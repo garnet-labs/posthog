@@ -15,7 +15,7 @@ from django.utils import timezone
 import pydantic
 from rest_framework.exceptions import ValidationError
 
-from posthog.schema import ActionsNode, ExperimentEventExposureConfig, ExperimentMetric
+from posthog.schema import ActionsNode, ExperimentEventExposureConfig, ExperimentFunnelMetric, ExperimentMetric
 
 from posthog.api.cohort import CohortSerializer
 from posthog.api.feature_flag import FeatureFlagSerializer
@@ -136,7 +136,12 @@ class ExperimentService:
 
             if kind == "ExperimentMetric":
                 try:
-                    ExperimentMetric.model_validate(metric)
+                    validated_metric = ExperimentMetric.model_validate(metric)
+
+                    # Additional validation for funnel metrics with DW steps
+                    if isinstance(validated_metric, ExperimentFunnelMetric):
+                        FunnelDWValidator.validate_funnel_metric(validated_metric)
+
                 except pydantic.ValidationError as e:
                     raise ValidationError(f"Invalid metric at index {i}: {e.errors()}")
 

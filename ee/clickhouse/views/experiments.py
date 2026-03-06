@@ -18,6 +18,7 @@ from posthog.api.scoped_related_fields import TeamScopedPrimaryKeyRelatedField
 from posthog.api.shared import UserBasicSerializer
 from posthog.api.utils import action
 from posthog.hogql_queries.experiments.experiment_metric_fingerprint import compute_metric_fingerprint
+from posthog.hogql_queries.experiments.funnel_validation import FunnelDWValidator
 from posthog.hogql_queries.experiments.utils import get_experiment_stats_method
 from posthog.models import Survey
 from posthog.models.activity_logging.activity_log import Detail, changes_between, log_activity
