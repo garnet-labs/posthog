@@ -1246,6 +1246,15 @@ class HogQLParseTreeJSONConverter : public HogQLParserBaseVisitor {
 
   VISIT(Expr) { return visit(ctx->columnExpr()); }
 
+  VISIT(ColumnTypeExprArray) {
+    string base_type = any_cast<Json>(visit(ctx->columnTypeExpr())).getString();
+    auto size_token = ctx->DECIMAL_LITERAL();
+    if (size_token) {
+      return Json(base_type + "[" + size_token->getText() + "]");
+    }
+    return Json(base_type + "[]");
+  }
+
   VISIT(ColumnTypeExprCompound) {
     string result;
     for (auto ident : ctx->identifier()) {
@@ -1275,7 +1284,17 @@ class HogQLParseTreeJSONConverter : public HogQLParserBaseVisitor {
 
   VISIT_UNSUPPORTED(ColumnTypeExprEnum)
 
-  VISIT_UNSUPPORTED(ColumnTypeExprComplex)
+  VISIT(ColumnTypeExprComplex) {
+    string name = to_lower_copy(visitAsString(ctx->identifier()));
+    string inner;
+    bool first = true;
+    for (auto type_expr : ctx->columnTypeExpr()) {
+      if (!first) inner += ", ";
+      inner += any_cast<Json>(visit(type_expr)).getString();
+      first = false;
+    }
+    return Json(name + "(" + inner + ")");
+  }
 
   VISIT(ColumnTypeExprParam) {
     string name = to_lower_copy(visitAsString(ctx->identifier()));
