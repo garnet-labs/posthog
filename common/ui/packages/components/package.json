@@ -1,0 +1,23 @@
+{
+    "name": "@posthog/ui-components",
+    "version": "0.0.1",
+    "private": true,
+    "files": [
+        "src"
+    ],
+    "type": "module",
+    "exports": {
+        ".": {
+            "types": "./src/index.ts",
+            "import": "./src/index.ts"
+        }
+    },
+    "dependencies": {
+        "@posthog/ui-primitives": "workspace:*",
+        "@posthog/ui-tokens": "workspace:*"
+    },
+    "peerDependencies": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0"
+    }
+}

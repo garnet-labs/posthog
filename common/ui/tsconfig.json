@@ -1,0 +1,11 @@
+{
+    "files": [],
+    "references": [
+        { "path": "packages/tokens" },
+        { "path": "packages/primitives" },
+        { "path": "packages/components" },
+        { "path": "packages/elements" },
+        { "path": "apps/web/tsconfig.app.json" },
+        { "path": "apps/web/tsconfig.node.json" }
+    ]
+}
