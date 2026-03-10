@@ -1,3 +1,4 @@
+export { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from './components/ui/accordion'
 export { Button, buttonVariants } from './components/ui/button'
 export { Badge, badgeVariants } from './components/ui/badge'
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from './components/ui/card'
