@@ -1217,9 +1217,10 @@ export const TargetTypeEnumApi = {
  * `monthly` - Monthly
  * `yearly` - Yearly
  */
-export type FrequencyEnumApi = (typeof FrequencyEnumApi)[keyof typeof FrequencyEnumApi]
+export type SubscriptionFrequencyEnumApi =
+    (typeof SubscriptionFrequencyEnumApi)[keyof typeof SubscriptionFrequencyEnumApi]
 
-export const FrequencyEnumApi = {
+export const SubscriptionFrequencyEnumApi = {
     Daily: 'daily',
     Weekly: 'weekly',
     Monthly: 'monthly',
@@ -1259,7 +1260,7 @@ export interface SubscriptionApi {
     dashboard_export_insights?: number[]
     target_type: TargetTypeEnumApi
     target_value: string
-    frequency: FrequencyEnumApi
+    frequency: SubscriptionFrequencyEnumApi
     /**
      * @minimum -2147483648
      * @maximum 2147483647
@@ -1320,7 +1321,7 @@ export interface PatchedSubscriptionApi {
     dashboard_export_insights?: number[]
     target_type?: TargetTypeEnumApi
     target_value?: string
-    frequency?: FrequencyEnumApi
+    frequency?: SubscriptionFrequencyEnumApi
     /**
      * @minimum -2147483648
      * @maximum 2147483647
