@@ -32,6 +32,10 @@
         }
     },
     "error_tracking_issues": {
+        "status": {
+            "description": "The current status of an issue.",
+            "label": "Issue status"
+        },
         "assignee": {
             "description": "The current assignee of an issue.",
             "label": "Issue assignee"

@@ -67,9 +67,7 @@ export const LemonDropdown = React.forwardRef<HTMLDivElement, LemonDropdownProps
                 floatingRef={floatingRef}
                 referenceRef={referenceRef}
                 onClickOutside={(e) => {
-                    if (trigger === 'click') {
-                        setVisible(false)
-                    }
+                    setVisible(false)
                     onClickOutside?.(e)
                 }}
                 onClickInside={(e) => {

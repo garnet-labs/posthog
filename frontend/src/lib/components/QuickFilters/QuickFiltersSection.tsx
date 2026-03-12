@@ -18,9 +18,14 @@ import { quickFiltersSectionLogic } from './quickFiltersSectionLogic'
 export interface QuickFiltersSectionProps {
     context: QuickFilterContext
     logicKey?: string
+    showConfigureButton?: boolean
 }
 
-export function QuickFiltersSection({ context, logicKey }: QuickFiltersSectionProps): JSX.Element {
+export function QuickFiltersSection({
+    context,
+    logicKey,
+    showConfigureButton = true,
+}: QuickFiltersSectionProps): JSX.Element {
     const { quickFilters } = useValues(quickFiltersLogic({ context }))
     const { selectedQuickFilters } = useValues(quickFiltersSectionLogic({ context, logicKey }))
     const { setQuickFilterValue, clearQuickFilter } = useActions(quickFiltersSectionLogic({ context, logicKey }))
@@ -47,9 +52,11 @@ export function QuickFiltersSection({ context, logicKey }: QuickFiltersSectionPr
                     />
                 )
             })}
-            <LemonButton size="small" icon={<IconGear />} onClick={openModal}>
-                Configure quick filters
-            </LemonButton>
+            {showConfigureButton && (
+                <LemonButton size="small" icon={<IconGear />} onClick={openModal}>
+                    Quick filters
+                </LemonButton>
+            )}
             <QuickFiltersModal context={context} />
         </>
     )

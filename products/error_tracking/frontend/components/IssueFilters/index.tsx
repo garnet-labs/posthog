@@ -1,7 +1,7 @@
 import { AssigneeFilter } from './Assignee'
 import { DateRangeFilter } from './DateRange'
 import { FilterGroup } from './FilterGroup'
-import { InternalAccountsFilter } from './InternalAccounts'
+import { FilterSettingsMenu } from './InternalAccounts'
 import { ErrorFiltersRoot } from './Root'
 import { StatusFilter } from './Status'
 
@@ -11,5 +11,5 @@ export const ErrorFilters = {
     FilterGroup: FilterGroup,
     Assignee: AssigneeFilter,
     Status: StatusFilter,
-    InternalAccounts: InternalAccountsFilter,
+    SettingsMenu: FilterSettingsMenu,
 }

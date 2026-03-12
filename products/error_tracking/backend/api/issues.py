@@ -205,7 +205,20 @@ class ErrorTrackingIssueViewSet(TeamAndOrgViewSetMixin, ForbidDestroyModel, view
         key = request.GET.get("key")
 
         issue_values: QuerySet[ErrorTrackingIssue] = QuerySet()
-        if key and value:
+        if key == "status":
+            issue_values = queryset.values_list("status", flat=True).distinct()
+        elif key == "assignee":
+            from posthog.models import User
+
+            user_values = (
+                User.objects.filter(
+                    errortrackingissueassignment__issue__in=queryset,
+                )
+                .distinct()
+                .values_list("email", flat=True)
+            )
+            return Response({"results": [{"name": v} for v in user_values], "refreshing": False})
+        elif key and value:
             if key == "name":
                 issue_values = queryset.filter(name__icontains=value).values_list("name", flat=True)
             elif key == "issue_description":

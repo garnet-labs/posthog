@@ -1,11 +1,9 @@
-import { BindLogic, useValues } from 'kea'
+import { useValues } from 'kea'
 
 import { Tooltip } from '@posthog/lemon-ui'
 
 import { humanFriendlyLargeNumber } from 'lib/utils'
 
-import { SceneStickyBar } from '~/layout/scenes/components/SceneStickyBar'
-import { insightVizDataNodeKey } from '~/queries/nodes/InsightViz/InsightViz'
 import { Query } from '~/queries/Query/Query'
 import { ErrorTrackingIssue } from '~/queries/schema/schema-general'
 import {
@@ -17,7 +15,7 @@ import {
 import { InsightLogicProps } from '~/types'
 
 import { IssueActions } from 'products/error_tracking/frontend/components/IssueActions/IssueActions'
-import { IssueQueryOptions } from 'products/error_tracking/frontend/components/IssueQueryOptions/IssueQueryOptions'
+import { IssueReloadButton } from 'products/error_tracking/frontend/components/IssueQueryOptions/IssueQueryOptions'
 import { OccurrenceSparkline } from 'products/error_tracking/frontend/components/OccurrenceSparkline'
 import { IssueListTitleColumn, IssueListTitleHeader } from 'products/error_tracking/frontend/components/TableColumns'
 import { useSparklineData } from 'products/error_tracking/frontend/hooks/use-sparkline-data'
@@ -98,7 +96,7 @@ export const useIssueQueryContext = (): QueryContext => {
     }
 }
 
-const insightProps: InsightLogicProps = {
+export const insightProps: InsightLogicProps = {
     dashboardItemId: 'new-ErrorTrackingQuery',
 }
 
@@ -107,22 +105,17 @@ export function IssuesList(): JSX.Element {
     const context = useIssueQueryContext()
 
     return (
-        <BindLogic
-            logic={issuesDataNodeLogic}
-            props={{ key: insightVizDataNodeKey(insightProps), query: query.source }}
-        >
-            <SceneStickyBar showBorderBottom={false}>
-                <ListOptions />
-            </SceneStickyBar>
-
-            <div data-attr="error-tracking-issue-row">
-                <Query query={query} context={context} />
-            </div>
-        </BindLogic>
+        <div data-attr="error-tracking-issue-row">
+            <Query query={query} context={context} />
+        </div>
     )
 }
 
-export const ListOptions = (): JSX.Element => {
+export const ListReloadButton = (): JSX.Element => {
+    return <IssueReloadButton />
+}
+
+export const ListSortOptions = (): JSX.Element | null => {
     const { selectedIssueIds } = useValues(bulkSelectLogic)
     const { results } = useValues(issuesDataNodeLogic)
 
@@ -130,5 +123,5 @@ export const ListOptions = (): JSX.Element => {
         return <IssueActions issues={results} selectedIds={selectedIssueIds} />
     }
 
-    return <IssueQueryOptions />
+    return null
 }

@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 
-import { IconPlusSmall, IconX } from '@posthog/icons'
+import { IconPlusSmall } from '@posthog/icons'
 import { LemonButton, LemonInput } from '@posthog/lemon-ui'
 
 import { urls } from 'scenes/urls'
@@ -23,20 +23,6 @@ export function AssigneeDropdown({ assignee, onChange }: AssigneeDropdownProps):
         <div className="max-w-100 deprecated-space-y-2">
             <LemonInput type="search" placeholder="Search" autoFocus value={search} onChange={setSearch} fullWidth />
             <ul className="deprecated-space-y-2">
-                {assignee && (
-                    <li>
-                        <LemonButton
-                            fullWidth
-                            role="menuitem"
-                            size="small"
-                            icon={<IconX />}
-                            onClick={() => onChange(null)}
-                        >
-                            Remove assignee
-                        </LemonButton>
-                    </li>
-                )}
-
                 <Section
                     title="Roles"
                     loading={rolesLoading}

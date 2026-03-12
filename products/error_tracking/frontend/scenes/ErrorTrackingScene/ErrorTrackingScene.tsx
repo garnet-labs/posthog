@@ -13,7 +13,9 @@ import { Scene, SceneExport } from 'scenes/sceneTypes'
 import { Settings } from 'scenes/settings/Settings'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
+import { SceneStickyBar } from '~/layout/scenes/components/SceneStickyBar'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
+import { insightVizDataNodeKey } from '~/queries/nodes/InsightViz/InsightViz'
 import { CyclotronJobFiltersType } from '~/types'
 
 import { ErrorTrackingIssueFilteringTool } from '../../components/IssueFilteringTool'
@@ -22,6 +24,7 @@ import { issueQueryOptionsLogic } from '../../components/IssueQueryOptions/issue
 import { exceptionIngestionLogic } from '../../components/SetupPrompt/exceptionIngestionLogic'
 import { ErrorTrackingSetupPrompt } from '../../components/SetupPrompt/SetupPrompt'
 import { StyleVariables } from '../../components/StyleVariables'
+import { issuesDataNodeLogic } from '../../logics/issuesDataNodeLogic'
 import { ERROR_TRACKING_LOGIC_KEY } from '../../utils'
 import {
     ERROR_TRACKING_SCENE_LOGIC_KEY,
@@ -30,7 +33,7 @@ import {
 } from './errorTrackingSceneLogic'
 import { ErrorTrackingInsights } from './tabs/insights/ErrorTrackingInsights'
 import { IssuesFilters } from './tabs/issues/IssuesFilters'
-import { IssuesList } from './tabs/issues/IssuesList'
+import { insightProps, IssuesList, ListReloadButton, ListSortOptions } from './tabs/issues/IssuesList'
 
 const ERROR_TRACKING_ALERT_FILTER_GROUPS: CyclotronJobFiltersType[] = [
     { events: [{ id: '$error_tracking_issue_created', type: 'events' }] },
@@ -45,7 +48,7 @@ export const scene: SceneExport = {
 
 export function ErrorTrackingScene(): JSX.Element {
     const { hasSentExceptionEvent, hasSentExceptionEventLoading } = useValues(exceptionIngestionLogic)
-    const { activeTab } = useValues(errorTrackingSceneLogic)
+    const { activeTab, query } = useValues(errorTrackingSceneLogic)
     const { setActiveTab } = useActions(errorTrackingSceneLogic)
     const hasInsights = useFeatureFlag('ERROR_TRACKING_INSIGHTS')
 
@@ -69,15 +72,26 @@ export function ErrorTrackingScene(): JSX.Element {
         {
             key: 'issues',
             label: 'Issues',
+
             content: (
-                <>
-                    <ErrorTrackingIssueFilteringTool />
-                    {hasSentExceptionEventLoading || hasSentExceptionEvent ? null : <IngestionStatusCheck />}
-                    <div className="border rounded bg-surface-primary p-2">
-                        <IssuesFilters />
+                <BindLogic
+                    logic={issuesDataNodeLogic}
+                    props={{
+                        key: insightVizDataNodeKey(insightProps),
+                        query: query.source,
+                    }}
+                >
+                    <>
+                        <ErrorTrackingIssueFilteringTool />
+                        {hasSentExceptionEventLoading || hasSentExceptionEvent ? null : <IngestionStatusCheck />}
+                    </>
+                    <SceneStickyBar showBorderBottom={false} className="pb-2">
+                        <IssuesFilters reload={<ListReloadButton />} actions={<ListSortOptions />} />
+                    </SceneStickyBar>
+                    <div className="px-4">
+                        <IssuesList />
                     </div>
-                    <IssuesList />
-                </>
+                </BindLogic>
             ),
         },
         ...(hasInsights
@@ -93,12 +107,14 @@ export function ErrorTrackingScene(): JSX.Element {
             key: 'configuration',
             label: 'Configuration',
             content: (
-                <Settings
-                    logicKey={ERROR_TRACKING_LOGIC_KEY}
-                    sectionId="environment-error-tracking"
-                    settingId="error-tracking-exception-autocapture"
-                    handleLocally
-                />
+                <div className="p-4">
+                    <Settings
+                        logicKey={ERROR_TRACKING_LOGIC_KEY}
+                        sectionId="environment-error-tracking"
+                        settingId="error-tracking-exception-autocapture"
+                        handleLocally
+                    />
+                </div>
             ),
         },
     ]
@@ -114,7 +130,7 @@ export function ErrorTrackingScene(): JSX.Element {
                                 activeKey={activeTab}
                                 onChange={(key) => setActiveTab(key)}
                                 tabs={tabs}
-                                sceneInset
+                                className="-mt-4 -mx-4 [&>ul]:pl-4 [&>ul]:mb-0"
                             />
                         </SceneContent>
                     </ErrorTrackingSetupPrompt>
@@ -183,7 +199,7 @@ const Header = (): JSX.Element => {
 
 const IngestionStatusCheck = (): JSX.Element | null => {
     return (
-        <LemonBanner type="warning" className="my-2">
+        <LemonBanner type="warning" className="my-2 px-4 pt-4">
             <p>
                 <strong>No Exception events have been detected!</strong>
             </p>
