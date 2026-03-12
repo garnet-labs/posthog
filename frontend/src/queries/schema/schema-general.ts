@@ -4421,6 +4421,7 @@ export type AIEventType =
     | '$ai_generation_summary'
     | '$ai_trace_clusters'
     | '$ai_generation_clusters'
+    | '$ai_evaluation_report'
 
 export interface LLMTraceEvent {
     id: string
