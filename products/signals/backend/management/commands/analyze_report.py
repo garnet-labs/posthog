@@ -18,7 +18,8 @@ TEST_SIGNALS = [
             "Customer would be able to select two arbitrary intervals (week, month etc) and compare "
             "the % change in conversion between those two periods. Current workaround is HogQL "
             "breakdown like toString(toISOWeek(timestamp)). "
-            "Check the events table for 'insight viewed' or 'insight analyzed' events with funnel-related properties to gauge demand."
+            "Use execute-sql to query the events table for 'insight viewed' events where "
+            "properties contain 'FUNNELS' to gauge how many users actually use funnel insights."
         ),
         source_product="github_issues",
         source_type="enhancement",
