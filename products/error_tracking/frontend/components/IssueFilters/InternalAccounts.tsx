@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import { useEffect } from 'react'
 
 import { IconBolt, IconChevronRight, IconGear } from '@posthog/icons'
-import { LemonButton, LemonMenu, LemonMenuItems, LemonSwitch } from '@posthog/lemon-ui'
+import { LemonButton, LemonMenu, LemonMenuItems } from '@posthog/lemon-ui'
 
 import { quickFiltersLogic, QuickFiltersModal, quickFiltersModalLogic } from 'lib/components/QuickFilters'
 import { quickFiltersSectionLogic } from 'lib/components/QuickFilters/quickFiltersSectionLogic'
@@ -19,14 +19,65 @@ import { StatusIndicator } from '../Indicators'
 import { issueQueryOptionsLogic } from '../IssueQueryOptions/issueQueryOptionsLogic'
 import { issueFiltersLogic } from './issueFiltersLogic'
 
-export const FilterSettingsMenu = ({
-    quickFilterContext,
-    logicKey,
-    showIssueFilters = true,
-}: {
+interface FilterSettingsMenuProps {
     quickFilterContext?: QuickFilterContext
     logicKey?: string
     showIssueFilters?: boolean
+}
+
+export const FilterSettingsMenu = (props: FilterSettingsMenuProps): JSX.Element => {
+    const { showIssueFilters = true } = props
+    // Conditionally render to avoid mounting issueQueryOptionsLogic
+    // in contexts where it has no BindLogic (e.g. the issue detail scene)
+    if (showIssueFilters) {
+        return <FilterSettingsMenuWithIssueOptions {...props} />
+    }
+    return <FilterSettingsMenuCore {...props} issueFilterItems={[]} />
+}
+
+const FilterSettingsMenuWithIssueOptions = (props: FilterSettingsMenuProps): JSX.Element => {
+    const { status, assignee } = useValues(issueQueryOptionsLogic)
+    const { setStatus, setAssignee } = useActions(issueQueryOptionsLogic)
+
+    const statusOptions: { value: ErrorTrackingIssue['status']; label: string }[] = [
+        { value: 'active', label: 'Active' },
+        { value: 'resolved', label: 'Resolved' },
+        { value: 'suppressed', label: 'Suppressed' },
+    ]
+
+    const issueFilterItems: LemonMenuItems[number]['items'] = [
+        {
+            label: 'Status',
+            sideIcon: <IconChevronRight className="size-3" />,
+            items: statusOptions.map((opt) => ({
+                label: <StatusIndicator status={opt.value} size="small" />,
+                active: status === opt.value || (!status && opt.value === 'active'),
+                onClick: () => setStatus(opt.value),
+            })),
+        },
+        {
+            label: 'Assignee',
+            sideIcon: <IconChevronRight className="size-3" />,
+            custom: true,
+            items: [
+                {
+                    label: () => (
+                        <AssigneeSubmenu assignee={assignee ?? null} onChange={(value) => setAssignee(value)} />
+                    ),
+                },
+            ],
+        },
+    ]
+
+    return <FilterSettingsMenuCore {...props} issueFilterItems={issueFilterItems} />
+}
+
+const FilterSettingsMenuCore = ({
+    quickFilterContext,
+    logicKey,
+    issueFilterItems,
+}: FilterSettingsMenuProps & {
+    issueFilterItems: LemonMenuItems[number]['items']
 }): JSX.Element => {
     const { filterTestAccounts } = useValues(issueFiltersLogic)
     const { setFilterTestAccounts } = useActions(issueFiltersLogic)
@@ -50,9 +101,6 @@ export const FilterSettingsMenu = ({
         })
     )
 
-    const { status, assignee } = useValues(issueQueryOptionsLogic)
-    const { setStatus, setAssignee } = useActions(issueQueryOptionsLogic)
-
     const checked = hasFilters ? filterTestAccounts : false
 
     const toggle = (): void => {
@@ -71,26 +119,12 @@ export const FilterSettingsMenu = ({
                   const opt = filter.options[0]
                   const isActive = selectedOptionId === opt.id
                   return {
-                      label: () => (
-                          // eslint-disable-next-line react/forbid-dom-props
-                          <div
-                              onClick={(e) => e.stopPropagation()}
-                              className="[&_label]:text-[0.875rem] [&_label]:font-medium [&_label]:text-[var(--text-3000)]"
-                          >
-                              <LemonSwitch
-                                  checked={isActive}
-                                  onChange={() =>
-                                      isActive
-                                          ? clearQuickFilter(filter.property_name)
-                                          : setQuickFilterValue(filter.property_name, opt)
-                                  }
-                                  label={filter.name}
-                                  fullWidth
-                                  size="small"
-                                  bordered={false}
-                              />
-                          </div>
-                      ),
+                      label: filter.name,
+                      active: isActive,
+                      onClick: () =>
+                          isActive
+                              ? clearQuickFilter(filter.property_name)
+                              : setQuickFilterValue(filter.property_name, opt),
                   }
               }
 
@@ -113,46 +147,8 @@ export const FilterSettingsMenu = ({
         </h5>
     )
 
-    const statusOptions: { value: ErrorTrackingIssue['status']; label: string }[] = [
-        { value: 'active', label: 'Active' },
-        { value: 'resolved', label: 'Resolved' },
-        { value: 'suppressed', label: 'Suppressed' },
-    ]
-
     const items: LemonMenuItems = [
-        ...(showIssueFilters
-            ? [
-                  {
-                      title: 'Issue',
-                      items: [
-                          {
-                              label: 'Status',
-                              sideIcon: <IconChevronRight className="size-3" />,
-                              items: statusOptions.map((opt) => ({
-                                  label: <StatusIndicator status={opt.value} size="small" />,
-                                  active: status === opt.value || (!status && opt.value === 'active'),
-                                  onClick: () => setStatus(opt.value),
-                              })),
-                          },
-                          {
-                              label: 'Assignee',
-                              sideIcon: <IconChevronRight className="size-3" />,
-                              custom: true,
-                              items: [
-                                  {
-                                      label: () => (
-                                          <AssigneeSubmenu
-                                              assignee={assignee ?? null}
-                                              onChange={(value) => setAssignee(value)}
-                                          />
-                                      ),
-                                  },
-                              ],
-                          },
-                      ],
-                  },
-              ]
-            : []),
+        ...(issueFilterItems.length > 0 ? [{ title: 'Issue', items: issueFilterItems }] : []),
         ...(quickFilterItems.length > 0
             ? [
                   {
@@ -171,25 +167,10 @@ export const FilterSettingsMenu = ({
             }),
             items: [
                 {
-                    label: () => (
-                        // eslint-disable-next-line react/forbid-dom-props
-                        <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="[&_label]:text-[0.875rem] [&_label]:font-medium [&_label]:text-[var(--text-3000)]"
-                        >
-                            <LemonSwitch
-                                checked={checked}
-                                onChange={toggle}
-                                label="Filter out internal users"
-                                fullWidth
-                                size="small"
-                                bordered={false}
-                                disabledReason={
-                                    !hasFilters ? "You haven't set any internal and test filters" : undefined
-                                }
-                            />
-                        </div>
-                    ),
+                    label: 'Filter out internal users',
+                    active: checked,
+                    onClick: toggle,
+                    disabledReason: !hasFilters ? "You haven't set any internal and test filters" : undefined,
                 },
             ],
         },
@@ -197,7 +178,7 @@ export const FilterSettingsMenu = ({
 
     return (
         <>
-            <LemonMenu items={items} trigger="hover" className="[&_.Popover__content]:pb-2">
+            <LemonMenu items={items} trigger="hover">
                 <LemonButton type="tertiary" size="small" icon={<IconBolt />} />
             </LemonMenu>
             {quickFilterContext && <QuickFiltersModal context={quickFilterContext} />}

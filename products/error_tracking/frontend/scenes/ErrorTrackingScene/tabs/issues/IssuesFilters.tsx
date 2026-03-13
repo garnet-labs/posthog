@@ -27,27 +27,27 @@ export function IssuesFilters({
 
     return (
         <ErrorFilters.Root>
-            <div className="flex items-stretch rounded-full border border-[var(--color-border-primary)] bg-[var(--color-bg-fill-input)] [&_.LemonInput]:border-0 [&_.LemonInput]:rounded-none [&_.LemonInput]:shadow-none [&_.LemonInput]:bg-transparent [&_.LemonButton]:rounded-none [&_.LemonButton:not(:hover)]:bg-transparent">
+            <ErrorFilters.SearchBar>
                 <div className="flex items-stretch rounded-l-full overflow-hidden">{reload}</div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex items-stretch overflow-hidden">
                     <ErrorFilters.DateRange type="tertiary" />
                 </div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex items-stretch overflow-hidden">
                     <ErrorFilters.SettingsMenu
                         quickFilterContext={QUICK_FILTER_CONTEXT}
                         logicKey={ERROR_TRACKING_SCENE_LOGIC_KEY}
                     />
                 </div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex-1 overflow-hidden">
                     <ErrorFilters.FilterGroup
                         quickFilterContext={QUICK_FILTER_CONTEXT}
                         logicKey={ERROR_TRACKING_SCENE_LOGIC_KEY}
                     />
                 </div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex items-stretch overflow-hidden">
                     <LemonMenu
                         items={Object.entries(ORDER_BY_OPTIONS).map(([value, label]) => ({
@@ -61,7 +61,7 @@ export function IssuesFilters({
                         </LemonButton>
                     </LemonMenu>
                 </div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex items-stretch rounded-r-full overflow-hidden">
                     <LemonButton
                         type="tertiary"
@@ -71,7 +71,7 @@ export function IssuesFilters({
                         <span className="text-xs px-1">{orderDirection}</span>
                     </LemonButton>
                 </div>
-            </div>
+            </ErrorFilters.SearchBar>
             {actions && (
                 <div className="flex items-center">
                     <div className="ml-auto">{actions}</div>

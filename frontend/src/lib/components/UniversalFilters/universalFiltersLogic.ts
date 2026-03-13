@@ -137,6 +137,8 @@ export const universalFiltersLogic = kea<universalFiltersLogicType>([
                         TaxonomicFilterGroupType.Logs,
                         TaxonomicFilterGroupType.LogAttributes,
                         TaxonomicFilterGroupType.LogResourceAttributes,
+                        TaxonomicFilterGroupType.ErrorTrackingIssues,
+                        TaxonomicFilterGroupType.ErrorTrackingProperties,
                     ].includes(t)
                 ),
         ],

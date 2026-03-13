@@ -20,13 +20,13 @@ const INSIGHTS_TAXONOMIC_GROUP_TYPES = [
 export function InsightsFilters({ reload }: { reload?: React.ReactNode }): JSX.Element {
     return (
         <ErrorFilters.Root>
-            <div className="flex items-stretch rounded-full border border-[var(--color-border-primary)] bg-[var(--color-bg-fill-input)] [&_.LemonInput]:border-0 [&_.LemonInput]:rounded-none [&_.LemonInput]:shadow-none [&_.LemonInput]:bg-transparent [&_.LemonButton]:rounded-none [&_.LemonButton:not(:hover)]:bg-transparent">
+            <ErrorFilters.SearchBar>
                 <div className="flex items-stretch rounded-l-full overflow-hidden">{reload}</div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex items-stretch overflow-hidden">
                     <ErrorFilters.DateRange type="tertiary" />
                 </div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex items-stretch overflow-hidden">
                     <ErrorFilters.SettingsMenu
                         quickFilterContext={QUICK_FILTER_CONTEXT}
@@ -34,7 +34,7 @@ export function InsightsFilters({ reload }: { reload?: React.ReactNode }): JSX.E
                         showIssueFilters={false}
                     />
                 </div>
-                <div className="w-px bg-[var(--color-border-primary)] shrink-0" />
+                <ErrorFilters.SearchBarDivider />
                 <div className="flex-1 rounded-r-full overflow-hidden">
                     <ErrorFilters.FilterGroup
                         taxonomicGroupTypes={INSIGHTS_TAXONOMIC_GROUP_TYPES}
@@ -44,7 +44,7 @@ export function InsightsFilters({ reload }: { reload?: React.ReactNode }): JSX.E
                         showIssueFilters={false}
                     />
                 </div>
-            </div>
+            </ErrorFilters.SearchBar>
         </ErrorFilters.Root>
     )
 }
