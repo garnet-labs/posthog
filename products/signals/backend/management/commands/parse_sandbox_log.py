@@ -208,7 +208,10 @@ class Command(BaseCommand):
                 title = update.get("title", "")
 
                 if raw_input and isinstance(raw_input, dict) and raw_input:
-                    detail = title or json.dumps(raw_input)
+                    # Prefer the rendered title for non-MCP tools (e.g. Grep shows the full command).
+                    # For MCP tools the title is just the tool name — show rawInput instead.
+                    is_mcp = tool_name.startswith("mcp__")
+                    detail = json.dumps(raw_input) if is_mcp or not title else title
                     self.stdout.write(f"  {ts_str}    {_c(_YELLOW, '  >')} {_c(_DIM, _truncate(detail, 150))}")
                 elif status == "completed":
                     tool_resp = cc.get("toolResponse", {})
@@ -218,6 +221,9 @@ class Command(BaseCommand):
                         self.stdout.write(f"  {ts_str}    {_c(_BLUE, '  <')} {_c(_DIM, _truncate(summary, 150))}")
                     elif raw_output:
                         self.stdout.write(f"  {ts_str}    {_c(_BLUE, '  <')} {_c(_DIM, _truncate(raw_output, 150))}")
+                elif status == "failed":
+                    raw_output = update.get("rawOutput", "tool call failed")
+                    self.stdout.write(f"  {ts_str}    {_c(_RED, '  !')} {_c(_RED, _truncate(raw_output, 150))}")
                 continue
 
             if session_update in ("user_message_chunk", "usage_update", "available_commands_update"):
