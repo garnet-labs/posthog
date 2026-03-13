@@ -1,8 +1,8 @@
-export { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from './components/ui/accordion'
-export { Button, buttonVariants } from './components/ui/button'
-export { Badge, badgeVariants } from './components/ui/badge'
-export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from './components/ui/card'
-export { Checkbox } from './components/ui/checkbox'
+export { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from './accordion'
+export { Button, buttonVariants } from './button'
+export { Badge, badgeVariants } from './badge'
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from './card'
+export { Checkbox } from './checkbox'
 export {
     Dialog,
     DialogClose,
@@ -14,12 +14,12 @@ export {
     DialogPortal,
     DialogTitle,
     DialogTrigger,
-} from './components/ui/dialog'
-export { Input } from './components/ui/input'
-export { Label } from './components/ui/label'
-export { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover'
-export { Progress } from './components/ui/progress'
-export { RadioGroup, RadioGroupItem } from './components/ui/radio-group'
+} from './dialog'
+export { Input } from './input'
+export { Label } from './label'
+export { Popover, PopoverContent, PopoverTrigger } from './popover'
+export { Progress } from './progress'
+export { RadioGroup, RadioGroupItem } from './radio-group'
 export {
     Select,
     SelectContent,
@@ -29,16 +29,16 @@ export {
     SelectSeparator,
     SelectTrigger,
     SelectValue,
-} from './components/ui/select'
-export { Separator } from './components/ui/separator'
-export { Skeleton } from './components/ui/skeleton'
-export { Slider } from './components/ui/slider'
-export { Switch } from './components/ui/switch'
-export { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs'
-export { Textarea } from './components/ui/textarea'
-export { Toggle, toggleVariants } from './components/ui/toggle'
-export { ToggleGroup, ToggleGroupItem } from './components/ui/toggle-group'
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip'
-export { Spinner } from './components/ui/spinner'
-export { ThemeProvider, useTheme } from './components/theme-provider'
+} from './select'
+export { Separator } from './separator'
+export { Skeleton } from './skeleton'
+export { Slider } from './slider'
+export { Switch } from './switch'
+export { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs'
+export { Textarea } from './textarea'
+export { Toggle, toggleVariants } from './toggle'
+export { ToggleGroup, ToggleGroupItem } from './toggle-group'
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip'
+export { Spinner } from './spinner'
+export { ThemeProvider, useTheme } from './theme-provider'
 export { cn } from './lib/utils'

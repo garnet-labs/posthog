@@ -5,6 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "pnpm --filter @posthog/ui-web dev",
+        "storybook": "pnpm --filter @posthog/ui-storybook storybook",
         "build": "pnpm -r build",
         "lint": "eslint .",
         "format": "prettier --write \"**/*.{ts,tsx}\"",

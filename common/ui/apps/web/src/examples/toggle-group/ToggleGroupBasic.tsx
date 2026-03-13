@@ -3,7 +3,7 @@ import { ToggleGroup, ToggleGroupItem } from '@posthog/ui-primitives'
 export default function ToggleGroupBasic(): React.ReactElement {
     return (
         <div className="flex flex-col gap-4">
-            <ToggleGroup defaultValue={['center']}>
+            <ToggleGroup defaultValue={['center']} spacing={0}>
                 <ToggleGroupItem value="left">Left</ToggleGroupItem>
                 <ToggleGroupItem value="center">Center</ToggleGroupItem>
                 <ToggleGroupItem value="right">Right</ToggleGroupItem>
