@@ -1,7 +1,7 @@
-import type { Theme } from 'node_modules/@posthog/ui-primitives/src/components/theme-provider'
 import * as React from 'react'
 import { NavLink } from 'react-router'
 
+import type { Theme } from '@posthog/ui-primitives'
 import {
     cn,
     Select,
