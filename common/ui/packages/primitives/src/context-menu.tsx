@@ -4,6 +4,7 @@ import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu
 import { ChevronRightIcon, CheckIcon } from 'lucide-react'
 import * as React from 'react'
 
+import { Button } from './button'
 import { cn } from './lib/utils'
 
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props): React.ReactElement {
@@ -80,6 +81,7 @@ function ContextMenuItem({
     className,
     inset,
     variant = 'default',
+    children,
     ...props
 }: ContextMenuPrimitive.Item.Props & {
     inset?: boolean
@@ -94,8 +96,11 @@ function ContextMenuItem({
                 "group/context-menu-item relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:ps-7.5 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 data-[variant=destructive]:*:[svg]:text-destructive",
                 className
             )}
+            render={<Button variant="ghost" size="sm" className="w-full" left />}
             {...props}
-        />
+        >
+            {children}
+        </ContextMenuPrimitive.Item>
     )
 }
 
@@ -129,7 +134,13 @@ function ContextMenuSubTrigger({
 
 function ContextMenuSubContent({ ...props }: React.ComponentProps<typeof ContextMenuContent>): React.ReactElement {
     return (
-        <ContextMenuContent data-slot="context-menu-sub-content" className="shadow-lg" side="inline-end" {...props} />
+        <ContextMenuContent
+            data-slot="context-menu-sub-content"
+            className="shadow-lg"
+            side="inline-start"
+            alignOffset={0}
+            {...props}
+        />
     )
 }
 

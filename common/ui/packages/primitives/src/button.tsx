@@ -5,19 +5,19 @@ import * as React from 'react'
 import { cn } from './lib/utils'
 
 const buttonVariants = cva(
-    "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-xs/relaxed font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 relative after:content-[''] after:absolute after:h-[44px] after:w-full after:min-w-[44px]",
+    "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-xs/relaxed font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
     {
         variants: {
             variant: {
                 default: 'bg-primary text-primary-foreground hover:bg-primary/80',
                 outline:
-                    'border-border hover:bg-input/50 hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground',
+                    'border-border hover:bg-input/50 hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground data-[popup-open]:bg-input/50',
                 secondary:
-                    'bg-secondary text-secondary-foreground hover:bg-foreground/10 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground',
-                ghost: 'hover:bg-foreground/10 hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground',
+                    'bg-secondary text-secondary-foreground hover:bg-foreground/10 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground data-[popup-open]:bg-foreground/10',
+                ghost: 'hover:bg-foreground/10 hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground data-[popup-open]:bg-foreground/10',
                 destructive:
-                    'bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40',
-                link: 'text-primary underline-offset-4 hover:underline',
+                    'bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40 data-[popup-open]:bg-destructive/20',
+                link: 'text-primary underline-offset-4 hover:underline data-[popup-open]:underline',
             },
             size: {
                 default:
@@ -34,6 +34,10 @@ const buttonVariants = cva(
                 true: '',
                 false: 'disabled:pointer-events-none',
             },
+            left: {
+                true: 'justify-start',
+                false: '',
+            },
         },
         defaultVariants: {
             variant: 'default',
@@ -43,12 +47,15 @@ const buttonVariants = cva(
 )
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonPrimitive.Props & VariantProps<typeof buttonVariants>>(
-    ({ className, variant = 'default', size = 'default', focusableWhenDisabled = true, ...props }, ref) => {
+    (
+        { className, variant = 'default', size = 'default', focusableWhenDisabled = true, left = false, ...props },
+        ref
+    ) => {
         return (
             <ButtonPrimitive
                 ref={ref}
                 data-slot="button"
-                className={cn(buttonVariants({ variant, size, className, focusableWhenDisabled }))}
+                className={cn(buttonVariants({ variant, size, className, focusableWhenDisabled, left }))}
                 {...props}
             />
         )
