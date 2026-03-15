@@ -22,6 +22,10 @@ export interface WidgetCardProps extends React.HTMLAttributes<HTMLDivElement>, R
     onDragHandleMouseDown?: React.MouseEventHandler<HTMLDivElement>
     openUrl?: string
     contentRenderer: React.ReactNode
+    /** Time range label for list widgets (logs, errors, replays) */
+    dateLabel?: string | null
+    /** Entity name for detail widgets (flag key, experiment name, survey name) */
+    entityName?: string | null
 }
 
 function WidgetCardInternal(
@@ -37,12 +41,14 @@ function WidgetCardInternal(
         onDragHandleMouseDown,
         openUrl,
         contentRenderer,
+        dateLabel,
+        entityName,
         ...divProps
     }: WidgetCardProps,
     ref: React.Ref<HTMLDivElement>
 ): JSX.Element {
     const shouldHideMoreButton = placement === DashboardPlacement.Public
-    const config = WIDGET_TYPE_CONFIG[widget.widget_type]
+    const typeConfig = WIDGET_TYPE_CONFIG[widget.widget_type]
 
     return (
         <div
@@ -59,14 +65,20 @@ function WidgetCardInternal(
                         <span
                             className="inline-flex items-center justify-center"
                             // eslint-disable-next-line react/forbid-dom-props
-                            style={{ color: config.color }}
+                            style={{ color: typeConfig.color }}
                         >
-                            {config.icon}
+                            {typeConfig.icon}
                         </span>
-                        {config.label}
+                        {typeConfig.label}
+                        {dateLabel && (
+                            <>
+                                <span className="text-muted">•</span>
+                                <span className="whitespace-nowrap">{dateLabel}</span>
+                            </>
+                        )}
                     </span>
                 }
-                content={null}
+                content={entityName ? <span className="font-semibold text-sm truncate block">{entityName}</span> : null}
                 metaDetails={null}
                 moreButtons={moreButtonOverlay}
                 onMouseDown={onDragHandleMouseDown}
@@ -77,7 +89,7 @@ function WidgetCardInternal(
                             type="tertiary"
                             icon={<IconExternal />}
                             to={openUrl}
-                            targetBlank={false}
+                            targetBlank
                             tooltip="Open full view"
                         />
                     ) : null

@@ -31,6 +31,7 @@ class DashboardWidget(models.Model):
         ERROR_TRACKING = "error_tracking", "Error tracking"
         SESSION_REPLAYS = "session_replays", "Session replays"
         SURVEY_RESPONSES = "survey_responses", "Survey responses"
+        FEATURE_FLAG = "feature_flag", "Feature flag"
 
     widget_type = models.CharField(max_length=40, choices=WidgetType.choices)
     config = models.JSONField(default=dict)
@@ -44,6 +45,9 @@ class DashboardWidget(models.Model):
         blank=True,
         related_name="modified_dashboard_widgets",
     )
+
+    def __str__(self) -> str:
+        return f"DashboardWidget({self.widget_type}, id={self.pk})"
 
 
 class DashboardTileManager(models.Manager):
@@ -148,11 +152,21 @@ class DashboardTile(models.Model):
             raise ValidationError("Fields to do with refreshing are only applicable when this is an insight tile")
 
     def copy_to_dashboard(self, dashboard: Dashboard) -> None:
+        # Clone widget objects so dashboards don't share mutable FK references
+        cloned_widget = None
+        if self.widget:
+            cloned_widget = DashboardWidget.objects.create(
+                widget_type=self.widget.widget_type,
+                config=self.widget.config,
+                team=self.widget.team,
+                created_by=self.widget.created_by,
+            )
+
         DashboardTile.objects.create(
             dashboard=dashboard,
             insight=self.insight,
             text=self.text,
-            widget=self.widget,
+            widget=cloned_widget if cloned_widget else self.widget,
             color=self.color,
             layouts=self.layouts,
             show_description=self.show_description,

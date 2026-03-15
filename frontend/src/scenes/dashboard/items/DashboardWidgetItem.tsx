@@ -19,7 +19,7 @@ import type {
 
 import { dashboardLogic } from '../dashboardLogic'
 import { EditWidgetModal } from '../widgets/EditWidgetModal'
-import { WidgetRenderer } from '../widgets/WidgetRenderer'
+import { useWidgetDateLabel, useWidgetEntityName, WidgetRenderer } from '../widgets/WidgetRenderer'
 
 type BaseWidgetCardProps = React.ComponentProps<typeof WidgetCard>
 
@@ -68,6 +68,8 @@ function DashboardWidgetItemInternal(
     const { updateWidgetConfig } = useActions(dashboardLogic)
     const [editModalOpen, setEditModalOpen] = useState(false)
     const openUrl = getWidgetOpenUrl(widget.widget_type, widget.config)
+    const dateLabel = useWidgetDateLabel(widget)
+    const entityName = useWidgetEntityName(widget)
 
     return (
         <>
@@ -76,6 +78,8 @@ function DashboardWidgetItemInternal(
                 widget={widget}
                 placement={placement}
                 openUrl={openUrl}
+                dateLabel={dateLabel}
+                entityName={entityName}
                 contentRenderer={<WidgetRenderer tileId={tile.id} widget={widget} />}
                 {...widgetCardProps}
                 moreButtonOverlay={
@@ -131,7 +135,7 @@ function DashboardWidgetItemInternal(
                                 fullWidth
                                 data-attr="remove-widget-tile-from-dashboard"
                             >
-                                Delete
+                                Remove from dashboard
                             </LemonButton>
                         )}
                     </>

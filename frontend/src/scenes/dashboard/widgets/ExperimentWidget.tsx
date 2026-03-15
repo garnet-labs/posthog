@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 
 import { IconFlask } from '@posthog/icons'
-import { LemonButton, LemonSkeleton, LemonTag } from '@posthog/lemon-ui'
+import { LemonSkeleton, LemonTag } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
 import { getSeriesColor } from 'lib/colors'
+import { dayjs } from 'lib/dayjs'
+import { LemonButton } from 'lib/lemon-ui/LemonButton'
+import { LemonDialog } from 'lib/lemon-ui/LemonDialog'
+import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
+import { Link } from 'lib/lemon-ui/Link'
 import { humanFriendlyLargeNumber } from 'lib/utils'
 import { urls } from 'scenes/urls'
 
@@ -14,6 +19,7 @@ import { NodeKind } from '~/queries/schema/schema-general'
 interface ExperimentWidgetProps {
     tileId: number
     config: Record<string, any>
+    refreshKey?: number
 }
 
 interface ExperimentData {
@@ -28,22 +34,19 @@ interface ExperimentData {
     metrics_secondary: any[]
 }
 
-interface VariantStats {
+/** Normalized variant stats for display — works for both legacy and new formats. */
+interface NormalizedVariant {
     key: string
-    sum: number
-    number_of_samples: number
-    denominator_sum?: number
+    value: number
+    samples: number
     chance_to_win?: number | null
     significant?: boolean | null
-    credible_interval?: [number, number] | null
-    p_value?: number | null
-    confidence_interval?: [number, number] | null
-    method?: string
 }
 
-interface MetricResponse {
-    baseline?: VariantStats
-    variant_results?: VariantStats[]
+interface NormalizedMetricResult {
+    baseline?: NormalizedVariant
+    variants: NormalizedVariant[]
+    probability?: Record<string, number>
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -62,60 +65,99 @@ function getStatus(exp: ExperimentData): { label: string; colorClass: string } {
     return { label: 'Draft', colorClass: STATUS_COLORS.draft }
 }
 
-function formatValue(variant: VariantStats, metric: any): string {
-    if (metric?.metric_type === 'ratio' && variant.denominator_sum && variant.denominator_sum > 0) {
-        return (variant.sum / variant.denominator_sum).toFixed(2)
+/** Normalize a query response into a consistent shape regardless of legacy/new format. */
+function normalizeMetricResult(response: any): NormalizedMetricResult {
+    // New format: has baseline + variant_results
+    if (response.baseline && response.variant_results) {
+        const baseline: NormalizedVariant = {
+            key: response.baseline.key,
+            value: response.baseline.sum ?? response.baseline.count ?? 0,
+            samples: response.baseline.number_of_samples ?? response.baseline.absolute_exposure ?? 0,
+        }
+        const variants: NormalizedVariant[] = (response.variant_results || []).map((v: any) => ({
+            key: v.key,
+            value: v.sum ?? v.count ?? 0,
+            samples: v.number_of_samples ?? v.absolute_exposure ?? 0,
+            chance_to_win: v.chance_to_win ?? null,
+            significant: v.significant ?? null,
+        }))
+        return { baseline, variants }
     }
-    const val = variant.sum / variant.number_of_samples
-    if (isNaN(val)) {
+
+    // Legacy format: has variants array + probability dict
+    if (response.variants && Array.isArray(response.variants)) {
+        const probability: Record<string, number> = response.probability || {}
+        const allVariants: NormalizedVariant[] = response.variants.map((v: any) => {
+            // Trends variant: { key, count, exposure, absolute_exposure }
+            // Funnels variant: { key, success_count, failure_count }
+            const isFunnels = 'success_count' in v
+            return {
+                key: v.key,
+                value: isFunnels ? v.success_count : v.count,
+                samples: isFunnels ? v.success_count + v.failure_count : (v.absolute_exposure ?? v.exposure ?? 0),
+                chance_to_win: probability[v.key] ?? null,
+                significant: response.significant ?? null,
+            }
+        })
+
+        // First variant is typically the control/baseline
+        const baseline = allVariants[0]
+        const variants = allVariants.slice(1)
+        return { baseline, variants, probability }
+    }
+
+    return { variants: [] }
+}
+
+function formatValue(variant: NormalizedVariant, samples: number): string {
+    if (samples === 0) {
         return '—'
     }
-    if (metric?.metric_type === 'mean') {
-        return humanFriendlyLargeNumber(val)
+    const rate = variant.value / samples
+    if (isNaN(rate)) {
+        return '—'
     }
-    return `${(val * 100).toFixed(2)}%`
+    // If rate looks like a conversion rate (0-1 range), show as percentage
+    if (rate <= 1 && rate >= 0) {
+        return `${(rate * 100).toFixed(2)}%`
+    }
+    return humanFriendlyLargeNumber(rate)
 }
 
-function formatDelta(variant: VariantStats, baseline: VariantStats, metric: any): string | null {
-    if (!baseline || baseline.number_of_samples === 0) {
+function formatDelta(variant: NormalizedVariant, baseline: NormalizedVariant): string | null {
+    if (!baseline || baseline.samples === 0 || variant.samples === 0) {
         return null
     }
-    const getVal = (v: VariantStats): number => {
-        if (metric?.metric_type === 'ratio' && v.denominator_sum && v.denominator_sum > 0) {
-            return v.sum / v.denominator_sum
-        }
-        return v.sum / v.number_of_samples
-    }
-    const baseVal = getVal(baseline)
-    const varVal = getVal(variant)
-    if (baseVal === 0 || isNaN(baseVal) || isNaN(varVal)) {
+    const baseRate = baseline.value / baseline.samples
+    const varRate = variant.value / variant.samples
+    if (baseRate === 0 || isNaN(baseRate) || isNaN(varRate)) {
         return null
     }
-    const delta = ((varVal - baseVal) / baseVal) * 100
+    const delta = ((varRate - baseRate) / baseRate) * 100
     return `${delta > 0 ? '+' : ''}${delta.toFixed(2)}%`
-}
-
-function getWinPercent(variant: VariantStats): string | null {
-    if (variant.chance_to_win != null) {
-        return `${(variant.chance_to_win * 100).toFixed(1)}%`
-    }
-    return null
 }
 
 function MetricResultsTable({
     metricName,
     metricIndex,
-    metric,
     result,
 }: {
     metricName: string
     metricIndex: number
-    metric: any
-    result: MetricResponse
+    result: NormalizedMetricResult
 }): JSX.Element {
-    const baseline = result.baseline
-    const variants = result.variant_results || []
-    const allVariants = [...(baseline ? [baseline] : []), ...variants]
+    const allVariants = [...(result.baseline ? [result.baseline] : []), ...result.variants]
+
+    if (allVariants.length === 0) {
+        return (
+            <div className="text-xs text-muted py-2 px-1">
+                {metricIndex + 1}. {metricName || 'Metric'} — no data
+            </div>
+        )
+    }
+
+    // Determine if there is a significant winner among the variants
+    const significantWinner = result.variants.find((v) => v.significant === true && (v.chance_to_win ?? 0) > 0.5)
 
     return (
         <div className="space-y-1">
@@ -123,7 +165,16 @@ function MetricResultsTable({
                 <span className="text-xs font-semibold text-text-primary">
                     {metricIndex + 1}. {metricName || 'Metric'}
                 </span>
-                {metric?.metric_type && <span className="text-xs text-muted capitalize">{metric.metric_type}</span>}
+            </div>
+            <div className="px-1">
+                {significantWinner ? (
+                    <span className="text-xs font-medium text-success bg-success-highlight px-1.5 py-0.5 rounded">
+                        {significantWinner.key} is winning ({((significantWinner.chance_to_win ?? 0) * 100).toFixed(1)}
+                        %)
+                    </span>
+                ) : (
+                    <span className="text-xs text-muted">Not yet significant</span>
+                )}
             </div>
             <table className="w-full text-xs">
                 <thead>
@@ -136,9 +187,9 @@ function MetricResultsTable({
                 </thead>
                 <tbody>
                     {allVariants.map((v, i) => {
-                        const isBaseline = baseline?.key === v.key
-                        const delta = !isBaseline && baseline ? formatDelta(v, baseline, metric) : null
-                        const winPct = !isBaseline ? getWinPercent(v) : null
+                        const isBaseline = result.baseline?.key === v.key
+                        const delta = !isBaseline && result.baseline ? formatDelta(v, result.baseline) : null
+                        const winPct = v.chance_to_win != null ? `${(v.chance_to_win * 100).toFixed(1)}%` : null
                         const deltaNum = delta ? parseFloat(delta) : 0
 
                         return (
@@ -154,9 +205,9 @@ function MetricResultsTable({
                                     </div>
                                 </td>
                                 <td className="text-right py-1 px-1 tabular-nums">
-                                    <div>{formatValue(v, metric)}</div>
+                                    <div>{formatValue(v, v.samples)}</div>
                                     <div className="text-muted">
-                                        {humanFriendlyLargeNumber(v.sum)} / {v.number_of_samples}
+                                        {humanFriendlyLargeNumber(v.value)} / {v.samples.toLocaleString()}
                                     </div>
                                 </td>
                                 <td className="text-right py-1 px-1 tabular-nums">
@@ -176,15 +227,93 @@ function MetricResultsTable({
     )
 }
 
-function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
+function ExperimentWidget({ config, refreshKey }: ExperimentWidgetProps): JSX.Element {
     const [experiment, setExperiment] = useState<ExperimentData | null>(null)
-    const [primaryResults, setPrimaryResults] = useState<MetricResponse[]>([])
-    const [secondaryResults, setSecondaryResults] = useState<MetricResponse[]>([])
+    const [primaryResults, setPrimaryResults] = useState<NormalizedMetricResult[]>([])
+    const [secondaryResults, setSecondaryResults] = useState<NormalizedMetricResult[]>([])
     const [loading, setLoading] = useState(true)
     const [resultsLoading, setResultsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [refreshCounter, setRefreshCounter] = useState(0)
+    const [actionLoading, setActionLoading] = useState(false)
 
     const experimentId = config.experiment_id
+    const showControls = config.show_controls !== false
+
+    const handleShipVariant = (variantName: string): void => {
+        LemonDialog.open({
+            title: `Ship variant '${variantName}'?`,
+            content: (
+                <div className="text-sm text-secondary">
+                    Ship variant '{variantName}' to 100% of users? This will end the experiment.
+                </div>
+            ),
+            primaryButton: {
+                children: `Ship ${variantName}`,
+                type: 'primary',
+                onClick: () => {
+                    setActionLoading(true)
+                    api.update(`api/projects/@current/experiments/${experimentId}`, {
+                        end_date: new Date().toISOString(),
+                    })
+                        .then(() => {
+                            lemonToast.success(`Variant '${variantName}' shipped successfully`)
+                            setRefreshCounter((c) => c + 1)
+                        })
+                        .catch(() => {
+                            lemonToast.error('Failed to ship variant')
+                        })
+                        .finally(() => {
+                            setActionLoading(false)
+                        })
+                },
+                size: 'small',
+            },
+            secondaryButton: {
+                children: 'Cancel',
+                type: 'tertiary',
+                size: 'small',
+            },
+        })
+    }
+
+    const handleStopExperiment = (): void => {
+        LemonDialog.open({
+            title: 'Stop experiment?',
+            content: (
+                <div className="text-sm text-secondary">
+                    Are you sure you want to stop this experiment? This action will end data collection.
+                </div>
+            ),
+            primaryButton: {
+                children: 'Stop experiment',
+                type: 'primary',
+                status: 'danger',
+                onClick: () => {
+                    setActionLoading(true)
+                    api.update(`api/projects/@current/experiments/${experimentId}`, {
+                        end_date: new Date().toISOString(),
+                    })
+                        .then(() => {
+                            lemonToast.success('Experiment stopped')
+                            setRefreshCounter((c) => c + 1)
+                        })
+                        .catch(() => {
+                            lemonToast.error('Failed to stop experiment')
+                        })
+                        .finally(() => {
+                            setActionLoading(false)
+                        })
+                },
+                size: 'small',
+            },
+            secondaryButton: {
+                children: 'Cancel',
+                type: 'tertiary',
+                size: 'small',
+            },
+        })
+    }
 
     useEffect(() => {
         if (!experimentId) {
@@ -211,13 +340,14 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
 
                 setResultsLoading(true)
 
-                const loadMetric = async (metric: any): Promise<MetricResponse | null> => {
+                const loadMetric = async (metric: any): Promise<NormalizedMetricResult | null> => {
                     try {
                         const query =
                             metric.kind === NodeKind.ExperimentMetric
                                 ? { kind: NodeKind.ExperimentQuery, metric, experiment_id: experimentId }
                                 : { ...metric, experiment_id: experimentId }
-                        return (await performQuery(query)) as MetricResponse
+                        const response = await performQuery(query)
+                        return normalizeMetricResult(response)
                     } catch {
                         return null
                     }
@@ -231,15 +361,15 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
                     Promise.all(secondaryPromises),
                 ])
 
-                setPrimaryResults(primary.filter(Boolean) as MetricResponse[])
-                setSecondaryResults(secondary.filter(Boolean) as MetricResponse[])
+                setPrimaryResults(primary.filter(Boolean) as NormalizedMetricResult[])
+                setSecondaryResults(secondary.filter(Boolean) as NormalizedMetricResult[])
                 setResultsLoading(false)
             })
             .catch(() => {
                 setError('Failed to load experiment')
                 setLoading(false)
             })
-    }, [experimentId])
+    }, [experimentId, refreshKey, refreshCounter])
 
     if (loading) {
         return (
@@ -256,6 +386,18 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
             <div className="p-4 flex flex-col items-center justify-center h-full text-muted">
                 <IconFlask className="text-3xl mb-2" />
                 <span className="text-center">{error || 'Experiment not found'}</span>
+                <LemonButton
+                    type="secondary"
+                    size="small"
+                    className="mt-2"
+                    onClick={() => {
+                        setError(null)
+                        setLoading(true)
+                        setRefreshCounter((c) => c + 1)
+                    }}
+                >
+                    Retry
+                </LemonButton>
             </div>
         )
     }
@@ -265,20 +407,38 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
     // Derive exposures from the first primary metric result
     const firstResult = primaryResults[0]
     const exposures = firstResult
-        ? [...(firstResult.baseline ? [firstResult.baseline] : []), ...(firstResult.variant_results || [])]
+        ? [...(firstResult.baseline ? [firstResult.baseline] : []), ...firstResult.variants]
         : []
-    const totalExposures = exposures.reduce((acc, v) => acc + v.number_of_samples, 0)
+    const totalExposures = exposures.reduce((acc, v) => acc + v.samples, 0)
+
+    // Find a significant winning variant across all primary results for ship action
+    const winningVariant = primaryResults
+        .flatMap((r) => r.variants)
+        .find((v) => v.significant === true && (v.chance_to_win ?? 0) > 0.5)
+
+    const isRunning = experiment.start_date != null && experiment.end_date == null
 
     return (
         <div className="h-full overflow-auto">
             {/* Header */}
             <div className="px-3 pt-3 pb-2">
                 <div className="flex items-center gap-2 mb-1">
-                    <h4 className="font-semibold text-sm mb-0 flex-1 truncate">{experiment.name}</h4>
+                    <h4 className="font-semibold text-sm mb-0 flex-1 truncate">
+                        <Link to={urls.experiment(experimentId)} className="text-text-primary hover:underline">
+                            {experiment.name}
+                        </Link>
+                    </h4>
                     <span className={`text-xs font-medium px-2 py-0.5 rounded shrink-0 ${status.colorClass}`}>
                         {status.label}
                     </span>
                 </div>
+                {experiment.start_date && (
+                    <div className="text-xs text-muted">
+                        {experiment.end_date
+                            ? `${dayjs(experiment.start_date).format('MMM D, YYYY')} — ${dayjs(experiment.end_date).format('MMM D, YYYY')}`
+                            : `Started ${dayjs(experiment.start_date).format('MMM D, YYYY')} (${dayjs(experiment.start_date).fromNow(true)})`}
+                    </div>
+                )}
             </div>
 
             {resultsLoading && (
@@ -306,7 +466,7 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
                                         className="h-full"
                                         // eslint-disable-next-line react/forbid-dom-props
                                         style={{
-                                            width: `${(v.number_of_samples / totalExposures) * 100}%`,
+                                            width: `${(v.samples / totalExposures) * 100}%`,
                                             backgroundColor: getSeriesColor(i),
                                         }}
                                     />
@@ -319,7 +479,7 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
                                         // eslint-disable-next-line react/forbid-dom-props
                                         style={{ backgroundColor: getSeriesColor(i) }}
                                     />
-                                    {v.key} {((v.number_of_samples / totalExposures) * 100).toFixed(1)}%
+                                    {v.key} {((v.samples / totalExposures) * 100).toFixed(1)}%
                                 </span>
                             ))}
                         </div>
@@ -334,7 +494,6 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
                                     key={i}
                                     metricName={experiment.metrics[i]?.name}
                                     metricIndex={i}
-                                    metric={experiment.metrics[i]}
                                     result={result}
                                 />
                             ))}
@@ -350,7 +509,6 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
                                     key={i}
                                     metricName={experiment.metrics_secondary[i]?.name}
                                     metricIndex={i}
-                                    metric={experiment.metrics_secondary[i]}
                                     result={result}
                                 />
                             ))}
@@ -371,11 +529,36 @@ function ExperimentWidget({ config }: ExperimentWidgetProps): JSX.Element {
                 </div>
             )}
 
-            <div className="p-3">
-                <LemonButton type="secondary" size="small" to={urls.experiment(experimentId)} fullWidth center>
-                    View full experiment
-                </LemonButton>
-            </div>
+            {/* Action controls */}
+            {showControls && isRunning && (
+                <div className="px-3 py-2 space-y-2">
+                    <div className="border-t border-border-light pt-2" />
+                    {winningVariant && (
+                        <LemonButton
+                            type="primary"
+                            status="default"
+                            size="small"
+                            fullWidth
+                            center
+                            loading={actionLoading}
+                            onClick={() => handleShipVariant(winningVariant.key)}
+                        >
+                            Ship {winningVariant.key}
+                        </LemonButton>
+                    )}
+                    <LemonButton
+                        type="secondary"
+                        status="danger"
+                        size="small"
+                        fullWidth
+                        center
+                        loading={actionLoading}
+                        onClick={handleStopExperiment}
+                    >
+                        Stop experiment
+                    </LemonButton>
+                </div>
+            )}
         </div>
     )
 }

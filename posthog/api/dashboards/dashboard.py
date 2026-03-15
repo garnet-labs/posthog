@@ -191,11 +191,25 @@ class TextSerializer(serializers.ModelSerializer):
 class DashboardWidgetSerializer(serializers.ModelSerializer):
     created_by = UserBasicSerializer(read_only=True)
     last_modified_by = UserBasicSerializer(read_only=True)
+    widget_type = serializers.CharField(
+        help_text="The type of widget: experiment, logs, error_tracking, session_replays, or survey_responses."
+    )
+    config = serializers.JSONField(
+        help_text="Widget-specific configuration (e.g. experiment_id for experiment widgets, filters for logs)."
+    )
 
     class Meta:
         model = DashboardWidget
         fields = ["id", "widget_type", "config", "created_by", "last_modified_by", "last_modified_at"]
         read_only_fields = ["id", "created_by", "last_modified_by", "last_modified_at"]
+
+    def validate_widget_type(self, value: str) -> str:
+        valid_types = {choice[0] for choice in DashboardWidget.WidgetType.choices}
+        if value not in valid_types:
+            raise serializers.ValidationError(
+                f"Invalid widget type '{value}'. Must be one of: {', '.join(sorted(valid_types))}"
+            )
+        return value
 
 
 class DashboardTileSerializer(serializers.ModelSerializer):

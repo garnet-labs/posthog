@@ -2186,12 +2186,55 @@ export enum DashboardWidgetType {
     ErrorTracking = 'error_tracking',
     SessionReplays = 'session_replays',
     SurveyResponses = 'survey_responses',
+    FeatureFlag = 'feature_flag',
 }
+
+export interface ExperimentWidgetConfig {
+    experiment_id?: number
+}
+
+export interface LogsWidgetConfig {
+    filters?: {
+        severityLevels?: string[]
+        serviceNames?: string[]
+        searchTerm?: string
+        filterGroup?: { type: 'AND' | 'OR'; values: any[] }
+    }
+}
+
+export interface ErrorTrackingWidgetConfig {
+    status?: string
+    search_query?: string
+    order_by?: string
+}
+
+export interface SessionReplaysWidgetConfig {
+    date_from?: string
+    date_to?: string
+    min_duration?: number
+}
+
+export interface SurveyResponsesWidgetConfig {
+    survey_id?: string
+}
+
+export interface FeatureFlagWidgetConfig {
+    feature_flag_id?: number
+    show_controls?: boolean
+}
+
+export type DashboardWidgetConfig =
+    | ExperimentWidgetConfig
+    | LogsWidgetConfig
+    | ErrorTrackingWidgetConfig
+    | SessionReplaysWidgetConfig
+    | SurveyResponsesWidgetConfig
+    | FeatureFlagWidgetConfig
 
 export interface DashboardWidgetModel {
     id: number
     widget_type: DashboardWidgetType
-    config: Record<string, any>
+    config: DashboardWidgetConfig
     created_by?: UserBasicType
     last_modified_by?: UserBasicType
     last_modified_at?: string

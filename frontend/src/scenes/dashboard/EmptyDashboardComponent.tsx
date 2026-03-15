@@ -3,10 +3,12 @@ import './EmptyDashboardComponent.scss'
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 import React from 'react'
+import { useState } from 'react'
 
 import { IconPlus } from '@posthog/icons'
 
 import { AccessControlAction } from 'lib/components/AccessControlAction'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonSkeleton } from 'lib/lemon-ui/LemonSkeleton'
 import { urls } from 'scenes/urls'
@@ -14,6 +16,7 @@ import { urls } from 'scenes/urls'
 import { AccessControlLevel, AccessControlResourceType } from '~/types'
 
 import { addInsightToDashboardLogic } from './addInsightToDashboardModalLogic'
+import { AddWidgetModal } from './AddWidgetModal'
 import { DASHBOARD_CANNOT_EDIT_MESSAGE } from './DashboardHeader'
 import { dashboardLogic } from './dashboardLogic'
 
@@ -87,6 +90,8 @@ export function EmptyDashboardComponent({ loading, canEdit }: { loading: boolean
     const { showAddInsightToDashboardModal } = useActions(addInsightToDashboardLogic)
     const { dashboard } = useValues(dashboardLogic)
     const { push } = useActions(router)
+    const hasDashboardWidgets = useFeatureFlag('DASHBOARD_WIDGETS')
+    const [addWidgetModalOpen, setAddWidgetModalOpen] = useState(false)
     return (
         <div className="EmptyDashboard">
             {!loading && (
@@ -113,15 +118,26 @@ export function EmptyDashboardComponent({ loading, canEdit }: { loading: boolean
                                                       minAccessLevel={AccessControlLevel.Editor}
                                                       userAccessLevel={dashboard.user_access_level}
                                                   >
-                                                      <LemonButton
-                                                          fullWidth
-                                                          onClick={() => {
-                                                              push(urls.dashboardTextTile(dashboard.id, 'new'))
-                                                          }}
-                                                          data-attr="add-text-tile-to-dashboard"
-                                                      >
-                                                          Add text card
-                                                      </LemonButton>
+                                                      <>
+                                                          <LemonButton
+                                                              fullWidth
+                                                              onClick={() => {
+                                                                  push(urls.dashboardTextTile(dashboard.id, 'new'))
+                                                              }}
+                                                              data-attr="add-text-tile-to-dashboard"
+                                                          >
+                                                              Add text card
+                                                          </LemonButton>
+                                                          {hasDashboardWidgets && (
+                                                              <LemonButton
+                                                                  fullWidth
+                                                                  onClick={() => setAddWidgetModalOpen(true)}
+                                                                  data-attr="add-widget-to-dashboard-empty"
+                                                              >
+                                                                  Add widget
+                                                              </LemonButton>
+                                                          )}
+                                                      </>
                                                   </AccessControlAction>
                                               ),
                                           },
@@ -146,6 +162,9 @@ export function EmptyDashboardComponent({ loading, canEdit }: { loading: boolean
                     <SkeletonCardTwo active={loading} />
                 </div>
             </div>
+            {hasDashboardWidgets && (
+                <AddWidgetModal isOpen={addWidgetModalOpen} onClose={() => setAddWidgetModalOpen(false)} />
+            )}
         </div>
     )
 }

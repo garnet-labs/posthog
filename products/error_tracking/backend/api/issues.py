@@ -1,6 +1,11 @@
+import datetime
+from zoneinfo import ZoneInfo
+
 from django.db import transaction
+from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.http import JsonResponse
+from django.utils.dateparse import parse_datetime
 
 import structlog
 import posthoganalytics
@@ -20,6 +25,7 @@ from posthog.models.activity_logging.activity_page import activity_page_response
 from posthog.models.cohort.cohort import Cohort
 from posthog.models.organization import OrganizationMembership
 from posthog.tasks.email import send_error_tracking_issue_assigned
+from posthog.utils import relative_date_parse
 
 from products.error_tracking.backend.models import (
     ErrorTrackingIssue,
@@ -123,13 +129,64 @@ class ErrorTrackingIssueViewSet(TeamAndOrgViewSetMixin, ForbidDestroyModel, view
     queryset = ErrorTrackingIssue.objects.with_first_seen().all()
     serializer_class = ErrorTrackingIssueFullSerializer
 
+    ALLOWED_ORDERING_FIELDS = {"first_seen", "created_at"}
+
+    @staticmethod
+    def _parse_date(value: str, tz: ZoneInfo) -> "datetime.datetime | None":
+        parsed = parse_datetime(value)
+        if parsed:
+            return parsed
+        try:
+            return relative_date_parse(value, tz)
+        except Exception:
+            return None
+
     def safely_get_queryset(self, queryset):
-        return (
+        queryset = (
             queryset.select_related("assignment")
             .prefetch_related("external_issues__integration")
             .prefetch_related("cohorts__cohort")
             .filter(team_id=self.team.id)
         )
+
+        # Filter by status
+        issue_status = self.request.GET.get("status")
+        if issue_status:
+            queryset = queryset.filter(status=issue_status)
+
+        # Search by name/description
+        search_query = self.request.GET.get("search_query")
+        if search_query:
+            queryset = queryset.filter(Q(name__icontains=search_query) | Q(description__icontains=search_query))
+
+        # Date filtering (supports both relative like "-7d", "dStart" and absolute ISO strings)
+        date_from = self.request.GET.get("date_from")
+        date_to = self.request.GET.get("date_to")
+        tz = self.team.timezone_info
+        if date_from:
+            parsed = self._parse_date(date_from, tz)
+            if parsed:
+                queryset = queryset.filter(created_at__gte=parsed)
+        if date_to:
+            parsed = self._parse_date(date_to, tz)
+            if parsed:
+                queryset = queryset.filter(created_at__lte=parsed)
+
+        # Ordering
+        ordering = self.request.GET.get("ordering")
+        if ordering:
+            direction = ""
+            field = ordering
+            if ordering.startswith("-"):
+                direction = "-"
+                field = ordering[1:]
+            if field in self.ALLOWED_ORDERING_FIELDS:
+                queryset = queryset.order_by(f"{direction}{field}")
+            # Default descending for first_seen when no direction specified
+        else:
+            queryset = queryset.order_by("-first_seen")
+
+        return queryset
 
     def retrieve(self, request, *args, **kwargs):
         fingerprint = self.request.GET.get("fingerprint")

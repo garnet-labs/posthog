@@ -1001,6 +1001,12 @@ export const dashboardLogic = kea<dashboardLogicType>([
                 }),
             },
         ],
+        widgetRefreshKey: [
+            0,
+            {
+                triggerDashboardRefresh: (state: number) => state + 1,
+            },
+        ],
         refreshAnalysisCacheKey: [
             null as string | null,
             {

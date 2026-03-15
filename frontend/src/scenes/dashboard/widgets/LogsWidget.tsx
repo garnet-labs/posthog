@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { IconLive } from '@posthog/icons'
 import { LemonSkeleton } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
 import { TZLabel } from 'lib/components/TZLabel'
+import { LemonButton } from 'lib/lemon-ui/LemonButton'
 
 interface LogsWidgetProps {
     tileId: number
     config: Record<string, any>
+    refreshKey?: number
+    effectiveDateFrom?: string
+    effectiveDateTo?: string
 }
 
 interface LogEntry {
@@ -28,17 +32,21 @@ const SEVERITY_COLORS: Record<string, string> = {
     fatal: 'text-danger font-bold',
 }
 
-function LogsWidget({ tileId, config }: LogsWidgetProps): JSX.Element {
+const REFRESH_INTERVAL_MS = 30_000
+
+function LogsWidget({ tileId, config, refreshKey, effectiveDateFrom, effectiveDateTo }: LogsWidgetProps): JSX.Element {
     const [logs, setLogs] = useState<LogEntry[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
-    useEffect(() => {
-        setLoading(true)
+    const fetchLogs = useCallback(() => {
         api.logs
             .query({
                 query: {
-                    dateRange: { date_from: '-1h' },
+                    dateRange: {
+                        date_from: effectiveDateFrom || config.filters?.dateFrom || '-24h',
+                        ...(effectiveDateTo ? { date_to: effectiveDateTo } : {}),
+                    },
                     severityLevels: config.filters?.severityLevels || [],
                     serviceNames: config.filters?.serviceNames || [],
                     ...(config.filters?.searchTerm ? { searchTerm: config.filters.searchTerm } : {}),
@@ -50,12 +58,20 @@ function LogsWidget({ tileId, config }: LogsWidgetProps): JSX.Element {
             .then((data) => {
                 setLogs(data.results as unknown as LogEntry[])
                 setLoading(false)
+                setError(null)
             })
             .catch(() => {
                 setError('Failed to load logs')
                 setLoading(false)
             })
-    }, [tileId, config.filters])
+    }, [config.filters, effectiveDateFrom, effectiveDateTo])
+
+    useEffect(() => {
+        setLoading(true)
+        fetchLogs()
+        const interval = setInterval(fetchLogs, REFRESH_INTERVAL_MS)
+        return () => clearInterval(interval)
+    }, [tileId, fetchLogs, refreshKey])
 
     if (loading) {
         return (
@@ -72,6 +88,9 @@ function LogsWidget({ tileId, config }: LogsWidgetProps): JSX.Element {
             <div className="p-4 flex flex-col items-center justify-center h-full text-muted">
                 <IconLive className="text-3xl mb-2" />
                 <span>{error}</span>
+                <LemonButton type="secondary" size="small" className="mt-2" onClick={fetchLogs}>
+                    Retry
+                </LemonButton>
             </div>
         )
     }
@@ -80,7 +99,7 @@ function LogsWidget({ tileId, config }: LogsWidgetProps): JSX.Element {
         return (
             <div className="p-4 flex flex-col items-center justify-center h-full text-muted">
                 <IconLive className="text-3xl mb-2" />
-                <span>No logs found</span>
+                <span>No logs in this time range</span>
             </div>
         )
     }
@@ -93,12 +112,19 @@ function LogsWidget({ tileId, config }: LogsWidgetProps): JSX.Element {
                     className="flex gap-2 px-2 py-0.5 hover:bg-surface-secondary border-b border-border-light"
                 >
                     <TZLabel time={log.timestamp} formatDate="" formatTime="HH:mm:ss" className="text-muted shrink-0" />
+                    {log.service_name ? (
+                        <span className="text-muted text-[0.65rem] shrink-0 max-w-24 truncate" title={log.service_name}>
+                            {log.service_name}
+                        </span>
+                    ) : null}
                     <span
                         className={`uppercase shrink-0 w-10 text-right ${SEVERITY_COLORS[log.severity_text?.toLowerCase()] || 'text-muted'}`}
                     >
                         {log.severity_text || '---'}
                     </span>
-                    <span className="truncate">{log.body}</span>
+                    <span className="line-clamp-2" title={log.body}>
+                        {log.body}
+                    </span>
                 </div>
             ))}
         </div>
