@@ -22,6 +22,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/posthog/posthog/phrocs/internal/config"
+	"github.com/posthog/posthog/phrocs/internal/ipc"
 	"github.com/posthog/posthog/phrocs/internal/tui"
 )
 
@@ -64,6 +65,27 @@ func main() {
 	p := tea.NewProgram(m)
 	m.SetSend(p.Send)
 	go m.StartAll()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "phrocs: getwd: %v\n", err)
+		os.Exit(1)
+	}
+	socketPath := ipc.SocketPathFor(wd)
+
+	ln, err := ipc.Listen(socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "phrocs: ipc: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		_ = ln.Close()
+		_ = os.Remove(socketPath)
+	}()
+	go func() {
+		// Accept returns an error when the listener is closed on exit; ignore it.
+		_ = ipc.Serve(ln, m.Manager())
+	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "phrocs: %v\n", err)
