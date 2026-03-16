@@ -17,6 +17,7 @@ from posthog.storage import object_storage
 from posthog.temporal.common.client import async_connect
 
 from products.signals.backend.temporal.grouping_v2 import TeamSignalGroupingV2Workflow
+from products.signals.backend.temporal.safety_filter import SafetyFilterInput, safety_filter_activity
 from products.signals.backend.temporal.types import BufferSignalsInput, EmitSignalInputs, TeamSignalGroupingV2Input
 
 logger = structlog.get_logger(__name__)
@@ -151,6 +152,33 @@ class BufferSignalsWorkflow:
             # Drain buffer
             batch = list(self._signal_buffer)
             self._signal_buffer.clear()
+
+            # Filter out malicious signals
+            safety_results = await asyncio.gather(
+                *[
+                    workflow.execute_activity(
+                        safety_filter_activity,
+                        SafetyFilterInput(description=s.description),
+                        start_to_close_timeout=timedelta(minutes=5),
+                        retry_policy=RetryPolicy(maximum_attempts=3),
+                    )
+                    for s in batch
+                ]
+            )
+            for s, r in zip(batch, safety_results):
+                if not r.safe:
+                    workflow.logger.info(
+                        "Safety filter dropped signal",
+                        team_id=s.team_id,
+                        source_product=s.source_product,
+                        source_type=s.source_type,
+                        source_id=s.source_id,
+                        threat_type=r.threat_type,
+                    )
+            batch = [s for s, r in zip(batch, safety_results) if r.safe]
+
+            if not batch:
+                continue
 
             # Flush to S3
             flush_result: FlushBufferOutput = await workflow.execute_activity(
