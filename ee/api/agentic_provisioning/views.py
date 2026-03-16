@@ -415,7 +415,7 @@ def agentic_authorize(request: Any) -> HttpResponseBase:
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([])
-@stripe_region_proxy(strategy="token_lookup")
+@stripe_region_proxy(strategy="token_lookup", require_api_version=False)
 def oauth_token(request: Request) -> Response:
     grant_type = request.data.get("grant_type", "")
 
