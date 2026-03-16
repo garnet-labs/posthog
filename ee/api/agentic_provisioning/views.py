@@ -189,8 +189,7 @@ def provisioning_health(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     return Response({"supported_versions": SUPPORTED_VERSIONS, "status": "ok"})
@@ -208,8 +207,7 @@ def provisioning_services(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     return Response({"data": _get_services(), "next_cursor": ""})
@@ -226,8 +224,7 @@ def provisioning_services(request: Request) -> Response:
 @permission_classes([])
 @stripe_region_proxy(strategy="body_region")
 def account_requests(request: Request) -> Response:
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     data = request.data
@@ -568,8 +565,7 @@ def provisioning_resources_create(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     service_id = request.data.get("service_id", "")
@@ -636,8 +632,7 @@ def provisioning_rotate_credentials(request: Request, resource_id: str) -> Respo
     error = verify_stripe_signature(request)
     if error:
         return error
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     scoped_teams = access_token.scoped_teams or []
@@ -692,8 +687,7 @@ def _resolve_resource_response(request: Request, resource_id: str) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     scoped_teams = access_token.scoped_teams or []
@@ -763,8 +757,7 @@ def deep_links(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    error = verify_api_version(request)
-    if error:
+    if error := verify_api_version(request):
         return error
 
     purpose = request.data.get("purpose", "dashboard")
