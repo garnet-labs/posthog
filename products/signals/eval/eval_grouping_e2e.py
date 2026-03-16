@@ -318,9 +318,6 @@ class TestGroupingPipeline:
         output = case.signal.content
         config = case.signal.config
 
-        if output is None:
-            return None
-
         outputs = [output]
 
         if config.summarization_prompt is not None and config.description_summarization_threshold_chars is not None:
