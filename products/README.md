@@ -119,9 +119,9 @@ The easiest way is to use hogli:
 bin/hogli product:bootstrap your_product_name
 ```
 
-This creates the full structure with apps.py, package.json, etc.
+This creates the full structure with apps.py, package.json, etc. For isolated products (those with `backend/facade/contracts.py`), it also automatically configures `interfaces` in `tach.toml` pointing to `backend.facade` and `backend.presentation.views`.
 
-To check your product structure follows conventions:
+To check your product structure follows conventions (including tach interface configuration for isolated products):
 
 ```bash
 bin/hogli product:lint your_product_name
