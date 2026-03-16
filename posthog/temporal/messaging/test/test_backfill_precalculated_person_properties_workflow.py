@@ -1,6 +1,9 @@
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
+from posthog.temporal.messaging.backfill_precalculated_person_properties_coordinator_workflow import (
+    generate_uuid_ranges,
+)
 from posthog.temporal.messaging.backfill_precalculated_person_properties_workflow import (
     BackfillPrecalculatedPersonPropertiesInputs,
     PersonPropertyFilter,
@@ -608,3 +611,135 @@ class TestBackfillPrecalculatedPersonPropertiesActivity:
         # Verify sources are different
         assert cohort_100_events[0]["source"] == "cohort_backfill_100"
         assert cohort_200_events[0]["source"] == "cohort_backfill_200"
+
+
+class TestGenerateUuidRanges:
+    """Tests for the generate_uuid_ranges function."""
+
+    @pytest.mark.parametrize(
+        "min_uuid,max_uuid,num_ranges,expected_count",
+        [
+            # Single range case
+            ("00000000-0000-0000-0000-000000000001", "ffffffff-ffff-ffff-ffff-ffffffffffff", 1, 1),
+            # Normal case
+            ("00000000-0000-0000-0000-000000000001", "ffffffff-ffff-ffff-ffff-ffffffffffff", 4, 4),
+            # Edge cases
+            ("", "", 1, 0),
+            ("00000000-0000-0000-0000-000000000001", "", 1, 0),
+            ("", "ffffffff-ffff-ffff-ffff-ffffffffffff", 1, 0),
+            ("00000000-0000-0000-0000-000000000001", "ffffffff-ffff-ffff-ffff-ffffffffffff", 0, 0),
+            ("00000000-0000-0000-0000-000000000001", "ffffffff-ffff-ffff-ffff-ffffffffffff", -1, 0),
+        ],
+    )
+    def test_basic_range_generation(self, min_uuid, max_uuid, num_ranges, expected_count):
+        """Test basic range generation with various inputs."""
+        result = generate_uuid_ranges(min_uuid, max_uuid, num_ranges)
+        assert len(result) == expected_count
+
+    def test_single_range_returns_full_span(self):
+        """Test that num_ranges=1 returns a single tuple spanning the full range."""
+        min_uuid = "00000000-0000-0000-0000-000000000001"
+        max_uuid = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+        result = generate_uuid_ranges(min_uuid, max_uuid, 1)
+
+        assert len(result) == 1
+        assert result[0] == (min_uuid, max_uuid)
+
+    def test_identical_uuids_edge_case(self):
+        """Test min_int >= max_int fallback when UUIDs are identical."""
+        same_uuid = "12345678-1234-1234-1234-123456789abc"
+
+        result = generate_uuid_ranges(same_uuid, same_uuid, 3)
+
+        assert len(result) == 1
+        assert result[0] == (same_uuid, same_uuid)
+
+    def test_very_small_range_fallback(self):
+        """Test that very small ranges trigger the single range fallback."""
+        min_uuid = "00000000-0000-0000-0000-000000000000"
+        max_uuid = "00000000-0000-0000-0000-000000000002"
+
+        # Request many ranges but the total range is only 2
+        result = generate_uuid_ranges(min_uuid, max_uuid, 10)
+
+        assert len(result) == 1
+        assert result[0] == (min_uuid, max_uuid)
+
+    def test_range_contiguity_and_coverage(self):
+        """Test that ranges are contiguous and cover the full span."""
+        min_uuid = "10000000-0000-0000-0000-000000000000"
+        max_uuid = "20000000-0000-0000-0000-000000000000"
+
+        result = generate_uuid_ranges(min_uuid, max_uuid, 4)
+
+        assert len(result) == 4
+
+        # Check that ranges are contiguous
+        for i in range(len(result) - 1):
+            current_end = result[i][1]
+            next_start = result[i + 1][0]
+
+            # Convert to integers for comparison
+            current_end_int = int(current_end.replace("-", ""), 16)
+            next_start_int = int(next_start.replace("-", ""), 16)
+
+            # Next range should start exactly where current ends + 1
+            assert next_start_int == current_end_int + 1
+
+        # Check coverage spans full range
+        assert result[0][0] == min_uuid
+        assert result[-1][1] == max_uuid
+
+    def test_uuid_format_preservation(self):
+        """Test that generated UUIDs maintain proper format (8-4-4-4-12)."""
+        min_uuid = "00000000-0000-0000-0000-000000000000"
+        max_uuid = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+        result = generate_uuid_ranges(min_uuid, max_uuid, 3)
+
+        uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        import re
+
+        for start_uuid, end_uuid in result:
+            assert re.match(uuid_pattern, start_uuid), f"Invalid start UUID format: {start_uuid}"
+            assert re.match(uuid_pattern, end_uuid), f"Invalid end UUID format: {end_uuid}"
+
+    def test_load_balancing_distribution(self):
+        """Test that ranges are distributed evenly to balance load."""
+        min_uuid = "00000000-0000-0000-0000-000000000000"
+        max_uuid = "00000000-0000-0000-0000-000000000063"  # Hex 63 = decimal 99
+
+        # Total range is 99, split into 4 ranges
+        result = generate_uuid_ranges(min_uuid, max_uuid, 4)
+
+        assert len(result) == 4
+
+        # Calculate actual range sizes
+        range_sizes = []
+        for start_uuid, end_uuid in result:
+            start_int = int(start_uuid.replace("-", ""), 16)
+            end_int = int(end_uuid.replace("-", ""), 16)
+            range_sizes.append(end_int - start_int + 1)
+
+        # All ranges should be reasonably balanced (difference <= 2 for small ranges)
+        # For a range of 99 split 4 ways, some ranges will be slightly larger
+        min_size = min(range_sizes)
+        max_size = max(range_sizes)
+        assert max_size - min_size <= 2, f"Unbalanced ranges: {range_sizes}"
+
+        # Verify total coverage
+        total_covered = sum(range_sizes)
+        expected_total = 99 + 1  # 0 to 99 inclusive = 100 elements
+        assert total_covered == expected_total
+
+    def test_invalid_uuid_fallback(self):
+        """Test fallback behavior when UUIDs cannot be parsed as hex."""
+        invalid_uuid = "invalid-uuid-format"
+        valid_uuid = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+        result = generate_uuid_ranges(invalid_uuid, valid_uuid, 3)
+
+        # Should fall back to simple partitioning (single range)
+        assert len(result) == 1
+        assert result[0] == (invalid_uuid, valid_uuid)
