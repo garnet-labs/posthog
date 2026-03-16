@@ -55,7 +55,7 @@ export const NoContent: Story = {
 
 export const WithActions: Story = {
     render: () => (
-        <Card>
+        <Card className="max-w-sm">
             <CardHeader>
                 <CardTitle>Card Title</CardTitle>
                 <CardDescription>Card Description</CardDescription>
@@ -74,6 +74,31 @@ export const WithActions: Story = {
                     Cancel
                 </Button>
             </CardFooter>
+        </Card>
+    ),
+} satisfies Story
+
+export const SettingsCard: Story = {
+    render: () => (
+        <Card className="max-w-sm">
+            <CardHeader>
+                <CardTitle>Card Title</CardTitle>
+                <CardDescription>Card Description</CardDescription>
+                <CardAction>
+                    <Button variant="outline">Button 1</Button>
+                </CardAction>
+            </CardHeader>
+            {/* <CardContent>
+                <p>Card Content</p>
+            </CardContent>
+            <CardFooter className="flex-col gap-2">
+                <Button type="submit" className="w-full">
+                    Login
+                </Button>
+                <Button variant="outline" className="w-full">
+                    Cancel
+                </Button>
+            </CardFooter> */}
         </Card>
     ),
 } satisfies Story

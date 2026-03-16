@@ -2,7 +2,6 @@
  * PostHog Design System — Color Tokens (shadcn-aligned)
  *
  * Each value is [light, dark]. Index 0 = light, index 1 = dark.
- * All values traced from vars.scss primitives.
  */
 
 import { cssVarsFlat } from './css'
@@ -10,49 +9,49 @@ import { generateShadowCSS } from './shadow'
 import { generateSpacingCSS } from './spacing'
 import { generateFontSizeCSS, generateFontFamilyCSS } from './typography'
 
-export const semanticColors = {
-    background: ['oklch(0.97 0.006 106)', 'hsl(240 8% 8%)'],
-    foreground: ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)'],
+export const semanticColors: Record<string, ColorTuple> = {
+    background: ['oklch(0.97 0.006 106)', 'hsl(240 8% 8%)', 'bg-background'],
+    foreground: ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)', 'text-foreground'],
 
-    card: ['oklch(1 0 0)', 'hsl(235 8% 15%)'],
-    'card-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)'],
+    card: ['oklch(1 0 0)', 'hsl(235 8% 15%)', 'bg-card'],
+    'card-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)', 'text-card-foreground'],
 
-    popover: ['oklch(1 0 0)', 'hsl(235 8% 15%)'],
-    'popover-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)'],
+    popover: ['oklch(1 0 0)', 'hsl(235 8% 15%)', 'bg-popover'],
+    'popover-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)', 'text-popover-foreground'],
 
-    primary: ['hsl(19 100% 48%)', 'hsl(43 94% 57%)'],
-    'primary-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)'],
+    primary: ['black', 'white', 'bg-primary'],
+    'primary-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)', 'text-primary-foreground'],
 
-    secondary: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)'],
-    'secondary-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)'],
+    secondary: ['oklch(0.967 0.001 286.375)', 'oklch(0.274 0.006 286.033)', 'bg-secondary'],
+    'secondary-foreground': ['oklch(0.21 0.006 285.885)', 'oklch(0.985 0 0)', 'text-secondary-foreground'],
 
-    muted: ['oklch(0.97 0.006 106)', 'hsl(240 8% 10%)'],
-    'muted-foreground': ['oklch(0.446 0.03 257)', 'oklch(0.709 0 0)'],
+    muted: ['oklch(0.97 0.006 106)', 'hsl(240 8% 10%)', 'bg-muted'],
+    'muted-foreground': ['oklch(0.446 0.03 257)', 'oklch(0.709 0 0)', 'text-muted-foreground'],
 
-    accent: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)'],
-    'accent-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)'],
+    accent: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'bg-accent'],
+    'accent-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)', 'text-accent-foreground'],
 
-    destructive: ['oklch(0.577 0.245 27)', 'oklch(0.704 0.191 22)'],
-    'destructive-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)'],
+    destructive: ['oklch(0.577 0.245 27)', 'oklch(0.704 0.191 22)', 'bg-destructive'],
+    'destructive-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)', 'text-destructive-foreground'],
 
-    success: ['oklch(0.627 0.194 149)', 'oklch(0.792 0.209 152)'],
-    'success-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)'],
+    success: ['oklch(0.627 0.194 149)', 'oklch(0.792 0.209 152)', 'bg-success'],
+    'success-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)', 'text-success-foreground'],
 
-    warning: ['oklch(0.554 0.135 66)', 'oklch(0.852 0.199 92)'],
-    'warning-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.13 0.028 262)'],
+    warning: ['oklch(0.554 0.135 66)', 'oklch(0.852 0.199 92)', 'bg-warning'],
+    'warning-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.13 0.028 262)', 'text-warning-foreground'],
 
-    info: ['oklch(0.546 0.245 263)', 'oklch(0.707 0.165 255)'],
-    'info-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)'],
+    info: ['oklch(0.546 0.245 263)', 'oklch(0.707 0.165 255)', 'bg-info'],
+    'info-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)', 'text-info-foreground'],
 
-    border: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)'],
-    input: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)'],
-    ring: ['hsl(228 100% 56%)', 'oklch(0.707 0.165 255)'],
+    border: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-border'],
+    input: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-input'],
+    ring: ['hsl(228 100% 56%)', 'oklch(0.707 0.165 255)', 'border-ring'],
 } as const
 
 // ── Types ──────────────────────────────────────────────
 
 export type SemanticColorKey = keyof typeof semanticColors
-export type ColorTuple = readonly [light: string, dark: string]
+export type ColorTuple = readonly [light: string, dark: string, tailwindClass: string]
 
 // ── Style generation config ────────────────────────────
 

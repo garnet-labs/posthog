@@ -3,12 +3,26 @@ import * as React from 'react'
 
 import { cn } from './lib/utils'
 
-function ScrollArea({ className, children, ...props }: ScrollAreaPrimitive.Root.Props): React.ReactElement {
+function ScrollArea({
+    className,
+    children,
+    scrollShadows = true,
+    ...props
+}: ScrollAreaPrimitive.Root.Props & { scrollShadows?: boolean }): React.ReactElement {
     return (
-        <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn('relative', className)} {...props}>
+        <ScrollAreaPrimitive.Root
+            data-slot="scroll-area"
+            data-scroll-shadows={scrollShadows}
+            className={cn('relative', className)}
+            {...props}
+        >
             <ScrollAreaPrimitive.Viewport
                 data-slot="scroll-area-viewport"
-                className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+                className={cn(
+                    'size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1',
+                    '[[data-scroll-shadows=true]_&]:before:content-[""] [[data-scroll-shadows=true]_&]:before:block [[data-scroll-shadows=true]_&]:before:left-0 [[data-scroll-shadows=true]_&]:before:w-full [[data-scroll-shadows=true]_&]:before:absolute [[data-scroll-shadows=true]_&]:before:pointer-events-none [[data-scroll-shadows=true]_&]:before:rounded-t-md [[data-scroll-shadows=true]_&]:before:transition-[height] [[data-scroll-shadows=true]_&]:before:duration-100 [[data-scroll-shadows=true]_&]:before:ease-out [[data-scroll-shadows=true]_&]:before:top-0 [[data-scroll-shadows=true]_&]:before:z-1 [[data-scroll-shadows=true]_&]:before:[--scroll-area-overflow-y-start:inherit] [[data-scroll-shadows=true]_&]:before:h-[min(20px,var(--scroll-area-overflow-y-start))] [[data-scroll-shadows=true]_&]:before:bg-linear-to-b [[data-scroll-shadows=true]_&]:before:from-muted-foreground/20 [[data-scroll-shadows=true]_&]:before:to-transparent',
+                    '[[data-scroll-shadows=true]_&]:after:content-[""] [[data-scroll-shadows=true]_&]:after:block [[data-scroll-shadows=true]_&]:after:left-0 [[data-scroll-shadows=true]_&]:after:w-full [[data-scroll-shadows=true]_&]:after:absolute [[data-scroll-shadows=true]_&]:after:pointer-events-none [[data-scroll-shadows=true]_&]:after:rounded-b-md [[data-scroll-shadows=true]_&]:after:transition-[height] [[data-scroll-shadows=true]_&]:after:duration-100 [[data-scroll-shadows=true]_&]:after:ease-out [[data-scroll-shadows=true]_&]:after:bottom-0 [[data-scroll-shadows=true]_&]:after:z-1 [[data-scroll-shadows=true]_&]:after:[--scroll-area-overflow-y-end:inherit] [[data-scroll-shadows=true]_&]:after:h-[min(20px,var(--scroll-area-overflow-y-end,20px))] [[data-scroll-shadows=true]_&]:after:bg-linear-to-t [[data-scroll-shadows=true]_&]:after:from-muted-foreground/20 [[data-scroll-shadows=true]_&]:after:to-transparent'
+                )}
             >
                 {children}
             </ScrollAreaPrimitive.Viewport>

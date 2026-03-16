@@ -27,9 +27,8 @@ export const Default = {
     render: () => (
         <div className="flex flex-wrap gap-2">
             <Button variant="default">Default</Button>
-            <Button variant="secondary">Secondary</Button>
-            <Button variant="destructive">Destructive</Button>
             <Button variant="outline">Outline</Button>
+            <Button variant="destructive">Destructive</Button>
             <Button variant="ghost">Ghost</Button>
             <Button variant="link">Link</Button>
         </div>
@@ -42,14 +41,11 @@ export const WithIcons = {
             <Button variant="default">
                 <TrashIcon /> Default
             </Button>
-            <Button variant="secondary">
-                <TrashIcon /> Secondary
+            <Button variant="outline">
+                <TrashIcon /> Outline
             </Button>
             <Button variant="destructive">
                 <TrashIcon /> Destructive
-            </Button>
-            <Button variant="outline">
-                <TrashIcon /> Outline
             </Button>
             <Button variant="ghost">
                 <TrashIcon /> Ghost
@@ -67,13 +63,10 @@ export const IconOnly = {
             <Button variant="default" size="icon">
                 <TrashIcon />
             </Button>
-            <Button variant="secondary" size="icon">
+            <Button variant="outline" size="icon">
                 <TrashIcon />
             </Button>
             <Button variant="destructive" size="icon">
-                <TrashIcon />
-            </Button>
-            <Button variant="outline" size="icon">
                 <TrashIcon />
             </Button>
             <Button variant="ghost" size="icon">
@@ -115,14 +108,11 @@ export const Disabled = {
             <Button variant="default" disabled>
                 Default
             </Button>
-            <Button variant="secondary" disabled>
-                Secondary
+            <Button variant="outline" disabled>
+                Outline
             </Button>
             <Button variant="destructive" disabled>
                 Destructive
-            </Button>
-            <Button variant="outline" disabled>
-                Outline
             </Button>
             <Button variant="ghost" disabled>
                 Ghost
