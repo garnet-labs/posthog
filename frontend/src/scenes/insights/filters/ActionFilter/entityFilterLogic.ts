@@ -2,6 +2,7 @@ import { actions, connect, events, kea, key, listeners, path, props, reducers, s
 import isEqual from 'lodash.isequal'
 
 import { convertPropertyGroupToProperties } from 'lib/components/PropertyFilters/utils'
+import { getSystemTableDefaults } from 'lib/components/TaxonomicFilter/systemTableDefaults'
 import { defaultDataWarehousePopoverFields } from 'lib/components/TaxonomicFilter/taxonomicFilterLogic'
 import { DataWarehousePopoverField } from 'lib/components/TaxonomicFilter/types'
 import { assignField, uuid } from 'lib/utils'
@@ -263,24 +264,37 @@ export const entityFilterLogic = kea<entityFilterLogicType>([
                         const dataWarehousePopoverFields =
                             props.dataWarehousePopoverFields ?? defaultDataWarehousePopoverFields
                         if (type === EntityTypes.DATA_WAREHOUSE) {
+                            const resolvedTableName = typeof table_name === 'undefined' ? filter.table_name : table_name
                             const updatedFilter = {
                                 ...filter,
                                 id: typeof id === 'undefined' ? filter.id : id,
                                 name: typeof name === 'undefined' ? filter.name : name,
                                 type: typeof type === 'undefined' ? filter.type : type,
                                 custom_name: typeof custom_name === 'undefined' ? filter.custom_name : custom_name,
-                                table_name: typeof table_name === 'undefined' ? filter.table_name : table_name,
+                                table_name: resolvedTableName,
                             }
 
-                            // Dynamically handle fields from dataWarehousePopoverFields
-                            dataWarehousePopoverFields.forEach(({ key }) => {
-                                const fieldValue = fieldValues[key]
-                                assignField(
-                                    updatedFilter,
-                                    key as keyof typeof updatedFilter,
-                                    typeof fieldValue === 'undefined' ? filter[key] : fieldValue
-                                )
-                            })
+                            // For system tables, auto-populate the required fields from known defaults
+                            const systemDefaults = getSystemTableDefaults(resolvedTableName || '')
+                            if (systemDefaults) {
+                                dataWarehousePopoverFields.forEach(({ key }) => {
+                                    assignField(
+                                        updatedFilter,
+                                        key as keyof typeof updatedFilter,
+                                        systemDefaults[key as keyof typeof systemDefaults]
+                                    )
+                                })
+                            } else {
+                                // For regular warehouse tables, use the user-selected field values
+                                dataWarehousePopoverFields.forEach(({ key }) => {
+                                    const fieldValue = fieldValues[key]
+                                    assignField(
+                                        updatedFilter,
+                                        key as keyof typeof updatedFilter,
+                                        typeof fieldValue === 'undefined' ? filter[key] : fieldValue
+                                    )
+                                })
+                            }
 
                             return updatedFilter
                         }

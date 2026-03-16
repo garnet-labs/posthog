@@ -110,7 +110,7 @@ export function TrendsSeries(): JSX.Element | null {
                     ...(hasScreen ? [TaxonomicFilterGroupType.ScreenEvents] : []),
                     TaxonomicFilterGroupType.AutocaptureEvents,
                     ...(isTrends && display !== ChartDisplayType.CalendarHeatmap && display !== ChartDisplayType.BoxPlot
-                        ? [TaxonomicFilterGroupType.DataWarehouse]
+                        ? [TaxonomicFilterGroupType.DataWarehouse, TaxonomicFilterGroupType.SystemTables]
                         : []),
                 ]}
                 hideDeleteBtn={series?.length === 1}

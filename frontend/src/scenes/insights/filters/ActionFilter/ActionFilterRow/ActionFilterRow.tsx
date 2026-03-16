@@ -1437,6 +1437,7 @@ const taxonomicFilterGroupTypeToEntityTypeMapping: Partial<Record<TaxonomicFilte
     [TaxonomicFilterGroupType.Events]: EntityTypes.EVENTS,
     [TaxonomicFilterGroupType.Actions]: EntityTypes.ACTIONS,
     [TaxonomicFilterGroupType.DataWarehouse]: EntityTypes.DATA_WAREHOUSE,
+    [TaxonomicFilterGroupType.SystemTables]: EntityTypes.DATA_WAREHOUSE,
 }
 
 export function taxonomicFilterGroupTypeToEntityType(

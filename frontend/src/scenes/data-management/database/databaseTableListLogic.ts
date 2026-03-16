@@ -1,6 +1,7 @@
 import { actions, connect, kea, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
+import { isUsableSystemTable } from 'lib/components/TaxonomicFilter/systemTableDefaults'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { objectsEqual } from 'lib/utils'
@@ -154,6 +155,13 @@ export const databaseTableListLogic = kea<databaseTableListLogicType>([
         systemTablesMap: [
             (s) => [s.systemTables],
             (systemTables: DatabaseSchemaTable[]): Record<string, DatabaseSchemaTable> => toMapByName(systemTables),
+            { resultEqualityCheck: objectsEqual },
+        ],
+        usableSystemTables: [
+            (s) => [s.systemTables],
+            (systemTables: DatabaseSchemaTable[]): DatabaseSchemaTable[] => {
+                return systemTables.filter((t) => isUsableSystemTable(t.name))
+            },
             { resultEqualityCheck: objectsEqual },
         ],
         dataWarehouseTables: [

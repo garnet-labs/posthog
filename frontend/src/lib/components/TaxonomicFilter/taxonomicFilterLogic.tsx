@@ -25,6 +25,7 @@ import {
 import { IconCohort } from 'lib/lemon-ui/icons'
 import { Link } from 'lib/lemon-ui/Link'
 import { capitalizeFirstLetter, isString, pluralize, toParams } from 'lib/utils'
+import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import {
     getEventDefinitionIcon,
     getEventMetadataDefinitionIcon,
@@ -468,6 +469,17 @@ export const taxonomicFilterLogic = kea<taxonomicFilterLogicType>([
                         getName: (table: DatabaseSchemaTable) => table.name,
                         getValue: (table: DatabaseSchemaTable) => table.name,
                         getPopoverHeader: () => 'Data Warehouse Table',
+                        getIcon: () => <IconServer />,
+                    },
+                    {
+                        name: 'System tables',
+                        searchPlaceholder: 'system tables',
+                        type: TaxonomicFilterGroupType.SystemTables,
+                        logic: databaseTableListLogic,
+                        value: 'usableSystemTables',
+                        getName: (table: DatabaseSchemaTable) => table.name,
+                        getValue: (table: DatabaseSchemaTable) => table.name,
+                        getPopoverHeader: () => 'System Table',
                         getIcon: () => <IconServer />,
                     },
                     ...(schemaColumns.length > 0

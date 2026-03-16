@@ -230,6 +230,8 @@ export enum TaxonomicFilterGroupType {
     // Workflows execution variables
     WorkflowVariables = 'workflow_variables',
     SuggestedFilters = 'suggested_filters',
+    // System tables (system.insights, system.feature_flags, etc.)
+    SystemTables = 'system_tables',
     Empty = 'empty',
 }
 

@@ -1199,9 +1199,31 @@ class Database(BaseModel):
                 for warehouse_modifier in modifiers.dataWarehouseEventsModifiers:
                     with timings.measure(f"data_warehouse_event_modifier_{warehouse_modifier.table_name}"):
                         # TODO: add all field mappings
+                        is_system_table = warehouse_modifier.table_name.startswith("system.")
                         is_view = views.has_child([warehouse_modifier.table_name])
 
-                        if is_view:
+                        if is_system_table:
+                            # System tables have statically defined fields (no Django model lookup needed).
+                            # Create standard aliases so the table works in trends like any DataWarehouseNode.
+                            table_chain = warehouse_modifier.table_name.split(".")
+                            if database.has_table(table_chain):
+                                table = database.get_table(table_chain)
+                                if "timestamp" not in table.fields:
+                                    table.fields["timestamp"] = ExpressionField(
+                                        name="timestamp",
+                                        expr=ast.Field(chain=[warehouse_modifier.timestamp_field]),
+                                    )
+                                if "distinct_id" not in table.fields:
+                                    table.fields["distinct_id"] = ExpressionField(
+                                        name="distinct_id",
+                                        expr=parse_expr(warehouse_modifier.distinct_id_field),
+                                    )
+                                if "person_id" not in table.fields:
+                                    table.fields["person_id"] = ExpressionField(
+                                        name="person_id",
+                                        expr=parse_expr(warehouse_modifier.distinct_id_field),
+                                    )
+                        elif is_view:
                             views = define_mappings(
                                 views,
                                 lambda team, warehouse_modifier: DataWarehouseSavedQuery.objects.exclude(deleted=True)
