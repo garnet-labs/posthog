@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+# In sandboxed Codex sessions, home-directory caches are not writable.
+# Use per-environment caches so activation can still run non-interactively.
+if [[ -n "${CODEX_SANDBOX:-}" ]]; then
+  export UV_CACHE_DIR="${UV_CACHE_DIR:-$PWD/.flox/cache/uv-cache}"
+  export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PWD/.flox/cache/xdg-cache}"
+fi
+
 # ── Colors & symbols ────────────────────────────────────────────────
 readonly C_RESET='\033[0m'
 readonly C_DIM='\033[2m'
@@ -172,21 +179,36 @@ echo -e "\n${C_CYAN}PostHog dev${C_RESET} ${C_DIM}── ${_branch}${C_RESET}\n"
 _activation_start=$(date +%s)
 
 # ── Step 1: Python packages (must run before hogli — it needs Click) ─
-run_step "Python packages" uv sync
+if [[ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]] && [[ -x "$UV_PROJECT_ENVIRONMENT/bin/python" ]]; then
+  done_step "Python packages (reused cached venv)"
+else
+  run_step "Python packages" uv sync
+fi
+
+# `flox activate -- <cmd>` skips profile scripts, so expose the uv venv here too.
+if [[ -d "$UV_PROJECT_ENVIRONMENT/bin" ]]; then
+  export PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"
+fi
 
 # Expose hogli on PATH via the uv-managed venv
 if [[ -d "$UV_PROJECT_ENVIRONMENT/bin" ]]; then
-  ln -sf "$FLOX_ENV_PROJECT/bin/hogli" "$UV_PROJECT_ENVIRONMENT/bin/hogli"
+  _hogli_target="$FLOX_ENV_PROJECT/bin/hogli"
+  _hogli_link="$UV_PROJECT_ENVIRONMENT/bin/hogli"
+  if [[ ! -L "$_hogli_link" ]] || [[ "$(readlink "$_hogli_link" 2>/dev/null || true)" != "$_hogli_target" ]]; then
+    ln -sf "$_hogli_target" "$_hogli_link" || true
+  fi
 fi
 
 # Install shell completions for hogli
-HOGLI_COMPLETION_DIR="$FLOX_ENV_CACHE/completions"
-mkdir -p "$HOGLI_COMPLETION_DIR"
 if [[ -d "$UV_PROJECT_ENVIRONMENT/bin" ]]; then
-  PYTHONPATH="$FLOX_ENV_PROJECT/common" "$UV_PROJECT_ENVIRONMENT/bin/python" \
-    -m hogli.core.completion --shell bash > "$HOGLI_COMPLETION_DIR/hogli.bash" 2>/dev/null || true
-  PYTHONPATH="$FLOX_ENV_PROJECT/common" "$UV_PROJECT_ENVIRONMENT/bin/python" \
-    -m hogli.core.completion --shell zsh > "$HOGLI_COMPLETION_DIR/_hogli" 2>/dev/null || true
+  (
+    HOGLI_COMPLETION_DIR="$FLOX_ENV_CACHE/completions"
+    mkdir -p "$HOGLI_COMPLETION_DIR"
+    PYTHONPATH="$FLOX_ENV_PROJECT/common" "$UV_PROJECT_ENVIRONMENT/bin/python" \
+      -m hogli.core.completion --shell bash > "$HOGLI_COMPLETION_DIR/hogli.bash" 2>/dev/null
+    PYTHONPATH="$FLOX_ENV_PROJECT/common" "$UV_PROJECT_ENVIRONMENT/bin/python" \
+      -m hogli.core.completion --shell zsh > "$HOGLI_COMPLETION_DIR/_hogli" 2>/dev/null
+  ) || true
 fi
 
 # Generate hogli man page into the active environment so `man hogli` works.
@@ -201,7 +223,11 @@ if [[ -d "$UV_PROJECT_ENVIRONMENT/bin" ]]; then
 fi
 
 # ── Step 2: Node packages ──────────────────────────────────────────
-run_step "Node packages" pnpm install
+if [[ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]] && [[ -e "$PWD/node_modules" ]]; then
+  done_step "Node packages (reused existing node_modules)"
+else
+  run_step "Node packages" pnpm install
+fi
 
 # ── Step 3: /etc/hosts ──────────────────────────────────────────────
 if grep -q "127.0.0.1 kafka clickhouse clickhouse-coordinator objectstorage" /etc/hosts; then
