@@ -179,6 +179,9 @@ func dispatch(req request, mgr *process.Manager) any {
 		if len(tail) > n {
 			tail = tail[len(tail)-n:]
 		}
+		if tail == nil {
+			tail = make([]string, 0)
+		}
 		return map[string]any{
 			"ok":       true,
 			"lines":    tail,

@@ -399,14 +399,14 @@ func TestSearch_incrementalUpdate(t *testing.T) {
 func TestSearch_eviction(t *testing.T) {
 	// Use a tiny scrollback (3 lines) so eviction happens quickly.
 	f := false
-	mgr := process.NewManager(&config.Config{
+	cfg := &config.Config{
 		Procs:            map[string]config.ProcConfig{"svc": {Shell: "true", Autostart: &f}},
 		MouseScrollSpeed: 3,
 		Scrollback:       3,
-	})
-	m := New(testConfig("backend"), nil)
+	}
+	m := New(cfg, nil)
 	m = update(m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	p, _ := mgr.Get("svc")
+	p, _ := m.mgr.Get("svc")
 
 	// Fill the scrollback: lines 0,1,2 = "err0","ok1","err2"
 	for i, line := range []string{"err0", "ok1", "err2"} {
