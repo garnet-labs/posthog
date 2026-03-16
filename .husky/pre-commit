@@ -5,6 +5,13 @@
 # not just your changes, making it slow and pointless
 [ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)" ] && exit 0
 
+# Connected worktree: use main repo's flox env (must come before .flox/cache check,
+# because connected worktrees have no local .flox/ directory)
+if [ -f .worktree-connected ] && command -v flox &> /dev/null && [ -z "$FLOX_ENV" ]; then
+    _main_repo="$(cat .worktree-connected)"
+    exec "$(command -v flox)" activate -d "$_main_repo" -- bash -c "NODE_OPTIONS='--max-old-space-size=8192' pnpm lint-staged"
+fi
+
 # Activate Flox environment if available and not already active
 # This ensures lint-staged commands work in GUI Git clients (GitHub Desktop, etc.)
 if command -v flox &> /dev/null && [ -d ".flox/cache" ] && [ -z "$FLOX_ENV" ]; then

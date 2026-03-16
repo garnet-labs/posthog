@@ -18,6 +18,8 @@ __pycache__/
 .turbo
 .venv
 .wokeignore
+.worktree-connected
+.worktree-disconnected
 .yalc
 *-esbuild-bundle-visualization.html
 *-esbuild-meta.json

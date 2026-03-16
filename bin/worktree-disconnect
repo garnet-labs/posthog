@@ -1,0 +1,58 @@
+#!/bin/bash
+# Disconnect a connected worktree — gives it its own independent flox environment.
+# Use when a branch needs different deps than the main repo.
+#
+# Usage: hogli worktree:disconnect
+
+set -e
+source "$(dirname "$0")/helpers/_utils.sh"
+
+if [[ ! -f .worktree-connected ]]; then
+    if [[ -f .worktree-disconnected ]]; then
+        echo "Already disconnected."
+    else
+        echo "Not a connected worktree (no .worktree-connected marker)."
+    fi
+    exit 1
+fi
+
+main_repo="$(cat .worktree-connected)"
+echo "Disconnecting worktree from: $main_repo"
+
+# Remove the connected marker
+rm .worktree-connected
+
+# Write the disconnected marker (prevents post-checkout from reconnecting)
+touch .worktree-disconnected
+
+# Remove symlinks (node_modules, .env files)
+if [[ -L node_modules ]]; then
+    rm node_modules
+    print_color blue "Removed node_modules symlink"
+fi
+
+for f in .env .env.*; do
+    [[ -L "$f" ]] && rm "$f" && print_color blue "Removed $f symlink"
+done
+
+# Copy .env files as real files
+for env_file in "$main_repo"/.env "$main_repo"/.env.*; do
+    [[ -f "$env_file" ]] || continue
+    base=$(basename "$env_file")
+    [[ "$base" == ".env.example" ]] && continue
+    [[ -e "$base" ]] && continue
+    cp "$env_file" "$base"
+done
+
+# Set up independent flox environment
+mkdir -p .flox/env
+cp "$main_repo/.flox/env/manifest.toml" .flox/env/
+[[ -f "$main_repo/.flox/env/on-activate.sh" ]] && cp "$main_repo/.flox/env/on-activate.sh" .flox/env/
+
+success "Worktree disconnected."
+echo ""
+echo "Next steps:"
+print_color blue "  exit                          # Leave current flox shell"
+print_color blue "  cd $(pwd)                     # Re-enter (triggers full flox activation)"
+echo ""
+print_color yellow "The first activation will run uv sync + pnpm install (~30s)."
