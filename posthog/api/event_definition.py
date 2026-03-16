@@ -508,6 +508,63 @@ class EventDefinitionViewSet(
         serializer = self.get_serializer(event_def)
         return response.Response(serializer.data)
 
+    @extend_schema(
+        responses={201: None},
+        description="Create a coding agent task that scans the relevant repository for posthog.capture() calls and updates event definitions with descriptions based on the code.",
+    )
+    @action(detail=False, methods=["POST"], url_path="update_from_code", required_scopes=["event_definition:write"])
+    def update_from_code(self, request, *args, **kwargs):
+        from posthog.models.integration import Integration
+        from posthog.models.team.extensions import get_or_create_team_extension
+
+        from products.tasks.backend.models import Task
+        from products.tasks.backend.team_code_config import TeamCodeConfig
+
+        config = get_or_create_team_extension(self.team, TeamCodeConfig)
+        if not config.relevant_repositories:
+            return response.Response(
+                {"detail": "No relevant repository configured. Go to Settings > Integrations to select one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        github_integration = Integration.objects.filter(team=self.team, kind="github").first()
+        if not github_integration:
+            return response.Response(
+                {"detail": "No GitHub integration connected. Go to Settings > Integrations to connect GitHub."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        repository = config.relevant_repositories[0]
+        description = (
+            f"Look at all posthog.capture() calls (and equivalent SDK calls like $posthog.capture(), "
+            f"analytics.capture(), posthog.capture_event(), etc.) in the repository {repository}.\n\n"
+            f"For each event you find:\n"
+            f"1. Use the PostHog MCP tool `event-definition-update` to update the event definition's description.\n"
+            f"2. The description should explain:\n"
+            f"   - What the event means and when it is triggered\n"
+            f"   - Its importance to the product's user journey\n"
+            f"   - The file path where the event was found, along with the current short commit hash "
+            f"(e.g. `src/checkout.ts` at `abc1234`)\n\n"
+            f"Do NOT create new event definitions. Only update existing ones that match events found in the code.\n"
+            f"Search thoroughly across the entire codebase for all SDK capture calls."
+        )
+
+        task = Task.create_and_run(
+            team=self.team,
+            title="Update event definitions from code",
+            description=description,
+            origin_product=Task.OriginProduct.DATA_MANAGEMENT,
+            user_id=request.user.id,
+            repository=repository,
+            create_pr=False,
+            posthog_mcp_scopes=["event_definition:read", "event_definition:write"],
+        )
+
+        return response.Response(
+            {"task_id": str(task.id), "task_url": f"/tasks/{task.id}"},
+            status=status.HTTP_201_CREATED,
+        )
+
 
 def fetch_30day_event_queries(
     team: Team,
