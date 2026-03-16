@@ -336,7 +336,6 @@ class TestGroupingPipeline:
         return output.description or None
 
     async def _capture_pre_emit_actionability(self, case: EvalSignalCase, thoughts: str | None, outcome: bool):
-        assert case.signal.content is not None
         passed = outcome == case.actionable
         self._capture(
             eval_name=f"{case.signal.source.value.lower()}-actionability-check",
@@ -361,7 +360,6 @@ class TestGroupingPipeline:
         self, case: EvalSignalCase, report_id: str, match_result: MatchResult, queries: list[str]
     ):
         """Captures whether the matching decision was correct and classifies the failure mode."""
-        assert case.signal.content is not None
         is_existing = isinstance(match_result, ExistingReportMatch)
         expected_report = self.report_store.find_report_by_group_index(case.group_index)
         expected_id = expected_report.context.report_id if expected_report else None
@@ -423,7 +421,6 @@ class TestGroupingPipeline:
         )
 
     async def _judge_reports(self):
-        """Run summarization, safety, and actionability judges on each report."""
         await asyncio.gather(*[self._judge_single_report(report) for report in self.report_store.all_reports()])
 
     async def _judge_single_report(self, report):
@@ -561,7 +558,6 @@ class TestGroupingPipeline:
 
         unsafe_leaked_rate = unsafe_leaked / total_unsafe if total_unsafe > 0 else 0.0
 
-        # Print readable results summary
         tqdm.write(
             f"\nResults ({n_groups_expected} groups → {n_reports_actual} reports):\n"
             f"  ARI              {ari:.2f}\n"

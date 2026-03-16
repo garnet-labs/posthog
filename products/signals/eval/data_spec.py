@@ -64,9 +64,12 @@ class EvalSignalSpec:
         return config
 
     @cached_property
-    def content(self) -> SignalEmitterOutput | None:
+    def content(self) -> SignalEmitterOutput:
         record = self._to_record()
-        return self.config.emitter(0, record)
+        content = self.config.emitter(0, record)
+        if content is None:
+            raise ValueError(f"Content empty for {self.source.value}")
+        return content
 
 
 @dataclass

@@ -125,3 +125,142 @@ python manage.py clear_eval_data --source X    # filter by eval source tag
   this ensures the embedding store and report store see a consistent view
   when deciding whether a signal joins an existing report or creates a new one.
 - Report judging runs concurrently (all reports at once).
+
+# Reports
+
+## HogQL queries
+
+All queries filter on `$ai_eval_source = 'signals-grouping'` and `$ai_evaluation_type = 'offline'`.
+Run these in the PostHog SQL editor.
+
+### Aggregate metrics
+
+ARI, homogeneity, completeness, purity, recall, malicious leak rate.
+
+```sql
+SELECT
+    properties.$ai_metric_name AS metric,
+    properties.$ai_score AS score,
+    properties.$ai_metric_description AS description,
+    properties.$ai_reasoning AS reasoning,
+    properties.$ai_input AS input,
+    properties.$ai_output AS output,
+    properties.$ai_expected AS expected
+FROM events
+WHERE event = '$ai_evaluation'
+  AND properties.$ai_eval_source = 'signals-grouping'
+  AND properties.$ai_evaluation_type = 'offline'
+  AND properties.$ai_experiment_name = 'signals-grouping/grouping-aggregate'
+ORDER BY metric
+```
+
+### Match quality failure mode breakdown
+
+```sql
+SELECT
+    multiIf(
+        properties.$ai_score = 1.0, 'CORRECT',
+        properties.$ai_reasoning LIKE '%UNDERGROUP%', 'UNDERGROUP',
+        properties.$ai_reasoning LIKE '%SPECIFICITY_SPLIT%', 'SPECIFICITY_SPLIT',
+        properties.$ai_reasoning LIKE '%OVERGROUP%', 'OVERGROUP',
+        'UNKNOWN'
+    ) AS failure_mode,
+    count() AS cnt,
+    round(count() * 100.0 / (SELECT count() FROM events WHERE event = '$ai_evaluation' AND properties.$ai_eval_source = 'signals-grouping' AND properties.$ai_evaluation_type = 'offline' AND properties.$ai_experiment_name = 'signals-grouping/match-quality'), 1) AS pct
+FROM events
+WHERE event = '$ai_evaluation'
+  AND properties.$ai_eval_source = 'signals-grouping'
+  AND properties.$ai_evaluation_type = 'offline'
+  AND properties.$ai_experiment_name = 'signals-grouping/match-quality'
+  AND properties.$ai_metric_name = 'correct_match'
+GROUP BY failure_mode
+ORDER BY cnt DESC
+```
+
+### Pre-emit actionability by source type
+
+```sql
+SELECT
+    replaceOne(properties.$ai_experiment_name, 'signals-grouping/', '') AS check_name,
+    count() AS total,
+    countIf(properties.$ai_score = 1.0) AS correct,
+    countIf(properties.$ai_score != 1.0) AS failures,
+    round(countIf(properties.$ai_score != 1.0) * 100.0 / count(), 1) AS failure_pct,
+    countIf(properties.$ai_score != 1.0 AND properties.$ai_output = 'ACTIONABLE') AS false_positives,
+    countIf(properties.$ai_score != 1.0 AND properties.$ai_output = 'NOT_ACTIONABLE') AS false_negatives
+FROM events
+WHERE event = '$ai_evaluation'
+  AND properties.$ai_eval_source = 'signals-grouping'
+  AND properties.$ai_evaluation_type = 'offline'
+  AND properties.$ai_experiment_name IN (
+      'signals-grouping/zendesk-actionability-check',
+      'signals-grouping/github-actionability-check',
+      'signals-grouping/linear-actionability-check'
+  )
+  AND properties.$ai_metric_name = 'correct_classification'
+GROUP BY check_name
+ORDER BY check_name
+```
+
+### Report-level judges (safety + actionability)
+
+```sql
+SELECT
+    replaceOne(properties.$ai_experiment_name, 'signals-grouping/', '') AS judge,
+    count() AS total,
+    countIf(properties.$ai_score = 1.0) AS correct,
+    round(countIf(properties.$ai_score = 1.0) * 100.0 / count(), 1) AS accuracy_pct,
+    countIf(properties.$ai_score != 1.0 AND properties.$ai_output IN ('SAFE', 'IMMEDIATELY_ACTIONABLE')) AS false_positives,
+    countIf(properties.$ai_score != 1.0 AND properties.$ai_output NOT IN ('SAFE', 'IMMEDIATELY_ACTIONABLE')) AS false_negatives
+FROM events
+WHERE event = '$ai_evaluation'
+  AND properties.$ai_eval_source = 'signals-grouping'
+  AND properties.$ai_evaluation_type = 'offline'
+  AND properties.$ai_experiment_name IN (
+      'signals-grouping/report-safety-check',
+      'signals-grouping/report-actionability-check'
+  )
+  AND properties.$ai_metric_name = 'correct_classification'
+GROUP BY judge
+ORDER BY judge
+```
+
+### Per-report grouping quality
+
+Purity, is_pure, group_recall distributions.
+
+```sql
+SELECT
+    properties.$ai_metric_name AS metric,
+    count() AS n,
+    round(avg(properties.$ai_score), 3) AS mean_score,
+    round(min(properties.$ai_score), 3) AS min_score,
+    round(max(properties.$ai_score), 3) AS max_score,
+    countIf(properties.$ai_score = 1.0) AS perfect_count
+FROM events
+WHERE event = '$ai_evaluation'
+  AND properties.$ai_eval_source = 'signals-grouping'
+  AND properties.$ai_evaluation_type = 'offline'
+  AND properties.$ai_experiment_name = 'signals-grouping/grouping-quality'
+GROUP BY metric
+ORDER BY metric
+```
+
+### Detailed match failures (for debugging)
+
+```sql
+SELECT
+    properties.$ai_experiment_item_name AS item,
+    properties.$ai_reasoning AS failure_mode,
+    properties.$ai_input AS signal_description,
+    properties.$ai_expected AS expected,
+    JSONExtractString(properties.$ai_output, 'report') AS actual_decision
+FROM events
+WHERE event = '$ai_evaluation'
+  AND properties.$ai_eval_source = 'signals-grouping'
+  AND properties.$ai_evaluation_type = 'offline'
+  AND properties.$ai_experiment_name = 'signals-grouping/match-quality'
+  AND properties.$ai_metric_name = 'correct_match'
+  AND properties.$ai_score != 1.0
+ORDER BY properties.$ai_reasoning, item
+```
