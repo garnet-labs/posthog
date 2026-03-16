@@ -140,6 +140,19 @@ This is it – you should be seeing the PostHog app at <a href="http://localhost
 
 You can now change PostHog in any way you want. See [Project structure](./project-structure) for an intro to the repository's contents. To commit changes, create a new branch based on `master` for your intended change, and develop away.
 
+### Working with multiple branches (worktrees)
+
+Use `git worktree add` to work on multiple branches simultaneously. New worktrees automatically share the main repo's Python venv, node_modules, and nix packages — no install step needed, activation takes ~0.1s.
+
+```bash
+git worktree add ../my-feature -b my-feature master
+cd ../my-feature
+# direnv activates shared env automatically, or manually:
+flox activate -d /path/to/main/posthog
+```
+
+If your branch needs different dependencies, run `hogli worktree:disconnect` for an independent environment. See the [worktree workflow guide](./flox-multi-instance-workflow) for the full `phw` helper commands.
+
 ### Customizing which services run
 
 By default, `hogli start` runs a minimal set of services (enough for product analytics). To customize which services start, run `hogli dev:setup` which lets you select intents based on the products you're working on. Your choices are saved and used automatically by `hogli start`.

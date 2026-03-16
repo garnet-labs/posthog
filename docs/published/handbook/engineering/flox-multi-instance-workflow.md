@@ -4,7 +4,7 @@ showTitle: true
 noindex: true
 ---
 
-This guide explains how to create isolated PostHog development environments using Flox and Git worktrees for seamless branch switching.
+This guide covers the `phw` helper for creating worktrees with fully independent Flox environments. Most of the time you won't need this — new worktrees automatically share the main repo's environment (see [developing locally](./developing-locally#working-with-multiple-branches-worktrees)). Use this guide when you need a worktree with its own deps, or after running `hogli worktree:disconnect`.
 
 **Key Benefits:**
 
