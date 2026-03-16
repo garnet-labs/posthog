@@ -17,9 +17,7 @@ TEST_SIGNALS = [
             "Feature request: Compare against previous option for funnel insights. "
             "Customer would be able to select two arbitrary intervals (week, month etc) and compare "
             "the % change in conversion between those two periods. Current workaround is HogQL "
-            "breakdown like toString(toISOWeek(timestamp)). "
-            "Use execute-sql to query the events table for 'insight viewed' events where "
-            "properties contain 'FUNNELS' to gauge how many users actually use funnel insights."
+            "breakdown like toString(toISOWeek(timestamp))."
         ),
         source_product="github_issues",
         source_type="enhancement",
@@ -71,6 +69,25 @@ TEST_SIGNALS = [
             "url": "https://github.com/PostHog/posthog/issues/42996",
         },
     ),
+    SignalData(
+        signal_id="test-funnel-drop-off-43201",
+        content=(
+            "Bug report: Customer reports that their onboarding funnel conversion rate dropped "
+            "significantly in the last two weeks but they haven't shipped any product changes. "
+            "The funnel goes: page view on /signup → custom event 'user_signed_up' → "
+            "custom event 'onboarding_completed'. They suspect a tracking regression — possibly "
+            "the 'onboarding_completed' event stopped firing or its volume dropped. "
+            "Needs investigation of actual event volumes in the events table to confirm or deny."
+        ),
+        source_product="zendesk",
+        source_type="bug",
+        source_id="44891",
+        weight=0.8,
+        timestamp="2025-12-11T14:32:07Z",
+        extra={
+            "labels": ["feature/funnels", "team/product-analytics"],
+        },
+    ),
 ]
 
 TEST_TITLE = "Funnel insights lack time-based comparison and statistical options"
@@ -79,8 +96,10 @@ TEST_SUMMARY = (
     "Key gaps include: (1) no ability to compare conversion rates across arbitrary time periods, "
     "(2) dynamic bin widths in Time to Convert histograms make trend tracking unreliable, and "
     "(3) only average conversion time is available — median and percentile options (P50, P90, P99) "
-    "are missing. All three requests come from the product-analytics/funnels area and have "
-    "Zendesk support ticket backing."
+    "are missing, and (4) a customer reports a potential tracking regression with their onboarding "
+    "funnel conversion dropping without any product changes. The first three requests come from "
+    "the product-analytics/funnels area with Zendesk support ticket backing. The fourth is a "
+    "Zendesk bug report requiring data investigation to confirm."
 )
 
 
