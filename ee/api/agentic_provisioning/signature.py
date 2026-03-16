@@ -31,7 +31,7 @@ def verify_stripe_signature(request: Request) -> Response | None:
     endpoint = request.path
 
     api_version = request.META.get("HTTP_API_VERSION", "")
-    if api_version not in SUPPORTED_VERSIONS:
+    if api_version and api_version not in SUPPORTED_VERSIONS:
         _log_and_capture_event("invalid_api_version", 400, endpoint, api_version=api_version)
         return Response(
             {
