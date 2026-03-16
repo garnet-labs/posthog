@@ -333,6 +333,15 @@ class RepositoryReadinessResponseSerializer(serializers.Serializer):
     scan = ScanEvidenceSerializer(required=False, help_text="Scan evidence details")
 
 
+class TeamCodeConfigSerializer(serializers.Serializer):
+    relevant_repositories = serializers.ListField(
+        child=serializers.CharField(max_length=255),
+        required=False,
+        default=list,
+        help_text="List of relevant repository full names in org/repo format, e.g. posthog/posthog",
+    )
+
+
 class ConnectionTokenResponseSerializer(serializers.Serializer):
     """Response containing a JWT token for direct sandbox connection"""
 

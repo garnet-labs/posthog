@@ -27,6 +27,7 @@ from posthog.api.mixins import validated_request
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.utils import ServerTimingsGathered
 from posthog.auth import OAuthAccessTokenAuthentication, PersonalAPIKeyAuthentication
+from posthog.models.team.extensions import get_or_create_team_extension
 from posthog.permissions import APIScopePermission
 from posthog.rate_limit import CodeInviteThrottle
 from posthog.storage import object_storage
@@ -56,9 +57,11 @@ from .serializers import (
     TaskRunSessionLogsQuerySerializer,
     TaskRunUpdateSerializer,
     TaskSerializer,
+    TeamCodeConfigSerializer,
 )
 from .services.connection_token import create_sandbox_connection_token
 from .stream.redis_stream import TaskRunRedisStream, TaskRunStreamError, get_task_run_stream_key
+from .team_code_config import TeamCodeConfig
 from .temporal.client import execute_posthog_code_agent_relay_workflow, execute_task_processing_workflow
 
 logger = logging.getLogger(__name__)
@@ -1082,3 +1085,24 @@ class CodeInviteViewSet(viewsets.ViewSet):
         # Fallback: check invite code redemption
         has_redeemed = CodeInviteRedemption.objects.filter(user=user).exists()
         return Response({"has_access": has_redeemed})
+
+
+@extend_schema(tags=["tasks"])
+class TeamCodeConfigViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
+    """API for managing team code configuration (relevant repositories)."""
+
+    scope_object = "INTERNAL"
+
+    def list(self, request, **kwargs):
+        config = get_or_create_team_extension(self.team, TeamCodeConfig)
+        return Response(TeamCodeConfigSerializer(config).data)
+
+    @action(detail=False, methods=["patch"], url_path="update")
+    def update_config(self, request, **kwargs):
+        serializer = TeamCodeConfigSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        config = get_or_create_team_extension(self.team, TeamCodeConfig)
+        if "relevant_repositories" in serializer.validated_data:
+            config.relevant_repositories = serializer.validated_data["relevant_repositories"]
+        config.save()
+        return Response(TeamCodeConfigSerializer(config).data)
