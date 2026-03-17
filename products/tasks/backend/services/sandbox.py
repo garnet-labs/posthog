@@ -125,6 +125,7 @@ class SandboxProtocol(Protocol):
         interaction_origin: str | None = None,
         branch: str | None = None,
         mcp_configs: list[McpServerConfig] | None = None,
+        tools_preset: str | None = None,
     ) -> None:
         """Start the agent-server HTTP server in the sandbox.
 

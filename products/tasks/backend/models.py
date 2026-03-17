@@ -165,6 +165,7 @@ class Task(DeletedMetaFields, models.Model):
         start_workflow: bool = True,
         posthog_mcp_scopes: PosthogMcpScopes = "full",
         branch: str | None = None,
+        tools_preset: str = "default",
     ) -> "Task":
         from products.tasks.backend.temporal.client import execute_task_processing_workflow
 
@@ -204,6 +205,7 @@ class Task(DeletedMetaFields, models.Model):
                 create_pr=create_pr,
                 slack_thread_context=slack_thread_context,
                 posthog_mcp_scopes=posthog_mcp_scopes,
+                tools_preset=tools_preset,
             )
 
         return task

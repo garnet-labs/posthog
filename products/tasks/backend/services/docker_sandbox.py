@@ -563,16 +563,20 @@ class DockerSandbox:
         interaction_origin: str | None = None,
         branch: str | None = None,
         mcp_servers_arg: str = "",
+        tools_preset: str | None = None,
     ) -> str:
         env_prefix = (
             f"env POSTHOG_CODE_INTERACTION_ORIGIN={shlex.quote(interaction_origin)} " if interaction_origin else ""
         )
         branch_flag = f" --baseBranch {shlex.quote(branch)}" if branch else ""
+        tools_preset_flag = (
+            f" --toolsPreset {shlex.quote(tools_preset)}" if tools_preset and tools_preset != "default" else ""
+        )
         return (
             f"cd /scripts && "
             f"nohup {env_prefix}./node_modules/.bin/agent-server --port {AGENT_SERVER_PORT} --repositoryPath {shlex.quote(repo_path)} "
             f"--taskId {shlex.quote(task_id)} --runId {shlex.quote(run_id)} --mode {shlex.quote(mode)}"
-            f"{branch_flag}{mcp_servers_arg} "
+            f"{branch_flag}{mcp_servers_arg}{tools_preset_flag} "
             f"> /tmp/agent-server.log 2>&1 &"
         )
 
@@ -596,6 +600,7 @@ class DockerSandbox:
         interaction_origin: str | None = None,
         branch: str | None = None,
         mcp_configs: list[McpServerConfig] | None = None,
+        tools_preset: str | None = None,
     ) -> None:
         """Start the agent-server HTTP server in the sandbox.
 
@@ -617,7 +622,7 @@ class DockerSandbox:
             mcp_servers_arg = f" --mcpServers {shlex.quote(mcp_json)}"
 
         command = self._build_agent_server_command(
-            repo_path, task_id, run_id, mode, interaction_origin, branch, mcp_servers_arg
+            repo_path, task_id, run_id, mode, interaction_origin, branch, mcp_servers_arg, tools_preset
         )
 
         logger.info(f"Starting agent-server in sandbox {self.id} for {repository}")
@@ -637,7 +642,14 @@ class DockerSandbox:
             self.execute("pkill -f agent-server || true", timeout_seconds=5)
 
             command = self._build_agent_server_command(
-                repo_path, task_id, run_id, mode, interaction_origin, branch=None, mcp_servers_arg=mcp_servers_arg
+                repo_path,
+                task_id,
+                run_id,
+                mode,
+                interaction_origin,
+                branch=None,
+                mcp_servers_arg=mcp_servers_arg,
+                tools_preset=tools_preset,
             )
             if self._launch_and_check(command):
                 logger.info(f"Agent-server started on port {self._host_port} (without --baseBranch)")

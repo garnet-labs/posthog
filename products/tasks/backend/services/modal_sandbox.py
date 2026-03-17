@@ -445,6 +445,7 @@ class ModalSandbox:
         interaction_origin: str | None = None,
         branch: str | None = None,
         mcp_configs: list[McpServerConfig] | None = None,
+        tools_preset: str | None = None,
     ) -> None:
         """Start the agent-server HTTP server in the sandbox.
 
@@ -467,11 +468,14 @@ class ModalSandbox:
             f"env POSTHOG_CODE_INTERACTION_ORIGIN={shlex.quote(interaction_origin)} " if interaction_origin else ""
         )
         branch_flag = f" --baseBranch {shlex.quote(branch)}" if branch else ""
+        tools_preset_flag = (
+            f" --toolsPreset {shlex.quote(tools_preset)}" if tools_preset and tools_preset != "default" else ""
+        )
         command = (
             f"cd /scripts && "
             f"nohup {env_prefix}./node_modules/.bin/agent-server --port {AGENT_SERVER_PORT} --repositoryPath {shlex.quote(repo_path)} "
             f"--taskId {shlex.quote(task_id)} --runId {shlex.quote(run_id)} --mode {shlex.quote(mode)}"
-            f"{branch_flag}{mcp_servers_arg} "
+            f"{branch_flag}{mcp_servers_arg}{tools_preset_flag} "
             f"> /tmp/agent-server.log 2>&1 &"
         )
 

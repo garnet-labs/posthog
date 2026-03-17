@@ -25,6 +25,7 @@ class StartAgentServerInput:
     sandbox_url: str
     sandbox_connect_token: str | None = None
     posthog_mcp_scopes: PosthogMcpScopes = "read_only"
+    tools_preset: str = "default"
 
 
 @dataclass
@@ -84,6 +85,7 @@ def start_agent_server(input: StartAgentServerInput) -> StartAgentServerOutput:
                 interaction_origin=ctx.interaction_origin,
                 branch=ctx.branch,
                 mcp_configs=mcp_configs or None,
+                tools_preset=input.tools_preset if input.tools_preset != "default" else None,
             )
         except Exception as e:
             raise SandboxExecutionError(
