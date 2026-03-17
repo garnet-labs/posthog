@@ -120,12 +120,44 @@ Add three new instance settings after the existing `WEB_ANALYTICS_WARMING_*` set
 Also add `ERROR_TRACKING_WARMING_DAYS` and `ERROR_TRACKING_WARMING_MIN_QUERY_COUNT`
 to the `SETTINGS_ALLOWING_API_OVERRIDE` tuple.
 
-### 3. `products/error_tracking/dags/__init__.py` (modify)
+### 3. `posthog/dags/locations/error_tracking.py` (modify)
 
-Export the new job and schedule so Dagster discovers them.
-Check how the web analytics dags `__init__.py` exports and mirror that pattern.
+Register the new job and schedule in the Dagster definitions file.
+This is where Dagster discovers jobs/schedules for the error tracking product.
 
-### 4. Tests: `products/error_tracking/dags/tests/test_cache_warming.py` (new)
+Current file registers `symbol_set_cleanup` assets, jobs, and schedules.
+Add the cache warming job and schedule:
+
+```python
+import dagster
+
+from products.error_tracking.dags import cache_warming, symbol_set_cleanup
+
+from . import resources
+
+defs = dagster.Definitions(
+    assets=[
+        symbol_set_cleanup.symbol_sets_to_delete,
+        symbol_set_cleanup.symbol_set_cleanup_results,
+    ],
+    jobs=[
+        symbol_set_cleanup.symbol_set_cleanup_job,
+        cache_warming.error_tracking_cache_warming_job,
+    ],
+    schedules=[
+        symbol_set_cleanup.daily_symbol_set_cleanup_schedule,
+        cache_warming.error_tracking_cache_warming_schedule,
+    ],
+    resources=resources,
+)
+```
+
+### 4. `products/error_tracking/dags/__init__.py` (no change needed)
+
+The `__init__.py` is empty — Dagster discovery happens via
+`posthog/dags/locations/error_tracking.py` (see above).
+
+### 5. Tests: `products/error_tracking/dags/tests/test_cache_warming.py` (new)
 
 Write tests mirroring the structure of the web analytics cache warming.
 Key test cases:
