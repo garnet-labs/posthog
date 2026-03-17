@@ -27,7 +27,7 @@ export function MessageTemplatesTable(): JSX.Element {
     const showProductIntroduction = !templatesLoading && templates.length === 0
 
     return (
-        <div className="templates-section" data-attr="message-templates-table">
+        <div className="templates-section" data-attr="message-templates-table" data-loading={templatesLoading}>
             {showProductIntroduction && (
                 <ProductIntroduction
                     productName="Message template"

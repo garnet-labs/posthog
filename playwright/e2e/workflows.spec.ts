@@ -69,8 +69,9 @@ test.describe('Workflows', () => {
     test.describe('library tab', () => {
         test.skip('shows message templates table', async ({ page }) => {
             await page.goto('/workflows/library')
-            await page.waitForSelector('[data-attr="message-templates-table"]', { timeout: 10000 })
-            await expect(page.getByText('Loading', { exact: true })).not.toBeVisible({ timeout: 5000 })
+            await page.waitForSelector('[data-attr="message-templates-table"][data-loading="false"]', {
+                timeout: 10000,
+            })
 
             // The new template button should be visible
             await expect(page.locator('[data-attr="new-message-button"]')).toBeVisible()
