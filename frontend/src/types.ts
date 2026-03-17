@@ -6070,7 +6070,6 @@ export type CyclotronJobInputSchemaType = {
         | 'integration_field'
         | 'email'
         | 'native_email'
-        | 'push_subscription'
         | 'posthog_assignee'
         | 'posthog_ticket_tags'
     key: string
