@@ -98,6 +98,7 @@ const meta: Meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+// smoke-test snapshot: trigger bot regeneration (67% drift detected on master)
 export const ProjectHomepage: Story = {}
 
 const teamWithNoPrimaryDashboard = { ...MOCK_DEFAULT_TEAM, primary_dashboard: null }
