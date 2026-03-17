@@ -3,14 +3,16 @@
 set -e
 set -u
 
-echo "Checking if database 'behavioral_cohorts' exists..."
-DB_EXISTS=$(psql -U "$POSTGRES_USER" -tAc "SELECT 1 FROM pg_database WHERE datname='behavioral_cohorts'")
+DB_NAME="${BEHAVIORAL_COHORTS_DATABASE_NAME:-behavioral_cohorts}"
+
+echo "Checking if database '${DB_NAME}' exists..."
+DB_EXISTS=$(psql -U "$POSTGRES_USER" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")
 
 if [ -z "$DB_EXISTS" ]; then
-    echo "Creating database 'behavioral_cohorts'..."
-    psql -U "$POSTGRES_USER" -c "CREATE DATABASE behavioral_cohorts;"
-    psql -U "$POSTGRES_USER" -c "GRANT ALL PRIVILEGES ON DATABASE behavioral_cohorts TO $POSTGRES_USER;"
-    echo "Database 'behavioral_cohorts' created successfully"
+    echo "Creating database '${DB_NAME}'..."
+    psql -U "$POSTGRES_USER" -c "CREATE DATABASE ${DB_NAME};"
+    psql -U "$POSTGRES_USER" -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO $POSTGRES_USER;"
+    echo "Database '${DB_NAME}' created successfully"
 else
-    echo "Database 'behavioral_cohorts' already exists"
+    echo "Database '${DB_NAME}' already exists"
 fi

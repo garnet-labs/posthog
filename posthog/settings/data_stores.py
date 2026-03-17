@@ -144,12 +144,13 @@ if direct_host:
 # Add the persons_db_writer database configuration using PERSONS_DB_WRITER_URL
 # For local development, default to the persons database in the main container if no URL is provided
 persons_db_writer_url = os.getenv("PERSONS_DB_WRITER_URL")
+persons_db_name = os.getenv("POSTHOG_PERSONS_DB_NAME") or "posthog_persons"
 if not persons_db_writer_url and DEBUG and not TEST:
     # Default to local persons database in main container in development mode (but not test mode)
     # This matches the docker-compose.dev.yml configuration
     # A default is needed for generate_demo_data to properly populate the correct databases
     # with the demo data
-    persons_db_writer_url = f"postgres://{PG_USER}:{PG_PASSWORD}@localhost:5432/posthog_persons"
+    persons_db_writer_url = f"postgres://{PG_USER}:{PG_PASSWORD}@localhost:5432/{persons_db_name}"
 elif not persons_db_writer_url and TEST:
     # In test mode, use a placeholder database name that will be updated by conftest
     # pytest-django adds test_ prefix which isn't known at settings import time

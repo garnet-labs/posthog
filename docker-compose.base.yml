@@ -137,7 +137,7 @@ services:
     redis7:
         image: redis:7.2-alpine
         restart: on-failure
-        command: redis-server --maxmemory-policy allkeys-lru --maxmemory 200mb
+        command: redis-server --maxmemory-policy allkeys-lru --maxmemory 200mb --databases 256
         healthcheck:
             test: ['CMD', 'redis-cli', 'ping']
             interval: 3s

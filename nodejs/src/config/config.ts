@@ -37,24 +37,24 @@ export function getDefaultConfig(): PluginsServerConfig {
         DATABASE_URL: isTestEnv()
             ? 'postgres://posthog:posthog@localhost:5432/test_posthog'
             : isDevEnv()
-              ? 'postgres://posthog:posthog@localhost:5432/posthog'
+              ? `postgres://posthog:posthog@localhost:5432/${process.env.POSTHOG_DB_NAME || 'posthog'}`
               : '',
         DATABASE_READONLY_URL: '',
         PLUGIN_STORAGE_DATABASE_URL: '',
         PERSONS_DATABASE_URL: isTestEnv()
             ? 'postgres://posthog:posthog@localhost:5432/test_persons'
             : isDevEnv()
-              ? 'postgres://posthog:posthog@localhost:5432/posthog_persons'
+              ? `postgres://posthog:posthog@localhost:5432/${process.env.POSTHOG_PERSONS_DB_NAME || 'posthog_persons'}`
               : '',
         PERSONS_READONLY_DATABASE_URL: isTestEnv()
             ? 'postgres://posthog:posthog@localhost:5432/test_persons'
             : isDevEnv()
-              ? 'postgres://posthog:posthog@localhost:5432/posthog_persons'
+              ? `postgres://posthog:posthog@localhost:5432/${process.env.POSTHOG_PERSONS_DB_NAME || 'posthog_persons'}`
               : '',
         BEHAVIORAL_COHORTS_DATABASE_URL: isTestEnv()
             ? 'postgres://posthog:posthog@localhost:5432/test_behavioral_cohorts'
             : isDevEnv()
-              ? 'postgres://posthog:posthog@localhost:5432/behavioral_cohorts'
+              ? `postgres://posthog:posthog@localhost:5432/${process.env.BEHAVIORAL_COHORTS_DATABASE_NAME || 'behavioral_cohorts'}`
               : '',
         POSTGRES_CONNECTION_POOL_SIZE: 10,
         POSTHOG_DB_NAME: null,
@@ -254,13 +254,13 @@ export function getDefaultConfig(): PluginsServerConfig {
         // Cyclotron
         CYCLOTRON_DATABASE_URL: isTestEnv()
             ? 'postgres://posthog:posthog@localhost:5432/test_cyclotron'
-            : 'postgres://posthog:posthog@localhost:5432/cyclotron',
+            : `postgres://posthog:posthog@localhost:5432/${process.env.CYCLOTRON_DATABASE_NAME || 'cyclotron'}`,
 
         CYCLOTRON_SHARD_DEPTH_LIMIT: 1000000,
         CYCLOTRON_NODE_DATABASE_URL: isTestEnv()
             ? 'postgres://posthog:posthog@localhost:5432/test_cyclotron_node'
             : isDevEnv()
-              ? 'postgres://posthog:posthog@localhost:5432/cyclotron_node'
+              ? `postgres://posthog:posthog@localhost:5432/${process.env.CYCLOTRON_NODE_DATABASE_NAME || 'cyclotron_node'}`
               : undefined,
         // Cyclotron Node
         CYCLOTRON_NODE_MAX_CONNECTIONS: 10,

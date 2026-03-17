@@ -57,7 +57,6 @@
                 "DEBUG": "1",
                 "CLICKHOUSE_SECURE": "False",
                 "KAFKA_HOSTS": "localhost",
-                "DATABASE_URL": "postgres://posthog:posthog@localhost:5432/posthog",
                 "SKIP_SERVICE_VERSION_REQUIREMENTS": "1",
                 "PRINT_SQL": "1",
                 "BILLING_SERVICE_URL": "https://billing.dev.posthog.dev",
@@ -84,12 +83,12 @@
                 "DEBUG": "1",
                 "CLICKHOUSE_SECURE": "False",
                 "KAFKA_HOSTS": "localhost",
-                "DATABASE_URL": "postgres://posthog:posthog@localhost:5432/posthog",
                 "SKIP_SERVICE_VERSION_REQUIREMENTS": "1",
                 "PRINT_SQL": "1",
                 "BILLING_SERVICE_URL": "http://localhost:8100/",
                 "CLOUD_DEPLOYMENT": "local"
             },
+            "envFile": "${workspaceFolder}/.env",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "presentation": {
@@ -152,7 +151,6 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "CLICKHOUSE_SECURE": "False",
-                "DATABASE_URL": "postgres://posthog:posthog@localhost:5432/posthog",
                 "KAFKA_HOSTS": "localhost:9092",
                 "WORKER_CONCURRENCY": "2",
                 "OBJECT_STORAGE_ENABLED": "True"
@@ -177,10 +175,10 @@
                 "DEBUG": "1",
                 "CLICKHOUSE_SECURE": "False",
                 "KAFKA_HOSTS": "localhost",
-                "DATABASE_URL": "postgres://posthog:posthog@localhost:5432/posthog",
                 "SKIP_SERVICE_VERSION_REQUIREMENTS": "1",
                 "PRINT_SQL": "1"
             },
+            "envFile": "${workspaceFolder}/.env",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "presentation": {
@@ -267,12 +265,12 @@
                 "DEBUG": "1",
                 "CLICKHOUSE_SECURE": "False",
                 "KAFKA_HOSTS": "localhost",
-                "DATABASE_URL": "postgres://posthog:posthog@localhost:5432/posthog",
                 "SKIP_SERVICE_VERSION_REQUIREMENTS": "1",
                 "PRINT_SQL": "1",
                 "BILLING_SERVICE_URL": "http://localhost:8100/",
                 "CLOUD_DEPLOYMENT": "local"
             },
+            "envFile": "${workspaceFolder}/.env",
             "autoStartBrowser": false,
             "program": "${workspaceFolder}/manage.py"
         },

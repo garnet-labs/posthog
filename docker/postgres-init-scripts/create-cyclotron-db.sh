@@ -3,14 +3,16 @@
 set -e
 set -u
 
-echo "Checking if database 'cyclotron' exists..."
-DB_EXISTS=$(psql -U "$POSTGRES_USER" -tAc "SELECT 1 FROM pg_database WHERE datname='cyclotron'")
+DB_NAME="${CYCLOTRON_DATABASE_NAME:-cyclotron}"
+
+echo "Checking if database '${DB_NAME}' exists..."
+DB_EXISTS=$(psql -U "$POSTGRES_USER" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")
 
 if [ -z "$DB_EXISTS" ]; then
-    echo "Creating database 'cyclotron'..."
-    psql -U "$POSTGRES_USER" -c "CREATE DATABASE cyclotron;"
-    psql -U "$POSTGRES_USER" -c "GRANT ALL PRIVILEGES ON DATABASE cyclotron TO $POSTGRES_USER;"
-    echo "Database 'cyclotron' created successfully"
+    echo "Creating database '${DB_NAME}'..."
+    psql -U "$POSTGRES_USER" -c "CREATE DATABASE ${DB_NAME};"
+    psql -U "$POSTGRES_USER" -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO $POSTGRES_USER;"
+    echo "Database '${DB_NAME}' created successfully"
 else
-    echo "Database 'cyclotron' already exists"
+    echo "Database '${DB_NAME}' already exists"
 fi

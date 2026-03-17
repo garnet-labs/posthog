@@ -83,7 +83,7 @@ def _ensure_database_exists(db_alias: str) -> None:
 
     try:
         with psycopg.connect(
-            dbname="postgres",
+            dbname=db_settings.get("NAME"),
             host=db_settings.get("HOST") or "localhost",
             port=int(db_settings.get("PORT") or 5432),
             user=db_settings.get("USER") or "posthog",

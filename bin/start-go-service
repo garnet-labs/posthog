@@ -47,7 +47,7 @@ case "$GO_SVC" in
     export LIVESTREAM_MMDB_PATH=../share/GeoLite2-City.mmdb
 
     # Postgres settings
-    export LIVESTREAM_POSTGRES_URL=postgres://posthog:posthog@localhost:5432/posthog
+    export LIVESTREAM_POSTGRES_URL=postgres://posthog:posthog@localhost:5432/${POSTHOG_DB_NAME:-posthog}
 
     # JWT secret
     export LIVESTREAM_JWT_SECRET="<randomly generated secret key>"

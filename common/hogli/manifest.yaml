@@ -710,6 +710,182 @@ utilities:
         bin_script: check_uv_python_compatibility.py
         description: CI validation for uv/Python version compatibility
         hidden: true
+    worktree:setup:
+        cmd: |
+            set -e
+            WORKTREE_PATH="${1:?Usage: hogli worktree:setup <path>}"
+            [[ -d "$WORKTREE_PATH" ]] || { echo "❌ Path not found: $WORKTREE_PATH"; exit 1; }
+
+            BRANCH=$(git -C "$WORKTREE_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
+            [[ -n "$BRANCH" ]] || { echo "❌ Could not determine branch at $WORKTREE_PATH"; exit 1; }
+
+            ID=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' \
+                | tr -cs 'a-z0-9' '_' | sed 's/__*/_/g;s/^_//;s/_$//' | cut -c1-40)
+
+            PG_DB="posthog_wt_${ID}"
+            PG_PERSONS_DB="posthog_persons_wt_${ID}"
+            PG_CYCLOTRON_DB="cyclotron_wt_${ID}"
+            PG_CYCLOTRON_NODE_DB="cyclotron_node_wt_${ID}"
+            PG_BEHAVIORAL_DB="behavioral_cohorts_wt_${ID}"
+            PG_DUCKLAKE_DB="ducklake_wt_${ID}"
+            CH_DB="posthog_wt_${ID}"
+            DAGSTER_TEST_DB="test_dagster_wt_${ID}"
+            PG_BASE="postgres://posthog:posthog@localhost:5432"
+
+            # DB 0 = main REDIS_URL, DB 1 = main FLAGS_REDIS_URL.
+            # Worktrees use consecutive pairs starting at DB 2: REDIS=2N, FLAGS=2N+1.
+            # With --databases 256 in docker-compose.base.yml, 127 distinct hash slots are available.
+            REDIS_PAIR=$(( $(echo "$ID" | cksum | cut -d' ' -f1) % 127 ))
+            REDIS_IDX=$(( 2 + REDIS_PAIR * 2 ))
+            FLAGS_REDIS_IDX=$(( REDIS_IDX + 1 ))
+
+            # Allow direnv so the .envrc runs when the user enters the worktree.
+            # New worktrees have their .envrc blocked by default — without this,
+            # flox never activates and .env is never created from .env.example.
+            if command -v direnv >/dev/null 2>&1; then
+                direnv allow "$WORKTREE_PATH"
+            fi
+
+            ENV_FILE="${WORKTREE_PATH}/.env"
+            # Bootstrap .env from .env.example if missing (flox normally does this
+            # on first activation, but direnv must be allowed first).
+            if [[ ! -f "$ENV_FILE" ]]; then
+                if [[ -f "${WORKTREE_PATH}/.env.example" ]]; then
+                    cp "${WORKTREE_PATH}/.env.example" "$ENV_FILE"
+                    echo "📋 Created .env from .env.example"
+                else
+                    echo "❌ No .env or .env.example found at $WORKTREE_PATH"; exit 1
+                fi
+            fi
+
+            SED_INPLACE=(-i); [[ "$(uname)" == "Darwin" ]] && SED_INPLACE=(-i '')
+            sed "${SED_INPLACE[@]}" \
+                -e '/^DATABASE_URL=/d' \
+                -e '/^POSTHOG_DB_NAME=/d' \
+                -e '/^POSTHOG_PERSONS_DB_NAME=/d' \
+                -e '/^CYCLOTRON_DATABASE_NAME=/d' \
+                -e '/^CYCLOTRON_NODE_DATABASE_NAME=/d' \
+                -e '/^BEHAVIORAL_COHORTS_DATABASE_NAME=/d' \
+                -e '/^BEHAVIORAL_COHORTS_READ_DATABASE_URL=/d' \
+                -e '/^CLICKHOUSE_DATABASE=/d' \
+                -e '/^DUCKLAKE_RDS_DATABASE=/d' \
+                -e '/^REDIS_URL=/d' \
+                -e '/^FLAGS_REDIS_URL=/d' \
+                -e '/^KAFKA_PREFIX=/d' \
+                -e '/^# Worktree-isolated/d' \
+                "$ENV_FILE"
+
+            {
+                echo ""
+                echo "# Worktree-isolated databases — managed by hogli worktree:setup"
+                echo "DATABASE_URL=${PG_BASE}/${PG_DB}"
+                echo "POSTHOG_DB_NAME=${PG_DB}"
+                echo "POSTHOG_PERSONS_DB_NAME=${PG_PERSONS_DB}"
+                echo "PERSONS_DB_WRITER_URL=${PG_BASE}/${PG_PERSONS_DB}"
+                echo "PERSONS_DB_READER_URL=${PG_BASE}/${PG_PERSONS_DB}"
+                echo "CYCLOTRON_DATABASE_NAME=${PG_CYCLOTRON_DB}"
+                echo "CYCLOTRON_DATABASE_URL=${PG_BASE}/${PG_CYCLOTRON_DB}"
+                echo "CYCLOTRON_NODE_DATABASE_NAME=${PG_CYCLOTRON_NODE_DB}"
+                echo "CYCLOTRON_NODE_DATABASE_URL=${PG_BASE}/${PG_CYCLOTRON_NODE_DB}"
+                echo "BEHAVIORAL_COHORTS_DATABASE_NAME=${PG_BEHAVIORAL_DB}"
+                echo "BEHAVIORAL_COHORTS_READ_DATABASE_URL=${PG_BASE}/${PG_BEHAVIORAL_DB}"
+                echo "CLICKHOUSE_DATABASE=${CH_DB}"
+                echo "DUCKLAKE_RDS_DATABASE=${PG_DUCKLAKE_DB}"
+                echo "REDIS_URL=redis://localhost/${REDIS_IDX}"
+                echo "FLAGS_REDIS_URL=redis://localhost/${FLAGS_REDIS_IDX}"
+                echo "KAFKA_PREFIX=wt_${ID}_"
+                echo "DAGSTER_TEST_DB_NAME=${DAGSTER_TEST_DB}"
+                echo "DAGSTER_TEST_POSTGRES_URL=${PG_BASE}/${DAGSTER_TEST_DB}"
+            } >> "$ENV_FILE"
+
+            echo "Creating worktree databases…"
+            INIT_DIR="${WORKTREE_PATH}/docker/postgres-init-scripts"
+
+            # Main posthog DB
+            docker compose exec -T db psql -U posthog \
+                -c "CREATE DATABASE \"${PG_DB}\"" 2>/dev/null \
+                && echo "  Created ${PG_DB}" || echo "  ✓ ${PG_DB} (already exists)"
+            docker compose exec -T db psql -U posthog \
+                -c "GRANT ALL PRIVILEGES ON DATABASE \"${PG_DB}\" TO posthog" 2>/dev/null || true
+
+            # Run init scripts with worktree-specific DB names
+            docker compose exec -T -e "POSTHOG_PERSONS_DB_NAME=${PG_PERSONS_DB}" db bash -s \
+                < "${INIT_DIR}/create-persons-db.sh"
+            docker compose exec -T -e "CYCLOTRON_DATABASE_NAME=${PG_CYCLOTRON_DB}" db bash -s \
+                < "${INIT_DIR}/create-cyclotron-db.sh"
+            docker compose exec -T -e "CYCLOTRON_NODE_DATABASE_NAME=${PG_CYCLOTRON_NODE_DB}" db bash -s \
+                < "${INIT_DIR}/create-cyclotron-node-db.sh"
+            docker compose exec -T -e "BEHAVIORAL_COHORTS_DATABASE_NAME=${PG_BEHAVIORAL_DB}" db bash -s \
+                < "${INIT_DIR}/create-behavioral-cohorts-db.sh"
+            docker compose exec -T -e "DUCKLAKE_RDS_DATABASE=${PG_DUCKLAKE_DB}" db bash -s \
+                < "${INIT_DIR}/create-ducklake-catalog.sh"
+
+            # ClickHouse
+            docker compose exec -T clickhouse clickhouse-client \
+                --query "CREATE DATABASE IF NOT EXISTS \`${CH_DB}\`;" 2>/dev/null || true
+            echo "  ✓ ClickHouse: ${CH_DB}"
+
+            echo "✅ Patched .env and created databases for worktree: $ID"
+            echo "   PostgreSQL:  $PG_DB  (+ persons, cyclotron, cyclotron_node, behavioral_cohorts, ducklake)"
+            echo "   ClickHouse:  $CH_DB"
+            echo "   Redis:       DB index $REDIS_IDX"
+            echo "   Kafka:       prefix wt_${ID}_"
+            echo ""
+            echo "Next: cd $WORKTREE_PATH && hogli worktree:init"
+        description: Patch a worktree's .env with isolated database names and create
+            databases (run after git worktree add)
+        services:
+            - postgresql
+            - clickhouse
+            - docker
+    worktree:remove:
+        cmd: |
+            set -e
+            WORKTREE_PATH="${1:?Usage: hogli worktree:remove <path>}"
+            [[ -d "$WORKTREE_PATH" ]] || { echo "❌ Path not found: $WORKTREE_PATH"; exit 1; }
+
+            set -a; source "${WORKTREE_PATH}/.env" 2>/dev/null; set +a
+
+            echo "Databases to drop:"
+            [[ -n "$POSTHOG_DB_NAME" ]] && echo "  - PostgreSQL: $POSTHOG_DB_NAME (+ persons, cyclotron*, behavioral*, ducklake*)"
+            [[ -n "${CLICKHOUSE_DATABASE:-}" ]] && echo "  - ClickHouse: $CLICKHOUSE_DATABASE"
+            [[ -n "$REDIS_URL" ]] && echo "  - Redis DB index: ${REDIS_URL##*/}"
+            echo ""
+            read -rp "Drop all worktree databases and remove worktree? [y/N] " REPLY
+            [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+
+            PG_EXEC="docker compose exec -T db psql -U posthog"
+            for DB in \
+                "$POSTHOG_DB_NAME" \
+                "$POSTHOG_PERSONS_DB_NAME" \
+                "${CYCLOTRON_DATABASE_NAME:-}" \
+                "${CYCLOTRON_NODE_DATABASE_NAME:-}" \
+                "${BEHAVIORAL_COHORTS_DATABASE_NAME:-}" \
+                "${DUCKLAKE_RDS_DATABASE:-}"; do
+                [[ -n "$DB" ]] && $PG_EXEC -c "DROP DATABASE IF EXISTS \"$DB\";" \
+                    && echo "  Dropped $DB"
+            done
+
+            if [[ -n "${CLICKHOUSE_DATABASE:-}" ]]; then
+                docker compose exec -T clickhouse clickhouse-client --query \
+                    "DROP DATABASE IF EXISTS \`${CLICKHOUSE_DATABASE}\`;"
+                echo "  Dropped ClickHouse DB: ${CLICKHOUSE_DATABASE}"
+            fi
+
+            if [[ -n "${REDIS_URL:-}" ]]; then
+                redis-cli -n "${REDIS_URL##*/}" FLUSHDB
+                echo "  Cleared Redis DB index: ${REDIS_URL##*/}"
+            fi
+
+            echo "Removing git worktree at $WORKTREE_PATH..."
+            git worktree remove "$WORKTREE_PATH" --force
+            echo "✅ Worktree and databases removed."
+        description: Drop worktree databases and remove the git worktree
+        prompt: true
+        services:
+            - postgresql
+            - clickhouse
+            - docker
 environment:
     flox:activate:
         cmd: flox activate

@@ -1,4 +1,5 @@
 import json
+import os
 from functools import lru_cache
 
 from pydantic import BaseModel, field_validator
@@ -89,7 +90,7 @@ def _parse_model_dict(
 class Settings(BaseSettings):
     debug: bool = False
 
-    database_url: str = "postgres://posthog:posthog@localhost:5432/posthog"
+    database_url: str = f"postgres://posthog:posthog@localhost:5432/{os.getenv('POSTHOG_DB_NAME', 'posthog')}"
     db_pool_min_size: int = 2
     db_pool_max_size: int = 10
 
