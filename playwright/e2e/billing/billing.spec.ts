@@ -1,22 +1,7 @@
-import fs from 'fs'
-import path from 'path'
-
 import { expect, test } from '../../utils/playwright-test-base'
 
 test.describe('Billing', () => {
     test.beforeEach(async ({ page }) => {
-        // This replicates cy.intercept('/api/billing/') with fixture
-        // We'll read the JSON from a fixture folder. Adjust the path as needed.
-        await page.route('**/api/billing/', async (route) => {
-            // If your codebase uses a different structure, update accordingly
-            const filePath = path.join(__dirname, '../../mocks/billing/billing.json')
-            const billingContent = fs.readFileSync(filePath, 'utf-8')
-            await route.fulfill({
-                status: 200,
-                body: billingContent,
-            })
-        })
-
         // Visit the billing page
         await page.goto('/organization/billing')
     })

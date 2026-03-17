@@ -1,9 +1,6 @@
 /**
  * Screenshot tests for workflows product
  */
-import fs from 'fs'
-import path from 'path'
-
 import { expect } from '@playwright/test'
 
 import { PlaywrightWorkspaceSetupResult, test } from '../utils/workspace-test-base'
@@ -24,16 +21,6 @@ test.describe('Workflows', () => {
         if (!workspace) {
             throw new Error('Workspace was not initialized before tests')
         }
-
-        // Mock billing API to prevent billing warning banners from appearing in snapshots
-        await page.route('**/api/billing/', async (route) => {
-            const filePath = path.join(__dirname, '../../mocks/billing/billing.json')
-            const billingContent = fs.readFileSync(filePath, 'utf-8')
-            await route.fulfill({
-                status: 200,
-                body: billingContent,
-            })
-        })
 
         // Login and navigate to the team page
         await playwrightSetup.loginAndNavigateToTeam(page, workspace)

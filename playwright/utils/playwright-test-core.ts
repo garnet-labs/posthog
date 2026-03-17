@@ -1,3 +1,6 @@
+import fs from 'fs'
+import path from 'path'
+
 import { Page, test as base } from '@playwright/test'
 
 import { AppContext } from '~/types'
@@ -38,6 +41,16 @@ export const test = base.extend<{ page: Page }>({
         page.goToMenuItem = async function (name: Identifier): Promise<void> {
             await new Navigation(page).openMenuItem(name)
         }
+
+        // Mock billing API by default to prevent billing warning banners from appearing in snapshots
+        await page.route('**/api/billing/', async (route) => {
+            const filePath = path.join(__dirname, '../mocks/billing/billing.json')
+            const billingContent = fs.readFileSync(filePath, 'utf-8')
+            await route.fulfill({
+                status: 200,
+                body: billingContent,
+            })
+        })
 
         // Pass the extended page to the test
         // eslint-disable-next-line react-hooks/rules-of-hooks
