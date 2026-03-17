@@ -24,7 +24,7 @@ from posthog.hogql_queries.experiments.utils import get_experiment_stats_method
 from posthog.models import Survey
 from posthog.models.activity_logging.activity_log import Detail, changes_between, log_activity
 from posthog.models.evaluation_context import FeatureFlagEvaluationContext
-from posthog.models.experiment import Experiment, ExperimentHoldout
+from posthog.models.experiment import Experiment, ExperimentHoldout, ExperimentTimeseriesRecalculation
 from posthog.models.filters.filter import Filter
 from posthog.models.signals import model_activity_signal, mutable_receiver
 from posthog.models.team.team import Team
@@ -511,16 +511,22 @@ class EnterpriseExperimentsViewSet(
         is_existing = result.pop("is_existing", False)
 
         if not is_existing:
-            temporal = sync_connect()
             recalculation_id = str(result["id"])
-            asyncio.run(
-                temporal.start_workflow(
-                    "experiment-timeseries-recalculation-workflow",
-                    ExperimentTimeseriesRecalculationWorkflowInputs(recalculation_id=recalculation_id),
-                    id=f"experiment-recalculation-{recalculation_id}",
-                    task_queue=settings.GENERAL_PURPOSE_TASK_QUEUE,
+            try:
+                temporal = sync_connect()
+                asyncio.run(
+                    temporal.start_workflow(
+                        "experiment-timeseries-recalculation-workflow",
+                        ExperimentTimeseriesRecalculationWorkflowInputs(recalculation_id=recalculation_id),
+                        id=f"experiment-recalculation-{recalculation_id}",
+                        task_queue=settings.GENERAL_PURPOSE_TASK_QUEUE,
+                    )
                 )
-            )
+            except Exception:
+                ExperimentTimeseriesRecalculation.objects.filter(id=recalculation_id).update(
+                    status=ExperimentTimeseriesRecalculation.Status.FAILED
+                )
+                raise
 
         status_code = 200 if is_existing else 201
         return Response(result, status=status_code)
