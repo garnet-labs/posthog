@@ -72,7 +72,7 @@ async def signal_with_start_grouping_v2_activity(input: SignalWithStartGroupingV
         TeamSignalGroupingV2Input(team_id=input.team_id),
         id=TeamSignalGroupingV2Workflow.workflow_id_for(input.team_id),
         task_queue=settings.VIDEO_EXPORT_TASK_QUEUE,
-        run_timeout=timedelta(hours=1),
+        run_timeout=timedelta(hours=3),
         start_signal="submit_batch",
         start_signal_args=[input.object_key],
     )
