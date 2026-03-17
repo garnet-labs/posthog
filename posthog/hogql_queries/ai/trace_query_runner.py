@@ -1,21 +1,44 @@
 from datetime import datetime, timedelta
 from functools import cached_property
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
-from posthog.schema import CachedTraceQueryResponse, IntervalType, NodeKind, TraceQuery, TraceQueryResponse
+import orjson
+
+from posthog.schema import (
+    CachedTraceQueryResponse,
+    IntervalType,
+    LLMTrace,
+    LLMTraceEvent,
+    NodeKind,
+    TraceQuery,
+    TraceQueryResponse,
+)
 
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_select
 from posthog.hogql.property import property_to_expr
-from posthog.hogql.query import execute_hogql_query
 
-from posthog.clickhouse.query_tagging import Product, tags_context
-from posthog.hogql_queries.ai.ai_column_rewriter import rewrite_expr_for_events_table, rewrite_query_for_events_table
-from posthog.hogql_queries.ai.ai_property_rewriter import rewrite_expr_for_ai_events_table
-from posthog.hogql_queries.ai.ai_table_resolver import is_ai_events_enabled, is_within_ai_events_ttl
-from posthog.hogql_queries.ai.utils import TraceMapperMixin
+from posthog.hogql_queries.ai.ai_table_resolver import execute_with_ai_events_fallback
+from posthog.hogql_queries.ai.utils import merge_heavy_properties
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
+
+TRACE_FIELDS_MAPPING: dict[str, str] = {
+    "id": "id",
+    "ai_session_id": "aiSessionId",
+    "created_at": "createdAt",
+    "first_distinct_id": "distinctId",
+    "total_latency": "totalLatency",
+    "input_state_parsed": "inputState",
+    "output_state_parsed": "outputState",
+    "input_tokens": "inputTokens",
+    "output_tokens": "outputTokens",
+    "input_cost": "inputCost",
+    "output_cost": "outputCost",
+    "total_cost": "totalCost",
+    "events": "events",
+    "trace_name": "traceName",
+}
 
 
 class TraceQueryDateRange(QueryDateRange):
@@ -39,38 +62,23 @@ class TraceQueryDateRange(QueryDateRange):
         return super().date_to() + timedelta(minutes=self.CAPTURE_RANGE_MINUTES)
 
 
-class TraceQueryRunner(TraceMapperMixin, AnalyticsQueryRunner[TraceQueryResponse]):
+class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
     query: TraceQuery
     cached_response: CachedTraceQueryResponse
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
 
-    def _should_use_ai_events_table(self) -> bool:
-        if not is_ai_events_enabled(self.team):
-            return False
-        return is_within_ai_events_ttl(self._date_range.date_from(), datetime.now())
-
     def _calculate(self):
-        query = self._build_query()
-        placeholders: dict[str, ast.Expr] = {"filter_conditions": self._get_where_clause()}
-
-        if not self._should_use_ai_events_table():
-            query = cast(ast.SelectQuery, rewrite_query_for_events_table(query))
-            placeholders = {k: rewrite_expr_for_events_table(v) for k, v in placeholders.items()}
-        else:
-            placeholders = {k: rewrite_expr_for_ai_events_table(v) for k, v in placeholders.items()}
-
-        with self.timings.measure("trace_query_hogql_execute"), tags_context(product=Product.LLM_ANALYTICS):
-            query_result = execute_hogql_query(
-                query=query,
-                placeholders=placeholders,
-                team=self.team,
-                query_type=NodeKind.TRACE_QUERY,
-                timings=self.timings,
-                modifiers=self.modifiers,
-                limit_context=self.limit_context,
-            )
+        query_result = execute_with_ai_events_fallback(
+            query=self._build_query(),
+            placeholders={"filter_conditions": self._get_where_clause()},
+            team=self.team,
+            query_type=NodeKind.TRACE_QUERY,
+            timings=self.timings,
+            modifiers=self.modifiers,
+            limit_context=self.limit_context,
+        )
 
         columns: list[str] = query_result.columns or []
         results = self._map_results(columns, query_result.results)
@@ -175,7 +183,7 @@ class TraceQueryRunner(TraceMapperMixin, AnalyticsQueryRunner[TraceQueryResponse
         return {
             **super().get_cache_payload(),
             # When the response schema changes, increment this version to invalidate the cache.
-            "schema_version": 4,
+            "schema_version": 5,
         }
 
     @cached_property
@@ -217,3 +225,47 @@ class TraceQueryRunner(TraceMapperMixin, AnalyticsQueryRunner[TraceQueryResponse
                     where_exprs.append(property_to_expr(prop, self.team))
 
         return ast.And(exprs=where_exprs)
+
+    def _map_event(self, event_tuple: tuple) -> LLMTraceEvent:
+        event_uuid, event_name, event_timestamp, event_properties, *heavy = event_tuple
+        heavy_columns = dict(zip(("input", "output", "output_choices", "input_state", "output_state", "tools"), heavy))
+        generation: dict[str, Any] = {
+            "id": str(event_uuid),
+            "event": event_name,
+            "createdAt": event_timestamp.isoformat(),
+            "properties": merge_heavy_properties(event_properties, heavy_columns),
+        }
+        return LLMTraceEvent.model_validate(generation)
+
+    def _map_trace(self, result: dict[str, Any], created_at: datetime) -> LLMTrace:
+        generations = []
+        for event_tuple in result["events"]:
+            generations.append(self._map_event(event_tuple))
+
+        trace_dict = {
+            **result,
+            "created_at": created_at.isoformat(),
+            "events": generations,
+        }
+        for raw_key, parsed_key in [("input_state", "input_state_parsed"), ("output_state", "output_state_parsed")]:
+            raw = trace_dict.get(raw_key) or None
+            trace_dict[raw_key] = raw
+            if raw is not None:
+                try:
+                    trace_dict[parsed_key] = orjson.loads(raw)
+                except (TypeError, orjson.JSONDecodeError):
+                    trace_dict[parsed_key] = raw
+        trace = LLMTrace.model_validate(
+            {TRACE_FIELDS_MAPPING[key]: value for key, value in trace_dict.items() if key in TRACE_FIELDS_MAPPING}
+        )
+        return trace
+
+    def _map_results(self, columns: list[str], query_results: list) -> list[LLMTrace]:
+        mapped_results = [dict(zip(columns, value)) for value in query_results]
+        traces = []
+
+        for result in mapped_results:
+            timestamp_dt = cast(datetime, result["first_timestamp"])
+            traces.append(self._map_trace(result, timestamp_dt))
+
+        return traces

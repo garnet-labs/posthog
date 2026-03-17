@@ -262,7 +262,6 @@ export const FEATURE_FLAGS = {
     DATA_WAREHOUSE_SCENE: 'data-warehouse-scene', // owner: #team-data-stack
     DEFAULT_EVALUATION_ENVIRONMENTS: 'default-evaluation-environments', // owner: @dmarticus #team-feature-flags
     DROP_PERSON_LIST_ORDER_BY: 'drop-person-list-order-by', // owner: @arthurdedeus #team-customer-analytics
-    LLM_ANALYTICS_AI_EVENTS_TABLE_ROLLOUT: 'ai-events-table-rollout', // owner: #team-llm-analytics
     LLM_ANALYTICS_TRACE_REVIEW: 'llma-trace-review', // owner: #team-llm-analytics
     DWH_FREE_SYNCS: 'dwh-free-syncs', // owner: @Gilbert09  #team-data-stack
     DWH_POSTGRES_DIRECT_QUERY: 'dwh-postgres-direct-query', // owner: #team-data-stack

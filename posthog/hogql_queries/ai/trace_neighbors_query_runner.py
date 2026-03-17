@@ -12,12 +12,8 @@ from posthog.schema import (
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_select
 from posthog.hogql.property import property_to_expr
-from posthog.hogql.query import execute_hogql_query
 
-from posthog.clickhouse.query_tagging import Product, tags_context
-from posthog.hogql_queries.ai.ai_column_rewriter import rewrite_expr_for_events_table, rewrite_query_for_events_table
-from posthog.hogql_queries.ai.ai_property_rewriter import rewrite_expr_for_ai_events_table
-from posthog.hogql_queries.ai.ai_table_resolver import is_ai_events_enabled, is_within_ai_events_ttl
+from posthog.hogql_queries.ai.ai_table_resolver import execute_with_ai_events_fallback
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 
@@ -31,30 +27,15 @@ class TraceNeighborsQueryRunner(AnalyticsQueryRunner[TraceNeighborsQueryResponse
     query: TraceNeighborsQuery
     cached_response: CachedTraceNeighborsQueryResponse
 
-    def _should_use_ai_events_table(self) -> bool:
-        if not is_ai_events_enabled(self.team):
-            return False
-        return is_within_ai_events_ttl(self._date_range.date_from(), datetime.now())
-
     def _calculate(self):
-        query = self._build_query()
-        placeholders = self._get_placeholders()
-
-        if not self._should_use_ai_events_table():
-            query = cast(ast.SelectSetQuery, rewrite_query_for_events_table(query))
-            placeholders = {k: rewrite_expr_for_events_table(v) for k, v in placeholders.items()}
-        else:
-            placeholders = {k: rewrite_expr_for_ai_events_table(v) for k, v in placeholders.items()}
-
-        with self.timings.measure("trace_neighbors"), tags_context(product=Product.LLM_ANALYTICS):
-            result = execute_hogql_query(
-                query_type="TraceNeighborsQuery",
-                query=query,
-                placeholders=placeholders,
-                team=self.team,
-                timings=self.timings,
-                modifiers=self.modifiers,
-            )
+        result = execute_with_ai_events_fallback(
+            query=self._build_query(),
+            placeholders=self._get_placeholders(),
+            team=self.team,
+            query_type="TraceNeighborsQuery",
+            timings=self.timings,
+            modifiers=self.modifiers,
+        )
 
         older_trace_id, older_timestamp = None, None
         newer_trace_id, newer_timestamp = None, None

@@ -1,42 +1,8 @@
-from datetime import UTC, datetime, timedelta
-
 from unittest.mock import Mock, patch
 
-from posthog.hogql_queries.ai.ai_table_resolver import AI_EVENTS_TTL_DAYS, is_ai_events_enabled, is_within_ai_events_ttl
+from posthog.hogql import ast
 
-
-class TestIsWithinAiEventsTtl:
-    def test_within_ttl(self):
-        now = datetime(2026, 3, 12, 12, 0, 0)
-        date_from = now - timedelta(days=20)
-        assert is_within_ai_events_ttl(date_from, now) is True
-
-    def test_at_ttl_boundary_with_buffer(self):
-        now = datetime(2026, 3, 12, 12, 0, 0)
-        # Exactly 30 days ago — within the 1-day buffer
-        date_from = now - timedelta(days=AI_EVENTS_TTL_DAYS)
-        assert is_within_ai_events_ttl(date_from, now) is True
-
-    def test_at_buffer_boundary(self):
-        now = datetime(2026, 3, 12, 12, 0, 0)
-        # Exactly 31 days ago — cutoff is TTL + 1 day, so exactly at cutoff
-        date_from = now - timedelta(days=AI_EVENTS_TTL_DAYS + 1)
-        assert is_within_ai_events_ttl(date_from, now) is True
-
-    def test_beyond_buffer(self):
-        now = datetime(2026, 3, 12, 12, 0, 0)
-        date_from = now - timedelta(days=AI_EVENTS_TTL_DAYS + 2)
-        assert is_within_ai_events_ttl(date_from, now) is False
-
-    def test_aware_datetimes(self):
-        now = datetime(2026, 3, 12, 12, 0, 0, tzinfo=UTC)
-        date_from = now - timedelta(days=20)
-        assert is_within_ai_events_ttl(date_from, now) is True
-
-    def test_mixed_naive_aware(self):
-        now = datetime(2026, 3, 12, 12, 0, 0, tzinfo=UTC)
-        date_from = datetime(2026, 2, 20, 12, 0, 0)  # naive
-        assert is_within_ai_events_ttl(date_from, now) is True
+from posthog.hogql_queries.ai.ai_table_resolver import execute_with_ai_events_fallback, is_ai_events_enabled
 
 
 class TestIsAiEventsEnabled:
@@ -63,3 +29,151 @@ class TestIsAiEventsEnabled:
             group_properties={"organization": {"id": "org_xyz"}},
             send_feature_flag_events=False,
         )
+
+
+class TestExecuteWithAiEventsFallback:
+    def _make_query(self):
+        return ast.SelectQuery(
+            select=[ast.Field(chain=["trace_id"])],
+            select_from=ast.JoinExpr(table=ast.Field(chain=["ai_events"])),
+            where=ast.Constant(value=True),
+        )
+
+    def _make_result(self, results):
+        return Mock(results=results)
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=True)
+    def test_returns_ai_events_result_when_data_found(self, _mock_flag, mock_execute):
+        ai_result = self._make_result([["trace-1"]])
+        mock_execute.return_value = ai_result
+
+        team = Mock(id=1, organization_id="org")
+        result = execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={},
+            team=team,
+            query_type="TestQuery",
+        )
+
+        assert result is ai_result
+        assert mock_execute.call_count == 1
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=True)
+    def test_falls_back_to_events_when_ai_events_empty(self, _mock_flag, mock_execute):
+        ai_result = self._make_result([])
+        events_result = self._make_result([["trace-1"]])
+        mock_execute.side_effect = [ai_result, events_result]
+
+        team = Mock(id=1, organization_id="org")
+        result = execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={},
+            team=team,
+            query_type="TestQuery",
+        )
+
+        assert result is events_result
+        assert mock_execute.call_count == 2
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=False)
+    def test_skips_ai_events_when_kill_switch_off(self, _mock_flag, mock_execute):
+        events_result = self._make_result([["trace-1"]])
+        mock_execute.return_value = events_result
+
+        team = Mock(id=1, organization_id="org")
+        result = execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={},
+            team=team,
+            query_type="TestQuery",
+        )
+
+        assert result is events_result
+        assert mock_execute.call_count == 1
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=True)
+    def test_rewrites_placeholders_for_ai_events(self, _mock_flag, mock_execute):
+        mock_execute.return_value = self._make_result([["found"]])
+
+        team = Mock(id=1, organization_id="org")
+        placeholder = ast.Field(chain=["properties", "$ai_trace_id"])
+        execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={"condition": placeholder},
+            team=team,
+            query_type="TestQuery",
+        )
+
+        # The placeholder should have been rewritten from properties.$ai_trace_id to trace_id
+        actual_placeholders = mock_execute.call_args.kwargs.get("placeholders", {})
+        rewritten = actual_placeholders["condition"]
+        assert isinstance(rewritten, ast.Field)
+        assert rewritten.chain == ["trace_id"]
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=False)
+    def test_rewrites_placeholders_for_events_fallback(self, _mock_flag, mock_execute):
+        mock_execute.return_value = self._make_result([])
+
+        team = Mock(id=1, organization_id="org")
+        # Use a native ai_events column name in the placeholder
+        placeholder = ast.Field(chain=["trace_id"])
+        execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={"condition": placeholder},
+            team=team,
+            query_type="TestQuery",
+        )
+
+        # The placeholder should have been rewritten from trace_id to properties.$ai_trace_id
+        actual_placeholders = mock_execute.call_args.kwargs.get("placeholders", {})
+        rewritten = actual_placeholders["condition"]
+        assert isinstance(rewritten, ast.Field)
+        assert rewritten.chain == ["properties", "$ai_trace_id"]
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=False)
+    def test_rewrites_query_from_clause_for_events_fallback(self, _mock_flag, mock_execute):
+        mock_execute.return_value = self._make_result([])
+
+        team = Mock(id=1, organization_id="org")
+        execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={},
+            team=team,
+            query_type="TestQuery",
+        )
+
+        # The query's FROM clause should have been rewritten from ai_events to events
+        actual_query = mock_execute.call_args.kwargs.get("query")
+        assert isinstance(actual_query, ast.SelectQuery)
+        assert actual_query.select_from.table.chain == ["events"]
+
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.execute_hogql_query")
+    @patch("posthog.hogql_queries.ai.ai_table_resolver.is_ai_events_enabled", return_value=True)
+    def test_passes_optional_kwargs(self, _mock_flag, mock_execute):
+        mock_execute.return_value = self._make_result([["found"]])
+
+        team = Mock(id=1, organization_id="org")
+        timings = Mock()
+        modifiers = Mock()
+        limit_context = Mock()
+
+        execute_with_ai_events_fallback(
+            query=self._make_query(),
+            placeholders={},
+            team=team,
+            query_type="TestQuery",
+            timings=timings,
+            modifiers=modifiers,
+            limit_context=limit_context,
+        )
+
+        kwargs = mock_execute.call_args.kwargs
+        assert kwargs["timings"] is timings
+        assert kwargs["modifiers"] is modifiers
+        assert kwargs["limit_context"] is limit_context

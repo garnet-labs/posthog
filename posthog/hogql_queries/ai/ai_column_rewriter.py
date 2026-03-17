@@ -1,12 +1,16 @@
 """AST rewriter that translates queries written against `ai_events` columns to work with the `events` table.
 
-This is the reverse of `AiPropertyRewriter`. When a query's date range extends beyond the
-`ai_events` 30-day TTL, the query must target the `events` table instead. This rewriter:
+This is the reverse of `AiPropertyRewriter`. When a query targets the `events` table
+as a fallback (e.g. data older than the `ai_events` TTL, or the kill switch is off),
+this rewriter:
 
 1. Rewrites dedicated column references (e.g. `trace_id`) to property access
    (e.g. `properties.$ai_trace_id`) so they resolve against the `events` table.
-2. Swaps the `ai_events` table prefix to `events` in table-qualified field chains.
-3. Replaces the FROM clause from `ai_events` to `events`.
+2. Wraps numeric columns in `toFloat()` since JSON-extracted properties are strings
+   and aggregate functions like `sum()` require numeric types.
+3. Wraps boolean columns (`is_error`) to preserve UInt8 semantics.
+4. Swaps the `ai_events` table prefix to `events` in table-qualified field chains.
+5. Replaces the FROM clause from `ai_events` to `events`.
 
 The rewriter is scope-aware: it only rewrites fields within SELECT queries that have
 `FROM ai_events`. Fields in outer queries (referencing subquery aliases) are left unchanged.
@@ -19,6 +23,43 @@ from posthog.hogql_queries.ai.ai_property_rewriter import AI_PROPERTY_TO_COLUMN
 
 # Invert AI_PROPERTY_TO_COLUMN: column_name -> property_name
 AI_COLUMN_TO_PROPERTY: dict[str, str] = {col: prop for prop, col in AI_PROPERTY_TO_COLUMN.items()}
+
+# Columns that are Int64/Float64 in ai_events but resolve as strings from events JSON.
+# Derived from posthog/models/ai_events/sql.py DDL. Keep in sync when adding columns.
+_NUMERIC_COLUMNS: frozenset[str] = frozenset(
+    {
+        # Token counts (Int64)
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "text_input_tokens",
+        "text_output_tokens",
+        "image_input_tokens",
+        "image_output_tokens",
+        "audio_input_tokens",
+        "audio_output_tokens",
+        "video_input_tokens",
+        "video_output_tokens",
+        "reasoning_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "web_search_count",
+        # Costs (Float64)
+        "input_cost_usd",
+        "output_cost_usd",
+        "total_cost_usd",
+        "request_cost_usd",
+        "web_search_cost_usd",
+        "audio_cost_usd",
+        "image_cost_usd",
+        "video_cost_usd",
+        # Timing (Float64)
+        "latency",
+        "time_to_first_token",
+    }
+)
+
+_BOOLEAN_COLUMNS: frozenset[str] = frozenset({"is_error"})
 
 
 class AiColumnToPropertyRewriter(CloningVisitor):
@@ -55,7 +96,7 @@ class AiColumnToPropertyRewriter(CloningVisitor):
             if isinstance(col_name, str) and col_name in AI_COLUMN_TO_PROPERTY:
                 prop_name = AI_COLUMN_TO_PROPERTY[col_name]
                 new_chain: list[str | int] = ["events", "properties", prop_name, *chain[2:]]
-                return _maybe_wrap_boolean(prop_name, new_chain)
+                return _wrap_for_events_type(col_name, prop_name, new_chain)
             # Native column (timestamp, event, distinct_id, etc.) — just swap table prefix
             return ast.Field(chain=["events", *chain[1:]])
 
@@ -65,7 +106,7 @@ class AiColumnToPropertyRewriter(CloningVisitor):
             if isinstance(col_name, str) and col_name in AI_COLUMN_TO_PROPERTY:
                 prop_name = AI_COLUMN_TO_PROPERTY[col_name]
                 new_chain = ["properties", prop_name, *chain[1:]]
-                return _maybe_wrap_boolean(prop_name, new_chain)
+                return _wrap_for_events_type(col_name, prop_name, new_chain)
 
         return super().visit_field(node)
 
@@ -86,9 +127,13 @@ def _has_ai_events_from(query: ast.SelectQuery) -> bool:
     )
 
 
-def _maybe_wrap_boolean(prop_name: str, chain: list[str | int]) -> ast.Expr:
-    """Wrap boolean properties to preserve UInt8 semantics used in trace runner queries."""
-    if prop_name == "$ai_is_error":
+def _wrap_for_events_type(col_name: str, prop_name: str, chain: list[str | int]) -> ast.Expr:
+    """Wrap a rewritten property reference to preserve the ai_events column type.
+
+    On the events table, properties are strings (JSON extraction). Aggregate functions
+    like sum() need numeric types, and boolean columns use UInt8 on ai_events.
+    """
+    if col_name in _BOOLEAN_COLUMNS:
         return ast.Call(
             name="if",
             args=[
@@ -101,6 +146,8 @@ def _maybe_wrap_boolean(prop_name: str, chain: list[str | int]) -> ast.Expr:
                 ast.Constant(value=0),
             ],
         )
+    if col_name in _NUMERIC_COLUMNS:
+        return ast.Call(name="toFloat", args=[ast.Field(chain=chain)])
     return ast.Field(chain=chain)
 
 

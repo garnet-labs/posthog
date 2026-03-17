@@ -1,7 +1,11 @@
+import pytest
+
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_select
 
 from posthog.hogql_queries.ai.ai_column_rewriter import (
+    _BOOLEAN_COLUMNS,
+    _NUMERIC_COLUMNS,
     AI_COLUMN_TO_PROPERTY,
     AiColumnToPropertyRewriter,
     rewrite_expr_for_events_table,
@@ -10,13 +14,13 @@ from posthog.hogql_queries.ai.ai_column_rewriter import (
 
 
 class TestAiColumnToPropertyRewriter:
-    def test_bare_column_rewritten(self):
+    def test_bare_string_column_rewritten(self):
         node = ast.Field(chain=["trace_id"])
         result = AiColumnToPropertyRewriter(force_rewrite=True).visit(node)
         assert isinstance(result, ast.Field)
         assert result.chain == ["properties", "$ai_trace_id"]
 
-    def test_table_qualified_column_rewritten(self):
+    def test_table_qualified_string_column_rewritten(self):
         node = ast.Field(chain=["ai_events", "trace_id"])
         result = AiColumnToPropertyRewriter(force_rewrite=True).visit(node)
         assert isinstance(result, ast.Field)
@@ -47,6 +51,63 @@ class TestAiColumnToPropertyRewriter:
         assert compare.right.value == "true"
         assert result.args[1].value == 1
         assert result.args[2].value == 0
+
+    def test_boolean_column_table_qualified_wrapped(self):
+        node = ast.Field(chain=["ai_events", "is_error"])
+        result = AiColumnToPropertyRewriter(force_rewrite=True).visit(node)
+        assert isinstance(result, ast.Call)
+        assert result.name == "if"
+        assert result.args[0].left.chain == ["events", "properties", "$ai_is_error"]
+
+    @pytest.mark.parametrize(
+        "col_name,prop_name",
+        [
+            ("latency", "$ai_latency"),
+            ("input_tokens", "$ai_input_tokens"),
+            ("output_tokens", "$ai_output_tokens"),
+            ("input_cost_usd", "$ai_input_cost_usd"),
+            ("total_cost_usd", "$ai_total_cost_usd"),
+            ("time_to_first_token", "$ai_time_to_first_token"),
+        ],
+    )
+    def test_numeric_column_wrapped_in_toFloat(self, col_name, prop_name):
+        node = ast.Field(chain=[col_name])
+        result = AiColumnToPropertyRewriter(force_rewrite=True).visit(node)
+        assert isinstance(result, ast.Call)
+        assert result.name == "toFloat"
+        assert len(result.args) == 1
+        assert isinstance(result.args[0], ast.Field)
+        assert result.args[0].chain == ["properties", prop_name]
+
+    def test_numeric_column_table_qualified_wrapped(self):
+        node = ast.Field(chain=["ai_events", "latency"])
+        result = AiColumnToPropertyRewriter(force_rewrite=True).visit(node)
+        assert isinstance(result, ast.Call)
+        assert result.name == "toFloat"
+        assert result.args[0].chain == ["events", "properties", "$ai_latency"]
+
+    def test_numeric_column_usable_in_sum(self):
+        """Verify the rewriter produces sumIf(toFloat(properties.$ai_input_tokens), ...) instead of sumIf(properties.$ai_input_tokens, ...)."""
+        query = parse_select("SELECT sumIf(input_tokens, event = '$ai_generation') FROM ai_events")
+        result = rewrite_query_for_events_table(query)
+        assert isinstance(result, ast.SelectQuery)
+        # The sumIf argument should be toFloat(properties.$ai_input_tokens)
+        sum_call = result.select[0]
+        assert isinstance(sum_call, ast.Call)
+        assert sum_call.name == "sumIf"
+        arg = sum_call.args[0]
+        assert isinstance(arg, ast.Call)
+        assert arg.name == "toFloat"
+        assert isinstance(arg.args[0], ast.Field)
+        assert arg.args[0].chain == ["properties", "$ai_input_tokens"]
+
+    def test_string_column_not_wrapped(self):
+        for col_name in ["trace_id", "session_id", "model", "provider", "span_name"]:
+            if col_name not in AI_COLUMN_TO_PROPERTY:
+                continue
+            node = ast.Field(chain=[col_name])
+            result = AiColumnToPropertyRewriter(force_rewrite=True).visit(node)
+            assert isinstance(result, ast.Field), f"{col_name} should not be wrapped"
 
     def test_scope_only_rewrites_in_ai_events_query(self):
         query = parse_select("SELECT trace_id FROM ai_events")
@@ -134,3 +195,15 @@ class TestAiColumnToPropertyRewriter:
 
         for prop, col in AI_PROPERTY_TO_COLUMN.items():
             assert AI_COLUMN_TO_PROPERTY[col] == prop
+
+    def test_all_numeric_columns_are_in_column_mapping(self):
+        for col in _NUMERIC_COLUMNS:
+            assert col in AI_COLUMN_TO_PROPERTY, f"Numeric column {col} not in AI_COLUMN_TO_PROPERTY"
+
+    def test_all_boolean_columns_are_in_column_mapping(self):
+        for col in _BOOLEAN_COLUMNS:
+            assert col in AI_COLUMN_TO_PROPERTY, f"Boolean column {col} not in AI_COLUMN_TO_PROPERTY"
+
+    def test_numeric_and_boolean_sets_are_disjoint(self):
+        overlap = _NUMERIC_COLUMNS & _BOOLEAN_COLUMNS
+        assert not overlap, f"Columns in both numeric and boolean sets: {overlap}"

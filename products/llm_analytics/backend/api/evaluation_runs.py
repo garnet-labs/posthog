@@ -83,10 +83,11 @@ class EvaluationRunViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             where_clauses.append("distinct_id = %(distinct_id)s")
             params["distinct_id"] = distinct_id
 
-        use_ai_events = is_ai_events_enabled(self.team)
+        # Try ai_events first (unless kill switch is off), fall back to events
+        query_result: list[dict] = []
+        used_ai_events = False
 
-        if use_ai_events:
-            # ai_events has dedicated columns for heavy properties
+        if is_ai_events_enabled(self.team):
             query_result = query_with_columns(
                 f"""
                 SELECT
@@ -110,8 +111,9 @@ class EvaluationRunViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
                 params,
                 team_id=self.team_id,
             )
-        else:
-            # Fall back to events table (all data in properties JSON)
+            used_ai_events = len(query_result) > 0
+
+        if not query_result:
             query_result = query_with_columns(
                 f"""
                 SELECT
@@ -135,7 +137,7 @@ class EvaluationRunViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
 
         event_data = query_result[0]
 
-        if use_ai_events:
+        if used_ai_events:
             # Merge heavy columns back into properties for the evaluation workflow
             heavy_columns = {col: event_data.pop(col, "") for col in HEAVY_COLUMN_TO_PROPERTY}
             event_data["properties"] = merge_heavy_properties(event_data["properties"], heavy_columns)
