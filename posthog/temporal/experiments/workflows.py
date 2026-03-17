@@ -178,7 +178,7 @@ class ExperimentTimeseriesRecalculationWorkflow(PostHogWorkflow):
         return await temporalio.workflow.execute_activity(
             backfill_experiment_metric,
             inputs.recalculation_id,
-            start_to_close_timeout=timedelta(minutes=30),
+            start_to_close_timeout=timedelta(hours=3),
             retry_policy=RetryPolicy(maximum_attempts=3, initial_interval=timedelta(minutes=5)),
             heartbeat_timeout=timedelta(minutes=20),
         )
