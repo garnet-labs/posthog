@@ -24,7 +24,9 @@ export const Default: Story = {
                 <Button variant="outline">Button 4</Button>
             </ButtonGroup>
             <ButtonGroupSeparator />
-            <ButtonGroupText>Some text</ButtonGroupText>
+            <ButtonGroup>
+                <ButtonGroupText>Some text</ButtonGroupText>
+            </ButtonGroup>
         </ButtonGroup>
     ),
 } satisfies Story
