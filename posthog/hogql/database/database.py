@@ -196,7 +196,6 @@ ROOT_TABLES__DO_NOT_ADD_ANY_MORE: dict[str, TableNode] = {
     "batch_export_log_entries": TableNode(name="batch_export_log_entries", table=BatchExportLogEntriesTable()),
     "sessions": TableNode(name="sessions", table=SessionsTableV1()),
     "heatmaps": TableNode(name="heatmaps", table=HeatmapsTable()),
-    "ai_events": TableNode(name="ai_events", table=AiEventsTable()),
     "exchange_rate": TableNode(name="exchange_rate", table=ExchangeRateTable()),
     "document_embeddings": TableNode(name="document_embeddings", table=DocumentEmbeddingsTable()),
     **{name: TableNode(name=name, table=table) for name, table in HOGQL_MODEL_TABLES.items()},
@@ -250,8 +249,9 @@ def build_database_root_node(*, include_posthog_tables: bool = True) -> TableNod
             **root_tables,
             "posthog": TableNode(
                 children={
-                    **clone_root_tables()
+                    **clone_root_tables(),
                     # Add new tables here
+                    "ai_events": TableNode(name="ai_events", table=AiEventsTable()),
                 }
             ),
             "system": SystemTables(),

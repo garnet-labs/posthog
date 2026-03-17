@@ -35,7 +35,7 @@ class TestExecuteWithAiEventsFallback:
     def _make_query(self):
         return ast.SelectQuery(
             select=[ast.Field(chain=["trace_id"])],
-            select_from=ast.JoinExpr(table=ast.Field(chain=["ai_events"])),
+            select_from=ast.JoinExpr(table=ast.Field(chain=["posthog", "ai_events"]), alias="ai_events"),
             where=ast.Constant(value=True),
         )
 

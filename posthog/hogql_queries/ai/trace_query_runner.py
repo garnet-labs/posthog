@@ -168,7 +168,7 @@ class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
                         timestamp,
                     )
                 ) AS trace_name
-            FROM ai_events
+            FROM posthog.ai_events AS ai_events
             WHERE event IN (
                 '$ai_span', '$ai_generation', '$ai_embedding', '$ai_metric', '$ai_feedback', '$ai_trace'
             )

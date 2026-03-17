@@ -168,7 +168,7 @@ class TraceNeighborsQueryRunner(AnalyticsQueryRunner[TraceNeighborsQueryResponse
                 SELECT
                     trace_id AS trace_id,
                     max(timestamp) as trace_timestamp
-                FROM ai_events
+                FROM posthog.ai_events AS ai_events
                 WHERE event IN ('$ai_span', '$ai_generation', '$ai_embedding', '$ai_metric', '$ai_feedback', '$ai_trace')
                   AND timestamp <= {current_timestamp}
                   AND {conditions}
@@ -188,7 +188,7 @@ class TraceNeighborsQueryRunner(AnalyticsQueryRunner[TraceNeighborsQueryResponse
                 SELECT
                     trace_id AS trace_id,
                     max(timestamp) as trace_timestamp
-                FROM ai_events
+                FROM posthog.ai_events AS ai_events
                 WHERE event IN ('$ai_span', '$ai_generation', '$ai_embedding', '$ai_metric', '$ai_feedback', '$ai_trace')
                   AND timestamp >= {current_timestamp}
                   AND {conditions}
