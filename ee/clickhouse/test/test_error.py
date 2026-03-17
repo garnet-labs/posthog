@@ -140,6 +140,16 @@ from posthog.errors import clickhouse_error_type, wrap_clickhouse_query_error
             184,
             "CHQueryErrorIllegalAggregation",
         ),
+        (
+            ServerException(
+                "Code: 36. DB::Exception: Received from prod-sessions:9440. DB::Exception: Dictionary (posthog.channel_definition_dict) not found:",
+                code=36,
+            ),
+            "CHQueryErrorBadArguments",
+            "Dictionary (posthog.channel_definition_dict) not found:",
+            36,
+            "CHQueryErrorBadArguments",
+        ),
     ],
 )
 def test_wrap_clickhouse_query_error(error, expected_type, expected_message, expected_code, expected_ch_error):

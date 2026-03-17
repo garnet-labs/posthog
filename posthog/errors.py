@@ -42,14 +42,14 @@ class ExposedCHQueryError(InternalCHQueryError):
     def __str__(self) -> str:
         message: str = self.message
         try:
-            start_index = message.index("DB::Exception:") + len("DB::Exception:")
+            start_index = message.rindex("DB::Exception:") + len("DB::Exception:")
         except ValueError:
             start_index = 0
         try:
             end_index = message.index("Stack trace:")
         except ValueError:
             end_index = len(message)
-        return self.message[start_index:end_index].strip()
+        return message[start_index:end_index].strip()
 
 
 @dataclass
