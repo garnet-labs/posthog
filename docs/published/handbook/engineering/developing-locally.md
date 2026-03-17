@@ -253,6 +253,10 @@ To only update snapshots for stories under a specific path, run:
 pnpm test:visual:update frontend/src/lib/Example.stories.tsx
 ```
 
+In CI, Storybook and Playwright snapshot tests run in **check mode** by default — snapshots must match exactly or the test fails. If your PR intentionally changes UI, add the `update-snapshots` label to your PR and push a new commit (or re-run CI) to enable auto-updates. When snapshot tests fail in check mode, a PR comment will explain your options.
+
+Local commands like `pnpm test:visual` are unaffected and continue to update snapshots directly.
+
 ### Backend
 
 For backend tests, run:
