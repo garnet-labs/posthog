@@ -1,21 +1,21 @@
 from django.utils.dateparse import parse_datetime
 
-import dagster
-from dagster import Backoff, Jitter, RetryPolicy
+import structlog
+from celery import shared_task
 from prometheus_client import Counter, Gauge
 
 from posthog.hogql.constants import LimitContext
 
 from posthog.clickhouse.query_tagging import Feature, tag_queries
-from posthog.dags.common import JobOwners
-from posthog.dags.common.common import skip_if_already_running
-from posthog.dags.common.resources import PostHogAnalyticsResource
 from posthog.event_usage import EventSource
 from posthog.exceptions_capture import capture_exception
 from posthog.hogql_queries.query_cache import DjangoCacheQueryCacheManager
 from posthog.hogql_queries.query_runner import get_query_runner
 from posthog.models import Team
 from posthog.models.instance_setting import get_instance_setting
+from posthog.tasks.utils import CeleryQueue
+
+logger = structlog.get_logger(__name__)
 
 STALE_ERROR_TRACKING_QUERIES_GAUGE = Gauge(
     "posthog_cache_warming_stale_error_tracking_query_gauge",
@@ -26,13 +26,6 @@ ERROR_TRACKING_QUERIES_COUNTER = Counter(
     "posthog_cache_warming_error_tracking_queries",
     "Number of error tracking queries warmed",
     ["team_id", "is_cached"],
-)
-
-cache_warming_retry_policy = RetryPolicy(
-    max_retries=3,
-    delay=2,
-    backoff=Backoff.EXPONENTIAL,
-    jitter=Jitter.FULL,
 )
 
 # The default filterless error tracking listing query, matching what the
@@ -76,113 +69,78 @@ def get_queries_for_team(team: Team) -> list[dict]:
     return queries
 
 
-@dagster.op()
-def get_teams_for_error_tracking_warming_op(
-    context: dagster.OpExecutionContext, posthoganalytics: PostHogAnalyticsResource
-) -> list[int]:
+@shared_task(ignore_result=True, expires=60 * 15)
+def schedule_error_tracking_cache_warming_task() -> None:
+    """Scheduler task that fans out per-team warming tasks via Celery."""
     team_ids = get_teams_enabled_for_error_tracking_cache_warming()
-    context.log.info(f"Found {len(team_ids)} teams for error tracking cache warming")
-    context.add_output_metadata({"team_count": len(team_ids), "team_ids": str(team_ids)})
-    return team_ids
-
-
-@dagster.op
-def get_error_tracking_queries_for_teams_op(
-    context: dagster.OpExecutionContext,
-    team_ids: list[int],
-) -> dict:
-    all_queries: dict[int, list[dict]] = {}
-    query_count = 0
+    logger.info("error_tracking_cache_warming_scheduled", team_count=len(team_ids), team_ids=team_ids)
 
     for team_id in team_ids:
-        try:
-            team = Team.objects.get(pk=team_id)
-        except Team.DoesNotExist:
-            context.log.warning(f"Team {team_id} not found, skipping")
-            continue
-
-        queries = get_queries_for_team(team)
-        context.log.info(f"Prepared {len(queries)} error tracking queries for team {team_id}")
-        STALE_ERROR_TRACKING_QUERIES_GAUGE.labels(team_id=team_id).set(len(queries))
-        all_queries[team_id] = queries
-        query_count += len(queries)
-
-    context.log.info(f"Found {query_count} total error tracking queries to warm")
-    context.add_output_metadata({"query_count": query_count, "team_count": len(team_ids)})
-    return all_queries
+        warm_error_tracking_cache_for_team_task.delay(team_id)
 
 
-@dagster.op(retry_policy=cache_warming_retry_policy)
-def warm_error_tracking_queries_op(context: dagster.OpExecutionContext, queries: dict) -> None:
+@shared_task(
+    queue=CeleryQueue.ANALYTICS_LIMITED.value,
+    ignore_result=True,
+    expires=60 * 60,
+    autoretry_for=(Exception,),
+    retry_backoff=2,
+    retry_backoff_max=30,
+    max_retries=3,
+)
+def warm_error_tracking_cache_for_team_task(team_id: int) -> None:
+    """Warm error tracking cache for a single team."""
+    try:
+        team = Team.objects.get(pk=team_id)
+    except Team.DoesNotExist:
+        logger.warning("error_tracking_cache_warming_team_not_found", team_id=team_id)
+        return
+
+    queries = get_queries_for_team(team)
+    STALE_ERROR_TRACKING_QUERIES_GAUGE.labels(team_id=team_id).set(len(queries))
+
     queries_warmed = 0
     queries_skipped = 0
 
-    for team_id, query_list in queries.items():
-        try:
-            team = Team.objects.get(pk=team_id)
-        except Team.DoesNotExist:
-            context.log.warning(f"Team {team_id} not found, skipping")
-            continue
+    for query_json in queries:
+        runner = get_query_runner(
+            query=query_json,
+            team=team,
+            limit_context=LimitContext.QUERY_ASYNC,
+        )
 
-        for query_json in query_list:
-            runner = get_query_runner(
-                query=query_json,
-                team=team,
-                limit_context=LimitContext.QUERY_ASYNC,
+        cache_manager = DjangoCacheQueryCacheManager(team_id=team.pk, cache_key=runner.get_cache_key())
+
+        try:
+            cached_data = cache_manager.get_cache_data()
+
+            if cached_data is not None:
+                last_refresh = parse_datetime(cached_data["last_refresh"])
+                is_stale = runner._is_stale(last_refresh)
+
+                if not is_stale:
+                    logger.info("error_tracking_query_already_cached", team_id=team_id)
+                    ERROR_TRACKING_QUERIES_COUNTER.labels(team_id=team_id, is_cached=True).inc()
+                    queries_skipped += 1
+                    continue
+
+            tag_queries(
+                team_id=team_id,
+                trigger="errorTrackingQueryWarming",
+                feature=Feature.CACHE_WARMUP,
             )
 
-            cache_manager = DjangoCacheQueryCacheManager(team_id=team.pk, cache_key=runner.get_cache_key())
+            runner.run(analytics_props={"source": EventSource.CACHE_WARMING})
+            ERROR_TRACKING_QUERIES_COUNTER.labels(team_id=team_id, is_cached=False).inc()
+            queries_warmed += 1
 
-            try:
-                cached_data = cache_manager.get_cache_data()
+        except Exception as e:
+            logger.exception("error_tracking_cache_warming_query_failed", team_id=team_id)
+            capture_exception(e)
 
-                if cached_data is not None:
-                    last_refresh = parse_datetime(cached_data["last_refresh"])
-                    is_stale = runner._is_stale(last_refresh)
-
-                    if not is_stale:
-                        context.log.info(f"Error tracking query for team {team_id} already cached, skipping")
-                        ERROR_TRACKING_QUERIES_COUNTER.labels(team_id=team_id, is_cached=True).inc()
-                        queries_skipped += 1
-                        continue
-
-                tag_queries(
-                    team_id=team_id,
-                    trigger="errorTrackingQueryWarming",
-                    feature=Feature.CACHE_WARMUP,
-                )
-
-                runner.run(analytics_props={"source": EventSource.CACHE_WARMING})
-                ERROR_TRACKING_QUERIES_COUNTER.labels(team_id=team_id, is_cached=False).inc()
-                queries_warmed += 1
-
-            except Exception as e:
-                context.log.exception(f"Error warming error tracking query for team {team_id}")
-                capture_exception(e)
-
-    context.log.info(f"Warmed {queries_warmed} error tracking queries ({queries_skipped} were already cached)")
-    context.add_output_metadata({"queries_warmed": queries_warmed, "queries_skipped": queries_skipped})
-
-
-@dagster.job(
-    description="Warms error tracking query cache for the default listing query",
-    tags={
-        "owner": JobOwners.TEAM_ERROR_TRACKING.value,
-        "dagster/error_tracking_cache_warming": "error_tracking_cache_warming",
-    },
-)
-def error_tracking_cache_warming_job():
-    team_ids = get_teams_for_error_tracking_warming_op()
-    queries = get_error_tracking_queries_for_teams_op(team_ids)
-    warm_error_tracking_queries_op(queries)
-
-
-@dagster.schedule(
-    cron_schedule="0 * * * *",
-    job=error_tracking_cache_warming_job,
-    execution_timezone="UTC",
-    tags={"owner": JobOwners.TEAM_ERROR_TRACKING.value},
-)
-@skip_if_already_running
-def error_tracking_cache_warming_schedule(context: dagster.ScheduleEvaluationContext):
-    return dagster.RunRequest()
+    logger.info(
+        "error_tracking_cache_warming_complete",
+        team_id=team_id,
+        queries_warmed=queries_warmed,
+        queries_skipped=queries_skipped,
+    )

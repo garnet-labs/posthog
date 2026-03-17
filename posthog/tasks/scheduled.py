@@ -76,6 +76,7 @@ from posthog.tasks.team_metadata import cleanup_stale_expiry_tracking_task, refr
 from posthog.utils import get_crontab, get_instance_region
 
 from products.endpoints.backend.tasks import deactivate_stale_materializations
+from products.error_tracking.dags.cache_warming import schedule_error_tracking_cache_warming_task
 
 TWENTY_FOUR_HOURS = 24 * 60 * 60
 
@@ -174,6 +175,14 @@ def setup_periodic_tasks(sender: Celery, **kwargs: Any) -> None:
         crontab(hour="*", minute="0"),
         schedule_warming_for_teams_task.s(),
         name="schedule warming for largest teams",
+    )
+
+    # Error tracking cache warming - hourly at minute 5
+    add_periodic_task_with_expiry(
+        sender,
+        crontab(hour="*", minute="5"),
+        schedule_error_tracking_cache_warming_task.s(),
+        name="schedule error tracking cache warming",
     )
 
     # Team access cache warming - every 10 minutes

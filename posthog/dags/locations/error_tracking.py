@@ -1,6 +1,6 @@
 import dagster
 
-from products.error_tracking.dags import cache_warming, symbol_set_cleanup
+from products.error_tracking.dags import symbol_set_cleanup
 
 from . import resources
 
@@ -11,11 +11,9 @@ defs = dagster.Definitions(
     ],
     jobs=[
         symbol_set_cleanup.symbol_set_cleanup_job,
-        cache_warming.error_tracking_cache_warming_job,
     ],
     schedules=[
         symbol_set_cleanup.daily_symbol_set_cleanup_schedule,
-        cache_warming.error_tracking_cache_warming_schedule,
     ],
     resources=resources,
 )

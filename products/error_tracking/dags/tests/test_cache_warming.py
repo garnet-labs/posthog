@@ -6,15 +6,14 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-import dagster
-
 from posthog.schema import ErrorTrackingQuery
 
 from products.error_tracking.dags.cache_warming import (
     DEFAULT_ERROR_TRACKING_QUERY,
     get_queries_for_team,
     get_teams_enabled_for_error_tracking_cache_warming,
-    warm_error_tracking_queries_op,
+    schedule_error_tracking_cache_warming_task,
+    warm_error_tracking_cache_for_team_task,
 )
 
 
@@ -70,11 +69,29 @@ class TestGetQueriesForTeam(BaseTest):
         assert queries[1]["filterTestAccounts"] is True
 
 
-class TestWarmErrorTrackingQueriesOp(BaseTest):
+class TestScheduleErrorTrackingCacheWarming(BaseTest):
+    @patch("products.error_tracking.dags.cache_warming.warm_error_tracking_cache_for_team_task")
+    @patch("products.error_tracking.dags.cache_warming.get_teams_enabled_for_error_tracking_cache_warming")
+    def test_fans_out_per_team(self, mock_get_teams, mock_warm_task):
+        mock_get_teams.return_value = [1, 2, 3]
+        schedule_error_tracking_cache_warming_task()
+        assert mock_warm_task.delay.call_count == 3
+        mock_warm_task.delay.assert_any_call(1)
+        mock_warm_task.delay.assert_any_call(2)
+        mock_warm_task.delay.assert_any_call(3)
+
+    @patch("products.error_tracking.dags.cache_warming.warm_error_tracking_cache_for_team_task")
+    @patch("products.error_tracking.dags.cache_warming.get_teams_enabled_for_error_tracking_cache_warming")
+    def test_no_teams_no_fanout(self, mock_get_teams, mock_warm_task):
+        mock_get_teams.return_value = []
+        schedule_error_tracking_cache_warming_task()
+        mock_warm_task.delay.assert_not_called()
+
+
+class TestWarmErrorTrackingCacheForTeamTask(BaseTest):
     @patch("products.error_tracking.dags.cache_warming.get_query_runner")
     @patch("products.error_tracking.dags.cache_warming.DjangoCacheQueryCacheManager")
     def test_skips_cached_queries(self, mock_cache_cls, mock_get_runner):
-        context = dagster.build_op_context()
         mock_runner = MagicMock()
         mock_get_runner.return_value = mock_runner
         mock_runner.get_cache_key.return_value = "test_key"
@@ -86,7 +103,7 @@ class TestWarmErrorTrackingQueriesOp(BaseTest):
         }
         mock_runner._is_stale.return_value = False
 
-        warm_error_tracking_queries_op(context, {self.team.pk: [DEFAULT_ERROR_TRACKING_QUERY]})
+        warm_error_tracking_cache_for_team_task(self.team.pk)
 
         mock_runner.run.assert_not_called()
 
@@ -94,7 +111,6 @@ class TestWarmErrorTrackingQueriesOp(BaseTest):
     @patch("products.error_tracking.dags.cache_warming.get_query_runner")
     @patch("products.error_tracking.dags.cache_warming.DjangoCacheQueryCacheManager")
     def test_warms_stale_queries(self, mock_cache_cls, mock_get_runner, mock_tag):
-        context = dagster.build_op_context()
         mock_runner = MagicMock()
         mock_get_runner.return_value = mock_runner
         mock_runner.get_cache_key.return_value = "test_key"
@@ -106,7 +122,7 @@ class TestWarmErrorTrackingQueriesOp(BaseTest):
         }
         mock_runner._is_stale.return_value = True
 
-        warm_error_tracking_queries_op(context, {self.team.pk: [DEFAULT_ERROR_TRACKING_QUERY]})
+        warm_error_tracking_cache_for_team_task(self.team.pk)
 
         mock_runner.run.assert_called_once()
 
@@ -114,7 +130,6 @@ class TestWarmErrorTrackingQueriesOp(BaseTest):
     @patch("products.error_tracking.dags.cache_warming.get_query_runner")
     @patch("products.error_tracking.dags.cache_warming.DjangoCacheQueryCacheManager")
     def test_warms_uncached_queries(self, mock_cache_cls, mock_get_runner, mock_tag):
-        context = dagster.build_op_context()
         mock_runner = MagicMock()
         mock_get_runner.return_value = mock_runner
         mock_runner.get_cache_key.return_value = "test_key"
@@ -123,14 +138,12 @@ class TestWarmErrorTrackingQueriesOp(BaseTest):
         mock_cache_cls.return_value = mock_cache
         mock_cache.get_cache_data.return_value = None
 
-        warm_error_tracking_queries_op(context, {self.team.pk: [DEFAULT_ERROR_TRACKING_QUERY]})
+        warm_error_tracking_cache_for_team_task(self.team.pk)
 
         mock_runner.run.assert_called_once()
 
     @patch("products.error_tracking.dags.cache_warming.get_query_runner")
     def test_handles_missing_team(self, mock_get_runner):
-        context = dagster.build_op_context()
-
-        warm_error_tracking_queries_op(context, {999999: [DEFAULT_ERROR_TRACKING_QUERY]})
+        warm_error_tracking_cache_for_team_task(999999)
 
         mock_get_runner.assert_not_called()
