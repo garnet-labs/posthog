@@ -289,8 +289,8 @@ class AlertSerializer(serializers.ModelSerializer):
 
         # Ensemble requires at least 2 sub-detectors
         root = validated.root if hasattr(validated, "root") else validated
-        if getattr(root, "type", None) == "ensemble":
-            if len(root.detectors) < 2:
+        if getattr(root, "type", None) == "ensemble" and hasattr(root, "detectors"):
+            if len(root.detectors) < 2:  # type: ignore[union-attr]
                 raise ValidationError("Ensemble detector requires at least 2 sub-detectors.")
 
         return value

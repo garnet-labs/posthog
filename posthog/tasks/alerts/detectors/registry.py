@@ -12,10 +12,10 @@ logger = structlog.get_logger(__name__)
 _DETECTOR_REGISTRY: dict[str, type["BaseDetector"]] = {}
 
 
-def register_detector(detector_type: str | DetectorType):
+def register_detector(detector_type: str | DetectorType) -> Any:
     """Decorator to register a detector class."""
 
-    def decorator(cls: type["BaseDetector"]):
+    def decorator(cls: type["BaseDetector"]) -> type["BaseDetector"]:
         key = detector_type.value if isinstance(detector_type, DetectorType) else detector_type
         _DETECTOR_REGISTRY[key] = cls
         return cls
@@ -59,7 +59,7 @@ def get_available_detectors() -> list[str]:
 _REGISTERED = False
 
 
-def _ensure_registered():
+def _ensure_registered() -> None:
     """Ensure all detector modules are imported and registered."""
     global _REGISTERED
     if _REGISTERED:

@@ -12,32 +12,32 @@ from posthog.tasks.alerts.detectors.threshold import ThresholdDetector
 
 
 class TestDetectorRegistry:
-    def test_get_zscore_detector(self):
+    def test_get_zscore_detector(self) -> None:
         config = {"type": "zscore", "threshold": 0.9, "window": 30}
         detector = get_detector(config)
         assert isinstance(detector, ZScoreDetector)
 
-    def test_get_threshold_detector(self):
+    def test_get_threshold_detector(self) -> None:
         config = {"type": "threshold", "upper_bound": 100, "lower_bound": 0}
         detector = get_detector(config)
         assert isinstance(detector, ThresholdDetector)
 
-    def test_unknown_detector_raises(self):
+    def test_unknown_detector_raises(self) -> None:
         config = {"type": "unknown"}
         with pytest.raises(ValueError, match="Unknown detector type"):
             get_detector(config)
 
-    def test_missing_type_raises(self):
+    def test_missing_type_raises(self) -> None:
         config = {"threshold": 0.9}
         with pytest.raises(ValueError, match="must have a 'type' field"):
             get_detector(config)
 
-    def test_get_mad_detector(self):
+    def test_get_mad_detector(self) -> None:
         config = {"type": "mad", "threshold": 0.9, "window": 30}
         detector = get_detector(config)
         assert isinstance(detector, MADDetector)
 
-    def test_get_available_detectors(self):
+    def test_get_available_detectors(self) -> None:
         detectors = get_available_detectors()
         assert "zscore" in detectors
         assert "mad" in detectors
@@ -92,11 +92,11 @@ class TestAnomalyDetectors:
             ),
         ]
     )
-    def test_detect(self, _name, detector, data, expected_anomaly):
-        result = detector.detect(data)
+    def test_detect(self, _name: str, detector: object, data: object, expected_anomaly: bool) -> None:
+        result = detector.detect(data)  # type: ignore[union-attr]
         assert result.is_anomaly == expected_anomaly
 
-    def test_scores_are_normalized_probabilities(self):
+    def test_scores_are_normalized_probabilities(self) -> None:
         """Scores from all detectors should be in the [0, 1] range."""
         data = np.array([10, 11, 10, 9, 10, 11, 10, 9, 10, 11, 10, 100])
         for detector in [
@@ -107,7 +107,7 @@ class TestAnomalyDetectors:
             assert result.score is not None
             assert 0.0 <= result.score <= 1.0, f"{type(detector).__name__} score {result.score} not in [0, 1]"
 
-    def test_anomaly_scores_are_high(self):
+    def test_anomaly_scores_are_high(self) -> None:
         """Obvious anomalies should have scores close to 1.0."""
         data = np.array([10, 11, 10, 9, 10, 11, 10, 9, 10, 11, 10, 100])
         for detector in [
@@ -136,12 +136,12 @@ class TestAnomalyDetectors:
             ),
         ]
     )
-    def test_detect_batch(self, _name, detector, data, min_triggered):
+    def test_detect_batch(self, _name: str, detector: object, data: object, min_triggered: int) -> None:
         result = detector.detect_batch(data)
         assert result.is_anomaly
         assert len(result.triggered_indices) >= min_triggered
 
-    def test_zscore_detect_returns_metadata(self):
+    def test_zscore_detect_returns_metadata(self) -> None:
         detector = ZScoreDetector({"threshold": 0.9, "window": 10})
         data = np.array([10, 11, 10, 9, 10, 11, 10, 9, 10, 11, 10])
         result = detector.detect(data)
@@ -150,7 +150,7 @@ class TestAnomalyDetectors:
         assert "value" in result.metadata
         assert "raw_zscore" in result.metadata
 
-    def test_mad_detect_returns_metadata(self):
+    def test_mad_detect_returns_metadata(self) -> None:
         detector = MADDetector({"threshold": 0.9, "window": 10})
         data = np.array([10, 11, 10, 9, 10, 11, 10, 9, 10, 11, 10])
         result = detector.detect(data)
@@ -195,12 +195,12 @@ class TestThresholdDetector:
             ),
         ]
     )
-    def test_detect(self, _name, config, data, expected_anomaly):
+    def test_detect(self, _name: str, config: dict, data: object, expected_anomaly: bool) -> None:
         detector = ThresholdDetector(config)
         result = detector.detect(data)
         assert result.is_anomaly == expected_anomaly
 
-    def test_detect_batch_finds_all_breaches(self):
+    def test_detect_batch_finds_all_breaches(self) -> None:
         detector = ThresholdDetector({"upper_bound": 50, "lower_bound": 0})
         data = np.array([10, 60, 20, -10, 30])
         result = detector.detect_batch(data)
@@ -209,7 +209,7 @@ class TestThresholdDetector:
 
 
 class TestDetectionResult:
-    def test_default_values(self):
+    def test_default_values(self) -> None:
         result = DetectionResult(is_anomaly=False)
         assert not result.is_anomaly
         assert result.score is None
@@ -217,7 +217,7 @@ class TestDetectionResult:
         assert result.all_scores == []
         assert result.metadata == {}
 
-    def test_custom_values(self):
+    def test_custom_values(self) -> None:
         result = DetectionResult(
             is_anomaly=True,
             score=0.95,
@@ -266,7 +266,7 @@ class TestEnsembleDetector:
             ),
         ]
     )
-    def test_detect(self, _name, operator, data, expected_anomaly):
+    def test_detect(self, _name: str, operator: str, data: object, expected_anomaly: bool) -> None:
         detector = EnsembleDetector(
             {
                 "type": "ensemble",
@@ -280,7 +280,7 @@ class TestEnsembleDetector:
         result = detector.detect(data)
         assert result.is_anomaly == expected_anomaly
 
-    def test_and_requires_all_detectors_to_agree(self):
+    def test_and_requires_all_detectors_to_agree(self) -> None:
         # Mild anomaly: zscore with low threshold flags, mad with high threshold doesn't
         mild_anomaly = np.array([10, 11, 10, 9, 10, 11, 10, 9, 10, 11, 10, 15])
         detector = EnsembleDetector(
@@ -300,7 +300,7 @@ class TestEnsembleDetector:
         if sub[0]["is_anomaly"] != sub[1]["is_anomaly"]:
             assert not result.is_anomaly
 
-    def test_or_flags_if_any_detector_flags(self):
+    def test_or_flags_if_any_detector_flags(self) -> None:
         mild_anomaly = np.array([10, 11, 10, 9, 10, 11, 10, 9, 10, 11, 10, 15])
         detector = EnsembleDetector(
             {
@@ -318,7 +318,7 @@ class TestEnsembleDetector:
         if any(s["is_anomaly"] for s in sub):
             assert result.is_anomaly
 
-    def test_metadata_contains_sub_results(self):
+    def test_metadata_contains_sub_results(self) -> None:
         detector = EnsembleDetector(
             {
                 "type": "ensemble",
@@ -335,7 +335,7 @@ class TestEnsembleDetector:
         assert result.metadata["sub_results"][0]["type"] == "zscore"
         assert result.metadata["sub_results"][1]["type"] == "mad"
 
-    def test_score_is_min_for_and(self):
+    def test_score_is_min_for_and(self) -> None:
         detector = EnsembleDetector(
             {
                 "type": "ensemble",
@@ -352,7 +352,7 @@ class TestEnsembleDetector:
         sub_scores = [r["score"] for r in result.metadata["sub_results"]]
         assert result.score == min(s for s in sub_scores if s is not None)
 
-    def test_score_is_max_for_or(self):
+    def test_score_is_max_for_or(self) -> None:
         detector = EnsembleDetector(
             {
                 "type": "ensemble",
@@ -369,7 +369,7 @@ class TestEnsembleDetector:
         sub_scores = [r["score"] for r in result.metadata["sub_results"]]
         assert result.score == max(s for s in sub_scores if s is not None)
 
-    def test_batch_and_intersects_triggered(self):
+    def test_batch_and_intersects_triggered(self) -> None:
         detector = EnsembleDetector(
             {
                 "type": "ensemble",
@@ -386,7 +386,7 @@ class TestEnsembleDetector:
         # AND should only include indices both detectors flagged
         assert len(result.triggered_indices) >= 1
 
-    def test_registry_creates_ensemble(self):
+    def test_registry_creates_ensemble(self) -> None:
         config = {
             "type": "ensemble",
             "operator": "or",
@@ -398,7 +398,7 @@ class TestEnsembleDetector:
         detector = get_detector(config)
         assert isinstance(detector, EnsembleDetector)
 
-    def test_fewer_than_two_detectors_raises(self):
+    def test_fewer_than_two_detectors_raises(self) -> None:
         with pytest.raises(ValueError, match="at least 2"):
             EnsembleDetector(
                 {
@@ -408,7 +408,7 @@ class TestEnsembleDetector:
                 }
             )
 
-    def test_invalid_operator_raises(self):
+    def test_invalid_operator_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid ensemble operator"):
             EnsembleDetector(
                 {
