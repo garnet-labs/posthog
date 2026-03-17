@@ -4,7 +4,7 @@ import json
 import datetime as dt
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy, WorkflowIDConflictPolicy
+from temporalio.common import RetryPolicy
 
 from posthog.temporal.common.base import PostHogWorkflow
 
@@ -13,10 +13,12 @@ with workflow.unsafe.imports_passed_through():
     from posthog.temporal.ducklake.duckling_backfill_inputs import (
         DucklingBackfillInputs,
         DucklingCopyFilesInputs,
+        DucklingCopyFilesResult,
         DucklingDiscoveryInputs,
         DucklingDiscoveryResult,
         DucklingRegisterInputs,
         DucklingResolveConfigInputs,
+        DucklingResolveConfigResult,
         DucklingUpdateStatusInputs,
     )
 
@@ -73,18 +75,19 @@ class DucklingBackfillWorkflow(PostHogWorkflow):
 
         try:
             # Resolve duckling config (get customer S3 credentials)
-            config_result = await workflow.execute_activity(
+            config_result: DucklingResolveConfigResult = await workflow.execute_activity(
                 "resolve_duckling_config_activity",
                 DucklingResolveConfigInputs(
                     team_id=inputs.team_id,
                     data_type=inputs.data_type,
                 ),
+                result_type=DucklingResolveConfigResult,
                 start_to_close_timeout=dt.timedelta(minutes=2),
                 retry_policy=ACTIVITY_RETRY_POLICY,
             )
 
             # Copy partition files from shared DuckLake to customer S3
-            copy_result = await workflow.execute_activity(
+            copy_result: DucklingCopyFilesResult = await workflow.execute_activity(
                 "copy_partition_files_activity",
                 DucklingCopyFilesInputs(
                     team_id=inputs.team_id,
@@ -96,6 +99,7 @@ class DucklingBackfillWorkflow(PostHogWorkflow):
                     aws_secret_access_key=config_result.aws_secret_access_key,
                     aws_session_token=config_result.aws_session_token,
                 ),
+                result_type=DucklingCopyFilesResult,
                 start_to_close_timeout=dt.timedelta(minutes=30),
                 heartbeat_timeout=dt.timedelta(minutes=5),
                 retry_policy=ACTIVITY_RETRY_POLICY,
@@ -197,6 +201,7 @@ class DucklingBackfillDiscoveryWorkflow(PostHogWorkflow):
         results: list[DucklingDiscoveryResult] = await workflow.execute_activity(
             "discover_duckling_teams_activity",
             inputs,
+            result_type=list[DucklingDiscoveryResult],
             start_to_close_timeout=dt.timedelta(minutes=5),
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
@@ -218,7 +223,6 @@ class DucklingBackfillDiscoveryWorkflow(PostHogWorkflow):
                     partition_key=result.partition_key,
                 ),
                 id=child_workflow_id,
-                id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
                 parent_close_policy=workflow.ParentClosePolicy.ABANDON,
                 retry_policy=RetryPolicy(
                     maximum_attempts=3,
