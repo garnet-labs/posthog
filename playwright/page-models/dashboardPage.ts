@@ -30,7 +30,10 @@ export class DashboardPage {
     async createNew(dashboardName?: string): Promise<DashboardPage> {
         await this.page.goto(urls.dashboards())
         await this.page.getByTestId('new-dashboard').click()
-        await this.page.getByTestId('create-dashboard-blank').click()
+        // With no demo data, the empty state shows a duplicate "create blank"
+        // button behind the modal. Scope to the modal/chooser to avoid strict
+        // mode violation.
+        await this.page.getByTestId('new-dashboard-chooser').getByTestId('create-dashboard-blank').click()
         await expect(this.page.locator('.dashboard')).toBeVisible()
         await this.dismissQuickStartIfVisible()
 
