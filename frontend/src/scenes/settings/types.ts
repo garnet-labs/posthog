@@ -183,7 +183,6 @@ export type SettingId =
     | 'web-vitals-autocapture'
     | 'dead-clicks-autocapture'
     | 'channel-type'
-    | 'cookieless-server-hash-mode'
     | 'user-groups'
     | 'user-delete'
     | 'web-revenue-events'

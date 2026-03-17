@@ -378,13 +378,12 @@ describe('CookielessManager', () => {
             }
         }
 
-        // tests that are shared between both modes
-        describe.each([
-            ['stateless', CookielessServerHashMode.Stateless],
-            ['stateful', CookielessServerHashMode.Stateful],
-        ])('common (%s)', (_, mode) => {
+        // NOTE: cookieless_server_hash_mode team setting has been deprecated.
+        // All cookieless events are now processed as STATEFUL.
+        describe('common behavior', () => {
             beforeEach(async () => {
-                await setModeForTeam(mode)
+                // Team setting is ignored now, but we still set it to verify it doesn't affect behavior
+                await setModeForTeam(CookielessServerHashMode.Stateful)
             })
             it('should give an event a distinct id and session id ', async () => {
                 const actual = await processEvent(event)
@@ -479,93 +478,7 @@ describe('CookielessManager', () => {
             })
         })
 
-        describe('stateless', () => {
-            beforeEach(async () => {
-                await setModeForTeam(CookielessServerHashMode.Stateless)
-            })
-
-            it('should provide the same session ID for events within the same day, later than the session timeout', async () => {
-                // this is actually a limitation of this mode, but we have the same test (with a different outcome) for stateful mode
-
-                const actual1 = await processEvent(event)
-                const actual2 = await processEvent(eventMuchLater)
-
-                if (!actual1?.properties || !actual2?.properties) {
-                    throw new Error('no event or properties')
-                }
-                expect(actual2.distinct_id).toEqual(actual1.distinct_id)
-                expect(actual1.properties.$session_id).toBeDefined()
-                expect(actual2.properties.$session_id).toEqual(actual1.properties.$session_id)
-            })
-
-            it('should drop identify events', async () => {
-                // this is also a limitation of this mode
-                const actual1 = await processEvent(identifyEvent)
-                expect(actual1).toBeUndefined()
-            })
-
-            it('should work even if redis is cleared (as it can use the local cache)', async () => {
-                const actual1 = await processEvent(event)
-                await clearRedis()
-                const actual2 = await processEvent(eventABitLater)
-
-                if (!actual1?.properties || !actual2?.properties) {
-                    throw new Error('no event or properties')
-                }
-                expect(actual2.distinct_id).toEqual(actual1.distinct_id)
-                expect(actual1.properties.$session_id).toBeDefined()
-                expect(actual2.properties.$session_id).toEqual(actual1.properties.$session_id)
-            })
-
-            it('should preserve headers through cookieless processing', async () => {
-                const testHeaders = {
-                    token: 'test-token',
-                    distinct_id: 'test-distinct-id',
-                    timestamp: '1234567890',
-                    force_disable_person_processing: false,
-                    historical_migration: false,
-                }
-
-                const result = await processEventWithHeaders(event, testHeaders)
-
-                expect(result.headers).toEqual(testHeaders)
-                expect(result.event).toBeDefined()
-            })
-
-            it('should preserve headers for non-cookieless events', async () => {
-                const testHeaders = {
-                    token: 'test-token',
-                    distinct_id: 'test-distinct-id',
-                    timestamp: '1234567890',
-                    force_disable_person_processing: false,
-                    historical_migration: false,
-                }
-
-                const result = await processEventWithHeaders(nonCookielessEvent, testHeaders)
-
-                expect(result.headers).toEqual(testHeaders)
-                expect(result.event).toBe(nonCookielessEvent)
-            })
-
-            it('should not return dropped events but should not throw', async () => {
-                const testHeaders = {
-                    token: 'test-token',
-                    distinct_id: 'test-distinct-id',
-                    timestamp: '1234567890',
-                    force_disable_person_processing: false,
-                    historical_migration: false,
-                }
-
-                // Test with alias event which should be dropped
-                const result = await processEventWithHeaders(aliasEvent, testHeaders)
-
-                // Dropped events are not returned in the response array
-                expect(result.event).toBeUndefined()
-                expect(result.headers).toEqual(createTestEventHeaders())
-            })
-        })
-
-        describe('stateful', () => {
+        describe('stateful behavior', () => {
             beforeEach(async () => {
                 await setModeForTeam(CookielessServerHashMode.Stateful)
             })
@@ -780,6 +693,36 @@ describe('CookielessManager', () => {
                     expect(anonResult.value.event.distinct_id).toEqual(baselineDistinctId)
                 }
             })
+
+            it('should preserve headers through cookieless processing', async () => {
+                const testHeaders = {
+                    token: 'test-token',
+                    distinct_id: 'test-distinct-id',
+                    timestamp: '1234567890',
+                    force_disable_person_processing: false,
+                    historical_migration: false,
+                }
+
+                const result = await processEventWithHeaders(event, testHeaders)
+
+                expect(result.headers).toEqual(testHeaders)
+                expect(result.event).toBeDefined()
+            })
+
+            it('should preserve headers for non-cookieless events', async () => {
+                const testHeaders = {
+                    token: 'test-token',
+                    distinct_id: 'test-distinct-id',
+                    timestamp: '1234567890',
+                    force_disable_person_processing: false,
+                    historical_migration: false,
+                }
+
+                const result = await processEventWithHeaders(nonCookielessEvent, testHeaders)
+
+                expect(result.headers).toEqual(testHeaders)
+                expect(result.event).toBe(nonCookielessEvent)
+            })
         })
         describe('timestamp out of range', () => {
             beforeEach(async () => {
@@ -889,46 +832,26 @@ describe('CookielessManager', () => {
                 }
             })
         })
-        describe('disabled', () => {
-            beforeEach(async () => {
+        describe('team setting is ignored (deprecated)', () => {
+            it('should process cookieless events even when team setting is DISABLED', async () => {
+                // NOTE: cookieless_server_hash_mode team setting has been deprecated.
+                // Events should be processed regardless of the team setting.
                 await setModeForTeam(CookielessServerHashMode.Disabled)
+
+                const actual = await processEvent(event)
+
+                if (!actual?.properties) {
+                    throw new Error('no event or properties')
+                }
+                expect(actual.distinct_id).not.toEqual(COOKIELESS_SENTINEL_VALUE)
+                expect(actual.distinct_id.startsWith('cookieless_')).toBe(true)
+                expect(actual.properties.$session_id).toBeTruthy()
             })
-            it('should drop all events', async () => {
-                const actual1 = await processEvent(event)
-                expect(actual1).toBeUndefined()
-            })
-            it('should pass through non-cookieless events', async () => {
+
+            it('should pass through non-cookieless events when team setting is DISABLED', async () => {
+                await setModeForTeam(CookielessServerHashMode.Disabled)
                 const actual1 = await processEvent(nonCookielessEvent)
                 expect(actual1).toBe(nonCookielessEvent)
-            })
-            it('should not return dropped cookieless events but should not throw', async () => {
-                const testHeaders = {
-                    token: 'test-token',
-                    distinct_id: 'test-distinct-id',
-                    timestamp: '1234567890',
-                    force_disable_person_processing: false,
-                    historical_migration: false,
-                }
-
-                const result = await processEventWithHeaders(event, testHeaders)
-
-                // Dropped events are not returned in the response array
-                expect(result.event).toBeUndefined()
-                expect(result.headers).toEqual(createTestEventHeaders())
-            })
-            it('should preserve headers when passing through non-cookieless events', async () => {
-                const testHeaders = {
-                    token: 'test-token',
-                    distinct_id: 'test-distinct-id',
-                    timestamp: '1234567890',
-                    force_disable_person_processing: false,
-                    historical_migration: false,
-                }
-
-                const result = await processEventWithHeaders(nonCookielessEvent, testHeaders)
-
-                expect(result.headers).toEqual(testHeaders)
-                expect(result.event).toBe(nonCookielessEvent)
             })
         })
 
