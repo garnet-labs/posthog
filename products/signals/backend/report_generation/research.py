@@ -80,7 +80,27 @@ class PriorityAssessment(BaseModel):
         return v
 
 
+class ReportPresentationOutput(BaseModel):
+    title: str = Field(description="A short, descriptive title for the report", max_length=100)
+    summary: str = Field(
+        description=(
+            "A very short factual summary of the report in 1-3 sentences. "
+            "Focus on what the signals collectively indicate and what product area is affected. "
+            "Do not restate actionability or priority."
+        ),
+    )
+
+    @field_validator("title", "summary")
+    @classmethod
+    def fields_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Title and summary must not be empty")
+        return v
+
+
 class ReportResearchOutput(BaseModel):
+    title: str = Field(description="Generated report title.")
+    summary: str = Field(description="Generated short factual report summary.")
     findings: list[SignalFinding] = Field(
         description="One finding per signal in the report, in the same order as the input signals.",
     )
@@ -88,6 +108,100 @@ class ReportResearchOutput(BaseModel):
     priority: PriorityAssessment | None = Field(
         default=None, description="Priority assessment. None when not actionable."
     )
+
+
+def _render_existing_report_context(previous_report_id: str | None) -> str:
+    if not previous_report_id:
+        return ""
+
+    return (
+        "\n---\n\n## Existing report context\n\n"
+        f"**Report ID:** `{previous_report_id}`\n\n"
+        "This is a re-research of an existing report. "
+        "If a signal already has previous findings, validate them lightly first and reuse them if they still hold. "
+        "Only re-research deeply when the old evidence looks stale or no longer matches the codebase.\n"
+    )
+
+
+def _render_previous_finding_context(previous_finding: SignalFinding | None) -> str:
+    if previous_finding is None:
+        return ""
+
+    finding_json = previous_finding.model_dump_json(indent=2)
+    return f"""
+## Previous finding for this signal
+
+This signal was already analyzed in an earlier report run.
+
+- First, lightly validate whether the cited code paths still exist and whether the previous claim still appears true.
+- If the previous finding is still valid, reuse it with only minimal edits and avoid deep re-research.
+- If the old code paths are stale or the evidence no longer holds, investigate the signal as new.
+- When lightly validating a previous finding, aim to spend fewer tool calls than a fresh investigation.
+
+Previous finding:
+
+```json
+{finding_json}
+```"""
+
+
+def _render_previous_actionability_context(previous_actionability: ActionabilityAssessment | None) -> str:
+    if previous_actionability is None:
+        return ""
+
+    assessment_json = previous_actionability.model_dump_json(indent=2)
+    return f"""## Previous actionability assessment
+
+This report was previously assessed as:
+
+```json
+{assessment_json}
+```
+
+Decide whether the updated set of signal findings changes that assessment.
+
+- If it still holds, keep the assessment materially the same and update the explanation only as much as needed.
+- If it changed, return the new assessment and explain what changed.
+"""
+
+
+def _render_previous_priority_context(previous_priority: PriorityAssessment | None) -> str:
+    if previous_priority is None:
+        return ""
+
+    priority_json = previous_priority.model_dump_json(indent=2)
+    return f"""## Previous priority assessment
+
+This report was previously prioritized as:
+
+```json
+{priority_json}
+```
+
+Decide whether the updated set of signal findings changes that priority.
+
+- If it still holds, keep the priority materially the same and update the explanation only as much as needed.
+- If it changed, return the new priority and explain what changed.
+"""
+
+
+def _render_previous_presentation_context(previous_title: str | None, previous_summary: str | None) -> str:
+    if not previous_title and not previous_summary:
+        return ""
+
+    parts = ["## Previous title and summary", "", "This report previously used:"]
+    if previous_title:
+        parts.append(f"- **Title:** {previous_title}")
+    if previous_summary:
+        parts.append(f"- **Summary:** {previous_summary}")
+    parts.extend(
+        [
+            "",
+            "If they are still accurate after incorporating the latest findings, keep them materially the same and edit minimally.",
+            "If the new findings change the shape of the report, update them.",
+        ]
+    )
+    return "\n".join(parts)
 
 
 def _render_signal_for_research(signal: SignalData, index: int, total: int) -> str:
@@ -140,6 +254,8 @@ def build_initial_research_prompt(
     *,
     title: str | None = None,
     summary: str | None = None,
+    previous_report_id: str | None = None,
+    previous_finding: SignalFinding | None = None,
 ) -> str:
     """Build the opening prompt for the first signal in a multi-turn research session."""
     signal_block = _render_signal_for_research(first_signal, 1, total_signals)
@@ -153,10 +269,23 @@ def build_initial_research_prompt(
         if summary:
             report_context += f"**Summary:** {summary}\n\n"
 
+    existing_report_context = _render_existing_report_context(previous_report_id)
+    previous_finding_context = _render_previous_finding_context(previous_finding)
+    investigation_instruction = (
+        "You will investigate **{total_signals} signal(s)** one at a time. I will send each signal in a separate "
+        "message. For signals with previous findings, validate them lightly first and reuse them if they still "
+        "hold. Investigate genuinely new or stale signals thoroughly, then respond with a `SignalFinding` JSON "
+        "object."
+        if previous_report_id or previous_finding
+        else "You will investigate **{total_signals} signal(s)** one at a time. I will send each signal in a "
+        "separate message. For each one, investigate it thoroughly then respond with a `SignalFinding` JSON object."
+    )
+
     return f"""{_RESEARCH_PREAMBLE}
 
-You will investigate **{total_signals} signal(s)** one at a time. I will send each signal in a separate message. For each one, investigate it thoroughly then respond with a `SignalFinding` JSON object.
+{investigation_instruction.format(total_signals=total_signals)}
 {report_context}
+{existing_report_context}
 ---
 
 {_RESEARCH_PROTOCOL}
@@ -166,6 +295,7 @@ You will investigate **{total_signals} signal(s)** one at a time. I will send ea
 ## Signal 1 of {total_signals}
 
 {signal_block}
+{previous_finding_context}
 
 ---
 
@@ -178,14 +308,22 @@ Investigate this signal, then respond with a JSON object matching this schema:
 </jsonschema>"""
 
 
-def build_signal_investigation_prompt(signal: SignalData, index: int, total: int) -> str:
+def build_signal_investigation_prompt(
+    signal: SignalData,
+    index: int,
+    total: int,
+    *,
+    previous_finding: SignalFinding | None = None,
+) -> str:
     """Build a follow-up prompt for signal N (2..total)."""
     signal_block = _render_signal_for_research(signal, index, total)
     finding_schema = json.dumps(SignalFinding.model_json_schema(), indent=2)
+    previous_finding_context = _render_previous_finding_context(previous_finding)
 
     return f"""## Signal {index} of {total}
 
 {signal_block}
+{previous_finding_context}
 
 ---
 
@@ -198,13 +336,20 @@ Investigate this signal using the same protocol, then respond with a JSON object
 </jsonschema>"""
 
 
-def build_actionability_prompt(total_signals: int) -> str:
+def build_actionability_prompt(
+    total_signals: int,
+    *,
+    previous_actionability: ActionabilityAssessment | None = None,
+) -> str:
     """Build the prompt asking for an actionability assessment after all signals are investigated."""
     schema = json.dumps(ActionabilityAssessment.model_json_schema(), indent=2)
+    previous_actionability_context = _render_previous_actionability_context(previous_actionability)
 
     return f"""You have investigated all {total_signals} signal(s). Now assess: **is this report actionable?**
 
 {_ACTIONABILITY_CRITERIA}
+
+{previous_actionability_context}
 
 Consider all your findings together.
 
@@ -218,9 +363,14 @@ Respond with a JSON object matching this schema:
 # TODO: When deciding on priority - also look at top N reports now, to decide if it should be higher/lower?
 
 
-def build_priority_prompt(total_signals: int) -> str:
+def build_priority_prompt(
+    total_signals: int,
+    *,
+    previous_priority: PriorityAssessment | None = None,
+) -> str:
     """Build the prompt asking for a priority assessment (only sent when actionable)."""
     schema = json.dumps(PriorityAssessment.model_json_schema(), indent=2)
+    previous_priority_context = _render_previous_priority_context(previous_priority)
 
     return f"""Now assess the **priority** of this report based on your research across all {total_signals} signal(s).
 
@@ -232,7 +382,36 @@ def build_priority_prompt(total_signals: int) -> str:
 - **P3** — Low. Minor improvement, low-impact issue, marginal experiment results.
 - **P4** — Minimal. Cosmetic, negligible performance, optional investigation.
 
+{previous_priority_context}
+
 Base your priority on **evidence from your research** — quantified user impact, error frequency, or scope of affected code paths — not just the signal descriptions.
+
+Respond with a JSON object matching this schema:
+
+<jsonschema>
+{schema}
+</jsonschema>"""
+
+
+def build_report_presentation_prompt(
+    total_signals: int,
+    *,
+    previous_title: str | None = None,
+    previous_summary: str | None = None,
+) -> str:
+    schema = json.dumps(ReportPresentationOutput.model_json_schema(), indent=2)
+    previous_presentation_context = _render_previous_presentation_context(previous_title, previous_summary)
+
+    return f"""Now write the final **report title and summary** based on your research across all {total_signals} signal(s).
+
+## Output goals
+
+- **Title**: a short, concrete headline describing the report's core issue or theme.
+- **Summary**: 1-3 short factual sentences explaining what the signals collectively indicate and what area of the product or codebase is involved.
+- Do **not** restate actionability, priority, urgency, or next steps unless they are part of the factual issue itself.
+- Keep the summary compact and information-dense.
+
+{previous_presentation_context}
 
 Respond with a JSON object matching this schema:
 
@@ -247,6 +426,8 @@ async def run_multi_turn_research(
     *,
     title: str | None = None,
     summary: str | None = None,
+    previous_report_id: str | None = None,
+    previous_report_research: ReportResearchOutput | None = None,
     branch: str = "master",
     verbose: bool = False,
     output_fn: OutputFn = None,
@@ -262,11 +443,27 @@ async def run_multi_turn_research(
     if total == 0:
         raise ValueError("No signals to investigate")
 
+    previous_findings_by_signal_id = (
+        {finding.signal_id: finding for finding in previous_report_research.findings}
+        if previous_report_research
+        else {}
+    )
+
     if output_fn:
-        output_fn(f"Starting multi-turn research: {total} signal(s)")
+        if previous_report_research:
+            output_fn(f"Starting report update research: {total} signal(s)")
+        else:
+            output_fn(f"Starting multi-turn research: {total} signal(s)")
 
     # Turn 1: initial prompt + signal 1
-    initial_prompt = build_initial_research_prompt(signals[0], total, title=title, summary=summary)
+    initial_prompt = build_initial_research_prompt(
+        signals[0],
+        total,
+        title=title,
+        summary=summary,
+        previous_report_id=previous_report_id,
+        previous_finding=previous_findings_by_signal_id.get(signals[0].signal_id),
+    )
     session, first_finding = await start_session(
         prompt=initial_prompt,
         context=context,
@@ -284,7 +481,12 @@ async def run_multi_turn_research(
     for i, signal in enumerate(signals[1:], start=2):
         if output_fn:
             output_fn(f"Investigating signal {i}/{total}...")
-        followup_prompt = build_signal_investigation_prompt(signal, i, total)
+        followup_prompt = build_signal_investigation_prompt(
+            signal,
+            i,
+            total,
+            previous_finding=previous_findings_by_signal_id.get(signal.signal_id),
+        )
         finding = await send_followup(
             session,
             followup_prompt,
@@ -298,7 +500,10 @@ async def run_multi_turn_research(
     # Actionability assessment
     if output_fn:
         output_fn("Assessing actionability...")
-    actionability_prompt = build_actionability_prompt(total)
+    actionability_prompt = build_actionability_prompt(
+        total,
+        previous_actionability=previous_report_research.actionability if previous_report_research else None,
+    )
     actionability_result = await send_followup(
         session,
         actionability_prompt,
@@ -313,7 +518,10 @@ async def run_multi_turn_research(
     if actionability_result.actionability != ActionabilityChoice.NOT_ACTIONABLE:
         if output_fn:
             output_fn("Assessing priority...")
-        priority_prompt = build_priority_prompt(total)
+        priority_prompt = build_priority_prompt(
+            total,
+            previous_priority=previous_report_research.priority if previous_report_research else None,
+        )
         priority_result = await send_followup(
             session,
             priority_prompt,
@@ -323,10 +531,28 @@ async def run_multi_turn_research(
         if output_fn:
             output_fn(f"Priority: {priority_result.priority.value}")
 
+    if output_fn:
+        output_fn("Generating title and summary...")
+    presentation_prompt = build_report_presentation_prompt(
+        total,
+        previous_title=title or (previous_report_research.title if previous_report_research else None),
+        previous_summary=summary or (previous_report_research.summary if previous_report_research else None),
+    )
+    presentation_result = await send_followup(
+        session,
+        presentation_prompt,
+        ReportPresentationOutput,
+        label="presentation",
+    )
+    if output_fn:
+        output_fn(f"Report title: {presentation_result.title}")
+
     await end_session(session)
 
     logger.info("multi_turn_research: completed with %d findings", len(findings))
     return ReportResearchOutput(
+        title=presentation_result.title,
+        summary=presentation_result.summary,
         findings=findings,
         actionability=actionability_result,
         priority=priority_result,
