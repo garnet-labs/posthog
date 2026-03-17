@@ -389,6 +389,7 @@ def google_ads_source(
         partition_mode="datetime" if table.requires_filter else None,
         partition_format="day" if table.requires_filter else None,
         partition_keys=["segments_date"] if table.requires_filter else None,
+        partition_overwrite=table.requires_filter,
     )
 
 

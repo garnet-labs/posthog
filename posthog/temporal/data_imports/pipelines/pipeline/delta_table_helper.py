@@ -27,6 +27,7 @@ class DeltaTableHelper:
     _job: ExternalDataJob
     _logger: FilteringBoundLogger
     _is_first_sync: bool
+    _overwritten_partitions: set[str]
 
     def __init__(
         self, resource_name: str, job: ExternalDataJob, logger: FilteringBoundLogger, is_first_sync: bool = False
@@ -35,6 +36,7 @@ class DeltaTableHelper:
         self._job = job
         self._logger = logger
         self._is_first_sync = is_first_sync
+        self._overwritten_partitions = set()
 
     @property
     def is_first_sync(self) -> bool:
@@ -147,6 +149,7 @@ class DeltaTableHelper:
         write_type: Literal["incremental", "full_refresh", "append"],
         should_overwrite_table: bool,
         primary_keys: Sequence[Any] | None,
+        partition_overwrite: bool = False,
     ) -> deltalake.DeltaTable:
         delta_table = await self.get_delta_table()
 
@@ -175,7 +178,32 @@ class DeltaTableHelper:
             ]
 
             predicate_ops = [f"source.{c} = target.{c}" for c in normalized_primary_keys]
-            if use_partitioning:
+            if use_partitioning and partition_overwrite:
+                # Delete+append: avoids loading the entire partition into memory for merge.
+                # Safe when the source fetches complete data for each partition (e.g. daily
+                # date-filtered tables where the query returns ALL rows for each date).
+                unique_partitions = pc.unique(data[PARTITION_KEY])  # type: ignore
+
+                partitions_to_delete = [
+                    str(p.as_py()) for p in unique_partitions if str(p.as_py()) not in self._overwritten_partitions
+                ]
+
+                if partitions_to_delete:
+                    await self._logger.adebug(
+                        f"Deleting {len(partitions_to_delete)} partition(s) before append: {partitions_to_delete}"
+                    )
+                    for partition_value in partitions_to_delete:
+                        await asyncio.to_thread(delta_table.delete, predicate=f"{PARTITION_KEY} = '{partition_value}'")
+                        self._overwritten_partitions.add(partition_value)
+
+                await asyncio.to_thread(
+                    deltalake.write_deltalake,
+                    table_or_uri=delta_table,
+                    data=data,
+                    mode="append",
+                    schema_mode="merge",
+                )
+            elif use_partitioning:
                 predicate_ops.append(f"source.{PARTITION_KEY} = target.{PARTITION_KEY}")
 
                 # Group the table by the partition key and merge multiple times with streamed_exec=True for optimised merging

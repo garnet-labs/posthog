@@ -278,6 +278,7 @@ class PipelineNonDLT(Generic[ResumableData]):
             write_type,
             should_overwrite_table=should_overwrite_table,
             primary_keys=self._resource.primary_keys,
+            partition_overwrite=self._resource.partition_overwrite,
         )
 
         self._internal_schema.add_pyarrow_table(pa_table)

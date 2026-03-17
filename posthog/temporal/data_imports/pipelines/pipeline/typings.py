@@ -38,6 +38,10 @@ class SourceResponse:
     rows_to_sync: Optional[int] = None
     has_duplicate_primary_keys: Optional[bool] = None
     """Whether incremental tables have non-unique primary keys"""
+    partition_overwrite: bool = False
+    """When True, incremental syncs delete+append partitions instead of merging.
+    Only safe when partition_format='day' and the partition key matches the
+    incremental field, so the source fetches complete data for each partition."""
 
 
 @dataclasses.dataclass
