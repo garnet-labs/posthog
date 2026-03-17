@@ -36,7 +36,7 @@ case "$RS_SVC" in
     SQLX_QUERY_LEVEL=${SQLX_QUERY_LEVEL:-warn}
     export RUST_LOG=debug,sqlx::query=$SQLX_QUERY_LEVEL,rdkafka=warn
     export RUST_BACKTRACE=1
-    export ADDRESS=0.0.0.0:3307 # avoid port conflict in local dev
+    export ADDRESS=${CAPTURE_ADDRESS:-0.0.0.0:3307} # avoid port conflict in local dev
     export KAFKA_HOSTS=localhost:9092
     export REDIS_URL=${REDIS_URL:-redis://localhost:6379}
     export DATABASE_URL=postgres://posthog:posthog@localhost:5432/${POSTHOG_DB_NAME:-posthog}
@@ -49,7 +49,7 @@ case "$RS_SVC" in
     SQLX_QUERY_LEVEL=${SQLX_QUERY_LEVEL:-warn}
     export RUST_LOG=debug,sqlx::query=$SQLX_QUERY_LEVEL,rdkafka=warn
     export RUST_BACKTRACE=1
-    export ADDRESS=0.0.0.0:3306 # avoid port conflict in local dev
+    export ADDRESS=${CAPTURE_REPLAY_ADDRESS:-0.0.0.0:3306} # avoid port conflict in local dev
     export KAFKA_HOSTS=localhost:9092
     export KAFKA_TOPIC=session_recording_snapshot_item_events
     export KAFKA_OVERFLOW_TOPIC=session_recording_snapshot_item_overflow
@@ -65,7 +65,7 @@ case "$RS_SVC" in
     SQLX_QUERY_LEVEL=${SQLX_QUERY_LEVEL:-warn}
     export RUST_LOG=debug,sqlx::query=$SQLX_QUERY_LEVEL,rdkafka=warn
     export RUST_BACKTRACE=1
-    export ADDRESS=0.0.0.0:3309 # avoid port conflict in local dev (3308 is used by llm-gateway)
+    export ADDRESS=${CAPTURE_AI_ADDRESS:-0.0.0.0:3309} # avoid port conflict in local dev (3308 is used by llm-gateway)
     export KAFKA_HOSTS=localhost:9092
     export REDIS_URL=${REDIS_URL:-redis://localhost:6379}
     export DATABASE_URL=postgres://posthog:posthog@localhost:5432/${POSTHOG_DB_NAME:-posthog}
@@ -98,7 +98,7 @@ case "$RS_SVC" in
     export ASSIGNMENT_RULE_CACHE_TTL_SECS=0
     export GROUPING_RULE_CACHE_TTL_SECS=0
     export SUPPRESSION_RULE_CACHE_TTL_SECS=0
-    export BIND_PORT=3302 # HACK! avoid local-dev clash with property-defs-rs port
+    export BIND_PORT=${CYMBAL_BIND_PORT:-3302} # HACK! avoid local-dev clash with property-defs-rs port
     export ALLOW_INTERNAL_IPS="true"
     export PERSONS_URL="postgres://posthog:posthog@localhost:5432/${POSTHOG_PERSONS_DB_NAME:-posthog_persons}"
     export ISSUE_BUCKETS_REDIS_URL=${REDIS_URL:-redis://localhost:6379}
@@ -110,7 +110,7 @@ case "$RS_SVC" in
     export KAFKA_CONSUMER_GROUP=embedding-worker
     export KAFKA_CONSUMER_TOPIC="document_embeddings_input"
     export FRAME_CACHE_TTL_SECONDS=1
-    export BIND_PORT=3305 # HACK! avoid local-dev clash with property-defs-rs port
+    export BIND_PORT=${EMBEDDING_WORKER_BIND_PORT:-3305} # HACK! avoid local-dev clash with property-defs-rs port
     export ALLOW_INTERNAL_IPS="true"
     ;;
 
@@ -135,7 +135,7 @@ case "$RS_SVC" in
     export READ_DATABASE_URL=postgres://posthog:posthog@localhost:5432/${POSTHOG_DB_NAME:-posthog}
     export MAXMIND_DB_PATH=../share/GeoLite2-City.mmdb
     export REDIS_URL=${REDIS_URL:-redis://localhost:6379}
-    export ADDRESS=0.0.0.0:3001
+    export ADDRESS=${FEATURE_FLAGS_ADDRESS:-0.0.0.0:3001}
     export DEBUG=1
     export ALLOW_INTERNAL_IPS=${ALLOW_INTERNAL_IPS:-true}
     ;;
@@ -146,8 +146,8 @@ case "$RS_SVC" in
     export RUST_BACKTRACE=1
     export KAFKA_HOSTS=localhost:9092
     export DATABASE_URL=postgres://posthog:posthog@localhost:5432/${POSTHOG_DB_NAME:-posthog}
-    export BIND_HOST=0.0.0.0
-    export BIND_PORT=3301
+    export BIND_HOST=${BATCH_IMPORT_BIND_HOST:-0.0.0.0}
+    export BIND_PORT=${BATCH_IMPORT_BIND_PORT:-3301}
     export ENCRYPTION_KEYS=00beef0000beef0000beef0000beef00
     export KAFKA_TOPIC_MAIN=events_plugin_ingestion
     export KAFKA_TOPIC_HISTORICAL=events_plugin_ingestion_historical
@@ -159,18 +159,18 @@ case "$RS_SVC" in
     SQLX_QUERY_LEVEL=${SQLX_QUERY_LEVEL:-warn}
     export RUST_LOG=debug,sqlx::query=$SQLX_QUERY_LEVEL
     export RUST_BACKTRACE=1
-    export GRPC_ADDRESS=127.0.0.1:50051
+    export GRPC_ADDRESS=${PERSONHOG_REPLICA_GRPC_ADDRESS:-127.0.0.1:50051}
     export PRIMARY_DATABASE_URL=postgres://posthog:posthog@localhost:5432/${POSTHOG_DB_NAME:-posthog}
-    export METRICS_PORT=9100
+    export METRICS_PORT=${PERSONHOG_REPLICA_METRICS_PORT:-9100}
     ;;
 
   personhog-router)
     export RUST_LOG=debug
     export RUST_BACKTRACE=1
-    export GRPC_ADDRESS=127.0.0.1:50052
-    export REPLICA_URL=http://127.0.0.1:50051
+    export GRPC_ADDRESS=${PERSONHOG_ROUTER_GRPC_ADDRESS:-127.0.0.1:50052}
+    export REPLICA_URL=${PERSONHOG_ROUTER_REPLICA_URL:-http://127.0.0.1:50051}
     export BACKEND_TIMEOUT_MS=5000
-    export METRICS_PORT=9101
+    export METRICS_PORT=${PERSONHOG_ROUTER_METRICS_PORT:-9101}
     ;;
 
   *)

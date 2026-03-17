@@ -755,6 +755,32 @@ utilities:
                 FRONTEND_PORT=$((FRONTEND_PORT + 1))
             done
 
+            # Rust service ports
+            CAPTURE_PORT=3307
+            while lsof -iTCP:$CAPTURE_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                CAPTURE_PORT=$((CAPTURE_PORT + 1))
+            done
+            CAPTURE_REPLAY_PORT=3306
+            while lsof -iTCP:$CAPTURE_REPLAY_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                CAPTURE_REPLAY_PORT=$((CAPTURE_REPLAY_PORT + 1))
+            done
+            CAPTURE_AI_PORT=3309
+            while lsof -iTCP:$CAPTURE_AI_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                CAPTURE_AI_PORT=$((CAPTURE_AI_PORT + 1))
+            done
+            FEATURE_FLAGS_PORT=3001
+            while lsof -iTCP:$FEATURE_FLAGS_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                FEATURE_FLAGS_PORT=$((FEATURE_FLAGS_PORT + 1))
+            done
+            CYMBAL_PORT=3302
+            while lsof -iTCP:$CYMBAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                CYMBAL_PORT=$((CYMBAL_PORT + 1))
+            done
+            BATCH_IMPORT_PORT=3301
+            while lsof -iTCP:$BATCH_IMPORT_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                BATCH_IMPORT_PORT=$((BATCH_IMPORT_PORT + 1))
+            done
+
             # DB 0 = main REDIS_URL, DB 1 = main FLAGS_REDIS_URL.
             # Worktrees use consecutive pairs starting at DB 2: REDIS=2N, FLAGS=2N+1.
             # With --databases 256 in docker-compose.base.yml, 127 distinct hash slots are available.
@@ -807,6 +833,12 @@ utilities:
                 -e '/^FRONTEND_PORT=/d' \
                 -e '/^SITE_URL=/d' \
                 -e '/^JS_URL=/d' \
+                -e '/^CAPTURE_ADDRESS=/d' \
+                -e '/^CAPTURE_REPLAY_ADDRESS=/d' \
+                -e '/^CAPTURE_AI_ADDRESS=/d' \
+                -e '/^FEATURE_FLAGS_ADDRESS=/d' \
+                -e '/^CYMBAL_BIND_PORT=/d' \
+                -e '/^BATCH_IMPORT_BIND_PORT=/d' \
                 -e '/^DAGSTER_TEST_DB_NAME=/d' \
                 -e '/^DAGSTER_TEST_POSTGRES_URL=/d' \
                 -e '/^# Worktree-isolated/d' \
@@ -841,6 +873,12 @@ utilities:
                 echo "FRONTEND_PORT=${FRONTEND_PORT}"
                 echo "SITE_URL=http://localhost:${PROXY_PORT}"
                 echo "JS_URL=http://localhost:${FRONTEND_PORT}"
+                echo "CAPTURE_ADDRESS=0.0.0.0:${CAPTURE_PORT}"
+                echo "CAPTURE_REPLAY_ADDRESS=0.0.0.0:${CAPTURE_REPLAY_PORT}"
+                echo "CAPTURE_AI_ADDRESS=0.0.0.0:${CAPTURE_AI_PORT}"
+                echo "FEATURE_FLAGS_ADDRESS=0.0.0.0:${FEATURE_FLAGS_PORT}"
+                echo "CYMBAL_BIND_PORT=${CYMBAL_PORT}"
+                echo "BATCH_IMPORT_BIND_PORT=${BATCH_IMPORT_PORT}"
             } >> "$ENV_FILE"
 
             echo "Creating worktree databases…"
@@ -887,6 +925,12 @@ utilities:
             echo "   Debugpy:     port ${DEBUGPY_PORT}"
             echo "   Proxy:       port ${PROXY_PORT} (SITE_URL)"
             echo "   Frontend:    port ${FRONTEND_PORT} (JS_URL)"
+            echo "   Capture:     port ${CAPTURE_PORT}"
+            echo "   Capture-replay: port ${CAPTURE_REPLAY_PORT}"
+            echo "   Capture-AI:  port ${CAPTURE_AI_PORT}"
+            echo "   Feature-flags: port ${FEATURE_FLAGS_PORT}"
+            echo "   Cymbal:      port ${CYMBAL_PORT}"
+            echo "   Batch-import: port ${BATCH_IMPORT_PORT}"
             echo ""
             echo "Next: cd $WORKTREE_PATH && hogli worktree:init"
         description: Patch a worktree's .env with isolated database names and create
