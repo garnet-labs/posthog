@@ -27,6 +27,8 @@ import { Button } from '@/components/ui/button'
       - [x] storybook
     - [x] primitives/card
       - [x] storybook
+    - [ ] primitives/chip
+      - [ ] storybook
     - [x] primitives/checkbox
       - [x] storybook
     - [x] primitives/collapsible
