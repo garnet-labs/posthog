@@ -124,6 +124,7 @@ test.describe('Dashboards', () => {
         })
 
         await test.step('rename the first tile', async () => {
+            await dashboard.waitForInsightCardLoaded()
             await dashboard.openFirstTileMenu()
             await dashboard.selectTileMenuOption('Rename')
 
@@ -135,6 +136,7 @@ test.describe('Dashboards', () => {
         })
 
         await test.step('remove the first tile', async () => {
+            await dashboard.waitForInsightCardLoaded()
             await dashboard.openFirstTileMenu()
             await dashboard.selectTileMenuOption('Remove from dashboard')
 
