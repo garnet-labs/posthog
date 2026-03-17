@@ -117,6 +117,9 @@ class MprocsGenerator(ConfigGenerator):
         """
         procs: dict[str, dict[str, Any]] = {}
 
+        # Info process is always first
+        procs["info"] = self._build_info_process(resolved)
+
         # Iterate in original mprocs.yaml order to preserve ordering
         for name in self.registry.get_processes():
             proc_config = self.registry.get_process_config(name)
@@ -158,6 +161,14 @@ class MprocsGenerator(ConfigGenerator):
             if name == "nodejs":
                 proc_config = self._add_nodejs_capability_groups(proc_config, resolved)
 
+            # Special handling for backend - wire up personhog env vars when capability is active
+            if name == "backend":
+                proc_config = self._add_personhog_env(proc_config, resolved)
+
+            # Special handling for temporal-worker - install uv groups when capabilities require them
+            if name == "temporal-worker":
+                proc_config = self._add_uv_groups(proc_config, resolved)
+
             # Add logging wrapper if enabled
             if source_config and source_config.log_to_files:
                 proc_config = self._add_logging(proc_config, name)
@@ -173,6 +184,49 @@ class MprocsGenerator(ConfigGenerator):
             scrollback=global_settings.get("scrollback", 10000),
             posthog_config=source_config,
         )
+
+    def _build_info_process(self, resolved: ResolvedEnvironment) -> dict[str, Any]:
+        """Build the info process shell command with environment summary and news.
+
+        News is read at runtime from devenv/news.txt so developers always see the
+        latest items without re-running hogli dev:generate.
+        """
+        process_count = len(resolved.units)
+        products = sorted(resolved.intents) if resolved.intents else ["(none)"]
+
+        # ANSI color codes matching PostHog brand
+        orange = r"\033[38;2;245;78;0m"  # #F54E00
+        blue = r"\033[38;2;29;74;255m"  # #1D4AFF
+        gray = r"\033[38;5;245m"
+        bold = r"\033[1m"
+        reset = r"\033[0m"
+
+        # news.txt sits next to intent-map.yaml in the devenv/ directory, which
+        # is at the repo root — the same cwd mprocs launches from.
+        news_path = "devenv/news.txt"
+
+        shell = f"""\
+echo ''
+printf '{orange}{bold}  PostHog Dev Environment{reset}\\n'
+printf '{gray}  ─────────────────────────────────────{reset}\\n'
+echo ''
+if [ -f {news_path} ]; then
+    printf '  {orange}{bold}News:{reset}\\n'
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        printf '    {gray}·{reset} %s\\n' "$line"
+    done < {news_path}
+    echo ''
+fi
+printf '  {bold}Commands:{reset}\\n'
+printf '    {blue}hogli dev:setup{reset}    Configure which services run\\n'
+printf '    {blue}hogli dev:explain{reset}  Show why each service is running\\n'
+echo ''
+printf '{gray}  ─────────────────────────────────────{reset}\\n'
+printf '  {bold}Products:{reset}  {blue}{", ".join(products)}{reset}\\n'
+printf '  {bold}Processes:{reset} {process_count} active\\n'
+printf '  {gray}Run {reset}{blue}hogli dev:setup{reset}{gray} to tailor this to your workflow.{reset}\\n'"""
+        return {"shell": shell}
 
     def _add_startup_message(self, proc_config: dict[str, Any], process_name: str, reason: str) -> dict[str, Any]:
         """Add a startup message to a process config.
@@ -211,10 +265,11 @@ class MprocsGenerator(ConfigGenerator):
             message = "echo '▶ docker-compose: core services only (configure via: hogli dev:setup)' && "
 
         up_cmd = build_docker_compose_command(profiles, "up --pull always -d")
-        logs_cmd = build_docker_compose_command(profiles, "logs --tail=0 -f")
+        logs_cmd = build_docker_compose_command(profiles, "logs --tail=100 -f")
 
         return {
-            "shell": f"{message}{up_cmd} && {logs_cmd}",
+            "shell": f"{message}{up_cmd} && echo 'docker-compose ready' && {logs_cmd}",
+            "ready_pattern": "docker-compose ready",
         }
 
     def _add_nodejs_capability_groups(
@@ -242,6 +297,43 @@ class MprocsGenerator(ConfigGenerator):
 
         return proc_config
 
+    def _add_personhog_env(self, proc_config: dict[str, Any], resolved: ResolvedEnvironment) -> dict[str, Any]:
+        """Add PERSONHOG_* env vars to backend when personhog capability is active."""
+        if "personhog" not in resolved.capabilities:
+            return proc_config
+
+        original_shell = proc_config.get("shell", "")
+        if original_shell:
+            env_exports = (
+                "export PERSONHOG_ADDR='127.0.0.1:50052' PERSONHOG_ENABLED='true' PERSONHOG_ROLLOUT_PERCENTAGE='100'"
+            )
+            proc_config["shell"] = f"{env_exports} && {original_shell}"
+
+        return proc_config
+
+    def _add_uv_groups(self, proc_config: dict[str, Any], resolved: ResolvedEnvironment) -> dict[str, Any]:
+        """Prepend uv sync --group and model download commands when uv_groups are resolved.
+
+        Currently handles the sentiment group (installs torch/optimum and downloads the ONNX model).
+        """
+        if not resolved.uv_groups:
+            return proc_config
+
+        original_shell = proc_config.get("shell", "")
+        if not original_shell:
+            return proc_config
+
+        # Build uv sync command with all resolved groups
+        group_flags = " ".join(f"--group {g}" for g in sorted(resolved.uv_groups))
+        prefix = f"uv sync {group_flags} --inexact"
+
+        # Add model download for sentiment group
+        if "sentiment" in resolved.uv_groups:
+            prefix += " && uv run --group sentiment bin/download-sentiment-model"
+
+        proc_config["shell"] = f"{prefix} && {original_shell}"
+        return proc_config
+
     def _add_logging(self, proc_config: dict[str, Any], process_name: str) -> dict[str, Any]:
         """Wrap shell command to log output to /tmp/posthog-{name}.log.
 
@@ -267,6 +359,7 @@ class MprocsGenerator(ConfigGenerator):
             # Add header comment for log mode
             if config.posthog_config and config.posthog_config.log_to_files:
                 f.write("# Log mode: Output logged to /tmp/posthog-*.log\n")
+
             yaml.dump(config.to_yaml_dict(), f, default_flow_style=False, sort_keys=False)
         return output_path
 
@@ -343,6 +436,11 @@ def get_generated_mprocs_path() -> Path:
     if main_repo:
         main_path = main_repo / ".posthog" / ".generated" / "mprocs.yaml"
         if main_path.exists():
+            # Create local symlink so bin/start (which uses $REPOSITORY_ROOT) finds it
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if local_path.is_symlink():
+                local_path.unlink()
+            local_path.symlink_to(main_path)
             return main_path
 
     return local_path

@@ -1,4 +1,3 @@
-import json
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -510,7 +509,7 @@ class BillingViewset(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
         try:
             params_to_pass = {k: v for k, v in serializer.validated_data.items() if v is not None}
             params_to_pass["organization_id"] = organization.id
-            params_to_pass["teams_map"] = json.dumps(teams_map)
+            params_to_pass["teams_map"] = teams_map
             res = billing_manager.get_usage_data(organization, params_to_pass)
             return Response(res, status=status.HTTP_200_OK)
         except Exception as e:
@@ -548,7 +547,7 @@ class BillingViewset(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
         try:
             params_to_pass = {k: v for k, v in serializer.validated_data.items() if v is not None}
             params_to_pass["organization_id"] = organization.id
-            params_to_pass["teams_map"] = json.dumps(teams_map)
+            params_to_pass["teams_map"] = teams_map
             res = billing_manager.get_spend_data(organization, params_to_pass)
             return Response(res, status=status.HTTP_200_OK)
         except Exception as e:
@@ -578,6 +577,8 @@ class BillingViewset(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
             return {}
 
     def _get_org(self) -> Optional[Organization]:
+        # root-router viewset with param_derived_from_user_current_team — no URL-scoped org to mismatch
+        # nosemgrep: cross-org-bypass-user-organization
         org = None if self.request.user.is_anonymous else self.request.user.organization
 
         return org

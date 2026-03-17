@@ -1,1 +1,1 @@
-0014_remove_ticket_assigned_to
+0024_ticket_channel_detail

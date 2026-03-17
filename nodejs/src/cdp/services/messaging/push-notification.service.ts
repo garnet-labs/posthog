@@ -41,7 +41,6 @@ export type PushNotificationServiceHub = Pick<
 
 export class PushNotificationService {
     constructor(
-        private hub: PushNotificationServiceHub,
         private hogInputsService: HogInputsService,
         private pushSubscriptionsManager: PushSubscriptionsManagerService,
         private fetchUtils: PushNotificationFetchUtils

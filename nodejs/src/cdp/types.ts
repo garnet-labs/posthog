@@ -249,18 +249,10 @@ export interface HogFunctionTiming {
 }
 
 // IMPORTANT: All queue names should be lowercase and only [A-Z0-9] characters are allowed.
-export const CYCLOTRON_INVOCATION_JOB_QUEUES = [
-    'hog',
-    'hogoverflow',
-    'hogflow',
-    'delay10m',
-    'delay60m',
-    'delay24h',
-    'datawarehouse_table',
-] as const
+export const CYCLOTRON_INVOCATION_JOB_QUEUES = ['hog', 'hogoverflow', 'hogflow'] as const
 export type CyclotronJobQueueKind = (typeof CYCLOTRON_INVOCATION_JOB_QUEUES)[number]
 
-export const CYCLOTRON_JOB_QUEUE_SOURCES = ['postgres', 'kafka', 'delay', 'shadow'] as const
+export const CYCLOTRON_JOB_QUEUE_SOURCES = ['postgres', 'postgres-v2', 'kafka'] as const
 export type CyclotronJobQueueSource = (typeof CYCLOTRON_JOB_QUEUE_SOURCES)[number]
 
 // Agnostic job invocation type
@@ -293,6 +285,7 @@ export type CyclotronJobInvocationResult<T extends CyclotronJobInvocation = Cycl
     logs: MinimalLogEntry[]
     metrics: MinimalAppMetric[]
     capturedPostHogEvents: HogFunctionCapturedEvent[]
+    warehouseWebhookPayloads: WarehouseWebhookPayload[]
     execResult?: unknown
 }
 
@@ -301,6 +294,7 @@ export type CyclotronJobInvocationHogFunctionContext = {
     vmState?: VMState
     timings: HogFunctionTiming[]
     attempts: number // Indicates the number of times this invocation has been attempted (for example if it gets scheduled for retries)
+    actionId?: string // The hogflow action node ID, used for metrics instance_id when executing within a workflow
 }
 
 export type CyclotronJobInvocationHogFunction = CyclotronJobInvocation & {
@@ -317,6 +311,7 @@ export type CyclotronJobInvocationHogFlow = CyclotronJobInvocation & {
 
 export type HogFlowInvocationContext = {
     event: HogFunctionInvocationGlobals['event']
+    personId?: string // Persisted person UUID, used when distinct_id is not available (e.g. batch workflows, manual person triggers)
     actionStepCount: number
     currentAction?: {
         id: string
@@ -340,6 +335,8 @@ export type HogFunctionInputSchemaType = {
         | 'email'
         | 'native_email'
         | 'push_subscription'
+        | 'posthog_assignee'
+        | 'posthog_ticket_tags'
     key: string
     label?: string
     choices?: { value: string; label: string }[]
@@ -366,6 +363,7 @@ export type HogFunctionTypeType =
     | 'transformation'
     | 'internal_destination'
     | 'source_webhook'
+    | 'warehouse_source_webhook'
     | 'site_destination'
 
 export interface HogFunctionMappingType {
@@ -394,6 +392,7 @@ export type HogFunctionType = {
     created_at: string
     updated_at: string
     metadata?: Record<string, any>
+    batch_export_id?: string | null
 }
 
 export type HogFunctionMappingTemplate = HogFunctionMappingType & {
@@ -449,6 +448,12 @@ export type HogFunctionCapturedEvent = {
     distinct_id: string
     timestamp: string
     properties: Record<string, any>
+}
+
+export type WarehouseWebhookPayload = {
+    team_id: number
+    schema_id: string
+    payload: Record<string, any>
 }
 
 export type Response = {

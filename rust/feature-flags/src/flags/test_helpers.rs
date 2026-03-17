@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::{
-    api::errors::FlagError,
+    api::errors::{simplify_serde_error, FlagError},
     flags::flag_models::{
         FeatureFlag, FeatureFlagList, FlagFilters, FlagPropertyGroup, HypercacheFlagsWrapper,
     },
@@ -43,6 +43,7 @@ pub fn create_simple_flag_filters(groups: Vec<FlagPropertyGroup>) -> FlagFilters
         payloads: None,
         super_groups: None,
         holdout_groups: None,
+        holdout: None,
     }
 }
 
@@ -104,7 +105,10 @@ pub async fn get_flags_from_redis(
                 team_id,
                 e
             );
-            FlagError::RedisDataParsingError
+            FlagError::DataParsingErrorWithContext(format!(
+                "Failed to deserialize pickle data for team {team_id}: {}",
+                simplify_serde_error(&e.to_string())
+            ))
         })?;
 
     // Parse JSON string -> HypercacheFlagsWrapper
@@ -114,7 +118,10 @@ pub async fn get_flags_from_redis(
             team_id,
             e
         );
-        FlagError::RedisDataParsingError
+        FlagError::DataParsingErrorWithContext(format!(
+            "Failed to parse hypercache JSON for team {team_id}: {}",
+            simplify_serde_error(&e.to_string())
+        ))
     })?;
 
     tracing::debug!(
@@ -125,6 +132,7 @@ pub async fn get_flags_from_redis(
 
     Ok(FeatureFlagList {
         flags: wrapper.flags,
+        ..Default::default()
     })
 }
 
@@ -155,7 +163,10 @@ pub async fn update_flags_in_hypercache(
             team_id,
             e
         );
-        FlagError::RedisDataParsingError
+        FlagError::DataParsingErrorWithContext(format!(
+            "Failed to serialize flags for team {team_id}: {}",
+            simplify_serde_error(&e.to_string())
+        ))
     })?;
 
     let pickled_bytes = serde_pickle::to_vec(&json_string, Default::default()).map_err(|e| {
@@ -165,7 +176,10 @@ pub async fn update_flags_in_hypercache(
             team_id,
             e
         );
-        FlagError::RedisDataParsingError
+        FlagError::DataParsingErrorWithContext(format!(
+            "Failed to pickle flags for team {team_id}: {}",
+            simplify_serde_error(&e.to_string())
+        ))
     })?;
 
     let cache_key = hypercache_test_key(team_id);

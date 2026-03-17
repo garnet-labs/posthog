@@ -2,7 +2,6 @@ import { convertHogToJS } from '@posthog/hogvm'
 
 import { ACCESS_TOKEN_PLACEHOLDER } from '~/config/constants'
 import { CyclotronInputType } from '~/schema/cyclotron'
-import { Hub } from '~/types'
 
 import { logger } from '../../utils/logger'
 import {
@@ -13,24 +12,18 @@ import {
 } from '../types'
 import { execHog } from '../utils/hog-exec'
 import { LiquidRenderer } from '../utils/liquid'
-import { PushSubscriptionsManagerService } from './managers/push-subscriptions-manager.service'
+import { IntegrationManagerService } from './managers/integration-manager.service'
 import { RecipientTokensService } from './messaging/recipient-tokens.service'
-
-export type HogInputsServiceHub = Pick<
-    Hub,
-    'integrationManager' | 'ENCRYPTION_SALT_KEYS' | 'SITE_URL' | 'postgres' | 'encryptedFields'
->
+import { PushSubscriptionsManagerService } from './managers/push-subscriptions-manager.service'
 
 export const EXTEND_OBJECT_KEY = '$$_extend_object'
 
 export class HogInputsService {
-    private recipientTokensService: RecipientTokensService
-    private pushSubscriptionsManager: PushSubscriptionsManagerService
-
-    constructor(private hub: HogInputsServiceHub) {
-        this.recipientTokensService = new RecipientTokensService(hub)
-        this.pushSubscriptionsManager = new PushSubscriptionsManagerService(hub.postgres, hub.encryptedFields)
-    }
+    constructor(
+        private integrationManager: IntegrationManagerService,
+        private recipientTokensService: RecipientTokensService,
+        private pushSubscriptionsManager: PushSubscriptionsManagerService,
+    ) {}
 
     public async buildInputs(
         hogFunction: HogFunctionType,
@@ -86,7 +79,13 @@ export class HogInputsService {
             }
         }
 
-        const orderedInputs = Object.entries(inputs ?? {}).sort(([_, input1], [__, input2]) => {
+        // Build a lookup of schema types for post-render coercion
+        const schemaTypes: Record<string, string> = {}
+        for (const schema of hogFunction.inputs_schema ?? []) {
+            schemaTypes[schema.key] = schema.type
+        }
+
+        const orderedInputs = Object.entries(inputs ?? {}).sort(([_k1, input1], [_k2, input2]) => {
             return (input1?.order ?? -1) - (input2?.order ?? -1)
         })
 
@@ -95,7 +94,16 @@ export class HogInputsService {
                 continue
             }
 
-            newGlobals.inputs[key] = await _formatInput(input, key)
+            let inputsResult = await _formatInput(input, key)
+
+            // Safety net: coerce string results to booleans for boolean schema fields.
+            // Handles edge cases where Liquid templating returns strings for boolean fields.
+            if (schemaTypes[key] === 'boolean' && typeof inputsResult === 'string') {
+                const lower = inputsResult.trim().toLowerCase()
+                inputsResult = lower === 'true' || lower === '1'
+            }
+
+            newGlobals.inputs[key] = inputsResult
         }
 
         return newGlobals.inputs
@@ -194,7 +202,7 @@ export class HogInputsService {
             return {}
         }
 
-        const integrations = await this.hub.integrationManager.getMany(Object.values(inputsToLoad))
+        const integrations = await this.integrationManager.getMany(Object.values(inputsToLoad))
         const returnInputs: Record<string, { value: Record<string, any> | null }> = {}
 
         Object.entries(inputsToLoad).forEach(([key, value]) => {

@@ -32,6 +32,7 @@ from posthog.rate_limit import (
     AIResearchBurstRateThrottle,
     AIResearchSustainedRateThrottle,
     AISustainedRateThrottle,
+    is_team_exempt_from_ai_rate_limit,
 )
 from posthog.temporal.ai.chat_agent import (
     CHAT_AGENT_STREAM_MAX_LENGTH,
@@ -51,6 +52,7 @@ from ee.hogai.api.serializers import ConversationSerializer
 from ee.hogai.chat_agent import AssistantGraph
 from ee.hogai.core.executor import AgentExecutor
 from ee.hogai.queue import ConversationQueueMessage, ConversationQueueStore, QueueFullError, build_queue_message
+from ee.hogai.sandbox.executor import handle_sandbox_message
 from ee.hogai.stream.redis_stream import get_conversation_stream_key
 from ee.hogai.utils.aio import async_to_sync
 from ee.hogai.utils.sse import AssistantSSESerializer
@@ -93,6 +95,7 @@ class MessageSerializer(MessageMinimalSerializer):
     trace_id = serializers.UUIDField(required=True)
     session_id = serializers.CharField(required=False)
     agent_mode = serializers.ChoiceField(required=False, choices=[mode.value for mode in AgentMode])
+    is_sandbox = serializers.BooleanField(required=False, default=False)
     resume_payload = serializers.JSONField(required=False, allow_null=True)
 
     def validate(self, attrs):
@@ -190,6 +193,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
 
     def _ensure_queue_access(self, request: Request, conversation_id: str) -> Response | None:
         try:
+            # nosemgrep: idor-lookup-without-team (instance scoped to team via get_queryset)
             conversation = Conversation.objects.get(id=conversation_id)
         except Conversation.DoesNotExist:
             return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -233,7 +237,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
         conversation_id = request.data.get("conversation")
         if conversation_id:
             try:
-                conversation = Conversation.objects.get(id=conversation_id)
+                conversation = Conversation.objects.get(id=conversation_id, team=self.team)
                 if conversation.type == Conversation.Type.DEEP_RESEARCH:
                     return True
             except (Conversation.DoesNotExist, ValidationError):
@@ -255,6 +259,8 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
         is_research = self._is_research_request(request)
 
         if is_research:
+            if is_team_exempt_from_ai_rate_limit(self.team_id):
+                return
             throttles = [AIResearchBurstRateThrottle(), AIResearchSustainedRateThrottle()]
         else:
             # Skip throttling for paying customers
@@ -320,6 +326,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
         if self.lookup_url_kwarg:
             self.kwargs[self.lookup_url_kwarg] = conversation_id
         try:
+            # nosemgrep: idor-lookup-without-team, idor-taint-user-input-to-model-get (user+team check immediately after)
             conversation = Conversation.objects.get(id=conversation_id)
             if conversation.user != request.user or conversation.team != self.team:
                 return Response(
@@ -347,16 +354,36 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
         is_idle = conversation.status == Conversation.Status.IDLE
         has_message = serializer.validated_data.get("message") is not None
         has_resume_payload = serializer.validated_data.get("resume_payload") is not None
-        if conversation.type == Conversation.Type.DEEP_RESEARCH:
-            is_research = True
+        is_sandbox = (
+            serializer.validated_data.get("is_sandbox", False)
+            or serializer.validated_data.get("agent_mode") == AgentMode.SANDBOX
+        )
 
-        if has_message and not is_idle:
+        if conversation.type == Conversation.Type.DEEP_RESEARCH:
+            if not is_new_conversation and is_idle and has_message and not has_resume_payload:
+                conversation.type = Conversation.Type.ASSISTANT
+                conversation.save(update_fields=["type", "updated_at"])
+                is_research = False
+            else:
+                is_research = True
+
+        if has_message and not is_idle and not is_sandbox:
             raise Conflict("Cannot resume streaming with a new message")
         # If the frontend is trying to resume streaming for a finished conversation, return a conflict error
         if not has_message and conversation.status == Conversation.Status.IDLE and not has_resume_payload:
             raise exceptions.ValidationError("Cannot continue streaming from an idle conversation")
 
         is_impersonated = is_impersonated_session(request)
+
+        if is_sandbox and has_message:
+            return handle_sandbox_message(
+                conversation=conversation,
+                conversation_id=str(conversation_id),
+                content=serializer.validated_data["content"],
+                user=cast(User, request.user),
+                team=self.team,
+                is_new_conversation=is_new_conversation,
+            )
 
         workflow_inputs: ChatAgentWorkflowInputs | ResearchAgentWorkflowInputs
         workflow_class: type[ChatAgentWorkflow] | type[ResearchAgentWorkflow]
@@ -496,7 +523,10 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
     def cancel(self, request: Request, *args, **kwargs):
         conversation = self.get_object()
 
-        if conversation.status in [Conversation.Status.CANCELING, Conversation.Status.IDLE]:
+        # IDLE is intentionally not short-circuited: during the handoff between the main
+        # workflow completing and a queued workflow starting, the status is briefly IDLE
+        # even though a queued Temporal workflow may be running.
+        if conversation.status == Conversation.Status.CANCELING:
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         async def cancel_workflow():

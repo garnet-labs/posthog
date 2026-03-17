@@ -9,15 +9,18 @@ import React, { useEffect } from 'react'
 
 import { IconPlusSmall } from '@posthog/icons'
 
-import { DataWarehousePopoverField, TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
+import {
+    DataWarehousePopoverField,
+    DefinitionPopoverRenderer,
+    TaxonomicFilterGroupType,
+} from 'lib/components/TaxonomicFilter/types'
 import { TaxonomicPopoverProps } from 'lib/components/TaxonomicPopover/TaxonomicPopover'
-import { DISPLAY_TYPES_TO_CATEGORIES as DISPLAY_TYPES_TO_CATEGORY, FEATURE_FLAGS } from 'lib/constants'
+import { DISPLAY_TYPES_TO_CATEGORIES as DISPLAY_TYPES_TO_CATEGORY } from 'lib/constants'
 import { LemonButton, LemonButtonProps } from 'lib/lemon-ui/LemonButton'
-import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { verticalSortableListCollisionDetection } from 'lib/sortable'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { RenameModal } from 'scenes/insights/filters/ActionFilter/RenameModal'
-import { isTrendsFilter } from 'scenes/insights/sharedUtils'
+import { isFunnelsFilter, isTrendsFilter } from 'scenes/insights/sharedUtils'
 
 import {
     ActionFilter as ActionFilterType,
@@ -26,7 +29,7 @@ import {
     FilterType,
     FunnelExclusionLegacy,
     InsightType,
-    Optional,
+    PropertyOperator,
 } from '~/types'
 
 import { teamLogic } from '../../../teamLogic'
@@ -36,7 +39,7 @@ import { LocalFilter, entityFilterLogic, toFilters } from './entityFilterLogic'
 
 export interface ActionFilterProps {
     setFilters: (filters: FilterType) => void
-    filters: Optional<FilterType, 'type'>
+    filters: FilterType
     typeKey: string
     addFilterDefaultOptions?: Record<string, any>
     mathAvailability?: MathAvailability
@@ -104,6 +107,9 @@ export interface ActionFilterProps {
     excludedProperties?: TaxonomicPopoverProps['excludedProperties']
     /** Allow adding non-captured events */
     allowNonCapturedEvents?: boolean
+    hogQLGlobals?: Record<string, any>
+    definitionPopoverRenderer?: DefinitionPopoverRenderer
+    operatorAllowlist?: PropertyOperator[]
 }
 
 export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(function ActionFilter(
@@ -140,6 +146,9 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
         addFilterDocLink,
         excludedProperties,
         allowNonCapturedEvents,
+        hogQLGlobals,
+        definitionPopoverRenderer,
+        operatorAllowlist,
     },
     ref
 ): JSX.Element {
@@ -156,7 +165,6 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
 
     const { localFilters } = useValues(logic)
     const { addFilter, setLocalFilters, showModal } = useActions(logic)
-    const { featureFlags } = useValues(featureFlagLogic)
 
     // No way around this. Somehow the ordering of the logic calling each other causes stale "localFilters"
     // to be shown on the /funnels page, even if we try to use a selector with props to hydrate it
@@ -177,7 +185,7 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
     }
 
     const singleFilter = entitiesLimit === 1
-    const canAccessEventsCombination = !!featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_EVENTS_COMBINATION_IN_TRENDS]
+    const canAccessEventsCombination = filters.insight === InsightType.TRENDS || filters.insight === InsightType.FUNNELS
 
     const commonProps = {
         logic,
@@ -197,7 +205,7 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
         renderRow,
         hideRename,
         hideDuplicate,
-        showCombine: canAccessEventsCombination && filters.insight === InsightType.TRENDS,
+        showCombine: canAccessEventsCombination,
         insightType: filters.insight,
         onRenameClick: showModal,
         sortable,
@@ -208,11 +216,15 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
         addFilterDocLink,
         excludedProperties,
         allowNonCapturedEvents,
+        hogQLGlobals,
+        operatorAllowlist,
+        inlineEventsDocLink: isTrendsFilter(filters)
+            ? 'https://posthog.com/docs/product-analytics/trends/overview#combine-events-inline'
+            : 'https://posthog.com/docs/product-analytics/funnels#combine-events-inline',
     }
 
     const reachedLimit: boolean = Boolean(entitiesLimit && localFilters.length >= entitiesLimit)
     const sortedItemIds = localFilters.map((i) => i.uuid)
-    const isTrendsContext = isTrendsFilter(filters)
 
     return (
         <div
@@ -246,7 +258,7 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
                             strategy={verticalListSortingStrategy}
                         >
                             {localFilters.map((filter, index) =>
-                                isTrendsContext && filter.type === EntityTypes.GROUPS ? (
+                                canAccessEventsCombination && filter.type === EntityTypes.GROUPS ? (
                                     <ActionFilterGroup
                                         key={filter.uuid}
                                         filter={filter}
@@ -264,10 +276,13 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
                                                 : hideDeleteBtn
                                         }
                                         hasBreakdown={!!filters.breakdown}
+                                        mathAvailability={mathAvailability}
+                                        groupTitle={isFunnelsFilter(filters) ? 'Any of the events below' : undefined}
                                         actionsTaxonomicGroupTypes={actionsTaxonomicGroupTypes}
                                         dataWarehousePopoverFields={dataWarehousePopoverFields}
                                         excludedProperties={excludedProperties}
                                         insightType={filters.insight}
+                                        definitionPopoverRenderer={definitionPopoverRenderer}
                                     />
                                 ) : (
                                     <ActionFilterRow
@@ -284,6 +299,7 @@ export const ActionFilter = React.forwardRef<HTMLDivElement, ActionFilterProps>(
                                                 ? hideDeleteBtn(filter, index)
                                                 : hideDeleteBtn
                                         }
+                                        definitionPopoverRenderer={definitionPopoverRenderer}
                                         {...commonProps}
                                     />
                                 )

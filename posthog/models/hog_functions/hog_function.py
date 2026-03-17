@@ -54,6 +54,7 @@ class HogFunctionType(models.TextChoices):
     SITE_DESTINATION = "site_destination"
     INTERNAL_DESTINATION = "internal_destination"
     SOURCE_WEBHOOK = "source_webhook"
+    WAREHOUSE_SOURCE_WEBHOOK = "warehouse_source_webhook"
     SITE_APP = "site_app"
     TRANSFORMATION = "transformation"
 
@@ -63,6 +64,7 @@ TYPES_THAT_RELOAD_PLUGIN_SERVER = (
     HogFunctionType.TRANSFORMATION,
     HogFunctionType.INTERNAL_DESTINATION,
     HogFunctionType.SOURCE_WEBHOOK,
+    HogFunctionType.WAREHOUSE_SOURCE_WEBHOOK,
 )
 TYPES_WITH_TRANSPILED_FILTERS = (HogFunctionType.SITE_DESTINATION, HogFunctionType.SITE_APP)
 TYPES_WITH_JAVASCRIPT_SOURCE = (HogFunctionType.SITE_DESTINATION, HogFunctionType.SITE_APP)
@@ -265,6 +267,23 @@ def team_saved(sender, instance: Team, created, **kwargs):
     from posthog.tasks.hog_functions import refresh_affected_hog_functions
 
     refresh_affected_hog_functions.delay(team_id=instance.id)
+
+
+@receiver(post_save, sender="posthog.Cohort")
+def cohort_saved(sender, instance, **kwargs):
+    # When a cohort changes, recompile hog functions for any team that uses
+    # this cohort in their test_account_filters (cohorts are inlined into bytecode).
+    # Deletion is handled separately: the cohort API prevents deleting cohorts
+    # that are referenced in test_account_filters.
+    team = instance.team
+    if team.test_account_filters and any(
+        f.get("type") == "cohort" and f.get("value") == instance.id
+        for f in team.test_account_filters
+        if isinstance(f, dict)
+    ):
+        from posthog.tasks.hog_functions import refresh_affected_hog_functions
+
+        refresh_affected_hog_functions.delay(cohort_id=instance.id)
 
 
 @mutable_receiver([post_save, post_delete], sender=HogFunction)

@@ -16,6 +16,7 @@ from posthog.test.base import (
 
 from django.test import override_settings
 
+from parameterized import parameterized
 from rest_framework.exceptions import ValidationError
 
 from posthog.schema import (
@@ -27,17 +28,20 @@ from posthog.schema import (
     DateRange,
     EventPropertyFilter,
     EventsNode,
+    FilterLogicalOperator,
     FunnelConversionWindowTimeUnit,
     FunnelExclusionEventsNode,
     FunnelMathType,
     FunnelsActorsQuery,
     FunnelsFilter,
     FunnelsQuery,
+    GroupNode,
     GroupPropertyFilter,
     HogQLQueryModifiers,
     IntervalType,
     PersonsOnEventsMode,
     PropertyOperator,
+    StepOrderValue,
 )
 
 from posthog.hogql.modifiers import create_default_modifiers_for_team
@@ -57,9 +61,10 @@ from posthog.hogql_queries.legacy_compatibility.filter_to_query import filter_to
 from posthog.models import Action, Element
 from posthog.models.cohort.cohort import Cohort
 from posthog.models.group.util import create_group
-from posthog.models.property_definition import PropertyDefinition
 from posthog.test.test_journeys import journeys_for
 from posthog.test.test_utils import create_group_type_mapping_without_created_at
+
+from products.event_definitions.backend.models.property_definition import PropertyDefinition
 
 
 class TestFunnelBreakdownUDF(
@@ -5257,3 +5262,344 @@ class TestFOSSFunnelUDF(ClickhouseTestMixin, APIBaseTest):
 
         self.assertEqual(result[3]["name"], "same_event")
         self.assertEqual(result[3]["count"], 1)  # the user with $current_url set in the second event
+
+    def test_group_node_basic(self):
+        _create_person(distinct_ids=["person1"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageview", distinct_id="person1", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person1", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person2"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageleave", distinct_id="person2", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person2", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person3"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$checkout", distinct_id="person3", timestamp="2024-01-01T10:00:00Z")
+
+        query = FunnelsQuery(
+            series=[
+                GroupNode(
+                    operator=FilterLogicalOperator.OR_,
+                    nodes=[EventsNode(event="$pageview"), EventsNode(event="$pageleave")],
+                ),
+                EventsNode(event="$checkout"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        self.assertEqual(result[0]["count"], 2)
+        self.assertEqual(result[0]["name"], "$pageview, $pageleave")
+        self.assertEqual(result[0]["action_id"], "$pageview, $pageleave")
+        self.assertEqual(result[0]["type"], "group")
+        self.assertEqual(result[1]["count"], 2)
+        self.assertEqual(result[1]["name"], "$checkout")
+
+    def test_group_node_with_dropoff(self):
+        _create_person(distinct_ids=["person1"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageview", distinct_id="person1", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person1", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person2"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageleave", distinct_id="person2", timestamp="2024-01-01T10:00:00Z")
+
+        query = FunnelsQuery(
+            series=[
+                GroupNode(
+                    operator=FilterLogicalOperator.OR_,
+                    nodes=[EventsNode(event="$pageview"), EventsNode(event="$pageleave")],
+                ),
+                EventsNode(event="$checkout"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        self.assertEqual(result[0]["count"], 2)
+        self.assertEqual(result[1]["count"], 1)
+
+    def test_group_node_with_action_child(self):
+        action = Action.objects.create(
+            team=self.team,
+            name="Page Action",
+            steps_json=[{"event": "$pageview"}, {"event": "$pageleave"}],
+        )
+
+        _create_person(distinct_ids=["person1"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageview", distinct_id="person1", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person1", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person2"], team_id=self.team.pk)
+        _create_event(team=self.team, event="sign up", distinct_id="person2", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person2", timestamp="2024-01-01T11:00:00Z")
+
+        query = FunnelsQuery(
+            series=[
+                GroupNode(
+                    operator=FilterLogicalOperator.OR_,
+                    nodes=[ActionsNode(id=action.id), EventsNode(event="sign up")],
+                ),
+                EventsNode(event="$checkout"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        self.assertEqual(result[0]["count"], 2)
+        self.assertEqual(result[0]["name"], "Page Action, sign up")
+        self.assertEqual(result[0]["type"], "group")
+        self.assertEqual(result[1]["count"], 2)
+
+    def test_group_node_with_child_property_filters(self):
+        _create_person(distinct_ids=["person1"], team_id=self.team.pk)
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="person1",
+            properties={"$browser": "Chrome"},
+            timestamp="2024-01-01T10:00:00Z",
+        )
+        _create_event(team=self.team, event="$checkout", distinct_id="person1", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person2"], team_id=self.team.pk)
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="person2",
+            properties={"$browser": "Firefox"},
+            timestamp="2024-01-01T10:00:00Z",
+        )
+        _create_event(team=self.team, event="$checkout", distinct_id="person2", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person3"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageleave", distinct_id="person3", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person3", timestamp="2024-01-01T11:00:00Z")
+
+        query = FunnelsQuery(
+            series=[
+                GroupNode(
+                    operator=FilterLogicalOperator.OR_,
+                    nodes=[
+                        EventsNode(
+                            event="$pageview",
+                            properties=[EventPropertyFilter(key="$browser", value="Chrome", operator="exact")],
+                        ),
+                        EventsNode(event="$pageleave"),
+                    ],
+                ),
+                EventsNode(event="$checkout"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        # person1 (Chrome $pageview) and person3 ($pageleave) match step 1, person2 (Firefox) does not
+        self.assertEqual(result[0]["count"], 2)
+        self.assertEqual(result[1]["count"], 2)
+
+    def test_group_node_any_order(self):
+        _create_person(distinct_ids=["person1"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$checkout", distinct_id="person1", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$pageview", distinct_id="person1", timestamp="2024-01-01T11:00:00Z")
+
+        query = FunnelsQuery(
+            series=[
+                GroupNode(
+                    operator=FilterLogicalOperator.OR_,
+                    nodes=[EventsNode(event="$pageview"), EventsNode(event="$pageleave")],
+                ),
+                EventsNode(event="$checkout"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(funnelOrderType=StepOrderValue.UNORDERED),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        # unordered: person1 did both events in any order
+        self.assertEqual(result[0]["count"], 1)
+        self.assertEqual(result[0]["name"], "Completed 1 step")
+        self.assertEqual(result[1]["count"], 1)
+        self.assertEqual(result[1]["name"], "Completed 2 steps")
+
+    def test_group_node_strict_order(self):
+        _create_person(distinct_ids=["person1"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageview", distinct_id="person1", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person1", timestamp="2024-01-01T11:00:00Z")
+
+        _create_person(distinct_ids=["person2"], team_id=self.team.pk)
+        _create_event(team=self.team, event="$pageleave", distinct_id="person2", timestamp="2024-01-01T10:00:00Z")
+        _create_event(team=self.team, event="unrelated", distinct_id="person2", timestamp="2024-01-01T10:30:00Z")
+        _create_event(team=self.team, event="$checkout", distinct_id="person2", timestamp="2024-01-01T11:00:00Z")
+
+        query = FunnelsQuery(
+            series=[
+                GroupNode(
+                    operator=FilterLogicalOperator.OR_,
+                    nodes=[EventsNode(event="$pageview"), EventsNode(event="$pageleave")],
+                ),
+                EventsNode(event="$checkout"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(funnelOrderType=StepOrderValue.STRICT),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        # person1 converts (pageview -> checkout, no interleaving)
+        # person2 does NOT convert (pageleave -> unrelated -> checkout breaks strict order)
+        self.assertEqual(result[0]["count"], 2)
+        self.assertEqual(result[1]["count"], 1)
+
+    @freeze_time("2024-01-02T00:00:00Z")
+    def test_funnel_same_event_different_property_filters(self):
+        _create_person(distinct_ids=["user_both"], team_id=self.team.pk)
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="user_both",
+            timestamp="2024-01-01T10:00:00Z",
+            properties={"$current_url": "/home"},
+        )
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="user_both",
+            timestamp="2024-01-01T11:00:00Z",
+            properties={"$current_url": "/pricing"},
+        )
+
+        _create_person(distinct_ids=["user_only_home"], team_id=self.team.pk)
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="user_only_home",
+            timestamp="2024-01-01T10:00:00Z",
+            properties={"$current_url": "/home"},
+        )
+
+        query = FunnelsQuery(
+            series=[
+                EventsNode(
+                    event="$pageview",
+                    properties=[
+                        EventPropertyFilter(
+                            key="$current_url",
+                            value="/home",
+                            operator=PropertyOperator.EXACT,
+                            type="event",
+                        )
+                    ],
+                ),
+                EventsNode(
+                    event="$pageview",
+                    properties=[
+                        EventPropertyFilter(
+                            key="$current_url",
+                            value="/pricing",
+                            operator=PropertyOperator.EXACT,
+                            type="event",
+                        )
+                    ],
+                ),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(
+                funnelWindowInterval=14, funnelWindowIntervalUnit=FunnelConversionWindowTimeUnit.DAY
+            ),
+        )
+        result = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        # Step 1: both users entered with /home
+        assert result[0]["count"] == 2
+        # Step 2: only user_both continued to /pricing
+        assert result[1]["count"] == 1
+
+    @parameterized.expand(
+        [
+            (
+                "event_breakdown",
+                BreakdownType.EVENT,
+                "$browser",
+                None,  # no group_type_index needed
+                False,  # no group setup needed
+            ),
+            (
+                "person_breakdown",
+                BreakdownType.PERSON,
+                "name",
+                None,
+                False,
+            ),
+            (
+                "group_breakdown",
+                BreakdownType.GROUP,
+                "industry",
+                0,
+                True,  # needs group setup
+            ),
+        ]
+    )
+    @freeze_time("2024-01-02T00:00:00Z")
+    def test_funnel_breakdown_value_boxing(self, _name, breakdown_type, breakdown_prop, group_type_index, needs_groups):
+        if needs_groups:
+            self._create_groups()
+
+        _create_person(distinct_ids=["bd_user1"], team_id=self.team.pk)
+        self._signup_event(
+            distinct_id="bd_user1",
+            timestamp="2024-01-01T10:00:00Z",
+            properties={"$browser": "Chrome", "$group_0": "org:5"} if needs_groups else {"$browser": "Chrome"},
+        )
+        self._add_to_cart_event(
+            distinct_id="bd_user1",
+            timestamp="2024-01-01T11:00:00Z",
+            properties={"$browser": "Chrome", "$group_0": "org:5"} if needs_groups else {"$browser": "Chrome"},
+        )
+
+        query = FunnelsQuery(
+            series=[
+                EventsNode(event="user signed up"),
+                EventsNode(event="added to cart"),
+            ],
+            dateRange=DateRange(date_from="2024-01-01", date_to="2024-01-02"),
+            funnelsFilter=FunnelsFilter(
+                funnelWindowInterval=14, funnelWindowIntervalUnit=FunnelConversionWindowTimeUnit.DAY
+            ),
+            breakdownFilter=BreakdownFilter(
+                breakdown=breakdown_prop,
+                breakdown_type=breakdown_type,
+                breakdown_group_type_index=group_type_index,
+            ),
+        )
+        response = FunnelsQueryRunner(query=query, team=self.team).calculate()
+
+        assert len(response.results) > 0
+
+        # Each breakdown group is a list of steps
+        first_group = response.results[0]
+        assert isinstance(first_group, list)
+        assert len(first_group) == 2
+
+        # Step 1: user entered funnel
+        assert first_group[0]["count"] == 1
+        assert first_group[0]["order"] == 0
+
+        # Step 2: user converted
+        assert first_group[1]["count"] == 1
+        assert first_group[1]["order"] == 1
+
+        # Breakdown value should be present and boxed as a list for all breakdown types.
+        # Known bug: GROUP breakdowns currently return unboxed strings instead of lists.
+        bv = first_group[0]["breakdown_value"]
+        assert bv is not None
+        if breakdown_type == BreakdownType.GROUP:
+            # Assert current (buggy) behavior so this test breaks when the bug is fixed,
+            # prompting update to the stricter list assertion below.
+            assert isinstance(bv, str), (
+                f"GROUP breakdown boxing bug appears fixed! "
+                f"Got list instead of str — remove this branch and use the list assertion for all types."
+            )
+        else:
+            assert isinstance(bv, list), f"Expected boxed breakdown_value for {breakdown_type}, got {type(bv)}"

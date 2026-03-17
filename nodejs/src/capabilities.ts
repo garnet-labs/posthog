@@ -1,4 +1,7 @@
-import { PluginServerCapabilities, PluginServerMode, PluginsServerConfig, stringToPluginServerMode } from './types'
+import { CommonConfig } from './common/config'
+import { SessionRecordingConfig } from './session-recording/config'
+import { PluginServerCapabilities, PluginServerMode, stringToPluginServerMode } from './types'
+import { isDevEnv } from './utils/env-utils'
 
 // =============================================================================
 // Capability Groups for Local Development
@@ -11,7 +14,6 @@ export const CAPABILITIES_CDP: PluginServerCapabilities = {
     cdpPersonUpdates: true,
     cdpInternalEvents: true,
     cdpCyclotronWorker: true,
-    cdpCyclotronShadowWorker: true,
     cdpApi: true,
     appManagementSingleton: true,
     cdpDataWarehouseEvents: false, // Not yet fully developed - enable when ready
@@ -23,6 +25,7 @@ export const CAPABILITIES_CDP_WORKFLOWS: PluginServerCapabilities = {
     ...CAPABILITIES_CDP,
     cdpBatchHogFlow: true,
     cdpCyclotronWorkerHogFlow: true,
+    cdpCyclotronV2Janitor: isDevEnv(),
 }
 
 /** Realtime Cohorts - precalculated filters and cohort membership */
@@ -31,14 +34,20 @@ export const CAPABILITIES_REALTIME_COHORTS: PluginServerCapabilities = {
     cdpCohortMembership: true,
 }
 
-/** Session Replay - recording ingestion */
+/** Session Replay - recording ingestion + serving */
 export const CAPABILITIES_SESSION_REPLAY: PluginServerCapabilities = {
     sessionRecordingBlobIngestionV2: true,
+    recordingApi: true,
 }
 
 /** Session Replay Overflow - overflow recording ingestion */
 export const CAPABILITIES_SESSION_REPLAY_OVERFLOW: PluginServerCapabilities = {
     sessionRecordingBlobIngestionV2Overflow: true,
+}
+
+/** Recording API - decryption and serving of encrypted recordings */
+export const CAPABILITIES_RECORDING_API: PluginServerCapabilities = {
+    recordingApi: true,
 }
 
 /** Logs - log ingestion */
@@ -74,11 +83,16 @@ const CAPABILITY_GROUP_MAP: Record<string, PluginServerCapabilities> = {
     cdp_workflows: CAPABILITIES_CDP_WORKFLOWS,
     realtime_cohorts: CAPABILITIES_REALTIME_COHORTS,
     session_replay: CAPABILITIES_SESSION_REPLAY,
+    recording_api: CAPABILITIES_RECORDING_API,
     logs: CAPABILITIES_LOGS,
     feature_flags: CAPABILITIES_FEATURE_FLAGS,
 }
 
-export function getPluginServerCapabilities(config: PluginsServerConfig): PluginServerCapabilities {
+// TODO: SESSION_RECORDING_OVERFLOW_ENABLED leaks session recording config into capability resolution — remove once overflow is handled within the session recording consumer
+export function getPluginServerCapabilities(
+    config: Pick<CommonConfig, 'PLUGIN_SERVER_MODE' | 'NODEJS_CAPABILITY_GROUPS'> &
+        Pick<SessionRecordingConfig, 'SESSION_RECORDING_OVERFLOW_ENABLED'>
+): PluginServerCapabilities {
     const mode: PluginServerMode | null = config.PLUGIN_SERVER_MODE
         ? stringToPluginServerMode[config.PLUGIN_SERVER_MODE]
         : null
@@ -118,6 +132,7 @@ export function getPluginServerCapabilities(config: PluginsServerConfig): Plugin
                 CAPABILITIES_REALTIME_COHORTS,
                 CAPABILITIES_SESSION_REPLAY,
                 { sessionRecordingBlobIngestionV2Overflow: config.SESSION_RECORDING_OVERFLOW_ENABLED },
+                CAPABILITIES_RECORDING_API,
                 CAPABILITIES_LOGS,
                 CAPABILITIES_FEATURE_FLAGS
             )
@@ -199,9 +214,17 @@ export function getPluginServerCapabilities(config: PluginsServerConfig): Plugin
             return {
                 cdpDataWarehouseEvents: true,
             }
-        case PluginServerMode.cdp_cyclotron_shadow_worker:
+        case PluginServerMode.cdp_cyclotron_v2_janitor:
             return {
-                cdpCyclotronShadowWorker: true,
+                cdpCyclotronV2Janitor: true,
+            }
+        case PluginServerMode.recording_api:
+            return {
+                recordingApi: true,
+            }
+        case PluginServerMode.ingestion_v2_testing:
+            return {
+                ingestionV2Testing: true,
             }
     }
 }

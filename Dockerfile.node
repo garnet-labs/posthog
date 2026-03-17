@@ -29,8 +29,8 @@ RUN apt-get update && \
     "librdkafka1=2.10.1-1.cflt~deb12" \
     "librdkafka++1=2.10.1-1.cflt~deb12" \
     "librdkafka-dev=2.10.1-1.cflt~deb12" \
-    "libssl-dev=3.0.17-1~deb12u2" \
-    "libssl3=3.0.17-1~deb12u2" \
+    "libssl-dev=3.0.18-1~deb12u2" \
+    "libssl3=3.0.18-1~deb12u2" \
     "zlib1g-dev" \
     && \
     rm -rf /var/lib/apt/lists/*
@@ -91,7 +91,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends --allow-downgrades \
     "librdkafka1=2.10.1-1.cflt~deb12" \
     "librdkafka++1=2.10.1-1.cflt~deb12" \
-    "libssl3=3.0.17-1~deb12u2" \
+    "libssl3=3.0.18-1~deb12u2" \
     "curl" \
     "gettext-base" \
     && \
@@ -126,6 +126,9 @@ COPY --from=nodejs-build --chown=posthog:posthog /code/nodejs/node_modules /code
 COPY --from=nodejs-build --chown=posthog:posthog /code/nodejs/package.json /code/nodejs/package.json
 COPY --from=nodejs-build --chown=posthog:posthog /code/nodejs/assets /code/nodejs/assets
 COPY --from=nodejs-build --chown=posthog:posthog /code/nodejs/bin /code/nodejs/bin
+
+# ClickHouse CA certificate for TLS connections
+COPY --chown=posthog:posthog ee/certs/ch.crt /code/ee/certs/ch.crt
 
 # Setup ENV
 ENV NODE_ENV=production \

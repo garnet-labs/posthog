@@ -5,7 +5,6 @@ import {
     CookielessServerHashMode,
     Hub,
     InternalPerson,
-    PluginsServerConfig,
     ProjectId,
     RawOrganization,
     RawPerson,
@@ -127,8 +126,8 @@ export async function clearDatabase(db: PostgresRouter) {
 
 // TODO: This shouldn't be called resetTestDatabase, as it actually adds data to the database
 // which can be misleading for people running tests
-export async function resetTestDatabase(extraServerConfig: Partial<PluginsServerConfig> = {}): Promise<void> {
-    const config = { ...defaultConfig, ...extraServerConfig, POSTGRES_CONNECTION_POOL_SIZE: 1 }
+export async function resetTestDatabase(): Promise<void> {
+    const config = { ...defaultConfig, POSTGRES_CONNECTION_POOL_SIZE: 1 }
     const pg = new PostgresRouter(config)
 
     // Delete common tables using COMMON_WRITE
@@ -501,6 +500,7 @@ export async function fetchPostgresPersons(postgres: PostgresRouter, teamId: num
                 ...rawPerson,
                 created_at: DateTime.fromISO(rawPerson.created_at).toUTC(),
                 version: Number(rawPerson.version || 0),
+                last_seen_at: rawPerson.last_seen_at ? DateTime.fromISO(rawPerson.last_seen_at).toUTC() : null,
             }) as InternalPerson
     )
 }
