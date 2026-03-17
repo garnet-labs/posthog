@@ -364,6 +364,7 @@ describe('selectExistingFeatureFlagModalLogic', () => {
                 logic.actions.setFilters({ page: 2 })
             })
                 .delay(350)
+                .toDispatchActions(['loadFeatureFlagsSuccess'])
                 .toMatchValues({
                     pagination: {
                         controlled: true,
