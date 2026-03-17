@@ -57,7 +57,7 @@ export const KIND_LABELS: Record<string, string> = {
     no_live_events: 'No live events',
     no_pageleave_events: 'No pageleave events',
     ingestion_lag: 'Ingestion lag',
-    hog_function_error: 'HogFunction errors',
+    hog_function_error: 'Hog function errors',
     sdk_outdated: 'SDK outdated',
 }
 
