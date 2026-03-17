@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("posthog", "1051_backfill_holdout_format"),
+        ("posthog", "1052_migrate_legacy_personal_api_key_scopes"),
     ]
 
     operations = [
