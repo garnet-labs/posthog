@@ -26,6 +26,7 @@ jobs:
         name: Determine need to run frontend checks
         outputs:
             frontend: ${{ steps.filter.outputs.frontend || 'true' }}
+            frontend_lint: ${{ steps.filter.outputs.frontend_lint || 'true' }}
         steps:
             # For pull requests it's not necessary to check out the code, but we
             # also want this to run on master, so we need to check out
@@ -39,7 +40,6 @@ jobs:
                       frontend:
                         # Avoid running frontend tests for irrelevant changes
                         # NOTE: we are at risk of missing a dependency here.
-                        - 'bin/**'
                         - 'frontend/**'
                         - 'ee/frontend/**'
                         - 'common/esbuilder/**'
@@ -59,6 +59,9 @@ jobs:
                         - tsconfig.*.json
                         - webpack.config.js
                         - stylelint*
+                      frontend_lint:
+                        # Broad patterns only needed for oxfmt/markdownlint in frontend-format job
+                        - 'bin/**'
                         - '**/*.md'
                         - '**/*.mdx'
                         - '**/*.yaml'
@@ -68,7 +71,7 @@ jobs:
     frontend-format:
         name: Frontend formatting
         needs: changes
-        if: needs.changes.outputs.frontend == 'true'
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.frontend_lint == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v6

@@ -34,6 +34,7 @@ jobs:
                         - 'products/**'
                         - 'ee/**/*'
                         - 'posthog/**/*'
+                        - '!posthog/management/**'
                         - '.github/workflows/ci-mcp.yml'
                         - '.github/workflows/mcp-publish.yml'
     build:

@@ -29,6 +29,14 @@ inputs:
     github-token:
         description: 'GitHub token for authentication'
         required: true
+    workflow-file:
+        description: 'Workflow filename to check master health (e.g., ci-e2e-playwright.yml). Empty to skip.'
+        required: false
+        default: ''
+    force-update:
+        description: 'Skip master health check (set from force-snapshot-update label)'
+        required: false
+        default: 'false'
 
 outputs:
     committed:
@@ -113,9 +121,34 @@ runs:
               - Merge master into your branch, or
               - Push an empty commit: \`git commit --allow-empty -m 'trigger CI' && git push\`"
 
+        - name: Check master workflow health
+          id: master-health
+          if: inputs.workflow-file != '' && inputs.force-update != 'true' && steps.verify.outputs.branch-advanced == 'false'
+          shell: bash
+          env:
+              GH_TOKEN: ${{ inputs.github-token }}
+              WORKFLOW_FILE: ${{ inputs.workflow-file }}
+              REPOSITORY: ${{ inputs.repository }}
+              PR_NUMBER: ${{ inputs.pr-number }}
+          run: |
+              MASTER_CONCLUSION=$(gh api "repos/$REPOSITORY/actions/workflows/$WORKFLOW_FILE/runs?branch=master&per_page=1&status=completed" --jq '.workflow_runs[0].conclusion' 2>/dev/null || echo "unknown")
+              if [ "$MASTER_CONCLUSION" == "failure" ]; then
+                echo "healthy=false" >> $GITHUB_OUTPUT
+                echo "::warning::$WORKFLOW_FILE is failing on master - skipping snapshot commit to avoid feedback loop"
+                gh pr comment "$PR_NUMBER" --body "### Snapshots not auto-updated
+
+              The \`$WORKFLOW_FILE\` workflow is currently failing on \`master\`. Snapshot differences are likely from a master-side issue, not from this PR.
+
+              **No action needed** -- once master is fixed, re-running CI should produce clean results.
+
+              To force snapshot updates, add the \`force-snapshot-update\` label and re-run."
+              else
+                echo "healthy=true" >> $GITHUB_OUTPUT
+              fi
+
         - name: Count and commit changes
           id: commit
-          if: steps.verify.outputs.branch-advanced == 'false'
+          if: steps.verify.outputs.branch-advanced == 'false' && steps.master-health.outputs.healthy != 'false'
           shell: bash
           env:
               GH_TOKEN: ${{ inputs.github-token }}

@@ -14,6 +14,7 @@ on:
 permissions:
     contents: read
     pull-requests: write
+    actions: read
 
 env:
     SECRET_KEY: '6b01eee4f945ca25045b5aab440b953461faf08693a9abbf1166dc7c6b9772da' # unsafe - for testing only
@@ -88,6 +89,7 @@ jobs:
                         - 'ee/**'
                         - 'posthog/!(temporal/**)/**'
                         - 'bin/*'
+                        - '!bin/mprocs*.yaml'
                         - frontend/**/*
                         - requirements.txt
                         - requirements-dev.txt
@@ -456,6 +458,17 @@ jobs:
                     # Look for either "Screenshot comparison failed" or "snapshot doesn't exist" error messages
                     # Use case-insensitive match to catch variations like "Snapshot does not exist"
                     if [ "${{ needs.detect-snapshot-mode.outputs.mode }}" == "update" ] && grep -qEi "(Screenshot comparison failed|snapshot does(n't| not) exist)" /tmp/playwright-output-attempt-1.log 2>/dev/null; then
+                      # Circuit-breaker: skip snapshot update if master is also failing
+                      FORCE_UPDATE="${{ contains(github.event.pull_request.labels.*.name, 'force-snapshot-update') }}"
+                      if [ "$FORCE_UPDATE" != "true" ]; then
+                        MASTER_CONCLUSION=$(gh api "repos/${{ github.repository }}/actions/workflows/ci-e2e-playwright.yml/runs?branch=master&per_page=1&status=completed" --jq '.workflow_runs[0].conclusion' 2>/dev/null || echo "unknown")
+                        if [ "$MASTER_CONCLUSION" == "failure" ]; then
+                          echo "::warning::E2E Playwright is also failing on master - skipping snapshot update to avoid feedback loop"
+                          echo "Add 'force-snapshot-update' label to override"
+                          exit 1
+                        fi
+                      fi
+
                       echo "Screenshot-related failure detected - retrying with --update-snapshots"
 
                       # Preserve attempt 1 artifacts
@@ -703,6 +716,7 @@ jobs:
         permissions:
             contents: write
             pull-requests: write
+            actions: read
         steps:
             # Use GitHub app token so Actions run after commiting updated snapshots
             - name: Get app token
@@ -760,6 +774,8 @@ jobs:
                   commit-sha: ${{ github.event.pull_request.head.sha }}
                   branch-name: ${{ github.event.pull_request.head.ref }}
                   github-token: ${{ steps.app-token.outputs.token || github.token }}
+                  workflow-file: ci-e2e-playwright.yml
+                  force-update: ${{ contains(github.event.pull_request.labels.*.name, 'force-snapshot-update') }}
 
     # Job to collate the status of the matrix jobs for requiring passing status
     # Must depend on handle-screenshots to prevent auto-merge before commits complete
