@@ -9,6 +9,8 @@ import { posthogJsPlugin } from './vite-posthog-js-plugin'
 import { publicAssetsPlugin } from './vite-public-assets-plugin'
 
 const backendPort = parseInt(process.env.BACKEND_PORT || '8000', 10)
+const frontendPort = parseInt(process.env.FRONTEND_PORT || '8234', 10)
+const proxyPort = parseInt(process.env.PROXY_PORT || '8010', 10)
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -31,7 +33,7 @@ export default defineConfig(({ mode }) => {
                             console.info(`
 ――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
-   🚀 Visit http://localhost:8010 to see the app
+   🚀 Visit http://localhost:${proxyPort} to see the app
    ⚠️  You may need to wait for the other services to start
 
 ――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
@@ -100,13 +102,13 @@ export default defineConfig(({ mode }) => {
             },
         },
         server: {
-            port: 8234,
+            port: frontendPort,
             host: process.argv.includes('--host') ? '0.0.0.0' : 'localhost',
             // this is just used in dev
             // nosemgrep: trailofbits.javascript.apollo-graphql.v3-cors-audit.v3-potentially-bad-cors
             cors: true, // This disables CORS in dev, key for using ngrok (e.g. for testing Slack integration)
             // Configure origin for proper asset URL generation
-            origin: 'http://localhost:8234',
+            origin: `http://localhost:${frontendPort}`,
             proxy: {
                 '/static': {
                     target: `http://localhost:${backendPort}`,

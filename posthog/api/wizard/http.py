@@ -165,7 +165,7 @@ class SetupWizardViewSet(viewsets.ViewSet):
             if mock_wizard_data:
                 wizard_data = {
                     "project_api_key": "mock-project-api-key",
-                    "host": "http://localhost:8010",
+                    "host": settings.SITE_URL,
                     "user_distinct_id": "mock-user-id",
                 }
                 cache.set(key, wizard_data, SETUP_WIZARD_CACHE_TIMEOUT)

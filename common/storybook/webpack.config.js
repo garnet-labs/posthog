@@ -7,6 +7,7 @@ const fs = require('fs-extra')
 
 const webpackDevServerHost = process.env.WEBPACK_HOT_RELOAD_HOST || '127.0.0.1'
 const webpackDevServerFrontendAddr = webpackDevServerHost === '0.0.0.0' ? '127.0.0.1' : webpackDevServerHost
+const frontendPort = parseInt(process.env.FRONTEND_PORT || '8234', 10)
 
 function createEntry(entry) {
     // Copy hedgehog-mode assets to dist
@@ -61,7 +62,7 @@ function createEntry(entry) {
                 ? `${process.env.JS_URL}${process.env.JS_URL.endsWith('/') ? '' : '/'}static/`
                 : process.env.NODE_ENV === 'production'
                   ? '/static/'
-                  : `http${process.env.LOCAL_HTTPS ? 's' : ''}://${webpackDevServerFrontendAddr}:8234/static/`,
+                  : `http${process.env.LOCAL_HTTPS ? 's' : ''}://${webpackDevServerFrontendAddr}:${frontendPort}/static/`,
         },
         resolve: {
             extensions: ['.js', '.jsx', '.ts', '.tsx'],
@@ -221,12 +222,12 @@ function createEntry(entry) {
                       contentBase: path.join(__dirname, 'dist'),
                       hot: true,
                       host: webpackDevServerHost,
-                      port: 8234,
+                      port: frontendPort,
                       stats: 'minimal',
                       disableHostCheck: !!process.env.LOCAL_HTTPS,
                       public: process.env.JS_URL
                           ? new URL(process.env.JS_URL).host
-                          : `${webpackDevServerFrontendAddr}:8234`,
+                          : `${webpackDevServerFrontendAddr}:${frontendPort}`,
                       headers: {
                           'Access-Control-Allow-Origin': '*',
                           'Access-Control-Allow-Headers': '*',

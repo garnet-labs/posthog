@@ -767,12 +767,13 @@ class CSPMiddleware:
             response.headers["Content-Security-Policy"] = "; ".join(csp_parts)
         else:
             resource_url = "https://*.posthog.com"
-            if settings.DEBUG or settings.TEST:
-                resource_url = "http://localhost:8234"
+            debug_or_test = settings.DEBUG or settings.TEST
+            connect_debug_url = resource_url.replace("http://", "ws://") if debug_or_test else ""
+            if debug_or_test:
+                resource_url = settings.JS_URL or "http://localhost:8234"
             elif settings.SITE_URL.endswith(".dev.posthog.dev"):
                 resource_url = "https://*.dev.posthog.dev"
 
-            connect_debug_url = "ws://localhost:8234" if settings.DEBUG or settings.TEST else ""
             csp_parts = [
                 "default-src 'self'",
                 f"style-src 'self' 'unsafe-inline' {resource_url} https://fonts.googleapis.com",

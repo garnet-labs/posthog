@@ -746,6 +746,14 @@ utilities:
             while lsof -iTCP:$DEBUGPY_PORT -sTCP:LISTEN >/dev/null 2>&1; do
                 DEBUGPY_PORT=$((DEBUGPY_PORT + 1))
             done
+            PROXY_PORT=8010
+            while lsof -iTCP:$PROXY_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                PROXY_PORT=$((PROXY_PORT + 1))
+            done
+            FRONTEND_PORT=8234
+            while lsof -iTCP:$FRONTEND_PORT -sTCP:LISTEN >/dev/null 2>&1; do
+                FRONTEND_PORT=$((FRONTEND_PORT + 1))
+            done
 
             # DB 0 = main REDIS_URL, DB 1 = main FLAGS_REDIS_URL.
             # Worktrees use consecutive pairs starting at DB 2: REDIS=2N, FLAGS=2N+1.
@@ -778,8 +786,12 @@ utilities:
                 -e '/^DATABASE_URL=/d' \
                 -e '/^POSTHOG_DB_NAME=/d' \
                 -e '/^POSTHOG_PERSONS_DB_NAME=/d' \
+                -e '/^PERSONS_DB_WRITER_URL=/d' \
+                -e '/^PERSONS_DB_READER_URL=/d' \
                 -e '/^CYCLOTRON_DATABASE_NAME=/d' \
                 -e '/^CYCLOTRON_NODE_DATABASE_NAME=/d' \
+                -e '/^CYCLOTRON_DATABASE_URL=/d' \
+                -e '/^CYCLOTRON_NODE_DATABASE_URL=/d' \
                 -e '/^BEHAVIORAL_COHORTS_DATABASE_NAME=/d' \
                 -e '/^BEHAVIORAL_COHORTS_READ_DATABASE_URL=/d' \
                 -e '/^CLICKHOUSE_DATABASE=/d' \
@@ -791,6 +803,12 @@ utilities:
                 -e '/^BACKEND_PORT=/d' \
                 -e '/^LIVESTREAM_PORT=/d' \
                 -e '/^DEBUGPY_PORT=/d' \
+                -e '/^PROXY_PORT=/d' \
+                -e '/^FRONTEND_PORT=/d' \
+                -e '/^SITE_URL=/d' \
+                -e '/^JS_URL=/d' \
+                -e '/^DAGSTER_TEST_DB_NAME=/d' \
+                -e '/^DAGSTER_TEST_POSTGRES_URL=/d' \
                 -e '/^# Worktree-isolated/d' \
                 "$ENV_FILE"
 
@@ -819,6 +837,10 @@ utilities:
                 echo "BACKEND_PORT=${BACKEND_PORT}"
                 echo "LIVESTREAM_PORT=${LIVESTREAM_PORT}"
                 echo "DEBUGPY_PORT=${DEBUGPY_PORT}"
+                echo "PROXY_PORT=${PROXY_PORT}"
+                echo "FRONTEND_PORT=${FRONTEND_PORT}"
+                echo "SITE_URL=http://localhost:${PROXY_PORT}"
+                echo "JS_URL=http://localhost:${FRONTEND_PORT}"
             } >> "$ENV_FILE"
 
             echo "Creating worktree databases…"
@@ -863,6 +885,8 @@ utilities:
             echo "   Backend:     port ${BACKEND_PORT}"
             echo "   Livestream:  port ${LIVESTREAM_PORT}"
             echo "   Debugpy:     port ${DEBUGPY_PORT}"
+            echo "   Proxy:       port ${PROXY_PORT} (SITE_URL)"
+            echo "   Frontend:    port ${FRONTEND_PORT} (JS_URL)"
             echo ""
             echo "Next: cd $WORKTREE_PATH && hogli worktree:init"
         description: Patch a worktree's .env with isolated database names and create
