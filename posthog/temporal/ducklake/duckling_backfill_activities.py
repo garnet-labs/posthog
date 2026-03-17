@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
-
-from django.utils import timezone
-
 import duckdb
 from structlog.contextvars import bind_contextvars
 from temporalio import activity
@@ -26,69 +22,60 @@ LOGGER = get_logger(__name__)
 # DuckDB memory limit — leave headroom for the Temporal worker process
 DUCKDB_MEMORY_LIMIT = "4GB"
 
-# Discovery looks back this many days for incomplete partitions
-BACKFILL_LOOKBACK_DAYS = 7
-
 # Auto-pause: if >= FAILURE_THRESHOLD of the last FAILURE_CHECK_WINDOW runs failed,
 # skip the team until manual intervention (matching batch exports pattern)
 FAILURE_THRESHOLD = 5
 FAILURE_CHECK_WINDOW = 10
 
 
-async def _get_auto_paused_team_ids(data_type: str) -> set[int]:
-    """Return team IDs that should be skipped due to too many recent failures.
+async def _is_team_auto_paused(team_id: int, data_type: str) -> bool:
+    """Check if a team should be skipped due to too many recent failures.
 
-    Checks the last FAILURE_CHECK_WINDOW runs per team. If >= FAILURE_THRESHOLD
+    Checks the last FAILURE_CHECK_WINDOW runs for the team. If >= FAILURE_THRESHOLD
     are failed, the team is considered auto-paused.
     """
-    from posthog.ducklake.models import DuckLakeCatalog, DucklingBackfillRun
+    from posthog.ducklake.models import DucklingBackfillRun
     from posthog.sync import database_sync_to_async
 
-    team_ids = await database_sync_to_async(lambda: list(DuckLakeCatalog.objects.values_list("team_id", flat=True)))()
-
-    paused: set[int] = set()
-    for team_id in team_ids:
-        failed_count = await database_sync_to_async(
-            lambda tid=team_id: (
-                DucklingBackfillRun.objects.filter(
-                    id__in=DucklingBackfillRun.objects.filter(
-                        team_id=tid,
-                        data_type=data_type,
-                    )
-                    .order_by("-updated_at")
-                    .values("id")[:FAILURE_CHECK_WINDOW]
+    failed_count = await database_sync_to_async(
+        lambda: (
+            DucklingBackfillRun.objects.filter(
+                id__in=DucklingBackfillRun.objects.filter(
+                    team_id=team_id,
+                    data_type=data_type,
                 )
-                .filter(status="failed")
-                .count()
+                .order_by("-updated_at")
+                .values("id")[:FAILURE_CHECK_WINDOW]
             )
-        )()
-        if failed_count >= FAILURE_THRESHOLD:
-            paused.add(team_id)
-
-    return paused
+            .filter(status="failed")
+            .count()
+        )
+    )()
+    return failed_count >= FAILURE_THRESHOLD
 
 
 @activity.defn
 async def discover_duckling_teams_activity(inputs: DucklingDiscoveryInputs) -> list[DucklingDiscoveryResult]:
-    """Discover team/partition pairs that need backfill.
+    """Discover teams that need backfill for a specific partition date.
 
-    Looks back BACKFILL_LOOKBACK_DAYS days and finds all team/date combinations
-    that don't have a completed run. Skips teams that are auto-paused due to
-    exceeding the failure threshold.
+    The partition_key is set by the discovery workflow from Temporal's
+    TemporalScheduledStartTime, so missed schedule firings are automatically
+    buffered and replayed by Temporal.
+
+    Skips teams that are auto-paused due to exceeding the failure threshold.
     """
     from posthog.temporal.ducklake.duckling_backfill_inputs import VALID_DATA_TYPES
 
     if inputs.data_type not in VALID_DATA_TYPES:
         raise ValueError(f"Invalid data_type: {inputs.data_type}, must be one of {VALID_DATA_TYPES}")
+    if not inputs.partition_key:
+        raise ValueError("partition_key must be set")
 
-    bind_contextvars(data_type=inputs.data_type)
+    bind_contextvars(data_type=inputs.data_type, partition_key=inputs.partition_key)
     logger = LOGGER.bind()
 
     from posthog.ducklake.models import DuckLakeCatalog, DucklingBackfillRun
     from posthog.sync import database_sync_to_async
-
-    now = timezone.now()
-    lookback_dates = [(now - dt.timedelta(days=d)).strftime("%Y-%m-%d") for d in range(1, BACKFILL_LOOKBACK_DAYS + 1)]
 
     # All teams with a duckling catalog
     team_ids = await database_sync_to_async(lambda: list(DuckLakeCatalog.objects.values_list("team_id", flat=True)))()
@@ -96,39 +83,36 @@ async def discover_duckling_teams_activity(inputs: DucklingDiscoveryInputs) -> l
     if not team_ids:
         return []
 
-    # Find auto-paused teams
-    paused_team_ids = await _get_auto_paused_team_ids(inputs.data_type)
-    if paused_team_ids:
-        logger.warning("Teams auto-paused due to failure threshold", team_ids=list(paused_team_ids))
-
-    active_team_ids = [tid for tid in team_ids if tid not in paused_team_ids]
-    if not active_team_ids:
-        return []
-
-    # Find all completed partitions in the lookback window in a single query
-    completed_pairs = await database_sync_to_async(
+    # Find teams that already completed this partition
+    completed_team_ids = await database_sync_to_async(
         lambda: set(
             DucklingBackfillRun.objects.filter(
-                team_id__in=active_team_ids,
+                team_id__in=team_ids,
                 data_type=inputs.data_type,
-                partition_key__in=lookback_dates,
+                partition_key=inputs.partition_key,
                 status="completed",
-            ).values_list("team_id", "partition_key")
+            ).values_list("team_id", flat=True)
         )
     )()
 
     results: list[DucklingDiscoveryResult] = []
-    for team_id in active_team_ids:
-        for date in lookback_dates:
-            if (team_id, date) not in completed_pairs:
-                results.append(DucklingDiscoveryResult(team_id=team_id, partition_key=date))
+    paused_count = 0
+    for team_id in team_ids:
+        if team_id in completed_team_ids:
+            continue
+        if await _is_team_auto_paused(team_id, inputs.data_type):
+            paused_count += 1
+            continue
+        results.append(DucklingDiscoveryResult(team_id=team_id, partition_key=inputs.partition_key))
+
+    if paused_count:
+        logger.warning("Teams auto-paused due to failure threshold", paused_count=paused_count)
 
     logger.info(
-        "Discovered partitions for backfill",
+        "Discovered teams for backfill",
         count=len(results),
-        teams=len(active_team_ids),
-        paused_teams=len(paused_team_ids),
-        lookback_days=BACKFILL_LOOKBACK_DAYS,
+        partition_key=inputs.partition_key,
+        paused_count=paused_count,
     )
     return results
 

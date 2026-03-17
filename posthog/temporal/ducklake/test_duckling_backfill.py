@@ -391,47 +391,46 @@ CATALOG_DEFAULTS = {
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-async def test_discover_returns_all_lookback_dates_for_team_without_completed_runs(ateam):
+async def test_discover_returns_team_for_partition(ateam):
     from posthog.ducklake.models import DuckLakeCatalog
     from posthog.sync import database_sync_to_async
-    from posthog.temporal.ducklake.duckling_backfill_activities import BACKFILL_LOOKBACK_DAYS
 
     await database_sync_to_async(DuckLakeCatalog.objects.create)(team=ateam, **CATALOG_DEFAULTS)
 
-    results = await discover_duckling_teams_activity(DucklingDiscoveryInputs(data_type="events"))
+    results = await discover_duckling_teams_activity(
+        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
+    )
 
     matching = [r for r in results if r.team_id == ateam.id]
-    assert len(matching) == BACKFILL_LOOKBACK_DAYS
+    assert len(matching) == 1
+    assert matching[0].partition_key == "2024-01-15"
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-async def test_discover_skips_completed_partition_but_includes_others(ateam):
-    from django.utils import timezone
-
+async def test_discover_skips_completed_team(ateam):
     from posthog.ducklake.models import DuckLakeCatalog, DucklingBackfillRun
     from posthog.sync import database_sync_to_async
-    from posthog.temporal.ducklake.duckling_backfill_activities import BACKFILL_LOOKBACK_DAYS
 
     await database_sync_to_async(DuckLakeCatalog.objects.create)(team=ateam, **CATALOG_DEFAULTS)
-
-    yesterday = (timezone.now() - dt.timedelta(days=1)).strftime("%Y-%m-%d")
     await database_sync_to_async(DucklingBackfillRun.objects.create)(
-        team=ateam, data_type="events", partition_key=yesterday, status="completed"
+        team=ateam, data_type="events", partition_key="2024-01-15", status="completed"
     )
 
-    results = await discover_duckling_teams_activity(DucklingDiscoveryInputs(data_type="events"))
+    results = await discover_duckling_teams_activity(
+        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
+    )
 
     matching = [r for r in results if r.team_id == ateam.id]
-    partition_keys = {r.partition_key for r in matching}
-    assert yesterday not in partition_keys
-    assert len(matching) == BACKFILL_LOOKBACK_DAYS - 1
+    assert len(matching) == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
 async def test_discover_returns_empty_when_no_catalogs():
-    results = await discover_duckling_teams_activity(DucklingDiscoveryInputs(data_type="events"))
+    results = await discover_duckling_teams_activity(
+        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
+    )
     assert isinstance(results, list)
 
 
@@ -453,7 +452,9 @@ async def test_discover_auto_pauses_team_with_too_many_failures(ateam):
             team=ateam, data_type="events", partition_key=date, status="failed"
         )
 
-    results = await discover_duckling_teams_activity(DucklingDiscoveryInputs(data_type="events"))
+    results = await discover_duckling_teams_activity(
+        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
+    )
 
     matching = [r for r in results if r.team_id == ateam.id]
     assert len(matching) == 0

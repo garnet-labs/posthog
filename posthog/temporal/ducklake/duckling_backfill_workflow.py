@@ -25,10 +25,15 @@ with workflow.unsafe.imports_passed_through():
 
 LOGGER = get_logger(__name__)
 
+# Unlimited retries bounded by workflow execution timeout (matching batch exports)
 ACTIVITY_RETRY_POLICY = RetryPolicy(
-    maximum_attempts=3,
-    initial_interval=dt.timedelta(seconds=10),
+    maximum_attempts=0,
+    initial_interval=dt.timedelta(seconds=30),
+    maximum_interval=dt.timedelta(minutes=2),
 )
+
+# Workflow-level execution timeout for child backfill workflows
+BACKFILL_WORKFLOW_EXECUTION_TIMEOUT = dt.timedelta(days=1)
 
 
 @workflow.defn(name="duckling-backfill")
@@ -180,13 +185,36 @@ class DucklingBackfillWorkflow(PostHogWorkflow):
             raise
 
 
+def _get_partition_key_from_schedule() -> str:
+    """Derive the partition date from Temporal's TemporalScheduledStartTime.
+
+    The scheduled start time is when the schedule fired. We subtract one day
+    to get yesterday's partition (the data we're backfilling).
+    Falls back to yesterday relative to workflow.now() if not on a schedule.
+    """
+    search_attr = workflow.info().search_attributes.get("TemporalScheduledStartTime")
+
+    if search_attr and search_attr[0]:
+        if isinstance(search_attr[0], dt.datetime):
+            scheduled_time = search_attr[0]
+        elif isinstance(search_attr[0], str):
+            scheduled_time = dt.datetime.fromisoformat(search_attr[0])
+        else:
+            scheduled_time = workflow.now()
+    else:
+        scheduled_time = workflow.now()
+
+    partition_date = scheduled_time - dt.timedelta(days=1)
+    return partition_date.strftime("%Y-%m-%d")
+
+
 @workflow.defn(name="duckling-backfill-discovery")
 class DucklingBackfillDiscoveryWorkflow(PostHogWorkflow):
     """Discovery workflow that finds teams needing backfill and spawns child workflows.
 
-    Runs hourly and:
-    1. Discovers teams that haven't completed yesterday's backfill
-    2. Spawns a child DucklingBackfillWorkflow for each with ABANDON parent close policy
+    Runs daily via Temporal schedule. The partition date is derived from
+    TemporalScheduledStartTime (the scheduled fire time minus one day),
+    so Temporal handles missed-day buffering automatically.
     """
 
     @staticmethod
@@ -196,6 +224,10 @@ class DucklingBackfillDiscoveryWorkflow(PostHogWorkflow):
 
     @workflow.run
     async def run(self, inputs: DucklingDiscoveryInputs) -> None:
+        # Derive partition_key from Temporal's scheduled time if not set explicitly
+        if not inputs.partition_key:
+            inputs.partition_key = _get_partition_key_from_schedule()
+
         logger = LOGGER.bind(**inputs.properties_to_log)
         logger.info("Starting duckling backfill discovery")
 
@@ -227,11 +259,8 @@ class DucklingBackfillDiscoveryWorkflow(PostHogWorkflow):
                         partition_key=result.partition_key,
                     ),
                     id=child_workflow_id,
+                    execution_timeout=BACKFILL_WORKFLOW_EXECUTION_TIMEOUT,
                     parent_close_policy=workflow.ParentClosePolicy.ABANDON,
-                    retry_policy=RetryPolicy(
-                        maximum_attempts=3,
-                        initial_interval=dt.timedelta(minutes=1),
-                    ),
                 )
                 started += 1
             except WorkflowAlreadyStartedError:

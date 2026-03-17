@@ -353,7 +353,8 @@ async def create_purge_deleted_recording_metadata_schedule(client: Client):
 async def create_duckling_events_daily_backfill_schedule(client: Client):
     """Create or update the schedule for daily duckling events backfill.
 
-    Runs hourly to discover teams needing yesterday's events backfilled.
+    Runs daily. Temporal buffers missed firings automatically.
+    The discovery workflow derives the partition date from TemporalScheduledStartTime.
     """
     schedule = Schedule(
         action=ScheduleActionStartWorkflow(
@@ -361,12 +362,8 @@ async def create_duckling_events_daily_backfill_schedule(client: Client):
             DucklingDiscoveryInputs(data_type="events"),
             id="duckling-events-daily-backfill-schedule",
             task_queue=settings.DUCKLING_BACKFILL_TASK_QUEUE,
-            retry_policy=common.RetryPolicy(
-                maximum_attempts=3,
-                initial_interval=timedelta(minutes=5),
-            ),
         ),
-        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(hours=1))]),
+        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(days=1))]),
     )
 
     if await a_schedule_exists(client, "duckling-events-daily-backfill-schedule"):
@@ -378,7 +375,8 @@ async def create_duckling_events_daily_backfill_schedule(client: Client):
 async def create_duckling_persons_daily_backfill_schedule(client: Client):
     """Create or update the schedule for daily duckling persons backfill.
 
-    Runs hourly to discover teams needing yesterday's persons backfilled.
+    Runs daily. Temporal buffers missed firings automatically.
+    The discovery workflow derives the partition date from TemporalScheduledStartTime.
     """
     schedule = Schedule(
         action=ScheduleActionStartWorkflow(
@@ -386,12 +384,8 @@ async def create_duckling_persons_daily_backfill_schedule(client: Client):
             DucklingDiscoveryInputs(data_type="persons"),
             id="duckling-persons-daily-backfill-schedule",
             task_queue=settings.DUCKLING_BACKFILL_TASK_QUEUE,
-            retry_policy=common.RetryPolicy(
-                maximum_attempts=3,
-                initial_interval=timedelta(minutes=5),
-            ),
         ),
-        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(hours=1))]),
+        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(days=1))]),
     )
 
     if await a_schedule_exists(client, "duckling-persons-daily-backfill-schedule"):

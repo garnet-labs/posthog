@@ -8,14 +8,20 @@ VALID_DATA_TYPES = ("events", "persons")
 
 @dataclasses.dataclass
 class DucklingDiscoveryInputs:
-    """Inputs for the discovery workflow that finds teams needing backfill."""
+    """Inputs for the discovery workflow that finds teams needing backfill.
+
+    partition_key is derived from Temporal's TemporalScheduledStartTime by the
+    workflow. When triggering manually, set it explicitly.
+    """
 
     data_type: str  # "events" or "persons"
+    partition_key: str = ""  # "2024-01-15", derived from scheduled time if empty
 
     @property
     def properties_to_log(self) -> dict[str, typing.Any]:
         return {
             "data_type": self.data_type,
+            "partition_key": self.partition_key,
         }
 
 
