@@ -1,9 +1,14 @@
 /**
  * Screenshot tests for workflows product
  */
-import { expect } from '@playwright/test'
+import { Page, expect } from '@playwright/test'
 
 import { PlaywrightWorkspaceSetupResult, test } from '../utils/workspace-test-base'
+
+async function waitForWorkflowsPageReady(page: Page): Promise<void> {
+    await page.waitForSelector('[data-attr="new-workflow"]', { timeout: 10000 })
+    await page.waitForSelector('[data-attr="workflows-table"][data-loading="false"]', { timeout: 10000 })
+}
 
 test.describe('Workflows', () => {
     let workspace: PlaywrightWorkspaceSetupResult | null = null
@@ -34,8 +39,7 @@ test.describe('Workflows', () => {
 
     test.describe('workflows tab', () => {
         test.beforeEach(async ({ page }) => {
-            await page.waitForSelector('[data-attr="new-workflow"]', { timeout: 10000 })
-            await page.waitForSelector('[data-attr="workflows-table"][data-loading="false"]', { timeout: 10000 })
+            await waitForWorkflowsPageReady(page)
         })
 
         test('shows workflows list page with table and controls', async ({ page }) => {
@@ -115,8 +119,7 @@ test.describe('Workflows', () => {
 
     test.describe('tab navigation', () => {
         test.beforeEach(async ({ page }) => {
-            await page.waitForSelector('[data-attr="new-workflow"]', { timeout: 10000 })
-            await page.waitForSelector('[data-attr="workflows-table"][data-loading="false"]', { timeout: 10000 })
+            await waitForWorkflowsPageReady(page)
         })
 
         test('can navigate between all top-level tabs', async ({ page }) => {
@@ -149,8 +152,7 @@ test.describe('Workflows', () => {
     test.describe('single workflow view', () => {
         test.beforeEach(async ({ page }) => {
             // Create a blank workflow to test with
-            await page.waitForSelector('[data-attr="new-workflow"]', { timeout: 10000 })
-            await page.waitForSelector('[data-attr="workflows-table"][data-loading="false"]', { timeout: 10000 })
+            await waitForWorkflowsPageReady(page)
 
             await page.click('[data-attr="new-workflow"]')
             await page.waitForSelector('[data-attr="new-workflow-chooser"]', { timeout: 3000 })
