@@ -180,5 +180,5 @@ class ExperimentTimeseriesRecalculationWorkflow(PostHogWorkflow):
             inputs.recalculation_id,
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=RetryPolicy(maximum_attempts=3, initial_interval=timedelta(minutes=5)),
-            heartbeat_timeout=timedelta(minutes=2),
+            heartbeat_timeout=timedelta(minutes=10),
         )

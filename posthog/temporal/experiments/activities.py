@@ -711,7 +711,10 @@ def _backfill_experiment_metric_sync(recalculation_id: str) -> dict[str, Any]:
     except ExperimentTimeseriesRecalculation.DoesNotExist:
         raise ValueError(f"Recalculation request {recalculation_id} not found")
 
-    if recalculation_request.status == ExperimentTimeseriesRecalculation.Status.PENDING:
+    if recalculation_request.status in (
+        ExperimentTimeseriesRecalculation.Status.PENDING,
+        ExperimentTimeseriesRecalculation.Status.FAILED,
+    ):
         recalculation_request.status = ExperimentTimeseriesRecalculation.Status.IN_PROGRESS
         recalculation_request.save(update_fields=["status"])
 
@@ -759,7 +762,7 @@ def _backfill_experiment_metric_sync(recalculation_id: str) -> dict[str, Any]:
 
             ExperimentMetricResultModel.objects.update_or_create(
                 experiment_id=experiment.id,
-                metric_uuid=recalculation_request.metric.get("uuid"),
+                metric_uuid=recalculation_request.metric["uuid"],
                 query_to=query_to_utc,
                 defaults={
                     "fingerprint": fingerprint,
