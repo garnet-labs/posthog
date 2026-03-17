@@ -6,16 +6,20 @@ from posthog.models.integration import ApplePushIntegration, Integration
 
 
 class TestApplePushIntegration(BaseTest):
-    def _create_apple_push_integration(self, **overrides) -> Integration:
-        defaults = {
-            "signing_key": "-----BEGIN PRIVATE KEY-----\nfake-key\n-----END PRIVATE KEY-----",
-            "key_id": "ABC123KEY",
-            "team_id_apple": "TEAM123",
-            "bundle_id": "com.example.app",
-            "team_id": self.team.id,
-        }
-        defaults.update(overrides)
-        return ApplePushIntegration.integration_from_key(**defaults)
+    def _create_apple_push_integration(
+        self,
+        signing_key: str = "-----BEGIN PRIVATE KEY-----\nfake-key\n-----END PRIVATE KEY-----",
+        key_id: str = "ABC123KEY",
+        team_id_apple: str = "TEAM123",
+        bundle_id: str = "com.example.app",
+    ) -> Integration:
+        return ApplePushIntegration.integration_from_key(
+            signing_key=signing_key,
+            key_id=key_id,
+            team_id_apple=team_id_apple,
+            bundle_id=bundle_id,
+            team_id=self.team.id,
+        )
 
     def test_creates_integration(self):
         integration = self._create_apple_push_integration()
