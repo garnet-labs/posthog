@@ -730,6 +730,7 @@ utilities:
             PG_DUCKLAKE_DB="ducklake_wt_${ID}"
             CH_DB="posthog_wt_${ID}"
             DAGSTER_TEST_DB="test_dagster_wt_${ID}"
+            TEMPORAL_NAMESPACE="wt_${ID}"
             PG_BASE="postgres://posthog:posthog@localhost:5432"
 
             # DB 0 = main REDIS_URL, DB 1 = main FLAGS_REDIS_URL.
@@ -772,6 +773,7 @@ utilities:
                 -e '/^REDIS_URL=/d' \
                 -e '/^FLAGS_REDIS_URL=/d' \
                 -e '/^KAFKA_PREFIX=/d' \
+                -e '/^TEMPORAL_NAMESPACE=/d' \
                 -e '/^# Worktree-isolated/d' \
                 "$ENV_FILE"
 
@@ -796,6 +798,7 @@ utilities:
                 echo "KAFKA_PREFIX=wt_${ID}_"
                 echo "DAGSTER_TEST_DB_NAME=${DAGSTER_TEST_DB}"
                 echo "DAGSTER_TEST_POSTGRES_URL=${PG_BASE}/${DAGSTER_TEST_DB}"
+                echo "TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE}"
             } >> "$ENV_FILE"
 
             echo "Creating worktree databases…"
@@ -825,11 +828,18 @@ utilities:
                 --query "CREATE DATABASE IF NOT EXISTS \`${CH_DB}\`;" 2>/dev/null || true
             echo "  ✓ ClickHouse: ${CH_DB}"
 
+            # Temporal namespace
+            docker compose exec -T temporal-admin-tools temporal operator namespace create \
+                --namespace "${TEMPORAL_NAMESPACE}" 2>/dev/null \
+                && echo "  Created Temporal namespace: ${TEMPORAL_NAMESPACE}" \
+                || echo "  ✓ Temporal namespace: ${TEMPORAL_NAMESPACE} (already exists)"
+
             echo "✅ Patched .env and created databases for worktree: $ID"
             echo "   PostgreSQL:  $PG_DB  (+ persons, cyclotron, cyclotron_node, behavioral_cohorts, ducklake)"
             echo "   ClickHouse:  $CH_DB"
             echo "   Redis:       DB index $REDIS_IDX"
             echo "   Kafka:       prefix wt_${ID}_"
+            echo "   Temporal:    namespace ${TEMPORAL_NAMESPACE}"
             echo ""
             echo "Next: cd $WORKTREE_PATH && hogli worktree:init"
         description: Patch a worktree's .env with isolated database names and create
@@ -850,6 +860,7 @@ utilities:
             [[ -n "$POSTHOG_DB_NAME" ]] && echo "  - PostgreSQL: $POSTHOG_DB_NAME (+ persons, cyclotron*, behavioral*, ducklake*)"
             [[ -n "${CLICKHOUSE_DATABASE:-}" ]] && echo "  - ClickHouse: $CLICKHOUSE_DATABASE"
             [[ -n "$REDIS_URL" ]] && echo "  - Redis DB index: ${REDIS_URL##*/}"
+            [[ -n "${TEMPORAL_NAMESPACE:-}" ]] && echo "  - Temporal namespace: $TEMPORAL_NAMESPACE"
             echo ""
             read -rp "Drop all worktree databases and remove worktree? [y/N] " REPLY
             [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
@@ -861,7 +872,8 @@ utilities:
                 "${CYCLOTRON_DATABASE_NAME:-}" \
                 "${CYCLOTRON_NODE_DATABASE_NAME:-}" \
                 "${BEHAVIORAL_COHORTS_DATABASE_NAME:-}" \
-                "${DUCKLAKE_RDS_DATABASE:-}"; do
+                "${DUCKLAKE_RDS_DATABASE:-}" \
+                "${DAGSTER_TEST_DB_NAME:-}"; do
                 [[ -n "$DB" ]] && $PG_EXEC -c "DROP DATABASE IF EXISTS \"$DB\";" \
                     && echo "  Dropped $DB"
             done
@@ -875,6 +887,16 @@ utilities:
             if [[ -n "${REDIS_URL:-}" ]]; then
                 redis-cli -n "${REDIS_URL##*/}" FLUSHDB
                 echo "  Cleared Redis DB index: ${REDIS_URL##*/}"
+            fi
+            if [[ -n "${FLAGS_REDIS_URL:-}" ]]; then
+                redis-cli -n "${FLAGS_REDIS_URL##*/}" FLUSHDB
+                echo "  Cleared Redis DB index: ${FLAGS_REDIS_URL##*/} (flags)"
+            fi
+
+            if [[ -n "${TEMPORAL_NAMESPACE:-}" ]]; then
+                docker compose exec -T temporal-admin-tools temporal operator namespace delete \
+                    --namespace "${TEMPORAL_NAMESPACE}" --yes 2>/dev/null \
+                    && echo "  Dropped Temporal namespace: ${TEMPORAL_NAMESPACE}" || true
             fi
 
             echo "Removing git worktree at $WORKTREE_PATH..."
