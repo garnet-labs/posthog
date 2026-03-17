@@ -80,6 +80,7 @@ def export_asset_direct(
     limit: Optional[int] = None,  # For CSV/XLSX: max row count
     max_height_pixels: Optional[int] = None,  # For images: max screenshot height in pixels
     source: Optional[EventSource] = None,  # EventSource value to tag queries with (e.g. "subscription")
+    is_last_attempt: bool = False,
 ) -> None:
     from posthog.tasks.exports import csv_exporter, image_exporter
 
@@ -114,9 +115,16 @@ def export_asset_direct(
 
     try:
         if exported_asset.export_format in (ExportedAsset.ExportFormat.CSV, ExportedAsset.ExportFormat.XLSX):
-            csv_exporter.export_tabular(exported_asset, limit=limit, source=export_source)
+            csv_exporter.export_tabular(
+                exported_asset, limit=limit, source=export_source, is_last_attempt=is_last_attempt
+            )
         else:
-            image_exporter.export_image(exported_asset, max_height_pixels=max_height_pixels, source=export_source)
+            image_exporter.export_image(
+                exported_asset,
+                max_height_pixels=max_height_pixels,
+                source=export_source,
+                is_last_attempt=is_last_attempt,
+            )
 
         EXPORT_SUCCEEDED_COUNTER.labels(type=exported_asset.export_format).inc()
         logger.info(
