@@ -3,7 +3,9 @@ from posthog.test.base import BaseTest, QueryMatchingTest, _create_event, _creat
 
 from django.test import override_settings
 
-from posthog.schema import HogQLQueryModifiers, InCohortVia, InlineCohortCalculation
+from parameterized import parameterized
+
+from posthog.schema import HogQLQueryModifiers, InCohortVia, InlineCohortCalculation, PersonsArgMaxVersion
 
 from posthog.hogql import ast
 from posthog.hogql.errors import QueryError
@@ -200,6 +202,78 @@ class TestInCohort(BaseTest):
                 pretty=False,
             )
         self.assertEqual(str(e.exception), "Could not find a cohort with the name 'blabla'")
+
+    @parameterized.expand(
+        [
+            ("subquery_off", InCohortVia.SUBQUERY, InlineCohortCalculation.OFF, 1),
+            ("subquery_always", InCohortVia.SUBQUERY, InlineCohortCalculation.ALWAYS, 1),
+            ("leftjoin_off", InCohortVia.LEFTJOIN, InlineCohortCalculation.OFF, 1),
+            ("leftjoin_always", InCohortVia.LEFTJOIN, InlineCohortCalculation.ALWAYS, 1),
+            ("conjoined_off", InCohortVia.LEFTJOIN_CONJOINED, InlineCohortCalculation.OFF, 1),
+            ("conjoined_always", InCohortVia.LEFTJOIN_CONJOINED, InlineCohortCalculation.ALWAYS, 1),
+        ]
+    )
+    @override_settings(PERSON_ON_EVENTS_OVERRIDE=True, PERSON_ON_EVENTS_V2_OVERRIDE=False)
+    def test_inline_cohort_limit_not_pushed_to_inner_query(self, _name, cohort_via, inline_mode, expected_count):
+        random_uuid = f"RANDOM_TEST_ID::{UUIDT()}"
+        cohort_prop_value = f"cohort_match_{random_uuid}"
+        # Create the cohort member FIRST (oldest created_at)
+        cohort_distinct_id = f"cohort_member_{random_uuid}"
+        _create_person(
+            properties={"email": "cohort_member@example.com", "cohort_marker": cohort_prop_value},
+            team=self.team,
+            distinct_ids=[cohort_distinct_id],
+            is_identified=True,
+        )
+        # Create many non-matching persons AFTER (newer created_at).
+        for i in range(10):
+            distinct_id = f"non_cohort_{i}_{random_uuid}"
+            _create_person(
+                properties={"email": f"user{i}@example.com", "cohort_marker": "no_match"},
+                team=self.team,
+                distinct_ids=[distinct_id],
+                is_identified=True,
+            )
+        sync_execute("OPTIMIZE TABLE person FINAL")
+        cohort = Cohort.objects.create(
+            team=self.team,
+            groups=[{"properties": [{"key": "cohort_marker", "value": cohort_prop_value, "type": "person"}]}],
+        )
+        recalculate_cohortpeople(cohort, pending_version=0, initiating_user_id=None)
+        # The V2 argmax persons optimization pushes LIMIT into the inner
+        # subquery when WhereClauseExtractor can't extract the WHERE clause.
+        # This is correct for simple queries, but breaks when a cohort filter
+        # is applied outside the inner subquery — the LIMIT restricts persons
+        # before the cohort filter runs, causing valid cohort members to be
+        # missed.
+        #
+        # The bug triggers when cohort resolution produces a WHERE clause that
+        # the extractor can't handle:
+        #
+        # - SUBQUERY + OFF: cohort() returns a simple cohortpeople subquery
+        #   with no lazy table references — extractor handles it fine. PASSES.
+        # - SUBQUERY + ALWAYS: cohort() returns an inline persons query that
+        #   references the `persons` lazy table — extractor produces tombstones
+        #   and returns None — limit pushed down. FAILS.
+        # - LEFTJOIN: cohorts resolve AFTER lazy tables, so the extractor
+        #   always sees the raw `id IN COHORT X` expression. PASSES.
+        # - LEFTJOIN_CONJOINED: cohorts resolve BEFORE lazy tables, so the
+        #   extractor sees `__in_cohort.matched = 1` (a join reference it
+        #   can't extract) — limit pushed down. FAILS.
+        response = execute_hogql_query(
+            f"SELECT id, properties.email FROM persons WHERE id IN COHORT {cohort.pk} ORDER BY created_at DESC LIMIT 3",
+            self.team,
+            modifiers=HogQLQueryModifiers(
+                inCohortVia=cohort_via,
+                inlineCohortCalculation=inline_mode,
+                personsArgMaxVersion=PersonsArgMaxVersion.V2,
+            ),
+            pretty=False,
+        )
+        assert len(response.results or []) == expected_count, (
+            f"Expected {expected_count} cohort member(s) but got {len(response.results or [])}. "
+            f"The inner LIMIT is likely filtering out the cohort member before the cohort filter runs."
+        )
 
 
 class TestInlineCohortLeftjoin(QueryMatchingTest, BaseTest):
