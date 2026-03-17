@@ -276,6 +276,25 @@ class AlertSerializer(serializers.ModelSerializer):
         )
         return instance
 
+    def validate_detector_config(self, value):
+        if value is None:
+            return value
+
+        import pydantic
+
+        try:
+            validated = DetectorConfig.model_validate(value)
+        except pydantic.ValidationError as e:
+            raise ValidationError(f"Invalid detector config: {e}")
+
+        # Ensemble requires at least 2 sub-detectors
+        root = validated.root if hasattr(validated, "root") else validated
+        if getattr(root, "type", None) == "ensemble":
+            if len(root.detectors) < 2:
+                raise ValidationError("Ensemble detector requires at least 2 sub-detectors.")
+
+        return value
+
     def validate_snoozed_until(self, value):
         if value is not None and not isinstance(value, str):
             raise ValidationError("snoozed_until has to be passed in string format")

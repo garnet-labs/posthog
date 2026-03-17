@@ -40,9 +40,9 @@ class ThresholdDetector(BaseDetector):
 
         return DetectionResult(
             is_anomaly=is_anomaly,
-            score=float(value),
+            score=1.0 if is_anomaly else 0.0,
             triggered_indices=[len(data) - 1] if is_anomaly else [],
-            all_scores=[float(value)],
+            all_scores=[1.0 if is_anomaly else 0.0],
             metadata={"lower_bound": lower, "upper_bound": upper, "value": float(value)},
         )
 
@@ -69,7 +69,7 @@ class ThresholdDetector(BaseDetector):
             if upper is not None and val > upper:
                 is_breach = True
 
-            scores.append(float(val))
+            scores.append(1.0 if is_breach else 0.0)
             if is_breach:
                 triggered.append(i)
 
