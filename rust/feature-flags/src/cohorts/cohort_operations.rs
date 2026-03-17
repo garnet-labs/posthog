@@ -199,8 +199,6 @@ impl InnerCohortProperty {
         target_properties: &HashMap<String, Value>,
         cohort_matches: &HashMap<CohortId, bool>,
     ) -> Result<bool, FlagError> {
-                 self.prop_type, self.values.len());
-        
         match self.prop_type {
             CohortPropertyType::OR => {
                 for (i, cohort_values) in self.values.iter().enumerate() {
@@ -231,12 +229,9 @@ fn evaluate_cohort_values(
     target_properties: &HashMap<String, Value>,
     cohort_matches: &HashMap<CohortId, bool>,
 ) -> Result<bool, FlagError> {
-             values.prop_type, values.values.len());
-    
     match values.prop_type.as_str() {
         "OR" => {
             for (i, filter) in values.values.iter().enumerate() {
-                         i, filter.key, filter.is_cohort());
                 if filter.is_cohort() {
                     // Handle cohort membership check
                     if apply_cohort_membership_logic(std::slice::from_ref(filter), cohort_matches)?
@@ -245,8 +240,8 @@ fn evaluate_cohort_values(
                     }
                 } else {
                     // Handle regular property check with negation
-                    let property_result = evaluate_property_with_negation(filter, target_properties);
-                             i, property_result);
+                    let property_result =
+                        evaluate_property_with_negation(filter, target_properties);
                     if property_result {
                         return Ok(true);
                     }
@@ -256,7 +251,6 @@ fn evaluate_cohort_values(
         }
         "AND" | "property" => {
             for (i, filter) in values.values.iter().enumerate() {
-                         i, filter.key, filter.is_cohort());
                 if filter.is_cohort() {
                     // Handle cohort membership check with negation
                     let cohort_result = apply_cohort_membership_logic(
@@ -269,8 +263,8 @@ fn evaluate_cohort_values(
                     }
                 } else {
                     // Handle regular property check with negation
-                    let property_result = evaluate_property_with_negation(filter, target_properties);
-                             i, property_result);
+                    let property_result =
+                        evaluate_property_with_negation(filter, target_properties);
                     if !property_result {
                         return Ok(false);
                     }
@@ -278,9 +272,7 @@ fn evaluate_cohort_values(
             }
             Ok(true)
         }
-        _ => {
-            Err(FlagError::CohortFiltersParsingError)
-        }
+        _ => Err(FlagError::CohortFiltersParsingError),
     }
 }
 
@@ -292,10 +284,8 @@ fn evaluate_property_with_negation(
     filter: &PropertyFilter,
     target_properties: &HashMap<String, Value>,
 ) -> bool {
-             filter.key, filter.operator, filter.value, filter.negation);
-    
     let property_value = target_properties.get(&filter.key);
-    
+
     let property_result = match_property(filter, target_properties, false).unwrap_or(false);
 
     // Apply negation if specified
@@ -304,7 +294,7 @@ fn evaluate_property_with_negation(
     } else {
         property_result
     };
-    
+
     final_result
 }
 
@@ -315,13 +305,9 @@ fn evaluate_single_cohort(
     target_properties: &HashMap<String, Value>,
     evaluation_results: &HashMap<CohortId, bool>,
 ) -> Result<bool, FlagError> {
-             cohort.id, cohort.name.as_deref().unwrap_or("unnamed"));
-    
     // Get the filters for this cohort
     let filters = match &cohort.filters {
-        Some(filters) => {
-            filters
-        },
+        Some(filters) => filters,
         None => {
             return Ok(false);
         }
@@ -329,9 +315,7 @@ fn evaluate_single_cohort(
 
     // Parse and evaluate using the hierarchical structure
     let cohort_property: CohortProperty = match serde_json::from_value(filters.clone()) {
-        Ok(prop) => {
-            prop
-        },
+        Ok(prop) => prop,
         Err(e) => {
             return Ok(false);
         }
@@ -341,7 +325,7 @@ fn evaluate_single_cohort(
     let result = cohort_property
         .properties
         .evaluate(target_properties, evaluation_results)?;
-    
+
     Ok(result)
 }
 
@@ -351,7 +335,6 @@ pub fn evaluate_dynamic_cohorts(
     cohorts: &[Cohort],
     static_cohort_matches: &HashMap<CohortId, bool>,
 ) -> Result<bool, FlagError> {
-    
     // First check if this is a static cohort
     let initial_cohort = cohorts
         .iter()
@@ -360,8 +343,6 @@ pub fn evaluate_dynamic_cohorts(
             FlagError::DependencyNotFound(DependencyType::Cohort, initial_cohort_id.into())
         })?
         .clone();
-
-             initial_cohort.name.as_deref().unwrap_or("unnamed"), initial_cohort.is_static);
 
     // If it's static, we don't need to evaluate dependencies
     if initial_cohort.is_static {
@@ -373,21 +354,17 @@ pub fn evaluate_dynamic_cohorts(
 
     // Use for_each_dependencies_first to evaluate each cohort in the correct order
     let results = graph.for_each_dependencies_first(|cohort, results, result| {
-                 cohort.id, cohort.is_static);
-        
         // If this is a static cohort dependency, use the cached result
         if cohort.is_static {
             let cached_result = static_cohort_matches
                 .get(&cohort.id)
                 .copied()
                 .unwrap_or(false);
-                     cohort.id, cached_result);
             *result = cached_result;
             return Ok(());
         }
 
         let evaluation_result = evaluate_single_cohort(cohort, target_properties, results)?;
-                 cohort.id, evaluation_result);
         *result = evaluation_result;
         Ok(())
     })?;
@@ -396,8 +373,7 @@ pub fn evaluate_dynamic_cohorts(
     let final_result = results.get(&initial_cohort_id).copied().ok_or_else(|| {
         FlagError::DependencyNotFound(DependencyType::Cohort, initial_cohort_id.into())
     })?;
-    
-             initial_cohort_id, final_result);
+
     Ok(final_result)
 }
 

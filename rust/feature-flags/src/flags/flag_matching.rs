@@ -634,7 +634,6 @@ impl FeatureFlagMatcher {
         target_properties: &HashMap<String, Value>,
         cohorts: Vec<Cohort>,
     ) -> Result<bool, FlagError> {
-
         // Track cohort evaluations in canonical log
         with_canonical_log(|log| log.eval.cohorts_evaluated += cohort_property_filters.len());
 
@@ -644,7 +643,6 @@ impl FeatureFlagMatcher {
             None => HashMap::new(), // Happens when targeting an anonymous user with no person record
         };
 
-
         let mut cohort_matches = cached_matches;
 
         // For any cohorts not yet evaluated (i.e., dynamic ones), evaluate them
@@ -652,7 +650,6 @@ impl FeatureFlagMatcher {
             let cohort_id = filter
                 .get_cohort_id()
                 .ok_or(FlagError::CohortFiltersParsingError)?;
-
 
             if !cohort_matches.contains_key(&cohort_id) {
                 let current_matches = cohort_matches.clone();
@@ -1228,15 +1225,13 @@ impl FeatureFlagMatcher {
         hash_key_overrides: Option<&HashMap<String, String>>,
         request_hash_key_override: &Option<String>,
     ) -> Result<FeatureFlagMatch, FlagError> {
-        
         // Check if this is a group-based flag with missing group
         let hashed_id =
             self.hashed_identifier(flag, hash_key_overrides, request_hash_key_override)?;
-        
+
         if flag.get_group_type_index().is_some() && hashed_id.is_empty() {
             // This is a group-based flag but we don't have the group key
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
             return Ok(FeatureFlagMatch {
                 matches: false,
                 variant: None,
@@ -1290,8 +1285,7 @@ impl FeatureFlagMatcher {
         // group-based flags. This is because early access enrollment is a person-level concept.
         // The API validates that group-based flags cannot have early access features attached.
         if let Some(super_groups) = &flag.filters.super_groups {
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
             if let Some(super_condition) = super_groups.first() {
                 // Only fetch person properties if the super condition has property filters
                 // Super conditions are used for feature enrollment (aka early access features)
@@ -1301,8 +1295,7 @@ impl FeatureFlagMatcher {
                     .as_ref()
                     .is_some_and(|p| !p.is_empty())
                 {
-                    if is_debug_flag {
-                    }
+                    if is_debug_flag {}
                     let person_properties = self.get_person_properties(property_overrides)?;
                     let super_condition_evaluation = self.is_super_condition_match(
                         flag,
@@ -1312,8 +1305,7 @@ impl FeatureFlagMatcher {
                     )?;
 
                     if super_condition_evaluation.should_evaluate {
-                        if is_debug_flag {
-                        }
+                        if is_debug_flag {}
                         let payload = self.get_matching_payload(None, flag);
                         return Ok(FeatureFlagMatch {
                             matches: super_condition_evaluation.is_match,
@@ -1325,8 +1317,7 @@ impl FeatureFlagMatcher {
                     }
                     // if no match, continue to normal conditions
                 } else {
-                    if is_debug_flag {
-                    }
+                    if is_debug_flag {}
                 }
             }
         }
@@ -1358,14 +1349,12 @@ impl FeatureFlagMatcher {
         let conditions: Vec<(usize, &FlagPropertyGroup)> =
             flag.get_conditions().iter().enumerate().collect();
 
-        if is_debug_flag {
-        }
+        if is_debug_flag {}
 
         let condition_timer = common_metrics::timing_guard(FLAG_EVALUATE_ALL_CONDITIONS_TIME, &[]);
         for (index, condition) in conditions {
-            if is_debug_flag {
-            }
-            
+            if is_debug_flag {}
+
             // Lazily compute properties only when a condition actually needs them.
             // A condition needs properties if it has non-empty property filters that aren't
             // purely flag-value filters (which don't require person/group properties).
@@ -1390,8 +1379,7 @@ impl FeatureFlagMatcher {
                 request_hash_key_override,
             )?;
 
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
 
             // Update highest_match and highest_index
             let (new_highest_match, new_highest_index) = self
@@ -1432,8 +1420,7 @@ impl FeatureFlagMatcher {
                 };
                 let payload = self.get_matching_payload(variant.as_deref(), flag);
 
-                if is_debug_flag {
-                }
+                if is_debug_flag {}
                 return Ok(FeatureFlagMatch {
                     matches: true,
                     variant,
@@ -1446,8 +1433,7 @@ impl FeatureFlagMatcher {
 
         condition_timer.label("outcome", "success").fin();
         // Return with the highest_match reason and index even if no conditions matched
-        if is_debug_flag {
-        }
+        if is_debug_flag {}
         Ok(FeatureFlagMatch {
             matches: false,
             variant: None,
@@ -1495,15 +1481,12 @@ impl FeatureFlagMatcher {
     ) -> Result<(bool, FeatureFlagMatchReason), FlagError> {
         let is_debug_flag = feature_flag.key == "real-users";
         let rollout_percentage = condition.rollout_percentage.unwrap_or(100.0);
-        if is_debug_flag {
-        }
+        if is_debug_flag {}
 
         if let Some(flag_property_filters) = &condition.properties {
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
             if flag_property_filters.is_empty() {
-                if is_debug_flag {
-                }
+                if is_debug_flag {}
                 return self.check_rollout(
                     feature_flag,
                     rollout_percentage,
@@ -1519,8 +1502,7 @@ impl FeatureFlagMatcher {
                     .cloned()
                     .partition(|prop| prop.depends_on_feature_flag());
 
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
 
             if !flag_value_filters.is_empty()
                 && !all_flag_condition_properties_match(
@@ -1528,8 +1510,7 @@ impl FeatureFlagMatcher {
                     &self.flag_evaluation_state.flag_evaluation_results,
                 )
             {
-                if is_debug_flag {
-                }
+                if is_debug_flag {}
                 return Ok((false, FeatureFlagMatchReason::NoConditionMatch));
             }
 
@@ -1540,13 +1521,11 @@ impl FeatureFlagMatcher {
                     .cloned()
                     .partition(|prop| prop.is_cohort());
 
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
 
             // Evaluate non-cohort filters first, since they're cheaper to evaluate and we can return early if they don't match
             if !all_properties_match(&non_cohort_filters, merged_properties) {
-                if is_debug_flag {
-                }
+                if is_debug_flag {}
                 return Ok((false, FeatureFlagMatchReason::NoConditionMatch));
             }
 
@@ -1555,33 +1534,27 @@ impl FeatureFlagMatcher {
                 let cohorts = match &self.flag_evaluation_state.cohorts {
                     Some(cohorts) => cohorts.clone(),
                     None => {
-                        if is_debug_flag {
-                        }
+                        if is_debug_flag {}
                         return Ok((false, FeatureFlagMatchReason::NoConditionMatch));
                     }
                 };
                 if is_debug_flag {
                     for filter in &cohort_filters {
-                        if let Some(cohort_id) = filter.get_cohort_id() {
-                        }
+                        if let Some(cohort_id) = filter.get_cohort_id() {}
                     }
                 }
                 if !self.evaluate_cohort_filters(&cohort_filters, merged_properties, cohorts)? {
-                    if is_debug_flag {
-                    }
+                    if is_debug_flag {}
                     return Ok((false, FeatureFlagMatchReason::NoConditionMatch));
                 } else {
-                    if is_debug_flag {
-                    }
+                    if is_debug_flag {}
                 }
             }
         } else {
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
         }
 
-        if is_debug_flag {
-        }
+        if is_debug_flag {}
         self.check_rollout(
             feature_flag,
             rollout_percentage,
@@ -1891,12 +1864,10 @@ impl FeatureFlagMatcher {
         request_hash_key_override: &Option<String>,
     ) -> Result<(bool, FeatureFlagMatchReason), FlagError> {
         let is_debug_flag = feature_flag.key == "real-users";
-        if is_debug_flag {
-        }
-        
+        if is_debug_flag {}
+
         if rollout_percentage == 100.0 {
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
             return Ok((true, FeatureFlagMatchReason::ConditionMatch));
         }
         let hash = self.get_hash(
@@ -1906,16 +1877,13 @@ impl FeatureFlagMatcher {
             request_hash_key_override,
         )?;
         let threshold = rollout_percentage / 100.0;
-        if is_debug_flag {
-        }
-        
+        if is_debug_flag {}
+
         if hash <= threshold {
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
             Ok((true, FeatureFlagMatchReason::ConditionMatch))
         } else {
-            if is_debug_flag {
-            }
+            if is_debug_flag {}
             Ok((false, FeatureFlagMatchReason::OutOfRolloutBound))
         }
     }
@@ -1979,13 +1947,9 @@ impl FeatureFlagMatcher {
         // (a cohort with is_static=true should never have CohortType::Realtime/Behavioral).
         let static_cohort_ids: Vec<CohortId> = cohorts
             .iter()
-            .filter(|c| {
-                         c.id, c.name.as_deref().unwrap_or("unnamed"), c.is_static, c.cohort_type, c.uses_realtime_membership());
-                c.is_static
-            })
+            .filter(|c| c.is_static)
             .map(|c| c.id)
             .collect();
-            
 
         // Then prepare group mappings and properties
         // This should be _wicked_ fast since it's async and is just pulling from a cache that's already in memory
@@ -2027,9 +1991,7 @@ impl FeatureFlagMatcher {
                 .iter()
                 .filter(|c| {
                     let uses_realtime = c.uses_realtime_membership();
-                    if uses_realtime {
-                                 c.id, c.name.as_deref().unwrap_or("unnamed"), c.cohort_type);
-                    }
+                    if uses_realtime {}
                     uses_realtime
                 })
                 .map(|c| c.id)
@@ -2037,7 +1999,6 @@ impl FeatureFlagMatcher {
         } else {
             Vec::new()
         };
-            
 
         if !realtime_cohort_ids.is_empty() {
             with_canonical_log(|log| {
