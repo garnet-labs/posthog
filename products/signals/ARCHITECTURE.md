@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Signals** product is a signal clustering and summarization pipeline. Signals from various PostHog products (experiments, web analytics, error tracking, session replay) get grouped into **SignalReports** via embedding similarity + LLM matching. When a group accumulates enough weight, a summary workflow summarizes the group, runs safety and actionability judges, and either marks the report as ready for a coding agent, defers to a human, or rejects it.
+The **Signals** product is a signal clustering and summarization pipeline. Signals from various PostHog products (experiments, web analytics, error tracking, session replay) get grouped into **SignalReports** via embedding similarity + LLM matching. When a group accumulates enough weight, a summary workflow either runs the legacy summarize + judge flow or, behind a feature flag, runs safety first and then agentic report research before deciding whether the report is ready for a coding agent, deferred to a human, or rejected.
 
 ---
 
@@ -120,26 +120,29 @@ Steps 1-4 run in parallel across all signals in the batch. Steps 5-7 run sequent
 
 ### `SignalReportSummaryWorkflow` (`signal-report-summary`)
 
-Runs when a report is promoted to `candidate` status. Summarizes the signal group, then runs judges to determine the report's fate.
+Runs when a report is promoted to `candidate` status. Uses either the legacy summarize + judge flow or the feature-flagged safety-first agentic research flow to determine the report's fate.
 
 **Flow:**
 
 1. **Fetch signals** for the report from ClickHouse → `fetch_signals_for_report_activity` (no hard limit — fetches all signals for the report)
 2. **Mark in-progress** in Postgres and advance `signals_at_run` by `SIGNALS_AT_RUN_INCREMENT` (3), so the report must accumulate that many new signals before it can be promoted and re-summarised again → `mark_report_in_progress_activity`
-3. **Summarize** signals into a title + summary via LLM → `summarize_signals_activity` (`summarize_signals.py`)
-4. **Safety judge** + **Actionability judge** — run **concurrently** via `asyncio.gather`:
-   - **Safety judge** → `safety_judge_activity` (`safety_judge.py`) — assess for prompt injection / manipulation
-   - **Actionability judge** → `actionability_judge_activity` (`actionability_judge.py`) — assess whether actionable by a coding agent
-5. **Evaluate results** (safety checked first):
+3. **Choose flow** via feature flag:
+   - **Default path**:
+     - summarize signals into a title + summary via LLM → `summarize_signals_activity` (`summarize_signals.py`)
+     - run **Safety judge** + **Actionability judge** concurrently via `asyncio.gather`
+   - **Feature-flagged path**:
+     - run **Safety judge** first on raw signals → `safety_judge_activity` (`safety_judge.py`)
+     - if safe, run sandbox-backed agentic research → `run_agentic_report_activity` (`temporal/agentic_report.py`)
+4. **Evaluate results** (safety checked first in both paths):
    - If **unsafe** → `mark_report_failed_activity` with error, **stop**
    - If **not actionable** → `reset_report_to_potential_activity` (weight → 0, status → `potential`), **stop**
    - If **requires human input** → `mark_report_pending_input_activity` (status → `pending_input`, stores draft title/summary), **stop**
    - If **immediately actionable** → continue
-6. **Mark ready** with the generated title and summary → `mark_report_ready_activity`
+5. **Mark ready** with the generated title and summary → `mark_report_ready_activity`
 
 On any unhandled exception, the workflow catches and calls `mark_report_failed_activity`.
 
-The grouping workflow uses a 1-hour `run_timeout` (resets on each `continue_as_new`). The summary workflow uses a 30-minute `execution_timeout`. Both use 3-attempt retry policies on individual activities.
+The grouping workflow uses a 1-hour `run_timeout` (resets on each `continue_as_new`). The summary workflow uses a 5-hour `execution_timeout` to allow the feature-flagged agentic path to finish. Most activities use 3-attempt retry policies; the sandbox-backed agentic report activity uses a single attempt to avoid spawning duplicate research tasks automatically.
 
 ### `SignalReportReingestionWorkflow` (`signal-report-reingestion`)
 
@@ -230,11 +233,13 @@ Binary artefacts attached to reports. Used for video segments and judge results.
 
 **Artefact types** (`SignalReportArtefact.ArtefactType` enum):
 
-| Type                     | Content                                                                                                    |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `video_segment`          | Video segment data from session clustering                                                                 |
-| `safety_judgment`        | `{"choice": bool, "explanation": "..."}` — true = safe                                                     |
-| `actionability_judgment` | `{"choice": "immediately_actionable" \| "requires_human_input" \| "not_actionable", "explanation": "..."}` |
+| Type                     | Content                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `video_segment`          | Video segment data from session clustering                                                                                                                                            |
+| `safety_judgment`        | `{"choice": bool, "explanation": "..."}` — true = safe                                                                                                                                |
+| `actionability_judgment` | `{"choice": "immediately_actionable" \| "requires_human_input" \| "not_actionable", "explanation": "...", "already_addressed": bool, "priority": "P0"\|"P1"\|"P2"\|"P3"\|"P4"\|null}` |
+| `priority_judgment`      | `{"priority": "P0"\|"P1"\|"P2"\|"P3"\|"P4", "explanation": "..."}`                                                                                                                    |
+| `signal_finding`         | `{"signal_id": "...", "relevant_code_paths": [...], "data_queried": "...", "verified": bool}`                                                                                         |
 
 **Indexes:** `(report)` (`signals_sig_report__idx`)
 

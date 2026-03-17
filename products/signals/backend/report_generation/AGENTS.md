@@ -1,7 +1,9 @@
 # Signals Report Generation
 
 This directory contains the new agentic report-research flow for Signals.
-It is currently used for isolated local testing, not the production Temporal summary flow.
+It is exercised locally via management commands, and it is also used by the production
+Temporal summary flow behind a feature flag. In production, the summary workflow runs
+the safety judge first, then calls into this flow via a Temporal activity if the report is safe.
 
 ## What lives here
 
@@ -34,6 +36,8 @@ It is currently used for isolated local testing, not the production Temporal sum
 
 This flow is intentionally prompt-orchestration only right now.
 Do not assume DB persistence or production artefact storage exists here unless you add it explicitly.
+Production persistence is handled outside `run_multi_turn_research()`, in the caller activity,
+so this module stays isolated from report DB writes.
 
 ## Local debug commands
 
@@ -76,6 +80,8 @@ Use it to inspect long `analyze_report --verbose` runs without reading raw JSONL
   actionability/priority explain what to do and how urgent it is.
 - If you change the output shape of `ReportResearchOutput`,
   update `fixtures/analyze_report_funnel_research_output.json` too.
+- Keep persistence out of `run_multi_turn_research()`.
+  If production needs new report artefacts or state transitions, do that in the caller activity/workflow.
 - If you change how local debug commands exercise this flow,
   update this file and `../management/AGENTS.md`.
 - **If you change any command or the flow, update this file to match**

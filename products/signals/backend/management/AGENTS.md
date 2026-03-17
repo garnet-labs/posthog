@@ -31,7 +31,8 @@ python manage.py list_signal_reports --team-id 1 --signals --json
 3. `SignalReport` rows are created/updated in Postgres
 4. Signal embeddings land in ClickHouse `document_embeddings`
 5. When a report's total weight reaches the threshold (default 1.0), a summary workflow runs:
-   summarizes the group, runs safety + actionability judges
+   - default path: summarizes the group, then runs safety + actionability judges
+   - feature-flagged path: runs safety first, then agentic report research
 6. Report reaches a terminal state:
    - `ready` — passed both judges, actionable by a coding agent
    - `pending_input` — needs human judgment before acting
