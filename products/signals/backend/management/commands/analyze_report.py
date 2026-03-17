@@ -1,3 +1,9 @@
+"""DEBUG ONLY: local sandbox utility for manually testing the agentic signals report flow.
+
+This management command is not used in production. It exists only to exercise the
+research and update flows against synthetic inputs and saved fixtures during local development.
+"""
+
 import json
 import asyncio
 import logging
@@ -150,7 +156,7 @@ def load_previous_report_fixture() -> tuple[str, ReportResearchOutput]:
 
 
 class Command(BaseCommand):
-    help = "Test the report research agent in either fresh research or update mode."
+    help = "DEBUG ONLY: local testing utility for the agentic signals report flow. Not used in production."
 
     def _flushing_write(self, msg: str) -> None:
         self.stdout.write(msg)
