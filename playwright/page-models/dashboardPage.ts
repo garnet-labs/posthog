@@ -200,18 +200,8 @@ export class DashboardPage {
         const card = this.insightCards.filter({
             has: this.page.locator('[data-attr="insight-card-title"]', { hasText: title }),
         })
-        await expect(card.first()).toBeVisible({ timeout: 60000 })
+        await expect(card.first()).toBeVisible({ timeout: 30000 })
         return card.first()
-    }
-
-    async waitForInsightCardLoaded(): Promise<void> {
-        // When a card's query is running the component renders
-        // InsightLoadingState instead of CardMeta, so the title element
-        // doesn't exist in the DOM at all. Wait for the title to appear,
-        // which means the query has finished and the full card is rendered.
-        const firstCard = this.insightCards.first()
-        await expect(firstCard).toBeVisible()
-        await expect(firstCard.getByTestId('insight-card-title')).toBeVisible({ timeout: 60000 })
     }
 
     async openFirstTileMenu(): Promise<void> {

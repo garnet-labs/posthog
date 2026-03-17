@@ -105,16 +105,14 @@ test.describe('Dashboards', () => {
         })
 
         await test.step('duplicate the tile', async () => {
-            await dashboard.waitForInsightCardLoaded()
-            // The h4[insight-card-title] contains two children: a span with
-            // the actual title, then a "Loading" tooltip. Read the first span
-            // to get the clean title text without the loading indicator.
-            const title = await dashboard.insightCards
-                .first()
-                .getByTestId('insight-card-title')
-                .locator('span')
-                .first()
-                .textContent()
+            const titleLocator = dashboard.insightCards.first().getByTestId('insight-card-title')
+            await expect(titleLocator).toBeVisible()
+            // The title element may include a "Loading" child — strip it.
+            const rawTitle = await titleLocator.textContent()
+            const title = rawTitle
+                ?.replace(/Loading$/, '')
+                .replace(/Waiting to load$/, '')
+                .trim()
             await dashboard.openFirstTileMenu()
             await dashboard.selectTileMenuOption('Duplicate')
 
@@ -124,7 +122,6 @@ test.describe('Dashboards', () => {
         })
 
         await test.step('rename the first tile', async () => {
-            await dashboard.waitForInsightCardLoaded()
             await dashboard.openFirstTileMenu()
             await dashboard.selectTileMenuOption('Rename')
 
@@ -136,7 +133,6 @@ test.describe('Dashboards', () => {
         })
 
         await test.step('remove the first tile', async () => {
-            await dashboard.waitForInsightCardLoaded()
             await dashboard.openFirstTileMenu()
             await dashboard.selectTileMenuOption('Remove from dashboard')
 
@@ -235,7 +231,6 @@ test.describe('Dashboards', () => {
         })
 
         await test.step('open the insight from the dashboard', async () => {
-            await dashboard.waitForInsightCardLoaded()
             await dashboard.openFirstTileMenu()
             await dashboard.selectTileMenuOption('Edit')
             await expect(page).toHaveURL(/edit/)
