@@ -812,6 +812,6 @@ def _backfill_experiment_metric_sync(recalculation_id: str) -> dict[str, Any]:
 
 
 @temporalio.activity.defn
-async def backfill_experiment_metric(recalculation_id: str) -> dict[str, Any]:
+def backfill_experiment_metric(recalculation_id: str) -> dict[str, Any]:
     """Backfill timeseries data for an experiment recalculation request."""
-    return await database_sync_to_async(_backfill_experiment_metric_sync)(recalculation_id)
+    return _backfill_experiment_metric_sync(recalculation_id)
