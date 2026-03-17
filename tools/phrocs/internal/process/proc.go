@@ -106,16 +106,19 @@ type Process struct {
 	Name string
 	Cfg  config.ProcConfig
 
-	mu           sync.Mutex
-	maxLines     int
-	status       Status
-	vterm        *vt.Emulator
-	vtermW       int // last known width
-	vtermH       int // last known height
-	cmd          *exec.Cmd
-	ptmx         *os.File // pty master; nil when using pipes
-	readyPattern *regexp.Regexp
-	ready        bool // whether we've seen the ready pattern (or no pattern is set)
+	mu            sync.Mutex
+	maxLines      int
+	status        Status
+	lines         []string
+	cmd           *exec.Cmd
+	ptmx          *os.File // pty master; nil when using pipes
+	readyPattern  *regexp.Regexp
+	ready         bool // whether we've seen the ready pattern (or no pattern is set)
+	stopRequested bool // set by Stop() to catch races with in-flight Start()
+
+	vterm  *vt.Emulator
+	vtermW int // last known width
+	vtermH int // last known height
 
 	startedAt time.Time
 	readyAt   time.Time
@@ -267,6 +270,7 @@ func (p *Process) Start(send func(tea.Msg)) error {
 	p.exitCode = nil
 	p.startedAt = time.Now()
 	p.readyAt = time.Time{}
+	p.stopRequested = false
 	// Reset ready flag when restarting
 	p.ready = p.readyPattern == nil
 	p.mu.Unlock()
@@ -278,6 +282,9 @@ func (p *Process) Start(send func(tea.Msg)) error {
 
 	cmd := exec.Command("bash", "-c", p.Cfg.Shell)
 	cmd.Env = env
+	// Give child its own process group so Stop() can kill the entire tree,
+	// preventing zombie tsx/node/vite processes when phrocs exits.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -287,6 +294,20 @@ func (p *Process) Start(send func(tea.Msg)) error {
 	p.mu.Lock()
 	p.cmd = cmd
 	p.ptmx = ptmx
+
+	// Stop() was called while pty.Start was in progress — kill immediately
+	if p.stopRequested {
+		p.killProcessGroup()
+		if p.ptmx != nil {
+			_ = p.ptmx.Close()
+			p.ptmx = nil
+		}
+		p.status = StatusStopped
+		p.mu.Unlock()
+		send(StatusMsg{Name: p.Name, Status: StatusStopped})
+		return nil
+	}
+
 	// Only set to running if proc has no ready pattern
 	if p.readyPattern == nil {
 		p.status = StatusRunning
@@ -484,13 +505,25 @@ func collectProcessTree(ps *gops.Process) []*gops.Process {
 	return all
 }
 
-// Sends SIGTERM to the process and marks it as stopped
+// killProcessGroup sends SIGTERM to the process group. Must be called with
+// p.mu held. Falls back to signaling the direct child if the group kill fails.
+func (p *Process) killProcessGroup() {
+	if p.cmd != nil && p.cmd.Process != nil {
+		pgid := p.cmd.Process.Pid
+		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+			_ = p.cmd.Process.Signal(syscall.SIGTERM)
+		}
+	}
+}
+
+// Sends SIGTERM to the process group and marks it as stopped.
+// Killing the process group (negative PID) ensures all descendants
+// (bash → tsx watch → node, etc.) are terminated, not just the shell.
 func (p *Process) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Signal(syscall.SIGTERM)
-	}
+	p.stopRequested = true
+	p.killProcessGroup()
 	if p.ptmx != nil {
 		_ = p.ptmx.Close()
 		p.ptmx = nil
