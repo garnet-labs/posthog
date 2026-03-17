@@ -68,7 +68,6 @@ export const CyclotronJobInputSchemaTypeSchema = z.object({
         'integration_field',
         'email',
         'native_email',
-        'push_subscription',
         'posthog_assignee',
         'posthog_ticket_tags',
     ]),
