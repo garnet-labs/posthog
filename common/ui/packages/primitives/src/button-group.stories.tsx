@@ -25,6 +25,13 @@ export const Default: Story = {
             </ButtonGroup>
             <ButtonGroupSeparator />
             <ButtonGroup>
+                <Button variant="outline">Button 1</Button>
+            </ButtonGroup>
+            <ButtonGroup>
+                <ButtonGroupText>Some text</ButtonGroupText>
+            </ButtonGroup>
+            <ButtonGroupSeparator />
+            <ButtonGroup>
                 <ButtonGroupText>Some text</ButtonGroupText>
             </ButtonGroup>
         </ButtonGroup>
