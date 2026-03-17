@@ -142,7 +142,7 @@ from posthog.errors import clickhouse_error_type, wrap_clickhouse_query_error
         ),
         (
             ServerException(
-                "Code: 36. DB::Exception: Received from prod-sessions:9440. DB::Exception: Dictionary (posthog.channel_definition_dict) not found:",
+                "Code: 36. DB::Exception: Received from prod-sessions. DB::Exception: Dictionary (posthog.channel_definition_dict) not found:",
                 code=36,
             ),
             "CHQueryErrorBadArguments",
