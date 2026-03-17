@@ -53,7 +53,7 @@ export const Nested: Story = {
                 <p>Dialog body content goes here.</p>
                 <Dialog>
                     <DialogTrigger render={<Button variant="outline" />}>Open nested dialog</DialogTrigger>
-                    <DialogContent nested>
+                    <DialogContent>
                         <DialogHeader>
                             <DialogTitle>Dialog title</DialogTitle>
                             <DialogDescription>This is a description of the dialog content.</DialogDescription>

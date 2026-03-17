@@ -7,6 +7,7 @@ import * as React from 'react'
 import { Button } from './button'
 import { cn } from './lib/utils'
 
+/** Note: if you're nesting dialogs, in order for you to click the overlay to close it, you must pass 'mounted: true' to the nested dialog*/
 function Dialog({ ...props }: DialogPrimitive.Root.Props): React.ReactElement {
     return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
@@ -28,7 +29,7 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props):
         <DialogPrimitive.Backdrop
             data-slot="dialog-overlay"
             className={cn(
-                'fixed inset-0 isolate z-50 min-h-dvh bg-black/20 transition-all duration-150 supports-backdrop-filter:backdrop-blur-xs data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
+                'fixed inset-0 min-h-dvh bg-black opacity-20 transition-all duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 dark:opacity-70 supports-[-webkit-touch-callout:none]:absolute',
                 className
             )}
             {...props}
@@ -48,7 +49,7 @@ function DialogContent({
 }): React.ReactElement {
     return (
         <DialogPortal>
-            {!nested && <DialogOverlay />}
+            <DialogOverlay />
             <DialogPrimitive.Popup
                 data-slot="dialog-content"
                 className={cn(
