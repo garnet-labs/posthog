@@ -2,7 +2,6 @@ import { actions, connect, events, kea, key, listeners, path, props, reducers, s
 import isEqual from 'lodash.isequal'
 
 import { convertPropertyGroupToProperties } from 'lib/components/PropertyFilters/utils'
-import { getSystemTableDefaults } from 'lib/components/TaxonomicFilter/systemTableDefaults'
 import { defaultDataWarehousePopoverFields } from 'lib/components/TaxonomicFilter/taxonomicFilterLogic'
 import { DataWarehousePopoverField } from 'lib/components/TaxonomicFilter/types'
 import { assignField, uuid } from 'lib/utils'
@@ -274,27 +273,15 @@ export const entityFilterLogic = kea<entityFilterLogicType>([
                                 table_name: resolvedTableName,
                             }
 
-                            // For system tables, auto-populate the required fields from known defaults
-                            const systemDefaults = getSystemTableDefaults(resolvedTableName || '')
-                            if (systemDefaults) {
-                                dataWarehousePopoverFields.forEach(({ key }) => {
-                                    assignField(
-                                        updatedFilter,
-                                        key as keyof typeof updatedFilter,
-                                        systemDefaults[key as keyof typeof systemDefaults]
-                                    )
-                                })
-                            } else {
-                                // For regular warehouse tables, use the user-selected field values
-                                dataWarehousePopoverFields.forEach(({ key }) => {
-                                    const fieldValue = fieldValues[key]
-                                    assignField(
-                                        updatedFilter,
-                                        key as keyof typeof updatedFilter,
-                                        typeof fieldValue === 'undefined' ? filter[key] : fieldValue
-                                    )
-                                })
-                            }
+                            // Use user-selected field values from the popover
+                            dataWarehousePopoverFields.forEach(({ key }) => {
+                                const fieldValue = fieldValues[key]
+                                assignField(
+                                    updatedFilter,
+                                    key as keyof typeof updatedFilter,
+                                    typeof fieldValue === 'undefined' ? filter[key] : fieldValue
+                                )
+                            })
 
                             return updatedFilter
                         }

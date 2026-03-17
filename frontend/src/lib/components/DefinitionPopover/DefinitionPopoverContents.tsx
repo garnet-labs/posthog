@@ -11,6 +11,7 @@ import { DefinitionPopover } from 'lib/components/DefinitionPopover/DefinitionPo
 import { DefinitionPopoverState, definitionPopoverLogic } from 'lib/components/DefinitionPopover/definitionPopoverLogic'
 import { ObjectTags } from 'lib/components/ObjectTags/ObjectTags'
 import { PropertyKeyInfo } from 'lib/components/PropertyKeyInfo'
+import { getSystemTableDefaults } from 'lib/components/TaxonomicFilter/systemTableDefaults'
 import {
     DataWarehousePopoverField,
     DefinitionPopoverRenderer,
@@ -133,12 +134,19 @@ function DefinitionView({ group }: { group: TaxonomicFilterGroup }): JSX.Element
     const { selectedItemMeta, dataWarehousePopoverFields } = useValues(taxonomicFilterLogic)
     const { selectItem } = useActions(taxonomicFilterLogic)
 
-    // Pre-populate field mappings from the insight filter.
-    // Only apply to data warehouse - for events/properties, selectedItemMeta.id is the
+    // Pre-populate field mappings from the insight filter or system table defaults.
+    // Only apply to data warehouse / system tables - for events/properties, selectedItemMeta.id is the
     // event name which would incorrectly overwrite the event definition's UUID.
     useEffect(() => {
-        if (isDataWarehouse && selectedItemMeta && definition.name === selectedItemMeta.id) {
-            setLocalDefinition(selectedItemMeta)
+        if (isDataWarehouse) {
+            if (selectedItemMeta && definition.name === selectedItemMeta.id) {
+                setLocalDefinition(selectedItemMeta)
+            } else if (definition.name) {
+                const systemDefaults = getSystemTableDefaults(definition.name as string)
+                if (systemDefaults) {
+                    setLocalDefinition(systemDefaults)
+                }
+            }
         }
     }, [definition, isDataWarehouse]) // eslint-disable-line react-hooks/exhaustive-deps
 

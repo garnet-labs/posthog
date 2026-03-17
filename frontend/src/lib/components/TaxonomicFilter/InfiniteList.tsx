@@ -174,6 +174,7 @@ const selectedItemHasPopover = (
             TaxonomicFilterGroupType.Elements,
             TaxonomicFilterGroupType.Events,
             TaxonomicFilterGroupType.DataWarehouse,
+            TaxonomicFilterGroupType.SystemTables,
             TaxonomicFilterGroupType.DataWarehouseProperties,
             TaxonomicFilterGroupType.DataWarehousePersonProperties,
             TaxonomicFilterGroupType.CustomEvents,
@@ -205,7 +206,9 @@ const canSelectItem = (
 ): boolean => {
     return (
         !!listGroupType &&
-        (dataWarehousePopoverFields?.length === 0 || listGroupType !== TaxonomicFilterGroupType.DataWarehouse)
+        (dataWarehousePopoverFields?.length === 0 ||
+            (listGroupType !== TaxonomicFilterGroupType.DataWarehouse &&
+                listGroupType !== TaxonomicFilterGroupType.SystemTables))
     )
 }
 
