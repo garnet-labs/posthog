@@ -3,10 +3,6 @@
   "report_id": "test-funnel-report-001",
   "generated_at": "2026-03-17T20:22:37Z",
   "repository": "posthog/posthog",
-  "report": {
-    "title": "Funnel insights lack time-based comparison and statistical options",
-    "summary": "Multiple users are requesting enhanced funnel analytics capabilities. Key gaps include: (1) no ability to compare conversion rates across arbitrary time periods, (2) dynamic bin widths in Time to Convert histograms make trend tracking unreliable, and (3) only average conversion time is available - median and percentile options (P50, P90, P99) are missing, and (4) a customer reports a potential tracking regression with their onboarding funnel conversion dropping without any product changes. The first three requests come from the product-analytics/funnels area with Zendesk support ticket backing. The fourth is a Zendesk bug report requiring data investigation to confirm."
-  },
   "signal_ids": [
     "test-funnel-compare-42606",
     "test-funnel-binwidth-42995",
@@ -14,6 +10,8 @@
     "test-funnel-drop-off-43201"
   ],
   "result": {
+    "title": "Funnel insights lack time-based comparison and statistical options",
+    "summary": "The signals point to missing funnel analysis capabilities rather than a broken funnel engine. The consistent gaps are native time-period comparison, fixed Time to Convert histogram buckets, and percentile-based conversion-time summaries, while the onboarding drop-off report could not be verified without customer data.",
     "findings": [
       {
         "signal_id": "test-funnel-compare-42606",
