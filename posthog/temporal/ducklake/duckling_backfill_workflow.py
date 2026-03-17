@@ -5,6 +5,7 @@ import datetime as dt
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from posthog.temporal.common.base import PostHogWorkflow
 
@@ -212,22 +213,28 @@ class DucklingBackfillDiscoveryWorkflow(PostHogWorkflow):
 
         logger.info("Spawning child workflows", count=len(results))
 
+        started = 0
+        skipped = 0
         for result in results:
             child_workflow_id = f"duckling-backfill-{inputs.data_type}-{result.team_id}-{result.partition_key}"
 
-            await workflow.start_child_workflow(
-                "duckling-backfill",
-                DucklingBackfillInputs(
-                    team_id=result.team_id,
-                    data_type=inputs.data_type,
-                    partition_key=result.partition_key,
-                ),
-                id=child_workflow_id,
-                parent_close_policy=workflow.ParentClosePolicy.ABANDON,
-                retry_policy=RetryPolicy(
-                    maximum_attempts=3,
-                    initial_interval=dt.timedelta(minutes=1),
-                ),
-            )
+            try:
+                await workflow.start_child_workflow(
+                    "duckling-backfill",
+                    DucklingBackfillInputs(
+                        team_id=result.team_id,
+                        data_type=inputs.data_type,
+                        partition_key=result.partition_key,
+                    ),
+                    id=child_workflow_id,
+                    parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+                    retry_policy=RetryPolicy(
+                        maximum_attempts=3,
+                        initial_interval=dt.timedelta(minutes=1),
+                    ),
+                )
+                started += 1
+            except WorkflowAlreadyStartedError:
+                skipped += 1
 
-        logger.info("Discovery complete, all child workflows started", count=len(results))
+        logger.info("Discovery complete", started=started, skipped=skipped)

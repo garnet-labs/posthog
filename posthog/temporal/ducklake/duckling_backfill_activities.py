@@ -335,13 +335,7 @@ def register_with_ducklake_activity(inputs: DucklingRegisterInputs) -> None:
     bind_contextvars(team_id=inputs.team_id, data_type=inputs.data_type)
     logger = LOGGER.bind()
 
-    from posthog.ducklake.common import (
-        attach_catalog,
-        escape,
-        get_duckgres_server_for_team,
-        get_team_config,
-        is_dev_mode,
-    )
+    from posthog.ducklake.common import attach_catalog, get_duckgres_server_for_team, get_team_config, is_dev_mode
     from posthog.ducklake.storage import configure_cross_account_connection, connect_to_duckgres, setup_duckgres_session
 
     heartbeater = HeartbeaterSync(details=("duckling_backfill", inputs.data_type), logger=logger)
@@ -363,7 +357,8 @@ def register_with_ducklake_activity(inputs: DucklingRegisterInputs) -> None:
                 for s3_path in inputs.s3_paths:
                     logger.info("Registering file with DuckLake (dev)", s3_path=s3_path)
                     conn.execute(
-                        f"CALL ducklake_add_data_files('{alias}', '{escape(inputs.data_type)}', '{escape(s3_path)}', schema => 'posthog')"
+                        f"CALL ducklake_add_data_files('{alias}', ?, ?, schema => 'posthog')",
+                        [inputs.data_type, s3_path],
                     )
             finally:
                 conn.close()

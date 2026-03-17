@@ -274,8 +274,6 @@ def test_register_with_ducklake_activity_dev_mode_calls_duckdb(monkeypatch):
     )
     monkeypatch.setattr("posthog.ducklake.storage.configure_cross_account_connection", MagicMock())
     monkeypatch.setattr("posthog.ducklake.common.attach_catalog", MagicMock())
-    monkeypatch.setattr("posthog.ducklake.common.escape", lambda x: x)
-
     inputs = DucklingRegisterInputs(
         team_id=7,
         data_type="events",
