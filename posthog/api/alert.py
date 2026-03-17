@@ -202,7 +202,10 @@ class AlertSerializer(serializers.ModelSerializer):
                 user=user, alert_configuration=instance, created_by=self.context["request"].user
             )
 
-        instance.report_created(self.context["request"].user, get_request_analytics_properties(self.context["request"]))
+        instance.report_created(
+            self.context["request"].user,
+            analytics_props=get_request_analytics_properties(self.context["request"]),
+        )
         return instance
 
     def update(self, instance, validated_data):
@@ -267,7 +270,10 @@ class AlertSerializer(serializers.ModelSerializer):
             instance.mark_for_recheck(reset_state=conditions_or_threshold_changed)
 
         instance = super().update(instance, validated_data)
-        instance.report_updated(self.context["request"].user, get_request_analytics_properties(self.context["request"]))
+        instance.report_updated(
+            self.context["request"].user,
+            analytics_props=get_request_analytics_properties(self.context["request"]),
+        )
         return instance
 
     def validate_snoozed_until(self, value):
@@ -316,9 +322,7 @@ class AlertSerializer(serializers.ModelSerializer):
         if self.context["request"].method != "POST":
             return attrs
 
-        if msg := AlertConfiguration.check_alert_limit(
-            self.context["team_id"], self.context["request"].user.organization
-        ):
+        if msg := AlertConfiguration.check_alert_limit(self.context["team_id"], self.context["get_organization"]()):
             raise ValidationError({"alert": [msg]})
 
         return attrs

@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.contrib.auth import login as auth_login
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.db import IntegrityError
@@ -14,27 +15,38 @@ from django.http import HttpResponseRedirect
 from django.http.response import HttpResponseBase
 from django.utils import timezone
 
+import requests
 import structlog
+import posthoganalytics
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from posthog.exceptions_capture import capture_exception
 from posthog.models.integration import StripeIntegration
 from posthog.models.oauth import OAuthAccessToken, OAuthRefreshToken, find_oauth_refresh_token
+from posthog.models.team.team import Team
 from posthog.models.user import User
 from posthog.models.utils import generate_random_oauth_access_token, generate_random_oauth_refresh_token
-from posthog.security.outbound_proxy import external_requests
+from posthog.utils import get_instance_region
 
 from ee.settings import BILLING_SERVICE_URL
 
-from . import AUTH_CODE_CACHE_PREFIX, PENDING_AUTH_CACHE_PREFIX
+from . import AUTH_CODE_CACHE_PREFIX, PENDING_AUTH_CACHE_PREFIX, RESOURCE_SERVICE_CACHE_PREFIX
 from .region_proxy import stripe_region_proxy
-from .signature import SUPPORTED_VERSIONS, verify_stripe_signature
+from .signature import SUPPORTED_VERSIONS, verify_api_version, verify_stripe_signature
 
 logger = structlog.get_logger(__name__)
 
 AUTH_CODE_TTL_SECONDS = 300
 PENDING_AUTH_TTL_SECONDS = 600
+DEEP_LINK_TTL_SECONDS = 600
+DEEP_LINK_CACHE_PREFIX = "stripe_app_deep_link:"
+SUPPORTED_DEEP_LINK_PURPOSES = {"dashboard"}
+DEEP_LINK_RATE_LIMIT_PREFIX = "agentic_login_rate:"
+DEEP_LINK_RATE_LIMIT_MAX_ATTEMPTS = 10
+DEEP_LINK_RATE_LIMIT_WINDOW_SECONDS = 300
 
 STRIPE_APP_NAME = "PostHog Stripe App"
 
@@ -83,7 +95,7 @@ POSTHOG_PARENT_SERVICE: dict[str, Any] = {
 def _fetch_services_from_billing() -> list[dict[str, Any]] | None:
     """Fetch product catalog from billing. Returns None on failure."""
     try:
-        res = external_requests.get(
+        res = requests.get(
             f"{BILLING_SERVICE_URL}/api/products-v2",
             params={"plan": "standard"},
         )
@@ -177,6 +189,8 @@ def provisioning_health(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
+    if error := verify_api_version(request):
+        return error
 
     return Response({"supported_versions": SUPPORTED_VERSIONS, "status": "ok"})
 
@@ -193,6 +207,8 @@ def provisioning_services(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
+    if error := verify_api_version(request):
+        return error
 
     return Response({"data": _get_services(), "next_cursor": ""})
 
@@ -208,6 +224,9 @@ def provisioning_services(request: Request) -> Response:
 @permission_classes([])
 @stripe_region_proxy(strategy="body_region")
 def account_requests(request: Request) -> Response:
+    if error := verify_api_version(request):
+        return error
+
     data = request.data
     request_id = data.get("id", "")
     email = data.get("email")
@@ -531,8 +550,282 @@ def _exchange_refresh_token(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# POST /provisioning/resources
+# ---------------------------------------------------------------------------
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+def provisioning_resources_create(request: Request) -> Response:
+    auth_error, user, access_token = _authenticate_bearer(request)
+    if auth_error:
+        return auth_error
+
+    error = verify_stripe_signature(request)
+    if error:
+        return error
+    if error := verify_api_version(request):
+        return error
+
+    service_id = request.data.get("service_id", "")
+    if service_id and service_id not in VALID_SERVICE_IDS:
+        return _error_response("unknown_service", f"Unknown service_id: {service_id}")
+
+    scoped_teams = access_token.scoped_teams or []
+
+    if not scoped_teams:
+        return _error_response("no_team", "No team associated with this token")
+
+    team_id = scoped_teams[0]
+    try:
+        team = Team.objects.get(id=team_id)
+    except Team.DoesNotExist:
+        return _error_response("team_not_found", "Team not found", resource_id=str(team_id), status=404)
+
+    resolved_service_id = service_id or POSTHOG_SERVICE_ID
+    cache.set(f"{RESOURCE_SERVICE_CACHE_PREFIX}{team_id}", resolved_service_id, timeout=None)
+
+    region = get_instance_region() or "US"
+    host = _region_to_host(region)
+
+    return Response(
+        {
+            "status": "complete",
+            "id": str(team_id),
+            "service_id": resolved_service_id,
+            "complete": {
+                "access_configuration": {
+                    "api_key": team.api_token,
+                    "host": host,
+                },
+            },
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /provisioning/resources/:id
+# ---------------------------------------------------------------------------
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def provisioning_resource_detail(request: Request, resource_id: str) -> Response:
+    return _resolve_resource_response(request, resource_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /provisioning/resources/:id/rotate_credentials
+# ---------------------------------------------------------------------------
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+def provisioning_rotate_credentials(request: Request, resource_id: str) -> Response:
+    auth_error, user, access_token = _authenticate_bearer(request)
+    if auth_error:
+        return auth_error
+
+    error = verify_stripe_signature(request)
+    if error:
+        return error
+    if error := verify_api_version(request):
+        return error
+
+    scoped_teams = access_token.scoped_teams or []
+
+    try:
+        team_id = int(resource_id)
+    except (ValueError, TypeError):
+        return _error_response("invalid_resource_id", "Invalid resource ID", resource_id=resource_id)
+
+    if team_id not in scoped_teams:
+        return _error_response(
+            "forbidden", "Resource not accessible with this token", resource_id=resource_id, status=403
+        )
+
+    try:
+        team = Team.objects.get(id=team_id)
+    except Team.DoesNotExist:
+        return _error_response("not_found", "Resource not found", resource_id=resource_id, status=404)
+
+    try:
+        team.reset_token_and_save(user=user, is_impersonated_session=False)
+    except Exception:
+        capture_exception(additional_properties={"team_id": team_id})
+        return _error_response(
+            "credential_rotation_failed", "Failed to rotate credentials", resource_id=resource_id, status=500
+        )
+
+    service_id = cache.get(f"{RESOURCE_SERVICE_CACHE_PREFIX}{team_id}") or POSTHOG_SERVICE_ID
+    region = get_instance_region() or "US"
+    host = _region_to_host(region)
+
+    return Response(
+        {
+            "status": "complete",
+            "id": resource_id,
+            "service_id": service_id,
+            "complete": {
+                "access_configuration": {
+                    "api_key": team.api_token,
+                    "host": host,
+                },
+            },
+        }
+    )
+
+
+def _resolve_resource_response(request: Request, resource_id: str) -> Response:
+    auth_error, user, access_token = _authenticate_bearer(request)
+    if auth_error:
+        return auth_error
+
+    error = verify_stripe_signature(request)
+    if error:
+        return error
+    if error := verify_api_version(request):
+        return error
+
+    scoped_teams = access_token.scoped_teams or []
+
+    try:
+        team_id = int(resource_id)
+    except (ValueError, TypeError):
+        return Response(
+            {
+                "status": "error",
+                "id": resource_id,
+                "error": {"code": "invalid_resource_id", "message": "Invalid resource ID"},
+            },
+            status=400,
+        )
+
+    if team_id not in scoped_teams:
+        return Response(
+            {
+                "status": "error",
+                "id": resource_id,
+                "error": {"code": "forbidden", "message": "Resource not accessible with this token"},
+            },
+            status=403,
+        )
+
+    try:
+        team = Team.objects.get(id=team_id)
+    except Team.DoesNotExist:
+        return Response(
+            {"status": "error", "id": resource_id, "error": {"code": "not_found", "message": "Resource not found"}},
+            status=404,
+        )
+
+    service_id = cache.get(f"{RESOURCE_SERVICE_CACHE_PREFIX}{team_id}") or POSTHOG_SERVICE_ID
+    region = get_instance_region() or "US"
+    host = _region_to_host(region)
+
+    return Response(
+        {
+            "status": "complete",
+            "id": resource_id,
+            "service_id": service_id,
+            "complete": {
+                "access_configuration": {
+                    "api_key": team.api_token,
+                    "host": host,
+                },
+            },
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /provisioning/deep_links
+# ---------------------------------------------------------------------------
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+def deep_links(request: Request) -> Response:
+    auth_error, user, access_token = _authenticate_bearer(request)
+    if auth_error:
+        return auth_error
+
+    error = verify_stripe_signature(request)
+    if error:
+        return error
+    if error := verify_api_version(request):
+        return error
+
+    purpose = request.data.get("purpose", "dashboard")
+    if purpose not in SUPPORTED_DEEP_LINK_PURPOSES:
+        return Response(
+            {
+                "error": {
+                    "code": "unsupported_purpose",
+                    "message": f"Unsupported purpose: {purpose}. Supported: {', '.join(sorted(SUPPORTED_DEEP_LINK_PURPOSES))}",
+                }
+            },
+            status=400,
+        )
+
+    scoped_teams = access_token.scoped_teams or []
+    team_id = scoped_teams[0] if scoped_teams else None
+
+    region = get_instance_region() or "US"
+    host = _region_to_host(region)
+
+    token = secrets.token_urlsafe(32)
+    cache_key = f"{DEEP_LINK_CACHE_PREFIX}{token}"
+    cache.set(
+        cache_key,
+        {
+            "user_id": access_token.user_id,
+            "team_id": team_id,
+            "purpose": purpose,
+        },
+        timeout=DEEP_LINK_TTL_SECONDS,
+    )
+
+    expires_at = timezone.now() + timedelta(seconds=DEEP_LINK_TTL_SECONDS)
+
+    url = f"{host}/agentic/login?token={token}"
+    if team_id:
+        url += f"&team_id={team_id}"
+
+    return Response(
+        {
+            "purpose": purpose,
+            "url": url,
+            "expires_at": expires_at.isoformat(),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _error_response(code: str, message: str, resource_id: str = "", status: int = 400) -> Response:
+    return Response({"status": "error", "id": resource_id, "error": {"code": code, "message": message}}, status=status)
+
+
+def _authenticate_bearer(request: Request) -> tuple[Response | None, Any, Any]:
+    """Authenticate via Bearer token. Returns (error_response, user, access_token)."""
+    from .authentication import StripeProvisioningBearerAuthentication
+
+    auth = StripeProvisioningBearerAuthentication()
+    try:
+        result = auth.authenticate(request)
+    except AuthenticationFailed:
+        return (_error_response("unauthorized", "Authentication failed", status=401), None, None)
+    if result is None:
+        return (_error_response("unauthorized", "Missing bearer token", status=401), None, None)
+    return None, result[0], result[1]
 
 
 def _get_stripe_oauth_app():
@@ -557,4 +850,96 @@ def _get_stripe_oauth_app():
         authorization_grant_type=OAuthApplication.GRANT_AUTHORIZATION_CODE,
         redirect_uris="https://localhost",
         algorithm="RS256",
+    )
+
+
+def _region_to_host(region: str) -> str:
+    region_lower = region.lower()
+    if region_lower == "eu":
+        return "https://eu.posthog.com"
+    elif region_lower in ("us", "dev"):
+        return "https://us.posthog.com"
+    return settings.SITE_URL
+
+
+# ---------------------------------------------------------------------------
+# GET /agentic/login — deep link login for agentic provisioning users
+# ---------------------------------------------------------------------------
+
+
+def agentic_login(request: Any) -> HttpResponseBase:
+    token = request.GET.get("token", "")
+    if not token:
+        _capture_deep_link_event("missing_token")
+        logger.warning("agentic_login.missing_token")
+        return HttpResponseRedirect("/?error=missing_token")
+
+    cache_key = f"{DEEP_LINK_CACHE_PREFIX}{token}"
+
+    try:
+        link_data = cache.get(cache_key)
+    except Exception:
+        capture_exception(additional_properties={"cache_key": cache_key})
+        return HttpResponseRedirect("/?error=service_unavailable")
+
+    if link_data is None:
+        _capture_deep_link_event("expired_or_invalid_token")
+        logger.warning("agentic_login.expired_or_invalid_token")
+        return HttpResponseRedirect("/?error=expired_or_invalid_token")
+
+    # Atomic delete — if another request already consumed this token, reject
+    if not cache.delete(cache_key):
+        _capture_deep_link_event("expired_or_invalid_token")
+        logger.warning("agentic_login.token_already_consumed")
+        return HttpResponseRedirect("/?error=expired_or_invalid_token")
+
+    if not isinstance(link_data, dict):
+        _capture_deep_link_event("invalid_token_data")
+        logger.warning("agentic_login.invalid_token_data")
+        return HttpResponseRedirect("/?error=invalid_token_data")
+
+    user_id = link_data.get("user_id")
+    team_id = link_data.get("team_id")
+    purpose = link_data.get("purpose", "dashboard")
+
+    if not user_id:
+        _capture_deep_link_event("invalid_token_data")
+        logger.warning("agentic_login.missing_user_id")
+        return HttpResponseRedirect("/?error=invalid_token_data")
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        _capture_deep_link_event("user_not_found", user_id=user_id)
+        capture_exception(
+            Exception("Deep link login user not found"),
+            {"user_id": user_id, "team_id": team_id},
+        )
+        return HttpResponseRedirect("/?error=user_not_found")
+
+    if not user.is_active:
+        _capture_deep_link_event("user_inactive", user_id=user_id)
+        logger.warning("agentic_login.user_inactive", user_id=user_id)
+        return HttpResponseRedirect("/?error=user_inactive")
+
+    auth_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+
+    _capture_deep_link_event("success", user_id=user_id, team_id=team_id, purpose=purpose)
+    logger.info("agentic_login.success", user_id=user_id, team_id=team_id, purpose=purpose)
+
+    redirect_path = _deep_link_redirect_path(purpose, team_id)
+    return HttpResponseRedirect(redirect_path)
+
+
+def _deep_link_redirect_path(purpose: str, team_id: int | None) -> str:
+    if team_id and Team.objects.filter(id=team_id).exists():
+        return f"/project/{team_id}"
+    return "/"
+
+
+def _capture_deep_link_event(outcome: str, **extra: object) -> None:
+    posthoganalytics.capture(
+        "agentic_provisioning deep link login",
+        distinct_id="agentic_provisioning_system",
+        properties={"outcome": outcome, **extra},
     )

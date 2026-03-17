@@ -17,6 +17,7 @@ from posthog.schema import (
 from posthog.api.services.query import ExecutionMode
 from posthog.caching.calculate_results import calculate_for_query_based_insight
 from posthog.caching.fetch_from_cache import InsightResult
+from posthog.event_usage import EventSource
 from posthog.models import AlertConfiguration, Insight
 from posthog.tasks.alerts.utils import AlertEvaluationResult, is_non_time_series_trend
 
@@ -111,6 +112,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
                 execution_mode=execution_mode,
                 user=None,
                 filters_override=filters_override,
+                analytics_props={"source": EventSource.ALERT},
             )
 
             interval = query.interval if not is_non_time_series else None
@@ -195,6 +197,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
                 execution_mode=execution_mode,
                 user=None,
                 filters_override=filters_overrides,
+                analytics_props={"source": EventSource.ALERT},
             )
 
             if no_result_evaluation := _is_empty_query_result(
@@ -294,6 +297,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
                 execution_mode=execution_mode,
                 user=None,
                 filters_override=filters_overrides,
+                analytics_props={"source": EventSource.ALERT},
             )
 
             if no_result_evaluation := _is_empty_query_result(

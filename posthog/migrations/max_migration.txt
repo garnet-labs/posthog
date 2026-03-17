@@ -1,1 +1,1 @@
-1043_add_detector_fields
+1052_add_detector_fields
