@@ -1,3 +1,6 @@
+import fs from 'fs'
+import path from 'path'
+
 import { expect, test } from '../../utils/playwright-test-base'
 
 test.describe('Billing', () => {
