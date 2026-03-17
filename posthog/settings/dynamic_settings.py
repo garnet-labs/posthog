@@ -215,6 +215,11 @@ CONSTANCE_CONFIG = {
         "Teams that will have web analytics cache warming enabled",
         list[int],
     ),
+    "ERROR_TRACKING_WARMING_TEAMS_TO_WARM": (
+        get_from_env("ERROR_TRACKING_WARMING_TEAMS_TO_WARM", default=[], type_cast=list[int]),
+        "Teams that will have error tracking cache warming enabled",
+        list[int],
+    ),
 }
 
 SETTINGS_ALLOWING_API_OVERRIDE = (
