@@ -8,21 +8,7 @@ test.describe('Dashboards', () => {
     let workspace: PlaywrightWorkspaceSetupResult | null = null
 
     test.beforeAll(async ({ playwrightSetup }) => {
-        workspace = await playwrightSetup.createWorkspace({
-            skip_onboarding: true,
-            no_demo_data: true,
-            insights: [
-                {
-                    name: 'Test Insight',
-                    query: {
-                        kind: 'DataVisualizationNode',
-                        source: { kind: 'HogQLQuery', query: 'SELECT 1' },
-                        chartSettings: {},
-                        tableSettings: {},
-                    },
-                },
-            ],
-        })
+        workspace = await playwrightSetup.createWorkspace({ use_current_time: true, skip_onboarding: true })
     })
 
     test.beforeEach(async ({ page, playwrightSetup }) => {
@@ -367,21 +353,7 @@ test.describe('Dashboard compact cards and inline editing', () => {
     let workspace: PlaywrightWorkspaceSetupResult | null = null
 
     test.beforeAll(async ({ playwrightSetup }) => {
-        workspace = await playwrightSetup.createWorkspace({
-            skip_onboarding: true,
-            no_demo_data: true,
-            insights: [
-                {
-                    name: 'Test Insight',
-                    query: {
-                        kind: 'DataVisualizationNode',
-                        source: { kind: 'HogQLQuery', query: 'SELECT 1' },
-                        chartSettings: {},
-                        tableSettings: {},
-                    },
-                },
-            ],
-        })
+        workspace = await playwrightSetup.createWorkspace({ use_current_time: true, skip_onboarding: true })
     })
 
     test.beforeEach(async ({ page, playwrightSetup }) => {
