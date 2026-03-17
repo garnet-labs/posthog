@@ -254,6 +254,7 @@ export const HogFunctionTypeEnumApi = {
  * `integration_field` - integration_field
  * `email` - email
  * `native_email` - native_email
+ * `push_subscription` - push_subscription
  * `posthog_assignee` - posthog_assignee
  * `posthog_ticket_tags` - posthog_ticket_tags
  */
@@ -270,6 +271,7 @@ export const InputsSchemaItemTypeEnumApi = {
     IntegrationField: 'integration_field',
     Email: 'email',
     NativeEmail: 'native_email',
+    PushSubscription: 'push_subscription',
     PosthogAssignee: 'posthog_assignee',
     PosthogTicketTags: 'posthog_ticket_tags',
 } as const
