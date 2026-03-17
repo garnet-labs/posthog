@@ -284,8 +284,8 @@ class AlertSerializer(serializers.ModelSerializer):
 
         try:
             validated = DetectorConfig.model_validate(value)
-        except pydantic.ValidationError as e:
-            raise ValidationError(f"Invalid detector config: {e}")
+        except pydantic.ValidationError:
+            raise ValidationError("Invalid detector configuration.")
 
         # Ensemble requires at least 2 sub-detectors
         root = validated.root if hasattr(validated, "root") else validated
