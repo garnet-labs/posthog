@@ -26,7 +26,6 @@ fi
 echo "Detecting changed story files since $BASE_SHA..."
 
 # All story files touched by the PR (added or modified).
-# Stories live in frontend/, products/, and ee/ directories.
 changed_story_files=$(git diff --name-only "$BASE_SHA..HEAD" -- '*.stories.tsx' '*.stories.ts')
 
 if [ -z "$changed_story_files" ]; then
@@ -56,7 +55,6 @@ printf "  %s\n" "${stories_to_verify[@]}"
 # test-storybook wraps Jest — pass Jest options after -- separator.
 pattern=""
 for story in "${stories_to_verify[@]}"; do
-    # Escape dots for regex
     escaped=$(echo "$story" | sed 's/\./\\./g')
     if [ -n "$pattern" ]; then
         pattern="${pattern}|${escaped}"
@@ -69,6 +67,9 @@ echo ""
 echo "testPathPattern: $pattern"
 echo ""
 
+# Build products once before the loop — test:visual:ci:verify rebuilds each time.
+pnpm --filter=@posthog/storybook run build:products
+
 # Run the stories REPEAT_COUNT times. Each run does a full snapshot comparison.
 # If any run fails, the story is flaky.
 failed_runs=0
@@ -76,10 +77,13 @@ for run in $(seq 1 "$REPEAT_COUNT"); do
     echo "=== Run $run/$REPEAT_COUNT ==="
 
     set +e
-    pnpm --filter=@posthog/storybook test:visual:ci:verify \
+    # Run test-storybook directly (skipping build:products which we already did).
+    # pipefail is set at script level so tee preserves the exit code.
+    pnpm --filter=@posthog/storybook exec test-storybook \
+        --ci --no-index-json --maxWorkers=1 \
         --browsers chromium \
         -- --testPathPattern "$pattern" 2>&1 | tee "/tmp/storybook-verify-run${run}.log"
-    exit_code=$?
+    exit_code=${PIPESTATUS[0]}
     set -e
 
     if [ $exit_code -ne 0 ]; then
@@ -93,7 +97,9 @@ for run in $(seq 1 "$REPEAT_COUNT"); do
 done
 
 if [ "$failed_runs" -gt 0 ]; then
+    echo ""
     echo "Flake verification failed — $failed_runs/$REPEAT_COUNT runs failed"
+    echo "Flaky snapshots must be fixed before merging."
     exit 1
 fi
 
