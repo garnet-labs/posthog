@@ -388,6 +388,13 @@ export function ActionFilterRow({
         ) : (
             <SeriesLetter seriesIndex={index} hasBreakdown={hasBreakdown} />
         )
+    const funnelStepAggregationEventNames =
+        filter.type === EntityTypes.EVENTS && filter.id
+            ? [String(filter.id)]
+            : filter.type === EntityTypes.ACTIONS && filter.id
+              ? getEventNamesForAction(parseInt(String(filter.id)), actions)
+              : []
+
     const filterElement = (
         <TaxonomicPopover
             data-attr={'trend-element-subject-' + index}
@@ -889,12 +896,31 @@ export function ActionFilterRow({
                                                           ]
                                                         : []),
                                                     // Custom aggregation target for funnels only
-                                                    ...(isFunnelContext && hasFunnelCustomStepAggregationFlag
+                                                    ...(isFunnelContext &&
+                                                    hasFunnelCustomStepAggregationFlag &&
+                                                    (filter.type === EntityTypes.EVENTS ||
+                                                        filter.type === EntityTypes.ACTIONS)
                                                         ? [
                                                               {
                                                                   label: () => (
                                                                       <>
-                                                                          <FunnelStepAggregationTargetSelect />
+                                                                          <FunnelStepAggregationTargetSelect
+                                                                              filter={filter}
+                                                                              eventNames={
+                                                                                  funnelStepAggregationEventNames
+                                                                              }
+                                                                              onChange={(
+                                                                                  funnelAggregationTarget,
+                                                                                  funnelAggregationTargetType
+                                                                              ) =>
+                                                                                  updateFilter({
+                                                                                      ...filter,
+                                                                                      index,
+                                                                                      funnelAggregationTarget,
+                                                                                      funnelAggregationTargetType,
+                                                                                  })
+                                                                              }
+                                                                          />
                                                                           <LemonDivider />
                                                                       </>
                                                                   ),
