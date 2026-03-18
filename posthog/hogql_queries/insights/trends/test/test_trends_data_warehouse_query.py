@@ -826,6 +826,12 @@ class TestTrendsSystemTableQuery(ClickhouseTestMixin, BaseTest):
 
         assert len(response.results) == 1
         assert response.hogql is not None
+        # Verify the generated HogQL references the system table
+        assert "insights" in response.hogql
+        # Verify the result has the expected label and data shape
+        result = response.results[0]
+        assert result["label"] == "system.insights"
+        assert isinstance(result["data"], list)
 
     def test_system_table_with_timestamp_field_override(self):
         trends_query = TrendsQuery(
@@ -841,7 +847,15 @@ class TestTrendsSystemTableQuery(ClickhouseTestMixin, BaseTest):
             ],
         )
 
-        response = TrendsQueryRunner(team=self.team, query=trends_query).calculate()
+        runner = TrendsQueryRunner(team=self.team, query=trends_query)
 
+        # Verify the timestamp override is wired through to the database modifiers.
+        modifiers = runner.modifiers
+        assert modifiers.dataWarehouseEventsModifiers is not None
+        modifier = modifiers.dataWarehouseEventsModifiers[0]
+        assert modifier.timestamp_field == "updated_at"
+        assert modifier.table_name == "system.insights"
+
+        response = runner.calculate()
         assert len(response.results) == 1
         assert response.hogql is not None

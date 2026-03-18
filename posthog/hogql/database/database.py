@@ -1205,12 +1205,15 @@ class Database(BaseModel):
                         if is_system_table:
                             # System tables have statically defined fields (no Django model lookup needed).
                             # Create standard aliases so the table works in trends like any DataWarehouseNode.
+                            # We copy the table to avoid mutating the shared singleton.
                             table_chain = warehouse_modifier.table_name.split(".")
                             if database.has_table(table_chain):
-                                table = database.get_table(table_chain)
+                                original = database.get_table(table_chain)
+                                table = original.model_copy()
+                                table.fields = dict(original.fields)
 
                                 # Add id alias if needed
-                                if "id" not in table.fields:
+                                if warehouse_modifier.id_field not in ("id",):
                                     table.fields["id"] = ExpressionField(
                                         name="id",
                                         expr=parse_expr(warehouse_modifier.id_field),
@@ -1220,25 +1223,24 @@ class Database(BaseModel):
                                 if warehouse_modifier.timestamp_field == "timestamp":
                                     if "timestamp" not in table.fields:
                                         table.fields["timestamp"] = DateTimeDatabaseField(name="timestamp")
-                                elif "timestamp" not in table.fields or not isinstance(
-                                    table.fields.get("timestamp"), DateTimeDatabaseField
-                                ):
+                                else:
                                     table.fields["timestamp"] = ExpressionField(
                                         name="timestamp",
                                         expr=ast.Field(chain=[warehouse_modifier.timestamp_field]),
                                     )
 
                                 if warehouse_modifier.distinct_id_field:
-                                    if "distinct_id" not in table.fields:
-                                        table.fields["distinct_id"] = ExpressionField(
-                                            name="distinct_id",
-                                            expr=parse_expr(warehouse_modifier.distinct_id_field),
-                                        )
-                                    if "person_id" not in table.fields:
-                                        table.fields["person_id"] = ExpressionField(
-                                            name="person_id",
-                                            expr=parse_expr(warehouse_modifier.distinct_id_field),
-                                        )
+                                    table.fields["distinct_id"] = ExpressionField(
+                                        name="distinct_id",
+                                        expr=parse_expr(warehouse_modifier.distinct_id_field),
+                                    )
+                                    table.fields["person_id"] = ExpressionField(
+                                        name="person_id",
+                                        expr=parse_expr(warehouse_modifier.distinct_id_field),
+                                    )
+
+                                # Register the per-request copy back onto the database
+                                database.get_table_node(table_chain).table = table
                         elif is_view:
                             views = define_mappings(
                                 views,
