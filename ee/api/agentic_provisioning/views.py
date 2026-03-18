@@ -31,7 +31,7 @@ from posthog.utils import get_instance_region
 
 from . import AUTH_CODE_CACHE_PREFIX, PENDING_AUTH_CACHE_PREFIX, RESOURCE_SERVICE_CACHE_PREFIX
 from .region_proxy import stripe_region_proxy
-from .signature import SUPPORTED_VERSIONS, verify_api_version, verify_stripe_signature
+from .signature import SUPPORTED_VERSIONS, verify_stripe_signature
 
 logger = structlog.get_logger(__name__)
 
@@ -131,8 +131,6 @@ def provisioning_health(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    if error := verify_api_version(request):
-        return error
 
     return Response({"supported_versions": SUPPORTED_VERSIONS, "status": "ok"})
 
@@ -149,8 +147,6 @@ def provisioning_services(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    if error := verify_api_version(request):
-        return error
 
     return Response({"data": _get_services(), "next_cursor": ""})
 
@@ -166,9 +162,6 @@ def provisioning_services(request: Request) -> Response:
 @permission_classes([])
 @stripe_region_proxy(strategy="body_region")
 def account_requests(request: Request) -> Response:
-    if error := verify_api_version(request):
-        return error
-
     data = request.data
     request_id = data.get("id", "")
     email = data.get("email")
@@ -507,8 +500,6 @@ def provisioning_resources_create(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    if error := verify_api_version(request):
-        return error
 
     service_id = request.data.get("service_id", "")
     if service_id and service_id not in VALID_SERVICE_IDS:
@@ -574,8 +565,6 @@ def provisioning_rotate_credentials(request: Request, resource_id: str) -> Respo
     error = verify_stripe_signature(request)
     if error:
         return error
-    if error := verify_api_version(request):
-        return error
 
     scoped_teams = access_token.scoped_teams or []
 
@@ -628,8 +617,6 @@ def _resolve_resource_response(request: Request, resource_id: str) -> Response:
 
     error = verify_stripe_signature(request)
     if error:
-        return error
-    if error := verify_api_version(request):
         return error
 
     scoped_teams = access_token.scoped_teams or []
@@ -699,8 +686,6 @@ def deep_links(request: Request) -> Response:
     error = verify_stripe_signature(request)
     if error:
         return error
-    if error := verify_api_version(request):
-        return error
 
     purpose = request.data.get("purpose", "dashboard")
     if purpose not in SUPPORTED_DEEP_LINK_PURPOSES:
@@ -753,6 +738,7 @@ def deep_links(request: Request) -> Response:
 
 
 def _error_response(code: str, message: str, resource_id: str = "", status: int = 400) -> Response:
+    logger.warning("stripe_app.error_response", code=code, message=message, resource_id=resource_id, status=status)
     return Response({"status": "error", "id": resource_id, "error": {"code": code, "message": message}}, status=status)
 
 
