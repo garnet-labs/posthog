@@ -177,10 +177,10 @@ def setup_periodic_tasks(sender: Celery, **kwargs: Any) -> None:
         name="schedule warming for largest teams",
     )
 
-    # Error tracking cache warming - hourly at minute 5
+    # Error tracking cache warming - every 5 minutes
     add_periodic_task_with_expiry(
         sender,
-        crontab(hour="*", minute="5"),
+        crontab(minute="*/5"),
         schedule_error_tracking_cache_warming_task.s(),
         name="schedule error tracking cache warming",
     )

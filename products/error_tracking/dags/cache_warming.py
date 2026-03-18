@@ -4,8 +4,6 @@ import structlog
 from celery import shared_task
 from prometheus_client import Counter, Gauge
 
-from posthog.hogql.constants import LimitContext
-
 from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.event_usage import EventSource
 from posthog.exceptions_capture import capture_exception
@@ -28,21 +26,32 @@ ERROR_TRACKING_QUERIES_COUNTER = Counter(
     ["team_id", "is_cached"],
 )
 
-# The default filterless error tracking listing query, matching what the
-# frontend renders when a user first opens the Error tracking page.
-DEFAULT_ERROR_TRACKING_QUERY: dict = {
+# Base error tracking listing query shape, matching what the frontend sends.
+_BASE_QUERY: dict = {
     "kind": "ErrorTrackingQuery",
-    "dateRange": {"date_from": "-7d", "date_to": None},
-    "orderBy": "last_seen",
     "orderDirection": "DESC",
-    "status": "active",
+    "status": "all",
     "limit": 50,
     "volumeResolution": 20,
     "withAggregations": True,
     "withFirstEvent": False,
     "withLastEvent": False,
     "filterTestAccounts": False,
+    "searchQuery": "",
+    "filterGroup": {"type": "AND", "values": [{"type": "AND", "values": []}]},
+    "useQueryV2": False,
 }
+
+# All (orderBy, dateRange) combinations to pre-warm
+_ORDER_BY_OPTIONS = ["last_seen", "occurrences", "sessions", "users"]
+_DATE_RANGES = [
+    {"date_from": "-7d", "date_to": None},
+    {"date_from": "-24h", "date_to": None},
+]
+
+WARMING_VARIANTS: list[dict] = [
+    {"orderBy": order, "dateRange": date_range} for order in _ORDER_BY_OPTIONS for date_range in _DATE_RANGES
+]
 
 
 def get_teams_enabled_for_error_tracking_cache_warming() -> list[int]:
@@ -52,19 +61,17 @@ def get_teams_enabled_for_error_tracking_cache_warming() -> list[int]:
 def get_queries_for_team(team: Team) -> list[dict]:
     """Return the set of queries to pre-warm for a given team.
 
-    For now this is a single canonical filterless query sorted by last_seen DESC.
-    We construct separate variants: one without and one with filterTestAccounts,
-    depending on the team setting.
+    Generates queries for each (orderBy, dateRange) variant, plus a
+    filterTestAccounts=True copy of each if the team has test account filters.
     """
     queries: list[dict] = []
 
-    query = {**DEFAULT_ERROR_TRACKING_QUERY}
-    queries.append(query)
+    for variant in WARMING_VARIANTS:
+        query = {**_BASE_QUERY, **variant}
+        queries.append(query)
 
-    # Also warm the variant with test accounts filtered if the team has that enabled
-    if team.test_account_filters:
-        query_with_filter = {**DEFAULT_ERROR_TRACKING_QUERY, "filterTestAccounts": True}
-        queries.append(query_with_filter)
+        if team.test_account_filters:
+            queries.append({**query, "filterTestAccounts": True})
 
     return queries
 
@@ -73,9 +80,10 @@ def get_queries_for_team(team: Team) -> list[dict]:
 def schedule_error_tracking_cache_warming_task() -> None:
     """Scheduler task that fans out per-team warming tasks via Celery."""
     team_ids = get_teams_enabled_for_error_tracking_cache_warming()
-    logger.info("error_tracking_cache_warming_scheduled", team_count=len(team_ids), team_ids=team_ids)
+    logger.info("error_tracking_cache_warming_scheduled for %d teams", len(team_ids))
 
     for team_id in team_ids:
+        logger.info("error_tracking_cache_warming_scheduled_for_team", team_id=team_id)
         warm_error_tracking_cache_for_team_task.delay(team_id)
 
 
@@ -92,11 +100,13 @@ def warm_error_tracking_cache_for_team_task(team_id: int) -> None:
     """Warm error tracking cache for a single team."""
     try:
         team = Team.objects.get(pk=team_id)
+        logger.info("error_tracking_cache_warming_team_found", team_id=team_id)
     except Team.DoesNotExist:
         logger.warning("error_tracking_cache_warming_team_not_found", team_id=team_id)
         return
 
     queries = get_queries_for_team(team)
+    logger.info("error_tracking_cache_warming_queries_found", team_id=team_id, queries=len(queries))
     STALE_ERROR_TRACKING_QUERIES_GAUGE.labels(team_id=team_id).set(len(queries))
 
     queries_warmed = 0
@@ -106,7 +116,6 @@ def warm_error_tracking_cache_for_team_task(team_id: int) -> None:
         runner = get_query_runner(
             query=query_json,
             team=team,
-            limit_context=LimitContext.QUERY_ASYNC,
         )
 
         cache_manager = DjangoCacheQueryCacheManager(team_id=team.pk, cache_key=runner.get_cache_key())
