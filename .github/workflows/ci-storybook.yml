@@ -463,6 +463,7 @@ jobs:
                   pnpm wait-on http://127.0.0.1:6006 --timeout 30
 
             - name: Verify changed stories are stable
+              id: flake-verify
               env:
                   HOME: /root
               run: |
@@ -470,6 +471,15 @@ jobs:
                   BASE_SHA="${{ github.event.pull_request.base.sha }}"
                   git fetch --no-tags --prune --depth=50 origin "$BASE_SHA"
                   .github/scripts/verify-storybook-new-stories.sh "$BASE_SHA" 3
+
+            - name: Upload flake verification diff screenshots
+              if: failure() && steps.flake-verify.outcome == 'failure'
+              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+              with:
+                  name: flake-verification-diffs
+                  path: frontend/__snapshots__/__diff_output__/
+                  if-no-files-found: ignore
+                  retention-days: 5
 
     # Post a helpful comment when snapshot tests fail in check mode (no label)
     snapshot-failure-comment:
