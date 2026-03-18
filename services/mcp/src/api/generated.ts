@@ -1466,7 +1466,8 @@ export namespace Schemas {
     }
 
     export interface DataWarehouseEventsModifier {
-      distinct_id_field: string;
+      /** @nullable */
+      distinct_id_field?: string | null;
       id_field: string;
       table_name: string;
       timestamp_field: string;
@@ -2103,6 +2104,63 @@ export namespace Schemas {
       version?: number | null;
     }
 
+    export type SystemTableNodeKind = typeof SystemTableNodeKind[keyof typeof SystemTableNodeKind];
+
+
+    export const SystemTableNodeKind = {
+      SystemTableNode: 'SystemTableNode',
+    } as const;
+
+    export const SystemTableNodeMath = {...BaseMathType,...FunnelMathType,...PropertyMathType,...CountPerActorMathType,...ExperimentMetricMathType,...CalendarHeatmapMathType,  unique_group: 'unique_group',
+      hogql: 'hogql',
+    } as const
+    /**
+     * @nullable
+     */
+    export type SystemTableNodeResponse = { [key: string]: unknown } | null | null;
+
+    export interface SystemTableNode {
+      /** @nullable */
+      custom_name?: string | null;
+      /**
+       * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
+       * @nullable
+       */
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      id: string;
+      id_field: string;
+      kind?: SystemTableNodeKind;
+      math?: typeof SystemTableNodeMath[keyof typeof SystemTableNodeMath]  | null;
+      math_group_type_index?: MathGroupTypeIndex | null;
+      /** @nullable */
+      math_hogql?: string | null;
+      /** @nullable */
+      math_multiplier?: number | null;
+      /** @nullable */
+      math_property?: string | null;
+      math_property_revenue_currency?: RevenueCurrencyPropertyConfig | null;
+      /** @nullable */
+      math_property_type?: string | null;
+      /** @nullable */
+      name?: string | null;
+      /** @nullable */
+      optionalInFunnel?: boolean | null;
+      /**
+       * Properties configurable in the interface
+       * @nullable
+       */
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /** @nullable */
+      response?: SystemTableNodeResponse;
+      table_name: string;
+      timestamp_field: string;
+      /**
+       * version of the node, used for schema migrations
+       * @nullable
+       */
+      version?: number | null;
+    }
+
     export const GroupNodeMath = {...BaseMathType,...FunnelMathType,...PropertyMathType,...CountPerActorMathType,...ExperimentMetricMathType,...CalendarHeatmapMathType,  unique_group: 'unique_group',
       hogql: 'hogql',
     } as const
@@ -2136,7 +2194,7 @@ export namespace Schemas {
       /** @nullable */
       name?: string | null;
       /** Entities to combine in this group */
-      nodes: (EventsNode | ActionsNode | DataWarehouseNode)[];
+      nodes: (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode)[];
       /** Group of entities combined with AND/OR operator */
       operator: FilterLogicalOperator;
       /** @nullable */
@@ -2404,7 +2462,7 @@ export namespace Schemas {
        */
       samplingFactor?: number | null;
       /** Events and actions to include */
-      series: (GroupNode | EventsNode | ActionsNode | DataWarehouseNode)[];
+      series: (GroupNode | EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode)[];
       /** Tags that will be added to the Query log comment */
       tags?: QueryLogTags | null;
       /** Properties specific to the trends insight */
@@ -2787,7 +2845,7 @@ export namespace Schemas {
        */
       samplingFactor?: number | null;
       /** Events and actions to include */
-      series: (GroupNode | EventsNode | ActionsNode | FunnelsDataWarehouseNode)[];
+      series: (GroupNode | EventsNode | ActionsNode | FunnelsDataWarehouseNode | SystemTableNode)[];
       /** Tags that will be added to the Query log comment */
       tags?: QueryLogTags | null;
       /**
@@ -3312,7 +3370,7 @@ export namespace Schemas {
        */
       samplingFactor?: number | null;
       /** Events and actions to include */
-      series: (EventsNode | ActionsNode | DataWarehouseNode)[];
+      series: (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode)[];
       /** Properties specific to the stickiness insight */
       stickinessFilter?: StickinessFilter | null;
       /** Tags that will be added to the Query log comment */
@@ -3476,7 +3534,7 @@ export namespace Schemas {
        */
       samplingFactor?: number | null;
       /** Events and actions to include */
-      series: (EventsNode | ActionsNode | LifecycleDataWarehouseNode)[];
+      series: (EventsNode | ActionsNode | LifecycleDataWarehouseNode | SystemTableNode)[];
       /** Tags that will be added to the Query log comment */
       tags?: QueryLogTags | null;
       /**
@@ -3948,7 +4006,7 @@ export namespace Schemas {
     export interface FunnelCorrelationActorsQuery {
       /** @nullable */
       funnelCorrelationPersonConverted?: boolean | null;
-      funnelCorrelationPersonEntity?: EventsNode | ActionsNode | DataWarehouseNode | null;
+      funnelCorrelationPersonEntity?: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | null;
       /** @nullable */
       funnelCorrelationPropertyValues?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
@@ -5909,7 +5967,7 @@ export namespace Schemas {
        */
       samplingFactor?: number | null;
       /** Events and actions to include */
-      series: (EventsNode | ActionsNode | DataWarehouseNode)[];
+      series: (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode)[];
       /** Tags that will be added to the Query log comment */
       tags?: QueryLogTags | null;
       /**
@@ -8779,6 +8837,7 @@ export namespace Schemas {
       MaxAiContext: 'max_ai_context',
       WorkflowVariables: 'workflow_variables',
       SuggestedFilters: 'suggested_filters',
+      SystemTables: 'system_tables',
       Empty: 'empty',
     } as const;
 

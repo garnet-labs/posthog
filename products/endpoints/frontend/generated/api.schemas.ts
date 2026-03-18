@@ -493,7 +493,8 @@ export interface CustomChannelRuleApi {
 }
 
 export interface DataWarehouseEventsModifierApi {
-    distinct_id_field: string
+    /** @nullable */
+    distinct_id_field?: string | null
     id_field: string
     table_name: string
     timestamp_field: string
@@ -1615,6 +1616,111 @@ export interface DataWarehouseNodeApi {
     version?: number | null
 }
 
+export type SystemTableNodeApiKind = (typeof SystemTableNodeApiKind)[keyof typeof SystemTableNodeApiKind]
+
+export const SystemTableNodeApiKind = {
+    SystemTableNode: 'SystemTableNode',
+} as const
+
+export const SystemTableNodeApiMath = {
+    ...BaseMathTypeApi,
+    ...FunnelMathTypeApi,
+    ...PropertyMathTypeApi,
+    ...CountPerActorMathTypeApi,
+    ...ExperimentMetricMathTypeApi,
+    ...CalendarHeatmapMathTypeApi,
+    unique_group: 'unique_group',
+    hogql: 'hogql',
+} as const
+/**
+ * @nullable
+ */
+export type SystemTableNodeApiResponse = { [key: string]: unknown } | null | null
+
+export interface SystemTableNodeApi {
+    /** @nullable */
+    custom_name?: string | null
+    /**
+     * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
+     * @nullable
+     */
+    fixedProperties?:
+        | (
+              | EventPropertyFilterApi
+              | PersonPropertyFilterApi
+              | ElementPropertyFilterApi
+              | EventMetadataPropertyFilterApi
+              | SessionPropertyFilterApi
+              | CohortPropertyFilterApi
+              | RecordingPropertyFilterApi
+              | LogEntryPropertyFilterApi
+              | GroupPropertyFilterApi
+              | FeaturePropertyFilterApi
+              | FlagPropertyFilterApi
+              | HogQLPropertyFilterApi
+              | EmptyPropertyFilterApi
+              | DataWarehousePropertyFilterApi
+              | DataWarehousePersonPropertyFilterApi
+              | ErrorTrackingIssueFilterApi
+              | LogPropertyFilterApi
+              | RevenueAnalyticsPropertyFilterApi
+          )[]
+        | null
+    id: string
+    id_field: string
+    kind?: SystemTableNodeApiKind
+    math?: (typeof SystemTableNodeApiMath)[keyof typeof SystemTableNodeApiMath] | null
+    math_group_type_index?: MathGroupTypeIndexApi | null
+    /** @nullable */
+    math_hogql?: string | null
+    /** @nullable */
+    math_multiplier?: number | null
+    /** @nullable */
+    math_property?: string | null
+    math_property_revenue_currency?: RevenueCurrencyPropertyConfigApi | null
+    /** @nullable */
+    math_property_type?: string | null
+    /** @nullable */
+    name?: string | null
+    /** @nullable */
+    optionalInFunnel?: boolean | null
+    /**
+     * Properties configurable in the interface
+     * @nullable
+     */
+    properties?:
+        | (
+              | EventPropertyFilterApi
+              | PersonPropertyFilterApi
+              | ElementPropertyFilterApi
+              | EventMetadataPropertyFilterApi
+              | SessionPropertyFilterApi
+              | CohortPropertyFilterApi
+              | RecordingPropertyFilterApi
+              | LogEntryPropertyFilterApi
+              | GroupPropertyFilterApi
+              | FeaturePropertyFilterApi
+              | FlagPropertyFilterApi
+              | HogQLPropertyFilterApi
+              | EmptyPropertyFilterApi
+              | DataWarehousePropertyFilterApi
+              | DataWarehousePersonPropertyFilterApi
+              | ErrorTrackingIssueFilterApi
+              | LogPropertyFilterApi
+              | RevenueAnalyticsPropertyFilterApi
+          )[]
+        | null
+    /** @nullable */
+    response?: SystemTableNodeApiResponse
+    table_name: string
+    timestamp_field: string
+    /**
+     * version of the node, used for schema migrations
+     * @nullable
+     */
+    version?: number | null
+}
+
 export const GroupNodeApiMath = {
     ...BaseMathTypeApi,
     ...FunnelMathTypeApi,
@@ -1676,7 +1782,7 @@ export interface GroupNodeApi {
     /** @nullable */
     name?: string | null
     /** Entities to combine in this group */
-    nodes: (EventsNodeApi | ActionsNodeApi | DataWarehouseNodeApi)[]
+    nodes: (EventsNodeApi | ActionsNodeApi | DataWarehouseNodeApi | SystemTableNodeApi)[]
     /** Group of entities combined with AND/OR operator */
     operator: FilterLogicalOperatorApi
     /** @nullable */
@@ -1984,7 +2090,7 @@ export interface TrendsQueryApi {
      */
     samplingFactor?: number | null
     /** Events and actions to include */
-    series: (GroupNodeApi | EventsNodeApi | ActionsNodeApi | DataWarehouseNodeApi)[]
+    series: (GroupNodeApi | EventsNodeApi | ActionsNodeApi | DataWarehouseNodeApi | SystemTableNodeApi)[]
     /** Tags that will be added to the Query log comment */
     tags?: QueryLogTagsApi | null
     /** Properties specific to the trends insight */
@@ -2530,7 +2636,7 @@ export interface FunnelsQueryApi {
      */
     samplingFactor?: number | null
     /** Events and actions to include */
-    series: (GroupNodeApi | EventsNodeApi | ActionsNodeApi | FunnelsDataWarehouseNodeApi)[]
+    series: (GroupNodeApi | EventsNodeApi | ActionsNodeApi | FunnelsDataWarehouseNodeApi | SystemTableNodeApi)[]
     /** Tags that will be added to the Query log comment */
     tags?: QueryLogTagsApi | null
     /**
@@ -3130,7 +3236,7 @@ export interface StickinessQueryApi {
      */
     samplingFactor?: number | null
     /** Events and actions to include */
-    series: (EventsNodeApi | ActionsNodeApi | DataWarehouseNodeApi)[]
+    series: (EventsNodeApi | ActionsNodeApi | DataWarehouseNodeApi | SystemTableNodeApi)[]
     /** Properties specific to the stickiness insight */
     stickinessFilter?: StickinessFilterApi | null
     /** Tags that will be added to the Query log comment */
@@ -3363,7 +3469,7 @@ export interface LifecycleQueryApi {
      */
     samplingFactor?: number | null
     /** Events and actions to include */
-    series: (EventsNodeApi | ActionsNodeApi | LifecycleDataWarehouseNodeApi)[]
+    series: (EventsNodeApi | ActionsNodeApi | LifecycleDataWarehouseNodeApi | SystemTableNodeApi)[]
     /** Tags that will be added to the Query log comment */
     tags?: QueryLogTagsApi | null
     /**
