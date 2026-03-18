@@ -74,6 +74,40 @@ man hogli
 
 Every subcommand is self-documented. You can append `--help` to any command for detailed options, for example `hogli test:python --help`.
 
+
+### Product commands
+
+hogli includes commands for scaffolding and validating product structure:
+
+**Bootstrap a new product:**
+
+```bash
+hogli product:bootstrap <name>
+```
+
+Scaffolds a new product under `products/<name>/` with the canonical directory structure, registers it in `tach.toml`, `frontend/package.json`, and Django settings. Use `--dry-run` to preview what would be created, or `--force` to overwrite existing files.
+
+**Lint a single product:**
+
+```bash
+hogli product:lint <name>
+```
+
+Validates the product's structure using AST-based checks. The linter runs in one of two modes depending on whether the product has `backend/facade/contracts.py`:
+
+- **Strict** (isolated products) — enforces all rules: required root files, `package.json` scripts, misplaced backend files, file/folder conflicts, tach interface declarations
+- **Lenient** (legacy products) — enforces a subset of rules plus an isolation progress report showing contracts coverage, facade purity, ORM-bound serializers, direct `.objects.` calls in views, and cross-product non-facade imports
+
+Single-product runs show detailed output with actionable `→` hints for each missing or broken layer.
+
+**Lint all products:**
+
+```bash
+hogli product:lint --all
+```
+
+Runs a compact pass/fail summary across all products, reporting the number of strict vs lenient products and which ones failed.
+
 ### Design philosophy
 
 Hogli follows these principles:
