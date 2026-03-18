@@ -22,6 +22,24 @@ API_VERSION_HEADER = "API-Version"
 MAX_TIMESTAMP_DRIFT_SECONDS = 300
 
 
+def verify_api_version(request: Request) -> Response | None:
+    """Check the API-Version header matches a supported version."""
+    api_version = request.META.get("HTTP_API_VERSION", "")
+    if api_version not in SUPPORTED_VERSIONS:
+        endpoint = request.path
+        _log_and_capture_event("invalid_api_version", 400, endpoint, api_version=api_version)
+        return Response(
+            {
+                "error": {
+                    "code": "invalid_api_version",
+                    "message": f"Supported API-Versions: {', '.join(SUPPORTED_VERSIONS)}",
+                }
+            },
+            status=400,
+        )
+    return None
+
+
 def verify_stripe_signature(request: Request) -> Response | None:
     """Verify the Stripe-Signature HMAC.
 
