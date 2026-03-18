@@ -15,6 +15,12 @@ import { Button } from '@/components/ui/button'
 - [ ] Tokens
   - [ ] tokens/colors
     - [ ] Storybook (WIP)
+  - [ ] tokens/shadows
+    - [ ] Storybook
+  - [ ] tokens/spacing
+    - [ ] Storybook
+  - [x] tokens/typography
+    - [x] Storybook
 - [ ] Primitives
   - [x] primitives/accordian
     - [x] storybook
