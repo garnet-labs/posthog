@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::cohorts::cohort_models::CohortId;
 use common_types::TeamId;
 
-use super::provider::{CohortMembershipError, CohortMembershipProvider};
+use super::provider::CohortMembershipProvider;
 
 type MembershipCacheKey = (TeamId, Uuid);
 
@@ -50,7 +50,7 @@ impl<P: CohortMembershipProvider> CohortMembershipProvider for CachedCohortMembe
         team_id: TeamId,
         person_uuid: Uuid,
         cohort_ids: &[CohortId],
-    ) -> Result<HashMap<CohortId, bool>, CohortMembershipError> {
+    ) -> anyhow::Result<HashMap<CohortId, bool>> {
         if cohort_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -129,7 +129,7 @@ mod tests {
             _team_id: TeamId,
             _person_uuid: Uuid,
             cohort_ids: &[CohortId],
-        ) -> Result<HashMap<CohortId, bool>, CohortMembershipError> {
+        ) -> anyhow::Result<HashMap<CohortId, bool>> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             Ok(cohort_ids
                 .iter()

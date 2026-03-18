@@ -74,13 +74,10 @@ pub enum FlagError {
     NoAuthenticationProvided,
     #[error("Row not found in postgres")]
     RowNotFound,
-    /// Data parsing error with context about what failed.
-    /// This is an internal error (500) indicating data corruption or schema mismatch,
+    /// Data parsing error indicating data corruption or schema mismatch,
     /// not a service availability issue.
-    #[error("Failed to parse flag data: {0}")]
-    DataParsingErrorWithContext(String),
-    #[error("failed to deserialize filters")]
-    DeserializeFiltersError,
+    #[error("Failed to parse data: {0}")]
+    DataParsingError(String),
     #[error("redis unavailable")]
     RedisUnavailable,
     #[error("database unavailable")]
@@ -121,8 +118,6 @@ pub enum FlagError {
     StaticCohortMatchesNotCached,
     #[error("Cache miss - data not found in cache")]
     CacheMiss,
-    #[error("Failed to parse data")]
-    DataParsingError,
     #[error("Parallel batch evaluation task panicked")]
     BatchEvaluationPanicked,
     #[error("Rayon semaphore acquisition timed out after {0}ms")]
@@ -166,20 +161,16 @@ impl FlagError {
 
             // Internal server errors (500)
             FlagError::Internal(_) => ("internal_error", 500),
-            FlagError::DeserializeFiltersError => ("deserialize_filters_error", 500),
             FlagError::DatabaseError(_, _) => ("database_error", 500),
             FlagError::NoGroupTypeMappings => ("no_group_type_mappings", 500),
             FlagError::RowNotFound => ("row_not_found", 500),
             FlagError::DependencyNotFound(_, _) => ("dependency_not_found", 500),
             FlagError::CohortFiltersParsingError => ("cohort_filters_parsing_error", 500),
             FlagError::DependencyCycle(_, _) => ("dependency_cycle", 500),
-            FlagError::DataParsingError => ("data_parsing_error", 500),
+            FlagError::DataParsingError(_) => ("data_parsing_error", 500),
             FlagError::BatchEvaluationPanicked => ("batch_evaluation_panicked", 500),
             FlagError::HashKeyOverrideError => ("hash_key_override_error", 500),
             FlagError::RayonSemaphoreTimeout(_) => ("rayon_semaphore_timeout", 504),
-
-            // Data parsing errors (500) - internal errors, not service unavailability
-            FlagError::DataParsingErrorWithContext(_) => ("flag_data_parsing_error", 500),
 
             // Service unavailable errors (503) - transient issues, retry may help
             FlagError::RedisUnavailable => ("redis_unavailable", 503),
@@ -308,16 +299,14 @@ impl FlagError {
             }
             FlagError::ClientFacing(_) => return false, // All other ClientFacing are 4XX
             FlagError::Internal(_)
-            | FlagError::DeserializeFiltersError
             | FlagError::DatabaseError(_, _)
             | FlagError::NoGroupTypeMappings
             | FlagError::RowNotFound
             | FlagError::DependencyNotFound(_, _)
             | FlagError::CohortFiltersParsingError
             | FlagError::DependencyCycle(_, _)
-            | FlagError::DataParsingError
+            | FlagError::DataParsingError(_)
             | FlagError::BatchEvaluationPanicked
-            | FlagError::DataParsingErrorWithContext(_)
             | FlagError::HashKeyOverrideError => StatusCode::INTERNAL_SERVER_ERROR,
 
             FlagError::RayonSemaphoreTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
@@ -421,18 +410,11 @@ impl IntoResponse for FlagError {
                 };
                 return (StatusCode::UNAUTHORIZED, Json(response)).into_response();
             }
-            FlagError::DataParsingErrorWithContext(ref details) => {
+            FlagError::DataParsingError(ref details) => {
                 tracing::error!("Data parsing error: {}", details);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to parse flag configuration data. This may indicate a misconfigured feature flag. Please check your flag definitions or contact support.".to_string(),
-                )
-            }
-            FlagError::DeserializeFiltersError => {
-                tracing::error!("Failed to deserialize filters");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to deserialize property filters. This is likely a temporary issue. Please try again later.".to_string(),
+                    "Failed to parse data. This may indicate a misconfigured feature flag. Please check your flag definitions or contact support.".to_string(),
                 )
             }
             FlagError::RedisUnavailable => {
@@ -514,10 +496,6 @@ impl IntoResponse for FlagError {
                 tracing::error!("Cache miss - required data not found in cache");
                 (StatusCode::SERVICE_UNAVAILABLE, "Required data not found in cache. This is likely a temporary issue. Please try again later.".to_string())
             }
-            FlagError::DataParsingError => {
-                tracing::error!("Failed to parse data");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse internal data. This is likely a temporary issue. Please try again later.".to_string())
-            }
             FlagError::BatchEvaluationPanicked => {
                 tracing::error!("Parallel batch evaluation task panicked");
                 (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred during flag evaluation. Please try again later.".to_string())
@@ -562,12 +540,10 @@ impl From<CustomRedisError> for FlagError {
     fn from(e: CustomRedisError) -> Self {
         match e {
             CustomRedisError::NotFound => FlagError::TokenValidationError,
-            CustomRedisError::ParseError(details) => {
-                FlagError::DataParsingErrorWithContext(format!(
-                    "Redis data parsing failed: {}",
-                    simplify_serde_error(&details)
-                ))
-            }
+            CustomRedisError::ParseError(details) => FlagError::DataParsingError(format!(
+                "Redis data parsing failed: {}",
+                simplify_serde_error(&details)
+            )),
             CustomRedisError::Timeout => FlagError::TimeoutError(Some("Redis timeout".to_string())),
             CustomRedisError::InvalidConfiguration(_) | CustomRedisError::Redis(_) => {
                 FlagError::RedisUnavailable
@@ -618,7 +594,9 @@ impl From<HyperCacheError> for FlagError {
             HyperCacheError::CacheMiss => FlagError::CacheMiss,
             HyperCacheError::Redis(redis_error) => FlagError::from(redis_error),
             HyperCacheError::S3(_) => FlagError::CacheMiss,
-            HyperCacheError::Json(_) => FlagError::DataParsingError,
+            HyperCacheError::Json(e) => {
+                FlagError::DataParsingError(format!("cache JSON deserialization failed: {e}"))
+            }
             HyperCacheError::Timeout(_) => {
                 FlagError::TimeoutError(Some("cache_timeout".to_string()))
             }
@@ -742,8 +720,7 @@ mod tests {
             FlagError::SecretApiTokenInvalid,
             FlagError::NoAuthenticationProvided,
             FlagError::RowNotFound,
-            FlagError::DataParsingErrorWithContext("test parse error".to_string()),
-            FlagError::DeserializeFiltersError,
+            FlagError::DataParsingError("test parse error".to_string()),
             FlagError::RedisUnavailable,
             FlagError::DatabaseUnavailable,
             FlagError::DatabaseError(sqlx::Error::RowNotFound, Some("test context".to_string())),
@@ -756,7 +733,6 @@ mod tests {
             FlagError::PropertiesNotInCache,
             FlagError::StaticCohortMatchesNotCached,
             FlagError::CacheMiss,
-            FlagError::DataParsingError,
             FlagError::BatchEvaluationPanicked,
             FlagError::RayonSemaphoreTimeout(800),
             CookielessManagerError::MissingProperty("test".to_string()).into(), // CookielessError
@@ -836,11 +812,10 @@ mod tests {
         // Server errors should be 5xx
         let server_errors = vec![
             FlagError::Internal("".into()),
-            FlagError::DeserializeFiltersError,
             FlagError::NoGroupTypeMappings,
             FlagError::RowNotFound,
             FlagError::CohortFiltersParsingError,
-            FlagError::DataParsingError,
+            FlagError::DataParsingError("test".to_string()),
         ];
         for error in server_errors {
             let status = error.status_code();
@@ -853,17 +828,15 @@ mod tests {
         // Verify that status_code() >= 500 matches is_5xx() for ALL 5xx errors
         let errors_5xx = vec![
             FlagError::Internal("test".to_string()),
-            FlagError::DeserializeFiltersError,
             FlagError::DatabaseError(sqlx::Error::RowNotFound, None),
             FlagError::NoGroupTypeMappings,
             FlagError::RowNotFound,
             FlagError::DependencyNotFound(DependencyType::Flag, 1),
             FlagError::CohortFiltersParsingError,
             FlagError::DependencyCycle(DependencyType::Cohort, 2),
-            FlagError::DataParsingError,
+            FlagError::DataParsingError("test".to_string()),
             FlagError::BatchEvaluationPanicked,
             FlagError::RayonSemaphoreTimeout(800),
-            FlagError::DataParsingErrorWithContext("test".to_string()),
             FlagError::RedisUnavailable,
             FlagError::DatabaseUnavailable,
             FlagError::TimeoutError(None),
@@ -902,7 +875,7 @@ mod tests {
         assert!(!FlagError::TimeoutError(Some("pool_timeout".to_string())).is_token_not_found());
         assert!(!FlagError::DatabaseError(sqlx::Error::PoolTimedOut, None).is_token_not_found());
         assert!(!FlagError::Internal("serialization failed".to_string()).is_token_not_found());
-        assert!(!FlagError::DataParsingError.is_token_not_found());
+        assert!(!FlagError::DataParsingError("test".to_string()).is_token_not_found());
     }
 
     #[test]
@@ -960,8 +933,7 @@ mod tests {
             FlagError::SecretApiTokenInvalid,
             FlagError::NoAuthenticationProvided,
             FlagError::RowNotFound,
-            FlagError::DataParsingErrorWithContext("test parse error".to_string()),
-            FlagError::DeserializeFiltersError,
+            FlagError::DataParsingError("test parse error".to_string()),
             FlagError::RedisUnavailable,
             FlagError::DatabaseUnavailable,
             FlagError::DatabaseError(sqlx::Error::RowNotFound, Some("test context".to_string())),
@@ -974,7 +946,6 @@ mod tests {
             FlagError::PropertiesNotInCache,
             FlagError::StaticCohortMatchesNotCached,
             FlagError::CacheMiss,
-            FlagError::DataParsingError,
             FlagError::BatchEvaluationPanicked,
             FlagError::RayonSemaphoreTimeout(800),
             CookielessManagerError::MissingProperty("test".to_string()).into(),

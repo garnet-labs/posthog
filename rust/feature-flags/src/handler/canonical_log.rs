@@ -727,8 +727,7 @@ mod tests {
         #[case(FlagError::SecretApiTokenInvalid, 401, "secret_api_token_invalid")]
         #[case(FlagError::NoAuthenticationProvided, 401, "no_authentication")]
         #[case(FlagError::RowNotFound, 500, "row_not_found")]
-        #[case(FlagError::DataParsingErrorWithContext("test".into()), 500, "flag_data_parsing_error")]
-        #[case(FlagError::DeserializeFiltersError, 500, "deserialize_filters_error")]
+        #[case(FlagError::DataParsingError("test".into()), 500, "data_parsing_error")]
         #[case(FlagError::RedisUnavailable, 503, "redis_unavailable")]
         #[case(FlagError::DatabaseUnavailable, 503, "database_unavailable")]
         #[case(FlagError::TimeoutError(None), 503, "timeout")]
@@ -757,7 +756,7 @@ mod tests {
             "static_cohort_not_cached"
         )]
         #[case(FlagError::CacheMiss, 503, "cache_miss")]
-        #[case(FlagError::DataParsingError, 500, "data_parsing_error")]
+        #[case(FlagError::DataParsingError("test".into()), 500, "data_parsing_error")]
         fn test_set_error_populates_fields(
             #[case] error: FlagError,
             #[case] expected_status: u16,

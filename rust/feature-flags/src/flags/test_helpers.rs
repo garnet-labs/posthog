@@ -106,7 +106,7 @@ pub async fn get_flags_from_redis(
                 team_id,
                 e
             );
-            FlagError::DataParsingErrorWithContext(format!(
+            FlagError::DataParsingError(format!(
                 "Failed to deserialize pickle data for team {team_id}: {}",
                 simplify_serde_error(&e.to_string())
             ))
@@ -119,7 +119,7 @@ pub async fn get_flags_from_redis(
             team_id,
             e
         );
-        FlagError::DataParsingErrorWithContext(format!(
+        FlagError::DataParsingError(format!(
             "Failed to parse hypercache JSON for team {team_id}: {}",
             simplify_serde_error(&e.to_string())
         ))
@@ -164,7 +164,7 @@ pub async fn update_flags_in_hypercache(
             team_id,
             e
         );
-        FlagError::DataParsingErrorWithContext(format!(
+        FlagError::DataParsingError(format!(
             "Failed to serialize flags for team {team_id}: {}",
             simplify_serde_error(&e.to_string())
         ))
@@ -177,7 +177,7 @@ pub async fn update_flags_in_hypercache(
             team_id,
             e
         );
-        FlagError::DataParsingErrorWithContext(format!(
+        FlagError::DataParsingError(format!(
             "Failed to pickle flags for team {team_id}: {}",
             simplify_serde_error(&e.to_string())
         ))

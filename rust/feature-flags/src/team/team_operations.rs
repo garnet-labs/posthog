@@ -52,7 +52,7 @@ impl Team {
     pub fn from_hypercache_value(value: Value) -> Result<Team, FlagError> {
         serde_json::from_value(value).map_err(|e| {
             tracing::error!("Failed to deserialize team from HyperCache: {e}");
-            FlagError::DataParsingErrorWithContext(format!(
+            FlagError::DataParsingError(format!(
                 "Failed to parse team configuration: {}",
                 simplify_serde_error(&e.to_string())
             ))
@@ -343,31 +343,19 @@ mod tests {
     async fn test_from_hypercache_value_rejects_non_object() {
         // Test with array
         let result = Team::from_hypercache_value(json!(["not", "an", "object"]));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // Test with string
         let result = Team::from_hypercache_value(json!("just a string"));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // Test with number
         let result = Team::from_hypercache_value(json!(42));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // Test with null
         let result = Team::from_hypercache_value(json!(null));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[tokio::test]
@@ -377,37 +365,25 @@ mod tests {
             "api_token": "phc_test",
             "uuid": "00000000-0000-0000-0000-000000000001"
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // Missing api_token
         let result = Team::from_hypercache_value(json!({
             "id": 123,
             "uuid": "00000000-0000-0000-0000-000000000001"
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // Missing uuid
         let result = Team::from_hypercache_value(json!({
             "id": 123,
             "api_token": "phc_test"
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // Empty object
         let result = Team::from_hypercache_value(json!({}));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[tokio::test]
@@ -417,20 +393,14 @@ mod tests {
             "api_token": "phc_test",
             "uuid": "not-a-valid-uuid"
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         let result = Team::from_hypercache_value(json!({
             "id": 123,
             "api_token": "phc_test",
             "uuid": ""
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[tokio::test]
@@ -441,10 +411,7 @@ mod tests {
             "api_token": "phc_test",
             "uuid": "00000000-0000-0000-0000-000000000001"
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // api_token as number instead of string
         let result = Team::from_hypercache_value(json!({
@@ -452,10 +419,7 @@ mod tests {
             "api_token": 12345,
             "uuid": "00000000-0000-0000-0000-000000000001"
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
 
         // uuid as number instead of string
         let result = Team::from_hypercache_value(json!({
@@ -463,9 +427,6 @@ mod tests {
             "api_token": "phc_test",
             "uuid": 12345
         }));
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 }

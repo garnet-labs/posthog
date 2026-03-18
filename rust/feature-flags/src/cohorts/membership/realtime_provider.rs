@@ -1,3 +1,4 @@
+use anyhow::Context;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use uuid::Uuid;
 use crate::cohorts::cohort_models::CohortId;
 use common_types::TeamId;
 
-use super::provider::{CohortMembershipError, CohortMembershipProvider};
+use super::provider::CohortMembershipProvider;
 
 /// Queries the behavioral cohorts PostgreSQL database for realtime cohort membership.
 ///
@@ -31,7 +32,7 @@ impl CohortMembershipProvider for RealtimeCohortMembershipProvider {
         team_id: TeamId,
         person_uuid: Uuid,
         cohort_ids: &[CohortId],
-    ) -> Result<HashMap<CohortId, bool>, CohortMembershipError> {
+    ) -> anyhow::Result<HashMap<CohortId, bool>> {
         if cohort_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -56,7 +57,7 @@ impl CohortMembershipProvider for RealtimeCohortMembershipProvider {
         .bind(&cohort_ids_i64)
         .fetch_all(self.pool.as_ref())
         .await
-        .map_err(|e| CohortMembershipError::QueryFailed(e.to_string()))?;
+        .context("cohort membership query failed")?;
 
         let matched_set: std::collections::HashSet<CohortId> = rows
             .iter()
@@ -88,7 +89,7 @@ impl CohortMembershipProvider for NoOpCohortMembershipProvider {
         _team_id: TeamId,
         _person_uuid: Uuid,
         cohort_ids: &[CohortId],
-    ) -> Result<HashMap<CohortId, bool>, CohortMembershipError> {
+    ) -> anyhow::Result<HashMap<CohortId, bool>> {
         Ok(cohort_ids.iter().map(|id| (*id, false)).collect())
     }
 }

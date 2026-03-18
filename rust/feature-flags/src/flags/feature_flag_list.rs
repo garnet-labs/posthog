@@ -55,7 +55,7 @@ impl FeatureFlagList {
                     "team_id" => team_id.to_string(),
                 )
                 .increment(1);
-                FlagError::DataParsingErrorWithContext(format!(
+                FlagError::DataParsingError(format!(
                     "Failed to parse feature flags for team {team_id}: {}",
                     simplify_serde_error(&e.to_string())
                 ))
@@ -685,10 +685,7 @@ mod tests {
         // Data is an array instead of {"flags": [...]} wrapper
         let data = json!([{"id": 1, "key": "test"}]);
         let result = FeatureFlagList::parse_hypercache_value(data, 123);
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[test]
@@ -696,10 +693,7 @@ mod tests {
         // Data has wrong structure - flags is not an array
         let data = json!({"flags": "not an array"});
         let result = FeatureFlagList::parse_hypercache_value(data, 123);
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[test]
@@ -714,10 +708,7 @@ mod tests {
             ]
         });
         let result = FeatureFlagList::parse_hypercache_value(data, 123);
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[test]
@@ -769,10 +760,7 @@ mod tests {
         // A random string that's not the sentinel should fail parsing
         let data = json!("some_random_string");
         let result = FeatureFlagList::parse_hypercache_value(data, 123);
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 
     #[test]
@@ -780,9 +768,6 @@ mod tests {
         // Empty object (no flags key)
         let data = json!({});
         let result = FeatureFlagList::parse_hypercache_value(data, 123);
-        assert!(matches!(
-            result,
-            Err(FlagError::DataParsingErrorWithContext(_))
-        ));
+        assert!(matches!(result, Err(FlagError::DataParsingError(_))));
     }
 }
