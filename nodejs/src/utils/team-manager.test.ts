@@ -7,13 +7,11 @@ import {
     updateOrganizationAvailableFeatures,
 } from '../../tests/helpers/sql'
 import { defaultConfig } from '../config/config'
-import { Hub, Team } from '../types'
-import { closeHub, createHub } from './db/hub'
+import { Team } from '../types'
 import { PostgresRouter } from './db/postgres'
 import { TeamManager } from './team-manager'
 
 describe('TeamManager()', () => {
-    let hub: Hub
     let teamManager: TeamManager
     let postgres: PostgresRouter
     let teamId: Team['id']
@@ -25,12 +23,11 @@ describe('TeamManager()', () => {
         const now = Date.now()
         jest.spyOn(Date, 'now').mockImplementation(() => now)
 
-        hub = await createHub()
         await resetTestDatabase()
 
         postgres = new PostgresRouter(defaultConfig)
         teamManager = new TeamManager(postgres)
-        const team = await getFirstTeam(hub.postgres)
+        const team = await getFirstTeam(postgres)
         teamId = team.id
         teamToken = team.api_token
         organizationId = team.organization_id
@@ -38,7 +35,7 @@ describe('TeamManager()', () => {
     })
 
     afterEach(async () => {
-        await closeHub(hub)
+        await postgres.end()
     })
 
     describe('getTeam()', () => {

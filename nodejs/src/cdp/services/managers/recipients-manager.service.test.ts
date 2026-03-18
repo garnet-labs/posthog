@@ -1,33 +1,33 @@
+import { defaultConfig } from '~/config/config'
 import { createTeam, getFirstTeam, getTeam, resetTestDatabase } from '~/tests/helpers/sql'
-import { Hub, Team } from '~/types'
-import { closeHub, createHub } from '~/utils/db/hub'
-import { PostgresUse } from '~/utils/db/postgres'
+import { Team } from '~/types'
+import { PostgresRouter, PostgresUse } from '~/utils/db/postgres'
 import { UUIDT } from '~/utils/utils'
 
 import { RecipientGetArgs, RecipientsManagerService } from './recipients-manager.service'
 
 describe('RecipientsManager', () => {
-    let hub: Hub
+    let postgres: PostgresRouter
     let manager: RecipientsManagerService
     let team: Team
     let team2: Team
 
     beforeEach(async () => {
-        hub = await createHub()
         await resetTestDatabase()
-        manager = new RecipientsManagerService(hub.postgres)
-        team = await getFirstTeam(hub.postgres)
-        const team2Id = await createTeam(hub.postgres, team.organization_id)
-        team2 = (await getTeam(hub.postgres, team2Id))!
+        postgres = new PostgresRouter(defaultConfig)
+        manager = new RecipientsManagerService(postgres)
+        team = await getFirstTeam(postgres)
+        const team2Id = await createTeam(postgres, team.organization_id)
+        team2 = (await getTeam(postgres, team2Id))!
     })
 
     afterEach(async () => {
-        await closeHub(hub)
+        await postgres.end()
     })
 
     const createRecipient = async (teamId: number, identifier: string, preferences: Record<string, string> = {}) => {
         const id = new UUIDT().toString()
-        await hub.postgres.query(
+        await postgres.query(
             PostgresUse.COMMON_WRITE,
             `INSERT INTO posthog_messagerecipientpreference (id, team_id, identifier, preferences, created_at, updated_at, deleted)
              VALUES ($1, $2, $3, $4, NOW(), NOW(), false)`,
@@ -77,7 +77,7 @@ describe('RecipientsManager', () => {
         it('should filter out deleted recipients', async () => {
             const id = await createRecipient(team.id, 'user@example.com', {})
 
-            await hub.postgres.query(
+            await postgres.query(
                 PostgresUse.COMMON_WRITE,
                 `UPDATE posthog_messagerecipientpreference SET deleted = true WHERE id = $1`,
                 [id],
@@ -251,7 +251,7 @@ describe('RecipientsManager', () => {
             const result1 = await manager.get(args)
             expect(result1?.id).toBe(id)
 
-            await hub.postgres.query(
+            await postgres.query(
                 PostgresUse.COMMON_WRITE,
                 `DELETE FROM posthog_messagerecipientpreference WHERE id = $1`,
                 [id],
@@ -270,7 +270,7 @@ describe('RecipientsManager', () => {
 
             manager.clear()
 
-            await hub.postgres.query(
+            await postgres.query(
                 PostgresUse.COMMON_WRITE,
                 `DELETE FROM posthog_messagerecipientpreference WHERE id = $1`,
                 [id],

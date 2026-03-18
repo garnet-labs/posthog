@@ -1,12 +1,10 @@
 import { createTeam, getFirstTeam, resetTestDatabase } from '../../tests/helpers/sql'
 import { defaultConfig } from '../config/config'
-import { Hub, Team } from '../types'
-import { closeHub, createHub } from './db/hub'
+import { Team } from '../types'
 import { PostgresRouter, PostgresUse } from './db/postgres'
 import { EventSchemaEnforcementManager } from './event-schema-enforcement-manager'
 
 describe('EventSchemaEnforcementManager', () => {
-    let hub: Hub
     let schemaManager: EventSchemaEnforcementManager
     let postgres: PostgresRouter
     let teamId: Team['id']
@@ -17,12 +15,11 @@ describe('EventSchemaEnforcementManager', () => {
         const now = Date.now()
         jest.spyOn(Date, 'now').mockImplementation(() => now)
 
-        hub = await createHub()
         await resetTestDatabase()
 
         postgres = new PostgresRouter(defaultConfig)
         schemaManager = new EventSchemaEnforcementManager(postgres)
-        const team = await getFirstTeam(hub.postgres)
+        const team = await getFirstTeam(postgres)
         teamId = team.id
         projectId = team.project_id
         fetchSchemasSpy = jest.spyOn(schemaManager as any, 'fetchSchemas')
@@ -30,7 +27,6 @@ describe('EventSchemaEnforcementManager', () => {
 
     afterEach(async () => {
         await postgres.end()
-        await closeHub(hub)
     })
 
     const createEventDefinition = async (

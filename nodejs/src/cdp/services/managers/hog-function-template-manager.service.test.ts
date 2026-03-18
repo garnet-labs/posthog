@@ -1,26 +1,26 @@
 import { DBHogFunctionTemplate } from '~/cdp/types'
+import { defaultConfig } from '~/config/config'
 import { forSnapshot } from '~/tests/helpers/snapshots'
 import { resetTestDatabase } from '~/tests/helpers/sql'
-import { Hub } from '~/types'
-import { closeHub, createHub } from '~/utils/db/hub'
+import { PostgresRouter } from '~/utils/db/postgres'
 
 import { insertHogFunctionTemplate } from '../../_tests/fixtures'
 import { HogFunctionTemplateManagerService } from './hog-function-template-manager.service'
 
 describe('HogFunctionTemplateManager', () => {
-    let hub: Hub
+    let postgres: PostgresRouter
     let manager: HogFunctionTemplateManagerService
     let hogFunctionsTemplates: DBHogFunctionTemplate[]
 
     beforeEach(async () => {
-        hub = await createHub()
         await resetTestDatabase()
-        manager = new HogFunctionTemplateManagerService(hub.postgres)
+        postgres = new PostgresRouter(defaultConfig)
+        manager = new HogFunctionTemplateManagerService(postgres)
 
         hogFunctionsTemplates = []
 
         hogFunctionsTemplates.push(
-            await insertHogFunctionTemplate(hub.postgres, {
+            await insertHogFunctionTemplate(postgres, {
                 id: 'template-testing-1',
                 name: 'Test Hog Function team 1',
                 inputs_schema: [
@@ -36,7 +36,7 @@ describe('HogFunctionTemplateManager', () => {
     })
 
     afterEach(async () => {
-        await closeHub(hub)
+        await postgres.end()
     })
 
     it('returns the hog functions templates', async () => {
