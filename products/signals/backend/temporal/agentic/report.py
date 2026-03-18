@@ -12,6 +12,7 @@ from posthog.sync import database_sync_to_async
 
 from products.signals.backend.models import SignalReportArtefact
 from products.signals.backend.report_generation.research import ReportResearchOutput, run_multi_turn_research
+from products.signals.backend.report_generation.select_repo import RepoSelectionResult
 from products.signals.backend.temporal.actionability_judge import ActionabilityChoice, Priority
 from products.signals.backend.temporal.types import SignalData
 from products.tasks.backend.services.custom_prompt_runner import CustomPromptSandboxContext
@@ -68,7 +69,7 @@ class RunAgenticReportInput:
     team_id: int
     report_id: str
     signals: list[SignalData]
-    repository: str
+    repo_selection: RepoSelectionResult
 
 
 @dataclass
@@ -97,8 +98,18 @@ def _resolve_user_id(team_id: int) -> int:
     return membership.user_id
 
 
-def _persist_agentic_report_artefacts(team_id: int, report_id: str, result: ReportResearchOutput) -> None:
+def _persist_agentic_report_artefacts(
+    team_id: int, report_id: str, result: ReportResearchOutput, repo_selection: RepoSelectionResult
+) -> None:
     artefacts = [
+        SignalReportArtefact(
+            team_id=team_id,
+            report_id=report_id,
+            type=SignalReportArtefact.ArtefactType.REPO_SELECTION,
+            content=repo_selection.model_dump_json(),
+        ),
+    ]
+    artefacts.extend(
         SignalReportArtefact(
             team_id=team_id,
             report_id=report_id,
@@ -106,7 +117,7 @@ def _persist_agentic_report_artefacts(team_id: int, report_id: str, result: Repo
             content=finding.model_dump_json(),
         )
         for finding in result.findings
-    ]
+    )
     artefacts.append(
         SignalReportArtefact(
             team_id=team_id,
@@ -132,12 +143,16 @@ def _persist_agentic_report_artefacts(team_id: int, report_id: str, result: Repo
 async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenticReportOutput:
     """Run the sandbox-backed report research and persist its artefacts after full success."""
     try:
+        # The workflow only calls this activity when repo_selection.repository is not None.
+        assert input.repo_selection.repository is not None, "run_agentic_report_activity called without a repository"
+        repository = input.repo_selection.repository
+
         # 1. Get context for the sandbox
         user_id = await database_sync_to_async(_resolve_user_id, thread_sensitive=False)(input.team_id)
         context = CustomPromptSandboxContext(
             team_id=input.team_id,
             user_id=user_id,
-            repository=input.repository,
+            repository=repository,
         )
         # 2. Run the agentic research in the sandbox
         result = await run_multi_turn_research(
@@ -150,13 +165,14 @@ async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenti
             input.team_id,
             input.report_id,
             result,
+            input.repo_selection,
         )
         logger.info(
             "signals agentic report completed",
             report_id=input.report_id,
             signal_count=len(input.signals),
             choice=result.actionability.actionability.value,
-            repository=input.repository,
+            repository=repository,
         )
         return RunAgenticReportOutput(
             title=result.title,
@@ -165,7 +181,7 @@ async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenti
             priority=result.priority.priority if result.priority else None,
             explanation=result.actionability.explanation,
             already_addressed=result.actionability.already_addressed,
-            repository=input.repository,
+            repository=repository,
         )
     except Exception as error:
         logger.exception(
