@@ -3,11 +3,10 @@ import { objectClean } from 'lib/utils'
 
 import { ProductAnalyticsInsightNodeKind } from '~/queries/nodes/InsightQuery/defaults'
 import {
-    ActionsNode,
+    AnyDataWarehouseNode,
+    AnyEntityNode,
     BreakdownFilter,
     CompareFilter,
-    DataWarehouseNode,
-    EventsNode,
     FunnelsFilterLegacy,
     GroupNode,
     InsightQueryNode,
@@ -21,10 +20,13 @@ import {
 } from '~/queries/schema/schema-general'
 import {
     isActionsNode,
+    isAnyDataWarehouseNode,
     isDataWarehouseNode,
     isEventsNode,
+    isFunnelsDataWarehouseNode,
     isFunnelsQuery,
     isGroupNode,
+    isLifecycleDataWarehouseNode,
     isSystemTableNode,
     isLifecycleQuery,
     isPathsQuery,
@@ -43,12 +45,12 @@ type FilterTypeActionsAndEvents = {
     groups?: ActionFilter[]
 }
 
-const getFilterId = (node: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode): any => {
+const getFilterId = (node: AnyEntityNode<AnyDataWarehouseNode> | GroupNode): any => {
     if (isGroupNode(node)) {
         return undefined
     }
 
-    if (isDataWarehouseNode(node) || isSystemTableNode(node)) {
+    if (isAnyDataWarehouseNode(node) || isSystemTableNode(node)) {
         return node.table_name
     }
 
@@ -60,12 +62,12 @@ const getFilterId = (node: EventsNode | ActionsNode | DataWarehouseNode | System
 }
 
 export const seriesNodeToFilter = (
-    node: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode,
+    node: AnyEntityNode<AnyDataWarehouseNode> | GroupNode,
     index?: number
 ): ActionFilter => {
     const entity: ActionFilter = objectClean({
         type:
-            isDataWarehouseNode(node) || isSystemTableNode(node)
+            isAnyDataWarehouseNode(node) || isSystemTableNode(node)
                 ? EntityTypes.DATA_WAREHOUSE
                 : isGroupNode(node)
                   ? EntityTypes.GROUPS
@@ -99,6 +101,22 @@ export const seriesNodeToFilter = (
                   timestamp_field: node.timestamp_field,
               }
             : {}),
+        ...(isFunnelsDataWarehouseNode(node)
+            ? {
+                  table_name: node.table_name,
+                  id_field: node.id_field,
+                  timestamp_field: node.timestamp_field,
+                  aggregation_target_field: node.aggregation_target_field,
+              }
+            : {}),
+        ...(isLifecycleDataWarehouseNode(node)
+            ? {
+                  table_name: node.table_name,
+                  timestamp_field: node.timestamp_field,
+                  aggregation_target_field: node.aggregation_target_field,
+                  created_at_field: node.created_at_field,
+              }
+            : {}),
         ...(isGroupNode(node)
             ? {
                   operator: node.operator,
@@ -111,7 +129,7 @@ export const seriesNodeToFilter = (
 }
 
 export const seriesToActionsAndEvents = (
-    series: (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode)[]
+    series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode)[]
 ): Required<FilterTypeActionsAndEvents> => {
     const actions: ActionFilter[] = []
     const events: ActionFilter[] = []
@@ -124,7 +142,7 @@ export const seriesToActionsAndEvents = (
             events.push(entity)
         } else if (isActionsNode(node)) {
             actions.push(entity)
-        } else if (isDataWarehouseNode(node) || isSystemTableNode(node)) {
+        } else if (isAnyDataWarehouseNode(node) || isSystemTableNode(node)) {
             data_warehouse.push(entity)
         } else if (isGroupNode(node)) {
             groups.push(entity)

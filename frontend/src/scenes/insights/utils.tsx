@@ -17,11 +17,10 @@ import { removeUndefinedAndNull } from '~/lib/utils'
 import { FormatPropertyValueForDisplayFunction } from '~/models/propertyDefinitionsModel'
 import { examples } from '~/queries/examples'
 import {
-    ActionsNode,
+    AnyDataWarehouseNode,
+    AnyEntityNode,
     BreakdownFilter,
     DashboardFilter,
-    DataWarehouseNode,
-    EventsNode,
     FileSystemIconType,
     GroupNode,
     HogQLQuery,
@@ -38,7 +37,7 @@ import {
 import {
     containsHogQLQuery,
     isDataTableNode,
-    isDataWarehouseNode,
+    isAnyDataWarehouseNode,
     isEventsNode,
     isGroupNode,
     isSystemTableNode,
@@ -114,7 +113,7 @@ export const getDisplayNameFromEntityFilter = (
 }
 
 export const getDisplayNameFromEntityNode = (
-    node: EventsNode | ActionsNode | DataWarehouseNode | GroupNode,
+    node: AnyEntityNode<AnyDataWarehouseNode> | GroupNode,
     isCustom = true
 ): string | null => {
     // Make sure names aren't blank strings
@@ -137,7 +136,7 @@ export const getDisplayNameFromEntityNode = (
     }
 
     const id =
-        isDataWarehouseNode(node) || isSystemTableNode(node)
+        isAnyDataWarehouseNode(node) || isSystemTableNode(node)
             ? node.table_name
             : isEventsNode(node)
               ? node.event
@@ -325,6 +324,9 @@ function formatNumericBreakdownLabel(
     return String(breakdown_value)
 }
 
+// Keep in sync with NOT_IN_COHORT_ID in posthog/queries/breakdown_props.py
+export const NOT_IN_COHORT_ID = 2 ** 52
+
 export function getCohortNameFromId(
     cohortId: string | number | null | undefined,
     cohorts: CohortType[] | null | undefined
@@ -332,6 +334,10 @@ export function getCohortNameFromId(
     // :TRICKY: Different endpoints represent the all users cohort breakdown differently
     if (cohortId === 'all' || cohortId === 0) {
         return 'All Users'
+    }
+
+    if (Number(cohortId) === NOT_IN_COHORT_ID) {
+        return 'Not in cohort'
     }
 
     return cohorts?.filter((c) => c.id == cohortId)[0]?.name ?? (cohortId || '').toString()
@@ -381,6 +387,17 @@ export function formatBreakdownLabel(
     if (breakdownFilter?.breakdown_type === 'cohort' || breakdownType === 'cohort') {
         if (breakdown_value === 'all' || breakdown_value === 0) {
             return 'All Users'
+        }
+        if (Number(breakdown_value) === NOT_IN_COHORT_ID) {
+            const selectedCohorts = Array.isArray(breakdownFilter?.breakdown) ? breakdownFilter.breakdown : []
+            const selectedCohortId = selectedCohorts.find((id) => id !== 'all' && Number(id) !== NOT_IN_COHORT_ID)
+            if (selectedCohortId != null && cohorts) {
+                const cohortName = cohorts.find((c) => c.id == selectedCohortId)?.name
+                if (cohortName) {
+                    return `Not in ${cohortName}`
+                }
+            }
+            return 'Not in cohort'
         }
         if (cohorts == null || cohorts.length === 0) {
             if (itemLabel != null) {

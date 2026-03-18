@@ -26,6 +26,7 @@ import { actionsModel } from '~/models/actionsModel'
 import { seriesNodeToFilter } from '~/queries/nodes/InsightQuery/utils/queryNodeToFilter'
 import { extractValidationError, getAllEventNames, queryFromKind } from '~/queries/nodes/InsightViz/utils'
 import {
+    AnyDataWarehouseNode,
     AnyEntityNode,
     BreakdownFilter,
     CompareFilter,
@@ -34,12 +35,15 @@ import {
     FunnelExclusionSteps,
     FunnelsFilter,
     FunnelsQuery,
+    GroupNode,
     InsightFilter,
     InsightFilterProperty,
     InsightQueryNode,
+    LifecycleQuery,
     Node,
     NodeKind,
     ProductAnalyticsInsightQueryNode,
+    RetentionQuery,
     TrendsFilter,
     TrendsFormulaNode,
     TrendsQuery,
@@ -48,6 +52,7 @@ import {
 import {
     filterForQuery,
     filterKeyForQuery,
+    getAggregationGroupTypeIndex,
     getBreakdown,
     getCompareFilter,
     getDisplay,
@@ -66,12 +71,14 @@ import {
     getShowValuesOnSeries,
     getYAxisScaleType,
     isActionsNode,
+    isAnyDataWarehouseNode,
     isDataWarehouseNode,
     isEventsNode,
     isSystemTableNode,
     isFunnelsQuery,
     isInsightQueryNode,
     isInsightVizNode,
+    isLifecycleDataWarehouseNode,
     isLifecycleQuery,
     isNodeWithSource,
     isPathsQuery,
@@ -84,7 +91,14 @@ import {
     nodeKindToFilterProperty,
     supportsPercentStackView,
 } from '~/queries/utils'
-import { BaseMathType, ChartDisplayType, FilterType, InsightLogicProps, SlowQueryPossibilities } from '~/types'
+import {
+    BaseMathType,
+    ChartDisplayType,
+    FilterType,
+    InsightLogicProps,
+    LabelGroupType,
+    SlowQueryPossibilities,
+} from '~/types'
 
 import type { insightVizDataLogicType } from './insightVizDataLogicType'
 
@@ -255,6 +269,11 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         yAxisScaleType: [(s) => [s.querySource], (q) => (q ? getYAxisScaleType(q) : null)],
         showMultipleYAxes: [(s) => [s.querySource], (q) => (q ? getShowMultipleYAxes(q) : null)],
         resultCustomizationBy: [(s) => [s.querySource], (q) => (q ? getResultCustomizationBy(q) : null)],
+        aggregationGroupTypeIndex: [(s) => [s.querySource], (q) => (q ? getAggregationGroupTypeIndex(q) : null)],
+        labelGroupType: [
+            (s) => [s.aggregationGroupTypeIndex],
+            (aggregationGroupTypeIndex): LabelGroupType => aggregationGroupTypeIndex ?? 'people',
+        ],
         goalLines: [
             (s) => [s.querySource],
             (q) => (isTrendsQuery(q) || isFunnelsQuery(q) || isRetentionQuery(q) ? getGoalLines(q) : null),
@@ -363,14 +382,10 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         ],
 
         hasDataWarehouseSeries: [
-            (s) => [s.isTrends, s.isFunnels, s.series],
-            (isTrends, isFunnels, series): boolean => {
-                return (
-                    (isTrends || isFunnels) &&
-                    (series || []).length > 0 &&
-                    !!series?.some((node) => isDataWarehouseNode(node) || isSystemTableNode(node))
-                )
-            },
+            (s) => [s.series],
+            (series): boolean =>
+                (series || []).length > 0 &&
+                !!series?.some((node) => isAnyDataWarehouseNode(node) || isSystemTableNode(node)),
         ],
         hasOnlyDataWarehouseSeries: [
             (s) => [s.series],
@@ -378,7 +393,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                 return (
                     !!series &&
                     series.length > 0 &&
-                    series.every((node) => isDataWarehouseNode(node) || isSystemTableNode(node))
+                    series.every((node) => isAnyDataWarehouseNode(node) || isSystemTableNode(node))
                 )
             },
         ],
@@ -405,7 +420,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                 }
 
                 const dataWarehouseSeries = series!.filter(
-                    (node) => isDataWarehouseNode(node) || isSystemTableNode(node)
+                    (node) => isAnyDataWarehouseNode(node) || isSystemTableNode(node)
                 )
                 const dataWarehouseTableNames = Array.from(new Set(dataWarehouseSeries.map((node) => node.table_name)))
                 return dataWarehouseTableNames.flatMap((tableName) =>
@@ -593,17 +608,6 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         // query
         setQuery: ({ query }) => {
             if (isInsightVizNode(query)) {
-                if (query.source.kind === NodeKind.TrendsQuery) {
-                    // Disable filter test account when using a data warehouse series
-                    const hasWarehouseSeries = query.source.series?.some(
-                        (node) => isDataWarehouseNode(node) || isSystemTableNode(node)
-                    )
-                    const filterTestAccountsEnabled = query.source.filterTestAccounts ?? false
-                    if (hasWarehouseSeries && filterTestAccountsEnabled) {
-                        query.source.filterTestAccounts = false
-                    }
-                }
-
                 if (props.setQuery) {
                     props.setQuery(query)
                 }
@@ -749,7 +753,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
 ])
 
 const getActiveUsersMath = (
-    series: TrendsQuery['series'] | null | undefined
+    series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode<AnyDataWarehouseNode>)[] | null | undefined
 ): BaseMathType.WeeklyActiveUsers | BaseMathType.MonthlyActiveUsers | null => {
     for (const seriesItem of series || []) {
         if (seriesItem.math === BaseMathType.WeeklyActiveUsers) {
@@ -824,6 +828,25 @@ const handleQuerySourceUpdateSideEffects = (
             ...(insightFilter as FunnelsFilter),
             ...getClampedFunnelStepRange(insightFilter as FunnelsFilter, funnelSeries),
         }
+    }
+
+    if (
+        maybeChangedSeries &&
+        isLifecycleQuery(currentState) &&
+        currentState.customAggregationTarget &&
+        !maybeChangedSeries.some((series) => isLifecycleDataWarehouseNode(series))
+    ) {
+        ;(mergedUpdate as LifecycleQuery).customAggregationTarget = undefined
+    }
+
+    if (
+        maybeChangedSeries &&
+        isLifecycleQuery(currentState) &&
+        maybeChangedSeries.some((series) => isLifecycleDataWarehouseNode(series))
+    ) {
+        ;(mergedUpdate as LifecycleQuery).properties = undefined
+        ;(mergedUpdate as LifecycleQuery).filterTestAccounts = undefined
+        ;(mergedUpdate as LifecycleQuery).samplingFactor = undefined
     }
 
     /*
@@ -965,6 +988,16 @@ const handleQuerySourceUpdateSideEffects = (
                 ...(currentState as TrendsQuery).trendsFilter,
                 smoothingIntervals: undefined,
             }
+        }
+    }
+
+    /*
+     * Retention side effects
+     */
+    if (kind === NodeKind.RetentionQuery) {
+        const retentionFilter = (mergedUpdate as RetentionQuery).retentionFilter
+        if (retentionFilter?.timeWindowMode === '24_hour_windows') {
+            retentionFilter.cumulative = false
         }
     }
 

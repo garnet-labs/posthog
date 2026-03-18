@@ -1162,6 +1162,12 @@ class DefaultChannelTypes(StrEnum):
     UNKNOWN = "Unknown"
 
 
+class DetectorType(StrEnum):
+    ZSCORE = "zscore"
+    MAD = "mad"
+    THRESHOLD = "threshold"
+
+
 class DistanceFunc(StrEnum):
     L1_DISTANCE = "L1Distance"
     L2_DISTANCE = "L2Distance"
@@ -1300,6 +1306,11 @@ class Metric(StrEnum):
     REQUESTS = "requests"
     QUERY_DURATION = "query_duration"
     ERROR_RATE = "error_rate"
+
+
+class EnsembleOperator(StrEnum):
+    AND_ = "and"
+    OR_ = "or"
 
 
 class EntityType(StrEnum):
@@ -2243,8 +2254,8 @@ class InsightsThresholdBounds(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    lower: float | None = None
-    upper: float | None = None
+    lower: float | None = Field(default=None, description="Alert fires when the value drops below this number.")
+    upper: float | None = Field(default=None, description="Alert fires when the value exceeds this number.")
 
 
 class IntegrationFilter(BaseModel):
@@ -2995,6 +3006,8 @@ class NodeKind(StrEnum):
     ACTIONS_NODE = "ActionsNode"
     DATA_WAREHOUSE_NODE = "DataWarehouseNode"
     SYSTEM_TABLE_NODE = "SystemTableNode"
+    FUNNELS_DATA_WAREHOUSE_NODE = "FunnelsDataWarehouseNode"
+    LIFECYCLE_DATA_WAREHOUSE_NODE = "LifecycleDataWarehouseNode"
     EVENTS_QUERY = "EventsQuery"
     SESSIONS_QUERY = "SessionsQuery"
     PERSONS_NODE = "PersonsNode"
@@ -5794,7 +5807,12 @@ class InsightThreshold(BaseModel):
         extra="forbid",
     )
     bounds: InsightsThresholdBounds | None = None
-    type: InsightThresholdType
+    type: InsightThresholdType = Field(
+        ...,
+        description=(
+            "Whether bounds are compared as absolute values or as percentage change from the previous interval."
+        ),
+    )
 
 
 class LLMTrace(BaseModel):
@@ -6100,6 +6118,24 @@ class PlanningStep(BaseModel):
     )
     description: str
     status: PlanningStepStatus
+
+
+class PreprocessingConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    diffs_n: int | None = Field(
+        default=None,
+        description=("Order of differencing. 0 = raw values, 1 = first-order diffs (default: 0)"),
+    )
+    lags_n: int | None = Field(
+        default=None,
+        description=("Number of lag features. 0 = none, >0 = include n lagged values (default: 0)"),
+    )
+    smooth_n: int | None = Field(
+        default=None,
+        description=("Moving average window size. 0 = no smoothing, >1 = smooth over n points (default: 0)"),
+    )
 
 
 class ProductItem(BaseModel):
@@ -7113,6 +7149,18 @@ class TestCachedBasicQueryResponse(BaseModel):
     )
 
 
+class ThresholdDetectorConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    lower_bound: float | None = Field(default=None, description="Lower bound - values below this are anomalies")
+    preprocessing: PreprocessingConfig | None = Field(
+        default=None, description="Preprocessing transforms applied before detection"
+    )
+    type: Literal["threshold"] = "threshold"
+    upper_bound: float | None = Field(default=None, description="Upper bound - values above this are anomalies")
+
+
 class TraceQueryResponse(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -7177,8 +7225,14 @@ class TrendsAlertConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    check_ongoing_interval: bool | None = None
-    series_index: int
+    check_ongoing_interval: bool | None = Field(
+        default=None,
+        description=("When true, evaluate the current (still incomplete) time interval in addition to completed ones."),
+    )
+    series_index: int = Field(
+        ...,
+        description="Zero-based index of the series in the insight's query to monitor.",
+    )
     type: Literal["TrendsAlertConfig"] = "TrendsAlertConfig"
 
 
@@ -7516,6 +7570,24 @@ class WebVitalsPathBreakdownResult(BaseModel):
     good: list[WebVitalsPathBreakdownResultItem]
     needs_improvements: list[WebVitalsPathBreakdownResultItem]
     poor: list[WebVitalsPathBreakdownResultItem]
+
+
+class ZScoreDetectorConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    preprocessing: PreprocessingConfig | None = Field(
+        default=None, description="Preprocessing transforms applied before detection"
+    )
+    threshold: float | None = Field(
+        default=None,
+        description=("Anomaly probability threshold [0-1]. Points above this probability are flagged (default: 0.9)"),
+    )
+    type: Literal["zscore"] = "zscore"
+    window: int | None = Field(
+        default=None,
+        description="Rolling window size for calculating mean/std (default: 30)",
+    )
 
 
 class ActorsPropertyTaxonomyQueryResponse(BaseModel):
@@ -11694,6 +11766,7 @@ class FeatureFlagGroupType(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
+    aggregation_group_type_index: int | None = None
     description: str | None = None
     properties: (
         list[
@@ -11919,6 +11992,90 @@ class FunnelExclusionEventsNode(BaseModel):
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
 
+class FunnelsDataWarehouseNode(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    aggregation_target_field: str
+    custom_name: str | None = None
+    dw_source_type: str | None = None
+    fixedProperties: (
+        list[
+            EventPropertyFilter
+            | PersonPropertyFilter
+            | ElementPropertyFilter
+            | EventMetadataPropertyFilter
+            | SessionPropertyFilter
+            | CohortPropertyFilter
+            | RecordingPropertyFilter
+            | LogEntryPropertyFilter
+            | GroupPropertyFilter
+            | FeaturePropertyFilter
+            | FlagPropertyFilter
+            | HogQLPropertyFilter
+            | EmptyPropertyFilter
+            | DataWarehousePropertyFilter
+            | DataWarehousePersonPropertyFilter
+            | ErrorTrackingIssueFilter
+            | LogPropertyFilter
+            | RevenueAnalyticsPropertyFilter
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description=("Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)"),
+    )
+    id: str
+    id_field: str
+    kind: Literal["FunnelsDataWarehouseNode"] = "FunnelsDataWarehouseNode"
+    math: (
+        BaseMathType
+        | FunnelMathType
+        | PropertyMathType
+        | CountPerActorMathType
+        | ExperimentMetricMathType
+        | CalendarHeatmapMathType
+        | Literal["unique_group"]
+        | Literal["hogql"]
+        | None
+    ) = None
+    math_group_type_index: MathGroupTypeIndex | None = None
+    math_hogql: str | None = None
+    math_multiplier: float | None = None
+    math_property: str | None = None
+    math_property_revenue_currency: RevenueCurrencyPropertyConfig | None = None
+    math_property_type: str | None = None
+    name: str | None = None
+    optionalInFunnel: bool | None = None
+    properties: (
+        list[
+            EventPropertyFilter
+            | PersonPropertyFilter
+            | ElementPropertyFilter
+            | EventMetadataPropertyFilter
+            | SessionPropertyFilter
+            | CohortPropertyFilter
+            | RecordingPropertyFilter
+            | LogEntryPropertyFilter
+            | GroupPropertyFilter
+            | FeaturePropertyFilter
+            | FlagPropertyFilter
+            | HogQLPropertyFilter
+            | EmptyPropertyFilter
+            | DataWarehousePropertyFilter
+            | DataWarehousePersonPropertyFilter
+            | ErrorTrackingIssueFilter
+            | LogPropertyFilter
+            | RevenueAnalyticsPropertyFilter
+        ]
+        | None
+    ) = Field(default=None, description="Properties configurable in the interface")
+    response: dict[str, Any] | None = None
+    table_name: str
+    timestamp_field: str
+    version: float | None = Field(default=None, description="version of the node, used for schema migrations")
+
+
 class FunnelsQueryResponse(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -12091,6 +12248,89 @@ class InsightActorsQueryBase(BaseModel):
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
 
+class LifecycleDataWarehouseNode(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    aggregation_target_field: str
+    created_at_field: str
+    custom_name: str | None = None
+    fixedProperties: (
+        list[
+            EventPropertyFilter
+            | PersonPropertyFilter
+            | ElementPropertyFilter
+            | EventMetadataPropertyFilter
+            | SessionPropertyFilter
+            | CohortPropertyFilter
+            | RecordingPropertyFilter
+            | LogEntryPropertyFilter
+            | GroupPropertyFilter
+            | FeaturePropertyFilter
+            | FlagPropertyFilter
+            | HogQLPropertyFilter
+            | EmptyPropertyFilter
+            | DataWarehousePropertyFilter
+            | DataWarehousePersonPropertyFilter
+            | ErrorTrackingIssueFilter
+            | LogPropertyFilter
+            | RevenueAnalyticsPropertyFilter
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description=("Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)"),
+    )
+    id: str
+    kind: Literal["LifecycleDataWarehouseNode"] = "LifecycleDataWarehouseNode"
+    math: (
+        BaseMathType
+        | FunnelMathType
+        | PropertyMathType
+        | CountPerActorMathType
+        | ExperimentMetricMathType
+        | CalendarHeatmapMathType
+        | Literal["unique_group"]
+        | Literal["hogql"]
+        | None
+    ) = None
+    math_group_type_index: MathGroupTypeIndex | None = None
+    math_hogql: str | None = None
+    math_multiplier: float | None = None
+    math_property: str | None = None
+    math_property_revenue_currency: RevenueCurrencyPropertyConfig | None = None
+    math_property_type: str | None = None
+    name: str | None = None
+    optionalInFunnel: bool | None = None
+    properties: (
+        list[
+            EventPropertyFilter
+            | PersonPropertyFilter
+            | ElementPropertyFilter
+            | EventMetadataPropertyFilter
+            | SessionPropertyFilter
+            | CohortPropertyFilter
+            | RecordingPropertyFilter
+            | LogEntryPropertyFilter
+            | GroupPropertyFilter
+            | FeaturePropertyFilter
+            | FlagPropertyFilter
+            | HogQLPropertyFilter
+            | EmptyPropertyFilter
+            | DataWarehousePropertyFilter
+            | DataWarehousePersonPropertyFilter
+            | ErrorTrackingIssueFilter
+            | LogPropertyFilter
+            | RevenueAnalyticsPropertyFilter
+        ]
+        | None
+    ) = Field(default=None, description="Properties configurable in the interface")
+    response: dict[str, Any] | None = None
+    table_name: str
+    timestamp_field: str
+    version: float | None = Field(default=None, description="version of the node, used for schema migrations")
+
+
 class LifecycleQueryResponse(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -12198,6 +12438,24 @@ class LogsQueryResponse(BaseModel):
     timings: list[QueryTiming] | None = Field(
         default=None,
         description=("Measured timings for different parts of the query generation process"),
+    )
+
+
+class MADDetectorConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    preprocessing: PreprocessingConfig | None = Field(
+        default=None, description="Preprocessing transforms applied before detection"
+    )
+    threshold: float | None = Field(
+        default=None,
+        description=("Anomaly probability threshold [0-1]. Points above this probability are flagged (default: 0.9)"),
+    )
+    type: Literal["mad"] = "mad"
+    window: int | None = Field(
+        default=None,
+        description="Rolling window size for calculating median/MAD (default: 30)",
     )
 
 
@@ -12318,6 +12576,10 @@ class NewExperimentQueryResponse(BaseModel):
     breakdown_results: list[ExperimentBreakdownResult] | None = None
     clickhouse_sql: str | None = None
     hogql: str | None = None
+    is_precomputed: bool | None = Field(
+        default=None,
+        description="Whether exposures were served from the precomputation system",
+    )
     variant_results: list[ExperimentVariantResultFrequentist] | list[ExperimentVariantResultBayesian]
 
 
@@ -15288,6 +15550,7 @@ class WebStatsTableQuery(BaseModel):
     filterTestAccounts: bool | None = None
     includeAvgTimeOnPage: bool | None = None
     includeBounceRate: bool | None = None
+    includeHost: bool | None = None
     includeRevenue: bool | None = None
     includeScrollDepth: bool | None = None
     interval: IntervalType | None = Field(
@@ -15499,6 +15762,26 @@ class ActorsPropertyTaxonomyQuery(BaseModel):
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
 
+class AnyDataWarehouseNode(RootModel[DataWarehouseNode | FunnelsDataWarehouseNode | LifecycleDataWarehouseNode]):
+    root: DataWarehouseNode | FunnelsDataWarehouseNode | LifecycleDataWarehouseNode
+
+
+class AnyEntityNodeDataWarehouseNode(RootModel[EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode]):
+    root: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode
+
+
+class AnyEntityNodeFunnelsDataWarehouseNode(
+    RootModel[EventsNode | ActionsNode | FunnelsDataWarehouseNode | SystemTableNode]
+):
+    root: EventsNode | ActionsNode | FunnelsDataWarehouseNode | SystemTableNode
+
+
+class AnyEntityNodeLifecycleDataWarehouseNode(
+    RootModel[EventsNode | ActionsNode | LifecycleDataWarehouseNode | SystemTableNode]
+):
+    root: EventsNode | ActionsNode | LifecycleDataWarehouseNode | SystemTableNode
+
+
 class AnyResponseType(
     RootModel[
         dict[str, Any]
@@ -15679,6 +15962,10 @@ class CachedNewExperimentQueryResponse(BaseModel):
     clickhouse_sql: str | None = None
     hogql: str | None = None
     is_cached: bool
+    is_precomputed: bool | None = Field(
+        default=None,
+        description="Whether exposures were served from the precomputation system",
+    )
     last_refresh: AwareDatetime
     next_allowed_client_refresh: AwareDatetime
     query_metadata: dict[str, Any] | None = None
@@ -15946,6 +16233,17 @@ class EndpointsUsageTrendsQuery(BaseModel):
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
 
+class EnsembleDetectorConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    detectors: list[ZScoreDetectorConfig | MADDetectorConfig | ThresholdDetectorConfig] = Field(
+        ..., description="Sub-detector configurations (minimum 2)"
+    )
+    operator: EnsembleOperator = Field(..., description="How to combine sub-detector results")
+    type: Literal["ensemble"] = "ensemble"
+
+
 class ErrorTrackingBreakdownsQuery(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -16153,6 +16451,12 @@ class FunnelsFilter(BaseModel):
     breakdownSorting: str | None = Field(
         default=None,
         description=("Breakdown table sorting. Format: 'column_key' or '-column_key' (descending)"),
+    )
+    customAggregationTarget: bool | None = Field(
+        default=None,
+        description=(
+            "For data warehouse based funnel insights when the aggregation target can't be mapped to persons or groups."
+        ),
     )
     exclusions: list[FunnelExclusionEventsNode | FunnelExclusionActionsNode] | None = []
     funnelAggregateByHogQL: str | None = None
@@ -16717,7 +17021,9 @@ class StickinessQuery(BaseModel):
     ) = Field(default=[], description="Property filters for all series")
     response: StickinessQueryResponse | None = None
     samplingFactor: float | None = Field(default=None, description="Sampling rate")
-    series: list[EventsNode | ActionsNode | DataWarehouseNode] = Field(..., description="Events and actions to include")
+    series: list[EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode] = Field(
+        ..., description="Events and actions to include"
+    )
     stickinessFilter: StickinessFilter | None = Field(
         default=None, description="Properties specific to the stickiness insight"
     )
@@ -16920,7 +17226,9 @@ class CalendarHeatmapQuery(BaseModel):
     ) = Field(default=[], description="Property filters for all series")
     response: CalendarHeatmapResponse | None = None
     samplingFactor: float | None = Field(default=None, description="Sampling rate")
-    series: list[EventsNode | ActionsNode | DataWarehouseNode] = Field(..., description="Events and actions to include")
+    series: list[EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode] = Field(
+        ..., description="Events and actions to include"
+    )
     tags: QueryLogTags | None = Field(default=None, description="Tags that will be added to the Query log comment")
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
@@ -17018,6 +17326,14 @@ class DatabaseSchemaViewTable(BaseModel):
     query: HogQLQuery
     row_count: float | None = None
     type: Literal["view"] = "view"
+
+
+class DetectorConfig(
+    RootModel[EnsembleDetectorConfig | ZScoreDetectorConfig | MADDetectorConfig | ThresholdDetectorConfig]
+):
+    root: EnsembleDetectorConfig | ZScoreDetectorConfig | MADDetectorConfig | ThresholdDetectorConfig = Field(
+        ..., description="Detector configuration types"
+    )
 
 
 class ErrorTrackingIssueCorrelationQuery(BaseModel):
@@ -17175,6 +17491,10 @@ class ExperimentQueryResponse(BaseModel):
     credible_intervals: dict[str, list[float]] | None = None
     hogql: str | None = None
     insight: list[dict[str, Any]] | None = None
+    is_precomputed: bool | None = Field(
+        default=None,
+        description="Whether exposures were served from the precomputation system",
+    )
     kind: Literal["ExperimentQuery"] = "ExperimentQuery"
     metric: ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric | None = (
         None
@@ -17239,7 +17559,7 @@ class GroupNode(BaseModel):
     math_property_revenue_currency: RevenueCurrencyPropertyConfig | None = None
     math_property_type: str | None = None
     name: str | None = None
-    nodes: list[SystemTableNode | EventsNode | ActionsNode | DataWarehouseNode] = Field(
+    nodes: list[EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode] = Field(
         ..., description="Entities to combine in this group"
     )
     operator: FilterLogicalOperator = Field(..., description="Group of entities combined with AND/OR operator")
@@ -17551,6 +17871,13 @@ class LifecycleQuery(BaseModel):
         extra="forbid",
     )
     aggregation_group_type_index: int | None = Field(default=None, description="Groups aggregation")
+    customAggregationTarget: bool | None = Field(
+        default=None,
+        description=(
+            "For data warehouse based lifecycle insights when the aggregation target"
+            " can't be mapped to persons or groups."
+        ),
+    )
     dataColorTheme: float | None = Field(default=None, description="Colors used in the insight's visualization")
     dateRange: DateRange | None = Field(default=None, description="Date range for the query")
     filterTestAccounts: bool | None = Field(
@@ -17592,7 +17919,9 @@ class LifecycleQuery(BaseModel):
     ) = Field(default=[], description="Property filters for all series")
     response: LifecycleQueryResponse | None = None
     samplingFactor: float | None = Field(default=None, description="Sampling rate")
-    series: list[EventsNode | ActionsNode | DataWarehouseNode] = Field(..., description="Events and actions to include")
+    series: list[EventsNode | ActionsNode | LifecycleDataWarehouseNode | SystemTableNode] = Field(
+        ..., description="Events and actions to include"
+    )
     tags: QueryLogTags | None = Field(default=None, description="Tags that will be added to the Query log comment")
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
@@ -17677,6 +18006,10 @@ class QueryResponseAlternative20(BaseModel):
     credible_intervals: dict[str, list[float]] | None = None
     hogql: str | None = None
     insight: list[dict[str, Any]] | None = None
+    is_precomputed: bool | None = Field(
+        default=None,
+        description="Whether exposures were served from the precomputation system",
+    )
     kind: Literal["ExperimentQuery"] = "ExperimentQuery"
     metric: ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric | None = (
         None
@@ -17867,7 +18200,7 @@ class TrendsQuery(BaseModel):
     ) = Field(default=[], description="Property filters for all series")
     response: TrendsQueryResponse | None = None
     samplingFactor: float | None = Field(default=None, description="Sampling rate")
-    series: list[GroupNode | SystemTableNode | EventsNode | ActionsNode | DataWarehouseNode] = Field(
+    series: list[GroupNode | EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode] = Field(
         ..., description="Events and actions to include"
     )
     tags: QueryLogTags | None = Field(default=None, description="Tags that will be added to the Query log comment")
@@ -17920,6 +18253,10 @@ class CachedExperimentQueryResponse(BaseModel):
     hogql: str | None = None
     insight: list[dict[str, Any]] | None = None
     is_cached: bool
+    is_precomputed: bool | None = Field(
+        default=None,
+        description="Whether exposures were served from the precomputation system",
+    )
     kind: Literal["ExperimentQuery"] = "ExperimentQuery"
     last_refresh: AwareDatetime
     metric: ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric | None = (
@@ -18113,7 +18450,7 @@ class FunnelsQuery(BaseModel):
     ) = Field(default=[], description="Property filters for all series")
     response: FunnelsQueryResponse | None = None
     samplingFactor: float | None = Field(default=None, description="Sampling rate")
-    series: list[GroupNode | EventsNode | ActionsNode | DataWarehouseNode] = Field(
+    series: list[GroupNode | EventsNode | ActionsNode | FunnelsDataWarehouseNode | SystemTableNode] = Field(
         ..., description="Events and actions to include"
     )
     tags: QueryLogTags | None = Field(default=None, description="Tags that will be added to the Query log comment")
@@ -18854,13 +19191,7 @@ class FunnelCorrelationActorsQuery(BaseModel):
         extra="forbid",
     )
     funnelCorrelationPersonConverted: bool | None = None
-    funnelCorrelationPersonEntity: EventsNode | ActionsNode | DataWarehouseNode | None = Field(
-        default=None,
-        description=(
-            "Entity nodes that have a distinct_id_field, usable in person-scoped"
-            " queries (funnels, stickiness, lifecycle)"
-        ),
-    )
+    funnelCorrelationPersonEntity: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | None = None
     funnelCorrelationPropertyValues: (
         list[
             EventPropertyFilter
@@ -19518,6 +19849,8 @@ class MaxInsightContext(BaseModel):
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
@@ -19630,6 +19963,8 @@ class QueryRequest(BaseModel):
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
@@ -19734,6 +20069,8 @@ class QuerySchemaRoot(
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
@@ -19808,6 +20145,8 @@ class QuerySchemaRoot(
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
@@ -19887,6 +20226,8 @@ class QueryUpgradeRequest(BaseModel):
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
@@ -19966,6 +20307,8 @@ class QueryUpgradeResponse(BaseModel):
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
@@ -20171,6 +20514,8 @@ class VisualizationArtifactContent(BaseModel):
         | ActionsNode
         | PersonsNode
         | DataWarehouseNode
+        | FunnelsDataWarehouseNode
+        | LifecycleDataWarehouseNode
         | EventsQuery
         | SessionsQuery
         | ActorsQuery
