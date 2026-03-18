@@ -69,6 +69,19 @@ Runs the agentic flow against synthetic signals.
 
 Use this command when changing prompt logic in `research.py`.
 
+### `select_repo`
+
+File: `../management/commands/select_repo.py`
+
+Tests repo selection in isolation against synthetic JS SDK signals.
+
+- `python manage.py select_repo`
+  Uses the team's actual GitHub integrations to list candidate repos.
+- `python manage.py select_repo --repos PostHog/posthog PostHog/posthog-js PostHog/posthog-python`
+  Bypasses integrations and uses an explicit candidate list.
+
+Use this command when changing prompt logic in `select_repo.py`.
+
 ### `parse_sandbox_log`
 
 File: `../management/commands/parse_sandbox_log.py`

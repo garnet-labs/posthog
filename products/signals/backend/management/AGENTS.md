@@ -52,9 +52,26 @@ python manage.py summarize_single_session <session_id> [--team-id N] [--user-id 
 
 Uses first team/user if omitted. Runs `execute_summarize_session` with `video_validation_enabled='full'`.
 
+## Repository selection (agentic)
+
+Test the repo selection flow in isolation:
+
+```bash
+# Using the team's actual GitHub integrations (same as production)
+python manage.py select_repo
+
+# With explicit candidate repos (bypasses integrations, useful for quick testing)
+python manage.py select_repo --repos PostHog/posthog PostHog/posthog-js PostHog/posthog-python
+
+# Verbose mode — stream raw sandbox logs
+python manage.py select_repo --verbose
+```
+
+Uses synthetic JS SDK signals by default. The agent uses `gh` CLI to explore candidates and pick the best match.
+
 ## Tips
 
 - Compare runs by saving output: `list_signal_reports --json > run_baseline.json`
 - Read each command's source for all available flags — they are in this directory
-- If you are looking for the local-only debug commands `analyze_report.py` or `parse_sandbox_log.py`, those are documented in `../report_generation/AGENTS.md`
+- If you are looking for the local-only debug commands `analyze_report.py`, `select_repo.py`, or `parse_sandbox_log.py`, those are documented in `../report_generation/AGENTS.md`
 - **If you change any command or the flow, update this file to match**
