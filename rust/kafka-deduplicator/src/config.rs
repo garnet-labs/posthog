@@ -320,6 +320,32 @@ pub struct Config {
     pub consumer_name: Option<String>,
 
     //// End kafka-assigner mode configuration ////
+
+    //// Catch-up configuration ////
+    /// Enable catch-up from the output topic after checkpoint restore.
+    /// When enabled, the deduplicator reads the output topic from the checkpoint's
+    /// producer_offset to the current high watermark and inserts dedup keys into RocksDB,
+    /// closing the gap between checkpoint time and now.
+    #[envconfig(default = "false")]
+    pub catchup_enabled: bool,
+
+    /// Batch size for RocksDB inserts during catch-up.
+    /// Larger batches reduce RocksDB write overhead but use more memory.
+    #[envconfig(default = "10000")]
+    pub catchup_batch_size: usize,
+
+    /// Maximum time (seconds) allowed for catch-up per partition.
+    /// If exceeded, catch-up stops with partial results (better than nothing).
+    /// Must fit within max.poll.interval.ms alongside checkpoint import time.
+    #[envconfig(default = "60")]
+    pub catchup_timeout_secs: u64,
+
+    /// Maximum fetch size (bytes) for the catch-up consumer.
+    /// Larger values improve throughput for sequential reads.
+    #[envconfig(default = "52428800")] // 50MB
+    pub catchup_consumer_fetch_max_bytes: u32,
+
+    //// End catch-up configuration ////
     /// Fail-open mode: bypass all deduplication and forward events directly to output topic.
     /// When enabled, the deduplicator skips store operations, checkpoint import/export,
     /// and treats all events as unique. Use as an emergency kill switch when the
@@ -614,6 +640,36 @@ impl Config {
     /// Get max staleness for local checkpoint data as Duration
     pub fn local_checkpoint_max_staleness(&self) -> Duration {
         Duration::from_secs(self.local_checkpoint_max_staleness_secs)
+    }
+
+    /// Check if catch-up is effectively enabled (flag + output topic configured)
+    pub fn catchup_enabled(&self) -> bool {
+        self.catchup_enabled && self.output_topic.is_some()
+    }
+
+    /// Get catch-up timeout as Duration
+    pub fn catchup_timeout(&self) -> Duration {
+        Duration::from_secs(self.catchup_timeout_secs)
+    }
+
+    /// Build Kafka consumer configuration for the catch-up consumer.
+    /// Uses an assign-only consumer optimized for large sequential reads.
+    pub fn build_catchup_consumer_config(&self) -> rdkafka::ClientConfig {
+        use crate::kafka::config::ConsumerConfigBuilder;
+
+        let group_id = format!("{}-catchup", self.kafka_consumer_group);
+
+        ConsumerConfigBuilder::for_watermark_consumer(&self.kafka_hosts, &group_id)
+            .with_tls(self.kafka_tls)
+            .with_max_partition_fetch_bytes(self.catchup_consumer_fetch_max_bytes)
+            .with_topic_metadata_refresh_interval_ms(self.kafka_topic_metadata_refresh_interval_ms)
+            .with_metadata_max_age_ms(self.kafka_metadata_max_age_ms)
+            .with_fetch_min_bytes(self.kafka_consumer_fetch_min_bytes)
+            .with_fetch_max_bytes(self.catchup_consumer_fetch_max_bytes)
+            .with_fetch_wait_max_ms(self.kafka_consumer_fetch_wait_max_ms)
+            .with_queued_min_messages(self.kafka_consumer_queued_min_messages)
+            .with_queued_max_messages_kbytes(self.kafka_consumer_queued_max_messages_kbytes)
+            .build()
     }
 
     /// Build Kafka consumer configuration for the group-based batch consumer.
@@ -911,6 +967,26 @@ mod tests {
         config.s3_endpoint = None;
         config.aws_region = None;
         assert!(!config.checkpoint_import_enabled());
+    }
+
+    #[test]
+    fn test_catchup_enabled() {
+        let mut config = Config::init_with_defaults().unwrap();
+
+        // Disabled by default (flag false, no output topic)
+        assert!(!config.catchup_enabled());
+
+        // Flag true but no output topic
+        config.catchup_enabled = true;
+        assert!(!config.catchup_enabled());
+
+        // Flag true and output topic set
+        config.output_topic = Some("events_deduped".to_string());
+        assert!(config.catchup_enabled());
+
+        // Flag false with output topic set
+        config.catchup_enabled = false;
+        assert!(!config.catchup_enabled());
     }
 
     #[test]

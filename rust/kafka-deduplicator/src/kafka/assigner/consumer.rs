@@ -19,7 +19,10 @@ use tracing::{error, info, warn};
 
 use super::client::AssignerGrpcClient;
 use super::handler::{proto_to_partition, AssignerCommandHandler};
+use crate::catchup::consumer::run_catchup;
 use crate::checkpoint::import::CheckpointImporter;
+use crate::checkpoint::metadata::CheckpointMetadata;
+use crate::config::Config;
 use crate::kafka::batch_consumer::BatchConsumerProcessor;
 use crate::kafka::batch_message::{Batch, BatchError, KafkaMessage};
 use crate::kafka::error_handling;
@@ -30,9 +33,10 @@ use crate::kafka::metrics_consts::{
 use crate::kafka::offset_tracker::OffsetTracker;
 use crate::kafka::partition_router::PartitionRouter;
 use crate::kafka::types::Partition;
-use crate::metrics_const::REBALANCE_CHECKPOINT_IMPORT_COUNTER;
+use crate::metrics_const::{CATCHUP_STATUS_COUNTER, REBALANCE_CHECKPOINT_IMPORT_COUNTER};
 use crate::store_manager::StoreManager;
 use crate::utils::async_helpers::unwrap_blocking_task;
+use crate::utils::format_store_path;
 
 /// Result of a background warming (checkpoint import) task.
 struct WarmResult {
@@ -63,6 +67,7 @@ where
     // For spawning warming tasks
     store_manager: Arc<StoreManager>,
     checkpoint_importer: Option<Arc<CheckpointImporter>>,
+    catchup_config: Option<Arc<Config>>,
 
     // Config
     commit_interval: Duration,
@@ -88,6 +93,7 @@ where
         topic: String,
         store_manager: Arc<StoreManager>,
         checkpoint_importer: Option<Arc<CheckpointImporter>>,
+        catchup_config: Option<Arc<Config>>,
         offset_tracker: Arc<OffsetTracker>,
         router: Arc<PartitionRouter<T, P>>,
         processor: Arc<RoutingProcessor<T, P>>,
@@ -121,6 +127,7 @@ where
             offset_tracker,
             store_manager,
             checkpoint_importer,
+            catchup_config,
             commit_interval,
             batch_size,
             batch_timeout,
@@ -161,6 +168,7 @@ where
                                 &mut self.handler,
                                 &self.store_manager,
                                 &self.checkpoint_importer,
+                                &self.catchup_config,
                                 &warm_done_tx,
                             ).await?;
                         }
@@ -299,6 +307,7 @@ async fn handle_command<T, P>(
     handler: &mut AssignerCommandHandler<T, P>,
     store_manager: &Arc<StoreManager>,
     checkpoint_importer: &Option<Arc<CheckpointImporter>>,
+    catchup_config: &Option<Arc<Config>>,
     warm_done_tx: &mpsc::Sender<WarmResult>,
 ) -> Result<()>
 where
@@ -336,6 +345,7 @@ where
                 cancel_token,
                 store_manager.clone(),
                 checkpoint_importer.clone(),
+                catchup_config.clone(),
                 warm_done_tx.clone(),
             );
         }
@@ -353,6 +363,7 @@ fn spawn_warming_task(
     cancel_token: CancellationToken,
     store_manager: Arc<StoreManager>,
     checkpoint_importer: Option<Arc<CheckpointImporter>>,
+    catchup_config: Option<Arc<Config>>,
     done_tx: mpsc::Sender<WarmResult>,
 ) {
     tokio::spawn(async move {
@@ -364,8 +375,142 @@ fn spawn_warming_task(
         )
         .await;
 
+        // Run catch-up after successful import
+        if result.is_ok() {
+            run_catchup_for_assigner(&partition, &catchup_config, &store_manager, &cancel_token)
+                .await;
+        }
+
         let _ = done_tx.send(WarmResult { partition, result }).await;
     });
+}
+
+/// Run catch-up for a partition in assigner mode after checkpoint import.
+///
+/// Loads metadata from the store path, reads the output topic from `producer_offset`
+/// to the high watermark, and inserts dedup keys into RocksDB.
+async fn run_catchup_for_assigner(
+    partition: &Partition,
+    catchup_config: &Option<Arc<Config>>,
+    store_manager: &Arc<StoreManager>,
+    cancel_token: &CancellationToken,
+) {
+    let Some(config) = catchup_config else {
+        return;
+    };
+
+    let output_topic = match &config.output_topic {
+        Some(t) if !t.is_empty() => t.clone(),
+        _ => return,
+    };
+
+    if cancel_token.is_cancelled() {
+        return;
+    }
+
+    // Load metadata from disk to get producer_offset
+    let store_path = format_store_path(
+        store_manager.base_path(),
+        partition.topic(),
+        partition.partition_number(),
+    );
+    let metadata = match CheckpointMetadata::load_from_dir(&store_path).await {
+        Ok(m) => m,
+        Err(_) => {
+            metrics::counter!(
+                CATCHUP_STATUS_COUNTER,
+                "topic" => partition.topic().to_string(),
+                "partition" => partition.partition_number().to_string(),
+                "result" => "skipped_no_metadata",
+            )
+            .increment(1);
+            return;
+        }
+    };
+
+    if metadata.producer_offset <= 0 {
+        metrics::counter!(
+            CATCHUP_STATUS_COUNTER,
+            "topic" => partition.topic().to_string(),
+            "partition" => partition.partition_number().to_string(),
+            "result" => "skipped_no_producer_offset",
+        )
+        .increment(1);
+        return;
+    }
+
+    // Get the store for this partition
+    let store = match store_manager.get(partition.topic(), partition.partition_number()) {
+        Some(s) => s,
+        None => {
+            warn!(
+                topic = partition.topic(),
+                partition = partition.partition_number(),
+                "Catch-up: store not found for partition, skipping"
+            );
+            return;
+        }
+    };
+
+    let pipeline_type = config.pipeline_type;
+    let partition_number = partition.partition_number();
+    let producer_offset = metadata.producer_offset;
+    let config_clone = config.clone();
+    let cancel_clone = cancel_token.clone();
+
+    info!(
+        topic = partition.topic(),
+        partition = partition_number,
+        producer_offset,
+        output_topic,
+        "Catch-up: starting for partition (assigner mode)"
+    );
+
+    let result = unwrap_blocking_task(
+        tokio::task::spawn_blocking(move || {
+            run_catchup(
+                &config_clone,
+                pipeline_type,
+                &output_topic,
+                partition_number,
+                producer_offset,
+                &store,
+                &cancel_clone,
+            )
+        }),
+        "catch-up task panicked",
+    )
+    .await;
+
+    match result {
+        Ok(catchup_result) => {
+            info!(
+                topic = partition.topic(),
+                partition = partition.partition_number(),
+                messages_read = catchup_result.messages_read,
+                keys_inserted = catchup_result.keys_inserted,
+                parse_errors = catchup_result.parse_errors,
+                duration_secs = catchup_result.duration.as_secs_f64(),
+                gap_size = catchup_result.gap_size,
+                "Catch-up: completed for partition (assigner mode)"
+            );
+        }
+        Err(e) => {
+            warn!(
+                topic = partition.topic(),
+                partition = partition.partition_number(),
+                error = %e,
+                "Catch-up: failed for partition (assigner mode), proceeding without full catch-up"
+            );
+            metrics::counter!(
+                CATCHUP_STATUS_COUNTER,
+                "topic" => partition.topic().to_string(),
+                "partition" => partition.partition_number().to_string(),
+                "result" => "error",
+            )
+            .increment(1);
+        }
+    }
 }
 
 /// Commit processed offsets to Kafka.

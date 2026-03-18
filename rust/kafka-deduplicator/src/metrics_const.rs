@@ -211,6 +211,28 @@ pub const KAFKA_PRODUCER_SEND_DURATION_MS: &str = "kafka_producer_send_duration_
 /// Histogram for event parsing duration using rayon (in milliseconds)
 pub const EVENT_PARSING_DURATION_MS: &str = "event_parsing_duration_ms";
 
+// ==== Catch-up metrics ====
+
+/// Histogram for total catch-up duration per partition (seconds)
+/// Labels: topic, partition, result (success|timeout|error|cancelled)
+pub const CATCHUP_DURATION_HISTOGRAM: &str = "catchup_duration_seconds";
+
+/// Counter for messages read from the output topic during catch-up
+/// Labels: topic, partition, result (success|parse_error|skipped)
+pub const CATCHUP_MESSAGES_PROCESSED_COUNTER: &str = "catchup_messages_processed_total";
+
+/// Counter for dedup keys inserted into RocksDB during catch-up
+/// Labels: topic, partition
+pub const CATCHUP_KEYS_INSERTED_COUNTER: &str = "catchup_keys_inserted_total";
+
+/// Histogram for RocksDB batch write duration during catch-up (seconds)
+/// Labels: topic, partition
+pub const CATCHUP_BATCH_WRITE_DURATION_HISTOGRAM: &str = "catchup_batch_write_duration_seconds";
+
+/// Counter for catch-up status outcomes
+/// Labels: topic, partition, result (success|skipped_disabled|skipped_no_output_topic|skipped_no_metadata|skipped_no_offset|timeout|error|cancelled)
+pub const CATCHUP_STATUS_COUNTER: &str = "catchup_status_total";
+
 // ==== Fail-open mode metrics ====
 /// Counter for events passed through in fail-open mode (deduplication bypassed)
 pub const FAIL_OPEN_EVENTS_PASSED_THROUGH: &str = "fail_open_events_passed_through_total";

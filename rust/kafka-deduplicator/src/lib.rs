@@ -13,6 +13,7 @@
 //! When constructing errors, use `.context()` / `.with_context()` so the original error remains
 //! the source. Avoid `anyhow!("...{e}")` — that formats the error into a string and drops the chain.
 
+pub mod catchup;
 pub mod checkpoint;
 pub mod checkpoint_manager;
 pub mod config;

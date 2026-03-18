@@ -26,7 +26,7 @@ use common_types::RawEvent;
 
 pub use duplicate_event::DuplicateEvent;
 pub use metadata::{SerializableRawEvent, TimestampMetadata};
-pub use parser::IngestionEventParser;
+pub use parser::{raw_event_from_captured, IngestionEventParser};
 pub use processor::{
     DeduplicationConfig, DuplicateEventProducerWrapper, IngestionEventsBatchProcessor,
 };

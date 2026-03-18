@@ -18,7 +18,7 @@ use tracing::info;
 
 use crate::checkpoint::config::DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS;
 use crate::checkpoint::import::CheckpointImporter;
-use crate::config::PipelineType;
+use crate::config::{Config, PipelineType};
 use crate::kafka::assigner::AssignerConsumer;
 use crate::kafka::batch_consumer::BatchConsumer;
 use crate::kafka::{OffsetTracker, PartitionRouter, PartitionRouterConfig, RoutingProcessor};
@@ -72,6 +72,9 @@ pub struct PipelineBuilder {
     // Fail-open mode: bypass deduplication and forward events directly
     fail_open: bool,
 
+    // Catch-up config: when set, catch-up runs after checkpoint restore
+    catchup_config: Option<Arc<Config>>,
+
     // Ingestion events specific
     dedup_config: Option<DeduplicationConfig>,
     main_producer: Option<Arc<FutureProducer<KafkaContext>>>,
@@ -109,6 +112,7 @@ impl PipelineBuilder {
                 DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS,
             ),
             fail_open,
+            catchup_config: None,
             dedup_config: None,
             main_producer: None,
             duplicate_producer: None,
@@ -122,6 +126,11 @@ impl PipelineBuilder {
 
     pub fn with_local_checkpoint_staleness(mut self, staleness: Duration) -> Self {
         self.local_checkpoint_max_staleness = staleness;
+        self
+    }
+
+    pub fn with_catchup_config(mut self, config: Option<Arc<Config>>) -> Self {
+        self.catchup_config = config;
         self
     }
 
@@ -229,6 +238,7 @@ impl PipelineBuilder {
             self.checkpoint_importer,
             self.rebalance_cleanup_parallelism,
             self.local_checkpoint_max_staleness,
+            self.catchup_config,
         ));
 
         let on_commit = Arc::new(MetadataCommitCallback::new(
@@ -291,6 +301,7 @@ impl PipelineBuilder {
             self.checkpoint_importer,
             self.rebalance_cleanup_parallelism,
             self.local_checkpoint_max_staleness,
+            self.catchup_config,
         ));
 
         let on_commit = Arc::new(MetadataCommitCallback::new(
@@ -357,6 +368,7 @@ impl PipelineBuilder {
             self.topic.clone(),
             self.store_manager,
             self.checkpoint_importer,
+            self.catchup_config,
             offset_tracker,
             router,
             routing_processor,
@@ -408,6 +420,7 @@ impl PipelineBuilder {
             self.topic.clone(),
             self.store_manager,
             self.checkpoint_importer,
+            self.catchup_config,
             offset_tracker,
             router,
             routing_processor,

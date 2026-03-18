@@ -11,8 +11,10 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+use crate::catchup::consumer::run_catchup;
 use crate::checkpoint::import::CheckpointImporter;
 use crate::checkpoint::metadata::CheckpointMetadata;
+use crate::config::Config;
 use crate::kafka::batch_consumer::BatchConsumerProcessor;
 use crate::kafka::batch_context::{ConsumerCommand, ConsumerCommandSender};
 use crate::kafka::offset_tracker::OffsetTracker;
@@ -20,8 +22,8 @@ use crate::kafka::partition_router::{shutdown_workers, PartitionRouter};
 use crate::kafka::rebalance_handler::RebalanceHandler;
 use crate::kafka::types::Partition;
 use crate::metrics_const::{
-    CHECKPOINT_IMPORT_CANCELLED_CLEANUP_COUNTER, LOCAL_STORE_RESTORE_COUNTER,
-    PARTITION_STORE_FALLBACK_EMPTY, PARTITION_STORE_SETUP_SKIPPED,
+    CATCHUP_STATUS_COUNTER, CHECKPOINT_IMPORT_CANCELLED_CLEANUP_COUNTER,
+    LOCAL_STORE_RESTORE_COUNTER, PARTITION_STORE_FALLBACK_EMPTY, PARTITION_STORE_SETUP_SKIPPED,
     REBALANCE_CHECKPOINT_IMPORT_COUNTER, REBALANCE_PARTITION_STATE_CHANGE,
     REBALANCE_RESUME_SKIPPED_NO_OWNED,
 };
@@ -71,6 +73,8 @@ where
     /// Metadata from successfully restored partitions (local or S3). Used in finalize to seed
     /// OffsetTracker and seek consumer without re-reading metadata.json from disk.
     partition_restored_metadata: Arc<DashMap<Partition, CheckpointMetadata>>,
+    /// Config for running catch-up after checkpoint restore (None = catch-up disabled).
+    catchup_config: Option<Arc<Config>>,
 }
 
 impl<T, P> ProcessorRebalanceHandler<T, P>
@@ -78,6 +82,7 @@ where
     T: Send + 'static,
     P: BatchConsumerProcessor<T> + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store_manager: Arc<StoreManager>,
         rebalance_tracker: Arc<RebalanceTracker>,
@@ -85,6 +90,7 @@ where
         checkpoint_importer: Option<Arc<CheckpointImporter>>,
         rebalance_cleanup_parallelism: usize,
         local_checkpoint_max_staleness: Duration,
+        catchup_config: Option<Arc<Config>>,
     ) -> Self {
         Self {
             store_manager,
@@ -97,9 +103,11 @@ where
             partition_setup_tasks: DashMap::new(),
             partition_fallback_reasons: Arc::new(DashMap::new()),
             partition_restored_metadata: Arc::new(DashMap::new()),
+            catchup_config,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_router(
         store_manager: Arc<StoreManager>,
         rebalance_tracker: Arc<RebalanceTracker>,
@@ -108,6 +116,7 @@ where
         checkpoint_importer: Option<Arc<CheckpointImporter>>,
         rebalance_cleanup_parallelism: usize,
         local_checkpoint_max_staleness: Duration,
+        catchup_config: Option<Arc<Config>>,
     ) -> Self {
         Self {
             store_manager,
@@ -120,6 +129,7 @@ where
             partition_setup_tasks: DashMap::new(),
             partition_fallback_reasons: Arc::new(DashMap::new()),
             partition_restored_metadata: Arc::new(DashMap::new()),
+            catchup_config,
         }
     }
 
@@ -244,6 +254,7 @@ where
         let fallback_reasons = Arc::clone(&self.partition_fallback_reasons);
         let restored_metadata = Arc::clone(&self.partition_restored_metadata);
         let local_max_staleness = self.local_checkpoint_max_staleness;
+        let catchup_config = self.catchup_config.clone();
 
         tokio::spawn(async move {
             if should_skip_setup(
@@ -256,25 +267,34 @@ where
                 return;
             }
 
-            if try_restore_from_local(
+            let restored_from_local = try_restore_from_local(
                 &partition,
                 &store_manager,
                 &restored_metadata,
                 local_max_staleness,
             )
-            .await
-            {
-                return;
+            .await;
+
+            if !restored_from_local {
+                try_import_from_s3(
+                    &partition,
+                    &cancel_token,
+                    &coordinator,
+                    &store_manager,
+                    &importer,
+                    &fallback_reasons,
+                    &restored_metadata,
+                )
+                .await;
             }
 
-            try_import_from_s3(
+            // Run catch-up after successful restore (local or S3)
+            try_run_catchup(
                 &partition,
-                &cancel_token,
-                &coordinator,
+                &catchup_config,
                 &store_manager,
-                &importer,
-                &fallback_reasons,
                 &restored_metadata,
+                &cancel_token,
             )
             .await;
         })
@@ -775,6 +795,150 @@ async fn try_import_from_s3(
     }
 }
 
+/// Run catch-up for a partition after checkpoint restore.
+///
+/// Reads the output topic from the restored `producer_offset` to the current high watermark,
+/// extracting dedup keys and inserting them into RocksDB. This closes the gap between
+/// checkpoint time and now, preventing re-production of already-produced events.
+///
+/// Catch-up is skipped when:
+/// - Config is None (catch-up disabled)
+/// - No output topic configured
+/// - No restored metadata for this partition
+/// - `producer_offset` is 0 or negative (no prior production)
+/// - Partition was cancelled during rebalance
+/// - Store is not registered for this partition
+///
+/// Catch-up failures are logged but do NOT fail the partition setup — partial catch-up
+/// is strictly better than no catch-up.
+async fn try_run_catchup(
+    partition: &Partition,
+    catchup_config: &Option<Arc<Config>>,
+    store_manager: &Arc<StoreManager>,
+    restored_metadata: &Arc<DashMap<Partition, CheckpointMetadata>>,
+    cancel_token: &CancellationToken,
+) {
+    let Some(config) = catchup_config else {
+        return;
+    };
+
+    let output_topic = match &config.output_topic {
+        Some(t) if !t.is_empty() => t.clone(),
+        _ => return,
+    };
+
+    // Get the restored metadata to find producer_offset
+    let producer_offset = match restored_metadata.get(partition) {
+        Some(m) => m.producer_offset,
+        None => {
+            metrics::counter!(
+                CATCHUP_STATUS_COUNTER,
+                "topic" => partition.topic().to_string(),
+                "partition" => partition.partition_number().to_string(),
+                "result" => "skipped_no_metadata",
+            )
+            .increment(1);
+            return;
+        }
+    };
+
+    // Skip if no prior production
+    if producer_offset <= 0 {
+        metrics::counter!(
+            CATCHUP_STATUS_COUNTER,
+            "topic" => partition.topic().to_string(),
+            "partition" => partition.partition_number().to_string(),
+            "result" => "skipped_no_producer_offset",
+        )
+        .increment(1);
+        debug!(
+            topic = partition.topic(),
+            partition = partition.partition_number(),
+            producer_offset,
+            "Catch-up: skipping, no prior production"
+        );
+        return;
+    }
+
+    if cancel_token.is_cancelled() {
+        return;
+    }
+
+    // Get the store for this partition
+    let store = match store_manager.get(partition.topic(), partition.partition_number()) {
+        Some(s) => s,
+        None => {
+            warn!(
+                topic = partition.topic(),
+                partition = partition.partition_number(),
+                "Catch-up: store not found for partition, skipping"
+            );
+            return;
+        }
+    };
+
+    let pipeline_type = config.pipeline_type;
+    let partition_number = partition.partition_number();
+    let config_clone = config.clone();
+    let cancel_clone = cancel_token.clone();
+
+    info!(
+        topic = partition.topic(),
+        partition = partition_number,
+        producer_offset,
+        output_topic,
+        "Catch-up: starting for partition"
+    );
+
+    // Run catch-up on blocking thread (Kafka poll + RocksDB writes are synchronous)
+    let result = unwrap_blocking_task(
+        tokio::task::spawn_blocking(move || {
+            run_catchup(
+                &config_clone,
+                pipeline_type,
+                &output_topic,
+                partition_number,
+                producer_offset,
+                &store,
+                &cancel_clone,
+            )
+        }),
+        "catch-up task panicked",
+    )
+    .await;
+
+    match result {
+        Ok(catchup_result) => {
+            info!(
+                topic = partition.topic(),
+                partition = partition.partition_number(),
+                messages_read = catchup_result.messages_read,
+                keys_inserted = catchup_result.keys_inserted,
+                parse_errors = catchup_result.parse_errors,
+                duration_secs = catchup_result.duration.as_secs_f64(),
+                gap_size = catchup_result.gap_size,
+                "Catch-up: completed for partition"
+            );
+        }
+        Err(e) => {
+            // Catch-up failure is non-fatal: partial catch-up is better than none
+            warn!(
+                topic = partition.topic(),
+                partition = partition.partition_number(),
+                error = %e,
+                "Catch-up: failed for partition, proceeding without full catch-up"
+            );
+            metrics::counter!(
+                CATCHUP_STATUS_COUNTER,
+                "topic" => partition.topic().to_string(),
+                "partition" => partition.partition_number().to_string(),
+                "result" => "error",
+            )
+            .increment(1);
+        }
+    }
+}
+
 #[async_trait]
 impl<T, P> RebalanceHandler for ProcessorRebalanceHandler<T, P>
 where
@@ -1076,6 +1240,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
         assert!(handler.router.is_none());
 
@@ -1094,6 +1259,7 @@ mod tests {
             None,
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+            None,
         );
         assert!(handler_with_router.router.is_some());
     }
@@ -1124,6 +1290,7 @@ mod tests {
             None,
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+            None,
         );
 
         // Initially no workers
@@ -1188,6 +1355,7 @@ mod tests {
             None,
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+            None,
         );
 
         // Assign partition and create a store
@@ -1296,6 +1464,7 @@ mod tests {
             None,
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+            None,
         );
 
         // Step 1: Initial assignment
@@ -1395,6 +1564,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         // First assignment
@@ -1443,6 +1613,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         // Create command channel
@@ -1507,6 +1678,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         // Create command channel
@@ -1598,6 +1770,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         // Create command channel
@@ -1714,6 +1887,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         // Create command channel
@@ -1762,6 +1936,7 @@ mod tests {
                 None,
                 16,
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         let mut partitions = rdkafka::TopicPartitionList::new();
@@ -1806,6 +1981,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         // Create command channel
@@ -1885,6 +2061,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1997,6 +2174,7 @@ mod tests {
                 None,
                 16, // rebalance_cleanup_parallelism
                 Duration::from_secs(DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS),
+                None,
             );
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

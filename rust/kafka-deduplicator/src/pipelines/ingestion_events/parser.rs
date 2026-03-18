@@ -1,12 +1,55 @@
 //! Event parser for ingestion events (CapturedEvent -> RawEvent).
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use common_types::{CapturedEvent, RawEvent};
 use tracing::{debug, error};
 
 use crate::kafka::batch_message::KafkaMessage;
 use crate::pipelines::traits::EventParser;
 use crate::utils::timestamp;
+
+/// Extract a RawEvent from a CapturedEvent, applying timestamp and field normalization.
+///
+/// This is the shared core logic used by both the normal pipeline
+/// (via `IngestionEventParser::parse`) and the catch-up path.
+pub fn raw_event_from_captured(captured_event: &CapturedEvent) -> Result<RawEvent> {
+    let now = captured_event.now.clone();
+    let extracted_distinct_id = captured_event.distinct_id.clone();
+    let extracted_token = captured_event.token.clone();
+    let extracted_uuid = captured_event.uuid;
+
+    let mut raw_event: RawEvent = serde_json::from_str(&captured_event.data)
+        .context("Failed to parse RawEvent from CapturedEvent data field")?;
+
+    // Validate timestamp: if it's None or unparseable, use CapturedEvent.now
+    // This ensures we always have a valid timestamp for deduplication
+    match raw_event.timestamp {
+        None => {
+            debug!("No timestamp in RawEvent, using CapturedEvent.now");
+            raw_event.timestamp = Some(now);
+        }
+        Some(ref ts) if !timestamp::is_valid_timestamp(ts) => {
+            debug!("Invalid timestamp in RawEvent, replacing with CapturedEvent.now");
+            raw_event.timestamp = Some(now);
+        }
+        _ => {}
+    }
+
+    // If RawEvent is missing any of the core values
+    // extracted by capture into the CapturedEvent
+    // wrapper, use those values for downstream analysis
+    if raw_event.uuid.is_none() {
+        raw_event.uuid = Some(extracted_uuid);
+    }
+    if raw_event.distinct_id.is_none() && !extracted_distinct_id.is_empty() {
+        raw_event.distinct_id = Some(serde_json::Value::String(extracted_distinct_id));
+    }
+    if raw_event.token.is_none() && !extracted_token.is_empty() {
+        raw_event.token = Some(extracted_token);
+    }
+
+    Ok(raw_event)
+}
 
 /// Parser for ingestion events.
 ///
@@ -35,69 +78,14 @@ impl EventParser<CapturedEvent, RawEvent> for IngestionEventParser {
             }
         };
 
-        // Extract well-validated values from the CapturedEvent that
-        // may or may not be present in the wrapped RawEvent
-        let now = captured_event.now.clone();
-        let extracted_distinct_id = captured_event.distinct_id.clone();
-        let extracted_token = captured_event.token.clone();
-        let extracted_uuid = captured_event.uuid;
-
-        // The RawEvent is serialized in the data field
-        match serde_json::from_str::<RawEvent>(&captured_event.data) {
-            Ok(mut raw_event) => {
-                // Validate timestamp: if it's None or unparseable, use CapturedEvent.now
-                // This ensures we always have a valid timestamp for deduplication
-                match raw_event.timestamp {
-                    None => {
-                        debug!("No timestamp in RawEvent, using CapturedEvent.now");
-                        raw_event.timestamp = Some(now);
-                    }
-                    Some(ref ts) if !timestamp::is_valid_timestamp(ts) => {
-                        debug!(
-                            "Invalid timestamp detected at {}:{} offset {}, replacing with CapturedEvent.now",
-                            message.get_topic_partition().topic(),
-                            message.get_topic_partition().partition_number(),
-                            message.get_offset()
-                        );
-                        raw_event.timestamp = Some(now);
-                    }
-                    _ => {
-                        // Timestamp exists and is valid, keep it
-                    }
-                }
-
-                // If RawEvent is missing any of the core values
-                // extracted by capture into the CapturedEvent
-                // wrapper, use those values for downstream analysis
-                if raw_event.uuid.is_none() {
-                    raw_event.uuid = Some(extracted_uuid);
-                }
-                if raw_event.distinct_id.is_none() && !extracted_distinct_id.is_empty() {
-                    raw_event.distinct_id = Some(serde_json::Value::String(extracted_distinct_id));
-                }
-                if raw_event.token.is_none() && !extracted_token.is_empty() {
-                    raw_event.token = Some(extracted_token);
-                }
-
-                Ok(raw_event)
-            }
-            Err(e) => {
-                error!(
-                    "Failed to parse RawEvent from data field at {}:{} offset {}: {}",
-                    message.get_topic_partition().topic(),
-                    message.get_topic_partition().partition_number(),
-                    message.get_offset(),
-                    e
-                );
-                Err(anyhow::anyhow!(
-                    "Failed to parse RawEvent from data field at {}:{} offset {}: {}",
-                    message.get_topic_partition().topic(),
-                    message.get_topic_partition().partition_number(),
-                    message.get_offset(),
-                    e
-                ))
-            }
-        }
+        raw_event_from_captured(captured_event).with_context(|| {
+            format!(
+                "at {}:{} offset {}",
+                message.get_topic_partition().topic(),
+                message.get_topic_partition().partition_number(),
+                message.get_offset(),
+            )
+        })
     }
 }
 

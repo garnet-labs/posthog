@@ -336,6 +336,7 @@ async fn test_rebalance_with_checkpoint_import() -> Result<()> {
             Some(importer),
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(7200),
+            None,
         ));
 
     // Create routing processor
@@ -466,6 +467,7 @@ async fn test_messages_dropped_for_revoked_partition() -> Result<()> {
             None,
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(7200),
+            None,
         );
 
     // Assign partition 0
@@ -555,6 +557,7 @@ async fn test_rapid_revoke_assign_preserves_new_store() -> Result<()> {
             None,
             16, // rebalance_cleanup_parallelism
             Duration::from_secs(7200),
+            None,
         );
 
     let mut partitions = TopicPartitionList::new();

@@ -304,6 +304,14 @@ impl KafkaDeduplicatorService {
             self.config.checkpoint_interval(),
         );
 
+        // Build catch-up config if enabled
+        let catchup_config = if self.config.catchup_enabled() {
+            info!("Catch-up enabled: will read output topic after checkpoint restore");
+            Some(Arc::new(self.config.clone()))
+        } else {
+            None
+        };
+
         // Build pipeline consumer using the builder
         let mut builder = PipelineBuilder::new(
             self.config.pipeline_type,
@@ -319,7 +327,8 @@ impl KafkaDeduplicatorService {
             self.config.fail_open,
         )
         .with_checkpoint_importer(self.checkpoint_importer.clone())
-        .with_local_checkpoint_staleness(self.config.local_checkpoint_max_staleness());
+        .with_local_checkpoint_staleness(self.config.local_checkpoint_max_staleness())
+        .with_catchup_config(catchup_config);
 
         // Configure pipeline-specific options for ingestion events
         if self.config.pipeline_type == PipelineType::IngestionEvents {
