@@ -17,6 +17,7 @@ from posthog.clickhouse.cluster import ClickhouseCluster
 from posthog.dags.common import JobOwners, check_for_concurrent_runs
 
 NO_SHARD_PATH = "noshard"
+MAX_WAIT_TRIES = 30  # 30 * ~125s (5s initial + 120s poll) ≈ 1 hour max
 
 SHARDED_TABLES = [
     "sharded_events",
@@ -188,6 +189,14 @@ class Backup:
                 event_time_microseconds=event_time_microseconds,
             )
 
+    def has_lock_file(self, s3_client, bucket: str) -> bool:
+        """Check if this backup has a .lock file indicating an incomplete/crashed backup."""
+        try:
+            s3_client.head_object(Bucket=bucket, Key=f"{self.path}/.lock")
+            return True
+        except Exception:
+            return False
+
     def is_done(self, client: Client) -> bool:
         # We query the processes table to check if the backup is in progress,
         # because the backup_log table could not be updated (for example, if the server is restarted)
@@ -321,6 +330,7 @@ def get_latest_successful_backup(
     config: BackupConfig,
     latest_backups: list[Backup],
     cluster: dagster.ResourceParam[ClickhouseCluster],
+    s3: S3Resource,
 ) -> Optional[Backup]:
     """
     Checks the latest succesful backup to use it as a base backup.
@@ -336,8 +346,14 @@ def get_latest_successful_backup(
             )
         return cluster.map_hosts_by_role(fn=func, node_role=NodeRole.DATA, workload=config.workload)
 
+    s3_client = s3.get_client()
     context.log.info(f"Find latest successful created backup")
     for latest_backup in latest_backups:
+        if latest_backup.has_lock_file(s3_client, settings.CLICKHOUSE_BACKUPS_BUCKET):
+            context.log.warning(
+                f"Backup {latest_backup.path} has a .lock file indicating it crashed mid-write. Skipping."
+            )
+            continue
         context.log.info(f"Checking status of backup: {latest_backup.path}")
         most_recent_status = get_most_recent_status(map_hosts(latest_backup.status).result().values())
         if most_recent_status and not most_recent_status.created():
@@ -430,6 +446,11 @@ def wait_for_backup(
     if backup:
         while not done:
             tries += 1
+            if tries > MAX_WAIT_TRIES:
+                raise dagster.Failure(
+                    description=f"Backup {backup.path} did not complete after {MAX_WAIT_TRIES} attempts (~1 hour). "
+                    f"Check system.backup_log and system.processes on the offline node for shard {backup.shard}."
+                )
             map_hosts(backup.wait).result().values()
             most_recent_status = get_most_recent_status(map_hosts(backup.status).result().values())
             if most_recent_status and most_recent_status.creating() and tries < 3:
@@ -443,6 +464,11 @@ def wait_for_backup(
             elif most_recent_status and not most_recent_status.created():
                 raise ValueError(
                     f"Backup {backup.path} finished with an unexpected status: {most_recent_status.status} on the host {most_recent_status.hostname}."
+                )
+            elif most_recent_status is None and tries >= 3:
+                raise dagster.Failure(
+                    description=f"Backup {backup.path} process finished but no status found in system.backup_log after {tries} attempts. "
+                    f"The backup may have crashed without logging. Check the offline node for shard {backup.shard}."
                 )
 
     context.add_output_metadata(
@@ -511,12 +537,21 @@ def cleanup_old_backups(
             context.log.info(f"Marking failed backup {b.path} (status: {b_status.status}) for deletion.")
             backups_to_delete.append(b)
 
+    # Clean up locked (crashed) backups that are newer than latest_full
+    s3_client = s3.get_client()
+    for b in full_backups:
+        if b.date <= latest_full.date:
+            continue
+        if b.has_lock_file(s3_client, settings.CLICKHOUSE_BACKUPS_BUCKET):
+            context.log.warning(f"Found locked (crashed) backup {b.path}, marking for deletion.")
+            if b not in backups_to_delete:
+                backups_to_delete.append(b)
+
     if not backups_to_delete:
         context.log.info("No old backups to delete.")
         context.add_output_metadata({"deleted_backups": dagster.MetadataValue.int(0)})
         return
 
-    s3_client = s3.get_client()
     for old_backup in backups_to_delete:
         context.log.info(f"Deleting backup {old_backup.path}.")
         paginator = s3_client.get_paginator("list_objects_v2")
