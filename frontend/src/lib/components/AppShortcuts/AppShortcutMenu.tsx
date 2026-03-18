@@ -32,6 +32,9 @@ function titleForKey(key: string): string {
 }
 
 function getShortcutIcon(shortcut: AppShortcutType): JSX.Element | null {
+    if (shortcut.icon) {
+        return <div className="flex items-center gap-1 size-4">{shortcut.icon}</div>
+    }
     switch (shortcut.interaction) {
         case 'focus':
             return (

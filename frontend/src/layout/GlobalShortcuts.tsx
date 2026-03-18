@@ -1,6 +1,8 @@
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 
+import { IconGear } from '@posthog/icons'
+
 import { newAccountMenuLogic } from 'lib/components/Account/newAccountMenuLogic'
 import { appShortcutLogic } from 'lib/components/AppShortcuts/appShortcutLogic'
 import { keyBinds } from 'lib/components/AppShortcuts/shortcuts'
@@ -11,6 +13,7 @@ import { openJumpToTimestampModal } from 'lib/components/DateFilter/openJumpToTi
 import { healthMenuLogic } from 'lib/components/HealthMenu/healthMenuLogic'
 import { helpMenuLogic } from 'lib/components/HelpMenu/helpMenuLogic'
 import { superpowersLogic } from 'lib/components/Superpowers/superpowersLogic'
+import { systemTablesSettingsLogic } from 'lib/components/TaxonomicFilter/systemTablesSettingsLogic'
 import { removeProjectIdIfPresent } from 'lib/utils/router-utils'
 import { urls } from 'scenes/urls'
 
@@ -35,6 +38,8 @@ export function GlobalShortcuts(): null {
     const { toggleTheme } = useActions(themeLogic)
     const { openSidePanel, closeSidePanel } = useActions(sidePanelStateLogic)
     const { sidePanelOpen } = useValues(sidePanelStateLogic)
+    const { systemTablesEnabled } = useValues(systemTablesSettingsLogic)
+    const { toggleSystemTablesEnabled } = useActions(systemTablesSettingsLogic)
 
     // Open Info tab if scene has panel content, otherwise default to PostHog AI
     const defaultTab = scenePanelIsPresent ? SidePanelTab.Info : SidePanelTab.Max
@@ -164,6 +169,17 @@ export function GlobalShortcuts(): null {
         intent: 'Jump to timestamp',
         interaction: 'function',
         callback: openJumpToTimestampModal,
+    })
+
+    useAppShortcut({
+        name: 'toggle-system-tables',
+        keybind: [],
+        intent: systemTablesEnabled
+            ? 'Product analytics: Hide system tables in insights'
+            : 'Product analytics: Show system tables in insights',
+        interaction: 'function',
+        callback: () => toggleSystemTablesEnabled(),
+        icon: <IconGear className="w-4 h-4 text-muted" />,
     })
 
     return null

@@ -30,6 +30,8 @@ interface AppShortcutBase {
     scope?: 'global' | keyof typeof Scene
     /** Higher priority items appear first in their group. Default: 0 */
     priority?: number
+    /** Optional custom icon to display in the shortcut menu */
+    icon?: React.ReactNode
 }
 
 interface AppShortcutWithRef extends AppShortcutBase {

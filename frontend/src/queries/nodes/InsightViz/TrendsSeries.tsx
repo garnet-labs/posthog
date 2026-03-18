@@ -1,5 +1,6 @@
 import { useActions, useValues } from 'kea'
 
+import { systemTablesSettingsLogic } from 'lib/components/TaxonomicFilter/systemTablesSettingsLogic'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { SINGLE_SERIES_DISPLAY_TYPES } from 'lib/constants'
 import { alphabet } from 'lib/utils'
@@ -27,6 +28,7 @@ export function TrendsSeries(): JSX.Element | null {
     const { updateQuerySource } = useActions(insightVizDataLogic(insightProps))
 
     const { showGroupsOptions: showGroupsOptionsFromModel, groupsTaxonomicTypes } = useValues(groupsModel)
+    const { systemTablesEnabled } = useValues(systemTablesSettingsLogic)
 
     // Disable groups for calendar heatmap and box plot
     const showGroupsOptions =
@@ -110,7 +112,10 @@ export function TrendsSeries(): JSX.Element | null {
                     ...(hasScreen ? [TaxonomicFilterGroupType.ScreenEvents] : []),
                     TaxonomicFilterGroupType.AutocaptureEvents,
                     ...(isTrends && display !== ChartDisplayType.CalendarHeatmap && display !== ChartDisplayType.BoxPlot
-                        ? [TaxonomicFilterGroupType.DataWarehouse, TaxonomicFilterGroupType.SystemTables]
+                        ? [
+                              TaxonomicFilterGroupType.DataWarehouse,
+                              ...(systemTablesEnabled ? [TaxonomicFilterGroupType.SystemTables] : []),
+                          ]
                         : []),
                 ]}
                 hideDeleteBtn={series?.length === 1}
