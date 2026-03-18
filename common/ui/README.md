@@ -1,6 +1,6 @@
-# HogUI - PostHog's unified design system
+# Quill - PostHog's unified design system
 
-This is the design library for PostHog (MCP, Web & Electron) built with React, TypeScript, Base UI, and shadcn/ui.
+This is the library for PostHog's unified UI (MCP, Web & Electron) built with React, TypeScript, Base UI, and based on shadcn/ui.
 
 ## Using components
 

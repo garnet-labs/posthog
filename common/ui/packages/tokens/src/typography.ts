@@ -5,8 +5,9 @@
 import { fontFamilyValue } from './css'
 
 export const fontSize = {
+    xss: ['10px', { lineHeight: '12px' }],
     xs: ['12px', { lineHeight: '16px' }],
-    sm: ['14px', { lineHeight: '20px' }],
+    sm: ['14px', { lineHeight: '14px' }],
     base: ['16px', { lineHeight: '24px' }],
     lg: ['18px', { lineHeight: '28px' }],
     xl: ['20px', { lineHeight: '28px' }],
