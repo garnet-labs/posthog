@@ -18,9 +18,7 @@ import { resetKafka } from '../../helpers/kafka'
 import { createUserTeamAndOrganization, resetTestDatabase } from '../../helpers/sql'
 
 jest.mock('../../../src/utils/logger')
-// This suite chains multiple ClickHouse polling waits, so it needs more headroom
-// than a single helper's 30s budget when CI is under load.
-jest.setTimeout(60000)
+jest.setTimeout(30000)
 
 const extraServerConfig: Partial<PluginsServerConfig> = {
     LOG_LEVEL: 'info',
