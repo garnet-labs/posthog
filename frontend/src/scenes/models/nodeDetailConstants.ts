@@ -13,6 +13,7 @@ export const NODE_TYPE_TAG_SETTINGS: Record<
 }
 
 export const STATUS_TAG_SETTINGS: Record<string, LemonTagType> = {
+    Queued: 'warning',
     Running: 'primary',
     Completed: 'success',
     Failed: 'danger',

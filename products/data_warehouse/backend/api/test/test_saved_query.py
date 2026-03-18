@@ -107,6 +107,26 @@ class TestSavedQuery(APIBaseTest):
 
             assert saved_query.is_materialized is True
             assert saved_query.sync_frequency_interval == timedelta(hours=24)
+            queued_job = DataModelingJob.objects.get(saved_query=saved_query, workflow_id=str(saved_query.id))
+            assert queued_job.status == DataModelingJob.Status.QUEUED
+
+    @patch("products.data_warehouse.backend.api.saved_query.trigger_saved_query_schedule")
+    def test_run_creates_queued_job_before_temporal_starts(self, mock_trigger_schedule):
+        saved_query = DataWarehouseSavedQuery.objects.create(
+            team=self.team,
+            name="event_view",
+            query={"kind": "HogQLQuery", "query": "select event as event from events LIMIT 100"},
+            created_by=self.user,
+        )
+
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/warehouse_saved_queries/{saved_query.id}/run",
+        )
+
+        assert response.status_code == 200
+        queued_job = DataModelingJob.objects.get(saved_query=saved_query, workflow_id=str(saved_query.id))
+        assert queued_job.status == DataModelingJob.Status.QUEUED
+        mock_trigger_schedule.assert_called_once_with(saved_query)
 
     def test_materialize_action_idempotent(self):
         """Test that the materialize action is idempotent and can be called multiple times"""

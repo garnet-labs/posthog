@@ -193,6 +193,7 @@ function NodeMetadata({
                             className={clsx(
                                 'rounded-full w-4 h-4',
                                 lastJobStatus === 'Completed' && 'bg-success border-primary border-1',
+                                lastJobStatus === 'Queued' && 'bg-warning border-primary border-1',
                                 lastJobStatus === 'Failed' && 'bg-danger border-primary border-1',
                                 lastJobStatus === 'Cancelled' && 'bg-warning border-primary border-1',
                                 !lastJobStatus && 'bg-surface-primary border-primary border-1'

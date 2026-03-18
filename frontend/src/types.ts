@@ -5306,7 +5306,7 @@ export interface DataWarehouseTable {
 
 export type DataWarehouseTableTypes = 'CSV' | 'Parquet' | 'JSON' | 'CSVWithNames'
 
-export type DataModelingJobStatus = 'Running' | 'Completed' | 'Failed' | 'Cancelled'
+export type DataModelingJobStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'
 
 export interface DataWarehouseSavedQueryRunHistory {
     status: DataModelingJobStatus

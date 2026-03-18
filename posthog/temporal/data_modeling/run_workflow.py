@@ -430,6 +430,24 @@ async def start_job_modeling_run(
     team: Team, workflow_id: str, workflow_run_id: str, saved_query: DataWarehouseSavedQuery | None
 ) -> DataModelingJob:
     """Create a DataModelingJob record in an async-safe way."""
+    queued_job = None
+    if saved_query is not None:
+        queued_job = await database_sync_to_async(
+            lambda: DataModelingJob.objects.filter(
+                saved_query=saved_query,
+                workflow_id=workflow_id,
+                status=DataModelingJob.Status.QUEUED,
+            )
+            .order_by("-created_at")
+            .first()
+        )()
+
+    if queued_job is not None:
+        queued_job.status = DataModelingJob.Status.RUNNING
+        queued_job.workflow_run_id = workflow_run_id
+        await database_sync_to_async(queued_job.save)(update_fields=["status", "workflow_run_id", "updated_at"])
+        return queued_job
+
     job_create = database_sync_to_async(DataModelingJob.objects.create)
     return await job_create(
         team=team,

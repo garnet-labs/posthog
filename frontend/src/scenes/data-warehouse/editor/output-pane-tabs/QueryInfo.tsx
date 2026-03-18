@@ -105,41 +105,70 @@ function getMaterializationDisabledReasons(
         sync:
             currentJobStatus === 'Running'
                 ? 'Materialization is already running'
-                : startingMaterialization
-                  ? 'Materialization is starting'
-                  : false,
+                : currentJobStatus === 'Queued'
+                  ? 'Materialization is queued'
+                  : startingMaterialization
+                    ? 'Materialization is starting'
+                    : false,
         cancel: currentJobStatus !== 'Running' ? 'Materialization is not running' : false,
-        revert: currentJobStatus === 'Running' ? 'Cannot revert while materialization is running' : false,
+        revert:
+            currentJobStatus === 'Queued' || currentJobStatus === 'Running'
+                ? 'Cannot revert while materialization is queued or running'
+                : false,
     }
 }
 
 export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
-    const { sourceTableItems } = useValues(infoTabLogic({ tabId }))
+    const queryInfoLogic = infoTabLogic({ tabId })
+
+    const { sourceTableItems } = useValues(queryInfoLogic)
     const { editingView, upstream, upstreamViewMode } = useValues(sqlEditorLogic)
-    const { runDataWarehouseSavedQuery, saveAsView, setUpstreamViewMode } = useActions(sqlEditorLogic)
+    const { saveAsView, setUpstreamViewMode } = useActions(sqlEditorLogic)
     const { featureFlags } = useValues(featureFlagLogic)
 
     const isLineageDependencyViewEnabled = featureFlags[FEATURE_FLAGS.LINEAGE_DEPENDENCY_VIEW]
 
-    const { dataModelingJobs, dataModelingJobsLoading, hasMoreJobsToLoad, startingMaterialization } = useValues(
-        infoTabLogic({ tabId })
-    )
-    const { loadOlderDataModelingJobs, setStartingMaterialization } = useActions(infoTabLogic({ tabId }))
+    const { dataModelingJobs, dataModelingJobsLoading, hasMoreJobsToLoad, startingMaterialization } =
+        useValues(queryInfoLogic)
+    const { loadOlderDataModelingJobs, setStartingMaterialization } = useActions(queryInfoLogic)
 
     const { dataWarehouseSavedQueryMapById, updatingDataWarehouseSavedQuery, initialDataWarehouseSavedQueryLoading } =
         useValues(dataWarehouseViewsLogic)
-    const {
-        updateDataWarehouseSavedQuery,
-        cancelDataWarehouseSavedQuery,
-        materializeDataWarehouseSavedQuery,
-        revertMaterialization,
-    } = useActions(dataWarehouseViewsLogic)
+    const { updateDataWarehouseSavedQuery, cancelDataWarehouseSavedQuery, revertMaterialization } =
+        useActions(dataWarehouseViewsLogic)
 
     // note: editingView is stale, but dataWarehouseSavedQueryMapById gets updated
     const savedQuery = editingView ? dataWarehouseSavedQueryMapById[editingView.id] : null
 
     const currentJobStatus = dataModelingJobs?.results?.[0]?.status || null
     const { sync, cancel, revert } = getMaterializationDisabledReasons(currentJobStatus, startingMaterialization)
+
+    const runMaterializationAndRefreshJobs = async (): Promise<void> => {
+        if (!editingView) {
+            return
+        }
+
+        setStartingMaterialization(true)
+
+        try {
+            await dataWarehouseViewsLogic.asyncActions.runDataWarehouseSavedQuery(editingView.id)
+        } finally {
+            await queryInfoLogic.asyncActions.loadDataModelingJobs(editingView.id)
+        }
+    }
+
+    const materializeViewAndRefreshJobs = async (): Promise<void> => {
+        if (!editingView) {
+            saveAsView({ materializeAfterSave: true })
+            return
+        }
+
+        try {
+            await dataWarehouseViewsLogic.asyncActions.materializeDataWarehouseSavedQuery(editingView.id)
+        } finally {
+            await queryInfoLogic.asyncActions.loadDataModelingJobs(editingView.id)
+        }
+    }
 
     if (initialDataWarehouseSavedQueryLoading) {
         return (
@@ -175,14 +204,13 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                 <div className="flex gap-4 mt-2">
                                     <LemonButton
                                         className="whitespace-nowrap"
-                                        loading={startingMaterialization || currentJobStatus === 'Running'}
+                                        loading={
+                                            startingMaterialization ||
+                                            currentJobStatus === 'Queued' ||
+                                            currentJobStatus === 'Running'
+                                        }
                                         disabledReason={sync}
-                                        onClick={() => {
-                                            if (editingView) {
-                                                setStartingMaterialization(true)
-                                                runDataWarehouseSavedQuery(editingView.id)
-                                            }
-                                        }}
+                                        onClick={() => runMaterializationAndRefreshJobs()}
                                         type="secondary"
                                         sideAction={{
                                             icon: <IconX fontSize={16} />,
@@ -193,9 +221,11 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                     >
                                         {startingMaterialization
                                             ? 'Starting...'
-                                            : currentJobStatus === 'Running'
-                                              ? 'Running...'
-                                              : 'Sync now'}
+                                            : currentJobStatus === 'Queued'
+                                              ? 'Queued...'
+                                              : currentJobStatus === 'Running'
+                                                ? 'Running...'
+                                                : 'Sync now'}
                                     </LemonButton>
                                     <LemonSelect
                                         className="h-9"
@@ -263,13 +293,7 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                 </p>
                                 <LemonButton
                                     size="small"
-                                    onClick={() => {
-                                        if (editingView) {
-                                            materializeDataWarehouseSavedQuery(editingView.id)
-                                        } else {
-                                            saveAsView({ materializeAfterSave: true })
-                                        }
-                                    }}
+                                    onClick={() => materializeViewAndRefreshJobs()}
                                     type="primary"
                                     loading={updatingDataWarehouseSavedQuery}
                                 >
@@ -300,6 +324,7 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                         const statusToType: Record<string, LemonTagType> = {
                                             Completed: 'success',
                                             Failed: 'danger',
+                                            Queued: 'warning',
                                             Running: 'warning',
                                         }
                                         const type = statusToType[status] || 'warning'
@@ -341,7 +366,8 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                     title: 'Rows',
                                     dataIndex: 'rows_materialized',
                                     render: (_, { rows_materialized, status }: DataModelingJob) =>
-                                        (status === 'Running' || status === 'Cancelled') && rows_materialized === 0
+                                        (status === 'Queued' || status === 'Running' || status === 'Cancelled') &&
+                                        rows_materialized === 0
                                             ? '~'
                                             : humanFriendlyNumber(rows_materialized),
                                 },
@@ -354,6 +380,9 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                 {
                                     title: 'Duration',
                                     render: (_, job: DataModelingJob) => {
+                                        if (job.status === 'Queued') {
+                                            return 'Queued'
+                                        }
                                         if (job.status === 'Running') {
                                             return 'In progress'
                                         }

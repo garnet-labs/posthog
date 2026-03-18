@@ -58,6 +58,7 @@ from products.data_warehouse.backend.models import (
     DataWarehouseSavedQuery,
     clean_type,
 )
+from products.data_warehouse.backend.models.data_modeling_job import create_queued_data_modeling_job
 from products.data_warehouse.backend.models.external_data_schema import (
     sync_frequency_interval_to_sync_frequency,
     sync_frequency_to_sync_frequency_interval,
@@ -612,6 +613,12 @@ class DataWarehouseSavedQueryViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewS
         """Run this saved query."""
         saved_query = self.get_object()
 
+        create_queued_data_modeling_job(
+            team_id=saved_query.team_id,
+            saved_query_id=str(saved_query.id),
+            workflow_id=str(saved_query.id),
+            created_by_id=saved_query.created_by_id,
+        )
         trigger_saved_query_schedule(saved_query)
 
         return response.Response(status=status.HTTP_200_OK)
@@ -664,6 +671,7 @@ class DataWarehouseSavedQueryViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewS
         sync_frequency_interval = sync_frequency_to_sync_frequency_interval("24hour")
 
         should_unpause = saved_query.sync_frequency_interval is None
+        schedule_exists = saved_query_workflow_exists(saved_query)
 
         saved_query.sync_frequency_interval = sync_frequency_interval
         saved_query.is_materialized = True
@@ -679,6 +687,14 @@ class DataWarehouseSavedQueryViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewS
             return response.Response(
                 {"error": "Materialization failed. Please try again or contact support."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if not schedule_exists:
+            create_queued_data_modeling_job(
+                team_id=saved_query.team_id,
+                saved_query_id=str(saved_query.id),
+                workflow_id=str(saved_query.id),
+                created_by_id=saved_query.created_by_id,
             )
 
         # set data modeling node type to matview

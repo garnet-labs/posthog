@@ -6,7 +6,7 @@ from rest_framework import status
 from posthog.models import Team
 
 from products.data_modeling.backend.models import DAG, Edge, Node, NodeType
-from products.data_warehouse.backend.models import DataWarehouseSavedQuery
+from products.data_warehouse.backend.models import DataModelingJob, DataWarehouseSavedQuery
 
 
 class TestNodeViewSet(APIBaseTest):
@@ -167,6 +167,8 @@ class TestNodeViewSet(APIBaseTest):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_client.start_workflow.assert_called_once()
+        queued_job = DataModelingJob.objects.get(saved_query=self.saved_query)
+        self.assertEqual(queued_job.status, DataModelingJob.Status.QUEUED)
 
     @patch("products.data_modeling.backend.api.node.posthoganalytics.feature_enabled", return_value=True)
     @patch("products.data_modeling.backend.api.node.sync_connect")

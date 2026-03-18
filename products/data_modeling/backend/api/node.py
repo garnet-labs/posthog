@@ -22,6 +22,7 @@ from posthog.temporal.data_modeling.workflows.execute_dag import ExecuteDAGInput
 from posthog.temporal.data_modeling.workflows.materialize_view import MaterializeViewWorkflowInputs
 
 from products.data_modeling.backend.models import DAG, Edge, Node, NodeType
+from products.data_warehouse.backend.models.data_modeling_job import create_queued_data_modeling_job
 from products.data_warehouse.backend.models.external_data_schema import sync_frequency_interval_to_sync_frequency
 
 
@@ -243,6 +244,13 @@ class NodeViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             workflow_id = f"data-modeling-run-{node.dag_id}-{uuid4()}"
 
         temporal = sync_connect()
+        if node.saved_query is not None:
+            create_queued_data_modeling_job(
+                team_id=node.team_id,
+                saved_query_id=str(node.saved_query_id),
+                workflow_id=workflow_id,
+                created_by_id=node.saved_query.created_by_id,
+            )
         asyncio.run(
             temporal.start_workflow(
                 workflow_name,
@@ -316,6 +324,13 @@ class NodeViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             workflow_id = f"data-modeling-run-{node.id}-{uuid4()}"
 
         temporal = sync_connect()
+        if node.saved_query is not None:
+            create_queued_data_modeling_job(
+                team_id=node.team_id,
+                saved_query_id=str(node.saved_query_id),
+                workflow_id=workflow_id,
+                created_by_id=node.saved_query.created_by_id,
+            )
         asyncio.run(
             temporal.start_workflow(
                 workflow_name,

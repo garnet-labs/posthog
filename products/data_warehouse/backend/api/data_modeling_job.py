@@ -59,7 +59,7 @@ class DataModelingJobViewSet(TeamAndOrgViewSetMixin, viewsets.ReadOnlyModelViewS
     def running(self, request, *args, **kwargs):
         """Get all currently running jobs from the v2 backend."""
         queryset = self.get_queryset().filter(
-            status=DataModelingJob.Status.RUNNING,
+            status__in=[DataModelingJob.Status.QUEUED, DataModelingJob.Status.RUNNING],
             workflow_id__startswith="materialize",
         )
         serializer = self.get_serializer(queryset, many=True)
@@ -70,7 +70,7 @@ class DataModelingJobViewSet(TeamAndOrgViewSetMixin, viewsets.ReadOnlyModelViewS
         """Get the most recent non-running job for each saved query from the v2 backend."""
         queryset = (
             self.get_queryset()
-            .exclude(status=DataModelingJob.Status.RUNNING)
+            .exclude(status__in=[DataModelingJob.Status.QUEUED, DataModelingJob.Status.RUNNING])
             .filter(saved_query_id__isnull=False, workflow_id__startswith="materialize")
             .order_by("saved_query_id", "-created_at")
             .distinct("saved_query_id")

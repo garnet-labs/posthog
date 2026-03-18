@@ -73,6 +73,7 @@ function StatusDot({ status }: { status?: DataModelingJobStatus }): JSX.Element 
                 className={clsx(
                     'rounded-full w-3 h-3 border-1 border-primary',
                     status === 'Completed' && 'bg-success',
+                    status === 'Queued' && 'bg-warning',
                     status === 'Running' && 'bg-warning',
                     status === 'Failed' && 'bg-danger',
                     status === 'Cancelled' && 'bg-warning',

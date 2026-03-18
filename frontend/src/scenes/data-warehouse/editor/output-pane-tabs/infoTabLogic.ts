@@ -83,7 +83,7 @@ export const infoTabLogic = kea<infoTabLogicType>([
                     const currentJobStatus = dataModelingJobs?.results?.[0]?.status
                     if (
                         currentJobStatus &&
-                        ['Running', 'Completed', 'Failed', 'Cancelled'].includes(currentJobStatus)
+                        ['Queued', 'Running', 'Completed', 'Failed', 'Cancelled'].includes(currentJobStatus)
                     ) {
                         return false
                     }

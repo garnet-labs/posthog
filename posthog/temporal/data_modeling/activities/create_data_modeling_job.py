@@ -26,14 +26,28 @@ def _create_data_modeling_job(inputs: CreateDataModelingJobInputs, workflow_id: 
     node = Node.objects.prefetch_related("saved_query").get(
         id=inputs.node_id, team_id=inputs.team_id, dag_id=inputs.dag_id
     )
-    job = DataModelingJob.objects.create(
-        team_id=inputs.team_id,
-        saved_query=node.saved_query,
-        status=DataModelingJob.Status.RUNNING,
-        workflow_id=workflow_id,
-        workflow_run_id=workflow_run_id,
-        created_by_id=node.saved_query.created_by_id if node.saved_query else None,
+    job = (
+        DataModelingJob.objects.filter(
+            saved_query=node.saved_query,
+            workflow_id=workflow_id,
+            status=DataModelingJob.Status.QUEUED,
+        )
+        .order_by("-created_at")
+        .first()
     )
+    if job is None:
+        job = DataModelingJob.objects.create(
+            team_id=inputs.team_id,
+            saved_query=node.saved_query,
+            status=DataModelingJob.Status.RUNNING,
+            workflow_id=workflow_id,
+            workflow_run_id=workflow_run_id,
+            created_by_id=node.saved_query.created_by_id if node.saved_query else None,
+        )
+    else:
+        job.status = DataModelingJob.Status.RUNNING
+        job.workflow_run_id = workflow_run_id
+        job.save(update_fields=["status", "workflow_run_id", "updated_at"])
     return str(job.id)
 
 
