@@ -1,1 +1,1 @@
-1048_alter_survey_response_sampling_daily_limits_and_more
+1052_migrate_legacy_personal_api_key_scopes
