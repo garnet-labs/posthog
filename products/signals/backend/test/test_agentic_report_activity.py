@@ -61,7 +61,6 @@ def _build_research_output() -> ReportResearchOutput:
     return ReportResearchOutput(
         title="Onboarding funnel completion tracking may be regressing",
         summary="Signals point to a likely regression around onboarding completion event tracking.",
-        repository="posthog/posthog",
         findings=[
             SignalFinding(
                 signal_id="sig-1",
@@ -152,14 +151,7 @@ async def test_signals_agentic_report_gate_activity(monkeypatch, ateam, flag_ena
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-async def test_select_repository_activity_persists_artefact(monkeypatch, ateam):
-    report = await database_sync_to_async(SignalReport.objects.create)(
-        team=ateam,
-        status=SignalReport.Status.IN_PROGRESS,
-        signal_count=2,
-        total_weight=1.3,
-    )
-
+async def test_select_repository_activity_returns_repo(monkeypatch, ateam):
     monkeypatch.setattr(
         "products.signals.backend.temporal.agentic.select_repository._resolve_team_repo_context",
         lambda team_id: _TeamRepoContext(team_id=team_id, user_id=1),
@@ -173,30 +165,15 @@ async def test_select_repository_activity_persists_artefact(monkeypatch, ateam):
         fake_select_repo,
     )
 
-    result = await select_repository_activity(
-        SelectRepositoryInput(team_id=ateam.id, report_id=str(report.id), signals=_build_signals())
-    )
+    result = await select_repository_activity(SelectRepositoryInput(team_id=ateam.id, signals=_build_signals()))
 
     assert result.repository == "posthog/posthog"
     assert "Single repository" in result.reason
-
-    artefact = await database_sync_to_async(
-        lambda: SignalReportArtefact.objects.get(report=report, type=SignalReportArtefact.ArtefactType.REPO_SELECTION)
-    )()
-    content = json.loads(artefact.content)
-    assert content["repository"] == "posthog/posthog"
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
 async def test_select_repository_activity_no_repo(monkeypatch, ateam):
-    report = await database_sync_to_async(SignalReport.objects.create)(
-        team=ateam,
-        status=SignalReport.Status.IN_PROGRESS,
-        signal_count=2,
-        total_weight=1.3,
-    )
-
     monkeypatch.setattr(
         "products.signals.backend.temporal.agentic.select_repository._resolve_team_repo_context",
         lambda team_id: _TeamRepoContext(team_id=team_id, user_id=1),
@@ -210,18 +187,10 @@ async def test_select_repository_activity_no_repo(monkeypatch, ateam):
         fake_select_repo,
     )
 
-    result = await select_repository_activity(
-        SelectRepositoryInput(team_id=ateam.id, report_id=str(report.id), signals=_build_signals())
-    )
+    result = await select_repository_activity(SelectRepositoryInput(team_id=ateam.id, signals=_build_signals()))
 
     assert result.repository is None
     assert "No GitHub repositories" in result.reason
-
-    artefact = await database_sync_to_async(
-        lambda: SignalReportArtefact.objects.get(report=report, type=SignalReportArtefact.ArtefactType.REPO_SELECTION)
-    )()
-    content = json.loads(artefact.content)
-    assert content["repository"] is None
 
 
 @pytest.mark.asyncio
@@ -249,7 +218,12 @@ async def test_run_agentic_report_activity_persists_artefacts(monkeypatch, ateam
 
     result = await run_agentic_report_activity(
         RunAgenticReportInput(
-            team_id=ateam.id, report_id=str(report.id), signals=_build_signals(), repository="posthog/posthog"
+            team_id=ateam.id,
+            report_id=str(report.id),
+            signals=_build_signals(),
+            repo_selection=RepoSelectionResult(
+                repository="posthog/posthog", reason="Single repository connected: posthog/posthog"
+            ),
         )
     )
 
@@ -265,6 +239,7 @@ async def test_run_agentic_report_activity_persists_artefacts(monkeypatch, ateam
     assert [artefact.type for artefact in artefacts] == [
         SignalReportArtefact.ArtefactType.ACTIONABILITY_JUDGMENT,
         SignalReportArtefact.ArtefactType.PRIORITY_JUDGMENT,
+        SignalReportArtefact.ArtefactType.REPO_SELECTION,
         SignalReportArtefact.ArtefactType.SIGNAL_FINDING,
         SignalReportArtefact.ArtefactType.SIGNAL_FINDING,
     ]
@@ -282,7 +257,13 @@ async def test_run_agentic_report_activity_persists_artefacts(monkeypatch, ateam
         "explanation": "The regression affects a core onboarding flow and should be addressed quickly.",
     }
 
-    finding_contents = [json.loads(artefact.content) for artefact in artefacts[2:]]
+    repo_selection_content = json.loads(artefacts[2].content)
+    assert repo_selection_content == {
+        "repository": "posthog/posthog",
+        "reason": "Single repository connected: posthog/posthog",
+    }
+
+    finding_contents = [json.loads(artefact.content) for artefact in artefacts[3:]]
     assert [finding["signal_id"] for finding in finding_contents] == ["sig-1", "sig-2"]
 
 
@@ -312,7 +293,10 @@ async def test_run_agentic_report_activity_does_not_persist_partial_artefacts(mo
     with pytest.raises(RuntimeError, match="sandbox failed"):
         await run_agentic_report_activity(
             RunAgenticReportInput(
-                team_id=ateam.id, report_id=str(report.id), signals=_build_signals()[:1], repository="posthog/posthog"
+                team_id=ateam.id,
+                report_id=str(report.id),
+                signals=_build_signals()[:1],
+                repo_selection=RepoSelectionResult(repository="posthog/posthog", reason="test"),
             )
         )
 

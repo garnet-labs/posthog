@@ -24,8 +24,7 @@ the safety judge first, then calls into this flow via a Temporal activity if the
   - priority assessment when actionable
   - final report title
   - very short factual summary
-    `ReportResearchOutput` also carries an optional `repository` field set by the caller
-    after repo selection, for use in future update flows.
+    The repository used for research is tracked separately via the `repo_selection` artefact.
 - `fixtures/analyze_report_funnel_research_output.json`
   Saved previous research output used by local `update` testing.
 
