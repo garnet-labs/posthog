@@ -1198,7 +1198,7 @@ jobs:
               run: | # async_migrations covered in ci-async-migrations.yml
                   # Kill pytest immediately on cancellation to avoid Django DB teardown
                   # holding the runner alive for minutes after GitHub requests cancellation.
-                  trap 'kill -KILL -$pytest_pgid 2>/dev/null; exit 130' TERM INT
+                  trap '[ -n "$pytest_pgid" ] && kill -KILL -$pytest_pgid 2>/dev/null; exit 130' TERM INT
                   pytest -v --tb=short ${{
                       matrix.compat
                       && env.CLICKHOUSE_COMPAT_PYTEST_TARGETS
@@ -1270,7 +1270,7 @@ jobs:
               run: |
                   # Kill pytest immediately on cancellation to avoid Django DB teardown
                   # holding the runner alive for minutes after GitHub requests cancellation.
-                  trap 'kill -KILL -$pytest_pgid 2>/dev/null; exit 130' TERM INT
+                  trap '[ -n "$pytest_pgid" ] && kill -KILL -$pytest_pgid 2>/dev/null; exit 130' TERM INT
                   pytest -v --tb=short --timeout=600 --timeout-method=thread posthog/temporal products/batch_exports/backend/tests/temporal products/tasks/backend/temporal -m "not async_migrations" \
                       --splits ${{ matrix.concurrency }} --group ${{ matrix.group }} \
                       --durations=100 --durations-min=1.0 --store-durations \
