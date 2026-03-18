@@ -249,6 +249,17 @@ export function AutoShowSection({ id }: { id: string }): JSX.Element | null {
 
     const [triggerType, setTriggerType] = useState<TourTriggerType>(getInitialTriggerType)
 
+    useEffect(() => {
+        const derivedTriggerType = getInitialTriggerType()
+        setTriggerType((current) => {
+            if (current === derivedTriggerType) {
+                return current
+            }
+            return derivedTriggerType
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [conditions.events?.values, conditions.actions?.values])
+
     const handleTriggerTypeChange = (newType: TourTriggerType): void => {
         setTriggerType(newType)
         if (newType === 'immediate') {

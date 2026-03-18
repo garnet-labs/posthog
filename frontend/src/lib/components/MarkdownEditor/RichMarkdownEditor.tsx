@@ -137,7 +137,7 @@ export function RichMarkdownEditor({
         return () => {
             formElement.removeEventListener('submit', handleFormSubmitCapture, true)
         }
-    }, [editor, docToMarkdown])
+    }, [editor, docToMarkdown, syncMarkdownFromEditor])
 
     const { setFilesToUpload, filesToUpload, uploading } = useUploadFiles({
         onUpload: (url, fileName) => {
