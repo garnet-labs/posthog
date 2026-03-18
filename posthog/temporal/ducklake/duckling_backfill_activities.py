@@ -7,10 +7,9 @@ from temporalio import activity
 from posthog.temporal.common.heartbeat_sync import HeartbeaterSync
 from posthog.temporal.common.logger import get_logger
 from posthog.temporal.ducklake.duckling_backfill_inputs import (
+    DucklingCheckAutoPauseInputs,
     DucklingCopyFilesInputs,
     DucklingCopyFilesResult,
-    DucklingDiscoveryInputs,
-    DucklingDiscoveryResult,
     DucklingRegisterInputs,
     DucklingResolveConfigInputs,
     DucklingResolveConfigResult,
@@ -28,12 +27,15 @@ FAILURE_THRESHOLD = 5
 FAILURE_CHECK_WINDOW = 10
 
 
-async def _is_team_auto_paused(team_id: int, data_type: str) -> bool:
+@activity.defn
+async def check_auto_pause_activity(inputs: DucklingCheckAutoPauseInputs) -> bool:
     """Check if a team should be skipped due to too many recent failures.
 
     Checks the last FAILURE_CHECK_WINDOW runs for the team. If >= FAILURE_THRESHOLD
-    are failed, the team is considered auto-paused.
+    are failed, returns True (auto-paused).
     """
+    bind_contextvars(team_id=inputs.team_id, data_type=inputs.data_type)
+
     from posthog.ducklake.models import DucklingBackfillRun
     from posthog.sync import database_sync_to_async
 
@@ -41,8 +43,8 @@ async def _is_team_auto_paused(team_id: int, data_type: str) -> bool:
         lambda: (
             DucklingBackfillRun.objects.filter(
                 id__in=DucklingBackfillRun.objects.filter(
-                    team_id=team_id,
-                    data_type=data_type,
+                    team_id=inputs.team_id,
+                    data_type=inputs.data_type,
                 )
                 .order_by("-updated_at")
                 .values("id")[:FAILURE_CHECK_WINDOW]
@@ -52,69 +54,6 @@ async def _is_team_auto_paused(team_id: int, data_type: str) -> bool:
         )
     )()
     return failed_count >= FAILURE_THRESHOLD
-
-
-@activity.defn
-async def discover_duckling_teams_activity(inputs: DucklingDiscoveryInputs) -> list[DucklingDiscoveryResult]:
-    """Discover teams that need backfill for a specific partition date.
-
-    The partition_key is set by the discovery workflow from Temporal's
-    TemporalScheduledStartTime, so missed schedule firings are automatically
-    buffered and replayed by Temporal.
-
-    Skips teams that are auto-paused due to exceeding the failure threshold.
-    """
-    from posthog.temporal.ducklake.duckling_backfill_inputs import VALID_DATA_TYPES
-
-    if inputs.data_type not in VALID_DATA_TYPES:
-        raise ValueError(f"Invalid data_type: {inputs.data_type}, must be one of {VALID_DATA_TYPES}")
-    if not inputs.partition_key:
-        raise ValueError("partition_key must be set")
-
-    bind_contextvars(data_type=inputs.data_type, partition_key=inputs.partition_key)
-    logger = LOGGER.bind()
-
-    from posthog.ducklake.models import DuckLakeCatalog, DucklingBackfillRun
-    from posthog.sync import database_sync_to_async
-
-    # All teams with a duckling catalog
-    team_ids = await database_sync_to_async(lambda: list(DuckLakeCatalog.objects.values_list("team_id", flat=True)))()
-
-    if not team_ids:
-        return []
-
-    # Find teams that already completed this partition
-    completed_team_ids = await database_sync_to_async(
-        lambda: set(
-            DucklingBackfillRun.objects.filter(
-                team_id__in=team_ids,
-                data_type=inputs.data_type,
-                partition_key=inputs.partition_key,
-                status="completed",
-            ).values_list("team_id", flat=True)
-        )
-    )()
-
-    results: list[DucklingDiscoveryResult] = []
-    paused_count = 0
-    for team_id in team_ids:
-        if team_id in completed_team_ids:
-            continue
-        if await _is_team_auto_paused(team_id, inputs.data_type):
-            paused_count += 1
-            continue
-        results.append(DucklingDiscoveryResult(team_id=team_id, partition_key=inputs.partition_key))
-
-    if paused_count:
-        logger.warning("Teams auto-paused due to failure threshold", paused_count=paused_count)
-
-    logger.info(
-        "Discovered teams for backfill",
-        count=len(results),
-        partition_key=inputs.partition_key,
-        paused_count=paused_count,
-    )
-    return results
 
 
 @activity.defn

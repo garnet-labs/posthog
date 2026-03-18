@@ -26,7 +26,7 @@ from posthog.temporal.common.client import async_connect
 from posthog.temporal.common.schedule import a_create_schedule, a_schedule_exists, a_update_schedule
 from posthog.temporal.delete_recordings.types import PurgeDeletedMetadataInput
 from posthog.temporal.ducklake.compaction_types import DucklakeCompactionInput
-from posthog.temporal.ducklake.duckling_backfill_inputs import DucklingDiscoveryInputs
+from posthog.temporal.ducklake.duckling_backfill_inputs import DucklingBackfillInputs
 from posthog.temporal.enforce_max_replay_retention.types import EnforceMaxReplayRetentionInput
 from posthog.temporal.experiments.schedule import (
     create_experiment_regular_metrics_schedules,
@@ -350,48 +350,35 @@ async def create_purge_deleted_recording_metadata_schedule(client: Client):
         )
 
 
-async def create_duckling_events_daily_backfill_schedule(client: Client):
-    """Create or update the schedule for daily duckling events backfill.
+async def sync_duckling_backfill_schedules(client: Client):
+    """Sync per-team duckling backfill schedules.
 
-    Runs daily. Temporal buffers missed firings automatically.
-    The discovery workflow derives the partition date from TemporalScheduledStartTime.
+    Creates a daily Temporal schedule for each (DuckLakeCatalog team, data_type)
+    combination, matching the batch exports pattern where each schedule fires
+    the workflow directly. Temporal handles missed-day buffering.
     """
-    schedule = Schedule(
-        action=ScheduleActionStartWorkflow(
-            "duckling-backfill-discovery",
-            DucklingDiscoveryInputs(data_type="events"),
-            id="duckling-events-daily-backfill-schedule",
-            task_queue=settings.DUCKLING_BACKFILL_TASK_QUEUE,
-        ),
-        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(days=1))]),
-    )
+    from posthog.ducklake.models import DuckLakeCatalog
 
-    if await a_schedule_exists(client, "duckling-events-daily-backfill-schedule"):
-        await a_update_schedule(client, "duckling-events-daily-backfill-schedule", schedule)
-    else:
-        await a_create_schedule(client, "duckling-events-daily-backfill-schedule", schedule, trigger_immediately=False)
+    team_ids = list(DuckLakeCatalog.objects.values_list("team_id", flat=True))
 
+    for data_type in ("events", "persons"):
+        for team_id in team_ids:
+            schedule_id = f"duckling-backfill-{data_type}-team-{team_id}"
+            schedule = Schedule(
+                action=ScheduleActionStartWorkflow(
+                    "duckling-backfill",
+                    DucklingBackfillInputs(team_id=team_id, data_type=data_type),
+                    id=schedule_id,
+                    task_queue=settings.DUCKLING_BACKFILL_TASK_QUEUE,
+                    execution_timeout=timedelta(days=1),
+                ),
+                spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(days=1))]),
+            )
 
-async def create_duckling_persons_daily_backfill_schedule(client: Client):
-    """Create or update the schedule for daily duckling persons backfill.
-
-    Runs daily. Temporal buffers missed firings automatically.
-    The discovery workflow derives the partition date from TemporalScheduledStartTime.
-    """
-    schedule = Schedule(
-        action=ScheduleActionStartWorkflow(
-            "duckling-backfill-discovery",
-            DucklingDiscoveryInputs(data_type="persons"),
-            id="duckling-persons-daily-backfill-schedule",
-            task_queue=settings.DUCKLING_BACKFILL_TASK_QUEUE,
-        ),
-        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(days=1))]),
-    )
-
-    if await a_schedule_exists(client, "duckling-persons-daily-backfill-schedule"):
-        await a_update_schedule(client, "duckling-persons-daily-backfill-schedule", schedule)
-    else:
-        await a_create_schedule(client, "duckling-persons-daily-backfill-schedule", schedule, trigger_immediately=False)
+            if await a_schedule_exists(client, schedule_id):
+                await a_update_schedule(client, schedule_id, schedule)
+            else:
+                await a_create_schedule(client, schedule_id, schedule, trigger_immediately=False)
 
 
 schedules = [
@@ -412,8 +399,7 @@ schedules = [
     create_all_realtime_cohort_calculation_schedules,
     create_ingestion_acceptance_test_schedule,
     create_health_check_schedules,
-    create_duckling_events_daily_backfill_schedule,
-    create_duckling_persons_daily_backfill_schedule,
+    sync_duckling_backfill_schedules,
 ]
 
 if settings.EE_AVAILABLE:

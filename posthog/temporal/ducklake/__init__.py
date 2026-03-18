@@ -16,16 +16,13 @@ from posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow import (
     verify_ducklake_copy_activity,
 )
 from posthog.temporal.ducklake.duckling_backfill_activities import (
+    check_auto_pause_activity,
     copy_partition_files_activity,
-    discover_duckling_teams_activity,
     register_with_ducklake_activity,
     resolve_duckling_config_activity,
     update_backfill_run_status_activity,
 )
-from posthog.temporal.ducklake.duckling_backfill_workflow import (
-    DucklingBackfillDiscoveryWorkflow,
-    DucklingBackfillWorkflow,
-)
+from posthog.temporal.ducklake.duckling_backfill_workflow import DucklingBackfillWorkflow
 
 WORKFLOWS = [DucklakeCompactionWorkflow, DuckLakeCopyDataImportsWorkflow, DuckLakeCopyDataModelingWorkflow]
 ACTIVITIES = [
@@ -42,10 +39,10 @@ ACTIVITIES = [
     verify_ducklake_copy_activity,
 ]
 
-DUCKLING_BACKFILL_WORKFLOWS = [DucklingBackfillWorkflow, DucklingBackfillDiscoveryWorkflow]
+DUCKLING_BACKFILL_WORKFLOWS = [DucklingBackfillWorkflow]
 DUCKLING_BACKFILL_ACTIVITIES = [
+    check_auto_pause_activity,
     copy_partition_files_activity,
-    discover_duckling_teams_activity,
     register_with_ducklake_activity,
     resolve_duckling_config_activity,
     update_backfill_run_status_activity,

@@ -13,26 +13,22 @@ from temporalio import activity as temporal_activity
 from temporalio.testing import WorkflowEnvironment
 
 from posthog.temporal.ducklake.duckling_backfill_activities import (
+    check_auto_pause_activity,
     copy_partition_files_activity,
-    discover_duckling_teams_activity,
     register_with_ducklake_activity,
     update_backfill_run_status_activity,
 )
 from posthog.temporal.ducklake.duckling_backfill_inputs import (
     DucklingBackfillInputs,
+    DucklingCheckAutoPauseInputs,
     DucklingCopyFilesInputs,
     DucklingCopyFilesResult,
-    DucklingDiscoveryInputs,
-    DucklingDiscoveryResult,
     DucklingRegisterInputs,
     DucklingResolveConfigInputs,
     DucklingResolveConfigResult,
     DucklingUpdateStatusInputs,
 )
-from posthog.temporal.ducklake.duckling_backfill_workflow import (
-    DucklingBackfillDiscoveryWorkflow,
-    DucklingBackfillWorkflow,
-)
+from posthog.temporal.ducklake.duckling_backfill_workflow import DucklingBackfillWorkflow
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,14 +70,6 @@ def test_duckling_backfill_workflow_parse_inputs():
     assert inputs.team_id == 42
     assert inputs.data_type == "events"
     assert inputs.partition_key == "2024-01-15"
-
-
-def test_duckling_backfill_discovery_workflow_parse_inputs():
-    payload = json.dumps({"data_type": "persons"})
-
-    inputs = DucklingBackfillDiscoveryWorkflow.parse_inputs([payload])
-
-    assert inputs.data_type == "persons"
 
 
 @parameterized.expand(
@@ -373,91 +361,34 @@ def test_register_with_ducklake_activity_production_mode_registers_multiple_path
 
 
 # ---------------------------------------------------------------------------
-# discover_duckling_teams_activity — unit tests (async, mocked ORM)
+# check_auto_pause_activity — unit tests (async, mocked ORM)
 # ---------------------------------------------------------------------------
 
-CATALOG_DEFAULTS = {
-    "db_host": "localhost",
-    "db_port": 5432,
-    "db_database": "ducklake",
-    "db_username": "user",
-    "db_password": "pass",
-    "bucket": "test-bucket",
-    "bucket_region": "us-east-1",
-    "cross_account_role_arn": "arn:aws:iam::123:role/test",
-    "cross_account_external_id": "ext-id",
-}
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_check_auto_pause_returns_false_with_no_runs(ateam):
+    result = await check_auto_pause_activity(DucklingCheckAutoPauseInputs(team_id=ateam.id, data_type="events"))
+    assert result is False
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-async def test_discover_returns_team_for_partition(ateam):
-    from posthog.ducklake.models import DuckLakeCatalog
-    from posthog.sync import database_sync_to_async
-
-    await database_sync_to_async(DuckLakeCatalog.objects.create)(team=ateam, **CATALOG_DEFAULTS)
-
-    results = await discover_duckling_teams_activity(
-        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
-    )
-
-    matching = [r for r in results if r.team_id == ateam.id]
-    assert len(matching) == 1
-    assert matching[0].partition_key == "2024-01-15"
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db
-async def test_discover_skips_completed_team(ateam):
-    from posthog.ducklake.models import DuckLakeCatalog, DucklingBackfillRun
-    from posthog.sync import database_sync_to_async
-
-    await database_sync_to_async(DuckLakeCatalog.objects.create)(team=ateam, **CATALOG_DEFAULTS)
-    await database_sync_to_async(DucklingBackfillRun.objects.create)(
-        team=ateam, data_type="events", partition_key="2024-01-15", status="completed"
-    )
-
-    results = await discover_duckling_teams_activity(
-        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
-    )
-
-    matching = [r for r in results if r.team_id == ateam.id]
-    assert len(matching) == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db
-async def test_discover_returns_empty_when_no_catalogs():
-    results = await discover_duckling_teams_activity(
-        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
-    )
-    assert isinstance(results, list)
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db
-async def test_discover_auto_pauses_team_with_too_many_failures(ateam):
+async def test_check_auto_pause_returns_true_when_over_threshold(ateam):
     from django.utils import timezone
 
-    from posthog.ducklake.models import DuckLakeCatalog, DucklingBackfillRun
+    from posthog.ducklake.models import DucklingBackfillRun
     from posthog.sync import database_sync_to_async
     from posthog.temporal.ducklake.duckling_backfill_activities import FAILURE_THRESHOLD
 
-    await database_sync_to_async(DuckLakeCatalog.objects.create)(team=ateam, **CATALOG_DEFAULTS)
-
-    # Create enough failed runs to trigger auto-pause
     for i in range(FAILURE_THRESHOLD):
         date = (timezone.now() - dt.timedelta(days=100 + i)).strftime("%Y-%m-%d")
         await database_sync_to_async(DucklingBackfillRun.objects.create)(
             team=ateam, data_type="events", partition_key=date, status="failed"
         )
 
-    results = await discover_duckling_teams_activity(
-        DucklingDiscoveryInputs(data_type="events", partition_key="2024-01-15")
-    )
-
-    matching = [r for r in results if r.team_id == ateam.id]
-    assert len(matching) == 0
+    result = await check_auto_pause_activity(DucklingCheckAutoPauseInputs(team_id=ateam.id, data_type="events"))
+    assert result is True
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +407,11 @@ async def test_duckling_backfill_workflow_happy_path():
     """
     call_log: list[str] = []
     captured_status_inputs: list[dict] = []
+
+    @temporal_activity.defn(name="check_auto_pause_activity")
+    async def check_pause_stub(inputs: DucklingCheckAutoPauseInputs) -> bool:
+        call_log.append("check_pause")
+        return False
 
     @temporal_activity.defn(name="update_backfill_run_status_activity")
     async def update_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
@@ -521,7 +457,7 @@ async def test_duckling_backfill_workflow_happy_path():
             env.client,
             task_queue="duckling-backfill-test",
             workflows=[DucklingBackfillWorkflow],
-            activities=[update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
+            activities=[check_pause_stub, update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
             workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
         ):
             await env.client.execute_workflow(
@@ -532,7 +468,14 @@ async def test_duckling_backfill_workflow_happy_path():
                 execution_timeout=dt.timedelta(seconds=30),
             )
 
-    assert call_log == ["update_status:running", "resolve_config", "copy_files", "register", "update_status:completed"]
+    assert call_log == [
+        "check_pause",
+        "update_status:running",
+        "resolve_config",
+        "copy_files",
+        "register",
+        "update_status:completed",
+    ]
 
     final_status = captured_status_inputs[-1]
     assert final_status["status"] == "completed"
@@ -543,6 +486,10 @@ async def test_duckling_backfill_workflow_happy_path():
 @pytest.mark.asyncio
 async def test_duckling_backfill_workflow_empty_partition_skips_register_and_marks_completed():
     call_log: list[str] = []
+
+    @temporal_activity.defn(name="check_auto_pause_activity")
+    async def check_pause_stub(inputs: DucklingCheckAutoPauseInputs) -> bool:
+        return False
 
     @temporal_activity.defn(name="update_backfill_run_status_activity")
     async def update_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
@@ -578,7 +525,7 @@ async def test_duckling_backfill_workflow_empty_partition_skips_register_and_mar
             env.client,
             task_queue="duckling-backfill-test-empty",
             workflows=[DucklingBackfillWorkflow],
-            activities=[update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
+            activities=[check_pause_stub, update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
             workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
         ):
             await env.client.execute_workflow(
@@ -597,6 +544,10 @@ async def test_duckling_backfill_workflow_empty_partition_skips_register_and_mar
 async def test_duckling_backfill_workflow_marks_failed_on_activity_error():
     call_log: list[str] = []
     status_updates: list[tuple[str, str]] = []  # (status, error_message)
+
+    @temporal_activity.defn(name="check_auto_pause_activity")
+    async def check_pause_stub(inputs: DucklingCheckAutoPauseInputs) -> bool:
+        return False
 
     @temporal_activity.defn(name="update_backfill_run_status_activity")
     async def update_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
@@ -624,7 +575,7 @@ async def test_duckling_backfill_workflow_marks_failed_on_activity_error():
             env.client,
             task_queue="duckling-backfill-test-fail",
             workflows=[DucklingBackfillWorkflow],
-            activities=[update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
+            activities=[check_pause_stub, update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
             workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
         ):
             with pytest.raises(Exception):
@@ -652,6 +603,10 @@ async def test_duckling_backfill_workflow_marks_failed_on_activity_error():
 async def test_duckling_backfill_workflow_error_message_is_truncated_to_1000_chars():
     status_updates: list[tuple[str, str]] = []
 
+    @temporal_activity.defn(name="check_auto_pause_activity")
+    async def check_pause_stub(inputs: DucklingCheckAutoPauseInputs) -> bool:
+        return False
+
     @temporal_activity.defn(name="update_backfill_run_status_activity")
     async def update_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
         status_updates.append((inputs.status, inputs.error_message))
@@ -675,7 +630,7 @@ async def test_duckling_backfill_workflow_error_message_is_truncated_to_1000_cha
             env.client,
             task_queue="duckling-backfill-test-truncate",
             workflows=[DucklingBackfillWorkflow],
-            activities=[update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
+            activities=[check_pause_stub, update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
             workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
         ):
             with pytest.raises(Exception):
@@ -692,171 +647,61 @@ async def test_duckling_backfill_workflow_error_message_is_truncated_to_1000_cha
     assert len(failed_error) <= 1000
 
 
-# ---------------------------------------------------------------------------
-# DucklingBackfillDiscoveryWorkflow — integration tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_duckling_backfill_discovery_workflow_spawns_child_workflow_per_team():
-    started_children: list[dict] = []
+async def test_duckling_backfill_workflow_skips_when_auto_paused():
+    call_log: list[str] = []
 
-    @temporal_activity.defn(name="discover_duckling_teams_activity")
-    async def discover_stub(inputs: DucklingDiscoveryInputs) -> list[DucklingDiscoveryResult]:
-        return [
-            DucklingDiscoveryResult(team_id=10, partition_key="2024-01-15"),
-            DucklingDiscoveryResult(team_id=20, partition_key="2024-01-15"),
-        ]
+    @temporal_activity.defn(name="check_auto_pause_activity")
+    async def check_pause_stub(inputs: DucklingCheckAutoPauseInputs) -> bool:
+        call_log.append("check_pause")
+        return True  # auto-paused
 
-    # Record child workflow executions by capturing the activity calls made by the child
     @temporal_activity.defn(name="update_backfill_run_status_activity")
-    async def child_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
-        if inputs.status == "running":
-            started_children.append({"team_id": inputs.team_id, "partition_key": inputs.partition_key})
+    async def update_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
+        call_log.append(f"update_status:{inputs.status}")
 
     @temporal_activity.defn(name="resolve_duckling_config_activity")
     async def resolve_config_stub(inputs: DucklingResolveConfigInputs) -> DucklingResolveConfigResult:
+        call_log.append("resolve_config")
         return DucklingResolveConfigResult(
-            bucket="customer-bucket",
-            region="us-east-1",
-            role_arn="arn:aws:iam::123:role/test",
-            external_id="ext-id",
-            aws_access_key_id="key",
-            aws_secret_access_key="secret",
-            aws_session_token="token",
+            bucket="b",
+            region="r",
+            role_arn="a",
+            external_id="e",
+            aws_access_key_id="k",
+            aws_secret_access_key="s",
+            aws_session_token="t",
         )
 
     @temporal_activity.defn(name="copy_partition_files_activity")
     async def copy_files_stub(inputs: DucklingCopyFilesInputs) -> DucklingCopyFilesResult:
+        call_log.append("copy_files")
         return DucklingCopyFilesResult(dest_s3_paths=[], total_records=0, total_bytes=0)
 
     @temporal_activity.defn(name="register_with_ducklake_activity")
     async def register_stub(inputs: DucklingRegisterInputs) -> None:
-        pass
+        call_log.append("register")
 
-    inputs = DucklingDiscoveryInputs(data_type="events")
-
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        async with temporalio.worker.Worker(
-            env.client,
-            task_queue="duckling-discovery-test",
-            workflows=[DucklingBackfillDiscoveryWorkflow, DucklingBackfillWorkflow],
-            activities=[
-                discover_stub,
-                child_status_stub,
-                resolve_config_stub,
-                copy_files_stub,
-                register_stub,
-            ],
-            workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
-        ):
-            await env.client.execute_workflow(
-                DucklingBackfillDiscoveryWorkflow.run,
-                inputs,
-                id=str(uuid.uuid4()),
-                task_queue="duckling-discovery-test",
-                execution_timeout=dt.timedelta(minutes=5),
-            )
-
-    assert len(started_children) == 2
-    team_ids = {c["team_id"] for c in started_children}
-    assert 10 in team_ids
-    assert 20 in team_ids
-
-
-@pytest.mark.asyncio
-async def test_duckling_backfill_discovery_workflow_returns_early_when_no_teams():
-    discover_call_count = {"count": 0}
-
-    @temporal_activity.defn(name="discover_duckling_teams_activity")
-    async def discover_stub(inputs: DucklingDiscoveryInputs) -> list[DucklingDiscoveryResult]:
-        discover_call_count["count"] += 1
-        return []
-
-    inputs = DucklingDiscoveryInputs(data_type="events")
+    inputs = DucklingBackfillInputs(team_id=1, data_type="events", partition_key="2024-01-15")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with temporalio.worker.Worker(
             env.client,
-            task_queue="duckling-discovery-empty-test",
-            workflows=[DucklingBackfillDiscoveryWorkflow],
-            activities=[discover_stub],
+            task_queue="duckling-backfill-test-paused",
+            workflows=[DucklingBackfillWorkflow],
+            activities=[check_pause_stub, update_status_stub, resolve_config_stub, copy_files_stub, register_stub],
             workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
         ):
             await env.client.execute_workflow(
-                DucklingBackfillDiscoveryWorkflow.run,
+                DucklingBackfillWorkflow.run,
                 inputs,
                 id=str(uuid.uuid4()),
-                task_queue="duckling-discovery-empty-test",
+                task_queue="duckling-backfill-test-paused",
                 execution_timeout=dt.timedelta(seconds=30),
             )
 
-    assert discover_call_count["count"] == 1
-
-
-@pytest.mark.asyncio
-async def test_duckling_backfill_discovery_workflow_uses_correct_child_workflow_id():
-    child_update_calls: list[DucklingUpdateStatusInputs] = []
-
-    @temporal_activity.defn(name="discover_duckling_teams_activity")
-    async def discover_stub(inputs: DucklingDiscoveryInputs) -> list[DucklingDiscoveryResult]:
-        return [DucklingDiscoveryResult(team_id=42, partition_key="2024-03-17")]
-
-    @temporal_activity.defn(name="update_backfill_run_status_activity")
-    async def child_status_stub(inputs: DucklingUpdateStatusInputs) -> None:
-        child_update_calls.append(inputs)
-
-    @temporal_activity.defn(name="resolve_duckling_config_activity")
-    async def resolve_config_stub(inputs: DucklingResolveConfigInputs) -> DucklingResolveConfigResult:
-        return DucklingResolveConfigResult(
-            bucket="customer-bucket",
-            region="us-east-1",
-            role_arn="arn:aws:iam::123:role/test",
-            external_id="ext-id",
-            aws_access_key_id="key",
-            aws_secret_access_key="secret",
-            aws_session_token="token",
-        )
-
-    @temporal_activity.defn(name="copy_partition_files_activity")
-    async def copy_files_stub(inputs: DucklingCopyFilesInputs) -> DucklingCopyFilesResult:
-        return DucklingCopyFilesResult(dest_s3_paths=[], total_records=0, total_bytes=0)
-
-    @temporal_activity.defn(name="register_with_ducklake_activity")
-    async def register_stub(inputs: DucklingRegisterInputs) -> None:
-        pass
-
-    inputs = DucklingDiscoveryInputs(data_type="persons")
-
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        async with temporalio.worker.Worker(
-            env.client,
-            task_queue="duckling-discovery-id-test",
-            workflows=[DucklingBackfillDiscoveryWorkflow, DucklingBackfillWorkflow],
-            activities=[
-                discover_stub,
-                child_status_stub,
-                resolve_config_stub,
-                copy_files_stub,
-                register_stub,
-            ],
-            workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
-        ):
-            await env.client.execute_workflow(
-                DucklingBackfillDiscoveryWorkflow.run,
-                inputs,
-                id=str(uuid.uuid4()),
-                task_queue="duckling-discovery-id-test",
-                execution_timeout=dt.timedelta(minutes=5),
-            )
-
-    # The child workflow for team 42 should have been started with the correct ID.
-    # We verify this by checking the workflow_id passed to update_backfill_run_status_activity.
-    running_calls = [c for c in child_update_calls if c.status == "running"]
-    assert len(running_calls) == 1
-    assert running_calls[0].team_id == 42
-    assert running_calls[0].partition_key == "2024-03-17"
-    assert running_calls[0].workflow_id == "duckling-backfill-persons-42-2024-03-17"
+    # Only check_pause should have been called — workflow returns early
+    assert call_log == ["check_pause"]
 
 
 # ---------------------------------------------------------------------------
