@@ -21,3 +21,10 @@ Run `hogli --help` to get the full, current command list. Run `hogli <command> -
 - `common/hogli/manifest.yaml` — command definitions (source of truth)
 - `common/hogli/commands.py` — extension point for custom Click commands
 - `common/hogli/README.md` — full developer and architecture docs
+- `.agents/skills/isolating-product-facade-contracts/SKILL.md` — AI-assisted product isolation migrations to facade + contracts architecture
+
+## Product commands
+
+- `hogli product:bootstrap <name>` — scaffold a new product with canonical structure. Supports `--dry-run` and `--force`.
+- `hogli product:lint <name>` — validate a single product's structure. Runs in **strict** mode (all rules enforced) for isolated products with `backend/facade/contracts.py`, or **lenient** mode (subset of rules) for legacy products. Single-product runs show detailed, actionable hints per check.
+- `hogli product:lint --all` — lint every product. Compact pass/fail output per product.
