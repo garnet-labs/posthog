@@ -149,6 +149,12 @@ class PipelineNonDLT(Generic[ResumableData]):
         self._table = table
         self._is_incremental = schema.is_incremental
 
+        if source_response.partition_overwrite and resumable_source_manager is not None:
+            raise ValueError(
+                "partition_overwrite is incompatible with resumable sources: "
+                "a partial write after a delete would lose data"
+            )
+
         self._delta_table_helper = DeltaTableHelper(self._resource_name, self._job, self._logger)
         self._resumable_source_manager = resumable_source_manager
         self._batcher = Batcher(self._logger)

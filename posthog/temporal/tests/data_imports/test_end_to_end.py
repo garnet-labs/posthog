@@ -3500,3 +3500,165 @@ async def test_stripe_webhook_s3_charges(team, stripe_charge, mock_stripe_client
     # Verify webhook parquet file was deleted from S3 after consumption
     files = await minio_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=webhook_prefix)
     assert files.get("Contents") is None or len(files.get("Contents", [])) == 0
+
+
+def _patch_pipeline_partition_overwrite():
+    """Wrap PipelineNonDLT.__init__ so that the SourceResponse always has partition_overwrite=True."""
+    original_init = PipelineNonDLT.__init__
+
+    def patched_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        self._resource.partition_overwrite = True
+
+    return mock.patch.object(PipelineNonDLT, "__init__", patched_init)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_partition_overwrite_uses_delete_and_append(team, postgres_config, postgres_connection, pipeline_mode):
+    if pipeline_mode == "v3":
+        pytest.skip("partition_overwrite path only runs in non_dlt pipeline")
+
+    await postgres_connection.execute(
+        "CREATE TABLE IF NOT EXISTS {schema}.test_partition_overwrite (id integer, created_at timestamp)".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.execute(
+        "INSERT INTO {schema}.test_partition_overwrite (id, created_at) VALUES (1, '2025-01-01T12:00:00.000Z')".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.commit()
+
+    # First sync: creates the delta table
+    workflow_id, inputs = await _run(
+        team=team,
+        schema_name="test_partition_overwrite",
+        table_name="postgres_test_partition_overwrite",
+        source_type="Postgres",
+        job_inputs={
+            "host": postgres_config["host"],
+            "port": postgres_config["port"],
+            "database": postgres_config["database"],
+            "user": postgres_config["user"],
+            "password": postgres_config["password"],
+            "schema": postgres_config["schema"],
+            "ssh_tunnel_enabled": "False",
+        },
+        mock_data_response=[],
+        sync_type=ExternalDataSchema.SyncType.INCREMENTAL,
+        sync_type_config={"incremental_field": "created_at", "incremental_field_type": "timestamp"},
+        ignore_assertions=True,
+    )
+
+    # Insert a new row so the second incremental sync picks it up
+    await postgres_connection.execute(
+        "INSERT INTO {schema}.test_partition_overwrite (id, created_at) VALUES (2, '2025-02-01T12:00:00.000Z')".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.commit()
+
+    with (
+        _patch_pipeline_partition_overwrite(),
+        mock.patch.object(DeltaTable, "delete") as mock_delete,
+        mock.patch.object(deltalake, "write_deltalake") as mock_write,
+        mock.patch.object(PipelineNonDLT, "_post_run_operations"),
+    ):
+        await _execute_run(str(uuid.uuid4()), inputs, [])
+
+    # partition_overwrite should use delete+append, NOT merge
+    assert mock_delete.call_count >= 1
+
+    # Every delete call should target a specific partition
+    for call in mock_delete.call_args_list:
+        predicate = call.kwargs.get("predicate") or call.args[0]
+        assert PARTITION_KEY in predicate
+
+    # write_deltalake should be called in append mode with partition_by
+    assert mock_write.call_count >= 1
+    for call in mock_write.call_args_list:
+        _, kwargs = call
+        assert kwargs["mode"] == "append"
+        assert kwargs["partition_by"] == PARTITION_KEY
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_partition_overwrite_does_not_redelete_same_partition(
+    team, postgres_config, postgres_connection, pipeline_mode
+):
+    if pipeline_mode == "v3":
+        pytest.skip("partition_overwrite path only runs in non_dlt pipeline")
+
+    await postgres_connection.execute(
+        "CREATE TABLE IF NOT EXISTS {schema}.test_partition_overwrite_nodelete (id integer, created_at timestamp)".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    # Two rows that will land in the same partition (same week)
+    await postgres_connection.execute(
+        "INSERT INTO {schema}.test_partition_overwrite_nodelete (id, created_at) VALUES (1, '2025-01-01T12:00:00.000Z')".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.execute(
+        "INSERT INTO {schema}.test_partition_overwrite_nodelete (id, created_at) VALUES (2, '2025-01-02T12:00:00.000Z')".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.commit()
+
+    # First sync: creates the delta table
+    workflow_id, inputs = await _run(
+        team=team,
+        schema_name="test_partition_overwrite_nodelete",
+        table_name="postgres_test_partition_overwrite_nodelete",
+        source_type="Postgres",
+        job_inputs={
+            "host": postgres_config["host"],
+            "port": postgres_config["port"],
+            "database": postgres_config["database"],
+            "user": postgres_config["user"],
+            "password": postgres_config["password"],
+            "schema": postgres_config["schema"],
+            "ssh_tunnel_enabled": "False",
+        },
+        mock_data_response=[],
+        sync_type=ExternalDataSchema.SyncType.INCREMENTAL,
+        sync_type_config={"incremental_field": "created_at", "incremental_field_type": "timestamp"},
+        ignore_assertions=True,
+    )
+
+    # Insert two more rows that will land in the same partition, with chunk_size=1
+    # so they arrive as separate batches — the second batch should NOT re-delete
+    await postgres_connection.execute(
+        "INSERT INTO {schema}.test_partition_overwrite_nodelete (id, created_at) VALUES (3, '2025-02-01T12:00:00.000Z')".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.execute(
+        "INSERT INTO {schema}.test_partition_overwrite_nodelete (id, created_at) VALUES (4, '2025-02-02T12:00:00.000Z')".format(
+            schema=postgres_config["schema"]
+        )
+    )
+    await postgres_connection.commit()
+
+    with (
+        mock.patch("posthog.temporal.data_imports.sources.postgres.postgres.DEFAULT_CHUNK_SIZE", 1),
+        _patch_pipeline_partition_overwrite(),
+        mock.patch.object(DeltaTable, "delete") as mock_delete,
+        mock.patch.object(deltalake, "write_deltalake"),
+        mock.patch.object(PipelineNonDLT, "_post_run_operations"),
+    ):
+        await _execute_run(str(uuid.uuid4()), inputs, [])
+
+    # Two batches hit the same partition — delete should only be called once per partition
+    partition_predicates = []
+    for call in mock_delete.call_args_list:
+        predicate = call.kwargs.get("predicate") or call.args[0]
+        partition_predicates.append(predicate)
+
+    # Each unique partition value should appear at most once in the delete calls
+    assert len(partition_predicates) == len(set(partition_predicates))

@@ -171,13 +171,6 @@ class DeltaTableHelper:
 
             await self._logger.adebug(f"write_to_deltalake: merging...")
 
-            # Normalize keys and check the keys actually exist in the dataset
-            py_table_column_names = data.column_names
-            normalized_primary_keys = [
-                normalize_column_name(x) for x in primary_keys if normalize_column_name(x) in py_table_column_names
-            ]
-
-            predicate_ops = [f"source.{c} = target.{c}" for c in normalized_primary_keys]
             if use_partitioning and partition_overwrite:
                 # Delete+append: avoids loading the entire partition into memory for merge.
                 # Safe when the source fetches complete data for each partition (e.g. daily
@@ -200,10 +193,18 @@ class DeltaTableHelper:
                     deltalake.write_deltalake,
                     table_or_uri=delta_table,
                     data=data,
+                    partition_by=PARTITION_KEY,
                     mode="append",
                     schema_mode="merge",
                 )
             elif use_partitioning:
+                # Normalize keys and check the keys actually exist in the dataset
+                py_table_column_names = data.column_names
+                normalized_primary_keys = [
+                    normalize_column_name(x) for x in primary_keys if normalize_column_name(x) in py_table_column_names
+                ]
+
+                predicate_ops = [f"source.{c} = target.{c}" for c in normalized_primary_keys]
                 predicate_ops.append(f"source.{PARTITION_KEY} = target.{PARTITION_KEY}")
 
                 # Group the table by the partition key and merge multiple times with streamed_exec=True for optimised merging
@@ -238,6 +239,13 @@ class DeltaTableHelper:
 
                     await self._logger.adebug(f"Delta Merge Stats: {json.dumps(merge_stats)}")
             else:
+                # Normalize keys and check the keys actually exist in the dataset
+                py_table_column_names = data.column_names
+                normalized_primary_keys = [
+                    normalize_column_name(x) for x in primary_keys if normalize_column_name(x) in py_table_column_names
+                ]
+
+                predicate_ops = [f"source.{c} = target.{c}" for c in normalized_primary_keys]
 
                 def _do_merge_unpartitioned(data: pa.Table, predicate_ops: list[str]):
                     return (
