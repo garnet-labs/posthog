@@ -15,6 +15,7 @@ from posthog.schema import (
     FunnelMathType,
     GroupNode,
     StepOrderValue,
+    TaxonomicFilterGroupType,
 )
 
 from posthog.hogql import ast
@@ -24,6 +25,7 @@ from posthog.hogql.database.models import (
     StringDatabaseField,
     UUIDDatabaseField,
 )
+from posthog.hogql.escape_sql import escape_hogql_identifier
 from posthog.hogql.parser import parse_expr
 from posthog.hogql.property import action_to_expr, property_to_expr
 
@@ -181,7 +183,7 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
 
         select: list[ast.Expr] = [
             ast.Alias(alias="timestamp", expr=ast.Field(chain=[self.EVENT_TABLE_ALIAS, "timestamp"])),
-            ast.Alias(alias="aggregation_target", expr=self._aggregation_target_expr()),
+            ast.Alias(alias="aggregation_target", expr=self._aggregation_target_expr(steps_with_index)),
             *all_step_cols,
         ]
 
@@ -195,7 +197,7 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
             self._date_range_expr(),
             self._entity_expr(skip_entity_filter),
             *self._properties_expr(),
-            self._aggregation_target_filter(),
+            self._aggregation_target_filter(steps_with_index),
         ]
         where = ast.And(exprs=[expr for expr in where_exprs if expr is not None])
 
@@ -533,7 +535,7 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
 
         return [ast.Alias(alias=field, expr=_expr_for(field)) for field in self.extra_fields]
 
-    def _aggregation_target_expr(self) -> ast.Expr:
+    def _default_aggregation_target_expr(self) -> ast.Expr:
         query, funnelsFilter = self.context.query, self.context.funnelsFilter
 
         # Aggregating by Person ID
@@ -552,8 +554,63 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
         else:
             return aggregation_target
 
-    def _aggregation_target_filter(self) -> ast.Expr | None:
-        if self._aggregation_target_expr() == ast.Field(chain=["person_id"]):
+    def _normalize_aggregation_target_expr(self, expr: ast.Expr) -> ast.Expr:
+        return ast.Call(
+            name="ifNull",
+            args=[
+                ast.Call(name="toString", args=[expr]),
+                ast.Constant(value=""),
+            ],
+        )
+
+    def _step_aggregation_target_expr(self, step_entity: EventsNode | ActionsNode) -> ast.Expr | None:
+        if not step_entity.funnelAggregationTarget:
+            return None
+
+        aggregation_target = step_entity.funnelAggregationTarget
+        aggregation_target_type = step_entity.funnelAggregationTargetType or TaxonomicFilterGroupType.EVENT_PROPERTIES
+        aggregation_target_type_value = str(aggregation_target_type)
+        escaped_target = escape_hogql_identifier(aggregation_target)
+
+        if aggregation_target_type == TaxonomicFilterGroupType.EVENT_PROPERTIES:
+            return parse_expr(f"properties.{escaped_target}")
+        if aggregation_target_type == TaxonomicFilterGroupType.PERSON_PROPERTIES:
+            return parse_expr(f"person.properties.{escaped_target}")
+        if aggregation_target_type == TaxonomicFilterGroupType.EVENT_FEATURE_FLAGS:
+            return parse_expr(f"properties.{escaped_target}")
+        if aggregation_target_type == TaxonomicFilterGroupType.EVENT_METADATA:
+            return parse_expr(escaped_target)
+        if aggregation_target_type == TaxonomicFilterGroupType.SESSION_PROPERTIES:
+            return parse_expr(f"session.{escaped_target}")
+        if aggregation_target_type == TaxonomicFilterGroupType.HOGQL_EXPRESSION:
+            return parse_expr(aggregation_target)
+        if aggregation_target_type_value.startswith(f"{TaxonomicFilterGroupType.GROUPS}_"):
+            _, _, group_type_index = aggregation_target_type_value.partition("_")
+            return parse_expr(f"group_{group_type_index}.properties.{escaped_target}")
+
+        raise ValidationError(detail=f"Unsupported funnel aggregation target type: {aggregation_target_type}")
+
+    def _aggregation_target_expr(self, steps_with_index: Sequence[tuple[int, EventsNode | ActionsNode]]) -> ast.Expr:
+        default_aggregation_target_expr = self._default_aggregation_target_expr()
+        if all(self._step_aggregation_target_expr(step_entity) is None for _, step_entity in steps_with_index):
+            return default_aggregation_target_expr
+
+        branch_args: list[ast.Expr] = []
+        for _, step_entity in steps_with_index:
+            branch_args.append(self._build_step_query(step_entity=step_entity, table_entity=None))
+            branch_args.append(
+                self._normalize_aggregation_target_expr(
+                    self._step_aggregation_target_expr(step_entity) or default_aggregation_target_expr
+                )
+            )
+
+        return ast.Call(
+            name="multiIf",
+            args=[*branch_args, self._normalize_aggregation_target_expr(default_aggregation_target_expr)],
+        )
+
+    def _aggregation_target_filter(self, steps_with_index: Sequence[tuple[int, EventsNode | ActionsNode]]) -> ast.Expr | None:
+        if self._aggregation_target_expr(steps_with_index) == ast.Field(chain=["person_id"]):
             return None
 
         return parse_expr("aggregation_target != '' and aggregation_target != null")

@@ -15,6 +15,7 @@ from posthog.schema import (
     FilterLogicalOperator,
     FunnelsQuery,
     GroupNode,
+    TaxonomicFilterGroupType,
 )
 
 from posthog.hogql import ast
@@ -394,3 +395,34 @@ class TestFunnelEventQuery(ClickhouseTestMixin, APIBaseTest):
 
         select = format_query(funnel_event_query)
         self.assertIn("IN(event, tuple('$pageleave', '$pageview'))", select)
+
+    @freeze_time("2025-11-12")
+    def test_single_events_table_with_custom_step_aggregation_targets(self):
+        query = FunnelsQuery(
+            series=[
+                EventsNode(
+                    event="user signed up",
+                    funnelAggregationTarget="dashboard_id",
+                    funnelAggregationTargetType=TaxonomicFilterGroupType.EVENT_PROPERTIES,
+                ),
+                EventsNode(
+                    event="$pageview",
+                    funnelAggregationTarget="replaceRegexpOne(properties.$pathname, '^/dashboard/', '')",
+                    funnelAggregationTargetType=TaxonomicFilterGroupType.HOGQL_EXPRESSION,
+                ),
+            ]
+        )
+        context = FunnelQueryContext(query=query, team=self.team)
+
+        funnel_event_query = FunnelEventQuery(context=context).to_query()
+
+        select = format_query(funnel_event_query)
+        expected = dedent("""
+            SELECT e.timestamp AS timestamp,
+                   multiIf(equals(event, 'user signed up'), ifNull(toString(properties.dashboard_id), ''), equals(event, '$pageview'), ifNull(toString(replaceRegexpOne(properties.$pathname, '^/dashboard/', '')), ''), ifNull(toString(person_id), '')) AS aggregation_target,
+                   if(equals(event, 'user signed up'), 1, 0) AS step_0,
+                   if(equals(event, '$pageview'), 1, 0) AS step_1
+            FROM EVENTS AS e
+            WHERE and(and(and(greaterOrEquals(e.timestamp, toDateTime('2025-11-05 00:00:00.000000')), lessOrEquals(e.timestamp, toDateTime('2025-11-12 23:59:59.999999'))), IN(event, tuple('$pageview', 'user signed up')), and(notEquals(aggregation_target, ''), notEquals(aggregation_target, NULL))), or(equals(step_0, 1), equals(step_1, 1)))
+        """).strip()
+        self.assertEqual(select, expected)

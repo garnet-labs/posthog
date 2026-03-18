@@ -42,6 +42,7 @@ from posthog.schema import (
     PersonsOnEventsMode,
     PropertyOperator,
     StepOrderValue,
+    TaxonomicFilterGroupType,
 )
 
 from posthog.hogql.modifiers import create_default_modifiers_for_team
@@ -3637,6 +3638,71 @@ class TestFOSSFunnelUDF(ClickhouseTestMixin, APIBaseTest):
         self.assertEqual(result[0]["count"], 1)
         self.assertEqual(result[1]["count"], 1)
         self.assertEqual(result[2]["count"], 1)
+
+    @snapshot_clickhouse_queries
+    def test_custom_step_aggregation_targets_can_mix_event_properties_and_hogql(self):
+        for distinct_id in ["creator_1", "creator_2", "creator_3", "viewer_1", "viewer_2", "viewer_3"]:
+            _create_person(distinct_ids=[distinct_id], team_id=self.team.pk)
+
+        self._signup_event(
+            distinct_id="creator_1",
+            timestamp="2024-03-20T12:00:00Z",
+            properties={"dashboard_id": "1"},
+        )
+        self._signup_event(
+            distinct_id="creator_2",
+            timestamp="2024-03-20T12:01:00Z",
+            properties={"dashboard_id": "2"},
+        )
+        self._signup_event(
+            distinct_id="creator_3",
+            timestamp="2024-03-20T12:02:00Z",
+            properties={"dashboard_id": "3"},
+        )
+
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="viewer_1",
+            timestamp="2024-03-20T12:10:00Z",
+            properties={"$pathname": "/dashboard/1"},
+        )
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="viewer_2",
+            timestamp="2024-03-20T12:11:00Z",
+            properties={"$pathname": "/dashboard/2"},
+        )
+        _create_event(
+            team=self.team,
+            event="$pageview",
+            distinct_id="viewer_3",
+            timestamp="2024-03-20T12:12:00Z",
+            properties={"$pathname": "/dashboard/4"},
+        )
+
+        query = FunnelsQuery(
+            series=[
+                EventsNode(
+                    event="user signed up",
+                    funnelAggregationTarget="dashboard_id",
+                    funnelAggregationTargetType=TaxonomicFilterGroupType.EVENT_PROPERTIES,
+                ),
+                EventsNode(
+                    event="$pageview",
+                    funnelAggregationTarget="replaceRegexpOne(properties.$pathname, '^/dashboard/', '')",
+                    funnelAggregationTargetType=TaxonomicFilterGroupType.HOGQL_EXPRESSION,
+                ),
+            ],
+            dateRange=DateRange(date_from="2024-03-20", date_to="2024-03-21"),
+            funnelsFilter=FunnelsFilter(funnelWindowInterval=14),
+        )
+
+        results = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+        self.assertEqual(results[0]["count"], 3)
+        self.assertEqual(results[1]["count"], 2)
 
     def test_funnel_all_events_with_properties(self):
         _create_person(distinct_ids=["user"], team_id=self.team.pk)
