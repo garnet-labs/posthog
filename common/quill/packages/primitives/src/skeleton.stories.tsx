@@ -35,17 +35,3 @@ export const Default: Story = {
         </div>
     ),
 } satisfies Story
-
-export const Paragraph: Story = {
-    render: () => (
-        <div className="grid grid-cols-2 gap-2 max-w-sm">
-            <div className="flex flex-col gap-2 max-w-sm pt-1.5">
-                <Skeleton className="h-4" />
-                <Skeleton className="h-4" />
-                <Skeleton className="h-4" />
-                <Skeleton className="h-4" />
-            </div>
-            <p>paragraph text, very nuanced and complex to replicate with loading states, just do your best</p>
-        </div>
-    ),
-} satisfies Story
