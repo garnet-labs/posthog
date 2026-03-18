@@ -6,7 +6,6 @@ import structlog
 import temporalio
 import posthoganalytics
 
-from posthog.models.integration import Integration
 from posthog.models.organization import OrganizationMembership
 from posthog.models.team.team import Team
 from posthog.sync import database_sync_to_async
@@ -20,11 +19,6 @@ from products.tasks.backend.services.custom_prompt_runner import CustomPromptSan
 logger = structlog.get_logger(__name__)
 
 SIGNALS_AGENTIC_REPORT_GENERATION_FF = "signals-agentic-report-generation"
-# TODO(signals): Signals reports do not yet carry repository context, but the sandbox task requires one.
-# We hardcode posthog/posthog for this rollout because the current agentic report path is only meant to
-# investigate the PostHog monorepo. Revisit once Signals reports can resolve a repository explicitly,
-# likely from source metadata or a repo-selection layer shared with Tasks.
-SIGNALS_AGENTIC_REPORT_REPOSITORY = "posthog/posthog"
 
 
 @dataclass
@@ -74,6 +68,7 @@ class RunAgenticReportInput:
     team_id: int
     report_id: str
     signals: list[SignalData]
+    repository: str
 
 
 @dataclass
@@ -84,9 +79,12 @@ class RunAgenticReportOutput:
     priority: Priority | None
     explanation: str
     already_addressed: bool
+    repository: str
 
 
-def _resolve_sandbox_context_for_report(team_id: int) -> CustomPromptSandboxContext:
+def _resolve_user_id(team_id: int) -> int:
+    """Resolve the first org member's user ID for sandbox context."""
+    # TODO: Decide if it's a safe approach
     team = Team.objects.select_related("organization").get(id=team_id)
     membership = (
         OrganizationMembership.objects.select_related("user")
@@ -96,18 +94,7 @@ def _resolve_sandbox_context_for_report(team_id: int) -> CustomPromptSandboxCont
     )
     if not membership:
         raise RuntimeError(f"No users in organization '{team.organization.name}' (team {team.id})")
-    github_integration = Integration.objects.filter(team=team, kind="github").first()
-    if not github_integration:
-        raise RuntimeError(
-            f"No GitHub integration found for team {team.id}. "
-            "Signals agentic report generation requires a connected GitHub integration."
-        )
-    # TODO: Pick the repo here, instead of hardcoding?
-    return CustomPromptSandboxContext(
-        team_id=team.id,
-        user_id=membership.user_id,
-        repository=SIGNALS_AGENTIC_REPORT_REPOSITORY,
-    )
+    return membership.user_id
 
 
 def _persist_agentic_report_artefacts(team_id: int, report_id: str, result: ReportResearchOutput) -> None:
@@ -146,16 +133,19 @@ async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenti
     """Run the sandbox-backed report research and persist its artefacts after full success."""
     try:
         # 1. Get context for the sandbox
-        context = await database_sync_to_async(_resolve_sandbox_context_for_report, thread_sensitive=False)(
-            input.team_id
+        user_id = await database_sync_to_async(_resolve_user_id, thread_sensitive=False)(input.team_id)
+        context = CustomPromptSandboxContext(
+            team_id=input.team_id,
+            user_id=user_id,
+            repository=input.repository,
         )
-        # 2. Run the research
+        # 2. Run the agentic research in the sandbox
         result = await run_multi_turn_research(
             input.signals,
             context,
             branch="master",
         )
-        # 3. Store the artefacts
+        # 3. Persist artefacts, avoid partial data from failed runs
         await database_sync_to_async(_persist_agentic_report_artefacts, thread_sensitive=False)(
             input.team_id,
             input.report_id,
@@ -166,6 +156,7 @@ async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenti
             report_id=input.report_id,
             signal_count=len(input.signals),
             choice=result.actionability.actionability.value,
+            repository=input.repository,
         )
         return RunAgenticReportOutput(
             title=result.title,
@@ -174,6 +165,7 @@ async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenti
             priority=result.priority.priority if result.priority else None,
             explanation=result.actionability.explanation,
             already_addressed=result.actionability.already_addressed,
+            repository=input.repository,
         )
     except Exception as error:
         logger.exception(
