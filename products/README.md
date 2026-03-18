@@ -10,6 +10,8 @@ This is the (future) home for all PostHog products ([RFC](https://github.com/Pos
 
 For the detailed architecture rationale (frozen dataclasses, facades, isolated testing), see [architecture.md](./architecture.md).
 
+For AI-assisted product isolation migrations (facade + contracts layer), see the [isolating-product-facade-contracts](./.agents/skills/isolating-product-facade-contracts/SKILL.md) agent skill.
+
 ## Folder structure
 
 ```txt
@@ -126,6 +128,19 @@ To check your product structure follows conventions:
 ```bash
 bin/hogli product:lint your_product_name
 ```
+
+To lint all products at once (compact pass/fail output):
+
+```bash
+bin/hogli product:lint --all
+```
+
+When run for a **single product**, the linter shows detailed output including isolation progress and actionable hints (e.g., missing contracts, ORM-bound serializers, direct `.objects.` calls in views, cross-product non-facade imports).
+
+The linter runs in two modes based on whether the product has `backend/facade/contracts.py`:
+
+- **Strict mode** (isolated products): enforces all structural rules — contracts coverage, facade purity, tach interfaces, misplaced files, etc.
+- **Lenient mode** (legacy products): enforces a subset of rules and reports isolation progress showing what's needed to migrate.
 
 ### Manual setup
 
