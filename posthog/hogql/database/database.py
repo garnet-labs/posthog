@@ -1228,16 +1228,17 @@ class Database(BaseModel):
                                         expr=ast.Field(chain=[warehouse_modifier.timestamp_field]),
                                     )
 
-                                if "distinct_id" not in table.fields:
-                                    table.fields["distinct_id"] = ExpressionField(
-                                        name="distinct_id",
-                                        expr=parse_expr(warehouse_modifier.distinct_id_field),
-                                    )
-                                if "person_id" not in table.fields:
-                                    table.fields["person_id"] = ExpressionField(
-                                        name="person_id",
-                                        expr=parse_expr(warehouse_modifier.distinct_id_field),
-                                    )
+                                if warehouse_modifier.distinct_id_field:
+                                    if "distinct_id" not in table.fields:
+                                        table.fields["distinct_id"] = ExpressionField(
+                                            name="distinct_id",
+                                            expr=parse_expr(warehouse_modifier.distinct_id_field),
+                                        )
+                                    if "person_id" not in table.fields:
+                                        table.fields["person_id"] = ExpressionField(
+                                            name="person_id",
+                                            expr=parse_expr(warehouse_modifier.distinct_id_field),
+                                        )
                         elif is_view:
                             views = define_mappings(
                                 views,

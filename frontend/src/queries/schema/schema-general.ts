@@ -81,6 +81,7 @@ export enum NodeKind {
     GroupNode = 'GroupNode',
     ActionsNode = 'ActionsNode',
     DataWarehouseNode = 'DataWarehouseNode',
+    SystemTableNode = 'SystemTableNode',
     EventsQuery = 'EventsQuery',
     SessionsQuery = 'SessionsQuery',
     PersonsNode = 'PersonsNode',
@@ -428,7 +429,7 @@ export interface HogQLQueryModifiers {
 export interface DataWarehouseEventsModifier {
     table_name: string
     timestamp_field: string
-    distinct_id_field: string
+    distinct_id_field?: string
     id_field: string
 }
 
@@ -763,12 +764,23 @@ export interface DataWarehouseNode extends EntityNode {
     dw_source_type?: string
 }
 
+export interface SystemTableNode extends EntityNode {
+    kind: NodeKind.SystemTableNode
+    id: string
+    id_field: string
+    table_name: string
+    timestamp_field: string
+}
+
 export interface ActionsNode extends EntityNode {
     kind: NodeKind.ActionsNode
     id: integer
 }
 
-export type AnyEntityNode = EventsNode | ActionsNode | DataWarehouseNode
+/** Entity nodes that have a distinct_id_field, usable in person-scoped queries (funnels, stickiness, lifecycle) */
+export type PersonScopedEntityNode = EventsNode | ActionsNode | DataWarehouseNode
+/** All entity node types including system tables */
+export type AnyEntityNode = PersonScopedEntityNode | SystemTableNode
 
 export interface GroupNode extends EntityNode {
     kind: NodeKind.GroupNode
@@ -1426,7 +1438,7 @@ export interface CalendarHeatmapQuery extends InsightsQueryBase<CalendarHeatmapR
      */
     interval?: IntervalType
     /** Events and actions to include */
-    series: AnyEntityNode[]
+    series: PersonScopedEntityNode[]
     /** Properties specific to the trends insight */
     calendarHeatmapFilter?: CalendarHeatmapFilter
     /**  Whether we should be comparing against a specific conversion goal */
@@ -1515,7 +1527,7 @@ export interface FunnelsQuery extends InsightsQueryBase<FunnelsQueryResponse> {
     /** Granularity of the response. Can be one of `hour`, `day`, `week` or `month` */
     interval?: IntervalType
     /** Events and actions to include */
-    series: (AnyEntityNode | GroupNode)[]
+    series: (PersonScopedEntityNode | GroupNode)[]
     /** Properties specific to the funnels insight */
     funnelsFilter?: FunnelsFilter
     /** Breakdown of the events and actions */
@@ -1728,7 +1740,7 @@ export interface StickinessQuery extends Omit<
      */
     intervalCount?: integer
     /** Events and actions to include */
-    series: AnyEntityNode[]
+    series: PersonScopedEntityNode[]
     /** Properties specific to the stickiness insight */
     stickinessFilter?: StickinessFilter
     /** Compare to date range */
@@ -2016,7 +2028,7 @@ export interface LifecycleQuery extends InsightsQueryBase<LifecycleQueryResponse
      */
     interval?: IntervalType
     /** Events and actions to include */
-    series: AnyEntityNode[]
+    series: PersonScopedEntityNode[]
     /** Properties specific to the lifecycle insight */
     lifecycleFilter?: LifecycleFilter
 }
@@ -3501,7 +3513,7 @@ export interface FunnelCorrelationActorsQuery extends InsightActorsQueryBase {
     kind: NodeKind.FunnelCorrelationActorsQuery
     source: FunnelCorrelationQuery
     funnelCorrelationPersonConverted?: boolean
-    funnelCorrelationPersonEntity?: AnyEntityNode
+    funnelCorrelationPersonEntity?: PersonScopedEntityNode
     funnelCorrelationPropertyValues?: AnyPropertyFilter[]
 }
 

@@ -25,6 +25,7 @@ from posthog.schema import (
     DateRange,
     EventsNode,
     PropertyOperator,
+    SystemTableNode,
     TrendsFilter,
     TrendsQuery,
 )
@@ -811,11 +812,10 @@ class TestTrendsSystemTableQuery(ClickhouseTestMixin, BaseTest):
             kind="TrendsQuery",
             dateRange=DateRange(date_from="2024-01-01", date_to="2025-01-01"),
             series=[
-                DataWarehouseNode(
+                SystemTableNode(
                     id="system.insights",
                     table_name="system.insights",
                     id_field="id",
-                    distinct_id_field="id",
                     timestamp_field="created_at",
                 )
             ],
@@ -828,16 +828,14 @@ class TestTrendsSystemTableQuery(ClickhouseTestMixin, BaseTest):
         assert response.hogql is not None
 
     def test_system_table_with_timestamp_field_override(self):
-        """Verify that a non-default timestamp field (e.g. updated_at) resolves correctly."""
         trends_query = TrendsQuery(
             kind="TrendsQuery",
             dateRange=DateRange(date_from="2024-01-01", date_to="2025-01-01"),
             series=[
-                DataWarehouseNode(
+                SystemTableNode(
                     id="system.insights",
                     table_name="system.insights",
                     id_field="id",
-                    distinct_id_field="id",
                     timestamp_field="updated_at",
                 )
             ],

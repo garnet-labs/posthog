@@ -13,6 +13,7 @@ import {
     InsightQueryNode,
     LifecycleFilterLegacy,
     NodeKind,
+    SystemTableNode,
     PathsFilterLegacy,
     RetentionFilterLegacy,
     StickinessFilterLegacy,
@@ -24,6 +25,7 @@ import {
     isEventsNode,
     isFunnelsQuery,
     isGroupNode,
+    isSystemTableNode,
     isLifecycleQuery,
     isPathsQuery,
     isRetentionQuery,
@@ -41,12 +43,12 @@ type FilterTypeActionsAndEvents = {
     groups?: ActionFilter[]
 }
 
-const getFilterId = (node: EventsNode | ActionsNode | DataWarehouseNode | GroupNode): any => {
+const getFilterId = (node: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode): any => {
     if (isGroupNode(node)) {
         return undefined
     }
 
-    if (isDataWarehouseNode(node)) {
+    if (isDataWarehouseNode(node) || isSystemTableNode(node)) {
         return node.table_name
     }
 
@@ -58,17 +60,18 @@ const getFilterId = (node: EventsNode | ActionsNode | DataWarehouseNode | GroupN
 }
 
 export const seriesNodeToFilter = (
-    node: EventsNode | ActionsNode | DataWarehouseNode | GroupNode,
+    node: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode,
     index?: number
 ): ActionFilter => {
     const entity: ActionFilter = objectClean({
-        type: isDataWarehouseNode(node)
-            ? EntityTypes.DATA_WAREHOUSE
-            : isGroupNode(node)
-              ? EntityTypes.GROUPS
-              : isActionsNode(node)
-                ? EntityTypes.ACTIONS
-                : EntityTypes.EVENTS,
+        type:
+            isDataWarehouseNode(node) || isSystemTableNode(node)
+                ? EntityTypes.DATA_WAREHOUSE
+                : isGroupNode(node)
+                  ? EntityTypes.GROUPS
+                  : isActionsNode(node)
+                    ? EntityTypes.ACTIONS
+                    : EntityTypes.EVENTS,
         id: getFilterId(node),
         order: index,
         name: node.name,
@@ -89,6 +92,13 @@ export const seriesNodeToFilter = (
                   distinct_id_field: node.distinct_id_field,
               }
             : {}),
+        ...(isSystemTableNode(node)
+            ? {
+                  table_name: node.table_name,
+                  id_field: node.id_field,
+                  timestamp_field: node.timestamp_field,
+              }
+            : {}),
         ...(isGroupNode(node)
             ? {
                   operator: node.operator,
@@ -101,7 +111,7 @@ export const seriesNodeToFilter = (
 }
 
 export const seriesToActionsAndEvents = (
-    series: (EventsNode | ActionsNode | DataWarehouseNode | GroupNode)[]
+    series: (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode)[]
 ): Required<FilterTypeActionsAndEvents> => {
     const actions: ActionFilter[] = []
     const events: ActionFilter[] = []
@@ -114,7 +124,7 @@ export const seriesToActionsAndEvents = (
             events.push(entity)
         } else if (isActionsNode(node)) {
             actions.push(entity)
-        } else if (isDataWarehouseNode(node)) {
+        } else if (isDataWarehouseNode(node) || isSystemTableNode(node)) {
             data_warehouse.push(entity)
         } else if (isGroupNode(node)) {
             groups.push(entity)

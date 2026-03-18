@@ -10,6 +10,7 @@ from posthog.schema import (
     FunnelExclusionEventsNode,
     GroupNode,
     HogQLPropertyFilter,
+    SystemTableNode,
 )
 
 from posthog.types import AnyPropertyFilter, EntityNode, ExclusionEntityNode
@@ -20,8 +21,8 @@ def is_equal_type(a: EntityNode, b: EntityNode | ExclusionEntityNode) -> bool:
         return isinstance(b, EventsNode) or isinstance(b, FunnelExclusionEventsNode)
     if isinstance(a, ActionsNode):
         return isinstance(b, ActionsNode) or isinstance(b, FunnelExclusionActionsNode)
-    if isinstance(a, DataWarehouseNode):
-        return isinstance(b, DataWarehouseNode)
+    if isinstance(a, (DataWarehouseNode, SystemTableNode)):
+        return isinstance(b, (DataWarehouseNode, SystemTableNode))
     if isinstance(a, GroupNode):
         return isinstance(b, GroupNode)
     raise ValueError(detail=f"Type comparison for {type(a)} and {type(b)} not implemented.")
@@ -59,8 +60,8 @@ def is_equal(a: EntityNode, b: EntityNode | ExclusionEntityNode, compare_propert
 
     # different data source
     if (
-        isinstance(a, DataWarehouseNode)
-        and isinstance(b, DataWarehouseNode)
+        isinstance(a, (DataWarehouseNode, SystemTableNode))
+        and isinstance(b, (DataWarehouseNode, SystemTableNode))
         and (a.id != b.id or a.id_field != b.id_field)
     ):
         return False
@@ -97,8 +98,8 @@ def is_superset(a: EntityNode, b: EntityNode | ExclusionEntityNode) -> bool:
 
 
 def _nodes_equal(
-    a_nodes: list[EventsNode | ActionsNode | DataWarehouseNode],
-    b_nodes: list[EventsNode | ActionsNode | DataWarehouseNode],
+    a_nodes: list[EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode],
+    b_nodes: list[EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode],
     compare_properties: bool,
 ) -> bool:
     """Order-independent comparison of child nodes in a GroupNode."""

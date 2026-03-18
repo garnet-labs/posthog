@@ -12,6 +12,7 @@ from posthog.schema import (
     HogQLQueryModifiers,
     InCohortVia,
     MultipleBreakdownType,
+    SystemTableNode,
     TrendsQuery,
 )
 
@@ -41,7 +42,7 @@ def hogql_to_string(expr: ast.Expr) -> ast.Call:
 class Breakdown:
     query: TrendsQuery
     team: Team
-    series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode]
+    series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode]
     query_date_range: QueryDateRange
     timings: HogQLTimings
     modifiers: HogQLQueryModifiers
@@ -51,7 +52,7 @@ class Breakdown:
         self,
         team: Team,
         query: TrendsQuery,
-        series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode],
+        series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode],
         query_date_range: QueryDateRange,
         timings: HogQLTimings,
         modifiers: HogQLQueryModifiers,

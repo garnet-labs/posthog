@@ -16,13 +16,14 @@ import {
     isExperimentMeanMetric,
     isExperimentRatioMetric,
 } from '~/queries/schema/schema-general'
-import { isActionsNode, isDataWarehouseNode, isEventsNode } from '~/queries/utils'
+import { isActionsNode, isDataWarehouseNode, isEventsNode, isSystemTableNode } from '~/queries/utils'
 
 const getSourceName = (source: ExperimentMetricSource): string =>
     match(source)
         .when(isEventsNode, (node) => node.name || node.event || 'Unknown event')
         .when(isActionsNode, (node) => node.name || `Action ${node.id}`)
         .when(isDataWarehouseNode, (node) => node.name || node.table_name)
+        .when(isSystemTableNode, (node) => node.name || node.table_name)
         .otherwise(() => 'Unknown')
 
 const getMathLabel = (math: string | undefined): string => {

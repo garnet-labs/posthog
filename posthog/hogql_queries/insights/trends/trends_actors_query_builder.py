@@ -15,6 +15,7 @@ from posthog.schema import (
     EventsNode,
     GroupNode,
     HogQLQueryModifiers,
+    SystemTableNode,
     TrendsFilter,
     TrendsQuery,
 )
@@ -72,8 +73,8 @@ class TrendsActorsQueryBuilder:
 
         entity = trends_query.series[series_index]
 
-        # TODO: Add support for DataWarehouseNode
-        if isinstance(entity, DataWarehouseNode):
+        # TODO: Add support for DataWarehouseNode/SystemTableNode
+        if isinstance(entity, (DataWarehouseNode, SystemTableNode)):
             raise Exception("DataWarehouseNodes are not supported for trends actors queries")
         else:
             self.entity = entity

@@ -4,6 +4,7 @@ from posthog.schema import (
     DataWarehouseNode,
     QueryTiming,
     ResolvedDateRangeResponse,
+    SystemTableNode,
     TrendsQueryResponse,
 )
 
@@ -214,7 +215,7 @@ class BoxPlotTrendsQueryRunner(TrendsQueryRunner):
                 alias="e",
                 sample=(
                     ast.SampleExpr(sample_value=query_builder._sample_value())
-                    if not isinstance(series_node, DataWarehouseNode)
+                    if not isinstance(series_node, (DataWarehouseNode, SystemTableNode))
                     else None
                 ),
             ),
@@ -236,7 +237,7 @@ class BoxPlotTrendsQueryRunner(TrendsQueryRunner):
                 alias="e",
                 sample=(
                     ast.SampleExpr(sample_value=query_builder._sample_value())
-                    if not isinstance(series_node, DataWarehouseNode)
+                    if not isinstance(series_node, (DataWarehouseNode, SystemTableNode))
                     else None
                 ),
             ),

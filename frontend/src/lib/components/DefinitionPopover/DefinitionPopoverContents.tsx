@@ -474,6 +474,10 @@ function DefinitionView({ group }: { group: TaxonomicFilterGroup }): JSX.Element
     }
     if (isDataWarehouse && dataWarehousePopoverFields.length > 0) {
         const _definition = definition as DataWarehouseTableForInsight
+        const isSystemTable = _definition.name?.startsWith('system.')
+        const visiblePopoverFields = isSystemTable
+            ? dataWarehousePopoverFields.filter((f) => f.key !== 'distinct_id_field')
+            : dataWarehousePopoverFields
         const columnOptions = Object.values(_definition.fields).map((column) => ({
             label: column.name + ' (' + column.type + ')',
             value: column.name,
@@ -494,7 +498,7 @@ function DefinitionView({ group }: { group: TaxonomicFilterGroup }): JSX.Element
             <form className="definition-popover-data-warehouse-schema-form">
                 <div className="flex flex-col justify-between gap-4">
                     <DefinitionPopover.Section>
-                        {dataWarehousePopoverFields.map(
+                        {visiblePopoverFields.map(
                             ({
                                 key,
                                 label,
@@ -558,7 +562,7 @@ function DefinitionView({ group }: { group: TaxonomicFilterGroup }): JSX.Element
                                 selectItem(group, itemValue ?? null, localDefinition)
                             }}
                             disabledReason={
-                                dataWarehousePopoverFields.every(
+                                visiblePopoverFields.every(
                                     ({ key, optional }: DataWarehousePopoverField) =>
                                         optional || (isKeyOf(key, localDefinition) && localDefinition[key])
                                 )

@@ -10,6 +10,7 @@ from posthog.schema import (
     GroupNode,
     HogQLQueryModifiers,
     IntervalType,
+    SystemTableNode,
     TrendsQuery,
 )
 
@@ -36,7 +37,7 @@ def get_start_of_interval_hogql_str(interval: str, *, team: Team, source: str) -
 
 
 def series_should_be_set_to_dau(
-    interval: IntervalType, series: EventsNode | ActionsNode | DataWarehouseNode | GroupNode
+    interval: IntervalType, series: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode
 ):
     return (
         series.math == BaseMathType.WEEKLY_ACTIVE and compare_interval_length(interval, ">=", IntervalType.WEEK)

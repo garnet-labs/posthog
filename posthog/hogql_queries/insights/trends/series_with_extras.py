@@ -1,10 +1,10 @@
 from typing import Optional, Union
 
-from posthog.schema import ActionsNode, DataWarehouseNode, EventsNode, GroupNode, TrendsQuery
+from posthog.schema import ActionsNode, DataWarehouseNode, EventsNode, GroupNode, SystemTableNode, TrendsQuery
 
 
 class SeriesWithExtras:
-    series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode]
+    series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode]
     series_order: int
     is_previous_period_series: Optional[bool]
     overriden_query: Optional[TrendsQuery]
@@ -12,7 +12,7 @@ class SeriesWithExtras:
 
     def __init__(
         self,
-        series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode],
+        series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode],
         series_order: int,
         is_previous_period_series: Optional[bool],
         overriden_query: Optional[TrendsQuery],

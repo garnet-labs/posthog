@@ -8,6 +8,7 @@ from posthog.schema import (
     EventsNode,
     GroupNode,
     PropertyMathType,
+    SystemTableNode,
 )
 
 from posthog.hogql import ast
@@ -53,7 +54,7 @@ def create_placeholder(name: str) -> ast.Placeholder:
 
 class AggregationOperations(DataWarehouseInsightQueryMixin):
     team: Team
-    series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode]
+    series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode]
     chart_display_type: ChartDisplayType
     query_date_range: QueryDateRange
     is_total_value: bool
@@ -61,7 +62,7 @@ class AggregationOperations(DataWarehouseInsightQueryMixin):
     def __init__(
         self,
         team: Team,
-        series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode],
+        series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode],
         chart_display_type: ChartDisplayType,
         query_date_range: QueryDateRange,
         is_total_value: bool,
@@ -264,7 +265,7 @@ class AggregationOperations(DataWarehouseInsightQueryMixin):
         elif self.series.math_property_type == "session_properties" and self.aggregating_on_session_property():
             # Other session properties use "session_property" alias from wrapper query
             return ["session_property"]
-        elif isinstance(self.series, DataWarehouseNode):
+        elif isinstance(self.series, (DataWarehouseNode, SystemTableNode)):
             return [self.series.math_property]
         elif self.series.math_property_type == "data_warehouse_person_properties":
             return ["person", *self.series.math_property.split(".")]
@@ -310,7 +311,7 @@ class AggregationOperations(DataWarehouseInsightQueryMixin):
             # This timestamp data can be nullable, so we need to handle NULL values
             # to avoid ClickHouse errors with dictGetOrDefault expecting non-nullable dates
             timestamp_expr: ast.Expr
-            if isinstance(self.series, DataWarehouseNode):
+            if isinstance(self.series, (DataWarehouseNode, SystemTableNode)):
                 if self.series.dw_source_type == "self-managed":
                     # The database's automatic toDateTime wrapping causes parseDateTime64BestEffortOrNull issues
                     # for the timestamp field that are strings for self managed sources.
@@ -600,7 +601,7 @@ class AggregationOperations(DataWarehouseInsightQueryMixin):
                     WHERE {events_where_clause}
                     GROUP BY {person_field}
                 """
-                    if isinstance(self.series, DataWarehouseNode)
+                    if isinstance(self.series, (DataWarehouseNode, SystemTableNode))
                     else """
                     SELECT
                         count() AS total

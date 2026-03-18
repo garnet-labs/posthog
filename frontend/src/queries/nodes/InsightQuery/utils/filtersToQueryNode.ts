@@ -32,6 +32,7 @@ import {
     LifecycleFilter,
     MathType,
     NodeKind,
+    SystemTableNode,
     PathsFilter,
     RetentionFilter,
     StickinessFilter,
@@ -109,19 +110,29 @@ export const legacyEntityToNode = (
     includeProperties: boolean,
     mathAvailability: MathAvailability
 ): AnyEntityNode | GroupNode => {
-    let shared: Partial<EventsNode | ActionsNode | DataWarehouseNode | GroupNode> = {
+    let shared: Partial<EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode> = {
         name: entity.name || undefined,
         custom_name: entity.custom_name || undefined,
     }
 
     if (isDataWarehouseFilter(entity)) {
-        shared = {
-            ...shared,
-            id_field: entity.id_field || undefined,
-            timestamp_field: entity.timestamp_field || undefined,
-            distinct_id_field: entity.distinct_id_field || undefined,
-            table_name: entity.table_name || undefined,
-        } as DataWarehouseNode
+        const isSystemTable = entity.table_name?.startsWith('system.')
+        if (isSystemTable) {
+            shared = {
+                ...shared,
+                id_field: entity.id_field || undefined,
+                timestamp_field: entity.timestamp_field || undefined,
+                table_name: entity.table_name || undefined,
+            } as SystemTableNode
+        } else {
+            shared = {
+                ...shared,
+                id_field: entity.id_field || undefined,
+                timestamp_field: entity.timestamp_field || undefined,
+                distinct_id_field: entity.distinct_id_field || undefined,
+                table_name: entity.table_name || undefined,
+            } as DataWarehouseNode
+        }
     }
 
     if (isGroupFilter(entity)) {
@@ -187,9 +198,10 @@ export const legacyEntityToNode = (
             })
         ) as any
     } else if (entity.type === 'data_warehouse') {
+        const isSystemTable = isDataWarehouseFilter(entity) && entity.table_name?.startsWith('system.')
         return setLatestVersionsOnQuery(
             objectCleanWithEmpty({
-                kind: NodeKind.DataWarehouseNode,
+                kind: isSystemTable ? NodeKind.SystemTableNode : NodeKind.DataWarehouseNode,
                 id: entity.id,
                 ...shared,
             })
@@ -584,9 +596,11 @@ export const compareFilterToQuery = (filters: Record<string, any>): CompareFilte
 
 /** Expand GroupNodes into individual EventsNode/ActionsNode for insight types that don't support GroupNode */
 export const expandGroupNodes = (
-    series: (EventsNode | ActionsNode | DataWarehouseNode | GroupNode)[]
-): (EventsNode | ActionsNode | DataWarehouseNode)[] => {
+    series: (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode)[]
+): (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode)[] => {
     return series.flatMap((item) =>
-        item.kind === NodeKind.GroupNode ? (item.nodes as (EventsNode | ActionsNode | DataWarehouseNode)[]) : [item]
+        item.kind === NodeKind.GroupNode
+            ? (item.nodes as (EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode)[])
+            : [item]
     )
 }

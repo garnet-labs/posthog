@@ -41,6 +41,7 @@ import {
     isDataWarehouseNode,
     isEventsNode,
     isGroupNode,
+    isSystemTableNode,
     isInsightVizNode,
 } from '~/queries/utils'
 import { cleanInsightQuery } from '~/scenes/insights/utils/queryUtils'
@@ -135,13 +136,14 @@ export const getDisplayNameFromEntityNode = (
         name = 'All events'
     }
 
-    const id = isDataWarehouseNode(node)
-        ? node.table_name
-        : isEventsNode(node)
-          ? node.event
-          : isGroupNode(node)
-            ? undefined
-            : node.id
+    const id =
+        isDataWarehouseNode(node) || isSystemTableNode(node)
+            ? node.table_name
+            : isEventsNode(node)
+              ? node.event
+              : isGroupNode(node)
+                ? undefined
+                : node.id
 
     // Return custom name. If that doesn't exist then the name, then the id, then just null.
     return (isCustom ? customName : null) ?? name ?? (id ? `${id}` : null)

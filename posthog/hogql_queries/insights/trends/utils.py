@@ -10,6 +10,7 @@ from posthog.schema import (
     EventsNode,
     GroupNode,
     MultipleBreakdownType,
+    SystemTableNode,
 )
 
 from posthog.hogql import ast
@@ -55,7 +56,7 @@ def get_properties_chain(
     return ["properties", breakdown_field]
 
 
-def is_groups_math(series: Union[EventsNode, ActionsNode, DataWarehouseNode | GroupNode]) -> bool:
+def is_groups_math(series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode]) -> bool:
     return (
         series.math in {BaseMathType.DAU, UNIQUE_GROUPS, BaseMathType.WEEKLY_ACTIVE, BaseMathType.MONTHLY_ACTIVE}
         and series.math_group_type_index is not None
@@ -87,7 +88,7 @@ def group_node_to_expr(group: GroupNode, team: Team) -> ast.Expr | None:
                 group_filters.append(node_expr)
             except Action.DoesNotExist:
                 pass
-        elif isinstance(node, DataWarehouseNode):
+        elif isinstance(node, (DataWarehouseNode, SystemTableNode)):
             # TODO: Support DWH nodes in groups
             pass
 

@@ -143,7 +143,8 @@ export const definitionPopoverLogic = kea<definitionPopoverLogicType>([
                             }
                         }
 
-                        if (hydratedWarehouseItem.distinct_id_field == null) {
+                        const isSystemTable = warehouseItem.name?.startsWith('system.')
+                        if (!isSystemTable && hydratedWarehouseItem.distinct_id_field == null) {
                             const distinctIdField =
                                 Object.values(hydratedWarehouseItem.fields).find((n) => n.name === 'distinct_id') ??
                                 Object.values(hydratedWarehouseItem.fields).find((n) => n.name === 'id')

@@ -11,6 +11,7 @@ from posthog.schema import (
     EventsNode,
     GroupNode,
     HogQLQueryModifiers,
+    SystemTableNode,
     TrendsQuery,
 )
 
@@ -39,7 +40,7 @@ class TrendsQueryBuilder(DataWarehouseInsightQueryMixin):
     query: TrendsQuery
     team: Team
     query_date_range: QueryDateRange
-    series: EventsNode | ActionsNode | DataWarehouseNode | GroupNode
+    series: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode
     timings: HogQLTimings
     modifiers: HogQLQueryModifiers
     limit_context: LimitContext
@@ -49,7 +50,7 @@ class TrendsQueryBuilder(DataWarehouseInsightQueryMixin):
         trends_query: TrendsQuery,
         team: Team,
         query_date_range: QueryDateRange,
-        series: EventsNode | ActionsNode | DataWarehouseNode | GroupNode,
+        series: EventsNode | ActionsNode | DataWarehouseNode | SystemTableNode | GroupNode,
         timings: HogQLTimings,
         modifiers: HogQLQueryModifiers,
         limit_context: LimitContext = LimitContext.QUERY,
@@ -417,7 +418,7 @@ class TrendsQueryBuilder(DataWarehouseInsightQueryMixin):
                 alias="e",
                 sample=(
                     ast.SampleExpr(sample_value=self._sample_value())
-                    if not isinstance(self.series, DataWarehouseNode)
+                    if not isinstance(self.series, (DataWarehouseNode, SystemTableNode))
                     else None
                 ),
             ),
@@ -797,7 +798,7 @@ class TrendsQueryBuilder(DataWarehouseInsightQueryMixin):
         series = self.series
         filters: list[ast.Expr] = []
         is_data_warehouse_event_series = (
-            isinstance(series, DataWarehouseNode)
+            isinstance(series, (DataWarehouseNode, SystemTableNode))
             and self.modifiers.dataWarehouseEventsModifiers is not None
             and any(
                 series.table_name == modifier.table_name for modifier in self.modifiers.dataWarehouseEventsModifiers

@@ -35,6 +35,7 @@ from posthog.schema import (
     QueryTiming,
     ResolvedDateRangeResponse,
     Series,
+    SystemTableNode,
     TrendsFormulaNode,
     TrendsQuery,
     TrendsQueryResponse,
@@ -765,7 +766,9 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
             exact_timerange=self.exact_timerange,
         )
 
-    def series_event(self, series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode]) -> str | None:
+    def series_event(
+        self, series: Union[EventsNode, ActionsNode, DataWarehouseNode, SystemTableNode, GroupNode]
+    ) -> str | None:
         if isinstance(series, EventsNode):
             return series.event
         if isinstance(series, ActionsNode):
@@ -773,7 +776,7 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
             action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
             return action.name
 
-        if isinstance(series, DataWarehouseNode):
+        if isinstance(series, (DataWarehouseNode, SystemTableNode)):
             return series.table_name
 
         if isinstance(series, GroupNode):
@@ -790,7 +793,7 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
                     events.append(node.event if node.event is not None else "All events")
                 elif isinstance(node, ActionsNode):
                     events.append(actions_by_id.get(int(node.id), "Unnamed action"))
-                elif isinstance(node, DataWarehouseNode):
+                elif isinstance(node, (DataWarehouseNode, SystemTableNode)):
                     events.append(node.table_name)
             return ", ".join(events)
 
@@ -816,6 +819,15 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
                         timestamp_field=series.timestamp_field,
                         id_field=series.id_field,
                         distinct_id_field=series.distinct_id_field,
+                    )
+                )
+            elif isinstance(series, SystemTableNode):
+                datawarehouse_modifiers.append(
+                    DataWarehouseEventsModifier(
+                        table_name=series.table_name,
+                        timestamp_field=series.timestamp_field,
+                        id_field=series.id_field,
+                        distinct_id_field=None,
                     )
                 )
 
@@ -1052,7 +1064,7 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
             return False
 
         if (
-            isinstance(self.query.series[0], DataWarehouseNode)
+            isinstance(self.query.series[0], (DataWarehouseNode, SystemTableNode))
             and self.query.breakdownFilter.breakdown_type == "data_warehouse"
         ):
             series = self.query.series[0]  # only one series when data warehouse is active

@@ -63,6 +63,7 @@ import {
     SessionAttributionExplorerQuery,
     SessionsQuery,
     StickinessQuery,
+    SystemTableNode,
     TracesQuery,
     TrendsFormulaNode,
     TrendsQuery,
@@ -119,6 +120,10 @@ export function isActionsNode(node?: Record<string, any> | null): node is Action
 
 export function isDataWarehouseNode(node?: Record<string, any> | null): node is DataWarehouseNode {
     return node?.kind === NodeKind.DataWarehouseNode
+}
+
+export function isSystemTableNode(node?: Record<string, any> | null): node is SystemTableNode {
+    return node?.kind === NodeKind.SystemTableNode
 }
 
 /** @deprecated `ActorsQuery` is now used instead of `PersonsNode`. */
@@ -807,7 +812,7 @@ export function isValidQueryForExperiment(query: Node): boolean {
     }
 
     const { series } = query.source
-    return series.length >= 2 && !series?.some((node) => isDataWarehouseNode(node))
+    return series.length >= 2 && !series?.some((node) => isDataWarehouseNode(node) || isSystemTableNode(node))
 }
 
 export function isGroupsQuery(node?: Record<string, any> | null): node is GroupsQuery {

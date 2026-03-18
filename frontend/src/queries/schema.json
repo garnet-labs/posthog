@@ -617,15 +617,13 @@
         "AnyEntityNode": {
             "anyOf": [
                 {
-                    "$ref": "#/definitions/EventsNode"
+                    "$ref": "#/definitions/PersonScopedEntityNode"
                 },
                 {
-                    "$ref": "#/definitions/ActionsNode"
-                },
-                {
-                    "$ref": "#/definitions/DataWarehouseNode"
+                    "$ref": "#/definitions/SystemTableNode"
                 }
-            ]
+            ],
+            "description": "All entity node types including system tables"
         },
         "AnyFilterLike": {
             "anyOf": [
@@ -8099,7 +8097,7 @@
                 "series": {
                     "description": "Events and actions to include",
                     "items": {
-                        "$ref": "#/definitions/AnyEntityNode"
+                        "$ref": "#/definitions/PersonScopedEntityNode"
                     },
                     "type": "array"
                 },
@@ -10974,7 +10972,7 @@
                     "type": "string"
                 }
             },
-            "required": ["table_name", "timestamp_field", "distinct_id_field", "id_field"],
+            "required": ["table_name", "timestamp_field", "id_field"],
             "type": "object"
         },
         "DataWarehouseManagedViewsetKind": {
@@ -16138,7 +16136,7 @@
                     "type": "boolean"
                 },
                 "funnelCorrelationPersonEntity": {
-                    "$ref": "#/definitions/AnyEntityNode"
+                    "$ref": "#/definitions/PersonScopedEntityNode"
                 },
                 "funnelCorrelationPropertyValues": {
                     "items": {
@@ -16866,7 +16864,7 @@
                     "items": {
                         "anyOf": [
                             {
-                                "$ref": "#/definitions/AnyEntityNode"
+                                "$ref": "#/definitions/PersonScopedEntityNode"
                             },
                             {
                                 "$ref": "#/definitions/GroupNode"
@@ -19192,7 +19190,7 @@
                 "series": {
                     "description": "Events and actions to include",
                     "items": {
-                        "$ref": "#/definitions/AnyEntityNode"
+                        "$ref": "#/definitions/PersonScopedEntityNode"
                     },
                     "type": "array"
                 },
@@ -22547,6 +22545,7 @@
                 "GroupNode",
                 "ActionsNode",
                 "DataWarehouseNode",
+                "SystemTableNode",
                 "EventsQuery",
                 "SessionsQuery",
                 "PersonsNode",
@@ -23253,6 +23252,20 @@
             },
             "required": ["key", "operator", "type"],
             "type": "object"
+        },
+        "PersonScopedEntityNode": {
+            "anyOf": [
+                {
+                    "$ref": "#/definitions/EventsNode"
+                },
+                {
+                    "$ref": "#/definitions/ActionsNode"
+                },
+                {
+                    "$ref": "#/definitions/DataWarehouseNode"
+                }
+            ],
+            "description": "Entity nodes that have a distinct_id_field, usable in person-scoped queries (funnels, stickiness, lifecycle)"
         },
         "PersonType": {
             "additionalProperties": false,
@@ -32166,7 +32179,7 @@
                 "series": {
                     "description": "Events and actions to include",
                     "items": {
-                        "$ref": "#/definitions/AnyEntityNode"
+                        "$ref": "#/definitions/PersonScopedEntityNode"
                     },
                     "type": "array"
                 },
@@ -32660,6 +32673,81 @@
             "enum": ["button", "tab", "selector"],
             "type": "string"
         },
+        "SystemTableNode": {
+            "additionalProperties": false,
+            "properties": {
+                "custom_name": {
+                    "type": "string"
+                },
+                "fixedProperties": {
+                    "description": "Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)",
+                    "items": {
+                        "$ref": "#/definitions/AnyPropertyFilter"
+                    },
+                    "type": "array"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "id_field": {
+                    "type": "string"
+                },
+                "kind": {
+                    "const": "SystemTableNode",
+                    "type": "string"
+                },
+                "math": {
+                    "$ref": "#/definitions/MathType"
+                },
+                "math_group_type_index": {
+                    "enum": [0, 1, 2, 3, 4],
+                    "type": "number"
+                },
+                "math_hogql": {
+                    "type": "string"
+                },
+                "math_multiplier": {
+                    "type": "number"
+                },
+                "math_property": {
+                    "type": "string"
+                },
+                "math_property_revenue_currency": {
+                    "$ref": "#/definitions/RevenueCurrencyPropertyConfig"
+                },
+                "math_property_type": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "optionalInFunnel": {
+                    "type": "boolean"
+                },
+                "properties": {
+                    "description": "Properties configurable in the interface",
+                    "items": {
+                        "$ref": "#/definitions/AnyPropertyFilter"
+                    },
+                    "type": "array"
+                },
+                "response": {
+                    "type": "object"
+                },
+                "table_name": {
+                    "type": "string"
+                },
+                "timestamp_field": {
+                    "type": "string"
+                },
+                "version": {
+                    "description": "version of the node, used for schema migrations",
+                    "type": "number"
+                }
+            },
+            "required": ["id", "id_field", "kind", "table_name", "timestamp_field"],
+            "type": "object"
+        },
         "TableSettings": {
             "additionalProperties": false,
             "properties": {
@@ -32795,6 +32883,7 @@
                 "max_ai_context",
                 "workflow_variables",
                 "suggested_filters",
+                "system_tables",
                 "empty"
             ],
             "type": "string"
