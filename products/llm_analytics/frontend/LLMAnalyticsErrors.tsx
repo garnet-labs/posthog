@@ -1,15 +1,18 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import { combineUrl, router } from 'kea-router'
 
-import { IconCopy } from '@posthog/icons'
+import { IconCopy, IconTrends } from '@posthog/icons'
 
+import { FEATURE_FLAGS } from 'lib/constants'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { Link } from 'lib/lemon-ui/Link'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
 import { urls } from 'scenes/urls'
 
 import { DataTable } from '~/queries/nodes/DataTable/DataTable'
+import { type InsightVizNode, NodeKind } from '~/queries/schema/schema-general'
 import { isHogQLQuery } from '~/queries/utils'
 import { PropertyFilterType, PropertyOperator } from '~/types'
 
@@ -21,8 +24,11 @@ export function LLMAnalyticsErrors(): JSX.Element {
     const sharedLogic = useMountedLogic(llmAnalyticsSharedLogic)
     const { setDates, setShouldFilterTestAccounts, setPropertyFilters } = useActions(llmAnalyticsSharedLogic)
     const { setErrorsSort } = useActions(llmAnalyticsErrorsLogic)
-    const { errorsQuery, errorsSort } = useValues(llmAnalyticsErrorsLogic)
+    const { errorsQuery, errorsSort, buildAllErrorsTrendQuery, buildErrorTrendQuery } =
+        useValues(llmAnalyticsErrorsLogic)
+    const { featureFlags } = useValues(featureFlagLogic)
     const { searchParams } = useValues(router)
+    const showErrorsCharts = !!featureFlags[FEATURE_FLAGS.LLM_ANALYTICS_ERRORS_CHARTS]
 
     const { renderSortableColumnTitle } = useSortableColumns(errorsSort, setErrorsSort)
 
@@ -45,6 +51,22 @@ export function LLMAnalyticsErrors(): JSX.Element {
                 setPropertyFilters(filters.properties || [])
             }}
             context={{
+                customActions: showErrorsCharts
+                    ? [
+                          <Tooltip title="View error trends over time" key="trends">
+                              <LemonButton
+                                  icon={<IconTrends />}
+                                  size="small"
+                                  type="secondary"
+                                  to={urls.insightNew({ query: buildAllErrorsTrendQuery })}
+                                  targetBlank
+                                  data-attr="llma-errors-all-trends-click"
+                              >
+                                  Error trends
+                              </LemonButton>
+                          </Tooltip>,
+                      ]
+                    : undefined,
                 columns: {
                     error: {
                         renderTitle: () => (
@@ -94,6 +116,22 @@ export function LLMAnalyticsErrors(): JSX.Element {
                                             {displayValue}
                                         </Link>
                                     </Tooltip>
+                                    {showErrorsCharts && (
+                                        <Tooltip title="View trend for this error over time">
+                                            <LemonButton
+                                                icon={<IconTrends />}
+                                                size="xsmall"
+                                                to={urls.insightNew({
+                                                    query: {
+                                                        kind: NodeKind.InsightVizNode,
+                                                        source: buildErrorTrendQuery(errorString),
+                                                    } as InsightVizNode,
+                                                })}
+                                                targetBlank
+                                                data-attr="llma-errors-trend-click"
+                                            />
+                                        </Tooltip>
+                                    )}
                                     <LemonButton
                                         size="xsmall"
                                         noPadding
