@@ -6,14 +6,15 @@ import { PluginEvent } from '~/plugin-scaffold'
 
 import { CyclotronJobInvocationResult, HogFunctionInvocationGlobals, HogFunctionType } from '../../cdp/types'
 import { isLegacyPluginHogFunction } from '../../cdp/utils'
+import { CommonConfig } from '../../common/config'
 import { InternalCaptureService } from '../../common/services/internal-capture'
 import { KafkaProducerWrapper } from '../../kafka/producer'
-import { PluginsServerConfig } from '../../types'
 import { PostgresRouter } from '../../utils/db/postgres'
 import { GeoIPService, GeoIp } from '../../utils/geoip'
 import { logger } from '../../utils/logger'
 import { PubSub } from '../../utils/pubsub'
 import { TeamManager } from '../../utils/team-manager'
+import { CdpConfig } from '../config'
 import { HogExecutorService } from '../services/hog-executor.service'
 import { HogInputsService } from '../services/hog-inputs.service'
 import { LegacyPluginExecutorService } from '../services/legacy-plugin-executor.service'
@@ -397,32 +398,16 @@ export class HogTransformerService {
 }
 
 export type HogTransformerServiceConfig = Pick<
-    PluginsServerConfig,
-    | 'CDP_HOG_WATCHER_SAMPLE_RATE'
-    | 'SITE_URL'
-    | 'REDIS_URL'
-    | 'REDIS_POOL_MIN_SIZE'
-    | 'REDIS_POOL_MAX_SIZE'
+    CdpConfig,
     | 'CDP_REDIS_HOST'
     | 'CDP_REDIS_PORT'
     | 'CDP_REDIS_PASSWORD'
-    | 'CDP_WATCHER_HOG_COST_TIMING_UPPER_MS'
-    | 'CDP_GOOGLE_ADWORDS_DEVELOPER_TOKEN'
-    | 'CDP_FETCH_BACKOFF_BASE_MS'
-    | 'CDP_FETCH_BACKOFF_MAX_MS'
-    | 'CDP_FETCH_RETRIES'
-    | 'ENCRYPTION_SALT_KEYS'
-    | 'SES_ACCESS_KEY_ID'
-    | 'SES_SECRET_ACCESS_KEY'
-    | 'SES_REGION'
-    | 'SES_ENDPOINT'
-    | 'HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC'
-    | 'HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC'
-    | 'CDP_WATCHER_HOG_COST_TIMING_LOWER_MS'
     | 'CDP_WATCHER_HOG_COST_TIMING'
+    | 'CDP_WATCHER_HOG_COST_TIMING_LOWER_MS'
+    | 'CDP_WATCHER_HOG_COST_TIMING_UPPER_MS'
+    | 'CDP_WATCHER_ASYNC_COST_TIMING'
     | 'CDP_WATCHER_ASYNC_COST_TIMING_LOWER_MS'
     | 'CDP_WATCHER_ASYNC_COST_TIMING_UPPER_MS'
-    | 'CDP_WATCHER_ASYNC_COST_TIMING'
     | 'CDP_WATCHER_SEND_EVENTS'
     | 'CDP_WATCHER_BUCKET_SIZE'
     | 'CDP_WATCHER_REFILL_RATE'
@@ -432,7 +417,27 @@ export type HogTransformerServiceConfig = Pick<
     | 'CDP_WATCHER_STATE_LOCK_TTL'
     | 'CDP_WATCHER_OBSERVE_RESULTS_BUFFER_TIME_MS'
     | 'CDP_WATCHER_OBSERVE_RESULTS_BUFFER_MAX_RESULTS'
->
+    | 'CDP_GOOGLE_ADWORDS_DEVELOPER_TOKEN'
+    | 'CDP_FETCH_RETRIES'
+    | 'CDP_FETCH_BACKOFF_BASE_MS'
+    | 'CDP_FETCH_BACKOFF_MAX_MS'
+    | 'CDP_EMAIL_TRACKING_URL'
+    | 'SES_ACCESS_KEY_ID'
+    | 'SES_SECRET_ACCESS_KEY'
+    | 'SES_REGION'
+    | 'SES_ENDPOINT'
+    | 'HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC'
+    | 'HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC'
+> &
+    Pick<
+        CommonConfig,
+        | 'CDP_HOG_WATCHER_SAMPLE_RATE'
+        | 'SITE_URL'
+        | 'REDIS_URL'
+        | 'REDIS_POOL_MIN_SIZE'
+        | 'REDIS_POOL_MAX_SIZE'
+        | 'ENCRYPTION_SALT_KEYS'
+    >
 
 export interface HogTransformerServiceDeps {
     geoipService: GeoIPService
@@ -471,7 +476,8 @@ export function createHogTransformerService(
         },
         deps.integrationManager,
         config.ENCRYPTION_SALT_KEYS,
-        config.SITE_URL
+        config.SITE_URL,
+        config.CDP_EMAIL_TRACKING_URL
     )
     const recipientTokensService = new RecipientTokensService(config.ENCRYPTION_SALT_KEYS, config.SITE_URL)
     const hogExecutor = new HogExecutorService(

@@ -70,7 +70,8 @@ describe('Hogflow Executor', () => {
             },
             hub.integrationManager,
             hub.ENCRYPTION_SALT_KEYS,
-            hub.SITE_URL
+            hub.SITE_URL,
+            hub.CDP_EMAIL_TRACKING_URL
         )
         const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
         const hogExecutor = new HogExecutorService(

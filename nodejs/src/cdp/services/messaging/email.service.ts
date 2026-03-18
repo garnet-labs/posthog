@@ -41,7 +41,8 @@ export class EmailService {
         private sesConfig: EmailServiceConfig,
         private integrationManager: IntegrationManagerService,
         encryptionSaltKeys: string,
-        siteUrl: string
+        siteUrl: string,
+        private emailTrackingUrl: string
     ) {
         this.sesV2Client = this.sesConfig.sesRegion
             ? new SESv2Client({
@@ -147,7 +148,7 @@ export class EmailService {
             to: params.to.name ? `"${params.to.name}" <${params.to.email}>` : params.to.email,
             subject: params.subject,
             text: params.text,
-            ...(params.html ? { html: addTrackingToEmail(params.html, result.invocation) } : {}),
+            ...(params.html ? { html: addTrackingToEmail(params.html, result.invocation, this.emailTrackingUrl) } : {}),
         }
 
         const ccAddresses = parseAddressList(params.cc)
@@ -182,7 +183,7 @@ export class EmailService {
             ? {
                   Html: {
                       Data: maybeAddPreheaderToEmail(
-                          addTrackingToEmail(params.html, result.invocation),
+                          addTrackingToEmail(params.html, result.invocation, this.emailTrackingUrl),
                           params.preheader
                       ),
                       Charset: 'UTF-8',

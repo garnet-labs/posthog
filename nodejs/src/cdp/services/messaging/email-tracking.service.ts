@@ -3,7 +3,6 @@ import express from 'ultimate-express'
 
 import { ModifiedRequest } from '~/api/router'
 import { CyclotronJobInvocationHogFunction, MinimalAppMetric } from '~/cdp/types'
-import { defaultConfig } from '~/config/config'
 import { parseJSON } from '~/utils/json-parse'
 import { captureException } from '~/utils/posthog'
 
@@ -33,17 +32,22 @@ const emailTrackingErrorsCounter = new Counter({
 
 export const generateTrackingRedirectUrl = (
     invocation: Pick<CyclotronJobInvocationHogFunction, 'functionId' | 'id' | 'teamId'>,
-    targetUrl: string
+    targetUrl: string,
+    emailTrackingUrl: string
 ): string => {
-    return `${defaultConfig.CDP_EMAIL_TRACKING_URL}/public/m/redirect?ph_id=${generateEmailTrackingCode(invocation)}&target=${encodeURIComponent(targetUrl)}`
+    return `${emailTrackingUrl}/public/m/redirect?ph_id=${generateEmailTrackingCode(invocation)}&target=${encodeURIComponent(targetUrl)}`
 }
 
-export const addTrackingToEmail = (html: string, invocation: CyclotronJobInvocationHogFunction): string => {
-    const trackingUrl = generateEmailTrackingPixelUrl(invocation)
+export const addTrackingToEmail = (
+    html: string,
+    invocation: CyclotronJobInvocationHogFunction,
+    emailTrackingUrl: string
+): string => {
+    const trackingUrl = generateEmailTrackingPixelUrl(invocation, emailTrackingUrl)
 
     html = html.replace(LINK_REGEX, (m, d, s, u) => {
         const href = d || s || u || ''
-        const tracked = generateTrackingRedirectUrl(invocation, href)
+        const tracked = generateTrackingRedirectUrl(invocation, href, emailTrackingUrl)
 
         // replace just the href in the original tag to preserve other attributes
         return m.replace(/\bhref\s*=\s*(?:"[^"]*"|'[^']*'|[^'">\s]+)/i, `href="${tracked}"`)

@@ -1,5 +1,4 @@
 import { CyclotronJobInvocationHogFunction } from '~/cdp/types'
-import { defaultConfig } from '~/config/config'
 
 function toBase64UrlSafe(input: string) {
     // Encode to normal base64
@@ -41,7 +40,8 @@ export const generateEmailTrackingCode = (
 }
 
 export const generateEmailTrackingPixelUrl = (
-    invocation: Pick<CyclotronJobInvocationHogFunction, 'functionId' | 'id' | 'teamId'>
+    invocation: Pick<CyclotronJobInvocationHogFunction, 'functionId' | 'id' | 'teamId'>,
+    emailTrackingUrl: string
 ): string => {
-    return `${defaultConfig.CDP_EMAIL_TRACKING_URL}/public/m/pixel?ph_id=${generateEmailTrackingCode(invocation)}`
+    return `${emailTrackingUrl}/public/m/pixel?ph_id=${generateEmailTrackingCode(invocation)}`
 }

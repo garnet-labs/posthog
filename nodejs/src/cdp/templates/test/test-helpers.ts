@@ -198,7 +198,8 @@ export class TemplateTester {
             },
             undefined as any,
             config.ENCRYPTION_SALT_KEYS,
-            config.SITE_URL
+            config.SITE_URL,
+            config.CDP_EMAIL_TRACKING_URL
         )
         const recipientTokensService = new RecipientTokensService(config.ENCRYPTION_SALT_KEYS, config.SITE_URL)
         return new HogExecutorService(

@@ -76,6 +76,7 @@ export type CdpCoreServicesConfig = Pick<
     | 'CDP_FETCH_BACKOFF_MAX_MS'
     | 'HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC'
     | 'HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC'
+    | 'CDP_EMAIL_TRACKING_URL'
 >
 
 export interface CdpCoreServicesDeps {
@@ -140,7 +141,8 @@ export function createCdpCoreServices(
         },
         deps.integrationManager,
         config.ENCRYPTION_SALT_KEYS,
-        config.SITE_URL
+        config.SITE_URL,
+        config.CDP_EMAIL_TRACKING_URL
     )
     const recipientTokensService = new RecipientTokensService(config.ENCRYPTION_SALT_KEYS, config.SITE_URL)
 
