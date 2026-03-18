@@ -75,7 +75,7 @@ class TestApplePushIntegration(BaseTest):
             sensitive_config={},
         )
 
-        with self.assertRaises(Exception, msg="ApplePushIntegration init called with Integration with wrong 'kind'"):
+        with self.assertRaisesMessage(Exception, "ApplePushIntegration init called with Integration with wrong 'kind'"):
             ApplePushIntegration(integration)
 
     def test_display_name(self):
