@@ -170,6 +170,27 @@ function buildDraftPayload(formValues: ProductTourForm): Record<string, any> {
     }
 }
 
+/** Avoid overwriting the form from draft polls while editing; pairs with PropertyFilters prop-sync behavior. */
+function shouldApplyProductTourFormFromServer(options: {
+    hasUnsavedLocalChanges: boolean
+    isEditing: boolean
+    isOwnEcho: boolean
+    cache: { formHydratedWhileEditing?: boolean }
+}): boolean {
+    const { hasUnsavedLocalChanges, isEditing, isOwnEcho, cache } = options
+    if (hasUnsavedLocalChanges) {
+        return false
+    }
+    if (!isEditing) {
+        return !isOwnEcho
+    }
+    if (!cache.formHydratedWhileEditing) {
+        cache.formHydratedWhileEditing = true
+        return true
+    }
+    return isOwnEcho
+}
+
 export const productTourLogic = kea<productTourLogicType>([
     path(['scenes', 'product-tours', 'productTourLogic']),
     props({} as ProductTourLogicProps),
@@ -592,26 +613,12 @@ export const productTourLogic = kea<productTourLogicType>([
                     values.isEditingProductTour &&
                     isEqual(incomingPayload, cache.lastSentDraftPayload ?? cache.lastDraftPayload)
 
-                // While editing, draft polling must not overwrite the form with a stale GET response
-                // (e.g. right after autosave), or in-progress UI like event property filters disappears.
-                let shouldApplyForm = false
-                if (!hasUnsavedLocalChanges) {
-                    if (!values.isEditingProductTour) {
-                        shouldApplyForm = !isOwnEcho
-                    } else if (!cache.formHydratedWhileEditing) {
-                        shouldApplyForm = true
-                        cache.formHydratedWhileEditing = true
-                } else {
-                    // Only re-apply when the server echoes back exactly what we last sent/saved.
-                    // This is safe because PropertyFilters skips its internal setFilters when
-                    // the incoming propertyFilters prop matches what was last synced, so any
-                    // in-progress filter row (property chosen but operator/value not yet set)
-                    // is preserved even though setProductTourFormValues is dispatched here.
-                    // If the server normalises the payload differently, isOwnEcho is false and
-                    // the form is left untouched until the user finishes the current edit session.
-                    shouldApplyForm = isOwnEcho
-                }
-                }
+                const shouldApplyForm = shouldApplyProductTourFormFromServer({
+                    hasUnsavedLocalChanges,
+                    isEditing: values.isEditingProductTour,
+                    isOwnEcho,
+                    cache,
+                })
 
                 if (shouldApplyForm) {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
