@@ -243,6 +243,9 @@ jobs:
                   cache-dependency-glob: uv.lock
                   save-cache: ${{ github.ref == 'refs/heads/master' }}
 
+            - name: Debug apt retry config
+              run: apt-config dump | grep -i retries
+
             - name: Install SAML (python3-saml) dependencies
               shell: bash
               run: |

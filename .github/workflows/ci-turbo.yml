@@ -45,6 +45,9 @@ jobs:
                     echo "TURBO_SCM_BASE=master" >> $GITHUB_ENV
                   fi
 
+            - name: Debug apt retry config
+              run: apt-config dump | grep -i retries
+
             - name: Set up Python
               uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
               with:
