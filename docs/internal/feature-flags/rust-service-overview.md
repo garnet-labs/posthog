@@ -221,6 +221,7 @@ All values come from environment variables via the `envconfig` crate. Defined in
 | `NON_PERSONS_READER_STATEMENT_TIMEOUT_MS` | `2000`                                              | Statement timeout for flag/team reads |
 | `PERSONS_READER_STATEMENT_TIMEOUT_MS`     | `3000`                                              | Statement timeout for person lookups  |
 | `WRITER_STATEMENT_TIMEOUT_MS`             | `3000`                                              | Statement timeout for writes          |
+| `BEHAVIORAL_COHORTS_READ_DATABASE_URL`    | (empty)                                             | Behavioral cohorts database replica (enables realtime cohort evaluation) |
 
 ### Redis
 
@@ -262,6 +263,14 @@ See [rate-limiting.md](rate-limiting.md) for the full configuration reference.
 | `OTEL_TRACES_SAMPLER_ARG`     | `0.001`                 | Trace sampling rate (0.1%)                                                            |
 | `OTEL_SERVICE_NAME`           | `posthog-feature-flags` | Service name in traces                                                                |
 | `TEAM_IDS_TO_TRACK`           | `all`                   | Teams to emit detailed metrics for (`all`, `none`, comma-separated, or range `1:100`) |
+
+### Realtime cohort evaluation
+
+| Variable                              | Default  | Purpose                                                                                        |
+| ------------------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `ENABLE_REALTIME_COHORT_EVALUATION`   | `false`  | Enable realtime/behavioral cohort membership lookups during flag evaluation (requires `BEHAVIORAL_COHORTS_READ_DATABASE_URL`) |
+| `COHORT_MEMBERSHIP_CACHE_TTL_SECONDS` | `60`     | Cache TTL for realtime cohort membership lookups (seconds)                                     |
+| `COHORT_MEMBERSHIP_CACHE_MAX_ENTRIES` | `500000` | Max entries in the cohort membership cache                                                     |
 
 ### Other
 
