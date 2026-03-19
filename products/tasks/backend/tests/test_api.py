@@ -322,6 +322,185 @@ class TestTaskAPI(BaseTaskAPITest):
         response = self.client.get(f"/api/projects/@current/tasks/{task.id}/")
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_create_task_with_parent(self):
+        parent = self.create_task("Parent Task")
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Child Task",
+                "description": "A side chat",
+                "origin_product": "user_created",
+                "parent_task": str(parent.id),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data["parent_task"], str(parent.id))
+
+    def test_list_tasks_excludes_subtasks_by_default(self):
+        parent = self.create_task("Parent Task")
+        Task.objects.create(
+            team=self.team,
+            title="Child Task",
+            description="Child",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+        standalone = self.create_task("Standalone Task")
+
+        response = self.client.get("/api/projects/@current/tasks/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        task_ids = [t["id"] for t in data["results"]]
+        self.assertIn(str(parent.id), task_ids)
+        self.assertIn(str(standalone.id), task_ids)
+        self.assertEqual(len(task_ids), 2)  # child excluded
+
+    def test_list_tasks_includes_subtasks_when_requested(self):
+        parent = self.create_task("Parent Task")
+        child = Task.objects.create(
+            team=self.team,
+            title="Child Task",
+            description="Child",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+
+        response = self.client.get("/api/projects/@current/tasks/?include_subtasks=true")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        task_ids = [t["id"] for t in data["results"]]
+        self.assertIn(str(parent.id), task_ids)
+        self.assertIn(str(child.id), task_ids)
+
+    def test_filter_tasks_by_parent(self):
+        parent = self.create_task("Parent Task")
+        child1 = Task.objects.create(
+            team=self.team,
+            title="Child 1",
+            description="Child 1",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+        child2 = Task.objects.create(
+            team=self.team,
+            title="Child 2",
+            description="Child 2",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+        self.create_task("Unrelated Task")
+
+        response = self.client.get(f"/api/projects/@current/tasks/?parent_task={parent.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        task_ids = [t["id"] for t in data["results"]]
+        self.assertEqual(len(task_ids), 2)
+        self.assertIn(str(child1.id), task_ids)
+        self.assertIn(str(child2.id), task_ids)
+
+    def test_retrieve_subtask_directly(self):
+        parent = self.create_task("Parent Task")
+        child = Task.objects.create(
+            team=self.team,
+            title="Child Task",
+            description="Child",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+
+        response = self.client.get(f"/api/projects/@current/tasks/{child.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        self.assertEqual(data["title"], "Child Task")
+        self.assertEqual(data["parent_task"], str(parent.id))
+
+    def test_retrieve_parent_includes_subtasks(self):
+        parent = self.create_task("Parent Task")
+        child1 = Task.objects.create(
+            team=self.team,
+            title="Side Chat",
+            description="Side chat",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+        child2 = Task.objects.create(
+            team=self.team,
+            title="Fork",
+            description="Forked task",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+
+        response = self.client.get(f"/api/projects/@current/tasks/{parent.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        self.assertIn("subtasks", data)
+        self.assertEqual(len(data["subtasks"]), 2)
+        subtask_ids = [s["id"] for s in data["subtasks"]]
+        self.assertIn(str(child1.id), subtask_ids)
+        self.assertIn(str(child2.id), subtask_ids)
+        # Subtasks include lightweight info
+        for subtask in data["subtasks"]:
+            self.assertIn("id", subtask)
+            self.assertIn("title", subtask)
+            self.assertIn("latest_run", subtask)
+
+    def test_list_parent_includes_subtasks_inline(self):
+        parent = self.create_task("Parent Task")
+        Task.objects.create(
+            team=self.team,
+            title="Side Chat",
+            description="Side chat",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=parent,
+        )
+
+        response = self.client.get("/api/projects/@current/tasks/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        parent_data = next(t for t in data["results"] if t["id"] == str(parent.id))
+        self.assertEqual(len(parent_data["subtasks"]), 1)
+        self.assertEqual(parent_data["subtasks"][0]["title"], "Side Chat")
+
+    def test_task_without_subtasks_returns_empty_list(self):
+        task = self.create_task("Standalone Task")
+
+        response = self.client.get(f"/api/projects/@current/tasks/{task.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        self.assertEqual(data["subtasks"], [])
+
+    def test_cannot_create_subtask_of_subtask(self):
+        grandparent = self.create_task("Grandparent")
+        child = Task.objects.create(
+            team=self.team,
+            title="Child",
+            description="Subtask",
+            origin_product=Task.OriginProduct.USER_CREATED,
+            parent_task=grandparent,
+        )
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Grandchild",
+                "description": "Should fail",
+                "origin_product": "user_created",
+                "parent_task": str(child.id),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("parent_task", response.json())
+
     @parameterized.expand(
         [
             ("self_user", "self", [0]),

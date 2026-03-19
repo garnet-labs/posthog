@@ -50,6 +50,15 @@ class Task(DeletedMetaFields, models.Model):
     description = models.TextField()
     origin_product = models.CharField(max_length=20, choices=OriginProduct.choices)
 
+    parent_task = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="subtasks",
+        help_text="Parent task for side chats and forks in PostHog Code",
+    )
+
     # Repository configuration
     github_integration = models.ForeignKey(
         "posthog.Integration",
@@ -82,6 +91,11 @@ class Task(DeletedMetaFields, models.Model):
         return self.title
 
     def save(self, *args, **kwargs):
+        if self.parent_task_id and self.parent_task.parent_task_id is not None:
+            raise ValidationError(
+                {"parent_task": "Subtasks cannot have further subtasks. Only top-level tasks can be parents."}
+            )
+
         if self.repository:
             parts = self.repository.split("/")
             if len(parts) != 2 or not parts[0] or not parts[1]:

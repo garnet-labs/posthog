@@ -14,9 +14,32 @@ from .services.title_generator import generate_task_title
 PRESIGNED_URL_CACHE_TTL = 55 * 60  # 55 minutes (less than 1 hour URL expiry)
 
 
+class TaskSubtaskSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for inline subtask info."""
+
+    latest_run = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Task
+        fields = [
+            "id",
+            "title",
+            "created_at",
+            "latest_run",
+        ]
+        read_only_fields = fields
+
+    def get_latest_run(self, obj):
+        latest_run = obj.latest_run
+        if latest_run:
+            return {"id": str(latest_run.id), "status": latest_run.status}
+        return None
+
+
 class TaskSerializer(serializers.ModelSerializer):
     repository = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
     latest_run = serializers.SerializerMethodField()
+    subtasks = serializers.SerializerMethodField()
     created_by = UserBasicSerializer(read_only=True)
 
     title = serializers.CharField(max_length=255, required=False, allow_blank=True)
@@ -33,6 +56,8 @@ class TaskSerializer(serializers.ModelSerializer):
             "title_manually_set",
             "description",
             "origin_product",
+            "parent_task",
+            "subtasks",
             "repository",
             "github_integration",
             "json_schema",
@@ -45,6 +70,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "id",
             "task_number",
             "slug",
+            "subtasks",
             "created_at",
             "updated_at",
             "created_by",
@@ -57,6 +83,24 @@ class TaskSerializer(serializers.ModelSerializer):
         if latest_run:
             return TaskRunDetailSerializer(latest_run, context=self.context).data
         return None
+
+    @extend_schema_field(serializers.ListField(child=serializers.DictField(), help_text="Subtasks of this task"))
+    def get_subtasks(self, obj):
+        # Use prefetched subtasks if available (avoids N+1)
+        subtasks = (
+            obj.subtasks.all()
+            if hasattr(obj, "_prefetched_objects_cache") and "subtasks" in obj._prefetched_objects_cache
+            else obj.subtasks.filter(deleted=False)
+        )
+        return TaskSubtaskSerializer(subtasks, many=True).data
+
+    def validate_parent_task(self, value):
+        """Prevent subtasks from having further subtasks — only one level of nesting allowed."""
+        if value and value.parent_task_id is not None:
+            raise serializers.ValidationError(
+                "Subtasks cannot have further subtasks. Only top-level tasks can be parents."
+            )
+        return value
 
     def validate_github_integration(self, value):
         """Validate that the GitHub integration belongs to the same team"""

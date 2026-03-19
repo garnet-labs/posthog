@@ -8,9 +8,10 @@ class TaskAdmin(admin.ModelAdmin):
     list_filter = ("origin_product", "deleted", "created_at")
     search_fields = ("title", "description", "repository")
     readonly_fields = ("id", "slug", "task_number", "created_at", "updated_at", "deleted_at")
+    raw_id_fields = ("parent_task",)
 
     fieldsets = (
-        (None, {"fields": ("id", "slug", "task_number", "title", "description", "origin_product")}),
+        (None, {"fields": ("id", "slug", "task_number", "title", "description", "origin_product", "parent_task")}),
         ("Team & User", {"fields": ("team", "created_by")}),
         ("Repository", {"fields": ("github_integration", "repository")}),
         ("Schema", {"fields": ("json_schema",)}),

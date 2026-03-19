@@ -9,7 +9,7 @@ from typing import cast
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Prefetch
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 
@@ -141,6 +141,14 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
         params = self.request.query_params if hasattr(self, "request") else {}
 
+        # filter by parent task
+        parent_task_id = params.get("parent_task")
+        if parent_task_id:
+            qs = qs.filter(parent_task=parent_task_id)
+        elif self.action == "list" and not params.get("include_subtasks"):
+            # by default, list only returns top-level tasks (no subtasks)
+            qs = qs.filter(parent_task__isnull=True)
+
         # Filter by origin product
         origin_product = params.get("origin_product")
         if origin_product:
@@ -169,8 +177,10 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if created_by:
             qs = qs.filter(created_by_id=created_by)
 
-        # Prefetch runs to avoid N+1 queries when fetching latest_run
-        qs = qs.prefetch_related("runs")
+        # Prefetch runs and subtasks to avoid N+1 queries
+        qs = qs.prefetch_related(
+            "runs", Prefetch("subtasks", queryset=Task.objects.filter(deleted=False).prefetch_related("runs"))
+        )
 
         return qs
 
