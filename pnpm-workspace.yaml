@@ -8,9 +8,9 @@ packages:
     - common/replay-shared
     - common/replay-headless
     - common/tailwind
-    - common/quill
-    - common/quill/apps/*
-    - common/quill/packages/*
+    - packages/quill
+    - packages/quill/apps/*
+    - packages/quill/packages/*
     - frontend
     - playwright
     - nodejs
