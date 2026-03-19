@@ -337,6 +337,9 @@ jobs:
             - name: Seed test data
               run: python manage.py generate_demo_data --n-clusters 10 --days-past 7 --days-future 0 --skip-materialization --skip-flag-sync --skip-user-product-list
 
+            - name: Sync feature flags
+              run: python manage.py sync_feature_flags
+
             - name: Create API key and extract test IDs
               run: |
                   python -c "
