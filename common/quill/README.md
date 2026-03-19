@@ -46,6 +46,8 @@ import { Button } from '@/components/ui/button'
     - [ ] storybook
   - [x] primitives/context-menu
     - [x] storybook
+  - [ ] primitives/chip
+    - [ ] storybook
   - [x] primitives/dialog
     - [x] storybook
   - [x] primitives/direction
@@ -63,7 +65,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/input
     - [ ] storybook
   - [x] primitives/item
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/kbd
     - [ ] storybook
   - [x] primitives/label

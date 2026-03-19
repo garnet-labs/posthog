@@ -6,13 +6,19 @@ import * as React from 'react'
 import { cn } from './lib/utils'
 import { Separator } from './separator'
 
-function ItemGroup({ className, ...props }: React.ComponentProps<'div'>): React.ReactElement {
+function ItemGroup({
+    className,
+    combined = false,
+    ...props
+}: React.ComponentProps<'div'> & { combined?: boolean }): React.ReactElement {
     return (
         <div
             role="list"
             data-slot="item-group"
+            data-combined={combined || undefined}
             className={cn(
                 'group/item-group flex w-full flex-col gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2',
+                combined && 'gap-0 has-data-[size=sm]:gap-0 has-data-[size=xs]:gap-0',
                 className
             )}
             {...props}
@@ -27,11 +33,11 @@ function ItemSeparator({ className, ...props }: React.ComponentProps<typeof Sepa
 }
 
 const itemVariants = cva(
-    'group/item flex w-full flex-wrap items-center rounded-md border text-xs/relaxed transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [a]:transition-colors [a]:hover:bg-muted',
+    'group/item flex w-full flex-wrap items-center rounded-md border text-xs/relaxed transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 [a]:transition-colors [a]:hover:bg-muted in-data-[combined]:rounded-none in-data-[combined]:first:rounded-t-md in-data-[combined]:last:rounded-b-md in-data-[combined]:not-last:border-b-0 focus-visible:z-1',
     {
         variants: {
             variant: {
-                default: 'border-transparent',
+                default: 'border-card',
                 outline: 'border-border',
                 muted: 'border-transparent bg-muted/50',
             },
@@ -72,6 +78,31 @@ function Item({
     })
 }
 
+function ItemCheckbox({
+    className,
+    variant = 'default',
+    size = 'default',
+    render,
+    ...props
+}: useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>): React.ReactElement {
+    return useRender({
+        defaultTagName: 'button',
+        props: mergeProps<'button'>(
+            {
+                className: cn(itemVariants({ variant, size, className })),
+                role: 'checkbox',
+            },
+            props
+        ),
+        render,
+        state: {
+            slot: 'item',
+            variant,
+            size,
+        },
+    })
+}
+
 const itemMediaVariants = cva(
     'flex shrink-0 items-center justify-center gap-2 group-has-data-[slot=item-description]/item:translate-y-0.5 group-has-data-[slot=item-description]/item:self-start [&_svg]:pointer-events-none',
     {
@@ -80,6 +111,8 @@ const itemMediaVariants = cva(
                 default: 'bg-transparent',
                 icon: "[&_svg:not([class*='size-'])]:size-4",
                 image: 'size-8 overflow-hidden rounded-sm group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 [&_img]:size-full [&_img]:object-cover',
+                checkbox:
+                    'size-8 overflow-hidden rounded-sm group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 [&_img]:size-full [&_img]:object-cover',
             },
         },
         defaultVariants: {
@@ -134,7 +167,7 @@ function ItemDescription({ className, ...props }: React.ComponentProps<'p'>): Re
         <p
             data-slot="item-description"
             className={cn(
-                'line-clamp-2 text-start text-xs/relaxed font-normal text-muted-foreground [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary',
+                'line-clamp-2 text-start text-xx font-normal text-muted-foreground [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary',
                 className
             )}
             {...props}
@@ -168,6 +201,8 @@ function ItemFooter({ className, ...props }: React.ComponentProps<'div'>): React
 
 export {
     Item,
+    ItemCheckbox,
+    // ItemRadio,
     ItemMedia,
     ItemContent,
     ItemActions,
