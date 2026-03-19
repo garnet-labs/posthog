@@ -153,6 +153,10 @@ async def test_signals_agentic_report_gate_activity(monkeypatch, ateam, flag_ena
 @pytest.mark.django_db
 async def test_select_repository_activity_returns_repo(monkeypatch, ateam):
     monkeypatch.setattr(
+        "products.signals.backend.temporal.agentic.select_repository._load_previous_repo_selection",
+        lambda report_id: None,
+    )
+    monkeypatch.setattr(
         "products.signals.backend.temporal.agentic.select_repository._resolve_team_repo_context",
         lambda team_id: _TeamRepoContext(team_id=team_id, user_id=1),
     )
@@ -165,7 +169,9 @@ async def test_select_repository_activity_returns_repo(monkeypatch, ateam):
         fake_select_repo,
     )
 
-    result = await select_repository_activity(SelectRepositoryInput(team_id=ateam.id, signals=_build_signals()))
+    result = await select_repository_activity(
+        SelectRepositoryInput(team_id=ateam.id, report_id="test-report-id", signals=_build_signals())
+    )
 
     assert result.repository == "posthog/posthog"
     assert "Single repository" in result.reason
@@ -174,6 +180,10 @@ async def test_select_repository_activity_returns_repo(monkeypatch, ateam):
 @pytest.mark.asyncio
 @pytest.mark.django_db
 async def test_select_repository_activity_no_repo(monkeypatch, ateam):
+    monkeypatch.setattr(
+        "products.signals.backend.temporal.agentic.select_repository._load_previous_repo_selection",
+        lambda report_id: None,
+    )
     monkeypatch.setattr(
         "products.signals.backend.temporal.agentic.select_repository._resolve_team_repo_context",
         lambda team_id: _TeamRepoContext(team_id=team_id, user_id=1),
@@ -187,7 +197,9 @@ async def test_select_repository_activity_no_repo(monkeypatch, ateam):
         fake_select_repo,
     )
 
-    result = await select_repository_activity(SelectRepositoryInput(team_id=ateam.id, signals=_build_signals()))
+    result = await select_repository_activity(
+        SelectRepositoryInput(team_id=ateam.id, report_id="test-report-id", signals=_build_signals())
+    )
 
     assert result.repository is None
     assert "No GitHub repositories" in result.reason

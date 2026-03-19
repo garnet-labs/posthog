@@ -144,6 +144,7 @@ class SignalReportSummaryWorkflow:
                     select_repository_activity,
                     SelectRepositoryInput(
                         team_id=inputs.team_id,
+                        report_id=inputs.report_id,
                         signals=fetch_result.signals,
                     ),
                     start_to_close_timeout=timedelta(minutes=10),
