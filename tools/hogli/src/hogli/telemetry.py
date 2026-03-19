@@ -186,11 +186,8 @@ def _debug(msg: str, payload: dict[str, Any] | None = None) -> None:
 
 def _post_event(host: str, payload: dict[str, Any]) -> None:
     """POST the event payload to the capture endpoint."""
-    try:
-        import requests
-    except ImportError:
-        _debug("requests package not installed, skipping telemetry POST")
-        return
+    import requests
+
     try:
         resp = requests.post(
             f"{host}/capture/",

@@ -1,6 +1,6 @@
-"""hogli - Unified developer CLI for PostHog monorepo.
+"""hogli - Developer CLI framework with YAML-based command definitions.
 
-All commands are defined in scripts_manifest.yaml and auto-discovered.
+All commands are defined in hogli.yaml and auto-discovered.
 Help output is dynamically generated from the manifest with category grouping.
 """
 

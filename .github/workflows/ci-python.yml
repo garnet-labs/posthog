@@ -169,7 +169,7 @@ jobs:
             - name: Run hogli framework tests
               shell: bash
               run: |
-                  pytest tools/hogli/tests -v
+                  pytest tools/hogli/tests -v --junitxml=junit-hogli.xml
 
             - name: Upload test results
               uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
