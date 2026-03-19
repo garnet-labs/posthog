@@ -91,15 +91,12 @@ Use this command when changing prompt logic in `select_repo.py`.
 
 File: `../management/commands/parse_sandbox_log.py`
 
-Takes a verbose sandbox log file and renders a concise timeline of:
+Local dev/testing tool (DEBUG only). Extracts key events from verbose sandbox logs
+without consuming the full stream — useful for both human inspection and agentic use
+(e.g., agents reviewing sandbox runs without reading raw S3 log streams).
 
-- prompts
-- tool calls
-- tool outputs
-- agent messages
-- optional thought chunks
-
-Use it to inspect long `analyze_report --verbose` runs without reading raw JSONL.
+Renders a concise timeline of: prompts, tool calls, tool outputs, agent messages,
+and optional thought chunks.
 
 ## When editing this flow
 

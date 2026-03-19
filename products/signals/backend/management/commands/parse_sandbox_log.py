@@ -1,4 +1,5 @@
-"""Parse a verbose sandbox log file into a concise, colorized timeline of agent actions.
+"""Local dev/testing tool. Extracts key events (prompts, tool calls, outputs, agent messages)
+from verbose sandbox logs without consuming the full stream (quick check, agentic research, etc.). DEBUG only.
 
 Usage:
     python manage.py parse_sandbox_log /tmp/analyze_report_output.txt
@@ -58,7 +59,7 @@ def _c(color: str, text: str) -> str:
 
 
 class Command(BaseCommand):
-    help = "Parse a verbose sandbox log file into a concise timeline of agent events."
+    help = "Local dev tool: extract key events from a verbose sandbox log without reading the full stream. DEBUG only."
 
     def add_arguments(self, parser):
         parser.add_argument("logfile", type=str, help="Path to the log file to parse")
