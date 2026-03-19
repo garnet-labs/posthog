@@ -98,9 +98,12 @@ class ErrorTrackingQueryV3Builder:
                 alias="assignee_role_id",
                 expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_role_id"])]),
             ),
-            # timestamps from events
+            # timestamps
             ast.Alias(alias="last_seen", expr=ast.Call(name="max", args=[ast.Field(chain=["e", "timestamp"])])),
-            ast.Alias(alias="first_seen", expr=ast.Call(name="min", args=[ast.Field(chain=["e", "timestamp"])])),
+            ast.Alias(
+                alias="first_seen",
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_first_seen"])]),
+            ),
             # frame info from events
             ast.Alias(alias="function", expr=innermost_frame_attribute("$exception_functions")),
             ast.Alias(alias="source", expr=innermost_frame_attribute("$exception_sources")),
@@ -369,6 +372,7 @@ class ErrorTrackingQueryV3Builder:
             "name": ["e", "issue_name"],
             "description": ["e", "issue_description"],
             "status": ["e", "issue_status"],
+            "first_seen": ["e", "issue_first_seen"],
         }
 
         field_chain = field_chain_map.get(key)

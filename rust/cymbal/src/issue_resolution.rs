@@ -209,6 +209,7 @@ pub struct IssueFingerprintDenormalized {
     pub issue_status: String,
     pub assigned_user_id: Option<i64>,
     pub assigned_role_id: Option<Uuid>,
+    pub first_seen: String,
     pub is_deleted: i8,
     pub version: i64,
 }
@@ -218,6 +219,7 @@ impl IssueFingerprintDenormalized {
         issue: &Issue,
         fingerprint: &str,
         assignment: Option<&Assignment>,
+        first_seen: DateTime<Utc>,
     ) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
@@ -229,6 +231,7 @@ impl IssueFingerprintDenormalized {
             issue_status: issue.status.to_string(),
             assigned_user_id: assignment.and_then(|a| a.user_id.map(i64::from)),
             assigned_role_id: assignment.and_then(|a| a.role_id),
+            first_seen: first_seen.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
             is_deleted: 0,
             version: now,
         }
@@ -240,8 +243,9 @@ pub async fn send_issue_fingerprint_denormalized(
     issue: &Issue,
     fingerprint: &str,
     assignment: Option<&Assignment>,
+    first_seen: DateTime<Utc>,
 ) -> Result<(), UnhandledError> {
-    let msg = IssueFingerprintDenormalized::new(issue, fingerprint, assignment);
+    let msg = IssueFingerprintDenormalized::new(issue, fingerprint, assignment, first_seen);
     send_iter_to_kafka(
         &context.immediate_producer,
         &context.config.issue_fingerprint_denormalized_topic,

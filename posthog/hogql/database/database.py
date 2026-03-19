@@ -1455,6 +1455,10 @@ def _use_error_tracking_issue_id_from_error_tracking_issue_overrides(database: D
         name="assigned_role_id",
         expr=parse_expr("exception_issue_denormalized.assigned_role_id"),
     )
+    table.fields["issue_first_seen"] = ExpressionField(
+        name="issue_first_seen",
+        expr=parse_expr("exception_issue_denormalized.first_seen"),
+    )
 
 
 def _setup_group_key_fields(database: Database, group_types: list[dict[str, Any]]) -> None:

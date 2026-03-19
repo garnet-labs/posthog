@@ -4,6 +4,7 @@ from posthog.hogql.context import HogQLContext
 from posthog.hogql.database.argmax import argmax_select
 from posthog.hogql.database.models import (
     BooleanDatabaseField,
+    DateTimeDatabaseField,
     FieldOrTable,
     IntegerDatabaseField,
     LazyJoinToAdd,
@@ -23,6 +24,7 @@ ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED_FIELDS: dict[str, FieldOrTable] = 
     "issue_status": StringDatabaseField(name="issue_status", nullable=False),
     "assigned_user_id": IntegerDatabaseField(name="assigned_user_id", nullable=True),
     "assigned_role_id": StringDatabaseField(name="assigned_role_id", nullable=True),
+    "first_seen": DateTimeDatabaseField(name="first_seen", nullable=True),
 }
 
 
