@@ -50,9 +50,13 @@ describe('Logs Alerts', { concurrent: false }, () => {
         const flagsResult = await listFlags.handler(context, { search: 'logs-alerting' })
         const flags = (flagsResult as any).results ?? []
         const flag = flags.find((f: any) => f.key === 'logs-alerting')
+        // eslint-disable-next-line no-console -- Intentionally preserved for debugging feature flag state in integration test
+        console.log('flag', flag)
 
         if (flag && !flag.active) {
             const updateResult = await updateFlag.handler(context, { id: flag.id, active: true })
+            // eslint-disable-next-line no-console -- Preserve output for test visibility
+            console.log('updateResult', updateResult)
         } else if (!flag) {
             const createResult = await createFlag.handler(context, {
                 key: 'logs-alerting',
@@ -62,6 +66,8 @@ describe('Logs Alerts', { concurrent: false }, () => {
                     groups: [{ properties: [], rollout_percentage: 100 }],
                 },
             })
+            // eslint-disable-next-line no-console -- Preserve output for test visibility
+            console.log('createResult', createResult)
         }
     })
 
