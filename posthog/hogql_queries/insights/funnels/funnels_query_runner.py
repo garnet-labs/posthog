@@ -1,4 +1,3 @@
-import threading
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Any, Optional
@@ -27,8 +26,6 @@ from posthog.hogql.query import execute_hogql_query
 from posthog.hogql.timings import HogQLTimings
 
 from posthog.caching.insights_api import BASE_MINIMUM_INSIGHT_REFRESH_INTERVAL, REDUCED_MINIMUM_INSIGHT_REFRESH_INTERVAL
-from posthog.clickhouse import query_tagging
-from posthog.clickhouse.query_tagging import QueryTags
 from posthog.hogql_queries.insights.funnels import FunnelTrendsUDF, FunnelUDF
 from posthog.hogql_queries.insights.funnels.funnel_query_context import FunnelQueryContext
 from posthog.hogql_queries.insights.funnels.funnel_time_to_convert import FunnelTimeToConvertUDF
@@ -178,39 +175,18 @@ class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
 
         return sub_query
 
-    def _run_sub_query(
-        self,
-        sub_query: FunnelsQuery,
-        series_index: int,
-        is_parallel: bool,
-        responses: list,
-        errors: list,
-        query_tags: QueryTags | None = None,
-    ) -> None:
-        try:
-            if query_tags:
-                query_tagging.update_tags(query_tags)
-
-            runner = FunnelsQueryRunner(
-                query=sub_query,
-                team=self.team,
-                timings=self.timings.clone_for_subquery(series_index),
-                modifiers=self.modifiers,
-                limit_context=self.limit_context,
-                just_summarize=self.just_summarize,
-            )
-            responses[series_index] = runner._calculate_single_query()
-        except Exception as e:
-            errors.append(e)
-        finally:
-            if is_parallel:
-                from django.db import connection
-
-                connection.close()
+    def _run_sub_query(self, sub_query: FunnelsQuery) -> FunnelsQueryResponse:
+        runner = FunnelsQueryRunner(
+            query=sub_query,
+            team=self.team,
+            timings=self.timings,
+            modifiers=self.modifiers,
+            limit_context=self.limit_context,
+            just_summarize=self.just_summarize,
+        )
+        return runner._calculate_single_query()
 
     def _calculate_single_cohort_breakdown(self) -> FunnelsQueryResponse:
-        from django.conf import settings
-
         cohort_id = self._single_cohort_id
         assert cohort_id is not None
 
@@ -230,30 +206,8 @@ class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
         in_query = self._create_cohort_sub_query(cohort_id, negate=False)
         not_in_query = self._create_cohort_sub_query(cohort_id, negate=True)
 
-        responses: list[FunnelsQueryResponse | None] = [None, None]
-        errors: list[Exception] = []
-        is_parallel = not settings.IN_UNIT_TESTING
-
-        if is_parallel:
-            tags = query_tagging.get_query_tags().model_copy(deep=True)
-            jobs = [
-                threading.Thread(target=self._run_sub_query, args=(in_query, 0, True, responses, errors, tags)),
-                threading.Thread(target=self._run_sub_query, args=(not_in_query, 1, True, responses, errors, tags)),
-            ]
-            for j in jobs:
-                j.start()
-            for j in jobs:
-                j.join()
-        else:
-            self._run_sub_query(in_query, 0, False, responses, errors)
-            self._run_sub_query(not_in_query, 1, False, responses, errors)
-
-        if errors:
-            raise errors[0]
-
-        in_response = responses[0]
-        not_in_response = responses[1]
-        assert in_response is not None and not_in_response is not None
+        in_response = self._run_sub_query(in_query)
+        not_in_response = self._run_sub_query(not_in_query)
 
         timings = [*(in_response.timings or []), *(not_in_response.timings or [])]
         hogql = in_response.hogql or ""
