@@ -112,16 +112,10 @@ export const LogsAlertsPartialUpdateParams = /* @__PURE__ */ zod.object({
 
 export const logsAlertsPartialUpdateBodyNameMax = 255
 
-export const logsAlertsPartialUpdateBodyEnabledDefault = true
-export const logsAlertsPartialUpdateBodyThresholdOperatorDefault = `above`
-export const logsAlertsPartialUpdateBodyWindowMinutesDefault = 5
-export const logsAlertsPartialUpdateBodyEvaluationPeriodsDefault = 1
 export const logsAlertsPartialUpdateBodyEvaluationPeriodsMax = 10
 
-export const logsAlertsPartialUpdateBodyDatapointsToAlarmDefault = 1
 export const logsAlertsPartialUpdateBodyDatapointsToAlarmMax = 10
 
-export const logsAlertsPartialUpdateBodyCooldownMinutesDefault = 0
 export const logsAlertsPartialUpdateBodyCooldownMinutesMin = 0
 
 export const LogsAlertsPartialUpdateBody = /* @__PURE__ */ zod.object({
@@ -132,7 +126,7 @@ export const LogsAlertsPartialUpdateBody = /* @__PURE__ */ zod.object({
         .describe('Human-readable name for this alert.'),
     enabled: zod
         .boolean()
-        .default(logsAlertsPartialUpdateBodyEnabledDefault)
+        .optional()
         .describe('Whether the alert is actively being evaluated. Disabling resets the state to not_firing.'),
     filters: zod
         .unknown()
@@ -148,30 +142,30 @@ export const LogsAlertsPartialUpdateBody = /* @__PURE__ */ zod.object({
     threshold_operator: zod
         .enum(['above', 'below'])
         .describe('* `above` - Above\n* `below` - Below')
-        .default(logsAlertsPartialUpdateBodyThresholdOperatorDefault)
+        .optional()
         .describe(
             'Whether the alert fires when the count is above or below the threshold.\n\n* `above` - Above\n* `below` - Below'
         ),
     window_minutes: zod
         .number()
-        .default(logsAlertsPartialUpdateBodyWindowMinutesDefault)
+        .optional()
         .describe('Time window in minutes over which log entries are counted. Allowed values: 1, 5, 10, 15, 30, 60.'),
     evaluation_periods: zod
         .number()
         .min(1)
         .max(logsAlertsPartialUpdateBodyEvaluationPeriodsMax)
-        .default(logsAlertsPartialUpdateBodyEvaluationPeriodsDefault)
+        .optional()
         .describe('Total number of check periods in the sliding evaluation window for firing (M in N-of-M).'),
     datapoints_to_alarm: zod
         .number()
         .min(1)
         .max(logsAlertsPartialUpdateBodyDatapointsToAlarmMax)
-        .default(logsAlertsPartialUpdateBodyDatapointsToAlarmDefault)
+        .optional()
         .describe('How many periods within the evaluation window must breach the threshold to fire (N in N-of-M).'),
     cooldown_minutes: zod
         .number()
         .min(logsAlertsPartialUpdateBodyCooldownMinutesMin)
-        .default(logsAlertsPartialUpdateBodyCooldownMinutesDefault)
+        .optional()
         .describe('Minimum minutes between repeated notifications after the alert fires. 0 means no cooldown.'),
     snooze_until: zod.iso
         .datetime({})
