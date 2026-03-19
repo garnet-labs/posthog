@@ -1,14 +1,16 @@
 // Auto-generated from OpenRouter API - Do not edit manually
-// Generated at: 2026-03-10 20:05:53 UTC
+// Generated at: 2026-03-19 10:13:21 UTC
 
 export type CanonicalProvider =
     | 'default'
     | 'ai21-fp8'
     | 'aion-labs'
     | 'aion-labs-bf16'
+    | 'akashml-fp16'
     | 'alibaba'
     | 'alibaba-opensource'
     | 'amazon-bedrock'
+    | 'ambient-fp8'
     | 'anthropic'
     | 'arcee-ai-bf16'
     | 'arcee-ai-modal'
@@ -50,6 +52,7 @@ export type CanonicalProvider =
     | 'google-vertex-europe'
     | 'google-vertex-global'
     | 'google-vertex-us'
+    | 'google-vertex-us-east5'
     | 'groq'
     | 'hyperbolic'
     | 'hyperbolic-bf16'
@@ -57,11 +60,12 @@ export type CanonicalProvider =
     | 'inception'
     | 'inceptron-fp8'
     | 'inceptron-int4'
-    | 'infermatic'
     | 'infermatic-bf16'
     | 'inflection'
     | 'io-net-bf16'
     | 'io-net-fp16'
+    | 'io-net-fp8'
+    | 'io-net-int4'
     | 'ionstream-fp8'
     | 'liquid'
     | 'mancer-fp8'
@@ -78,6 +82,7 @@ export type CanonicalProvider =
     | 'morph'
     | 'nebius'
     | 'nebius-base'
+    | 'nebius-bf16'
     | 'nebius-fast'
     | 'nebius-fp4'
     | 'nebius-fp8'
