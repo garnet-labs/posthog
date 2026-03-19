@@ -38,6 +38,7 @@ import {
     manualLinkSources,
 } from '~/types'
 
+import { restoreSourceFormState } from '../external/forms/DataWarehouseIntegrationChoice'
 import { dataWarehouseSettingsLogic } from '../settings/dataWarehouseSettingsLogic'
 import { dataWarehouseTableLogic } from './dataWarehouseTableLogic'
 import type { sourceWizardLogicType } from './sourceWizardLogicType'
@@ -925,6 +926,8 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                 actions.selectConnector(source)
                 actions.handleRedirect(source.name)
                 actions.setStep(2)
+                // Restore form values saved before an OAuth redirect
+                restoreSourceFormState()
                 return
             }
 
