@@ -15,7 +15,8 @@ the safety judge first, then calls into this flow via a Temporal activity if the
     candidates and pick the best match. Uses `PostHog/.github` as a small dummy repo
     for the sandbox clone, since the agent only needs `gh` CLI access (not the repo itself).
   - Output: `RepoSelectionResult(repository: str | None, reason: str)`.
-  - Persisted as a `repo_selection` artefact on the report.
+  - Persisted as a `repo_selection` artefact on the report (by the caller activity, not here).
+  - On re-promotion, the activity reuses the previous artefact instead of re-running selection.
 - `research.py`
   Orchestrates a multi-turn sandbox session over a report's signals.
   The agent researches each signal, then produces:
@@ -36,7 +37,7 @@ the safety judge first, then calls into this flow via a Temporal activity if the
   start from raw signals only
   research each signal as new
   produce findings + assessments + title/summary
-- `update` behavior:
+- `update` behavior (re-promoted reports or `analyze_report update`):
   start from raw signals plus a previous `ReportResearchOutput`
   match previous findings by `signal_id`
   lightly validate old findings before reusing them
@@ -44,8 +45,12 @@ the safety judge first, then calls into this flow via a Temporal activity if the
   show previous actionability, priority, title, and summary as context
   regenerate those outputs only as much as needed
 
-This flow is intentionally prompt-orchestration only right now.
-Do not assume DB persistence or production artefact storage exists here unless you add it explicitly.
+In production, the `update` path is triggered automatically when a `ready` report is
+re-promoted after accumulating enough new signals. The caller activity (`temporal/agentic/report.py`)
+reconstructs the previous `ReportResearchOutput` from stored artefacts and the report's
+title/summary fields, then passes it to `run_multi_turn_research()`.
+
+This module is intentionally prompt-orchestration only.
 Production persistence is handled outside `run_multi_turn_research()`, in the caller activity,
 so this module stays isolated from report DB writes.
 

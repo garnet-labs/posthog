@@ -30,14 +30,17 @@ python manage.py list_signal_reports --team-id 1 --signals --json
 2. Each signal gets embedded, matched to an existing report or a new one via LLM
 3. `SignalReport` rows are created/updated in Postgres
 4. Signal embeddings land in ClickHouse `document_embeddings`
-5. When a report's total weight reaches the threshold (default 1.0), a summary workflow runs:
+5. When a report's total weight reaches the threshold (default 1.0) and `signal_count >= signals_at_run`, a summary workflow runs:
    - default path: summarizes the group, then runs safety + actionability judges
-   - feature-flagged path: runs safety first, then agentic report research
+   - feature-flagged path: runs safety first, selects repo, then agentic report research
 6. Report reaches a terminal state:
    - `ready` — passed both judges, actionable by a coding agent
    - `pending_input` — needs human judgment before acting
    - `failed` — failed safety review (possible prompt injection)
    - `potential` (reset, weight zeroed) — deemed not actionable
+7. `ready` reports accumulate new signals silently. After enough new signals (`signal_count >= signals_at_run`),
+   the report is re-promoted and the summary workflow runs again — reusing the previous repo selection and
+   lightly validating previous findings instead of re-researching from scratch.
 
 Reports that aren't `ready` still appear in the output with their `error` field
 explaining why they were filtered, plus `artefacts` containing the full judge reasoning.
