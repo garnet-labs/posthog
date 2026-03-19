@@ -1,25 +1,26 @@
 import json
+import unittest
 from datetime import datetime, timedelta
-
-from freezegun import freeze_time
-from posthog.test.base import APIBaseTest, FuzzyInt, override_settings
 from unittest.mock import patch
 
 from django.conf import settings
 from django.core.cache import cache
-from django.test import Client as DjangoClient
+from django.test import Client as DjangoClient, RequestFactory
 from django.urls import reverse
-
+from freezegun import freeze_time
+from parameterized import parameterized
 from rest_framework import status
 from social_core.exceptions import AuthCanceled
 
 from posthog.api.test.test_organization import create_organization
 from posthog.api.test.test_team import create_team
+from posthog.middleware import PopupOAuthCoopMiddleware
 from posthog.models import Action, Cohort, Dashboard, FeatureFlag, Insight
 from posthog.models.organization import Organization
 from posthog.models.team import Team
 from posthog.models.user import User
 from posthog.settings import SITE_URL
+from posthog.test.base import APIBaseTest, FuzzyInt, override_settings
 
 
 class TestAccessMiddleware(APIBaseTest):
@@ -1388,3 +1389,39 @@ class TestSocialAuthExceptionMiddleware(APIBaseTest):
         self.assertIsNotNone(response)
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertEqual(response.url, "/login?error_code=oauth_cancelled")
+
+
+class TestPopupOAuthCoopMiddleware(unittest.TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.middleware = PopupOAuthCoopMiddleware(lambda request: self._make_response())
+
+    def _make_response(self):
+        from django.http import HttpResponse
+
+        return HttpResponse("OK")
+
+    @parameterized.expand(
+        [
+            ("/oauth/authorize",),
+            ("/oauth/authorize?client_id=abc",),
+            ("/toolbar_oauth/authorize/",),
+            ("/connect/vercel/configure/",),
+        ]
+    )
+    def test_popup_path_gets_unsafe_none(self, path):
+        request = self.factory.get(path)
+        response = self.middleware(request)
+        self.assertEqual(response["Cross-Origin-Opener-Policy"], "unsafe-none")
+
+    @parameterized.expand(
+        [
+            ("/api/projects/",),
+            ("/",),
+            ("/dashboard",),
+        ]
+    )
+    def test_non_popup_path_does_not_get_unsafe_none(self, path):
+        request = self.factory.get(path)
+        response = self.middleware(request)
+        self.assertNotIn("Cross-Origin-Opener-Policy", response)
