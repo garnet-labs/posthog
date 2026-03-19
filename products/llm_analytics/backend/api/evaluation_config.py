@@ -10,6 +10,8 @@ from posthog.event_usage import report_user_action
 from posthog.permissions import AccessControlPermission
 
 from ..models.evaluation_config import EvaluationConfig
+from ..models.evaluations import Evaluation
+from ..models.model_configuration import LLMModelConfiguration
 from ..models.provider_keys import LLMProviderKey
 from .metrics import llma_track_latency
 from .provider_keys import LLMProviderKeySerializer
@@ -18,6 +20,9 @@ from .provider_keys import LLMProviderKeySerializer
 class EvaluationConfigSerializer(serializers.ModelSerializer):
     trial_evals_remaining = serializers.IntegerField(read_only=True)
     active_provider_key = LLMProviderKeySerializer(read_only=True)
+    trial_providers = serializers.SerializerMethodField(
+        help_text="Providers whose evaluations are consuming trial quota (no BYOK key available)."
+    )
 
     class Meta:
         model = EvaluationConfig
@@ -26,6 +31,7 @@ class EvaluationConfigSerializer(serializers.ModelSerializer):
             "trial_evals_used",
             "trial_evals_remaining",
             "active_provider_key",
+            "trial_providers",
             "created_at",
             "updated_at",
         ]
@@ -33,9 +39,52 @@ class EvaluationConfigSerializer(serializers.ModelSerializer):
             "trial_evals_used",
             "trial_evals_remaining",
             "active_provider_key",
+            "trial_providers",
             "created_at",
             "updated_at",
         ]
+
+    def get_trial_providers(self, obj: EvaluationConfig) -> list[str]:
+        """Return providers whose evaluations would consume trial quota.
+
+        A provider is on trial when it has active evaluations without a pinned
+        BYOK key and the team has no healthy BYOK key for that provider.
+        """
+        # Providers used by active evals without a pinned BYOK key
+        unpinned_providers = set(
+            LLMModelConfiguration.objects.filter(
+                team_id=obj.team_id,
+                provider_key__isnull=True,
+                evaluations__deleted=False,
+            )
+            .values_list("provider", flat=True)
+            .distinct()
+        )
+
+        # Legacy evaluations (no model_configuration) default to OpenAI
+        has_legacy_evals = Evaluation.objects.filter(
+            team_id=obj.team_id,
+            model_configuration__isnull=True,
+            deleted=False,
+        ).exists()
+        if has_legacy_evals:
+            unpinned_providers.add("openai")
+
+        if not unpinned_providers:
+            return []
+
+        # Providers with a healthy BYOK key
+        covered_providers = set(
+            LLMProviderKey.objects.filter(
+                team_id=obj.team_id,
+                state=LLMProviderKey.State.OK,
+                provider__in=unpinned_providers,
+            )
+            .values_list("provider", flat=True)
+            .distinct()
+        )
+
+        return sorted(unpinned_providers - covered_providers)
 
 
 class EvaluationConfigViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):

@@ -481,8 +481,8 @@ function DeleteKeyModal({
                     {hasEvaluations && !hasAlternatives && (
                         <div className="bg-warning-highlight border border-warning rounded p-3">
                             <p className="text-sm">
-                                <strong>No replacement keys available.</strong> These evaluations will be disabled and
-                                their model configuration removed. You'll need to reconfigure them to re-enable.
+                                <strong>No replacement keys available.</strong> These evaluations will be disabled.
+                                You'll need to assign a new key to re-enable them.
                             </p>
                         </div>
                     )}
@@ -628,7 +628,7 @@ export function LLMProviderKeysSettings(): JSX.Element {
                             </AccessControlAction>
                         </div>
 
-                        {evaluationConfig && !evaluationConfig.active_provider_key && (
+                        {evaluationConfig && !!evaluationConfig.trial_providers?.length && (
                             <TrialUsageMeterDisplay evaluationConfig={evaluationConfig} />
                         )}
 

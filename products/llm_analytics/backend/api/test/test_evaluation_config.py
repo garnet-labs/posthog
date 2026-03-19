@@ -2,11 +2,14 @@ from uuid import uuid4
 
 from posthog.test.base import APIBaseTest
 
+from parameterized import parameterized
 from rest_framework import status
 
 from posthog.models import Organization, Project, Team, User
 
 from products.llm_analytics.backend.models.evaluation_config import EvaluationConfig
+from products.llm_analytics.backend.models.evaluations import Evaluation
+from products.llm_analytics.backend.models.model_configuration import LLMModelConfiguration
 from products.llm_analytics.backend.models.provider_keys import LLMProviderKey
 
 
@@ -46,10 +49,12 @@ class TestEvaluationConfigViewSet(APIBaseTest):
         self.assertIn("trial_evals_used", response.data)
         self.assertIn("trial_evals_remaining", response.data)
         self.assertIn("active_provider_key", response.data)
+        self.assertIn("trial_providers", response.data)
         self.assertEqual(response.data["trial_eval_limit"], 100)
         self.assertEqual(response.data["trial_evals_used"], 0)
         self.assertEqual(response.data["trial_evals_remaining"], 100)
         self.assertIsNone(response.data["active_provider_key"])
+        self.assertEqual(response.data["trial_providers"], [])
 
     def test_get_creates_config_if_missing(self):
         self.assertEqual(EvaluationConfig.objects.filter(team=self.team).count(), 0)
@@ -223,3 +228,98 @@ class TestEvaluationConfigViewSet(APIBaseTest):
         self.assertEqual(active_key["provider"], "openai")
         self.assertEqual(active_key["state"], "ok")
         self.assertIn("api_key_masked", active_key)
+
+
+class TestTrialProviders(APIBaseTest):
+    """Tests for the trial_providers field on the evaluation config endpoint."""
+
+    def _create_eval(self, provider: str, provider_key: LLMProviderKey | None = None, deleted: bool = False):
+        config = LLMModelConfiguration.objects.create(
+            team=self.team,
+            provider=provider,
+            model="test-model",
+            provider_key=provider_key,
+        )
+        return Evaluation.objects.create(
+            team=self.team,
+            name=f"Test {provider}",
+            evaluation_type="llm_judge",
+            output_type="boolean",
+            model_configuration=config,
+            deleted=deleted,
+        )
+
+    @parameterized.expand(
+        [
+            # (description, eval_providers, byok_providers, expected_trial_providers)
+            ("no_evals", [], [], []),
+            ("openai_eval_no_byok", ["openai"], [], ["openai"]),
+            ("openai_eval_with_openai_byok", ["openai"], ["openai"], []),
+            ("anthropic_eval_with_openai_byok", ["anthropic"], ["openai"], ["anthropic"]),
+            ("both_evals_only_anthropic_byok", ["openai", "anthropic"], ["anthropic"], ["openai"]),
+            ("both_evals_both_byok", ["openai", "anthropic"], ["openai", "anthropic"], []),
+            ("multi_provider_no_byok", ["openai", "anthropic", "gemini"], [], ["anthropic", "gemini", "openai"]),
+        ]
+    )
+    def test_trial_providers(self, _name, eval_providers, byok_providers, expected_trial_providers):
+        for provider in byok_providers:
+            LLMProviderKey.objects.create(
+                team=self.team,
+                provider=provider,
+                name=f"{provider} key",
+                state=LLMProviderKey.State.OK,
+                encrypted_config={"api_key": "sk-test"},
+                created_by=self.user,
+            )
+        for provider in eval_providers:
+            self._create_eval(provider)
+
+        response = self.client.get(f"/api/environments/{self.team.id}/llm_analytics/evaluation_config/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["trial_providers"], expected_trial_providers)
+
+    def test_trial_providers_excludes_deleted_evals(self):
+        self._create_eval("openai", deleted=True)
+
+        response = self.client.get(f"/api/environments/{self.team.id}/llm_analytics/evaluation_config/")
+        self.assertEqual(response.data["trial_providers"], [])
+
+    def test_trial_providers_excludes_pinned_byok_evals(self):
+        key = LLMProviderKey.objects.create(
+            team=self.team,
+            provider="openai",
+            name="My Key",
+            state=LLMProviderKey.State.OK,
+            encrypted_config={"api_key": "sk-test"},
+            created_by=self.user,
+        )
+        self._create_eval("openai", provider_key=key)
+
+        response = self.client.get(f"/api/environments/{self.team.id}/llm_analytics/evaluation_config/")
+        self.assertEqual(response.data["trial_providers"], [])
+
+    def test_trial_providers_ignores_invalid_byok_keys(self):
+        LLMProviderKey.objects.create(
+            team=self.team,
+            provider="openai",
+            name="Bad Key",
+            state=LLMProviderKey.State.INVALID,
+            encrypted_config={"api_key": "sk-invalid"},
+            created_by=self.user,
+        )
+        self._create_eval("openai")
+
+        response = self.client.get(f"/api/environments/{self.team.id}/llm_analytics/evaluation_config/")
+        self.assertEqual(response.data["trial_providers"], ["openai"])
+
+    def test_trial_providers_includes_legacy_evals_as_openai(self):
+        Evaluation.objects.create(
+            team=self.team,
+            name="Legacy eval",
+            evaluation_type="llm_judge",
+            output_type="boolean",
+            model_configuration=None,
+        )
+
+        response = self.client.get(f"/api/environments/{self.team.id}/llm_analytics/evaluation_config/")
+        self.assertEqual(response.data["trial_providers"], ["openai"])

@@ -109,13 +109,14 @@ class LLMProviderKeySerializer(serializers.ModelSerializer):
                     config.active_provider_key = instance
                     config.save(update_fields=["active_provider_key", "updated_at"])
 
-                # Auto-assign this key to evaluations that were created on the
-                # trial tier for the same provider so they seamlessly graduate
-                # to BYOK without the user having to reconfigure each one.
+                # Auto-assign this key to active evaluations that were created
+                # on the trial tier for the same provider so they seamlessly
+                # graduate to BYOK without the user reconfiguring each one.
                 LLMModelConfiguration.objects.filter(
                     team=team,
                     provider=instance.provider,
                     provider_key__isnull=True,
+                    evaluations__deleted=False,
                 ).update(provider_key=instance)
 
         return instance
@@ -308,18 +309,15 @@ class LLMProviderKeyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, v
                 return super().destroy(request, *args, **kwargs)
         else:
             with transaction.atomic():
-                model_config_ids = list(
-                    LLMModelConfiguration.objects.filter(provider_key=instance, team_id=self.team_id).values_list(
-                        "id", flat=True
-                    )
-                )
-                # Disable affected evaluations and sever the model configuration
-                # link so they don't attempt to use a provider that no longer has
-                # a key. The user will need to reconfigure the evaluation to
-                # re-enable it.
+                affected_configs = LLMModelConfiguration.objects.filter(provider_key=instance, team_id=self.team_id)
+                # Disable evaluations that use this key and null the provider_key
+                # on their model configuration. The provider/model choice is
+                # preserved so users only need to pick a new key, not reconfigure
+                # from scratch.
                 Evaluation.objects.filter(
-                    model_configuration_id__in=model_config_ids, team_id=self.team_id, deleted=False
-                ).update(enabled=False, model_configuration=None)
+                    model_configuration__in=affected_configs, team_id=self.team_id, deleted=False
+                ).update(enabled=False)
+                affected_configs.update(provider_key=None)
                 return super().destroy(request, *args, **kwargs)
 
 

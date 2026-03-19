@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from django.conf import settings
-from django.db import models
+from django.db.models import F
 
 import structlog
 import temporalio
@@ -277,8 +277,7 @@ async def execute_llm_judge_activity(inputs: ExecuteLLMJudgeInputs) -> dict[str,
         if config.active_provider_key:
             key = config.active_provider_key
             if key.state == LLMProviderKey.State.OK:
-                key.last_used_at = timezone.now()
-                key.save(update_fields=["last_used_at"])
+                LLMProviderKey.objects.filter(id=key.id).update(last_used_at=timezone.now())
                 return key
             # Active key exists but is invalid - fail, don't fall back to trial
             raise ApplicationError(
@@ -301,8 +300,7 @@ async def execute_llm_judge_activity(inputs: ExecuteLLMJudgeInputs) -> dict[str,
                     {"error_type": "key_invalid", "key_id": str(key.id), "key_state": key.state},
                     non_retryable=True,
                 )
-            key.last_used_at = timezone.now()
-            key.save(update_fields=["last_used_at"])
+            LLMProviderKey.objects.filter(id=key.id).update(last_used_at=timezone.now())
             return key
         except LLMProviderKey.DoesNotExist:
             raise ApplicationError(
@@ -318,16 +316,16 @@ async def execute_llm_judge_activity(inputs: ExecuteLLMJudgeInputs) -> dict[str,
         used over the trial quota. Falls back to trial if no BYOK key is
         available, and raises if trial is also exhausted.
         """
-        # Prefer BYOK key for this provider — avoids consuming trial quota.
-        # Order by most recently used, with never-used keys last.
+        # Prefer a healthy BYOK key for this provider to avoid consuming trial quota.
+        # Order by most recently used so the actively-used key is preferred.
+        # nulls_last ensures never-used keys don't sort ahead of active ones.
         byok_key = (
             LLMProviderKey.objects.filter(team_id=team_id, provider=provider, state=LLMProviderKey.State.OK)
-            .order_by(models.F("last_used_at").desc(nulls_last=True))
+            .order_by(F("last_used_at").desc(nulls_last=True))
             .first()
         )
         if byok_key:
-            byok_key.last_used_at = timezone.now()
-            byok_key.save(update_fields=["last_used_at"])
+            LLMProviderKey.objects.filter(id=byok_key.id).update(last_used_at=timezone.now())
             return byok_key
 
         # No BYOK key — fall back to trial quota

@@ -581,10 +581,12 @@ class TestDynamicKeyResolution:
     @pytest.mark.asyncio
     @pytest.mark.django_db(transaction=True)
     @freeze_time("2025-01-15T12:00:00Z")
-    async def test_most_recently_used_byok_key_preferred(self, setup_data):
+    async def test_recently_used_key_preferred_over_never_used(self, setup_data):
+        """When multiple healthy keys exist, the most recently used one is
+        preferred over a never-used key (nulls_last ordering)."""
         team = setup_data["team"]
 
-        older_key = await sync_to_async(LLMProviderKey.objects.create)(
+        recently_used_key = await sync_to_async(LLMProviderKey.objects.create)(
             team=team,
             provider="openai",
             name="Recently Used Key",
@@ -620,7 +622,7 @@ class TestDynamicKeyResolution:
             )
 
             assert result["is_byok"] is True
-            assert result["key_id"] == str(older_key.id)
+            assert result["key_id"] == str(recently_used_key.id)
 
 
 class TestExecuteHogEvalActivity:

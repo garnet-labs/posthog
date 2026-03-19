@@ -732,7 +732,11 @@ class TestLLMProviderKeyDependentConfigs(APIBaseTest):
 
         evaluation.refresh_from_db()
         self.assertFalse(evaluation.enabled)
-        self.assertIsNone(evaluation.model_configuration)
+        # Model configuration is preserved so the user only needs to assign a
+        # new key, not reconfigure provider/model from scratch.
+        self.assertIsNotNone(evaluation.model_configuration)
+        model_config.refresh_from_db()
+        self.assertIsNone(model_config.provider_key)
 
     def test_delete_with_mismatched_provider_replacement_fails(self):
         openai_key = LLMProviderKey.objects.create(

@@ -117,6 +117,7 @@ export interface EvaluationConfig {
     trial_evals_used: number
     trial_evals_remaining: number
     active_provider_key: LLMProviderKey | null
+    trial_providers: LLMProvider[]
     created_at: string
     updated_at: string
 }
