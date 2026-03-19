@@ -9,21 +9,21 @@ import { issuesDataNodeLogic } from '../../logics/issuesDataNodeLogic'
 import { ORDER_BY_OPTIONS, issueQueryOptionsLogic } from './issueQueryOptionsLogic'
 
 export const IssueQueryOptions = (): JSX.Element => {
-    const { orderBy, orderDirection, useQueryV2 } = useValues(issueQueryOptionsLogic)
-    const { setOrderBy, setOrderDirection, setUseQueryV2 } = useActions(issueQueryOptionsLogic)
-    const hasQueryV2Flag = useFeatureFlag('ERROR_TRACKING_QUERY_V2')
+    const { orderBy, orderDirection, useQueryV3 } = useValues(issueQueryOptionsLogic)
+    const { setOrderBy, setOrderDirection, setUseQueryV3 } = useActions(issueQueryOptionsLogic)
+    const hasQueryV3Flag = useFeatureFlag('ERROR_TRACKING_FORCE_QUERY_V3')
 
     return (
         <span className="flex items-center justify-between gap-2 self-end">
             <Reload />
             <div className="flex items-center gap-2 self-end">
-                {hasQueryV2Flag && (
+                {hasQueryV3Flag && (
                     <LemonSwitch
-                        checked={useQueryV2}
-                        onChange={setUseQueryV2}
-                        label="v2 query"
+                        checked={useQueryV3}
+                        onChange={setUseQueryV3}
+                        label="v3 query"
                         size="small"
-                        tooltip="Use ClickHouse postgres connector join instead of separate Postgres queries"
+                        tooltip="Use denormalized ClickHouse table (no Postgres joins)"
                     />
                 )}
                 <div className="flex items-center gap-1">

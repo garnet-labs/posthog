@@ -1431,6 +1431,10 @@ def _use_error_tracking_issue_id_from_error_tracking_issue_overrides(database: D
         join_table=ErrorTrackingIssueFingerprintDenormalizedTable(),
         join_function=join_with_error_tracking_issue_fingerprint_denormalized_table,
     )
+    table.fields["issue_id_denormalized"] = ExpressionField(
+        name="issue_id_denormalized",
+        expr=parse_expr("exception_issue_denormalized.issue_id"),
+    )
     table.fields["issue_name"] = ExpressionField(
         name="issue_name",
         expr=parse_expr("exception_issue_denormalized.issue_name"),

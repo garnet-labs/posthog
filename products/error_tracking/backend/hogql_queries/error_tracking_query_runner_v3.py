@@ -1,6 +1,8 @@
 import datetime
 from typing import cast
 
+from django.core.exceptions import ValidationError
+
 from posthog.schema import (
     ErrorTrackingIssueFilter,
     ErrorTrackingQuery,
@@ -14,19 +16,21 @@ from posthog.hogql import ast
 from posthog.models.filters.mixins.utils import cached_property
 
 from products.error_tracking.backend.hogql_queries.error_tracking_query_runner_utils import (
-    build_event_where_exprs,
-    build_select_expressions,
     extract_aggregations,
     extract_event,
+    innermost_frame_attribute,
     order_direction,
+    search_tokenizer,
+    select_sparkline_array,
 )
 
 
 class ErrorTrackingQueryV3Builder:
     """ClickHouse-only query builder using the denormalized fingerprint table.
 
-    Replaces the V2 builder's 3 Postgres joins (issues, fingerprints, assignments)
-    with a single join to error_tracking_issue_fingerprint_denormalized.
+    Uses the HogQL virtual fields on events (issue_id_denormalized, issue_name,
+    issue_status, etc.) which trigger a LazyJoin to the denormalized table.
+    This avoids Postgres and the old overrides table entirely.
     """
 
     def __init__(self, query: ErrorTrackingQuery, date_from: datetime.datetime, date_to: datetime.datetime):
@@ -36,25 +40,10 @@ class ErrorTrackingQueryV3Builder:
 
     def build_query(self) -> ast.SelectQuery:
         return ast.SelectQuery(
-            select=self._outer_select_expressions(),
-            select_from=ast.JoinExpr(
-                table=self._inner_subquery(),
-                alias="agg",
-                next_join=ast.JoinExpr(
-                    join_type="INNER JOIN",
-                    table=self._denormalized_subquery(),
-                    alias="dn",
-                    constraint=ast.JoinConstraint(
-                        constraint_type="ON",
-                        expr=ast.CompareOperation(
-                            op=ast.CompareOperationOp.Eq,
-                            left=ast.Field(chain=["agg", "id"]),
-                            right=ast.Field(chain=["dn", "issue_id"]),
-                        ),
-                    ),
-                ),
-            ),
-            where=self._outer_where,
+            select=self._select_expressions(),
+            select_from=ast.JoinExpr(table=ast.Field(chain=["events"]), alias="e"),
+            where=ast.And(exprs=self._where_exprs()),
+            group_by=[ast.Field(chain=["id"])],
             order_by=[ast.OrderExpr(expr=ast.Field(chain=[self.query.orderBy]), order=order_direction(self.query))],
         )
 
@@ -91,106 +80,238 @@ class ErrorTrackingQueryV3Builder:
             )
         return results
 
-    def _inner_subquery(self) -> ast.SelectQuery:
-        return ast.SelectQuery(
-            select=build_select_expressions(self.query, self.date_from, self.date_to),
-            select_from=ast.JoinExpr(table=ast.Field(chain=["events"]), alias="e"),
-            where=ast.And(exprs=build_event_where_exprs(self.query, self.date_from, self.date_to)),
-            group_by=[ast.Field(chain=["id"])],
-        )
-
-    def _denormalized_subquery(self) -> ast.SelectQuery:
-        """Groups the denormalized table by issue_id, taking the latest version for each field."""
-        return ast.SelectQuery(
-            select=[
-                ast.Alias(alias="issue_id", expr=ast.Field(chain=["issue_id"])),
-                ast.Alias(
-                    alias="status",
-                    expr=self._argmax_field("issue_status"),
-                ),
-                ast.Alias(
-                    alias="name",
-                    expr=self._argmax_field("issue_name"),
-                ),
-                ast.Alias(
-                    alias="description",
-                    expr=self._argmax_field("issue_description"),
-                ),
-                ast.Alias(
-                    alias="assignee_user_id",
-                    expr=self._argmax_field("assigned_user_id"),
-                ),
-                ast.Alias(
-                    alias="assignee_role_id",
-                    expr=self._argmax_field("assigned_role_id"),
-                ),
-            ],
-            select_from=ast.JoinExpr(table=ast.Field(chain=["raw_error_tracking_issue_fingerprint_denormalized"])),
-            group_by=[ast.Field(chain=["issue_id"])],
-            having=ast.CompareOperation(
-                op=ast.CompareOperationOp.Eq,
-                left=self._argmax_field("is_deleted"),
-                right=ast.Constant(value=0),
-            ),
-        )
-
-    @staticmethod
-    def _argmax_field(field_name: str) -> ast.Call:
-        """argMax(field, version) — picks the value from the row with the highest version."""
-        return ast.Call(
-            name="argMax",
-            args=[
-                ast.Field(chain=[field_name]),
-                ast.Field(chain=["version"]),
-            ],
-        )
-
-    def _outer_select_expressions(self) -> list[ast.Expr]:
-        def from_agg(field: str) -> ast.Field:
-            return ast.Field(chain=["agg", field])
-
+    def _select_expressions(self) -> list[ast.Expr]:
         exprs: list[ast.Expr] = [
-            ast.Alias(alias="id", expr=from_agg("id")),
-            ast.Alias(alias="status", expr=ast.Field(chain=["dn", "status"])),
-            ast.Alias(alias="name", expr=ast.Field(chain=["dn", "name"])),
-            ast.Alias(alias="description", expr=ast.Field(chain=["dn", "description"])),
-            ast.Alias(alias="last_seen", expr=from_agg("last_seen")),
-            ast.Alias(alias="first_seen", expr=from_agg("first_seen")),
-            ast.Alias(alias="assignee_user_id", expr=ast.Field(chain=["dn", "assignee_user_id"])),
-            ast.Alias(alias="assignee_role_id", expr=ast.Field(chain=["dn", "assignee_role_id"])),
-            ast.Alias(alias="function", expr=from_agg("function")),
-            ast.Alias(alias="source", expr=from_agg("source")),
+            # issue_id from the denormalized table (not the old overrides table)
+            ast.Alias(alias="id", expr=ast.Field(chain=["e", "issue_id_denormalized"])),
+            # metadata from denormalized table via HogQL virtual fields
+            ast.Alias(alias="status", expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_status"])])),
+            ast.Alias(alias="name", expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_name"])])),
+            ast.Alias(
+                alias="description", expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_description"])])
+            ),
+            ast.Alias(
+                alias="assignee_user_id",
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_user_id"])]),
+            ),
+            ast.Alias(
+                alias="assignee_role_id",
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_role_id"])]),
+            ),
+            # timestamps from events
+            ast.Alias(alias="last_seen", expr=ast.Call(name="max", args=[ast.Field(chain=["e", "timestamp"])])),
+            ast.Alias(alias="first_seen", expr=ast.Call(name="min", args=[ast.Field(chain=["e", "timestamp"])])),
+            # frame info from events
+            ast.Alias(alias="function", expr=innermost_frame_attribute("$exception_functions")),
+            ast.Alias(alias="source", expr=innermost_frame_attribute("$exception_sources")),
         ]
 
         if self.query.withAggregations:
             exprs.extend(
                 [
-                    ast.Alias(alias="occurrences", expr=from_agg("occurrences")),
-                    ast.Alias(alias="sessions", expr=from_agg("sessions")),
-                    ast.Alias(alias="users", expr=from_agg("users")),
-                    ast.Alias(alias="volumeRange", expr=from_agg("volumeRange")),
+                    ast.Alias(
+                        alias="occurrences",
+                        expr=ast.Call(name="count", distinct=True, args=[ast.Field(chain=["e", "uuid"])]),
+                    ),
+                    ast.Alias(
+                        alias="sessions",
+                        expr=ast.Call(
+                            name="count",
+                            distinct=True,
+                            args=[
+                                ast.Call(
+                                    name="nullIf",
+                                    args=[ast.Field(chain=["e", "$session_id"]), ast.Constant(value="")],
+                                )
+                            ],
+                        ),
+                    ),
+                    ast.Alias(
+                        alias="users",
+                        expr=ast.Call(
+                            name="count",
+                            distinct=True,
+                            args=[
+                                ast.Call(
+                                    name="coalesce",
+                                    args=[
+                                        ast.Call(
+                                            name="nullIf",
+                                            args=[
+                                                ast.Call(name="toString", args=[ast.Field(chain=["e", "person_id"])]),
+                                                ast.Constant(value="00000000-0000-0000-0000-000000000000"),
+                                            ],
+                                        ),
+                                        ast.Field(chain=["e", "distinct_id"]),
+                                    ],
+                                )
+                            ],
+                        ),
+                    ),
+                    ast.Alias(
+                        alias="volumeRange",
+                        expr=select_sparkline_array(self.date_from, self.date_to, self.query.volumeResolution),
+                    ),
                 ]
             )
 
         if self.query.withFirstEvent:
-            exprs.append(ast.Alias(alias="first_event", expr=from_agg("first_event")))
+            exprs.append(
+                ast.Alias(
+                    alias="first_event",
+                    expr=ast.Call(
+                        name="argMin",
+                        args=[
+                            ast.Tuple(
+                                exprs=[
+                                    ast.Field(chain=["e", "uuid"]),
+                                    ast.Field(chain=["e", "distinct_id"]),
+                                    ast.Field(chain=["e", "timestamp"]),
+                                    ast.Field(chain=["e", "properties"]),
+                                ]
+                            ),
+                            ast.Field(chain=["e", "timestamp"]),
+                        ],
+                    ),
+                )
+            )
 
         if self.query.withLastEvent:
-            exprs.append(ast.Alias(alias="last_event", expr=from_agg("last_event")))
+            exprs.append(
+                ast.Alias(
+                    alias="last_event",
+                    expr=ast.Call(
+                        name="argMax",
+                        args=[
+                            ast.Tuple(
+                                exprs=[
+                                    ast.Field(chain=["e", "uuid"]),
+                                    ast.Field(chain=["e", "distinct_id"]),
+                                    ast.Field(chain=["e", "timestamp"]),
+                                    ast.Field(chain=["e", "properties"]),
+                                ]
+                            ),
+                            ast.Field(chain=["e", "timestamp"]),
+                        ],
+                    ),
+                )
+            )
 
-        exprs.append(ast.Alias(alias="library", expr=from_agg("library")))
+        exprs.append(
+            ast.Alias(
+                alias="library",
+                expr=ast.Call(
+                    name="argMax",
+                    args=[ast.Field(chain=["e", "properties", "$lib"]), ast.Field(chain=["e", "timestamp"])],
+                ),
+            )
+        )
 
         return exprs
 
-    @property
-    def _outer_where(self) -> ast.And | None:
-        exprs: list[ast.Expr] = []
+    def _where_exprs(self) -> list[ast.Expr]:
+        exprs: list[ast.Expr] = [
+            ast.CompareOperation(
+                op=ast.CompareOperationOp.Eq,
+                left=ast.Field(chain=["e", "event"]),
+                right=ast.Constant(value="$exception"),
+            ),
+            ast.Not(
+                expr=ast.Call(name="empty", args=[ast.Field(chain=["e", "issue_id_denormalized"])])
+            ),  # TODO: CHANGE THIS BEFORE GOING TO PROD!!!!
+            ast.Placeholder(expr=ast.Field(chain=["filters"])),
+        ]
 
+        if self.date_from:
+            exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.GtEq,
+                    left=ast.Field(chain=["e", "timestamp"]),
+                    right=ast.Call(name="toDateTime", args=[ast.Constant(value=self.date_from)]),
+                )
+            )
+
+        if self.date_to:
+            exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.LtEq,
+                    left=ast.Field(chain=["e", "timestamp"]),
+                    right=ast.Call(name="toDateTime", args=[ast.Constant(value=self.date_to)]),
+                )
+            )
+
+        if self.query.issueId:
+            exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.Eq,
+                    left=ast.Field(chain=["e", "issue_id_denormalized"]),
+                    right=ast.Constant(value=self.query.issueId),
+                )
+            )
+
+        if self.query.personId:
+            exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.Eq,
+                    left=ast.Field(chain=["e", "person_id"]),
+                    right=ast.Constant(value=self.query.personId),
+                )
+            )
+
+        if self.query.groupKey and self.query.groupTypeIndex is not None:
+            exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.Eq,
+                    left=ast.Field(chain=["e", f"$group_{self.query.groupTypeIndex}"]),
+                    right=ast.Constant(value=self.query.groupKey),
+                )
+            )
+
+        if self.query.searchQuery:
+            tokens = search_tokenizer(self.query.searchQuery)
+            if len(tokens) > 100:
+                raise ValidationError("Too many search tokens")
+
+            and_exprs: list[ast.Expr] = []
+            for token in tokens:
+                if not token:
+                    continue
+                or_exprs: list[ast.Expr] = []
+                props_to_search = {
+                    ("e", "properties"): [
+                        "$exception_types",
+                        "$exception_values",
+                        "$exception_sources",
+                        "$exception_functions",
+                        "email",
+                    ],
+                    ("e", "person", "properties"): ["email"],
+                }
+                for chain_prefix, properties in props_to_search.items():
+                    for prop in properties:
+                        or_exprs.append(
+                            ast.CompareOperation(
+                                op=ast.CompareOperationOp.Gt,
+                                left=ast.Call(
+                                    name="position",
+                                    args=[
+                                        ast.Call(name="lower", args=[ast.Field(chain=[*chain_prefix, prop])]),
+                                        ast.Call(name="lower", args=[ast.Constant(value=token)]),
+                                    ],
+                                ),
+                                right=ast.Constant(value=0),
+                            )
+                        )
+                and_exprs.append(ast.Or(exprs=or_exprs))
+
+            exprs.append(ast.And(exprs=and_exprs))
+
+        # issue-level filters
         if self.query.status and self.query.status != "all":
             exprs.append(
                 ast.CompareOperation(
                     op=ast.CompareOperationOp.Eq,
-                    left=ast.Field(chain=["dn", "status"]),
+                    left=ast.Field(chain=["e", "issue_status"]),
                     right=ast.Constant(value=self.query.status),
                 )
             )
@@ -200,7 +321,7 @@ class ErrorTrackingQueryV3Builder:
                 exprs.append(
                     ast.CompareOperation(
                         op=ast.CompareOperationOp.Eq,
-                        left=ast.Field(chain=["dn", "assignee_user_id"]),
+                        left=ast.Field(chain=["e", "assigned_user_id"]),
                         right=ast.Constant(value=self.query.assignee.id),
                     )
                 )
@@ -208,7 +329,7 @@ class ErrorTrackingQueryV3Builder:
                 exprs.append(
                     ast.CompareOperation(
                         op=ast.CompareOperationOp.Eq,
-                        left=ast.Field(chain=["dn", "assignee_role_id"]),
+                        left=ast.Field(chain=["e", "assigned_role_id"]),
                         right=ast.Constant(value=str(self.query.assignee.id)),
                     )
                 )
@@ -218,7 +339,7 @@ class ErrorTrackingQueryV3Builder:
             if expr is not None:
                 exprs.append(expr)
 
-        return ast.And(exprs=exprs) if exprs else None
+        return exprs
 
     def _extract_assignee(self, row: dict) -> dict | None:
         user_id = row.get("assignee_user_id")
@@ -245,10 +366,9 @@ class ErrorTrackingQueryV3Builder:
         key = "description" if prop.key == "issue_description" else prop.key
 
         field_chain_map: dict[str, list[str | int]] = {
-            "name": ["dn", "name"],
-            "description": ["dn", "description"],
-            "status": ["dn", "status"],
-            "first_seen": ["agg", "first_seen"],
+            "name": ["e", "issue_name"],
+            "description": ["e", "issue_description"],
+            "status": ["e", "issue_status"],
         }
 
         field_chain = field_chain_map.get(key)
@@ -260,8 +380,6 @@ class ErrorTrackingQueryV3Builder:
         operator = prop.operator
 
         def make_value(v) -> ast.Expr:
-            if key == "first_seen":
-                return ast.Call(name="toDateTime", args=[ast.Constant(value=str(v))])
             return ast.Constant(value=v)
 
         if operator == PropertyOperator.EXACT:
@@ -279,7 +397,7 @@ class ErrorTrackingQueryV3Builder:
 
         if operator == PropertyOperator.IS_NOT:
             raw = value if isinstance(value, list) else [value]
-            values: list[str | float | bool] = [v for v in raw if v is not None]
+            values = [v for v in raw if v is not None]
             if not values:
                 return None
             if len(values) == 1:
