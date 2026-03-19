@@ -10,7 +10,8 @@ use crate::{
     assignment_rules::{try_assignment_rules, Assignment},
     error::UnhandledError,
     issue_resolution::{
-        send_issue_created_alert, send_issue_reopened_alert, send_new_fingerprint_event, Issue,
+        send_issue_created_alert, send_issue_fingerprint_denormalized,
+        send_issue_reopened_alert, send_new_fingerprint_event, Issue,
         IssueFingerprintOverride,
     },
     metric_consts::{ISSUE_CREATED, ISSUE_LINKER_OPERATOR},
@@ -110,6 +111,8 @@ async fn resolve_issue(
             let assignment =
                 process_assignment(&mut conn, &context.team_manager, &issue, &event_properties)
                     .await?;
+            send_issue_fingerprint_denormalized(context, &issue, &fingerprint, assignment.as_ref())
+                .await?;
             let output_props: OutputErrProps = event_properties.to_output(issue.id)?;
             send_issue_reopened_alert(context, &issue, assignment, output_props, &event_timestamp)
                 .await?;
@@ -159,6 +162,8 @@ async fn resolve_issue(
             let assignment =
                 process_assignment(&mut conn, &context.team_manager, &issue, &event_properties)
                     .await?;
+            send_issue_fingerprint_denormalized(context, &issue, &fingerprint, assignment.as_ref())
+                .await?;
             let output_props: OutputErrProps = event_properties.to_output(issue.id)?;
             send_issue_reopened_alert(context, &issue, assignment, output_props, &event_timestamp)
                 .await?;
@@ -170,6 +175,8 @@ async fn resolve_issue(
 
         let output_props = event_properties.clone().to_output(issue.id)?;
         send_new_fingerprint_event(context, &issue, &output_props).await?;
+        send_issue_fingerprint_denormalized(context, &issue, &fingerprint, assignment.as_ref())
+            .await?;
         send_issue_created_alert(context, &issue, assignment, output_props, &event_timestamp)
             .await?;
         txn.commit().await?;
