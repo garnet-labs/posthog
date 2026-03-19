@@ -158,11 +158,14 @@ class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
         if isinstance(existing_props, list):
             sub_query.properties = [*existing_props, cohort_filter]
         else:
-            # PropertyGroupFilter — wrap with AND at the top level
+            # PropertyGroupFilter — preserve existing group semantics (e.g. OR) as a nested value
             sub_query.properties = PropertyGroupFilter(
                 type=FilterLogicalOperator.AND_,
                 values=[
-                    *existing_props.values,
+                    PropertyGroupFilterValue(
+                        type=existing_props.type,
+                        values=existing_props.values,
+                    ),
                     PropertyGroupFilterValue(
                         type=FilterLogicalOperator.AND_,
                         values=[cohort_filter],
