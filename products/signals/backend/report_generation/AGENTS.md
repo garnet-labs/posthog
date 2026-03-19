@@ -63,7 +63,9 @@ They are not production entrypoints.
 
 File: `../management/commands/analyze_report.py`
 
-Runs the agentic flow against synthetic signals.
+Local dev tool (DEBUG only). Runs the agentic research/update flow against synthetic signals.
+Will be reworked into an eval harness — keeping it now preserves coverage of the multi-turn
+research path while the eval infrastructure is built.
 
 - `python manage.py analyze_report research`
   Fresh research run from the hardcoded synthetic signals.
@@ -78,7 +80,9 @@ Use this command when changing prompt logic in `research.py`.
 
 File: `../management/commands/select_repo.py`
 
-Tests repo selection in isolation against synthetic JS SDK signals.
+Local dev tool (DEBUG only). Tests repo selection in isolation against synthetic JS SDK signals.
+Will be reworked into an eval harness — keeping it now preserves coverage of the sandbox-based
+repo selection path.
 
 - `python manage.py select_repo`
   Uses the team's actual GitHub integrations to list candidate repos.

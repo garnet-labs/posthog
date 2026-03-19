@@ -1,7 +1,8 @@
-"""DEBUG ONLY: local sandbox utility for testing repository selection in isolation.
+"""Local dev tool for testing repository selection in isolation. DEBUG only.
 
-This management command is not used in production. It exercises the repo selection
-flow against synthetic signals and optionally a custom candidate repo list.
+Exercises the repo selection flow against synthetic signals and optionally a custom
+candidate repo list. Intended to be reworked into an eval harness — keeping it now
+preserves coverage of the sandbox-based repo selection path.
 """
 
 import asyncio
@@ -86,7 +87,7 @@ DEFAULT_CANDIDATE_REPOS = [
 
 
 class Command(BaseCommand):
-    help = "DEBUG ONLY: local testing utility for the repo selection flow. Not used in production."
+    help = "Local dev tool: test repo selection in isolation. DEBUG only. Will be reworked into evals."
 
     def _flushing_write(self, msg: str) -> None:
         self.stdout.write(msg)

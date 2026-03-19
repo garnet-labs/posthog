@@ -1,7 +1,8 @@
-"""DEBUG ONLY: local sandbox utility for manually testing the agentic signals report flow.
+"""Local dev tool for manually testing the agentic signals report flow. DEBUG only.
 
-This management command is not used in production. It exists only to exercise the
-research and update flows against synthetic inputs and saved fixtures during local development.
+Exercises the research and update flows against synthetic inputs and saved fixtures.
+Intended to be reworked into an eval harness — keeping it now preserves coverage of
+the multi-turn research path while the eval infrastructure is built.
 """
 
 import json
@@ -157,7 +158,7 @@ def load_previous_report_fixture() -> tuple[str, ReportResearchOutput]:
 
 
 class Command(BaseCommand):
-    help = "DEBUG ONLY: local testing utility for the agentic signals report flow. Not used in production."
+    help = "Local dev tool: test the agentic report research/update flow. DEBUG only. Will be reworked into evals."
 
     def _flushing_write(self, msg: str) -> None:
         self.stdout.write(msg)
