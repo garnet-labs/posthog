@@ -3801,6 +3801,11 @@ export interface DateRange {
      * @default false
      * */
     explicitDate?: boolean | null
+    /** When true, exclude the current incomplete time interval from results.
+     * Only applies when date_to is not explicitly set (rolling date ranges).
+     * Defaults to true for trends queries.
+     */
+    hideIncompleteData?: boolean | null
 }
 
 export interface ResolvedDateRangeResponse {

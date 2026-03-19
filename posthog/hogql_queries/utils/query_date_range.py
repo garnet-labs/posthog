@@ -60,6 +60,7 @@ class QueryDateRange:
         interval_count: Optional[int] = None,
         timezone_info: Optional[ZoneInfo] = None,
         exact_timerange: bool = False,  # Setting this to true stops a relative time range from including the time between the intervalStart and the date_range start, as well as cuts off the interval at precisely now()
+        hide_incomplete_data: bool = False,
     ) -> None:
         self._team = team
         self._date_range = date_range
@@ -69,6 +70,7 @@ class QueryDateRange:
         self._earliest_timestamp_fallback = earliest_timestamp_fallback
         self._timezone_info = timezone_info or self._team.timezone_info
         self._exact_timerange = exact_timerange
+        self._hide_incomplete_data = hide_incomplete_data
 
         # Hour intervals have strange behaviour in clickhouse:
         # From the docs:
@@ -101,8 +103,22 @@ class QueryDateRange:
         elif self._exact_timerange:
             return date_to
 
+        is_relative = not self._date_range or not self._date_range.date_to or delta_mapping is not None
+        has_no_explicit_date_to = not self._date_range or not self._date_range.date_to
+
+        # When hiding incomplete data, truncate to end of the previous completed interval.
+        # Only applies to rolling date ranges where no date_to was specified.
+        if (
+            self._hide_incomplete_data
+            and has_no_explicit_date_to
+            and compare_interval_length(self.interval_type, ">=", IntervalType.HOUR)
+        ):
+            current_interval_start = self.align_with_interval(date_to)
+            truncated = current_interval_start - timedelta(microseconds=1)
+            if truncated >= self.date_from():
+                return truncated
+
         if not self._date_range or not self._date_range.explicitDate:
-            is_relative = not self._date_range or not self._date_range.date_to or delta_mapping is not None
             if compare_interval_length(self.interval_type, ">", IntervalType.HOUR):
                 date_to = date_to.replace(hour=23, minute=59, second=59, microsecond=999999)
             elif is_relative:

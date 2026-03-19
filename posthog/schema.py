@@ -1130,6 +1130,14 @@ class DateRange(BaseModel):
             " rounding to the start and end of period."
         ),
     )
+    hideIncompleteData: bool | None = Field(
+        default=None,
+        description=(
+            "When true, exclude the current incomplete time interval from results."
+            " Only applies when date_to is not explicitly set (rolling date ranges)."
+            " Defaults to true for trends queries."
+        ),
+    )
 
 
 class DatetimeDay(RootModel[AwareDatetime]):

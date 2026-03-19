@@ -83,6 +83,7 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                 'goalLines',
                 'compareFilter',
                 'interval',
+                'dateRange',
                 'enabledIntervals',
                 'breakdownFilter',
                 'showValuesOnSeries',
@@ -286,8 +287,14 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
         ],
 
         incompletenessOffsetFromEnd: [
-            (s) => [s.results, s.interval],
-            (results, interval) => {
+            (s) => [s.results, s.interval, s.dateRange],
+            (results, interval, dateRange) => {
+                // When incomplete data is hidden server-side, no dotted line needed
+                const hideIncomplete = dateRange?.hideIncompleteData ?? true
+                if (hideIncomplete && !dateRange?.date_to) {
+                    return 0
+                }
+
                 // Returns negative number of points to paint over starting from end of array
                 if (results[0]?.days === undefined) {
                     return 0

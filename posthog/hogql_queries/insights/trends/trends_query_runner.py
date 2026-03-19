@@ -734,6 +734,12 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
         return self.query.dateRange and self.query.dateRange.explicitDate
 
     @cached_property
+    def _hide_incomplete_data(self) -> bool:
+        hide = self.query.dateRange.hideIncompleteData if self.query.dateRange else None
+        # Default to True for trends: exclude incomplete current period
+        return hide if hide is not None else True
+
+    @cached_property
     def query_date_range(self):
         interval = IntervalType.DAY if self._trends_display.is_total_value() else self.query.interval
 
@@ -743,6 +749,7 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
             interval=interval,
             now=datetime.now(),
             exact_timerange=self.exact_timerange,
+            hide_incomplete_data=self._hide_incomplete_data,
         )
 
     @cached_property
@@ -756,6 +763,7 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
                 now=datetime.now(),
                 compare_to=self.query.compareFilter.compare_to,
                 exact_timerange=self.exact_timerange,
+                hide_incomplete_data=self._hide_incomplete_data,
             )
         return QueryPreviousPeriodDateRange(
             date_range=self.query.dateRange,
@@ -763,6 +771,7 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
             interval=self.query.interval,
             now=datetime.now(),
             exact_timerange=self.exact_timerange,
+            hide_incomplete_data=self._hide_incomplete_data,
         )
 
     def series_event(self, series: Union[EventsNode, ActionsNode, DataWarehouseNode, GroupNode]) -> str | None:
