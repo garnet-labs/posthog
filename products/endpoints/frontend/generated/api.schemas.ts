@@ -23,6 +23,11 @@ export interface DateRangeApi {
      * @nullable
      */
     explicitDate?: boolean | null
+    /**
+     * When true, exclude the current incomplete time interval from results. Only applies when date_to is not explicitly set (rolling date ranges). Defaults to true for trends queries.
+     * @nullable
+     */
+    hideIncompleteData?: boolean | null
 }
 
 export type PropertyOperatorApi = (typeof PropertyOperatorApi)[keyof typeof PropertyOperatorApi]
