@@ -42,4 +42,5 @@ export const keyBinds: Record<string, string[]> = {
     allApps: ['g', 'then', '2'],
     theme: ['g', 'then', 't'],
     jumpToTimestamp: ['j', 'then', 't'],
+    toggleSystemTables: ['command', 'shift', '.'],
 }

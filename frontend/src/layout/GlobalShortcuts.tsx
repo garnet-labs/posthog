@@ -173,7 +173,7 @@ export function GlobalShortcuts(): null {
 
     useAppShortcut({
         name: 'toggle-system-tables',
-        keybind: [],
+        keybind: [keyBinds.toggleSystemTables],
         intent: systemTablesEnabled ? 'Hide system tables in insights' : 'Show system tables in insights',
         interaction: 'function',
         callback: () => toggleSystemTablesEnabled(),
