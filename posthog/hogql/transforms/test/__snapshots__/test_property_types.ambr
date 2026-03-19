@@ -96,7 +96,7 @@
 # name: TestPropertyTypes.test_resolve_property_types_event_person_poe_on
   '''
   
-  SELECT replaceRegexpAll(nullIf(nullIf(JSONExtractRaw(events.person_properties, %(hogql_val_0)s), ''), 'null'), '^"|"$', '') AS provided_timestamp 
+  SELECT parseDateTime64BestEffortOrNull(replaceRegexpAll(nullIf(nullIf(JSONExtractRaw(events.person_properties, %(hogql_val_0)s), ''), 'null'), '^"|"$', ''), 6, %(hogql_val_1)s) AS provided_timestamp 
   FROM events 
   WHERE equals(events.team_id, 420) 
   LIMIT 50000
