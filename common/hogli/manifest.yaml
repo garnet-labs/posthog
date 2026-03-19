@@ -662,6 +662,10 @@ tools:
         bin_script: phrocs
         description: Run phrocs directly with a custom mprocs-format YAML config
         hidden: true
+    phtest:build:
+        cmd: cd tools/phtest && make build && cp dist/phtest ../../bin/phtest
+        description: Build the phtest binary from source (Go required; run once or after
+            changing tools/phtest/)
     ci:wait:for:docker:
         bin_script: ci-wait-for-docker
         description: Launch Docker Compose services in CI and later wait for readiness
@@ -724,3 +728,7 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
+    phtest:
+        bin_script: phtest
+        description: 'TODO: add description for phtest'
+        hidden: true

@@ -157,6 +157,7 @@ bin/hobby-installer/hobby-installer.log
 
 # phrocs binary
 bin/phrocs
+bin/phtest
 
 # Debug output of our session summaries product
 .session-summaries
