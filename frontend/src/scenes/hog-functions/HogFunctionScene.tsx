@@ -78,6 +78,16 @@ export const hogFunctionSceneLogic = kea<hogFunctionSceneLogicType>([
     })),
     selectors({
         logicProps: [() => [(_, props) => props], (props) => props],
+        supportsBackfills: [
+            (s) => [s.type, s.configuration],
+            (type: HogFunctionTypeType, configuration: HogFunctionType | null): boolean => {
+                if (type !== 'destination') {
+                    return false
+                }
+                const source = configuration?.filters?.source ?? 'events'
+                return source === 'events'
+            },
+        ],
         alertId: [
             (s) => [s.configuration],
             (configuration: HogFunctionType | null): string | undefined => {
@@ -356,7 +366,7 @@ function HogFunctionHeader(): JSX.Element {
 }
 
 export function HogFunctionScene(): JSX.Element {
-    const { currentTab, loading, loaded, logicProps, type, teamHasCohortFilters, currentProjectId } =
+    const { currentTab, loading, loaded, logicProps, type, teamHasCohortFilters, currentProjectId, supportsBackfills } =
         useValues(hogFunctionSceneLogic)
     const { setCurrentTab } = useActions(hogFunctionSceneLogic)
     const { featureFlags } = useValues(featureFlagLogic)
@@ -415,7 +425,7 @@ export function HogFunctionScene(): JSX.Element {
                   content: <HogFunctionTesting />,
               },
 
-        type === 'destination' && featureFlags[FEATURE_FLAGS.BACKFILL_WORKFLOWS_DESTINATION]
+        supportsBackfills && featureFlags[FEATURE_FLAGS.BACKFILL_WORKFLOWS_DESTINATION]
             ? {
                   label: 'Backfills',
                   key: 'backfills',

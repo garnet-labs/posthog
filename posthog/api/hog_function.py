@@ -685,6 +685,14 @@ class HogFunctionViewSet(
         if hog_function.batch_export_id:
             return Response({"error": "Backfills already enabled for this function"}, status=400)
 
+        # Only event-sourced destinations support backfills
+        source = (hog_function.filters or {}).get("source", "events")
+        if source != "events":
+            return Response(
+                {"error": "Backfills are only supported for event-sourced destinations."},
+                status=400,
+            )
+
         # Check feature flag for backfill-workflows-destination
         team = Team.objects.get(id=self.team_id)
         if not posthoganalytics.feature_enabled(
