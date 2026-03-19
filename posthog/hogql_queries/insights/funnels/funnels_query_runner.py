@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from math import ceil
 from typing import Any, Optional
 
+import structlog
+
 from posthog.schema import (
     BreakdownType,
     CachedFunnelsQueryResponse,
@@ -33,6 +35,8 @@ from posthog.models import Team
 from posthog.models.cohort import Cohort
 from posthog.models.filters.mixins.utils import cached_property
 from posthog.queries.breakdown_props import NOT_IN_COHORT_ID
+
+logger = structlog.get_logger(__name__)
 
 
 class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
@@ -180,20 +184,39 @@ class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
         return runner._calculate_single_query()
 
     def _calculate_single_cohort_breakdown(self) -> FunnelsQueryResponse:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from django.db import connection
+
         cohort_id = self._single_cohort_id
         assert cohort_id is not None
 
         try:
             cohort = Cohort.objects.get(pk=cohort_id, team__project_id=self.team.project_id)
-            cohort_name = cohort.name
+            cohort_name = cohort.name or str(cohort_id)
         except Cohort.DoesNotExist:
             cohort_name = str(cohort_id)
+
+        logger.info(
+            "funnel_single_cohort_split",
+            cohort_id=cohort_id,
+            cohort_name=cohort_name,
+            team_id=self.team.pk,
+        )
 
         in_query = self._create_cohort_sub_query(cohort_id, negate=False)
         not_in_query = self._create_cohort_sub_query(cohort_id, negate=True)
 
-        in_response = self._run_sub_query(in_query)
-        not_in_response = self._run_sub_query(not_in_query)
+        if connection.in_atomic_block:
+            # Inside a transaction (e.g. tests) — threads can't see uncommitted data
+            in_response = self._run_sub_query(in_query)
+            not_in_response = self._run_sub_query(not_in_query)
+        else:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                in_future = executor.submit(self._run_sub_query, in_query)
+                not_in_future = executor.submit(self._run_sub_query, not_in_query)
+                in_response = in_future.result()
+                not_in_response = not_in_future.result()
 
         timings = [*(in_response.timings or []), *(not_in_response.timings or [])]
         hogql = in_response.hogql or ""

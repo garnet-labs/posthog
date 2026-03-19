@@ -1623,6 +1623,75 @@ def funnel_breakdown_test_factory(funnel_order_type: FunnelOrderType):
             assert not_in_cohort_results[0]["count"] == 1
             assert not_in_cohort_results[1]["count"] == 1
 
+        def test_funnel_single_cohort_breakdown_no_matching_events(self):
+            # Cohort exists with members, but no one performs the funnel events
+            _create_person(
+                distinct_ids=["person_in_cohort"],
+                team_id=self.team.pk,
+                properties={"key": "value"},
+            )
+
+            cohort = Cohort.objects.create(
+                team=self.team,
+                name="no_events_cohort",
+                groups=[{"properties": [{"key": "key", "value": "value", "type": "person"}]}],
+            )
+            cohort.calculate_people_ch(pending_version=0)
+
+            query = FunnelsQuery(
+                series=[
+                    EventsNode(event="sign up"),
+                    EventsNode(event="play movie"),
+                ],
+                dateRange=DateRange(date_from="2020-01-01", date_to="2020-01-08"),
+                funnelsFilter=FunnelsFilter(funnelWindowInterval=7),
+                breakdownFilter=BreakdownFilter(
+                    breakdown=[cohort.pk],
+                    breakdown_type=BreakdownType.COHORT,
+                ),
+            )
+
+            results = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+            assert len(results) == 2
+            breakdown_labels = {r[0]["breakdown"] for r in results}
+            assert "no_events_cohort" in breakdown_labels
+            assert "Not in no_events_cohort" in breakdown_labels
+
+            for group in results:
+                assert group[0]["count"] == 0
+                assert group[1]["count"] == 0
+
+        def test_funnel_single_cohort_breakdown_empty_results(self):
+            # No events at all — both groups should return zero-count steps
+            cohort = Cohort.objects.create(
+                team=self.team,
+                name="empty_cohort",
+                groups=[{"properties": [{"key": "key", "value": "value", "type": "person"}]}],
+            )
+            cohort.calculate_people_ch(pending_version=0)
+
+            query = FunnelsQuery(
+                series=[
+                    EventsNode(event="sign up"),
+                    EventsNode(event="play movie"),
+                ],
+                dateRange=DateRange(date_from="2020-01-01", date_to="2020-01-08"),
+                funnelsFilter=FunnelsFilter(funnelWindowInterval=7),
+                breakdownFilter=BreakdownFilter(
+                    breakdown=[cohort.pk],
+                    breakdown_type=BreakdownType.COHORT,
+                ),
+            )
+
+            results = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+            assert len(results) == 2
+
+            for group in results:
+                assert group[0]["count"] == 0
+                assert group[1]["count"] == 0
+
         def test_basic_funnel_default_funnel_days_breakdown_event(self):
             events_by_person = {
                 "user_1": [
