@@ -123,7 +123,9 @@ class SignalReport(UUIDModel):
 
         match (self.status, new_status):
             # Pipeline transitions
-            case (S.POTENTIAL, S.CANDIDATE):
+            # - POTENTIAL -> CANDIDATE when the report is selected for summary generation
+            # - READY -> CANDIDATE to update the report with new signals context (every N signals)
+            case (S.POTENTIAL | S.READY, S.CANDIDATE):
                 self.promoted_at = timezone.now()
                 updated_fields.add("promoted_at")
 
