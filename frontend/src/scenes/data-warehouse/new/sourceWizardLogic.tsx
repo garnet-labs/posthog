@@ -38,9 +38,9 @@ import {
     manualLinkSources,
 } from '~/types'
 
-import { restoreSourceFormState } from '../external/forms/DataWarehouseIntegrationChoice'
 import { dataWarehouseSettingsLogic } from '../settings/dataWarehouseSettingsLogic'
 import { dataWarehouseTableLogic } from './dataWarehouseTableLogic'
+import { restoreSourceFormState } from './sourceWizardFormStorage'
 import type { sourceWizardLogicType } from './sourceWizardLogicType'
 
 export const SSH_FIELD: SourceFieldSwitchGroupConfig = {
