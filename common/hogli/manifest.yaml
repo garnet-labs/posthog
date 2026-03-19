@@ -311,6 +311,9 @@ build:
             - build:openapi-mcp
             - build:openapi-mcp-tools
         description: Generate OpenAPI schema and TypeScript types from the backend
+    build:ci-diagrams:
+        bin_script: generate-ci-diagrams.py
+        description: Regenerate Mermaid DAG diagrams for top CI workflows
     build:grammar:
         cmd: pnpm grammar:build
         description: Generate HogQL grammar definitions (Python and C++)
@@ -724,6 +727,3 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
-    generate:ci:diagrams:
-        bin_script: generate-ci-diagrams.py
-        description: Regenerate Mermaid DAG diagrams for top CI workflows

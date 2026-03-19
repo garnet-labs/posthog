@@ -22,7 +22,7 @@ regenerate the CI visualization diagrams so they stay in sync.
 1. Run the generator:
 
    ```bash
-   python bin/generate-ci-diagrams.py
+   hogli build:ci-diagrams
    ```
 
 2. Review the diff in `docs/internal/ci/` to verify the diagrams
@@ -33,7 +33,7 @@ regenerate the CI visualization diagrams so they stay in sync.
 ## Regenerating a single workflow
 
 ```bash
-python bin/generate-ci-diagrams.py ci-backend.yml
+hogli build:ci-diagrams ci-backend.yml
 ```
 
 ## Adding a new workflow to the diagram set
