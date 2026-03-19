@@ -10,12 +10,14 @@ import { dayjs } from 'lib/dayjs'
 import { BatchExportRun, GroupedBatchExportRuns, RawBatchExportRun } from '~/types'
 
 import { batchExportBackfillModalLogic } from './batchExportBackfillModalLogic'
+import { BatchExportContext } from './batchExportBackfillsLogic'
 import { batchExportDataLogic } from './batchExportDataLogic'
 import type { batchExportRunsLogicType } from './batchExportRunsLogicType'
 
 const DEFAULT_DATE_FROM = '-2d'
 export interface BatchExportRunsLogicProps {
     id: string
+    context?: BatchExportContext
 }
 
 export const batchExportRunsLogic = kea<batchExportRunsLogicType>([
@@ -78,6 +80,10 @@ export const batchExportRunsLogic = kea<batchExportRunsLogicType>([
         ],
     }),
     selectors({
+        recordLabel: [
+            () => [(_, props) => props],
+            (props: BatchExportRunsLogicProps): string => (props.context === 'hog_function' ? 'events' : 'rows'),
+        ],
         hasMoreRunsToLoad: [(s) => [s.runsPaginatedResponse], (runsPaginatedResponse) => !!runsPaginatedResponse?.next],
         loading: [
             (s) => [s.runsPaginatedResponseLoading],

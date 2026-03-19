@@ -21,5 +21,5 @@ export function HogFunctionRuns({ id }: HogFunctionBackfillsLogicProps): JSX.Ele
         )
     }
 
-    return <BatchExportRuns id={configuration.batch_export_id!} />
+    return <BatchExportRuns id={configuration.batch_export_id!} context="hog_function" />
 }
