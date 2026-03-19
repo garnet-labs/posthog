@@ -713,7 +713,7 @@ class HogFunctionViewSet(
         batch_export_data = {
             "name": hog_function.name,
             "paused": True,
-            "interval": "day",
+            "interval": "hour",
             "model": "events",
             "filters": hog_function.filters.get("events", []) if hog_function.filters else [],
             "destination": {
