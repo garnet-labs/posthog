@@ -384,6 +384,8 @@ class ErrorTrackingQueryV3Builder:
         operator = prop.operator
 
         def make_value(v) -> ast.Expr:
+            if key == "first_seen":
+                return ast.Call(name="toDateTime", args=[ast.Constant(value=str(v))])
             return ast.Constant(value=v)
 
         if operator == PropertyOperator.EXACT:
