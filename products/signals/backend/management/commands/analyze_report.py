@@ -8,6 +8,7 @@ the multi-turn research path while the eval infrastructure is built.
 import json
 import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from django.conf import settings
@@ -42,7 +43,7 @@ TEST_SIGNALS = [
         source_type="enhancement",
         source_id="42606",
         weight=0.5,
-        timestamp="2025-12-03T16:21:28Z",
+        timestamp=datetime(2025, 12, 3, 16, 21, 28, tzinfo=UTC),
         extra={
             "labels": ["feature/funnels", "team/product-analytics"],
             "url": "https://github.com/PostHog/posthog/issues/42606",
@@ -62,7 +63,7 @@ TEST_SIGNALS = [
         source_type="enhancement",
         source_id="42995",
         weight=0.5,
-        timestamp="2025-12-09T00:56:33Z",
+        timestamp=datetime(2025, 12, 9, 0, 56, 33, tzinfo=UTC),
         extra={
             "labels": ["feature/funnels", "team/product-analytics"],
             "url": "https://github.com/PostHog/posthog/issues/42995",
@@ -82,7 +83,7 @@ TEST_SIGNALS = [
         source_type="enhancement",
         source_id="42996",
         weight=0.5,
-        timestamp="2025-12-09T00:58:16Z",
+        timestamp=datetime(2025, 12, 9, 0, 58, 16, tzinfo=UTC),
         extra={
             "labels": ["feature/funnels", "team/product-analytics"],
             "url": "https://github.com/PostHog/posthog/issues/42996",
@@ -102,7 +103,7 @@ TEST_SIGNALS = [
         source_type="bug",
         source_id="44891",
         weight=0.8,
-        timestamp="2025-12-11T14:32:07Z",
+        timestamp=datetime(2025, 12, 11, 14, 32, 7, tzinfo=UTC),
         extra={
             "labels": ["feature/funnels", "team/product-analytics"],
         },
@@ -121,7 +122,7 @@ UPDATE_SIGNAL = SignalData(
     source_type="enhancement",
     source_id="43310",
     weight=0.6,
-    timestamp="2025-12-13T09:41:05Z",
+    timestamp=datetime(2025, 12, 13, 9, 41, 5, tzinfo=UTC),
     extra={
         "labels": ["feature/funnels", "team/product-analytics"],
         "url": "https://github.com/PostHog/posthog/issues/43310",
