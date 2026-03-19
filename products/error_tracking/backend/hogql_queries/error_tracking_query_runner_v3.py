@@ -102,7 +102,7 @@ class ErrorTrackingQueryV3Builder:
             ast.Alias(alias="last_seen", expr=ast.Call(name="max", args=[ast.Field(chain=["e", "timestamp"])])),
             ast.Alias(
                 alias="first_seen",
-                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_first_seen"])]),
+                expr=ast.Call(name="min", args=[ast.Field(chain=["e", "issue_first_seen"])]),
             ),
             # frame info from events
             ast.Alias(alias="function", expr=innermost_frame_attribute("$exception_functions")),
@@ -219,9 +219,6 @@ class ErrorTrackingQueryV3Builder:
                 left=ast.Field(chain=["e", "event"]),
                 right=ast.Constant(value="$exception"),
             ),
-            ast.Not(
-                expr=ast.Call(name="empty", args=[ast.Field(chain=["e", "issue_id_denormalized"])])
-            ),  # TODO: CHANGE THIS BEFORE GOING TO PROD!!!!
             ast.Placeholder(expr=ast.Field(chain=["filters"])),
         ]
 
