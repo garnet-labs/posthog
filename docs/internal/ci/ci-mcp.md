@@ -52,11 +52,11 @@ Edge labels show the change-detection output that gates the job.
 
 ## Job details
 
-| Job                 | Depends on                                                      | Condition                                | Matrix |
-| ------------------- | --------------------------------------------------------------- | ---------------------------------------- | ------ |
-| `changes`           | -                                                               | -                                        | -      |
-| `build`             | changes                                                         | mcp                                      | -      |
-| `integration-tests` | changes                                                         | mcp                                      | -      |
-| `unit-tests`        | changes                                                         | mcp                                      | -      |
-| `handle-snapshots`  | changes, unit-tests                                             | mcp && github.event_name == 'pull_req... | -      |
-| `mcp_tests`         | changes, build, unit-tests, integration-tests, handle-snapshots | -                                        | -      |
+| Job                 | Depends on                                                      | Condition                                                                                                                                                                                                                          | Matrix |
+| ------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `changes`           | -                                                               | -                                                                                                                                                                                                                                  | -      |
+| `build`             | changes                                                         | mcp                                                                                                                                                                                                                                | -      |
+| `integration-tests` | changes                                                         | mcp                                                                                                                                                                                                                                | -      |
+| `unit-tests`        | changes                                                         | mcp                                                                                                                                                                                                                                | -      |
+| `handle-snapshots`  | changes, unit-tests                                             | mcp && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.actor, '[bot]') && github.actor != 'posthog-bot' && !contains(github.actor, 'github-actions') | -      |
+| `mcp_tests`         | changes, build, unit-tests, integration-tests, handle-snapshots | -                                                                                                                                                                                                                                  | -      |

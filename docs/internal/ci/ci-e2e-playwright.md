@@ -47,10 +47,10 @@ Edge labels show the change-detection output that gates the job.
 
 ## Job details
 
-| Job                  | Depends on                     | Condition                                  | Matrix |
-| -------------------- | ------------------------------ | ------------------------------------------ | ------ |
-| `changes`            | -                              | github.event_name == 'push' \|\| github... | -      |
-| `playwright`         | changes                        | shouldRun                                  | -      |
-| `capture-run-time`   | changes, playwright            | github.actor != 'dependabot[bot]' && ...   | -      |
-| `handle-screenshots` | playwright, changes            | needs.changes.outputs.mode == 'update...   | -      |
-| `playwright_tests`   | playwright, handle-screenshots | -                                          | -      |
+| Job                  | Depends on                     | Condition                                                                                                                                                                                                                                             | Matrix |
+| -------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `changes`            | -                              | github.event_name == 'push' \|\| github.event.pull_request.head.repo.full_name == github.repository                                                                                                                                                   | -      |
+| `playwright`         | changes                        | shouldRun                                                                                                                                                                                                                                             | -      |
+| `capture-run-time`   | changes, playwright            | github.actor != 'dependabot[bot]' && shouldRun && ( (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'PostHog/posthog') \|\| (github.event_name != 'pull_request' && github.repository == 'PostHog/posthog')) | -      |
+| `handle-screenshots` | playwright, changes            | needs.changes.outputs.mode == 'update' && shouldRun && github.event.pull_request.head.repo.full_name == github.repository                                                                                                                             | -      |
+| `playwright_tests`   | playwright, handle-screenshots | -                                                                                                                                                                                                                                                     | -      |

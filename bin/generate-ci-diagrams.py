@@ -152,15 +152,6 @@ def normalize_condition(raw: str) -> str:
     return cleaned
 
 
-def _truncate_text(text: str) -> str:
-    """Truncate text for compact display."""
-    if not text:
-        return ""
-    if len(text) > 40:
-        return text[:37] + "..."
-    return text
-
-
 def parse_condition(raw: str) -> ConditionInfo:
     """Extract dependency gate labels and a summary from a job-level if: expression."""
     cleaned = normalize_condition(raw)
@@ -180,22 +171,9 @@ def parse_condition(raw: str) -> ConditionInfo:
 
     simplified = match_pattern.sub(replacement, cleaned)
 
-    # Treat always() as flow-control noise for display when the remaining
-    # expression is otherwise a simple composition of output gates.
+    # Strip always() prefix -- it's flow-control noise for display purposes.
     simplified = re.sub(r"\balways\(\)\s*&&\s*", "", simplified).strip()
-    is_simple_gate = (
-        bool(edge_labels_by_dep)
-        and not re.search(r"[=!<>]", simplified)
-        and not re.search(
-            r"\b(github|steps|runner|matrix|env|inputs|vars|secrets|contains|failure|success|cancelled)\b",
-            simplified,
-        )
-    )
-
-    if is_simple_gate:
-        summary = simplified
-    else:
-        summary = _truncate_text(simplified)
+    summary = simplified
 
     if summary == "always()":
         summary = ""
