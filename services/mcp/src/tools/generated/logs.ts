@@ -9,7 +9,6 @@ import {
     LogsAlertsPartialUpdateBody,
     LogsAlertsPartialUpdateParams,
     LogsAlertsRetrieveParams,
-    LogsSparklineCreateBody,
 } from '@/generated/logs/api'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
 
@@ -164,31 +163,10 @@ const logsAlertsDestroy = (): ToolBase<typeof LogsAlertsDestroySchema, unknown> 
     },
 })
 
-const LogsSparklineCreateSchema = LogsSparklineCreateBody
-
-const logsSparklineCreate = (): ToolBase<typeof LogsSparklineCreateSchema, unknown> => ({
-    name: 'logs-sparkline-create',
-    schema: LogsSparklineCreateSchema,
-    handler: async (context: Context, params: z.infer<typeof LogsSparklineCreateSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const body: Record<string, unknown> = {}
-        if (params.query !== undefined) {
-            body['query'] = params.query
-        }
-        const result = await context.api.request<unknown>({
-            method: 'POST',
-            path: `/api/projects/${projectId}/logs/sparkline/`,
-            body,
-        })
-        return result
-    },
-})
-
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'logs-alerts-list': logsAlertsList,
     'logs-alerts-create': logsAlertsCreate,
     'logs-alerts-retrieve': logsAlertsRetrieve,
     'logs-alerts-partial-update': logsAlertsPartialUpdate,
     'logs-alerts-destroy': logsAlertsDestroy,
-    'logs-sparkline-create': logsSparklineCreate,
 }

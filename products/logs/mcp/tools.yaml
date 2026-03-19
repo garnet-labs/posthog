@@ -117,17 +117,7 @@ tools:
         enabled: false
     logs-sparkline-create:
         operation: logs_sparkline_create
-        enabled: true
-        scopes:
-            - logs:read
-        annotations:
-            readOnly: true
-            destructive: false
-            idempotent: true
-        title: Logs sparkline
-        description: >
-            Get a sparkline visualization of log volume over time. Returns bucketed log counts broken down by severity
-            level or service name. Useful for understanding log patterns and identifying spikes in errors or activity.
+        enabled: false
     logs-values-retrieve:
         operation: logs_values_retrieve
         enabled: false
