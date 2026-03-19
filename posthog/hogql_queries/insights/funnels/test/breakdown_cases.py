@@ -16,6 +16,7 @@ from posthog.test.base import (
     snapshot_clickhouse_queries,
 )
 from unittest import skip
+from unittest.mock import patch
 
 from posthog.schema import (
     BaseMathType,
@@ -29,6 +30,7 @@ from posthog.schema import (
 )
 
 from posthog.constants import INSIGHT_FUNNELS, FunnelOrderType
+from posthog.clickhouse.client.execute import sync_execute
 from posthog.hogql_queries.insights.funnels.funnels_query_runner import FunnelsQueryRunner
 from posthog.hogql_queries.insights.funnels.test.test_funnel_persons import get_actors, get_actors_legacy_filters
 from posthog.hogql_queries.legacy_compatibility.filter_to_query import filter_to_query
@@ -1340,6 +1342,77 @@ def funnel_breakdown_test_factory(funnel_order_type: FunnelOrderType):
 
             query = cast(FunnelsQuery, filter_to_query(filters))
             results = FunnelsQueryRunner(query=query, team=self.team).calculate().results
+
+            assert len(results) == 2
+
+            breakdown_labels = {r[0]["breakdown"] for r in results}
+            assert "test_cohort" in breakdown_labels
+            assert "Not in test_cohort" in breakdown_labels
+
+            cohort_results = next(r for r in results if r[0]["breakdown"] == "test_cohort")
+            not_in_cohort_results = next(r for r in results if r[0]["breakdown"] == "Not in test_cohort")
+
+            assert cohort_results[0]["count"] == 1
+            assert cohort_results[1]["count"] == 1
+
+            assert not_in_cohort_results[0]["count"] == 1
+            assert not_in_cohort_results[1]["count"] == 1
+            assert not_in_cohort_results[0]["breakdown_value"] == NOT_IN_COHORT_ID
+
+        def test_funnel_cohort_breakdown_shows_not_in_cohort_with_unquoted_uint64s(self):
+            _create_person(
+                distinct_ids=["person_in_cohort"],
+                team_id=self.team.pk,
+                properties={"key": "value"},
+            )
+            _create_person(
+                distinct_ids=["person_outside_cohort"],
+                team_id=self.team.pk,
+                properties={"key": "other"},
+            )
+            journeys_for(
+                {
+                    "person_in_cohort": [
+                        {"event": "sign up", "timestamp": datetime(2020, 1, 2, 12)},
+                        {"event": "play movie", "timestamp": datetime(2020, 1, 2, 13)},
+                    ],
+                    "person_outside_cohort": [
+                        {"event": "sign up", "timestamp": datetime(2020, 1, 3, 12)},
+                        {"event": "play movie", "timestamp": datetime(2020, 1, 3, 13)},
+                    ],
+                },
+                self.team,
+                create_people=False,
+            )
+
+            cohort = Cohort.objects.create(
+                team=self.team,
+                name="test_cohort",
+                groups=[{"properties": [{"key": "key", "value": "value", "type": "person"}]}],
+            )
+            cohort.calculate_people_ch(pending_version=0)
+
+            filters = {
+                "events": [
+                    {"id": "sign up", "order": 0},
+                    {"id": "play movie", "order": 1},
+                ],
+                "insight": INSIGHT_FUNNELS,
+                "date_from": "2020-01-01",
+                "date_to": "2020-01-08",
+                "funnel_window_days": 7,
+                "breakdown_type": "cohort",
+                "breakdown": [cohort.pk],
+            }
+
+            query = cast(FunnelsQuery, filter_to_query(filters))
+
+            def sync_execute_with_unquoted_uint64s(*args, **kwargs):
+                kwargs["settings"] = {**(kwargs.get("settings") or {}), "output_format_json_quote_64bit_integers": 0}
+                return sync_execute(*args, **kwargs)
+
+            with patch("posthog.hogql.query.sync_execute", side_effect=sync_execute_with_unquoted_uint64s):
+                results = FunnelsQueryRunner(query=query, team=self.team).calculate().results
 
             assert len(results) == 2
 

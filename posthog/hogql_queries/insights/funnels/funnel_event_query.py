@@ -635,7 +635,7 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
         source_to_aggregation_keys: dict[tuple[str, str], set[tuple[str | None, str | None]]] = {}
 
         for node in self.context.query.series:
-            if isinstance(node, DataWarehouseNode):
+            if isinstance(node, FunnelsDataWarehouseNode):
                 continue
 
             source_key = self._event_step_source_key(node)
