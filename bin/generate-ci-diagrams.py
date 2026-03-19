@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import sys
 import argparse
+import subprocess
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -500,6 +501,19 @@ Edge labels show the change-detection output that gates the job.
 """
 
 
+def _format_markdown(paths: list[Path]) -> None:
+    """Run markdown formatters on generated files."""
+    files = [str(p) for p in paths]
+    subprocess.run(
+        ["pnpm", "exec", "markdownlint-cli2", "--config", ".config/.markdownlint-cli2.jsonc", "--fix", *files],
+        cwd=REPO_ROOT,
+    )
+    subprocess.run(
+        ["pnpm", "exec", "oxfmt", "--no-error-on-unmatched-pattern", *files],
+        cwd=REPO_ROOT,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate Mermaid CI workflow diagrams")
     parser.add_argument(
@@ -515,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workflows: list[WorkflowInfo] = []
     mermaid_by_name: dict[str, str] = {}
+    written_paths: list[Path] = []
     for filename in requested_workflows:
         path = WORKFLOWS_DIR / filename
         if not path.exists():
@@ -532,17 +547,23 @@ def main(argv: list[str] | None = None) -> int:
 
         out_path = OUTPUT_DIR / f"{path.stem}.md"
         out_path.write_text(md, encoding="utf-8")
+        written_paths.append(out_path)
         print(f"  -> {display_path(out_path)} ({len(wf.jobs)} jobs)")
         workflows.append(wf)
 
     if should_rebuild_index and workflows:
         index_path = OUTPUT_DIR / "README.md"
         index_path.write_text(generate_index(workflows), encoding="utf-8")
+        written_paths.append(index_path)
         print(f"  -> {display_path(index_path)} (index)")
 
         published_path = PUBLISHED_DIR / "ci-workflows.md"
         published_path.write_text(generate_published_page(workflows, mermaid_by_name), encoding="utf-8")
+        written_paths.append(published_path)
         print(f"  -> {display_path(published_path)} (handbook)")
+
+    if written_paths:
+        _format_markdown(written_paths)
 
     print(f"Done. Generated {len(workflows)} diagrams.")
     if not workflows:
