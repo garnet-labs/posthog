@@ -43,8 +43,6 @@ async def signals_agentic_report_gate_activity(input: SignalsAgenticReportGateIn
         return False
 
     try:
-        # TODO: Revert after tests
-        return True
         return posthoganalytics.feature_enabled(
             SIGNALS_AGENTIC_REPORT_GENERATION_FF,
             str(team.uuid),
