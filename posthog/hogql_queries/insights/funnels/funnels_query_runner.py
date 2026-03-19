@@ -3,11 +3,17 @@ from math import ceil
 from typing import Any, Optional
 
 from posthog.schema import (
+    BreakdownType,
     CachedFunnelsQueryResponse,
+    CohortPropertyFilter,
+    FilterLogicalOperator,
     FunnelsQuery,
     FunnelsQueryResponse,
     FunnelVizType,
     HogQLQueryModifiers,
+    PropertyGroupFilter,
+    PropertyGroupFilterValue,
+    PropertyOperator,
     ResolvedDateRangeResponse,
 )
 
@@ -24,7 +30,9 @@ from posthog.hogql_queries.insights.funnels.funnel_time_to_convert import Funnel
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.models import Team
+from posthog.models.cohort import Cohort
 from posthog.models.filters.mixins.utils import cached_property
+from posthog.queries.breakdown_props import NOT_IN_COHORT_ID
 
 
 class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
@@ -71,7 +79,30 @@ class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
     def to_actors_query(self) -> ast.SelectQuery:
         return self.funnel_actor_class.actor_query()
 
+    @cached_property
+    def _single_cohort_id(self) -> int | None:
+        """Returns the cohort ID if this is a single-cohort breakdown, else None."""
+        bf = self.query.breakdownFilter
+        if not bf or bf.breakdown_type != BreakdownType.COHORT:
+            return None
+        breakdown = bf.breakdown
+        if isinstance(breakdown, list) and len(breakdown) == 1 and breakdown[0] != "all":
+            try:
+                return int(breakdown[0])
+            except (ValueError, TypeError):
+                return None
+        if isinstance(breakdown, int):
+            return breakdown
+        return None
+
     def _calculate(self):
+        funnelVizType = self.context.funnelsFilter.funnelVizType
+        if self._single_cohort_id is not None and funnelVizType != FunnelVizType.TIME_TO_CONVERT:
+            return self._calculate_single_cohort_breakdown()
+
+        return self._calculate_single_query()
+
+    def _calculate_single_query(self):
         query = self.to_query()
         timings = []
 
@@ -107,6 +138,134 @@ class FunnelsQueryRunner(AnalyticsQueryRunner[FunnelsQueryResponse]):
                 date_to=self.query_date_range.date_to(),
             ),
         )
+
+    def _create_cohort_sub_query(self, cohort_id: int, negate: bool) -> FunnelsQuery:
+        """Create a copy of the query filtered to cohort members (or non-members), with breakdown removed."""
+        sub_query = self.query.model_copy(deep=True)
+        sub_query.breakdownFilter = None
+
+        cohort_filter = CohortPropertyFilter(
+            key="id",
+            value=cohort_id,
+            operator=PropertyOperator.NOT_IN if negate else PropertyOperator.IN_,
+        )
+
+        existing_props = sub_query.properties or []
+        if isinstance(existing_props, list):
+            sub_query.properties = [*existing_props, cohort_filter]
+        else:
+            # PropertyGroupFilter — wrap with AND at the top level
+            sub_query.properties = PropertyGroupFilter(
+                type=FilterLogicalOperator.AND_,
+                values=[
+                    *existing_props.values,
+                    PropertyGroupFilterValue(
+                        type=FilterLogicalOperator.AND_,
+                        values=[cohort_filter],
+                    ),
+                ],
+            )
+
+        return sub_query
+
+    def _run_sub_query(self, sub_query: FunnelsQuery) -> FunnelsQueryResponse:
+        runner = FunnelsQueryRunner(
+            query=sub_query,
+            team=self.team,
+            timings=self.timings,
+            modifiers=self.modifiers,
+            limit_context=self.limit_context,
+            just_summarize=self.just_summarize,
+        )
+        return runner._calculate_single_query()
+
+    def _calculate_single_cohort_breakdown(self) -> FunnelsQueryResponse:
+        cohort_id = self._single_cohort_id
+        assert cohort_id is not None
+
+        try:
+            cohort = Cohort.objects.get(pk=cohort_id, team__project_id=self.team.project_id)
+            cohort_name = cohort.name
+        except Cohort.DoesNotExist:
+            cohort_name = str(cohort_id)
+
+        in_query = self._create_cohort_sub_query(cohort_id, negate=False)
+        not_in_query = self._create_cohort_sub_query(cohort_id, negate=True)
+
+        in_response = self._run_sub_query(in_query)
+        not_in_response = self._run_sub_query(not_in_query)
+
+        timings = [*(in_response.timings or []), *(not_in_response.timings or [])]
+        hogql = in_response.hogql or ""
+
+        funnelVizType = self.context.funnelsFilter.funnelVizType
+
+        if funnelVizType == FunnelVizType.TRENDS:
+            results = self._merge_trends_results(in_response.results, not_in_response.results, cohort_id, cohort_name)
+        else:
+            results = self._merge_steps_results(in_response.results, not_in_response.results, cohort_id, cohort_name)
+
+        return FunnelsQueryResponse(
+            results=results,
+            timings=timings,
+            hogql=hogql,
+            modifiers=self.modifiers,
+            resolved_date_range=ResolvedDateRangeResponse(
+                date_from=self.query_date_range.date_from(),
+                date_to=self.query_date_range.date_to(),
+            ),
+        )
+
+    def _empty_steps(self) -> list[dict[str, Any]]:
+        """Generate zero-count step dicts for when a sub-query returns no results."""
+        steps = []
+        for index, step in enumerate(self.query.series):
+            serialized = self.funnel_class._serialize_step(step, 0, index, [])
+            serialized.update({"average_conversion_time": None, "median_conversion_time": None})
+            steps.append(serialized)
+        return steps
+
+    def _merge_steps_results(
+        self,
+        in_results: list,
+        not_in_results: list,
+        cohort_id: int,
+        cohort_name: str,
+    ) -> list[list[dict[str, Any]]]:
+        # Without a breakdown, _format_results returns a flat list of step dicts.
+        # With a breakdown, the frontend expects a list of lists (one per breakdown value).
+        in_steps = in_results if isinstance(in_results, list) and in_results else self._empty_steps()
+        not_in_steps = not_in_results if isinstance(not_in_results, list) and not_in_results else self._empty_steps()
+
+        for step in in_steps:
+            step["breakdown"] = cohort_name
+            step["breakdown_value"] = cohort_id
+
+        not_in_label = f"Not in {cohort_name}"
+        for step in not_in_steps:
+            step["breakdown"] = not_in_label
+            step["breakdown_value"] = NOT_IN_COHORT_ID
+
+        return [in_steps, not_in_steps]
+
+    def _merge_trends_results(
+        self,
+        in_results: list,
+        not_in_results: list,
+        cohort_id: int,
+        cohort_name: str,
+    ) -> list[dict[str, Any]]:
+        # Trends _format_results returns a list of dicts, each with optional breakdown_value.
+        # For single-cohort split, each sub-query returns one group (no breakdown_value key).
+        not_in_label = f"Not in {cohort_name}"
+
+        for entry in in_results:
+            entry["breakdown_value"] = cohort_name
+
+        for entry in not_in_results:
+            entry["breakdown_value"] = not_in_label
+
+        return [*in_results, *not_in_results]
 
     @cached_property
     def funnel_order_class(self):
