@@ -1244,7 +1244,7 @@ async def _process_signal_batch(
     # CONCURRENT MATCHING + SPECIFICITY (step 6)
     # All match calls fire concurrently against the same search snapshot.
 
-    # Step 6a: Concurrent match LLM calls
+    # Step 6: Concurrent match LLM calls
     match_results: list[MatchResult] = list(
         await asyncio.gather(
             *[
@@ -1266,7 +1266,7 @@ async def _process_signal_batch(
         )
     )
 
-    # Step 6b: Concurrent specificity checks for existing matches
+    # Step 7: Concurrent specificity checks for existing matches
     existing_indices = [i for i, r in enumerate(match_results) if isinstance(r, ExistingReportMatch)]
 
     # Fetch group signals concurrently (deduplicated by report_id)
@@ -1274,8 +1274,8 @@ async def _process_signal_batch(
     if existing_indices:
         unique_report_ids: dict[str, list[int]] = defaultdict(list)
         for i in existing_indices:
-            mr = cast(ExistingReportMatch, match_results[i])
-            unique_report_ids[mr.report_id].append(i)
+            match_result = cast(ExistingReportMatch, match_results[i])
+            unique_report_ids[match_result.report_id].append(i)
 
         fetch_tasks = {
             rid: workflow.execute_activity(
@@ -1296,19 +1296,21 @@ async def _process_signal_batch(
     if existing_indices:
         specificity_tasks = []
         for i in existing_indices:
-            mr = cast(ExistingReportMatch, match_results[i])
-            report_ctx = report_contexts.get(mr.report_id)
+            match_result = cast(ExistingReportMatch, match_results[i])
+            signal = batch[i]
+            group_signals_result = group_signals_by_idx[i]
+            report_ctx = report_contexts.get(match_result.report_id)
             specificity_tasks.append(
                 workflow.execute_activity(
                     verify_match_specificity_activity,
                     VerifyMatchSpecificityInput(
                         team_id=team_id,
-                        report_id=mr.report_id,
+                        report_id=match_result.report_id,
                         report_title=report_ctx.title if report_ctx else "",
-                        new_signal_description=batch[i].description,
-                        new_signal_source_product=batch[i].source_product,
-                        new_signal_source_type=batch[i].source_type,
-                        group_signals=group_signals_by_idx[i].signals,
+                        new_signal_description=signal.description,
+                        new_signal_source_product=signal.source_product,
+                        new_signal_source_type=signal.source_type,
+                        group_signals=group_signals_result.signals,
                     ),
                     start_to_close_timeout=timedelta(minutes=10),
                     retry_policy=RetryPolicy(maximum_attempts=5),
@@ -1386,7 +1388,7 @@ async def _process_signal_batch(
                 source_type=signal.source_type,
                 source_id=signal.source_id,
             )
-    # Step 7: Wait for all emitted signals to land in ClickHouse
+    # Step 8: Wait for all emitted signals to land in ClickHouse
     if emitted_signals:
         await workflow.execute_activity(
             wait_for_signal_in_clickhouse_activity,
