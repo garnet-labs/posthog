@@ -117,10 +117,10 @@ interface HoldoutCondition {
 
 ## Key files
 
-| Component         | Path                                            |
-| ----------------- | ----------------------------------------------- |
-| Model             | `products/experiments/backend/models/experiment.py` |
-| Serializer        | `ee/clickhouse/views/experiment_holdouts.py`    |
-| Rust evaluation   | `rust/feature-flags/src/flags/flag_matching.rs` |
-| Python evaluation | `posthog/models/feature_flag/flag_matching.py`  |
-| Frontend types    | `frontend/src/types.ts`                         |
+| Component         | Path                                                |
+| ----------------- | --------------------------------------------------- |
+| Experiment models | `products/experiments/backend/models/experiment.py` |
+| Serializer        | `ee/clickhouse/views/experiment_holdouts.py`        |
+| Rust evaluation   | `rust/feature-flags/src/flags/flag_matching.rs`     |
+| Python evaluation | `posthog/models/feature_flag/flag_matching.py`      |
+| Frontend types    | `frontend/src/types.ts`                             |
