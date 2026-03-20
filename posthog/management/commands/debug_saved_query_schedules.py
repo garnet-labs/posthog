@@ -1,10 +1,20 @@
 """Debug CLI for connecting DataWarehouseSavedQuery models to their Temporal schedules and runs.
 
 Usage (from the toolbox pod):
+
+    # Forward lookup: team -> saved queries -> schedules
     python manage.py debug_saved_query_schedules --team-id 12345
     python manage.py debug_saved_query_schedules --team-id 12345 --saved-query-id <uuid>
     python manage.py debug_saved_query_schedules --team-id 12345 --show-runs --run-limit 5
     python manage.py debug_saved_query_schedules --team-id 12345 --json
+
+    # Reverse lookup: workflow ID -> saved query + schedule
+    python manage.py debug_saved_query_schedules --workflow-id <workflow-id>
+    python manage.py debug_saved_query_schedules --workflow-id <workflow-id> --json
+
+    # Find orphan schedules (Temporal schedules with no matching saved query)
+    python manage.py debug_saved_query_schedules --find-orphans
+    python manage.py debug_saved_query_schedules --find-orphans --team-id 12345
 """
 
 from __future__ import annotations
@@ -86,8 +96,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--team-id",
             type=int,
-            required=True,
-            help="Team ID to inspect",
+            default=None,
+            help="Team ID to inspect (required for forward lookup, optional for --find-orphans)",
         )
         parser.add_argument(
             "--saved-query-id",
@@ -120,10 +130,30 @@ class Command(BaseCommand):
             default=False,
             help="Include soft-deleted saved queries",
         )
+        parser.add_argument(
+            "--workflow-id",
+            type=str,
+            default=None,
+            help="Reverse lookup: find saved query and schedule from a Temporal workflow ID",
+        )
+        parser.add_argument(
+            "--find-orphans",
+            action="store_true",
+            default=False,
+            help="Find Temporal schedules with no matching saved query in Postgres",
+        )
 
     def handle(self, **options):
         logging.basicConfig(level=logging.WARNING)
-        asyncio.run(self._run(options))
+
+        if options["workflow_id"]:
+            asyncio.run(self._run_workflow_lookup(options))
+        elif options["find_orphans"]:
+            asyncio.run(self._run_find_orphans(options))
+        else:
+            if not options["team_id"]:
+                raise CommandError("--team-id is required (unless using --workflow-id or --find-orphans)")
+            asyncio.run(self._run(options))
 
     async def _run(self, options: dict[str, Any]):
         team_id: int = options["team_id"]
@@ -168,6 +198,385 @@ class Command(BaseCommand):
             self.stdout.write(json_module.dumps(results, indent=2, default=str))
         else:
             self._print_formatted(results, team_id, show_runs, namespace)
+
+    async def _run_workflow_lookup(self, options: dict[str, Any]):
+        """Reverse lookup: given a workflow ID, find the matching Django models and Temporal state."""
+        from products.data_warehouse.backend.models.data_modeling_job import DataModelingJob
+        from products.data_warehouse.backend.models.datawarehouse_saved_query import DataWarehouseSavedQuery
+
+        workflow_id: str = options["workflow_id"]
+        json_output: bool = options["json_output"]
+        namespace = settings.TEMPORAL_NAMESPACE
+
+        result: dict[str, Any] = {
+            "workflow_id": workflow_id,
+            "temporal_workflow": None,
+            "django_jobs": [],
+            "saved_query": None,
+            "schedule": None,
+        }
+
+        # Step 1: Try to describe the workflow in Temporal
+        temporal = await async_connect()
+        try:
+            handle = temporal.get_workflow_handle(workflow_id)
+            desc = await handle.describe()
+            result["temporal_workflow"] = {
+                "workflow_id": desc.id,
+                "run_id": desc.run_id,
+                "status": desc.status.name if desc.status else "UNKNOWN",
+                "workflow_type": desc.workflow_type,
+                "start_time": desc.start_time,
+                "close_time": desc.close_time,
+                "execution_time": desc.execution_time,
+                "task_queue": desc.task_queue,
+                "url": _temporal_ui_workflow_url(namespace, desc.id, desc.run_id),
+            }
+            # Extract team_id from search attributes if available
+            team_id_attr = desc.typed_search_attributes.get(POSTHOG_TEAM_ID_KEY)
+            if team_id_attr is not None:
+                result["temporal_workflow"]["team_id"] = team_id_attr
+        except RPCError as e:
+            if "not found" not in str(e).lower():
+                result["temporal_workflow"] = {"error": str(e)}
+        except Exception as e:
+            result["temporal_workflow"] = {"error": str(e)}
+
+        # Step 2: Find matching DataModelingJobs in Postgres
+        jobs = await sync_to_async(list)(
+            DataModelingJob.objects.filter(workflow_id=workflow_id)
+            .order_by("-last_run_at")
+            .values(
+                "id",
+                "saved_query_id",
+                "team_id",
+                "status",
+                "rows_materialized",
+                "rows_expected",
+                "error",
+                "workflow_id",
+                "workflow_run_id",
+                "last_run_at",
+                "storage_delta_mib",
+                "created_at",
+            )
+        )
+        result["django_jobs"] = [
+            {**job, "id": str(job["id"]), "saved_query_id": str(job["saved_query_id"])} for job in jobs
+        ]
+
+        # Step 3: Find the saved query — from the job or by trying the workflow_id as a schedule_id
+        saved_query_id: str | None = None
+        if jobs:
+            saved_query_id = str(jobs[0]["saved_query_id"])
+        else:
+            # Schedule-triggered workflows have IDs like "<schedule_id>-<timestamp>"
+            # The schedule_id is the saved_query UUID
+            parts = workflow_id.split("-")
+            # UUIDs have 5 parts separated by hyphens. Try reconstructing.
+            if len(parts) >= 5:
+                candidate = "-".join(parts[:5])
+                try:
+                    UUID(candidate)
+                    saved_query_id = candidate
+                except ValueError:
+                    pass
+
+        if saved_query_id:
+            sq = await sync_to_async(
+                lambda: list(
+                    DataWarehouseSavedQuery.objects.filter(id=saved_query_id)
+                    .select_related("table", "managed_viewset")
+                    .values(
+                        "id",
+                        "name",
+                        "team_id",
+                        "is_materialized",
+                        "status",
+                        "sync_frequency_interval",
+                        "last_run_at",
+                        "latest_error",
+                        "deleted",
+                        "origin",
+                        "table_id",
+                        "created_at",
+                        "updated_at",
+                    )
+                )
+            )()
+            if sq:
+                result["saved_query"] = {
+                    **sq[0],
+                    "id": str(sq[0]["id"]),
+                    "table_id": str(sq[0]["table_id"]) if sq[0]["table_id"] else None,
+                }
+
+            # Step 4: Describe the schedule
+            try:
+                sched_handle = temporal.get_schedule_handle(saved_query_id)
+                desc = await sched_handle.describe()
+                intervals = desc.schedule.spec.intervals
+                result["schedule"] = {
+                    "exists": True,
+                    "schedule_id": saved_query_id,
+                    "paused": desc.schedule.state.paused,
+                    "note": desc.schedule.state.note or "",
+                    "interval": _format_timedelta(intervals[0].every) if intervals else "-",
+                    "num_actions_taken": desc.info.num_actions,
+                    "url": _temporal_ui_schedule_url(namespace, saved_query_id),
+                }
+            except RPCError as e:
+                if "not found" in str(e).lower():
+                    result["schedule"] = {"exists": False, "schedule_id": saved_query_id}
+                else:
+                    result["schedule"] = {"exists": False, "error": str(e)}
+            except Exception as e:
+                result["schedule"] = {"exists": False, "error": str(e)}
+
+        if json_output:
+            self.stdout.write(json_module.dumps(result, indent=2, default=str))
+        else:
+            self._print_workflow_lookup(result, namespace)
+
+    def _print_workflow_lookup(self, result: dict[str, Any], namespace: str):
+        self.stdout.write("")
+        self.stdout.write(f"{'=' * 80}")
+        self.stdout.write(f"  Workflow Lookup: {result['workflow_id']}")
+        self.stdout.write(f"{'=' * 80}")
+
+        # Temporal workflow info
+        wf = result["temporal_workflow"]
+        if wf and "error" not in wf:
+            self.stdout.write("")
+            self.stdout.write(f"  Temporal Workflow:")
+            self.stdout.write(f"    Status: {wf['status']}")
+            self.stdout.write(f"    Type: {wf.get('workflow_type', '-')}")
+            self.stdout.write(f"    Task queue: {wf.get('task_queue', '-')}")
+            self.stdout.write(f"    Started: {_format_dt(wf.get('start_time'))} {_format_ago(wf.get('start_time'))}")
+            if wf.get("close_time"):
+                self.stdout.write(f"    Closed: {_format_dt(wf['close_time'])} {_format_ago(wf['close_time'])}")
+                if wf.get("start_time"):
+                    duration = wf["close_time"] - wf["start_time"]
+                    self.stdout.write(f"    Duration: {_format_timedelta(duration)}")
+            if wf.get("team_id"):
+                self.stdout.write(f"    Team ID: {wf['team_id']}")
+            self.stdout.write(f"    URL: {wf['url']}")
+        elif wf and "error" in wf:
+            self.stdout.write(f"\n  Temporal Workflow: ERROR - {wf['error']}")
+        else:
+            self.stdout.write(f"\n  Temporal Workflow: NOT FOUND")
+
+        # Saved query info
+        sq = result["saved_query"]
+        if sq:
+            self.stdout.write("")
+            self.stdout.write(f"  Saved Query:")
+            self.stdout.write(f"    Name: {sq['name']}")
+            self.stdout.write(f"    ID: {sq['id']}")
+            self.stdout.write(f"    Team: {sq['team_id']}")
+            self.stdout.write(f"    Materialized: {sq['is_materialized']}  |  Status: {sq['status'] or '-'}")
+            self.stdout.write(f"    Sync interval: {_format_timedelta(sq.get('sync_frequency_interval'))}")
+            self.stdout.write(f"    Last run: {_format_dt(sq.get('last_run_at'))} {_format_ago(sq.get('last_run_at'))}")
+            self.stdout.write(f"    Deleted: {sq['deleted']}")
+            if sq.get("latest_error"):
+                error_preview = sq["latest_error"][:200]
+                if len(sq["latest_error"]) > 200:
+                    error_preview += "..."
+                self.stdout.write(f"    Latest error: {error_preview}")
+        else:
+            self.stdout.write(f"\n  Saved Query: NOT FOUND")
+
+        # Schedule info
+        sched = result["schedule"]
+        if sched:
+            self.stdout.write("")
+            if sched.get("exists"):
+                paused_str = " (PAUSED)" if sched.get("paused") else ""
+                self.stdout.write(f"  Temporal Schedule:{paused_str}")
+                self.stdout.write(f"    Schedule ID: {sched.get('schedule_id', '-')}")
+                self.stdout.write(
+                    f"    Interval: {sched.get('interval', '-')}  |  Actions taken: {sched.get('num_actions_taken', '-')}"
+                )
+                self.stdout.write(f"    URL: {sched.get('url', '-')}")
+            else:
+                self.stdout.write(f"  Temporal Schedule: NOT FOUND (schedule_id: {sched.get('schedule_id', '-')})")
+                if sched.get("error"):
+                    self.stdout.write(f"    Error: {sched['error']}")
+
+        # Django jobs
+        django_jobs = result["django_jobs"]
+        if django_jobs:
+            self.stdout.write("")
+            self.stdout.write(f"  DataModelingJobs ({len(django_jobs)} found):")
+            for job in django_jobs:
+                rows = f"{job['rows_materialized']}"
+                if job.get("rows_expected"):
+                    rows += f"/{job['rows_expected']}"
+                self.stdout.write(
+                    f"    [{job['status']:>9}] {_format_dt(job.get('last_run_at'))} | team: {job.get('team_id')} | rows: {rows}"
+                )
+                if job.get("error"):
+                    err_preview = job["error"][:100]
+                    if len(job["error"]) > 100:
+                        err_preview += "..."
+                    self.stdout.write(f"              Error: {err_preview}")
+                if job.get("workflow_run_id"):
+                    self.stdout.write(
+                        f"              Run: {_temporal_ui_workflow_url(namespace, job['workflow_id'], job['workflow_run_id'])}"
+                    )
+        else:
+            self.stdout.write(f"\n  DataModelingJobs: NONE FOUND")
+
+        self.stdout.write("")
+        self.stdout.write(f"{'=' * 80}")
+
+    async def _run_find_orphans(self, options: dict[str, Any]):
+        """Find Temporal schedules for data-modeling-run that have no matching saved query in Postgres."""
+        from products.data_warehouse.backend.models.datawarehouse_saved_query import DataWarehouseSavedQuery
+
+        team_id: int | None = options["team_id"]
+        json_output: bool = options["json_output"]
+        namespace = settings.TEMPORAL_NAMESPACE
+
+        temporal = await async_connect()
+
+        # Step 1: List all data-modeling-run schedules from Temporal
+        self.stderr.write("Listing data-modeling-run schedules from Temporal...")
+        query = None
+        if team_id:
+            query = f"{POSTHOG_TEAM_ID_KEY.name} = {team_id}"
+
+        schedule_ids: set[str] = set()
+        schedule_details: dict[str, dict[str, Any]] = {}
+        count = 0
+        async for listing in await temporal.list_schedules(query=query):
+            if listing.schedule.action.workflow != "data-modeling-run":
+                continue
+            schedule_ids.add(listing.id)
+            schedule_details[listing.id] = {
+                "schedule_id": listing.id,
+                "workflow": listing.schedule.action.workflow,
+            }
+            count += 1
+            if count % 100 == 0:
+                self.stderr.write(f"  ...scanned {count} schedules")
+
+        self.stderr.write(f"Found {len(schedule_ids)} data-modeling-run schedule(s) in Temporal")
+
+        if not schedule_ids:
+            self.stdout.write("No data-modeling-run schedules found.")
+            return
+
+        # Step 2: Check which schedule IDs have a matching saved query
+        valid_ids = await sync_to_async(
+            lambda: {
+                str(pk)
+                for pk in DataWarehouseSavedQuery.objects.filter(id__in=schedule_ids)
+                .exclude(deleted=True)
+                .values_list("id", flat=True)
+            }
+        )()
+
+        orphan_ids = schedule_ids - valid_ids
+
+        # Step 3: For orphans, check if there's a soft-deleted saved query
+        deleted_ids: set[str] = set()
+        if orphan_ids:
+            deleted_ids = await sync_to_async(
+                lambda: {
+                    str(pk)
+                    for pk in DataWarehouseSavedQuery.objects.filter(id__in=orphan_ids, deleted=True).values_list(
+                        "id", flat=True
+                    )
+                }
+            )()
+
+        # Step 4: Enrich orphans with Temporal details
+        semaphore = asyncio.Semaphore(10)
+
+        async def describe_orphan(schedule_id: str) -> dict[str, Any]:
+            async with semaphore:
+                info: dict[str, Any] = {
+                    "schedule_id": schedule_id,
+                    "has_deleted_saved_query": schedule_id in deleted_ids,
+                    "url": _temporal_ui_schedule_url(namespace, schedule_id),
+                }
+                try:
+                    handle = temporal.get_schedule_handle(schedule_id)
+                    desc = await handle.describe()
+                    intervals = desc.schedule.spec.intervals
+                    info["paused"] = desc.schedule.state.paused
+                    info["interval"] = _format_timedelta(intervals[0].every) if intervals else "-"
+                    info["num_actions_taken"] = desc.info.num_actions
+
+                    team_id_attr = desc.typed_search_attributes.get(POSTHOG_TEAM_ID_KEY)
+                    if team_id_attr is not None:
+                        info["team_id"] = team_id_attr
+
+                    if desc.info.recent_actions:
+                        last_action = desc.info.recent_actions[-1]
+                        info["last_action_time"] = last_action.actual_time
+                except Exception as e:
+                    info["describe_error"] = str(e)
+                return info
+
+        orphan_details = await asyncio.gather(*[asyncio.create_task(describe_orphan(sid)) for sid in orphan_ids])
+
+        # Step 5: Output
+        results = {
+            "total_schedules": len(schedule_ids),
+            "matched_to_saved_query": len(valid_ids),
+            "orphans": len(orphan_ids),
+            "orphans_with_deleted_saved_query": len(deleted_ids),
+            "orphan_details": sorted(orphan_details, key=lambda x: x["schedule_id"]),
+        }
+
+        if json_output:
+            self.stdout.write(json_module.dumps(results, indent=2, default=str))
+        else:
+            self._print_orphans(results, team_id, namespace)
+
+    def _print_orphans(self, results: dict[str, Any], team_id: int | None, namespace: str):
+        self.stdout.write("")
+        self.stdout.write(f"{'=' * 80}")
+        scope = f" for Team {team_id}" if team_id else ""
+        self.stdout.write(f"  Orphan Schedule Report{scope}")
+        self.stdout.write(f"{'=' * 80}")
+        self.stdout.write(f"  Total schedules: {results['total_schedules']}")
+        self.stdout.write(f"  Matched to saved query: {results['matched_to_saved_query']}")
+        self.stdout.write(f"  Orphans: {results['orphans']}")
+        self.stdout.write(f"  Orphans with soft-deleted saved query: {results['orphans_with_deleted_saved_query']}")
+
+        if not results["orphan_details"]:
+            self.stdout.write("\n  No orphans found!")
+            self.stdout.write(f"{'=' * 80}")
+            return
+
+        for orphan in results["orphan_details"]:
+            self.stdout.write("")
+            self.stdout.write(f"{'─' * 80}")
+
+            deleted_tag = " [HAS DELETED SAVED QUERY]" if orphan.get("has_deleted_saved_query") else ""
+            paused_tag = " (PAUSED)" if orphan.get("paused") else ""
+            self.stdout.write(f"  Schedule: {orphan['schedule_id']}{deleted_tag}{paused_tag}")
+
+            if orphan.get("team_id"):
+                self.stdout.write(f"    Team ID: {orphan['team_id']}")
+            if orphan.get("interval"):
+                self.stdout.write(
+                    f"    Interval: {orphan['interval']}  |  Actions taken: {orphan.get('num_actions_taken', '-')}"
+                )
+            if orphan.get("last_action_time"):
+                self.stdout.write(
+                    f"    Last action: {_format_dt(orphan['last_action_time'])} {_format_ago(orphan['last_action_time'])}"
+                )
+            self.stdout.write(f"    URL: {orphan['url']}")
+
+            if orphan.get("describe_error"):
+                self.stdout.write(f"    Describe error: {orphan['describe_error']}")
+
+        self.stdout.write("")
+        self.stdout.write(f"{'=' * 80}")
 
     def _get_saved_queries(
         self, team_id: int, saved_query_id: str | None, include_deleted: bool
