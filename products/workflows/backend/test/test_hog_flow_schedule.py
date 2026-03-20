@@ -137,7 +137,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_saving_workflow_with_schedule_sets_schedule_config(self):
         schedule_config = {
             "rrule": "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "Europe/Prague",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -150,7 +150,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_saving_active_workflow_with_schedule_creates_pending_run(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;INTERVAL=1",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -163,7 +163,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_saving_workflow_with_count_1_creates_one_pending_run(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;COUNT=1",
-            "starts_at": "2026-03-20T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -176,7 +176,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_removing_schedule_deletes_pending_run(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;INTERVAL=1",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -199,7 +199,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_deactivating_workflow_deletes_pending_run(self):
         schedule_config = {
             "rrule": "FREQ=WEEKLY;INTERVAL=1",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -219,7 +219,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_draft_workflow_creates_no_pending_run(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;INTERVAL=1",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config, workflow_status="draft")
@@ -235,7 +235,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_rrule_validation_rejects_invalid_rrule(self):
         payload = _make_workflow_payload(
             workflow_status="active",
-            schedule_config={"rrule": "NOT_VALID", "starts_at": "2026-03-16T12:00:00.000Z", "timezone": "UTC"},
+            schedule_config={"rrule": "NOT_VALID", "starts_at": "2030-01-01T12:00:00.000Z", "timezone": "UTC"},
         )
         response = self.client.post(f"/api/projects/{self.team.id}/hog_flows/", payload, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -250,7 +250,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_rrule_validation_rejects_too_frequent_schedules(self, rrule_str):
         payload = _make_workflow_payload(
             workflow_status="active",
-            schedule_config={"rrule": rrule_str, "starts_at": "2026-03-16T12:00:00.000Z", "timezone": "UTC"},
+            schedule_config={"rrule": rrule_str, "starts_at": "2030-01-01T12:00:00.000Z", "timezone": "UTC"},
         )
         response = self.client.post(f"/api/projects/{self.team.id}/hog_flows/", payload, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -260,7 +260,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
             workflow_status="active",
             schedule_config={
                 "rrule": "FREQ=HOURLY;INTERVAL=1",
-                "starts_at": "2026-03-16T12:00:00.000Z",
+                "starts_at": "2030-01-01T12:00:00.000Z",
                 "timezone": "UTC",
             },
         )
@@ -278,7 +278,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_scheduled_runs_endpoint(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;INTERVAL=1",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -291,7 +291,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
     def test_updating_schedule_replaces_pending_run(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;INTERVAL=1",
-            "starts_at": "2026-03-16T12:00:00.000Z",
+            "starts_at": "2030-01-01T12:00:00.000Z",
             "timezone": "UTC",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
@@ -303,7 +303,7 @@ class TestHogFlowScheduleAPI(APIBaseTest):
             {
                 "schedule_config": {
                     "rrule": "FREQ=WEEKLY;INTERVAL=1",
-                    "starts_at": "2026-03-16T12:00:00.000Z",
+                    "starts_at": "2030-01-01T12:00:00.000Z",
                     "timezone": "UTC",
                 }
             },
@@ -324,13 +324,33 @@ class TestHogFlowScheduleAPI(APIBaseTest):
         assert hog_flow.schedule_config is None
         assert HogFlowScheduledRun.objects.filter(hog_flow_id=workflow["id"]).count() == 0
 
+    def test_repeated_sync_produces_exactly_one_pending_run(self):
+        """Calling sync_schedule multiple times should always result in exactly one pending run."""
+        from products.workflows.backend.utils.schedule_sync import sync_schedule
+
+        schedule_config = {
+            "rrule": "FREQ=DAILY;INTERVAL=1",
+            "starts_at": "2030-01-01T12:00:00.000Z",
+            "timezone": "UTC",
+        }
+        workflow = self._create_batch_workflow(schedule_config=schedule_config)
+        hog_flow = HogFlow.objects.get(id=workflow["id"])
+
+        # Call sync multiple times
+        for _ in range(5):
+            sync_schedule(hog_flow, self.team.id)
+
+        pending = HogFlowScheduledRun.objects.filter(hog_flow=hog_flow, status=HogFlowScheduledRun.Status.PENDING)
+        assert pending.count() == 1
+
     def test_schedule_with_timezone_stores_timezone(self):
         schedule_config = {
             "rrule": "FREQ=DAILY;INTERVAL=1",
-            "starts_at": "2026-03-16T08:00:00.000Z",
+            "starts_at": "2030-01-01T08:00:00.000Z",
             "timezone": "US/Eastern",
         }
         workflow = self._create_batch_workflow(schedule_config=schedule_config)
 
         hog_flow = HogFlow.objects.get(id=workflow["id"])
+        assert hog_flow.schedule_config is not None
         assert hog_flow.schedule_config["timezone"] == "US/Eastern"

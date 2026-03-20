@@ -211,42 +211,6 @@ class HogFlowScheduledRunSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-def _sync_schedule_for_hog_flow(hog_flow: HogFlow, team_id: int) -> None:
-    """
-    Manage the next pending HogFlowScheduledRun based on schedule_config.
-    Deletes any existing pending run and creates a new one if the workflow is active.
-    """
-    schedule_config = hog_flow.schedule_config
-
-    # Always clean up existing pending run
-    HogFlowScheduledRun.objects.filter(hog_flow=hog_flow, status=HogFlowScheduledRun.Status.PENDING).delete()
-
-    if not schedule_config or hog_flow.status != HogFlow.State.ACTIVE:
-        return
-
-    rrule_str = schedule_config.get("rrule")
-    starts_at_str = schedule_config.get("starts_at")
-    tz = schedule_config.get("timezone", "UTC")
-
-    if not rrule_str or not starts_at_str:
-        return
-
-    starts_at = isoparse(starts_at_str)
-    occurrences = compute_next_occurrences(
-        rrule_string=rrule_str,
-        starts_at=starts_at,
-        timezone_str=tz,
-        count=1,
-    )
-    if occurrences:
-        HogFlowScheduledRun.objects.create(
-            team_id=team_id,
-            hog_flow=hog_flow,
-            run_at=occurrences[0],
-            status=HogFlowScheduledRun.Status.PENDING,
-        )
-
-
 class HogFlowMinimalSerializer(serializers.ModelSerializer):
     created_by = UserBasicSerializer(read_only=True)
 
@@ -376,27 +340,20 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
                 logger.warning("Invalid RRULE encountered during validation", rrule=rrule_str, error=str(e))
                 raise serializers.ValidationError({"schedule_config": {"rrule": "Invalid RRULE."}})
 
-            from dateutil.rrule import (
-                HOURLY,
-                MINUTELY,
-                SECONDLY,
-                rrule as rrule_cls,
-                rrulestr as rrulestr_parse,
-            )
-
-            parsed_rule = rrulestr_parse(rrule_str)
-            if isinstance(parsed_rule, rrule_cls):
-                if parsed_rule._freq in (MINUTELY, SECONDLY):
-                    raise serializers.ValidationError(
-                        {"schedule_config": {"rrule": "Schedules must run at most once per hour."}}
-                    )
-                if parsed_rule._freq == HOURLY and (parsed_rule._interval or 1) < 1:
-                    raise serializers.ValidationError(
-                        {"schedule_config": {"rrule": "Schedules must run at most once per hour."}}
-                    )
-
             if not schedule_config.get("starts_at"):
                 raise serializers.ValidationError({"schedule_config": {"starts_at": "Start date is required."}})
+
+            # Enforce minimum interval of 1 hour by checking actual occurrences
+            from datetime import timedelta
+
+            starts_at = isoparse(schedule_config["starts_at"])
+            sample = compute_next_occurrences(
+                rrule_str, starts_at, timezone_str=schedule_config.get("timezone", "UTC"), count=2
+            )
+            if len(sample) == 2 and (sample[1] - sample[0]) < timedelta(hours=1):
+                raise serializers.ValidationError(
+                    {"schedule_config": {"rrule": "Schedules must run at most once per hour."}}
+                )
 
         return data
 
