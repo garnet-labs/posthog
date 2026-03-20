@@ -15,7 +15,6 @@ import {
     IconSearch,
     IconSparkles,
     IconWarning,
-    IconX,
 } from '@posthog/icons'
 import {
     LemonBadge,
@@ -359,83 +358,116 @@ function ReportListPane(): JSX.Element {
     )
 }
 
-function JudgmentBadges({ artefacts }: { artefacts: SignalReportArtefact[] }): JSX.Element | null {
+function JudgmentBlocks({ artefacts }: { artefacts: SignalReportArtefact[] }): JSX.Element | null {
     const [expanded, setExpanded] = useState(false)
 
-    const safetyArtefact = artefacts.find((a) => a.type === 'safety_judgment')
-    const actionabilityArtefact = artefacts.find((a) => a.type === 'actionability_judgment')
+    const latest = (type: string): SignalReportArtefact | undefined =>
+        artefacts
+            .filter((a) => a.type === type)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
 
-    if (!safetyArtefact && !actionabilityArtefact) {
+    const safetyArtefact = latest('safety_judgment')
+    const actionabilityArtefact = latest('actionability_judgment')
+    const priorityArtefact = latest('priority_judgment')
+
+    if (!safetyArtefact && !actionabilityArtefact && !priorityArtefact) {
         return null
     }
 
     const safetyContent = safetyArtefact?.content as Record<string, unknown> | undefined
     const actionabilityContent = actionabilityArtefact?.content as Record<string, unknown> | undefined
+    const priorityContent = priorityArtefact?.content as Record<string, unknown> | undefined
 
-    const isSafe = safetyContent?.safe === true || safetyContent?.judgment === 'safe'
-    const actionabilityJudgment = (actionabilityContent?.judgment as string) ?? ''
+    const isSafe = safetyContent?.choice === true
+    const actionability = (actionabilityContent?.actionability as string) ?? ''
+    const priority = (priorityContent?.priority as string) ?? ''
+
+    const hasExpandableContent =
+        (actionabilityContent?.explanation as string) || (priorityContent?.explanation as string)
 
     return (
-        <div className="border rounded bg-surface-primary mb-3">
+        <div className="mb-6">
             <button
                 type="button"
-                className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-surface-tertiary rounded"
-                onClick={() => setExpanded(!expanded)}
+                className={clsx(
+                    'flex items-center gap-4 text-left text-xs text-tertiary rounded px-2 py-1 -mx-2',
+                    hasExpandableContent ? 'cursor-pointer hover:bg-surface-tertiary' : 'cursor-default'
+                )}
+                onClick={() => hasExpandableContent && setExpanded(!expanded)}
             >
-                <span className="text-xs font-medium text-tertiary shrink-0">LLM judgment:</span>
-                <div className="flex items-center gap-1.5 flex-wrap flex-1">
-                    {safetyArtefact && (
+                {hasExpandableContent && (
+                    <IconChevronRight
+                        className={clsx(
+                            'size-4 text-tertiary transition-transform shrink-0 -mr-2.5',
+                            expanded && 'rotate-90'
+                        )}
+                    />
+                )}
+                {safetyArtefact && (
+                    <span className="inline-flex items-center gap-1">
+                        Safety:{' '}
                         <LemonTag size="small" type={isSafe ? 'success' : 'danger'}>
                             {isSafe ? <IconCheck className="size-3" /> : <IconWarning className="size-3" />}
                             <span className="ml-0.5">{isSafe ? 'Safe' : 'Unsafe'}</span>
                         </LemonTag>
-                    )}
-                    {actionabilityArtefact && (
+                    </span>
+                )}
+                {actionabilityArtefact && (
+                    <span className="inline-flex items-center gap-1">
+                        Actionability:{' '}
                         <LemonTag
                             size="small"
                             type={
-                                actionabilityJudgment === 'immediately_actionable'
+                                actionability === 'immediately_actionable'
                                     ? 'success'
-                                    : actionabilityJudgment === 'requires_human_input'
+                                    : actionability === 'requires_human_input'
                                       ? 'caution'
                                       : 'muted'
                             }
                         >
-                            {actionabilityJudgment === 'immediately_actionable' ? (
-                                <IconCheck className="size-3" />
-                            ) : actionabilityJudgment === 'requires_human_input' ? (
-                                <IconWarning className="size-3" />
-                            ) : (
-                                <IconX className="size-3" />
-                            )}
-                            <span className="ml-0.5">
-                                {actionabilityJudgment === 'immediately_actionable'
-                                    ? 'Immediately actionable'
-                                    : actionabilityJudgment === 'requires_human_input'
-                                      ? 'Requires human input'
-                                      : 'Not actionable'}
-                            </span>
+                            {actionability === 'immediately_actionable'
+                                ? 'Immediately actionable'
+                                : actionability === 'requires_human_input'
+                                  ? 'Requires human input'
+                                  : 'Not actionable'}
                         </LemonTag>
-                    )}
-                </div>
-                <IconChevronRight
-                    className={clsx('size-4 text-tertiary transition-transform shrink-0', expanded && 'rotate-90')}
-                />
+                    </span>
+                )}
+                {priorityArtefact && (
+                    <span className="inline-flex items-center gap-1">
+                        Priority:{' '}
+                        <LemonTag
+                            size="small"
+                            type={
+                                priority === 'P0' || priority === 'P1'
+                                    ? 'danger'
+                                    : priority === 'P2'
+                                      ? 'caution'
+                                      : 'muted'
+                            }
+                        >
+                            {priority}
+                        </LemonTag>
+                    </span>
+                )}
             </button>
-            {expanded && (
-                <div className="px-3 pb-3 space-y-2 text-sm text-secondary">
-                    {safetyContent?.explanation ? (
+            {expanded && hasExpandableContent && (
+                <div className="mt-2 text-sm text-secondary">
+                    {priorityContent?.explanation && (
                         <div>
-                            <span className="font-medium text-xs text-tertiary">Safety:</span>
-                            <LemonMarkdown className="mt-0.5">{String(safetyContent.explanation)}</LemonMarkdown>
+                            <span className="font-medium text-xs text-tertiary">Priority</span>
+                            <LemonMarkdown className="mt-0.5">{String(priorityContent.explanation)}</LemonMarkdown>
                         </div>
-                    ) : null}
-                    {actionabilityContent?.explanation ? (
+                    )}
+                    {priorityContent?.explanation && actionabilityContent?.explanation && (
+                        <div className="border-t my-3" />
+                    )}
+                    {actionabilityContent?.explanation && (
                         <div>
-                            <span className="font-medium text-xs text-tertiary">Actionability:</span>
+                            <span className="font-medium text-xs text-tertiary">Actionability</span>
                             <LemonMarkdown className="mt-0.5">{String(actionabilityContent.explanation)}</LemonMarkdown>
                         </div>
-                    ) : null}
+                    )}
                 </div>
             )}
         </div>
@@ -637,9 +669,9 @@ function ReportDetailPane(): JSX.Element {
                             label: 'Overview',
                             content: (
                                 <div className="p-6 max-w-200 w-full">
-                                    {/* Judgment badges from artefacts */}
+                                    {/* Judgment blocks from artefacts */}
                                     {reportArtefacts && reportArtefacts.length > 0 && (
-                                        <JudgmentBadges artefacts={reportArtefacts} />
+                                        <JudgmentBlocks artefacts={reportArtefacts} />
                                     )}
 
                                     {/* Signal cards as primary content */}
