@@ -13,6 +13,7 @@ from posthog.models.cohort import Cohort
 from posthog.models.entity import Entity
 from posthog.models.filters import Filter
 from posthog.models.group.util import create_group
+from posthog.models.organization import Organization
 from posthog.queries.breakdown_props import (
     ALL_USERS_COHORT_ID,
     NOT_IN_COHORT_ID,
@@ -525,8 +526,6 @@ class TestBreakdownProps(ClickhouseTestMixin, APIBaseTest):
         self.assertEqual(result[0], ["mac", "test"])
 
     def test_get_breakdown_cohort_name_rejects_cross_project_cohort(self):
-        from posthog.models.organization import Organization
-
         _, _, other_team = Organization.objects.bootstrap(self.user, name="other org")
         other_cohort = Cohort.objects.create(
             team=other_team,
@@ -590,8 +589,6 @@ class TestBreakdownProps(ClickhouseTestMixin, APIBaseTest):
         assert result == {}
 
     def test_get_breakdown_cohort_names_excludes_cross_project_cohorts(self):
-        from posthog.models.organization import Organization
-
         _, _, other_team = Organization.objects.bootstrap(self.user, name="another org")
         other_cohort = Cohort.objects.create(
             team=other_team,

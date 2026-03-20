@@ -1364,7 +1364,10 @@ class RetentionQueryRunner(AnalyticsQueryRunner[RetentionQueryResponse]):
                 ordered_breakdown_keys.append(BREAKDOWN_OTHER_STRING_LABEL)
 
             cohort_names: dict[int, str] = {}
-            if self.query.breakdownFilter and self.query.breakdownFilter.breakdown_type == "cohort":
+            is_cohort_breakdown = bool(
+                self.query.breakdownFilter and self.query.breakdownFilter.breakdown_type == "cohort"
+            )
+            if is_cohort_breakdown:
                 cohort_ids = [int(bv) for bv in ordered_breakdown_keys if str(bv).isdigit()]
                 cohort_names = get_breakdown_cohort_names(cohort_ids, self.team)
 
@@ -1396,7 +1399,7 @@ class RetentionQueryRunner(AnalyticsQueryRunner[RetentionQueryResponse]):
                         "date": self.get_date(start_interval),
                         "breakdown_value": breakdown_value,
                     }
-                    if cohort_names:
+                    if is_cohort_breakdown:
                         try:
                             result_entry["breakdown"] = cohort_names.get(int(breakdown_value), str(breakdown_value))
                         except (ValueError, TypeError):
