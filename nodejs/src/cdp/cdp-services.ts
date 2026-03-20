@@ -6,12 +6,7 @@ import { PluginsServerConfig } from '../types'
 import { PostgresRouter } from '../utils/db/postgres'
 import { PubSub } from '../utils/pubsub'
 import { TeamManager } from '../utils/team-manager'
-import {
-    HogExecutorService,
-    MAX_FETCH_TIMEOUT_MS,
-    cdpTrackedFetch,
-    isFetchResponseRetriable,
-} from './services/hog-executor.service'
+import { HogExecutorService, MAX_FETCH_TIMEOUT_MS, cdpTrackedFetch } from './services/hog-executor.service'
 import { HogInputsService } from './services/hog-inputs.service'
 import { HogFlowExecutorService } from './services/hogflows/hogflow-executor.service'
 import { HogFlowFunctionsService } from './services/hogflows/hogflow-functions.service'
@@ -155,11 +150,14 @@ export function createCdpCoreServices(
         recipientTokensService,
         pushSubscriptionsManagerService
     )
-    const pushNotificationService = new PushNotificationService(hogInputsService, pushSubscriptionsManagerService, {
-        trackedFetch: cdpTrackedFetch,
-        isFetchResponseRetriable,
-        maxFetchTimeoutMs: MAX_FETCH_TIMEOUT_MS,
-    })
+    const pushNotificationService = new PushNotificationService(
+        deps.integrationManager,
+        pushSubscriptionsManagerService,
+        {
+            trackedFetch: cdpTrackedFetch,
+            maxFetchTimeoutMs: MAX_FETCH_TIMEOUT_MS,
+        }
+    )
 
     const hogExecutor = new HogExecutorService(
         {

@@ -212,6 +212,7 @@ export class HogInputsService {
             if (integration && integration.team_id === hogFunction.team_id) {
                 returnInputs[key] = {
                     value: {
+                        $integration_id: integration.id,
                         ...integration.config,
                         ...integration.sensitive_config,
                         ...(integration.sensitive_config.access_token || integration.config.access_token

@@ -1,22 +1,18 @@
-import { DateTime } from 'luxon'
 import { Counter } from 'prom-client'
 
 import { instrumented } from '~/common/tracing/tracing-utils'
-import { ACCESS_TOKEN_PLACEHOLDER } from '~/config/constants'
 import { FetchOptions, FetchResponse } from '~/utils/request'
 
-import { Hub } from '../../../types'
+import {
+    CyclotronInvocationQueueParametersSendPushNotificationType,
+    PushNotificationPayloadType,
+} from '../../../schema/cyclotron'
 import { parseJSON } from '../../../utils/json-parse'
-import { CyclotronJobInvocationHogFunction, CyclotronJobInvocationResult } from '../../types'
+import { CyclotronJobInvocationHogFunction, CyclotronJobInvocationResult, IntegrationType } from '../../types'
 import { createAddLogFunction } from '../../utils'
 import { createInvocationResult } from '../../utils/invocation-utils'
-import { HogInputsService } from '../hog-inputs.service'
+import { IntegrationManagerService } from '../managers/integration-manager.service'
 import { FcmErrorDetail, PushSubscriptionsManagerService } from '../managers/push-subscriptions-manager.service'
-
-export type FcmTokenFromInvocationArgs = {
-    inputs: Record<string, unknown> | undefined
-    inputsSchema: { type: string; key: string }[] | undefined
-}
 
 const pushNotificationSentCounter = new Counter({
     name: 'push_notification_sent_total',
@@ -30,143 +26,138 @@ export type PushNotificationFetchUtils = {
         fetchResponse: FetchResponse | null
         fetchDuration: number
     }>
-    isFetchResponseRetriable: (response: FetchResponse | null, error: any) => boolean
     maxFetchTimeoutMs: number
 }
 
-export type PushNotificationServiceHub = Pick<
-    Hub,
-    'CDP_FETCH_RETRIES' | 'CDP_FETCH_BACKOFF_BASE_MS' | 'CDP_FETCH_BACKOFF_MAX_MS'
->
-
 export class PushNotificationService {
     constructor(
-        private hogInputsService: HogInputsService,
+        private integrationManager: IntegrationManagerService,
         private pushSubscriptionsManager: PushSubscriptionsManagerService,
         private fetchUtils: PushNotificationFetchUtils
     ) {}
-
-    getFcmTokenFromInvocation(args: FcmTokenFromInvocationArgs): string | null {
-        if (!args.inputs) {
-            return null
-        }
-        const pushSubscriptionKey = args.inputsSchema?.find((schema) => schema.type === 'push_subscription')?.key
-        if (!pushSubscriptionKey || !args.inputs[pushSubscriptionKey]) {
-            return null
-        }
-        const value = args.inputs[pushSubscriptionKey]
-        return typeof value === 'string' ? value : null
-    }
 
     @instrumented('push-notification.executeSendPushNotification')
     async executeSendPushNotification(
         invocation: CyclotronJobInvocationHogFunction
     ): Promise<CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>> {
-        const templateId = invocation.hogFunction.template_id ?? 'unknown'
         if (invocation.queueParameters?.type !== 'sendPushNotification') {
             throw new Error('Bad invocation')
         }
 
-        const params = invocation.queueParameters
-        const result = createInvocationResult<CyclotronJobInvocationHogFunction>(invocation, {}, { finished: false })
+        const params = invocation.queueParameters as CyclotronInvocationQueueParametersSendPushNotificationType
+        const result = createInvocationResult<CyclotronJobInvocationHogFunction>(invocation, {}, { finished: true })
         const addLog = createAddLogFunction(result.logs)
 
-        const method = params.method.toUpperCase()
-        let headers = params.headers ?? {}
+        let success = false
 
-        const integrationInputs = await this.hogInputsService.loadIntegrationInputs(invocation.hogFunction)
-        if (Object.keys(integrationInputs).length > 0) {
-            for (const [key, value] of Object.entries(integrationInputs)) {
-                const accessToken: string = value.value?.access_token_raw
-                if (!accessToken) {
-                    continue
-                }
-                const placeholder: string = ACCESS_TOKEN_PLACEHOLDER + invocation.hogFunction.inputs?.[key]?.value
-
-                if (placeholder && accessToken) {
-                    const replace = (val: string) => val.replaceAll(placeholder, accessToken)
-                    params.body = params.body ? replace(params.body) : params.body
-                    headers = Object.fromEntries(
-                        Object.entries(params.headers ?? {}).map(([k, v]) => [
-                            k,
-                            typeof v === 'string' ? replace(v) : v,
-                        ])
-                    )
-                    params.url = replace(params.url)
-                }
-            }
-        }
-
-        const fetchParams: FetchOptions = { method, headers }
-        if (!['GET', 'HEAD'].includes(method) && params.body) {
-            fetchParams.body = params.body
-        }
-        if (params.timeoutMs !== undefined) {
-            fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
-        }
-
-        const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
-            url: params.url,
-            fetchParams,
-            templateId,
-        })
-
-        result.invocation.state.timings.push({
-            kind: 'async_function',
-            duration_ms: fetchDuration,
-        })
-        result.invocation.state.attempts++
-
-        if (!fetchResponse || (fetchResponse?.status && fetchResponse.status >= 400)) {
-            const backoffMs = Math.min(
-                this.hub.CDP_FETCH_BACKOFF_BASE_MS * result.invocation.state.attempts +
-                    Math.floor(Math.random() * this.hub.CDP_FETCH_BACKOFF_BASE_MS),
-                this.hub.CDP_FETCH_BACKOFF_MAX_MS
-            )
-            const canRetry = this.fetchUtils.isFetchResponseRetriable(fetchResponse, fetchError)
-            let message = `Push notification request failed on attempt ${result.invocation.state.attempts} with status code ${
-                fetchResponse?.status ?? '(none)'
-            }.`
-            if (fetchError) {
-                message += ` Error: ${fetchError.message}.`
-            }
-            if (canRetry) {
-                message += ` Retrying in ${backoffMs}ms.`
-            }
-            addLog('error', message)
-            if (canRetry && result.invocation.state.attempts < this.hub.CDP_FETCH_RETRIES) {
-                await fetchResponse?.dump()
-                result.invocation.queue = 'hog'
-                result.invocation.queueParameters = { ...params }
-                result.invocation.queuePriority = invocation.queuePriority + 1
-                result.invocation.queueScheduledAt = DateTime.utc().plus({ milliseconds: backoffMs })
-                return result
-            }
-            result.error = new Error(message)
-        }
-
-        result.invocation.state.attempts = 0
-
-        let body: unknown = undefined
         try {
-            body = await fetchResponse?.text()
-            if (typeof body === 'string') {
-                try {
-                    body = parseJSON(body)
-                } catch (e) {
-                    // Pass through
-                }
+            const integration = await this.integrationManager.get(params.integrationId)
+            if (!integration || integration.team_id !== invocation.teamId) {
+                throw new Error('Push notification integration not found')
             }
-        } catch (e) {
-            addLog('error', `Failed to parse response body: ${e.message}`)
-            body = undefined
+
+            if (integration.kind === 'firebase') {
+                await this.executeFcm(result, params, integration)
+            } else if (integration.kind === 'apple-push') {
+                await this.executeApns(result, params, integration)
+            } else {
+                throw new Error(`Unsupported push integration kind: ${integration.kind}`)
+            }
+
+            success = true
+        } catch (error) {
+            addLog('error', error.message)
+            result.error = error.message
         }
 
-        const fcmToken = this.getFcmTokenFromInvocation({
-            inputs: invocation.state.globals?.inputs,
-            inputsSchema: invocation.hogFunction.inputs_schema,
+        result.invocation.state.vmState!.stack.push({ success })
+
+        result.metrics.push({
+            team_id: invocation.teamId,
+            app_source_id: invocation.parentRunId ?? invocation.functionId,
+            instance_id: invocation.state.actionId || invocation.id,
+            metric_kind: 'other',
+            metric_name: 'sendPushNotification' as const,
+            count: 1,
         })
-        if (fcmToken) {
+
+        return result
+    }
+
+    private async executeFcm(
+        result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>,
+        params: CyclotronInvocationQueueParametersSendPushNotificationType,
+        integration: IntegrationType
+    ): Promise<void> {
+        const addLog = createAddLogFunction(result.logs)
+        const payload = params.payload
+        const teamId = result.invocation.teamId
+
+        const projectId = integration.config.project_id
+        const accessToken = integration.sensitive_config.access_token ?? integration.config.access_token
+        if (!projectId || !accessToken) {
+            throw new Error('Firebase integration is missing project_id or access_token')
+        }
+
+        // Look up device tokens for this distinct ID
+        const subscriptions = await this.pushSubscriptionsManager.get({
+            teamId,
+            distinctId: params.distinctId,
+            fcmProjectId: projectId,
+            provider: 'fcm',
+        })
+
+        if (subscriptions.length === 0) {
+            addLog('warn', `No active FCM device tokens found for distinct_id: ${params.distinctId}`)
+            return
+        }
+
+        const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`
+        const templateId = result.invocation.hogFunction.template_id ?? 'unknown'
+        let sentCount = 0
+
+        for (const subscription of subscriptions) {
+            const fcmMessage = this.buildFcmMessage(subscription.token, payload)
+
+            const fetchParams: FetchOptions = {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(fcmMessage),
+            }
+
+            if (params.timeoutMs !== undefined) {
+                fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
+            }
+
+            const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
+                url,
+                fetchParams,
+                templateId,
+            })
+
+            result.invocation.state.timings.push({
+                kind: 'async_function',
+                duration_ms: fetchDuration,
+            })
+
+            let body: unknown = undefined
+            try {
+                body = await fetchResponse?.text()
+                if (typeof body === 'string') {
+                    try {
+                        body = parseJSON(body)
+                    } catch (_e) {
+                        // Pass through
+                    }
+                }
+            } catch (e) {
+                addLog('error', `Failed to parse response body: ${e.message}`)
+            }
+
+            // Handle FCM token lifecycle
             const status = fetchResponse?.status
             let errorDetails: FcmErrorDetail[] | undefined
             if (status === 400 && body && typeof body === 'object') {
@@ -174,27 +165,140 @@ export class PushNotificationService {
                 const error = errorBody?.error as { details?: FcmErrorDetail[] } | undefined
                 errorDetails = error?.details
             }
-            await this.pushSubscriptionsManager.updateTokenLifecycle(invocation.teamId, fcmToken, status, errorDetails)
-            if (status && status >= 200 && status < 300) {
-                pushNotificationSentCounter.labels({ platform: 'android' }).inc()
+            await this.pushSubscriptionsManager.updateTokenLifecycle(teamId, subscription.token, status, errorDetails)
+
+            if (!fetchResponse || (status && status >= 400)) {
+                const message = `Push notification to device ${subscription.id} failed with status ${status ?? '(none)'}.${fetchError ? ` Error: ${fetchError.message}.` : ''}`
+                addLog('error', message)
+                continue
             }
-        } else {
-            addLog('warn', 'FCM token not found in inputs, skipping FCM response handling')
+
+            sentCount++
         }
 
-        const hogVmResponse: { status: number; body: unknown } = {
-            status: fetchResponse?.status ?? 500,
-            body,
+        if (sentCount === 0) {
+            throw new Error(`Push notification failed for all ${subscriptions.length} device(s)`)
         }
-        result.invocation.state.vmState!.stack.push(hogVmResponse)
-        result.execResult = hogVmResponse
-        result.metrics.push({
-            team_id: invocation.teamId,
-            app_source_id: invocation.functionId,
-            metric_kind: 'other',
-            metric_name: 'sendPushNotification' as const,
-            count: 1,
-        })
-        return result
+
+        pushNotificationSentCounter.labels({ platform: 'android' }).inc(sentCount)
+        addLog('info', `Push notification sent via FCM to ${sentCount}/${subscriptions.length} device(s)`)
+    }
+
+    private executeApns(
+        _result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>,
+        _params: CyclotronInvocationQueueParametersSendPushNotificationType,
+        _integration: IntegrationType
+    ): Promise<void> {
+        // TODO: Implement APNS direct delivery (requires HTTP/2)
+        throw new Error('Direct APNS delivery is not yet supported. Use FCM to deliver to iOS devices.')
+    }
+
+    private buildFcmMessage(token: string, payload: PushNotificationPayloadType): Record<string, unknown> {
+        const notification: Record<string, string> = { title: payload.title }
+        if (payload.body) {
+            notification.body = payload.body
+        }
+        if (payload.image) {
+            notification.image = payload.image
+        }
+
+        const message: Record<string, unknown> = {
+            token,
+            notification,
+        }
+
+        if (payload.data) {
+            message.data = payload.data
+        }
+
+        // Android-specific config
+        if (payload.android || payload.collapseKey || payload.ttlSeconds !== undefined) {
+            const android: Record<string, unknown> = {}
+            if (payload.collapseKey) {
+                android.collapse_key = payload.collapseKey
+            }
+            if (payload.ttlSeconds !== undefined) {
+                android.ttl = `${payload.ttlSeconds}s`
+            }
+            if (payload.android) {
+                if (payload.android.priority) {
+                    android.priority = payload.android.priority.toUpperCase()
+                }
+                const androidNotification: Record<string, string> = {}
+                if (payload.android.channelId) {
+                    androidNotification.channel_id = payload.android.channelId
+                }
+                if (payload.android.sound) {
+                    androidNotification.sound = payload.android.sound
+                }
+                if (payload.android.tag) {
+                    androidNotification.tag = payload.android.tag
+                }
+                if (payload.android.icon) {
+                    androidNotification.icon = payload.android.icon
+                }
+                if (payload.android.color) {
+                    androidNotification.color = payload.android.color
+                }
+                if (payload.android.clickAction) {
+                    androidNotification.click_action = payload.android.clickAction
+                }
+                if (Object.keys(androidNotification).length > 0) {
+                    android.notification = androidNotification
+                }
+            }
+            message.android = android
+        }
+
+        // APNS overrides (for iOS devices via FCM)
+        if (payload.apns) {
+            const aps: Record<string, unknown> = {}
+            if (payload.apns.sound) {
+                aps.sound = payload.apns.sound
+            }
+            if (payload.apns.badge !== undefined) {
+                aps.badge = payload.apns.badge
+            }
+            if (payload.apns.category) {
+                aps.category = payload.apns.category
+            }
+            if (payload.apns.threadId) {
+                aps['thread-id'] = payload.apns.threadId
+            }
+            if (payload.apns.interruptionLevel) {
+                aps['interruption-level'] = payload.apns.interruptionLevel
+            }
+            if (payload.apns.relevanceScore !== undefined) {
+                aps['relevance-score'] = payload.apns.relevanceScore
+            }
+            if (payload.apns.subtitle) {
+                // Subtitle goes in the alert object
+                notification.subtitle = payload.apns.subtitle
+            }
+            if (payload.apns.mutableContent) {
+                aps['mutable-content'] = 1
+            }
+            if (payload.apns.targetContentId) {
+                aps['target-content-id'] = payload.apns.targetContentId
+            }
+
+            message.apns = {
+                payload: { aps },
+            }
+
+            // Set collapse ID via APNS header if collapseKey is set
+            if (payload.collapseKey) {
+                ;(message.apns as Record<string, unknown>).headers = {
+                    'apns-collapse-id': payload.collapseKey,
+                }
+            }
+            if (payload.ttlSeconds !== undefined) {
+                const headers = ((message.apns as Record<string, unknown>).headers as Record<string, string>) ?? {}
+                headers['apns-expiration'] = String(Math.floor(Date.now() / 1000) + payload.ttlSeconds)
+                ;(message.apns as Record<string, unknown>).headers = headers
+            }
+        }
+
+        return { message }
     }
 }
