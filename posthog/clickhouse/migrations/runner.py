@@ -1,0 +1,245 @@
+from __future__ import annotations
+
+import re
+import hashlib
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from posthog.clickhouse.migrations.manifest import ManifestStep
+from posthog.clickhouse.migrations.tracking import get_applied_migrations, record_step
+
+if TYPE_CHECKING:
+    from posthog.clickhouse.client.connection import NodeRole
+    from posthog.clickhouse.cluster import ClickhouseCluster
+
+logger = logging.getLogger("migrations")
+
+MIGRATIONS_DIR = Path("posthog/clickhouse/migrations")
+
+# Map manifest uppercase role strings to NodeRole enum value strings (lowercase).
+# We resolve to actual NodeRole at call time to avoid importing Django at module load.
+_ROLE_MAP: dict[str, str] = {
+    "DATA": "data",
+    "COORDINATOR": "coordinator",
+    "INGESTION_EVENTS": "events",
+    "INGESTION_SMALL": "small",
+    "INGESTION_MEDIUM": "medium",
+    "SHUFFLEHOG": "shufflehog",
+    "ENDPOINTS": "endpoints",
+    "LOGS": "logs",
+    "ALL": "all",
+}
+
+# Matches migration filenames like 0001_initial.py or directories like 0220_name
+_MIGRATION_PY_RE = re.compile(r"^([0-9]+)_([a-zA-Z_0-9]+)\.py$")
+_MIGRATION_DIR_RE = re.compile(r"^([0-9]+)_([a-zA-Z_0-9]+)$")
+
+
+def _get_node_role_enum() -> type:
+    """Deferred import of NodeRole to avoid Django dependency at module load."""
+    from posthog.clickhouse.client.connection import NodeRole
+
+    return NodeRole
+
+
+def _make_query(sql: str) -> Any:
+    """Deferred import of Query to avoid Django dependency at module load."""
+    from posthog.clickhouse.cluster import Query
+
+    return Query(sql)
+
+
+def _map_node_roles(manifest_roles: list[str]) -> list[NodeRole]:
+    """Convert manifest uppercase role strings to NodeRole enum values."""
+    NodeRole = _get_node_role_enum()
+    result = []
+    for role in manifest_roles:
+        role_value = _ROLE_MAP.get(role)
+        if role_value is None:
+            raise ValueError(f"Unknown node role '{role}'. Valid roles: {sorted(_ROLE_MAP.keys())}")
+        result.append(NodeRole(role_value))
+    return result
+
+
+def discover_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> list[dict[str, Any]]:
+    """Discover all migrations (both .py and directory-based). Returns sorted list."""
+    migrations: list[dict[str, Any]] = []
+
+    for entry in migrations_dir.iterdir():
+        if entry.name.startswith("_"):
+            continue
+
+        if entry.is_file():
+            match = _MIGRATION_PY_RE.match(entry.name)
+            if match:
+                number = int(match.group(1))
+                name = f"{match.group(1)}_{match.group(2)}"
+                migrations.append(
+                    {
+                        "number": number,
+                        "name": name,
+                        "style": "py",
+                        "path": entry,
+                    }
+                )
+        elif entry.is_dir():
+            match = _MIGRATION_DIR_RE.match(entry.name)
+            if match and (entry / "manifest.yaml").exists():
+                number = int(match.group(1))
+                name = f"{match.group(1)}_{match.group(2)}"
+                migrations.append(
+                    {
+                        "number": number,
+                        "name": name,
+                        "style": "new",
+                        "path": entry,
+                    }
+                )
+
+    migrations.sort(key=lambda m: m["number"])
+    return migrations
+
+
+def is_new_style(migration_dir: Path) -> bool:
+    """Check if a path corresponds to a directory with manifest.yaml."""
+    return migration_dir.is_dir() and (migration_dir / "manifest.yaml").exists()
+
+
+def get_pending_migrations(
+    client: Any,
+    database: str,
+    migrations_dir: Path = MIGRATIONS_DIR,
+) -> list[dict[str, Any]]:
+    """Compare discovered migrations against tracking table, return unapplied."""
+    all_migrations = discover_migrations(migrations_dir)
+    applied = get_applied_migrations(client, database)
+
+    applied_numbers: set[int] = {row["migration_number"] for row in applied}
+
+    return [m for m in all_migrations if m["number"] not in applied_numbers]
+
+
+def execute_migration_step(
+    cluster: ClickhouseCluster,
+    step: ManifestStep,
+    rendered_sql: str,
+) -> dict[str, Any]:
+    """Execute a single step using the correct ClickhouseCluster method.
+
+    Returns dict with per-host results.
+
+    Routing logic:
+    - sharded + is_alter_on_replicated_table -> map_one_host_per_shard
+    - is_alter_on_replicated_table only -> any_host_by_roles
+    - neither -> map_hosts_by_roles
+    """
+    query = _make_query(rendered_sql)
+    node_roles = _map_node_roles(step.node_roles)
+
+    if step.sharded and step.is_alter_on_replicated_table:
+        futures_map = cluster.map_one_host_per_shard(query)
+        return futures_map.result()
+    elif step.is_alter_on_replicated_table:
+        future = cluster.any_host_by_roles(query, node_roles=node_roles)
+        result = future.result()
+        return {"single_host": result}
+    else:
+        futures_map = cluster.map_hosts_by_roles(query, node_roles=node_roles)
+        return futures_map.result()
+
+
+def run_migration_up(
+    cluster: ClickhouseCluster,
+    migration: Any,
+    database: str,
+    migration_number: int,
+    migration_name: str,
+) -> bool:
+    """Run all steps in a migration. Records results in tracking table.
+
+    Returns True if all steps succeeded on all hosts.
+    On partial failure: halts, tracking table shows which hosts succeeded.
+    """
+    steps = migration.get_steps()
+
+    for step_index, (step, rendered_sql) in enumerate(steps):
+        checksum = compute_checksum(rendered_sql)
+
+        try:
+            host_results = execute_migration_step(cluster, step, rendered_sql)
+        except Exception as exc:
+            logger.exception(
+                "Migration %s step %d failed: %s",
+                migration_name,
+                step_index,
+                exc,
+            )
+            _record_for_tracking(
+                database=database,
+                migration_number=migration_number,
+                migration_name=migration_name,
+                step_index=step_index,
+                host="unknown",
+                node_role=",".join(step.node_roles),
+                direction="up",
+                checksum=checksum,
+                success=False,
+            )
+            return False
+
+        for host_key in host_results:
+            _record_for_tracking(
+                database=database,
+                migration_number=migration_number,
+                migration_name=migration_name,
+                step_index=step_index,
+                host=str(host_key),
+                node_role=",".join(step.node_roles),
+                direction="up",
+                checksum=checksum,
+                success=True,
+            )
+
+    return True
+
+
+def _record_for_tracking(
+    *,
+    database: str,
+    migration_number: int,
+    migration_name: str,
+    step_index: int,
+    host: str,
+    node_role: str,
+    direction: str,
+    checksum: str,
+    success: bool,
+) -> None:
+    """Record a step result in the tracking table.
+
+    Uses a deferred import to get a ClickHouse client for the tracking table.
+    """
+    from posthog.clickhouse.client.migration_tools import get_migrations_cluster
+
+    tracking_cluster = get_migrations_cluster()
+
+    def _do_record(client: Any) -> None:
+        record_step(
+            client=client,
+            migration_number=migration_number,
+            migration_name=migration_name,
+            step_index=step_index,
+            host=host,
+            node_role=node_role,
+            direction=direction,
+            checksum=checksum,
+            success=success,
+        )
+
+    tracking_cluster.any_host(_do_record).result()
+
+
+def compute_checksum(sql: str) -> str:
+    """SHA256 of rendered SQL."""
+    return hashlib.sha256(sql.encode()).hexdigest()
