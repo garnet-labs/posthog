@@ -110,7 +110,7 @@ def ingest_test_results(
     """Create TestCase and TestExecution records from parsed test results."""
     from .ingestion import ParsedTestResult
 
-    counts = {"total": 0, "passed": 0, "failed": 0, "flaky": 0, "skipped": 0, "errored": 0}
+    counts = {"total": 0, "passed": 0, "failed": 0, "flaky": 0, "skipped": 0, "error": 0}
 
     for result in parsed_results:
         result: ParsedTestResult
@@ -155,7 +155,7 @@ def ingest_test_results(
     ci_run.failed = counts["failed"]
     ci_run.flaky = counts["flaky"]
     ci_run.skipped = counts["skipped"]
-    ci_run.errored = counts["errored"]
+    ci_run.errored = counts["error"]
     ci_run.artifacts_ingested = True
     ci_run.save(
         update_fields=[

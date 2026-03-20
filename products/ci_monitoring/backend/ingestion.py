@@ -5,7 +5,11 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
+import structlog
+
 from .facade.enums import TestExecutionStatus
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -28,15 +32,19 @@ def parse_junit_xml(xml_content: str | bytes) -> list[ParsedTestResult]:
     Flaky detection: a testcase with <rerun> children that eventually passed
     is marked as FLAKY.
     """
-    root = ET.fromstring(xml_content)
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError:
+        logger.warning("ci_monitoring.malformed_junit_xml")
+        return []
+
     results: list[ParsedTestResult] = []
 
-    # Handle both <testsuites><testsuite>... and bare <testsuite>...
-    testsuites = root.findall(".//testcase")
-    if not testsuites:
+    testcases = root.findall(".//testcase")
+    if not testcases:
         return results
 
-    for tc in testsuites:
+    for tc in testcases:
         classname = tc.get("classname", "")
         name = tc.get("name", "")
         time_attr = tc.get("time")
@@ -44,6 +52,9 @@ def parse_junit_xml(xml_content: str | bytes) -> list[ParsedTestResult]:
 
         duration_ms = int(float(time_attr) * 1000) if time_attr else None
         identifier = f"{classname}.{name}" if classname else name
+
+        if not identifier:
+            continue
 
         # Detect status from child elements
         failures = tc.findall("failure")

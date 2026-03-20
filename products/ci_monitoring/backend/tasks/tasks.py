@@ -17,7 +17,12 @@ def ingest_ci_run_artifacts(*, ci_run_id: str) -> None:
 
     ci_run = CIRun.objects.select_related("repo").get(id=ci_run_id)
 
-    xml_contents = logic.download_run_artifacts(ci_run)
+    try:
+        xml_contents = logic.download_run_artifacts(ci_run)
+    except Exception:
+        logger.exception("ci_monitoring.artifact_download_failed", ci_run_id=ci_run_id)
+        return
+
     if not xml_contents:
         logger.info("ci_monitoring.no_artifacts", ci_run_id=ci_run_id)
         ci_run.artifacts_ingested = True
