@@ -77,7 +77,7 @@ task = Task.create_and_run(
 | `description`          | Yes      | Detailed description of what the agent should do                           |
 | `origin_product`       | Yes      | Which product created this task (see `Task.OriginProduct` choices)         |
 | `user_id`              | Yes      | User ID — used for feature flag validation and creating the scoped API key |
-| `repository`           | Yes      | GitHub repo in `org/repo` format (e.g., `posthog/posthog-js`)              |
+| `repository`           | No       | GitHub repo in `org/repo` format (e.g., `posthog/posthog-js`). Optional for tasks that don't need code execution or GitHub access. |
 | `posthog_mcp_scopes`   | No       | Scope preset or explicit scope list (default: `"full"`)                    |
 | `create_pr`            | No       | Whether the agent should create a PR (default: `True`)                     |
 | `mode`                 | No       | Execution mode (default: `"background"`)                                   |
