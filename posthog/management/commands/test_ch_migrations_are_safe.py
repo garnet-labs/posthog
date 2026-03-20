@@ -29,13 +29,25 @@ IGNORED_DUPLICATE_MIGRATION_NUMBERS = frozenset(
 
 
 def get_all_migrations() -> list[tuple[str, str]]:
-    """Get all migrations as (index, name) tuples."""
+    """Get all migrations as (index, name) tuples.
+
+    Matches both .py files (0001_name.py) and directories (0220_name/).
+    """
     migrations: list[tuple[str, str]] = []
     for filename in os.listdir(MIGRATIONS_DIR):
+        # Match .py files: 0001_name.py
         match = re.match(r"([0-9]+)_([a-zA-Z_0-9]+)\.py", filename)
         if match:
             groups = match.groups()
             migrations.append((groups[0], groups[1]))
+            continue
+        # Match directories: 0220_name/ (must contain manifest.yaml to count)
+        dir_match = re.match(r"([0-9]+)_([a-zA-Z_0-9]+)$", filename)
+        if dir_match:
+            dir_path = os.path.join(MIGRATIONS_DIR, filename)
+            if os.path.isdir(dir_path) and os.path.exists(os.path.join(dir_path, "manifest.yaml")):
+                groups = dir_match.groups()
+                migrations.append((groups[0], groups[1]))
     return sorted(migrations, key=lambda x: (int(x[0]), x[1]))
 
 
@@ -51,7 +63,7 @@ def check_no_duplicate_migration_numbers() -> bool:
 
     if duplicates:
         for index, names in sorted(duplicates.items()):
-            logger.error(f"Duplicate migration {index}: {', '.join(f'{index}_{n}.py' for n in names)}")
+            logger.error(f"Duplicate migration {index}: {', '.join(f'{index}_{n}' for n in names)}")
         return False
     return True
 
@@ -121,14 +133,23 @@ class Command(BaseCommand):
 
         old_migrations = []
         for filename in master_migrations:
+            # Match .py files
             match = re.findall(r"([0-9]+)_([a-zA-Z_0-9]+)\.py", filename)
             if match:
                 old_migrations.append(match[0])
+                continue
+            # Match directories
+            dir_match = re.findall(r"^([0-9]+)_([a-zA-Z_0-9]+)$", filename)
+            if dir_match:
+                old_migrations.append(dir_match[0])
 
         try:
-            _, index, name = re.findall(r"([a-z]+)/clickhouse/migrations/([0-9]+)_([a-zA-Z_0-9]+)\.py", new_migration)[
-                0
-            ]
+            # Try .py file pattern first
+            matches = re.findall(r"([a-z]+)/clickhouse/migrations/([0-9]+)_([a-zA-Z_0-9]+)\.py", new_migration)
+            if not matches:
+                # Try directory pattern (path may end with / or not)
+                matches = re.findall(r"([a-z]+)/clickhouse/migrations/([0-9]+)_([a-zA-Z_0-9]+)/?$", new_migration)
+            _, index, name = matches[0]
         except (IndexError, CommandError) as exc:
             logger.warning("Could not parse migration path '%s': %s", new_migration, exc)
             return
