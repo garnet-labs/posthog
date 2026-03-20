@@ -46,7 +46,7 @@ def _list_candidate_repos(team_id: int) -> list[str]:
                 if full_name:
                     repos.add(full_name.lower())
                     if len(repos) >= _MAX_GITHUB_REPOS:
-                        logger.warning("repo_list_capped", team_id=team_id, cap=_MAX_GITHUB_REPOS)
+                        logger.warning("repo_list_capped team_id=%s cap=%s", team_id, _MAX_GITHUB_REPOS)
                         return sorted(repos)
             if len(repo_entries) < _GITHUB_REPOS_PER_PAGE:
                 break
