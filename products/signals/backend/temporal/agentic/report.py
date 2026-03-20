@@ -5,6 +5,7 @@ from django.db import transaction
 import structlog
 import temporalio
 import posthoganalytics
+from pydantic import ValidationError
 
 from posthog.models.organization import OrganizationMembership
 from posthog.models.team.team import Team
@@ -133,7 +134,14 @@ def _load_previous_research(report_id: str) -> ReportResearchOutput | None:
             case SignalReportArtefact.ArtefactType.SIGNAL_FINDING:
                 findings.append(SignalFinding.model_validate_json(artefact.content))
             case SignalReportArtefact.ArtefactType.ACTIONABILITY_JUDGMENT:
-                actionability = ActionabilityAssessment.model_validate_json(artefact.content)
+                try:
+                    actionability = ActionabilityAssessment.model_validate_json(artefact.content)
+                except ValidationError:
+                    logger.warning(
+                        "Ignoring actionability artefact with incompatible schema (likely written by the legacy path)",
+                        report_id=report_id,
+                        artefact_id=artefact.id,
+                    )
             case SignalReportArtefact.ArtefactType.PRIORITY_JUDGMENT:
                 priority = PriorityAssessment.model_validate_json(artefact.content)
     if not findings or actionability is None:
