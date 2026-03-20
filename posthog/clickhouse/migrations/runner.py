@@ -298,3 +298,38 @@ def run_migration_down(
 def compute_checksum(sql: str) -> str:
     """SHA256 of rendered SQL."""
     return hashlib.sha256(sql.encode()).hexdigest()
+
+
+def check_active_mutations(
+    cluster: ClickhouseCluster,
+    database: str,
+    tables: list[str],
+) -> list[dict[str, Any]]:
+    """Query system.mutations WHERE is_done = 0 on target tables.
+
+    Returns list of active mutation dicts across all hosts.
+    """
+    if not tables:
+        return []
+
+    table_list = ", ".join(f"'{t}'" for t in tables)
+    sql = (
+        f"SELECT database, table, mutation_id, command, create_time "
+        f"FROM system.mutations "
+        f"WHERE is_done = 0 AND database = '{database}' AND table IN ({table_list}) "
+        f"ORDER BY create_time"
+    )
+
+    query = _make_query(sql)
+
+    NodeRole = _get_node_role_enum()
+    futures_map = cluster.map_hosts_by_roles(query, node_roles=[NodeRole("data")])
+    host_results = futures_map.result()
+
+    active: list[dict[str, Any]] = []
+    for _host, rows in host_results.items():
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    active.append(row)
+    return active

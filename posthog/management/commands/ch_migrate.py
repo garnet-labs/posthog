@@ -27,6 +27,18 @@ class Command(BaseCommand):
             default=99_999,
             help="Apply migrations up to this number (inclusive).",
         )
+        up_parser.add_argument(
+            "--check-mutations",
+            action="store_true",
+            default=False,
+            help="Check for active mutations on target tables before applying.",
+        )
+        up_parser.add_argument(
+            "--force",
+            action="store_true",
+            default=False,
+            help="Force apply even if active mutations are found.",
+        )
 
         down_parser = subparsers.add_parser("down", help="Roll back a specific migration")
         down_parser.add_argument(
@@ -41,6 +53,19 @@ class Command(BaseCommand):
             type=str,
             default=None,
             help="Filter to a specific node hostname (e.g. host1:9000).",
+        )
+
+        validate_parser = subparsers.add_parser("validate", help="Static analysis validation of a migration")
+        validate_parser.add_argument(
+            "migration_number",
+            type=int,
+            help="Migration number to validate.",
+        )
+        validate_parser.add_argument(
+            "--strict",
+            action="store_true",
+            default=False,
+            help="Treat warnings as errors.",
         )
 
         trial_parser = subparsers.add_parser("trial", help="Sandbox validation: up, verify, down, verify")
@@ -62,6 +87,8 @@ class Command(BaseCommand):
             self.handle_status(options)
         elif subcommand == "down":
             self.handle_down(options)
+        elif subcommand == "validate":
+            self.handle_validate(options)
         elif subcommand == "trial":
             self.handle_trial(options)
         else:
@@ -131,10 +158,17 @@ class Command(BaseCommand):
     def handle_up(self, options: object) -> None:
         from posthog.clickhouse.client.migration_tools import get_migrations_cluster
         from posthog.clickhouse.migrations.new_style import NewStyleMigration
-        from posthog.clickhouse.migrations.runner import get_pending_migrations, is_new_style, run_migration_up
+        from posthog.clickhouse.migrations.runner import (
+            check_active_mutations,
+            get_pending_migrations,
+            is_new_style,
+            run_migration_up,
+        )
 
         database: str = settings.CLICKHOUSE_DATABASE
         upto: int = options.get("upto", 99_999)  # type: ignore[union-attr]
+        check_mutations: bool = options.get("check_mutations", False)  # type: ignore[union-attr]
+        force: bool = options.get("force", False)  # type: ignore[union-attr]
         cluster = get_migrations_cluster()
 
         def _get_client_for_query(client):  # type: ignore[no-untyped-def]
@@ -150,6 +184,33 @@ class Command(BaseCommand):
         if not pending:
             print("All migrations are up to date.")
             return
+
+        if check_mutations:
+            # Extract table names from pending new-style migrations for mutation check
+            tables_to_check: list[str] = []
+            for mig in pending:
+                if mig["style"] == "new" and is_new_style(mig["path"]):
+                    try:
+                        m = NewStyleMigration(mig["path"])
+                        for step, _sql in m.get_steps():
+                            if step.sharded or step.is_alter_on_replicated_table:
+                                # Try to extract table name from SQL
+                                import re
+
+                                match = re.search(r"ALTER\s+TABLE\s+(\S+)", _sql, re.IGNORECASE)
+                                if match:
+                                    tables_to_check.append(match.group(1).split(".")[-1])
+                    except Exception:
+                        pass
+
+            if tables_to_check:
+                active = check_active_mutations(cluster, database, tables_to_check)
+                if active and not force:
+                    print("Active mutations found on target tables:")
+                    for mut in active:
+                        print(f"  table={mut.get('table')}, mutation_id={mut.get('mutation_id')}")
+                    print("\nUse --force to apply anyway.")
+                    return
 
         print(f"Applying {len(pending)} migration(s)...\n")
 
@@ -222,6 +283,44 @@ class Command(BaseCommand):
                 self.stdout.write("  New-style migrations: none\n")
 
         self.stdout.write("\n")
+
+    def handle_validate(self, options: object) -> None:
+        from posthog.clickhouse.migrations.runner import discover_migrations, is_new_style
+        from posthog.clickhouse.migrations.validator import validate_migration
+
+        target: int = options.get("migration_number")  # type: ignore[union-attr]
+        strict: bool = options.get("strict", False)  # type: ignore[union-attr]
+
+        all_migrations = discover_migrations()
+        target_mig = next((m for m in all_migrations if m["number"] == target), None)
+
+        if target_mig is None:
+            print(f"Migration {target} not found.")
+            return
+
+        if target_mig["style"] != "new" or not is_new_style(target_mig["path"]):
+            print(f"Migration {target_mig['name']} is not a new-style migration. Validation not supported.")
+            return
+
+        print(f"Validating {target_mig['name']}...")
+        results = validate_migration(target_mig["path"], strict=strict)
+
+        if not results:
+            print("  No issues found.")
+            return
+
+        has_errors = False
+        for r in results:
+            icon = "ERROR" if r.severity == "error" else "WARN"
+            print(f"  [{icon}] ({r.rule}) {r.message}")
+            if r.severity == "error":
+                has_errors = True
+
+        if has_errors:
+            print(f"\nValidation FAILED for {target_mig['name']}.")
+            raise SystemExit(1)
+        else:
+            print(f"\nValidation passed with warnings for {target_mig['name']}.")
 
     def handle_down(self, options: object) -> None:
         from posthog.clickhouse.client.migration_tools import get_migrations_cluster
