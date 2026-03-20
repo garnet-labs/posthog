@@ -5,7 +5,7 @@ import { instrumentFn } from '~/common/tracing/tracing-utils'
 
 import { HogTransformerService } from '../cdp/hog-transformations/hog-transformer.service'
 import { CommonConfig } from '../common/config'
-import { KAFKA_CLICKHOUSE_TOPHOG } from '../config/kafka-topics'
+import { KAFKA_CLICKHOUSE_TOPHOG, KAFKA_INGESTION_WARNINGS } from '../config/kafka-topics'
 import { KafkaConsumer } from '../kafka/consumer'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import { HealthCheckResult, HealthCheckResultError, PluginServerService, RedisPool } from '../types'
@@ -31,7 +31,12 @@ import {
 } from './analytics'
 import { IngestionConsumerConfig } from './config'
 import { CookielessManager } from './cookieless/cookieless-manager'
-import { AI_EVENTS_OUTPUT, EVENTS_OUTPUT, HEATMAPS_OUTPUT } from './event-processing/ingestion-outputs'
+import {
+    AI_EVENTS_OUTPUT,
+    EVENTS_OUTPUT,
+    HEATMAPS_OUTPUT,
+    INGESTION_WARNINGS_OUTPUT,
+} from './event-processing/ingestion-outputs'
 import { parseSplitAiEventsConfig } from './event-processing/split-ai-events-step'
 import { resolveOutputs } from './kafka/output-resolver'
 import { KafkaProducerRegistry } from './kafka/producer-registry'
@@ -227,6 +232,9 @@ export class IngestionConsumer {
             },
             [HEATMAPS_OUTPUT]: {
                 topic: this.config.CLICKHOUSE_HEATMAPS_KAFKA_TOPIC,
+            },
+            [INGESTION_WARNINGS_OUTPUT]: {
+                topic: KAFKA_INGESTION_WARNINGS,
             },
         })
 

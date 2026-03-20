@@ -3,6 +3,7 @@ import { Message } from 'node-rdkafka'
 import { KafkaProducerWrapper } from '../../kafka/producer'
 import { Team } from '../../types'
 import * as utils from '../../worker/ingestion/utils'
+import { INGESTION_WARNINGS_OUTPUT, IngestionOutputs } from '../event-processing/ingestion-outputs'
 import { createContext, createNewBatchPipeline } from './helpers'
 import { IngestionWarningHandlingBatchPipeline } from './ingestion-warning-handling-batch-pipeline'
 import { ok } from './results'
@@ -51,15 +52,15 @@ function createTestTeam(overrides: Partial<Team> = {}): Team {
 
 describe('IngestionWarningHandlingBatchPipeline', () => {
     let mockKafkaProducer: jest.Mocked<KafkaProducerWrapper>
-    let mockCaptureIngestionWarning: jest.MockedFunction<typeof utils.captureIngestionWarning>
+    let mockProduceIngestionWarning: jest.MockedFunction<typeof utils.produceIngestionWarning>
 
     beforeEach(() => {
         mockKafkaProducer = {
             queueMessages: jest.fn(),
         } as any
 
-        mockCaptureIngestionWarning = jest.fn().mockResolvedValue(true)
-        ;(utils.captureIngestionWarning as any) = mockCaptureIngestionWarning
+        mockProduceIngestionWarning = jest.fn().mockResolvedValue(true)
+        ;(utils.produceIngestionWarning as any) = mockProduceIngestionWarning
     })
 
     describe('basic functionality', () => {
@@ -82,7 +83,12 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             ]
 
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed(batch)
             const results = await pipeline.next()
@@ -100,18 +106,23 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
                     team,
                 })
             )
-            expect(mockCaptureIngestionWarning).not.toHaveBeenCalled()
+            expect(mockProduceIngestionWarning).not.toHaveBeenCalled()
         })
 
         it('should handle empty batch', async () => {
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed([])
             const results = await pipeline.next()
 
             expect(results).toEqual(null)
-            expect(mockCaptureIngestionWarning).not.toHaveBeenCalled()
+            expect(mockProduceIngestionWarning).not.toHaveBeenCalled()
         })
     })
 
@@ -132,7 +143,12 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             ]
 
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed(batch)
             const results = await pipeline.next()
@@ -141,16 +157,18 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             expect(results![0].context.warnings).toEqual([])
             expect(results![0].context.sideEffects).toHaveLength(2)
 
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledTimes(2)
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledWith(
+            expect(mockProduceIngestionWarning).toHaveBeenCalledTimes(2)
+            expect(mockProduceIngestionWarning).toHaveBeenCalledWith(
                 mockKafkaProducer,
+                'ingestion_warnings_test',
                 team.id,
                 'test_warning',
                 { field: 'value' },
                 { alwaysSend: undefined }
             )
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledWith(
+            expect(mockProduceIngestionWarning).toHaveBeenCalledWith(
                 mockKafkaProducer,
+                'ingestion_warnings_test',
                 team.id,
                 'another_warning',
                 { error: 'something' },
@@ -171,13 +189,19 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             ]
 
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed(batch)
             const results = await pipeline.next()
 
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledWith(
+            expect(mockProduceIngestionWarning).toHaveBeenCalledWith(
                 mockKafkaProducer,
+                'ingestion_warnings_test',
                 team.id,
                 'critical_warning',
                 { urgent: true },
@@ -203,7 +227,12 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             ]
 
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed(batch)
             const results = await pipeline.next()
@@ -247,7 +276,12 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             ]
 
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed(batch)
             const results = await pipeline.next()
@@ -266,7 +300,7 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             expect(results![2].context.warnings).toEqual([])
             expect(results![2].context.sideEffects).toHaveLength(2)
 
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledTimes(3)
+            expect(mockProduceIngestionWarning).toHaveBeenCalledTimes(3)
         })
 
         it('should handle multiple items with different teams', async () => {
@@ -288,20 +322,27 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             ]
 
             const rootPipeline = createNewBatchPipeline<{ message: Message; team: Team }, { team: Team }>().build()
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, rootPipeline)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                rootPipeline
+            )
 
             pipeline.feed(batch)
             await pipeline.next()
 
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledWith(
+            expect(mockProduceIngestionWarning).toHaveBeenCalledWith(
                 mockKafkaProducer,
+                'ingestion_warnings_test',
                 team1.id,
                 'warning_team1',
                 { team: 1 },
                 { alwaysSend: undefined }
             )
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledWith(
+            expect(mockProduceIngestionWarning).toHaveBeenCalledWith(
                 mockKafkaProducer,
+                'ingestion_warnings_test',
                 team2.id,
                 'warning_team2',
                 { team: 2 },
@@ -356,7 +397,12 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
                 ]),
             }
 
-            const pipeline = new IngestionWarningHandlingBatchPipeline(mockKafkaProducer, previousPipeline as any)
+            const pipeline = new IngestionWarningHandlingBatchPipeline(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'ingestion_warnings_test', producer: mockKafkaProducer },
+                }),
+                previousPipeline as any
+            )
 
             pipeline.feed(batch)
             const results = await pipeline.next()
@@ -369,7 +415,7 @@ describe('IngestionWarningHandlingBatchPipeline', () => {
             expect(results![1].context.warnings).toEqual([])
             expect(results![2].context.warnings).toEqual([])
 
-            expect(mockCaptureIngestionWarning).toHaveBeenCalledTimes(2)
+            expect(mockProduceIngestionWarning).toHaveBeenCalledTimes(2)
         })
     })
 })

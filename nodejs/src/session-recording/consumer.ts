@@ -5,7 +5,7 @@ import { instrumentFn } from '~/common/tracing/tracing-utils'
 
 import { CommonConfig } from '../common/config'
 import { buildIntegerMatcher } from '../config/config'
-import { KAFKA_CLICKHOUSE_TOPHOG } from '../config/kafka-topics'
+import { KAFKA_CLICKHOUSE_TOPHOG, KAFKA_INGESTION_WARNINGS } from '../config/kafka-topics'
 import { IngestionConsumerConfig } from '../ingestion/config'
 import { BatchPipelineUnwrapper } from '../ingestion/pipelines/batch-pipeline-unwrapper'
 import {
@@ -257,6 +257,7 @@ export class SessionRecordingIngester {
             promiseScheduler: this.promiseScheduler,
             teamService: this.teamService,
             topHog: this.topHog,
+            ingestionWarningsTopic: KAFKA_INGESTION_WARNINGS,
             ingestionWarningProducer: this.kafkaMetadataProducer,
             sessionBatchManager: this.sessionBatchManager,
             isDebugLoggingEnabled: this.isDebugLoggingEnabled,

@@ -9,6 +9,9 @@ export type AiEventOutput = typeof AI_EVENTS_OUTPUT
 export const HEATMAPS_OUTPUT = 'heatmaps' as const
 export type HeatmapsOutput = typeof HEATMAPS_OUTPUT
 
+export const INGESTION_WARNINGS_OUTPUT = 'ingestion_warnings' as const
+export type IngestionWarningsOutput = typeof INGESTION_WARNINGS_OUTPUT
+
 export interface IngestionOutputConfig {
     topic: string
     producer: KafkaProducerWrapper

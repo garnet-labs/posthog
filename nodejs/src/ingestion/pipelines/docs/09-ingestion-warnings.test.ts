@@ -46,6 +46,7 @@
 import { createTestTeam } from '../../../../tests/helpers/team'
 import { Team } from '../../../types'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
+import { INGESTION_WARNINGS_OUTPUT, IngestionOutputs } from '../../event-processing/ingestion-outputs'
 import { newBatchPipelineBuilder } from '../builders'
 import { createContext } from '../helpers'
 import { PipelineWarning } from '../pipeline.interface'
@@ -256,7 +257,11 @@ describe('Handling Ingestion Warnings', () => {
         const pipeline = newBatchPipelineBuilder<Event, { team: Team }>()
             .pipeBatch(createWarningStep())
             .teamAware((builder) => builder)
-            .handleIngestionWarnings(mockKafkaProducer as any)
+            .handleIngestionWarnings(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'warnings_test', producer: mockKafkaProducer as any },
+                })
+            )
             .handleSideEffects(promiseScheduler, { await: true })
             .build()
 
@@ -304,7 +309,11 @@ describe('Handling Ingestion Warnings', () => {
         const pipeline = newBatchPipelineBuilder<Event, { team: Team }>()
             .pipeBatch(createStepWithBothSideEffectsAndWarnings())
             .teamAware((builder) => builder)
-            .handleIngestionWarnings(mockKafkaProducer as any)
+            .handleIngestionWarnings(
+                new IngestionOutputs({
+                    [INGESTION_WARNINGS_OUTPUT]: { topic: 'warnings_test', producer: mockKafkaProducer as any },
+                })
+            )
             .handleSideEffects(promiseScheduler, { await: true })
             .build()
 

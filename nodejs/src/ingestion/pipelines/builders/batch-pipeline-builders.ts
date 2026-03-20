@@ -1,7 +1,7 @@
 import { Message } from 'node-rdkafka'
 
-import { KafkaProducerWrapper } from '../../../kafka/producer'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
+import { IngestionOutputs, IngestionWarningsOutput } from '../../event-processing/ingestion-outputs'
 import { BaseBatchPipeline, BatchProcessingStep } from '../base-batch-pipeline'
 import { BatchPipeline } from '../batch-pipeline.interface'
 import { BatchRetryOptions, withBatchRetry } from '../batch-retry'
@@ -228,8 +228,8 @@ export class TeamAwareBatchPipelineBuilder<
     }
 
     handleIngestionWarnings(
-        kafkaProducer: KafkaProducerWrapper
+        outputs: IngestionOutputs<IngestionWarningsOutput>
     ): BatchPipelineBuilder<TInput, TOutput, CInput, COutput> {
-        return new BatchPipelineBuilder(new IngestionWarningHandlingBatchPipeline(kafkaProducer, this.pipeline))
+        return new BatchPipelineBuilder(new IngestionWarningHandlingBatchPipeline(outputs, this.pipeline))
     }
 }

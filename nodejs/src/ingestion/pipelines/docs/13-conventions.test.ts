@@ -37,6 +37,7 @@ import { KafkaProducerWrapper } from '../../../kafka/producer'
 import { Team } from '../../../types'
 import { parseJSON } from '../../../utils/json-parse'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
+import { INGESTION_WARNINGS_OUTPUT, IngestionOutputs } from '../../event-processing/ingestion-outputs'
 import { newBatchPipelineBuilder, newPipelineBuilder } from '../builders'
 import { PipelineBuilder, StartPipelineBuilder } from '../builders/pipeline-builders'
 import { createContext } from '../helpers'
@@ -482,7 +483,14 @@ describe('Pipeline Phases', () => {
                                                 group.sequentially((b) => createProcessingSubpipeline(b))
                                             )
                                     )
-                                    .handleIngestionWarnings(mockKafkaProducer)
+                                    .handleIngestionWarnings(
+                                        new IngestionOutputs({
+                                            [INGESTION_WARNINGS_OUTPUT]: {
+                                                topic: 'warnings_test',
+                                                producer: mockKafkaProducer,
+                                            },
+                                        })
+                                    )
                         )
                 )
                 .handleResults(pipelineConfig)

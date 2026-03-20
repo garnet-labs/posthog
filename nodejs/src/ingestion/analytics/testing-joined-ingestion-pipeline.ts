@@ -4,7 +4,12 @@ import { KafkaProducerWrapper } from '../../kafka/producer'
 import { Team } from '../../types'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
 import { TeamManager } from '../../utils/team-manager'
-import { EventOutput, HeatmapsOutput, IngestionOutputs } from '../event-processing/ingestion-outputs'
+import {
+    EventOutput,
+    HeatmapsOutput,
+    IngestionOutputs,
+    IngestionWarningsOutput,
+} from '../event-processing/ingestion-outputs'
 import { BatchPipelineBuilder } from '../pipelines/builders/batch-pipeline-builders'
 import { OkResultWithContext } from '../pipelines/filter-map-batch-pipeline'
 import { PipelineConfig } from '../pipelines/result-handling-pipeline'
@@ -23,7 +28,7 @@ import { createTestingPreTeamPreprocessingSubpipeline } from './testing-pre-team
 export interface TestingJoinedIngestionPipelineConfig {
     dlqTopic: string
     groupId: string
-    outputs: IngestionOutputs<EventOutput | HeatmapsOutput>
+    outputs: IngestionOutputs<EventOutput | HeatmapsOutput | IngestionWarningsOutput>
 }
 
 export interface TestingJoinedIngestionPipelineDeps {
@@ -126,7 +131,7 @@ export function createTestingJoinedIngestionPipeline<
                                 )
                                 .gather()
                         )
-                        .handleIngestionWarnings(kafkaProducer)
+                        .handleIngestionWarnings(outputs)
                 )
         )
         .handleResults(pipelineConfig)

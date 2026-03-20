@@ -2,6 +2,7 @@ import { Message } from 'node-rdkafka'
 import { v4 } from 'uuid'
 
 import { ProjectId, Team } from '../../types'
+import { INGESTION_WARNINGS_OUTPUT, IngestionOutputs } from '../event-processing/ingestion-outputs'
 import { BatchProcessingStep } from './base-batch-pipeline'
 import { newBatchPipelineBuilder } from './builders'
 import { createBatch, createNewPipeline, createUnwrapper } from './helpers'
@@ -1796,7 +1797,14 @@ describe('Pipeline Integration Tests', () => {
                                             .gather()
                                             .pipeBatch(batchStep)
                                     )
-                                    .handleIngestionWarnings(mockKafkaProducer)
+                                    .handleIngestionWarnings(
+                                        new IngestionOutputs({
+                                            [INGESTION_WARNINGS_OUTPUT]: {
+                                                topic: 'ingestion_warnings_test',
+                                                producer: mockKafkaProducer,
+                                            },
+                                        })
+                                    )
                         )
                 )
                 .handleResults(pipelineConfig)

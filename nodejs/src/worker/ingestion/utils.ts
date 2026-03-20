@@ -69,19 +69,13 @@ export function generateEventDeadLetterQueueMessage(
 // These get displayed under Data Management > Ingestion Warnings
 // These warnings get displayed to end users. Make sure these errors are actionable and useful for them and
 // also update IngestionWarningsView.tsx to display useful context.
-export async function captureIngestionWarning(
+/** Produce an ingestion warning with an explicit producer and topic. */
+export async function produceIngestionWarning(
     kafkaProducer: KafkaProducerWrapper,
+    topic: string,
     teamId: TeamId,
     type: string,
     details: Record<string, any>,
-    /**
-     * captureIngestionWarning will debounce calls using team id and type as the key
-     * you can provide additional config in debounce.key to add to that key
-     * for example to debounce by specific user id you can use debounce: { key: user_id }
-     *
-     * if alwaysSend is true, the message will be sent regardless of the debounce key
-     * you can use this when a message is rare enough or important enough that it should always be sent
-     */
     debounce?: { key?: string; alwaysSend?: boolean }
 ): Promise<boolean> {
     const limiter_key = `${teamId}:${type}:${debounce?.key || ''}`
@@ -92,7 +86,7 @@ export async function captureIngestionWarning(
     if (shouldEmit) {
         return kafkaProducer
             .queueMessages({
-                topic: KAFKA_INGESTION_WARNINGS,
+                topic,
                 messages: [
                     {
                         value: JSON.stringify({
@@ -117,4 +111,18 @@ export async function captureIngestionWarning(
             })
     }
     return Promise.resolve(false)
+}
+
+/**
+ * Legacy wrapper — uses hardcoded KAFKA_INGESTION_WARNINGS topic.
+ * Prefer produceIngestionWarning with an explicit topic in new code.
+ */
+export async function captureIngestionWarning(
+    kafkaProducer: KafkaProducerWrapper,
+    teamId: TeamId,
+    type: string,
+    details: Record<string, any>,
+    debounce?: { key?: string; alwaysSend?: boolean }
+): Promise<boolean> {
+    return produceIngestionWarning(kafkaProducer, KAFKA_INGESTION_WARNINGS, teamId, type, details, debounce)
 }

@@ -9,6 +9,11 @@ import { ValueMatcher } from '../../types'
 import { EventIngestionRestrictionManager } from '../../utils/event-ingestion-restrictions'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
 import { createApplyEventRestrictionsStep, createParseHeadersStep } from '../event-preprocessing'
+import {
+    INGESTION_WARNINGS_OUTPUT,
+    IngestionOutputs,
+    IngestionWarningsOutput,
+} from '../event-processing/ingestion-outputs'
 import { BatchPipelineUnwrapper } from '../pipelines/batch-pipeline-unwrapper'
 import { newBatchPipelineBuilder } from '../pipelines/builders'
 import { TopHogRegistry, createTopHogWrapper, sum, timer } from '../pipelines/extensions/tophog'
@@ -38,7 +43,9 @@ export interface SessionReplayPipelineConfig {
     teamService: TeamService
     /** TopHog registry for tracking metrics. */
     topHog: TopHogRegistry
-    /** Producer for ingestion warnings. */
+    /** Topic for ingestion warnings. */
+    ingestionWarningsTopic: string
+    /** Producer for ingestion warnings (may differ from the main kafkaProducer). */
     ingestionWarningProducer: KafkaProducerWrapper
     /** Session batch manager for recording sessions. */
     sessionBatchManager: SessionBatchManager
@@ -68,10 +75,18 @@ export function createSessionReplayPipeline(
         promiseScheduler,
         teamService,
         topHog,
+        ingestionWarningsTopic,
         ingestionWarningProducer,
         sessionBatchManager,
         isDebugLoggingEnabled,
     } = config
+
+    const outputs = new IngestionOutputs<IngestionWarningsOutput>({
+        [INGESTION_WARNINGS_OUTPUT]: {
+            topic: ingestionWarningsTopic,
+            producer: ingestionWarningProducer,
+        },
+    })
 
     const pipelineConfig: PipelineConfig = {
         kafkaProducer,
@@ -150,7 +165,7 @@ export function createSessionReplayPipeline(
                                     )
                                     .gather()
                             )
-                            .handleIngestionWarnings(ingestionWarningProducer)
+                            .handleIngestionWarnings(outputs)
                 )
         )
         .handleResults(pipelineConfig)

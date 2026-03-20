@@ -284,6 +284,7 @@ describe('ErrorTrackingPipeline', () => {
             eventIngestionRestrictionManager: mockEventIngestionRestrictionManager,
             overflowEnabled: false,
             overflowTopic: 'error_tracking_overflow',
+            ingestionWarningsTopic: 'clickhouse_ingestion_warnings_test',
             ingestionWarningProducer: mockKafkaProducer,
             topHog: mockTopHog,
         }

@@ -1,5 +1,9 @@
-import { KafkaProducerWrapper } from '../../kafka/producer'
-import { captureIngestionWarning } from '../../worker/ingestion/utils'
+import { produceIngestionWarning } from '../../worker/ingestion/utils'
+import {
+    INGESTION_WARNINGS_OUTPUT,
+    IngestionOutputs,
+    IngestionWarningsOutput,
+} from '../event-processing/ingestion-outputs'
 import { BatchPipeline, BatchPipelineResultWithContext } from './batch-pipeline.interface'
 import { TeamIdContext } from './builders/batch-pipeline-builders'
 
@@ -11,7 +15,7 @@ export class IngestionWarningHandlingBatchPipeline<
 > implements BatchPipeline<TInput, TOutput, CInput, COutput>
 {
     constructor(
-        private kafkaProducer: KafkaProducerWrapper,
+        private outputs: IngestionOutputs<IngestionWarningsOutput>,
         private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput>
     ) {}
 
@@ -27,13 +31,18 @@ export class IngestionWarningHandlingBatchPipeline<
 
         return results.map((resultWithContext) => {
             if (resultWithContext.context.warnings && resultWithContext.context.warnings.length > 0) {
+                const { topic, producer } = this.outputs.resolve(INGESTION_WARNINGS_OUTPUT)
                 const warningPromises = resultWithContext.context.warnings.map((warning) =>
-                    captureIngestionWarning(
-                        this.kafkaProducer,
+                    produceIngestionWarning(
+                        producer,
+                        topic,
                         resultWithContext.context.team.id,
                         warning.type,
                         warning.details,
-                        { key: warning.key, alwaysSend: warning.alwaysSend }
+                        {
+                            key: warning.key,
+                            alwaysSend: warning.alwaysSend,
+                        }
                     )
                 )
 
