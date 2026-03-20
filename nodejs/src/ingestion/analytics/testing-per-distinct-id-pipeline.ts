@@ -1,5 +1,6 @@
 import { Message } from 'node-rdkafka'
 
+import { HogTransformerService } from '../../cdp/hog-transformations/hog-transformer.service'
 import { KafkaProducerWrapper } from '../../kafka/producer'
 import { Team } from '../../types'
 import { PersonsStore } from '../../worker/ingestion/persons/persons-store'
@@ -27,6 +28,7 @@ export interface TestingPerDistinctIdPipelineConfig {
     personsStore: PersonsStore
     kafkaProducer: KafkaProducerWrapper
     groupId: string
+    hogTransformer: HogTransformerService | null
 }
 
 export interface TestingPerDistinctIdPipelineContext {
@@ -50,7 +52,7 @@ export function createTestingPerDistinctIdPipeline<TInput extends TestingPerDist
     builder: StartPipelineBuilder<TInput, TContext>,
     config: TestingPerDistinctIdPipelineConfig
 ): PipelineBuilder<TInput, void, TContext> {
-    const { options, outputs, personsStore, kafkaProducer, groupId } = config
+    const { options, outputs, personsStore, kafkaProducer, groupId, hogTransformer } = config
 
     return builder.retry(
         (e) =>
@@ -76,6 +78,7 @@ export function createTestingPerDistinctIdPipeline<TInput extends TestingPerDist
                             personsStore,
                             kafkaProducer,
                             groupId,
+                            hogTransformer,
                         })
                     )
             }),

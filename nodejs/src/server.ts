@@ -287,12 +287,23 @@ export class PluginServer {
                         true
                     )
 
+                    // Create hogTransformer with no monitoring and no hog watcher — we only
+                    // need the pure transformation logic, no side effects
+                    const testingHogTransformer = hogTransformerDeps
+                        ? createHogTransformerService(
+                              { ...this.config, CDP_HOG_WATCHER_SAMPLE_RATE: 0 },
+                              hogTransformerDeps,
+                              { disableMonitoring: true }
+                          )
+                        : null
+
                     const consumer = new IngestionTestingConsumer(this.config, {
                         kafkaProducer: kafkaWarpStreamProducer,
                         personRepository: ingestionCdpServices!.personRepository,
                         teamManager,
                         cookielessManager: readonlyCookielessManager,
                         redisPool: this.redisPool!,
+                        hogTransformer: testingHogTransformer,
                     })
                     await consumer.start()
                     return consumer.service

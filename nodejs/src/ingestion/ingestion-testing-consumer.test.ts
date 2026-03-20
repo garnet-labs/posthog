@@ -91,6 +91,7 @@ describe('IngestionTestingConsumer', () => {
                 ...hub,
                 personRepository: hub.personRepository,
                 cookielessManager: readonlyCookielessManager,
+                hogTransformer: null,
             },
             overrides
         )

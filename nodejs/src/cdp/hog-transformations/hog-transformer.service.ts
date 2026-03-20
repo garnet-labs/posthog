@@ -445,9 +445,27 @@ export interface HogTransformerServiceDeps {
     internalCaptureService: InternalCaptureService
 }
 
+/** No-op monitoring service that discards all metrics, logs, and invocation results. */
+class NoOpHogFunctionMonitoringService extends HogFunctionMonitoringService {
+    constructor() {
+        super(undefined as any, undefined as any, undefined as any, '', '')
+    }
+    queueAppMetric() {}
+    queueAppMetrics() {}
+    queueLogs() {}
+    async queueInvocationResults() {}
+    async flush() {}
+}
+
+export interface CreateHogTransformerServiceOptions {
+    /** When true, discard all monitoring metrics/logs instead of writing to Kafka. */
+    disableMonitoring?: boolean
+}
+
 export function createHogTransformerService(
     config: HogTransformerServiceConfig,
-    deps: HogTransformerServiceDeps
+    deps: HogTransformerServiceDeps,
+    options?: CreateHogTransformerServiceOptions
 ): HogTransformerService {
     const redis = createRedisV2PoolFromConfig({
         connection: config.CDP_REDIS_HOST
@@ -488,13 +506,15 @@ export function createHogTransformerService(
         recipientTokensService
     )
     const pluginExecutor = new LegacyPluginExecutorService(deps.postgres, deps.geoipService)
-    const hogFunctionMonitoringService = new HogFunctionMonitoringService(
-        deps.kafkaProducer,
-        deps.internalCaptureService,
-        deps.teamManager,
-        config.HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC,
-        config.HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC
-    )
+    const hogFunctionMonitoringService = options?.disableMonitoring
+        ? new NoOpHogFunctionMonitoringService()
+        : new HogFunctionMonitoringService(
+              deps.kafkaProducer,
+              deps.internalCaptureService,
+              deps.teamManager,
+              config.HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC,
+              config.HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC
+          )
     const hogWatcher = new HogWatcherService(
         deps.teamManager,
         {

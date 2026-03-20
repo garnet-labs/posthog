@@ -1,5 +1,6 @@
 import { Message } from 'node-rdkafka'
 
+import { HogTransformerService } from '../../cdp/hog-transformations/hog-transformer.service'
 import { KafkaProducerWrapper } from '../../kafka/producer'
 import { Team } from '../../types'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
@@ -42,6 +43,7 @@ export interface TestingJoinedIngestionPipelineDeps {
     teamManager: TeamManager
     cookielessManager: CookielessManager
     overflowRedisRepository?: OverflowRedisRepository
+    hogTransformer: HogTransformerService | null
 }
 
 export interface TestingJoinedIngestionPipelineInput {
@@ -105,7 +107,14 @@ export function createTestingJoinedIngestionPipeline<
         perDistinctIdOptions,
     } = config
 
-    const { kafkaProducer, personsStore, promiseScheduler, cookielessManager, overflowRedisRepository } = deps
+    const {
+        kafkaProducer,
+        personsStore,
+        promiseScheduler,
+        cookielessManager,
+        overflowRedisRepository,
+        hogTransformer,
+    } = deps
 
     const pipelineConfig: PipelineConfig = {
         kafkaProducer,
@@ -119,6 +128,7 @@ export function createTestingJoinedIngestionPipeline<
         personsStore,
         kafkaProducer,
         groupId,
+        hogTransformer,
     }
 
     // Compared to joined-ingestion-pipeline.ts:

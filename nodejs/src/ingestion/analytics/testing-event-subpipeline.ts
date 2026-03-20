@@ -2,12 +2,14 @@ import { Message } from 'node-rdkafka'
 
 import { PluginEvent } from '~/plugin-scaffold'
 
+import { HogTransformerService } from '../../cdp/hog-transformations/hog-transformer.service'
 import { KafkaProducerWrapper } from '../../kafka/producer'
 import { EventHeaders, Team } from '../../types'
 import { PersonsStore } from '../../worker/ingestion/persons/persons-store'
 import { createCreateEventStep } from '../event-processing/create-event-step'
 import { createEmitEventStep } from '../event-processing/emit-event-step'
 import { createExtractHeatmapDataStep } from '../event-processing/extract-heatmap-data-step'
+import { createHogTransformEventStep } from '../event-processing/hog-transform-event-step'
 import { EVENTS_OUTPUT, EventOutput, IngestionOutputs } from '../event-processing/ingestion-outputs'
 import { createNormalizeEventStep } from '../event-processing/normalize-event-step'
 import { createNormalizeProcessPersonFlagStep } from '../event-processing/normalize-process-person-flag-step'
@@ -32,22 +34,24 @@ export interface TestingEventSubpipelineConfig {
     personsStore: PersonsStore
     kafkaProducer: KafkaProducerWrapper
     groupId: string
+    hogTransformer: HogTransformerService | null
 }
 
 export function createTestingEventSubpipeline<TInput extends TestingEventSubpipelineInput, TContext>(
     builder: StartPipelineBuilder<TInput, TContext>,
     config: TestingEventSubpipelineConfig
 ): PipelineBuilder<TInput, void, TContext> {
-    const { options, outputs, personsStore, kafkaProducer, groupId } = config
+    const { options, outputs, personsStore, kafkaProducer, groupId, hogTransformer } = config
 
     // Compared to event-subpipeline.ts:
     // CHANGED: createProcessPersonsStep → createReadonlyProcessPersonsStep + createPublishPersonUpdateStep
     //   (reads person from DB, computes property diff, publishes Kafka update — never writes to Postgres)
+    // CHANGED: hogTransformer runs with hogWatcherSampleRate=0 (no Redis writes, no monitoring flush)
     // REMOVED: createProcessGroupsStep (creates/updates group records, enriches with group properties)
-    // REMOVED: createHogTransformEventStep (no hog transformations — avoids Redis writes)
     // REMOVED: topHog metrics wrapping (no TopHog in this pipeline)
     return builder
         .pipe(createNormalizeProcessPersonFlagStep())
+        .pipe(createHogTransformEventStep(hogTransformer))
         .pipe(createNormalizeEventStep())
         .pipe(createProcessPersonlessStep(personsStore))
         .pipe(createReadonlyProcessPersonsStep(personsStore))

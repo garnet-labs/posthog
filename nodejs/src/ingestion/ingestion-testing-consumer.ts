@@ -2,6 +2,7 @@ import { Message } from 'node-rdkafka'
 
 import { instrumentFn } from '~/common/tracing/tracing-utils'
 
+import { HogTransformerService } from '../cdp/hog-transformations/hog-transformer.service'
 import { KafkaConsumer } from '../kafka/consumer'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import {
@@ -54,6 +55,7 @@ export interface IngestionTestingConsumerDeps {
     teamManager: TeamManager
     cookielessManager: CookielessManager
     redisPool: RedisPool
+    hogTransformer: HogTransformerService | null
 }
 
 export class IngestionTestingConsumer {
@@ -148,6 +150,7 @@ export class IngestionTestingConsumer {
             teamManager: this.deps.teamManager,
             cookielessManager: this.deps.cookielessManager,
             overflowRedisRepository: this.overflowRedisRepository,
+            hogTransformer: this.deps.hogTransformer,
         }
         this.joinedPipeline = createTestingJoinedIngestionPipeline(
             newBatchPipelineBuilder<TestingJoinedIngestionPipelineInput, TestingJoinedIngestionPipelineContext>(),
@@ -229,7 +232,9 @@ export class IngestionTestingConsumer {
 
         return {
             backgroundTask: this.runInstrumented('awaitScheduledWork', async () => {
-                await this.promiseScheduler.waitForAll()
+                // Drain invocation results to prevent memory leak — monitoring is a no-op
+                const hogTransformer = this.deps.hogTransformer
+                await Promise.all([this.promiseScheduler.waitForAll(), hogTransformer?.processInvocationResults()])
             }),
         }
     }
