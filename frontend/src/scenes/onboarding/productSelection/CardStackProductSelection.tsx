@@ -148,9 +148,10 @@ const SwipeableCard = forwardRef<
         productKey: AvailableOnboardingProductKey
         isTop: boolean
         stackIndex: number
+        exitDirection: 'left' | 'right'
         onSwipe: (direction: 'left' | 'right') => void
     }
->(function SwipeableCard({ productKey, isTop, stackIndex, onSwipe }, ref) {
+>(function SwipeableCard({ productKey, isTop, stackIndex, exitDirection, onSwipe }, ref) {
     const product = availableOnboardingProducts[productKey]
     const HedgehogComponent = PRODUCT_HEDGEHOG[productKey]
     const socialProof = getSocialProof(productKey)
@@ -207,16 +208,24 @@ const SwipeableCard = forwardRef<
         return <></>
     }
 
+    const cardVariants = {
+        initial: isTop ? { scale: 1, y: 0, opacity: 1 } : { scale: stackScale, y: stackY, opacity: stackOpacity },
+        animate: { scale: stackScale, y: stackY, opacity: stackOpacity },
+        exit: (direction: 'left' | 'right') => ({
+            x: isTop ? (direction === 'left' ? -FLY_OUT_X : FLY_OUT_X) : 0,
+            opacity: 0,
+            rotate: isTop ? (direction === 'left' ? -MAX_ROTATION : MAX_ROTATION) : 0,
+        }),
+    }
+
     return (
         <motion.div
             className="absolute"
-            initial={isTop ? { scale: 1, y: 0, opacity: 1 } : { scale: stackScale, y: stackY, opacity: stackOpacity }}
-            animate={{ scale: stackScale, y: stackY, opacity: stackOpacity }}
-            exit={(custom: 'left' | 'right') => ({
-                x: isTop ? (custom === 'left' ? -FLY_OUT_X : FLY_OUT_X) : 0,
-                opacity: 0,
-                rotate: isTop ? (custom === 'left' ? -MAX_ROTATION : MAX_ROTATION) : 0,
-            })}
+            variants={cardVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            custom={exitDirection}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             style={{
                 x: isTop ? x : 0,
@@ -531,6 +540,7 @@ export function CardStackProductSelection(): JSX.Element {
                                         productKey={productKey}
                                         isTop={i === 0}
                                         stackIndex={i}
+                                        exitDirection={exitDirection}
                                         onSwipe={handleSwipe}
                                     />
                                 ))}
