@@ -212,13 +212,54 @@ export const templateToConfiguration = (template: HogFunctionTemplateType): HogF
     }
 }
 
+export function buildSurveyGlobals(properties: Record<string, any>): CyclotronJobInvocationGlobals['survey'] {
+    const SURVEY_RESPONSE_PREFIX = '$survey_response'
+    const surveyId = properties['$survey_id'] ?? ''
+    const questions: Record<string, any>[] | undefined = properties['$survey_questions']
+    const responses: Record<string, unknown> = {}
+
+    if (Array.isArray(questions)) {
+        for (let i = 0; i < questions.length; i++) {
+            const questionId = questions[i]?.id
+            if (questionId) {
+                const value = properties[`${SURVEY_RESPONSE_PREFIX}_${questionId}`]
+                if (value !== undefined) {
+                    responses[String(i)] = value
+                }
+            }
+            const indexKey = i === 0 ? SURVEY_RESPONSE_PREFIX : `${SURVEY_RESPONSE_PREFIX}_${i}`
+            if (!(String(i) in responses) && properties[indexKey] !== undefined) {
+                responses[String(i)] = properties[indexKey]
+            }
+        }
+    } else {
+        if (properties[SURVEY_RESPONSE_PREFIX] !== undefined) {
+            responses['0'] = properties[SURVEY_RESPONSE_PREFIX]
+        }
+        for (const key of Object.keys(properties)) {
+            if (key.startsWith(SURVEY_RESPONSE_PREFIX + '_')) {
+                const suffix = key.slice(SURVEY_RESPONSE_PREFIX.length + 1)
+                if (/^\d+$/.test(suffix)) {
+                    responses[suffix] = properties[key]
+                }
+            }
+        }
+    }
+
+    return {
+        id: surveyId,
+        response: responses['0'] ?? '',
+        responses,
+    }
+}
+
 export function convertToHogFunctionInvocationGlobals(
     event: EventType,
     person: PersonType
 ): CyclotronJobInvocationGlobals {
     const team = teamLogic.findMounted()?.values?.currentTeam
     const projectUrl = `${window.location.origin}/project/${team?.id}`
-    return {
+    const globals: CyclotronJobInvocationGlobals = {
         project: {
             id: team?.id ?? 0,
             name: team?.name ?? 'Default project',
@@ -243,6 +284,12 @@ export function convertToHogFunctionInvocationGlobals(
         },
         groups: {},
     }
+
+    if (event.event === 'survey sent') {
+        globals.survey = buildSurveyGlobals(event.properties)
+    }
+
+    return globals
 }
 
 export type SparklineData = {

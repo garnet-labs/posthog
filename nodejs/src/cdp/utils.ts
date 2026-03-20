@@ -30,6 +30,54 @@ export const getPersonDisplayName = (team: Team, distinctId: string, properties:
     return (customIdentifier || String(distinctId))?.trim()
 }
 
+const SURVEY_RESPONSE_PREFIX = '$survey_response'
+
+export function buildSurveyGlobals(properties: Record<string, any>): HogFunctionInvocationGlobals['survey'] {
+    const surveyId = properties['$survey_id'] ?? ''
+    const questions: Record<string, any>[] | undefined = properties['$survey_questions']
+
+    // Build responses indexed by numeric position (0, 1, 2, ...)
+    // The SDK stores responses as $survey_response_{question_uuid} so we use
+    // the $survey_questions array to map each question index to its UUID-keyed response.
+    const responses: Record<string, unknown> = {}
+
+    if (Array.isArray(questions)) {
+        for (let i = 0; i < questions.length; i++) {
+            const questionId = questions[i]?.id
+            if (questionId) {
+                const value = properties[`${SURVEY_RESPONSE_PREFIX}_${questionId}`]
+                if (value !== undefined) {
+                    responses[String(i)] = value
+                }
+            }
+            // Also check the legacy index-based key
+            const indexKey = i === 0 ? SURVEY_RESPONSE_PREFIX : `${SURVEY_RESPONSE_PREFIX}_${i}`
+            if (!(String(i) in responses) && properties[indexKey] !== undefined) {
+                responses[String(i)] = properties[indexKey]
+            }
+        }
+    } else {
+        // Fallback: no $survey_questions metadata, try legacy index-based keys
+        if (properties[SURVEY_RESPONSE_PREFIX] !== undefined) {
+            responses['0'] = properties[SURVEY_RESPONSE_PREFIX]
+        }
+        for (const key of Object.keys(properties)) {
+            if (key.startsWith(SURVEY_RESPONSE_PREFIX + '_')) {
+                const suffix = key.slice(SURVEY_RESPONSE_PREFIX.length + 1)
+                if (/^\d+$/.test(suffix)) {
+                    responses[suffix] = properties[key]
+                }
+            }
+        }
+    }
+
+    return {
+        id: surveyId,
+        response: responses['0'] ?? '',
+        responses,
+    }
+}
+
 // that we can keep to as a contract
 export function convertToHogFunctionInvocationGlobals(
     event: RawClickHouseEvent,
@@ -82,6 +130,10 @@ export function convertToHogFunctionInvocationGlobals(
             url: `${projectUrl}/events/${encodeURIComponent(event.uuid)}/${encodeURIComponent(eventTimestamp)}`,
         },
         person,
+    }
+
+    if (event.event === 'survey sent') {
+        context.survey = buildSurveyGlobals(properties)
     }
 
     return context

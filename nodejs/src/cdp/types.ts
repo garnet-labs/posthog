@@ -104,6 +104,13 @@ export type HogFunctionInvocationGlobals = {
         stringBody: string
     }
 
+    // Survey response variables, populated when event is "survey sent"
+    survey?: {
+        id: string
+        response: unknown // First question response ($survey_response)
+        responses: Record<string, unknown> // All responses keyed by index (0, 1, 2, ...)
+    }
+
     unsubscribe_url?: string // For email actions, the unsubscribe URL to use
     unsubscribe_url_one_click?: string // For email actions, the one-click unsubscribe URL to use
 

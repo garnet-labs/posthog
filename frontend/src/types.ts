@@ -6330,6 +6330,12 @@ export type CyclotronJobInvocationGlobals = {
         headers: Record<string, string>
         ip?: string
     }
+    // Survey response variables, populated when event is "survey sent"
+    survey?: {
+        id: string
+        response: unknown
+        responses: Record<string, unknown>
+    }
     // For HogFlows, workflow-level variables
     variables?: Record<string, any>
 }

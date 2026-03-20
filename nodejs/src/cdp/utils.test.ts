@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon'
 
 import { LogEntry } from './types'
-import { fixLogDeduplication, gzipObject, sanitizeLogMessage, unGzipObject } from './utils'
+import { buildSurveyGlobals, fixLogDeduplication, gzipObject, sanitizeLogMessage, unGzipObject } from './utils'
 
 describe('Utils', () => {
     describe('gzip compressions', () => {
@@ -74,6 +74,126 @@ describe('Utils', () => {
             )
         })
     })
+    describe('buildSurveyGlobals', () => {
+        it('should map UUID-keyed responses to numeric indices using $survey_questions', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+                $survey_questions: [
+                    { id: '4e28cbea-f2a2-4730-a220-41c661a61316', question: 'How do you like it?', type: 'open' },
+                    { id: 'b1c2d3e4-f5a6-7890-abcd-ef1234567890', question: 'Rate us', type: 'rating' },
+                ],
+                '$survey_response_4e28cbea-f2a2-4730-a220-41c661a61316': 'Great product!',
+                '$survey_response_b1c2d3e4-f5a6-7890-abcd-ef1234567890': '5',
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: 'Great product!',
+                responses: {
+                    '0': 'Great product!',
+                    '1': '5',
+                },
+            })
+        })
+
+        it('should handle single question with UUID-keyed response', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+                $survey_questions: [
+                    { id: '4e28cbea-f2a2-4730-a220-41c661a61316', question: 'How do you like it?', type: 'open' },
+                ],
+                '$survey_response_4e28cbea-f2a2-4730-a220-41c661a61316': 'Great product!',
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: 'Great product!',
+                responses: { '0': 'Great product!' },
+            })
+        })
+
+        it('should fall back to legacy index-based keys', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+                $survey_response: 'Great product!',
+                $survey_response_1: '5',
+                $survey_response_2: 'More features',
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: 'Great product!',
+                responses: {
+                    '0': 'Great product!',
+                    '1': '5',
+                    '2': 'More features',
+                },
+            })
+        })
+
+        it('should prefer UUID-keyed response over index-based when $survey_questions is present', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+                $survey_questions: [{ id: 'q-uuid-1', question: 'Q1', type: 'open' }],
+                '$survey_response_q-uuid-1': 'UUID response',
+                $survey_response: 'Index response',
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: 'UUID response',
+                responses: { '0': 'UUID response' },
+            })
+        })
+
+        it('should handle missing survey ID', () => {
+            const result = buildSurveyGlobals({
+                $survey_response: 'Some response',
+            })
+            expect(result).toEqual({
+                id: '',
+                response: 'Some response',
+                responses: { '0': 'Some response' },
+            })
+        })
+
+        it('should handle no responses', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: '',
+                responses: {},
+            })
+        })
+
+        it('should handle array responses (multiple choice)', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+                $survey_questions: [{ id: 'q1', question: 'Pick options', type: 'multiple_choice' }],
+                $survey_response_q1: ['Option A', 'Option B'],
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: ['Option A', 'Option B'],
+                responses: { '0': ['Option A', 'Option B'] },
+            })
+        })
+
+        it('should not include non-response survey properties', () => {
+            const result = buildSurveyGlobals({
+                $survey_id: 'survey-uuid-123',
+                $survey_questions: [{ id: 'q1', question: 'Q1', type: 'open' }],
+                $survey_response_q1: 'Great!',
+                $survey_completed: true,
+                $survey_submission_id: 'sub-123',
+                $current_url: 'https://example.com',
+            })
+            expect(result).toEqual({
+                id: 'survey-uuid-123',
+                response: 'Great!',
+                responses: { '0': 'Great!' },
+            })
+        })
+    })
+
     describe('sanitizeLogMessage', () => {
         it('should sanitize the log message', () => {
             const message = sanitizeLogMessage(['test', 'test2'])

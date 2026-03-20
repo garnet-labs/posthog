@@ -103,7 +103,7 @@ export const HOG_FUNCTION_SUB_TEMPLATES: Record<HogFunctionSubTemplateIdType, Ho
             description: 'Posts a message to Discord when a user responds to a survey',
             inputs: {
                 content: {
-                    value: '**{person.name}** responded to survey **{event.properties.$survey_name}**',
+                    value: '**{person.name}** responded to survey **{event.properties.$survey_name}**\n> {survey.response}',
                 },
             },
         },
@@ -114,7 +114,7 @@ export const HOG_FUNCTION_SUB_TEMPLATES: Record<HogFunctionSubTemplateIdType, Ho
             description: 'Posts a message to Microsoft Teams when a user responds to a survey',
             inputs: {
                 text: {
-                    value: '**{person.name}** responded to survey **{event.properties.$survey_name}**',
+                    value: '**{person.name}** responded to survey **{event.properties.$survey_name}**\n> {survey.response}',
                 },
             },
         },
@@ -128,7 +128,7 @@ export const HOG_FUNCTION_SUB_TEMPLATES: Record<HogFunctionSubTemplateIdType, Ho
                     value: [
                         {
                             text: {
-                                text: '*{person.name}* responded to survey *{event.properties.$survey_name}*',
+                                text: '*{person.name}* responded to survey *{event.properties.$survey_name}*\n> {survey.response}',
                                 type: 'mrkdwn',
                             },
                             type: 'section',
@@ -151,7 +151,7 @@ export const HOG_FUNCTION_SUB_TEMPLATES: Record<HogFunctionSubTemplateIdType, Ho
                     ],
                 },
                 text: {
-                    value: '*{person.name}* responded to survey *{event.properties.$survey_name}*',
+                    value: '*{person.name}* responded to survey *{event.properties.$survey_name}*: {survey.response}',
                 },
             },
         },
