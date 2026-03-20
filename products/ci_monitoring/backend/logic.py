@@ -13,8 +13,21 @@ import datetime
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from .facade.enums import QuarantineState, TestExecutionStatus
+import structlog
+
+from .facade.enums import CIRunConclusion, QuarantineState, TestExecutionStatus
 from .models import CIRun, MainStreak, Quarantine, Repo, TestCase, TestExecution
+
+logger = structlog.get_logger(__name__)
+
+
+class RepoNotFoundError(Exception):
+    pass
+
+
+class GitHubIntegrationNotFoundError(Exception):
+    pass
+
 
 # --- Repo ---
 
@@ -43,6 +56,218 @@ def get_repo(*, repo_id: uuid.UUID, team_id: int) -> Repo:
 
 def list_repos(*, team_id: int) -> QuerySet[Repo]:
     return Repo.objects.filter(team_id=team_id).order_by("repo_full_name")
+
+
+# --- Webhook Ingestion ---
+
+
+def create_ci_run_from_webhook(
+    *,
+    repo_external_id: int,
+    repo_full_name: str,
+    github_run_id: int,
+    workflow_name: str,
+    commit_sha: str,
+    branch: str,
+    conclusion: CIRunConclusion,
+    started_at: str | None,
+    completed_at: str | None,
+    pr_number: int | None,
+) -> CIRun:
+    """Create a CIRun from a GitHub workflow_run webhook payload."""
+    from django.utils.dateparse import parse_datetime
+
+    repo = Repo.objects.filter(repo_external_id=repo_external_id).first()
+    if not repo:
+        raise RepoNotFoundError(f"No repo with external_id={repo_external_id}")
+
+    parsed_started = parse_datetime(started_at) if started_at else timezone.now()
+    parsed_completed = parse_datetime(completed_at) if completed_at else timezone.now()
+
+    ci_run, created = CIRun.objects.update_or_create(
+        repo=repo,
+        github_run_id=github_run_id,
+        defaults={
+            "team_id": repo.team_id,
+            "workflow_name": workflow_name,
+            "commit_sha": commit_sha,
+            "branch": branch,
+            "conclusion": conclusion,
+            "started_at": parsed_started,
+            "completed_at": parsed_completed,
+            "pr_number": pr_number,
+        },
+    )
+
+    return ci_run
+
+
+def ingest_test_results(
+    *,
+    ci_run: CIRun,
+    parsed_results: list,
+) -> None:
+    """Create TestCase and TestExecution records from parsed test results."""
+    from .ingestion import ParsedTestResult
+
+    counts = {"total": 0, "passed": 0, "failed": 0, "flaky": 0, "skipped": 0, "errored": 0}
+
+    for result in parsed_results:
+        result: ParsedTestResult
+        test_case, _ = TestCase.objects.get_or_create(
+            repo=ci_run.repo,
+            identifier=result.identifier,
+            defaults={
+                "team_id": ci_run.team_id,
+                "suite": _infer_suite(result),
+                "file_path": result.file_path,
+            },
+        )
+
+        if result.file_path and not test_case.file_path:
+            test_case.file_path = result.file_path
+            test_case.save(update_fields=["file_path"])
+
+        TestExecution.objects.update_or_create(
+            ci_run=ci_run,
+            test_case=test_case,
+            defaults={
+                "status": result.status,
+                "duration_ms": result.duration_ms,
+                "error_message": result.error_message,
+                "retry_count": result.retry_count,
+            },
+        )
+
+        if result.status == TestExecutionStatus.FLAKY and (
+            test_case.last_flaked_at is None or test_case.last_flaked_at < ci_run.completed_at
+        ):
+            test_case.last_flaked_at = ci_run.completed_at
+            test_case.save(update_fields=["last_flaked_at"])
+
+        counts["total"] += 1
+        status_key = result.status.value
+        if status_key in counts:
+            counts[status_key] += 1
+
+    ci_run.total_tests = counts["total"]
+    ci_run.passed = counts["passed"]
+    ci_run.failed = counts["failed"]
+    ci_run.flaky = counts["flaky"]
+    ci_run.skipped = counts["skipped"]
+    ci_run.errored = counts["errored"]
+    ci_run.artifacts_ingested = True
+    ci_run.save(
+        update_fields=[
+            "total_tests",
+            "passed",
+            "failed",
+            "flaky",
+            "skipped",
+            "errored",
+            "artifacts_ingested",
+        ]
+    )
+
+
+def _infer_suite(result) -> str:
+    """Infer the test suite from file path or classname."""
+    from .facade.enums import TestSuite
+
+    fp = result.file_path or result.classname or ""
+    fp_lower = fp.lower()
+
+    if "e2e" in fp_lower or "playwright" in fp_lower:
+        return TestSuite.E2E
+    if "storybook" in fp_lower:
+        return TestSuite.STORYBOOK
+    if fp_lower.endswith(".rs"):
+        return TestSuite.RUST
+    if "node" in fp_lower or fp_lower.endswith((".ts", ".js")):
+        return TestSuite.NODEJS
+    if fp_lower.endswith(".py") or "test_" in fp_lower:
+        return TestSuite.BACKEND
+    return TestSuite.OTHER
+
+
+# --- GitHub API ---
+
+
+def get_github_integration_for_repo(repo: Repo):
+    """Get GitHub integration for the repo's team."""
+    from posthog.models.integration import GitHubIntegration, Integration
+
+    integration = Integration.objects.filter(team_id=repo.team_id, kind="github").first()
+    if not integration:
+        raise GitHubIntegrationNotFoundError(f"No GitHub integration found for team {repo.team_id}")
+
+    return GitHubIntegration(integration)
+
+
+def download_run_artifacts(ci_run: CIRun) -> list[bytes]:
+    """Download JUnit XML artifacts from a GitHub Actions run."""
+    import io
+    import zipfile
+
+    import requests
+
+    github = get_github_integration_for_repo(ci_run.repo)
+    if github.access_token_expired():
+        github.refresh_access_token()
+
+    access_token = github.integration.sensitive_config["access_token"]
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {access_token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # List artifacts for this run
+    response = requests.get(
+        f"https://api.github.com/repos/{ci_run.repo.repo_full_name}/actions/runs/{ci_run.github_run_id}/artifacts",
+        headers=headers,
+        timeout=30,
+    )
+    if response.status_code != 200:
+        logger.warning(
+            "ci_monitoring.artifacts_list_failed",
+            status=response.status_code,
+            ci_run_id=str(ci_run.id),
+        )
+        return []
+
+    artifacts = response.json().get("artifacts", [])
+    xml_contents: list[bytes] = []
+
+    for artifact in artifacts:
+        name = artifact.get("name", "")
+        if not (name.startswith("junit-") or "junit" in name.lower()):
+            continue
+
+        # Download the artifact zip
+        download_url = artifact.get("archive_download_url")
+        if not download_url:
+            continue
+
+        dl_response = requests.get(download_url, headers=headers, timeout=60)
+        if dl_response.status_code != 200:
+            logger.warning(
+                "ci_monitoring.artifact_download_failed",
+                artifact_name=name,
+                status=dl_response.status_code,
+            )
+            continue
+
+        # Extract XML files from the zip
+        try:
+            with zipfile.ZipFile(io.BytesIO(dl_response.content)) as zf:
+                for entry in zf.namelist():
+                    if entry.endswith(".xml"):
+                        xml_contents.append(zf.read(entry))
+        except zipfile.BadZipFile:
+            logger.warning("ci_monitoring.artifact_bad_zip", artifact_name=name)
+
+    return xml_contents
 
 
 # --- CI Runs ---
