@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "pnpm --filter @posthog/quill-web dev",
         "storybook": "pnpm --filter @posthog/quill-storybook storybook",
-        "build": "pnpm -r build",
+        "build": "pnpm -r --filter '@posthog/quill-*' build",
         "lint": "eslint .",
         "format": "prettier --write \"**/*.{ts,tsx}\"",
         "typecheck": "pnpm -r typecheck"

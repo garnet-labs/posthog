@@ -83,7 +83,7 @@ export const Default: Story = {
 export const Disabled: Story = {
     render: () => (
         <Select items={allItems}>
-            <SelectTrigger className="w-full max-w-48" render={<Button variant="outline" />}>
+            <SelectTrigger className="w-full max-w-48" render={<Button variant="outline" disabled />}>
                 <SelectValue />
             </SelectTrigger>
             <SelectContent>

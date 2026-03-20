@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { Skeleton } from './skeleton'
+import { useState } from 'react'
+import { Card, CardTitle, CardHeader } from './card'
+import { Button } from './button'
 
 const meta = {
     title: 'Primitives/Skeleton',
@@ -12,26 +15,38 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Default: Story = {
-    render: () => (
-        <div className="flex flex-col gap-2">
-            <div className="grid grid-cols-2 gap-2 max-w-sm">
-                <div className="flex flex-col gap-2 max-w-sm pt-1.5">
-                    <Skeleton className="h-5.5" />
+    render: () => {
+        const [isLoading, setIsLoading] = useState(true)
+
+        return (
+            <div className="flex flex-col gap-2 ">
+                <div className="w-full max-w-sm">
+                    Wrap the content in a Skeleton component to animate the opacity of the children when the loading state changes. The container shouldn't change in size when the loading state changes.
                 </div>
-                <h1 className="text-2xl font-bold tracking-tight">h1 title tag</h1>
+                <Button className="self-start" variant="outline" onClick={() => setIsLoading(!isLoading)}>
+                    {isLoading ? 'Stop Loading' : 'Start Loading'}
+                </Button>{' '}
+                {isLoading ? (
+                    <Skeleton className="w-full max-w-sm">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>
+                                    Not visible
+                                </CardTitle>
+                            </CardHeader>
+                        </Card>
+                    </Skeleton>
+                ) : (
+                    <Card className="w-full max-w-sm">
+                        <CardHeader>
+                            <CardTitle>
+                                Hello
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+                )}
             </div>
-            <div className="grid grid-cols-2 gap-2 max-w-sm">
-                <div className="flex flex-col gap-2 max-w-sm pt-1.5">
-                    <Skeleton className="h-4.5" />
-                </div>
-                <h2 className="text-xl font-bold tracking-tight">h2 title tag</h2>
-            </div>
-            <div className="grid grid-cols-2 gap-2 max-w-sm">
-                <div className="flex flex-col gap-2 max-w-sm pt-2">
-                    <Skeleton className="h-3.5" />
-                </div>
-                <h3 className="text-lg font-bold tracking-tight">h3 title tag</h3>
-            </div>
-        </div>
-    ),
+        )
+    },
 } satisfies Story
+

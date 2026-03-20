@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { Button } from './button'
 import { SkeletonText } from './skeleton-text'
+import { Card } from './card'
 
 const meta = {
     title: 'Primitives/SkeletonText',
@@ -19,18 +20,21 @@ export const Default: Story = {
 
         return (
             <div className="flex flex-col gap-2 ">
+                <div className="w-full max-w-sm">
+                    The containers shouldn't change in size when the loading state changes.
+                </div>
                 <Button className="self-start" variant="outline" onClick={() => setIsLoading(!isLoading)}>
                     {isLoading ? 'Stop Loading' : 'Start Loading'}
                 </Button>{' '}
-                the containers shouldn't change in size when the loading state changes.
-                <div className="max-w-sm border border-border rounded-md p-2 text-base">
+                <hr />  
+                <Card className="max-w-sm border border-border rounded-md p-2 text-base">
                     {isLoading ? (
                         <SkeletonText lines={1} className="text-base" />
                     ) : (
                         <p className="text-base">Single line of text.</p>
                     )}
-                </div>
-                <div className="max-w-sm border border-border rounded-md p-2 text-base">
+                </Card>
+                <Card className="max-w-sm border border-border rounded-md p-2 text-base">
                     {isLoading ? (
                         <SkeletonText lines={3} className="text-base" />
                     ) : (
@@ -39,8 +43,8 @@ export const Default: Story = {
                             size.
                         </p>
                     )}
-                </div>
-                <div className="max-w-sm border border-border rounded-md p-2 text-base">
+                </Card>
+                <Card className="max-w-sm border border-border rounded-md p-2 text-base">
                     {isLoading ? (
                         <SkeletonText lines={3} className="text-xl" />
                     ) : (
@@ -49,7 +53,7 @@ export const Default: Story = {
                             size.
                         </p>
                     )}
-                </div>
+                </Card>
             </div>
         )
     },
