@@ -1,0 +1,11 @@
+description: "Test new migration system — creates and drops a no-op table"
+
+steps:
+  - sql: "up.sql"
+    node_roles: ["DATA"]
+    comment: "create test table"
+
+rollback:
+  - sql: "down.sql"
+    node_roles: ["DATA"]
+    comment: "drop test table"

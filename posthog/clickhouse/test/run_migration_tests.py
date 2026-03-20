@@ -35,6 +35,7 @@ if __name__ == "__main__":
                 "posthog/clickhouse/test/test_trial.py",
                 "posthog/clickhouse/test/test_status_command.py",
                 "posthog/clickhouse/test/test_create_migration.py",
+                "posthog/clickhouse/test/test_validator.py",
             ]
         )
     )
