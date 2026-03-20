@@ -221,6 +221,8 @@ const resolveIncrementalField = (fields: IncrementalField[]): IncrementalField |
 export interface SourceWizardLogicProps {
     onComplete?: () => void
     availableSources: Record<string, SourceConfig>
+    /** When set, only these tables will be pre-selected and they cannot be deselected */
+    requiredTables?: string[]
 }
 
 export const sourceWizardLogic = kea<sourceWizardLogicType>([
@@ -230,12 +232,17 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
         selectConnector: (connector: SourceConfig | null) => ({ connector }),
         setInitialConnector: (connector: SourceConfig | null) => ({ connector }),
         toggleManualLinkFormVisible: (visible: boolean) => ({ visible }),
-        handleRedirect: (source: ExternalDataSourceType, searchParams?: any) => ({ source, searchParams }),
+        handleRedirect: (source: ExternalDataSourceType, searchParams?: any) => ({
+            source,
+            searchParams,
+        }),
         onClear: true,
         onBack: true,
         onNext: true,
         onSubmit: true,
-        setDatabaseSchemas: (schemas: ExternalDataSourceSyncSchema[]) => ({ schemas }),
+        setDatabaseSchemas: (schemas: ExternalDataSourceSyncSchema[]) => ({
+            schemas,
+        }),
         toggleSchemaShouldSync: (schema: ExternalDataSourceSyncSchema, shouldSync: boolean) => ({ schema, shouldSync }),
         updateSchemaSyncType: (
             schema: ExternalDataSourceSyncSchema,
@@ -249,7 +256,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             incrementalFieldType,
         }),
         clearSource: true,
-        updateSource: (source: Partial<ExternalDataSourceCreatePayload>) => ({ source }),
+        updateSource: (source: Partial<ExternalDataSourceCreatePayload>) => ({
+            source,
+        }),
         createSource: true,
         setIsLoading: (isLoading: boolean) => ({ isLoading }),
         setSourceId: (id: string) => ({ sourceId: id }),
@@ -257,10 +266,17 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
         cancelWizard: true,
         setStep: (step: number) => ({ step }),
         getDatabaseSchemas: true,
-        setManualLinkingProvider: (provider: ManualLinkSourceType) => ({ provider }),
+        setManualLinkingProvider: (provider: ManualLinkSourceType) => ({
+            provider,
+        }),
         openSyncMethodModal: (schema: ExternalDataSourceSyncSchema) => ({ schema }),
         cancelSyncMethodModal: true,
         toggleAllTables: (selectAll: boolean) => ({ selectAll }),
+        createWebhook: true,
+        setWebhookResult: (result: { success: boolean; webhook_url: string; error?: string } | null) => ({
+            result,
+        }),
+        submitWebhookFields: true,
     }),
     connect(() => ({
         values: [
@@ -336,7 +352,12 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             },
         ],
         source: [
-            { payload: {}, prefix: '', description: '', access_method: 'warehouse' } as {
+            {
+                payload: {},
+                prefix: '',
+                description: '',
+                access_method: 'warehouse',
+            } as {
                 prefix: string
                 description: string
                 access_method: 'warehouse' | 'direct'
@@ -354,7 +375,12 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                         },
                     }
                 },
-                clearSource: () => ({ payload: {}, prefix: '', description: '', access_method: 'warehouse' }),
+                clearSource: () => ({
+                    payload: {},
+                    prefix: '',
+                    description: '',
+                    access_method: 'warehouse',
+                }),
             },
         ],
         isLoading: [
@@ -390,9 +416,24 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                 }),
             },
         ],
+        webhookResult: [
+            null as { success: boolean; webhook_url: string; error?: string } | null,
+            {
+                setWebhookResult: (_, { result }) => result,
+                onClear: () => null,
+            },
+        ],
+        webhookCreating: [
+            false,
+            {
+                createWebhook: () => true,
+                setWebhookResult: () => false,
+            },
+        ],
     }),
     selectors({
         availableSources: [() => [(_, p) => p.availableSources], (availableSources) => availableSources],
+        requiredTables: [() => [(_, p) => p.requiredTables], (requiredTables) => requiredTables ?? null],
         suggestedTablesMap: [
             (s) => [s.selectedConnector],
             (selectedConnector: SourceConfig | null): Record<string, string | null> => {
@@ -432,6 +473,26 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             },
         ],
 
+        hasWebhookSchemas: [
+            (s) => [s.databaseSchema],
+            (databaseSchema: ExternalDataSourceSyncSchema[]): boolean =>
+                databaseSchema.some((s) => s.supports_webhooks && s.sync_type === 'incremental' && s.should_sync),
+        ],
+        webhookStepComplete: [
+            (s) => [s.webhookResult, s.selectedConnector],
+            (webhookResult: { success: boolean } | null, selectedConnector: SourceConfig | null): boolean => {
+                if (webhookResult?.success) {
+                    return true
+                }
+                if (!webhookResult) {
+                    return false
+                }
+
+                const webhookFields = selectedConnector?.webhookFields ?? []
+                const requiredFields = webhookFields.filter((f) => 'required' in f && f.required)
+                return requiredFields.length === 0
+            },
+        ],
         isManualLinkingSelected: [(s) => [s.selectedConnector], (selectedConnector): boolean => !selectedConnector],
         isDirectQueryMode: [
             (s) => [s.source, s.selectedConnector, s.featureFlags],
@@ -443,12 +504,18 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
         canGoBack: [
             (s) => [s.currentStep],
             (currentStep): boolean => {
-                return currentStep !== 4
+                return currentStep !== 4 && currentStep !== 5
             },
         ],
         canGoNext: [
-            (s) => [s.currentStep, s.isManualLinkingSelected, s.databaseSchema, s.isDirectQueryMode],
-            (currentStep, isManualLinkingSelected, databaseSchema, isDirectQueryMode): boolean => {
+            (s) => [
+                s.currentStep,
+                s.isManualLinkingSelected,
+                s.databaseSchema,
+                s.isDirectQueryMode,
+                s.webhookStepComplete,
+            ],
+            (currentStep, isManualLinkingSelected, databaseSchema, isDirectQueryMode, webhookStepComplete): boolean => {
                 if (isManualLinkingSelected && currentStep === 1) {
                     return false
                 }
@@ -465,18 +532,28 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                     return databaseSchema.filter((n) => n.should_sync && !n.sync_type).length === 0
                 }
 
+                if (currentStep === 4) {
+                    return webhookStepComplete
+                }
+
                 return true
             },
         ],
         showSkipButton: [
             (s) => [s.currentStep],
             (currentStep): boolean => {
-                return currentStep === 4
+                return currentStep === 5
             },
         ],
         nextButtonText: [
-            (s) => [s.currentStep, s.isManualLinkingSelected, s.isDirectQueryMode, (_, props) => props.onComplete],
-            (currentStep, isManualLinkingSelected, isDirectQueryMode, onComplete): string => {
+            (s) => [
+                s.currentStep,
+                s.isManualLinkingSelected,
+                s.isDirectQueryMode,
+                s.hasWebhookSchemas,
+                (_, props) => props.onComplete,
+            ],
+            (currentStep, isManualLinkingSelected, isDirectQueryMode, hasWebhookSchemas, onComplete): string => {
                 if (currentStep === 3 && isManualLinkingSelected) {
                     return 'Link'
                 }
@@ -485,10 +562,19 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                     if (isDirectQueryMode) {
                         return 'Save tables'
                     }
+
+                    if (hasWebhookSchemas) {
+                        return 'Set up webhook'
+                    }
+
                     return 'Import'
                 }
 
                 if (currentStep === 4) {
+                    return 'Next'
+                }
+
+                if (currentStep === 5) {
                     if (onComplete) {
                         return 'Next'
                     }
@@ -556,6 +642,10 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                 }
 
                 if (currentStep === 4) {
+                    return 'Set up webhook'
+                }
+
+                if (currentStep === 5) {
                     return isDirectQueryMode ? 'Tables ready to query' : 'Importing your data...'
                 }
 
@@ -609,7 +699,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                     actions.setIsLoading(true)
                     actions.createSource()
                     if (values.selectedConnector) {
-                        posthog.capture('source created', { sourceType: values.selectedConnector.name })
+                        posthog.capture('source created', {
+                            sourceType: values.selectedConnector.name,
+                        })
                     }
                     return
                 }
@@ -653,7 +745,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                         <div className="font-bold text-danger">Full refresh</div>
                         <div>
                             <span className="text-muted">
-                                {tableCountFormatter(fullRefreshTables.length, { none: 'None ✓' })}
+                                {tableCountFormatter(fullRefreshTables.length, {
+                                    none: 'None ✓',
+                                })}
                             </span>{' '}
                             — Re-syncs all rows every time. Can significantly increase costs.
                         </div>
@@ -689,7 +783,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                             actions.setIsLoading(true)
                             actions.createSource()
                             if (values.selectedConnector) {
-                                posthog.capture('source created', { sourceType: values.selectedConnector.name })
+                                posthog.capture('source created', {
+                                    sourceType: values.selectedConnector.name,
+                                })
                             }
                         },
                         size: 'small',
@@ -703,6 +799,15 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             }
 
             if (values.currentStep === 4) {
+                if (values.webhookResult?.success) {
+                    actions.onNext()
+                } else {
+                    // Manual mode - submit webhook form (validates, then triggers submitWebhookFields)
+                    actions.submitWebhookFieldInputs()
+                }
+            }
+
+            if (values.currentStep === 5) {
                 if (props.onComplete) {
                     props.onComplete()
                 } else {
@@ -735,18 +840,59 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                     source_type: values.selectedConnector.name,
                 })
 
-                lemonToast.success('New data resource created')
-
                 actions.setSourceId(id)
                 actions.resetSourceConnectionDetails()
                 actions.loadSources()
                 actions.markTaskAsCompleted(SetupTaskId.ConnectSource)
-                actions.onNext()
+
+                // When requiredTables is set (e.g. signals setup), skip step 4 and complete directly
+                if (values.requiredTables && props.onComplete) {
+                    props.onComplete()
+                } else if (values.hasWebhookSchemas) {
+                    // Go to webhook setup step (4)
+                    actions.onNext()
+                } else {
+                    // Skip webhook step, go directly to progress (5)
+                    actions.setStep(5)
+                }
             } catch (e: any) {
                 lemonToast.error(e.data?.message ?? e.message)
             } finally {
                 actions.setIsLoading(false)
             }
+        },
+        createWebhook: async () => {
+            if (!values.sourceId) {
+                return
+            }
+
+            try {
+                const result = await api.externalDataSources.createWebhook(values.sourceId)
+                actions.setWebhookResult(result)
+            } catch (e: any) {
+                actions.setWebhookResult({
+                    success: false,
+                    webhook_url: '',
+                    error: e.data?.message ?? e.message ?? 'Failed to create webhook',
+                })
+            }
+        },
+        submitWebhookFields: async () => {
+            if (!values.sourceId) {
+                return
+            }
+
+            const fieldValues = values.webhookFieldInputs
+            if (Object.keys(fieldValues).length > 0) {
+                try {
+                    await api.externalDataSources.updateWebhookInputs(values.sourceId, fieldValues)
+                } catch (e: any) {
+                    lemonToast.error(e.data?.message ?? e.message ?? 'Failed to update webhook inputs')
+                    return
+                }
+            }
+
+            actions.onNext()
         },
         handleRedirect: async ({ source }) => {
             // By default, we assume the source is a valid external data source
@@ -804,10 +950,42 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                     }
                 }
 
-                if (showToast) {
+                if (showToast && !values.requiredTables) {
                     lemonToast.info(
                         "We've setup some defaults for you! Please take a look to make sure you're happy with the results."
                     )
+                }
+
+                // If required tables are specified (e.g. signals setup), skip the schema selection step
+                // entirely and create the source with only those tables, using their default sync settings
+                if (values.requiredTables) {
+                    const requiredSchemas = schemas.filter((schema) => values.requiredTables!.includes(schema.table))
+                    if (requiredSchemas.length !== values.requiredTables.length) {
+                        const missingTables = values.requiredTables.filter(
+                            (table: string) => !requiredSchemas.some((schema) => schema.table === table)
+                        )
+                        lemonToast.error(`Required tables not found in source: ${missingTables.join(', ')}`)
+                        actions.setIsLoading(false)
+                        return
+                    }
+
+                    actions.updateSource({
+                        payload: {
+                            schemas: requiredSchemas.map((schema) => ({
+                                name: schema.table,
+                                should_sync: true,
+                                sync_type: schema.sync_type,
+                                incremental_field: schema.incremental_field,
+                                incremental_field_type: schema.incremental_field_type,
+                                sync_time_of_day: schema.sync_time_of_day ?? null,
+                            })),
+                        },
+                    })
+                    // Jump to step 3 so that createSource's onNext() advances to step 4 (sync progress)
+                    actions.setStep(3)
+                    actions.setIsLoading(true)
+                    actions.createSource()
+                    return
                 }
 
                 actions.setDatabaseSchemas(schemas)
@@ -888,8 +1066,10 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                 return
             }
 
-            actions.selectConnector(null)
-            actions.setStep(1)
+            if (values.currentStep <= 1) {
+                actions.selectConnector(null)
+                actions.setStep(1)
+            }
         }
 
         return {
@@ -975,7 +1155,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                         actions.setIsLoading(false)
                     } catch (e: any) {
                         if (e?.data?.message) {
-                            actions.setSourceConnectionDetailsManualErrors({ prefix: e.data.message })
+                            actions.setSourceConnectionDetailsManualErrors({
+                                prefix: e.data.message,
+                            })
                         }
                         actions.setIsLoading(false)
 
@@ -984,12 +1166,31 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                 }
             },
         },
+        webhookFieldInputs: {
+            defaults: {} as Record<string, any>,
+            errors: (sourceValues) => {
+                const webhookFields = values.selectedConnector?.webhookFields ?? []
+                return getErrorsForFields(webhookFields, {
+                    prefix: '',
+                    payload: sourceValues as Record<string, any>,
+                }).payload
+            },
+            submit: async () => {
+                actions.submitWebhookFields()
+            },
+        },
     })),
 ])
 
 export const getErrorsForFields = (
     fields: SourceFieldConfig[],
-    values: { prefix: string; payload: Record<string, any>; access_method?: 'warehouse' | 'direct' } | undefined,
+    values:
+        | {
+              prefix: string
+              payload: Record<string, any>
+              access_method?: 'warehouse' | 'direct'
+          }
+        | undefined,
     options?: { allowBlankSensitiveFields?: boolean }
 ): Record<string, any> => {
     const errors: Record<string, any> = {

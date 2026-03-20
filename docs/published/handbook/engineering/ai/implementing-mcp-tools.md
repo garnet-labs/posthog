@@ -167,12 +167,16 @@ Product teams own their definitions and control which operations are exposed as 
 **Workflow: scaffold, configure, generate.**
 
 1. **Scaffold** a starter YAML with all operations disabled.
-   `--product` is a **substring match** on URL paths —
-   it selects every endpoint whose path contains `/<name>/`
-   (hyphens are normalized to underscores before matching).
-   The value doesn't have to be an exact product name;
-   any string that appears as a path segment will work
-   (e.g., `--product actions` matches `/api/projects/{project_id}/actions/`).
+   `--product` discovers endpoints in two ways (same priority as frontend type generation):
+   1. **`x-explicit-tags`** — matches endpoints whose OpenAPI tag equals the product name.
+      ViewSets in `products/<name>/backend/` are auto-tagged.
+      ViewSets elsewhere (e.g. `posthog/api/`) need `@extend_schema(tags=["<product>"])`.
+   2. **URL substring fallback** — selects endpoints whose path contains `/<name>/`
+      (hyphens normalized to underscores).
+
+   If your product's API routes use a different slug than the product folder name
+   (e.g. `workflows` product with `/hog_flows/` routes),
+   add `@extend_schema(tags=["workflows"])` to the ViewSet so the scaffold can find them.
 
    ```sh
    pnpm --filter=@posthog/mcp run scaffold-yaml -- --product your_product
@@ -187,6 +191,12 @@ Product teams own their definitions and control which operations are exposed as 
    Tool names follow a **`domain-action`** convention in kebab-case,
    e.g. `feature-flags-list`, `experiments-create`, `surveys-delete`.
    The domain groups related tools together and the action describes the operation.
+
+   **Tool name length limit:** Some MCP clients (notably Cursor) enforce a 60-character
+   combined limit on `server_name:tool_name`. Since our server name is `posthog` (7 chars),
+   tool names must be **52 characters or fewer**.
+   CI runs `pnpm --filter=@posthog/mcp lint-tool-names` to enforce this.
+   If you hit the limit, shorten the domain prefix or use a more concise action name.
 
    ```yaml
    category: Human readable name # shown in tool registry

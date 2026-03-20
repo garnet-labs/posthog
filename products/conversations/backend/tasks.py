@@ -6,12 +6,12 @@ from uuid import UUID
 
 from django.core.cache import cache
 
+import requests
 import structlog
 from celery import shared_task
 
 from posthog.models.team import Team
 from posthog.models.uploaded_media import UploadedMedia
-from posthog.security.outbound_proxy import external_requests
 from posthog.storage import object_storage
 
 from products.conversations.backend.formatting import extract_images_from_rich_content, rich_content_to_slack_payload
@@ -117,13 +117,18 @@ def post_reply_to_slack(
         image_count=len(rich_images),
     )
 
-    # Build message kwargs with optional avatar
+    support_settings = team.conversations_settings or {}
+    bot_display_name = support_settings.get("slack_bot_display_name")
+    bot_icon_url = support_settings.get("slack_bot_icon_url")
+
     message_kwargs: dict = {
         "channel": slack_channel_id,
         "thread_ts": slack_thread_ts,
         "text": slack_text,
-        "username": author_name or "Support",
+        "username": author_name or bot_display_name or "Support",
     }
+    if not author_name and bot_icon_url:
+        message_kwargs["icon_url"] = bot_icon_url
     if slack_blocks:
         message_kwargs["blocks"] = slack_blocks
 
@@ -190,12 +195,15 @@ def post_reply_to_slack(
             unique_urls = [url for url in dict.fromkeys(failed_image_urls) if url]
             if unique_urls:
                 fallback_text = "Images:\n" + "\n".join(unique_urls)
-                client.chat_postMessage(
-                    channel=slack_channel_id,
-                    thread_ts=slack_thread_ts,
-                    text=fallback_text,
-                    username=author_name or "Support",
-                )
+                fallback_kwargs: dict = {
+                    "channel": slack_channel_id,
+                    "thread_ts": slack_thread_ts,
+                    "text": fallback_text,
+                    "username": author_name or bot_display_name or "Support",
+                }
+                if not author_name and bot_icon_url:
+                    fallback_kwargs["icon_url"] = bot_icon_url
+                client.chat_postMessage(**fallback_kwargs)
                 logger.warning(
                     "🖼️ slack_reply_image_upload_fallback_links_posted",
                     ticket_id=ticket_id,
@@ -256,7 +264,7 @@ def _upload_image_to_slack_thread(
     if not _is_allowed_slack_upload_url(upload_url):
         raise ValueError("files.getUploadURLExternal returned disallowed upload URL")
 
-    upload_response = external_requests.post(
+    upload_response = requests.post(
         upload_url,
         data=image_bytes,
         headers={"Content-Type": "application/octet-stream"},
