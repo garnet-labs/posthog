@@ -119,31 +119,41 @@ const Component = ({
         return null
     }
 
+    const isVisualization = isInsightVizNode(modifiedQuery) || isSavedInsightNode(modifiedQuery)
+
+    const queryElement = (
+        <Query
+            // use separate keys for the settings and visualization to avoid conflicts with insightProps
+            uniqueKey={nodeId + '-component'}
+            query={modifiedQuery}
+            attachTo={notebookLogic}
+            setQuery={(t) => {
+                updateAttributes({
+                    query: {
+                        ...attributes.query,
+                        source: (t as DataTableNode | InsightVizNode).source,
+                    } as QuerySchema,
+                })
+            }}
+            embedded
+            readOnly
+        />
+    )
+
     return (
         <div className="flex flex-1 flex-col h-full" data-attr="notebook-node-query">
             <BindLogic logic={insightLogic} props={insightLogicProps}>
-                <ScrollableShadows
-                    direction="vertical"
-                    className="flex-1"
-                    hideScrollbars={isInsightVizNode(modifiedQuery) || isSavedInsightNode(modifiedQuery)}
-                >
-                    <Query
-                        // use separate keys for the settings and visualization to avoid conflicts with insightProps
-                        uniqueKey={nodeId + '-component'}
-                        query={modifiedQuery}
-                        attachTo={notebookLogic}
-                        setQuery={(t) => {
-                            updateAttributes({
-                                query: {
-                                    ...attributes.query,
-                                    source: (t as DataTableNode | InsightVizNode).source,
-                                } as QuerySchema,
-                            })
-                        }}
-                        embedded
-                        readOnly
-                    />
-                </ScrollableShadows>
+                {isVisualization ? (
+                    // Render visualizations without ScrollableShadows so that the chart canvas
+                    // properly inherits the container height set by the resizable NodeWrapper.
+                    // ScrollArea creates a scrollable viewport that breaks the flex height chain,
+                    // causing Chart.js to ignore container resize.
+                    <div className="flex flex-1 flex-col min-h-0">{queryElement}</div>
+                ) : (
+                    <ScrollableShadows direction="vertical" className="flex-1">
+                        {queryElement}
+                    </ScrollableShadows>
+                )}
             </BindLogic>
         </div>
     )
