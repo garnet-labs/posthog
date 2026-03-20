@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from posthog.models.organization import OrganizationMembership
 from posthog.models.team.team import Team
 from posthog.sync import database_sync_to_async
+from posthog.temporal.common.heartbeat import Heartbeater
 
 from products.signals.backend.models import SignalReport, SignalReportArtefact
 from products.signals.backend.report_generation.research import (
@@ -224,32 +225,33 @@ async def run_agentic_report_activity(input: RunAgenticReportInput) -> RunAgenti
         assert input.repo_selection.repository is not None, "run_agentic_report_activity called without a repository"
         repository = input.repo_selection.repository
 
-        # 1. Get context for the sandbox
-        user_id = await database_sync_to_async(_resolve_user_id, thread_sensitive=False)(input.team_id)
-        context = CustomPromptSandboxContext(
-            team_id=input.team_id,
-            user_id=user_id,
-            repository=repository,
-        )
-        # 2. Load previous research if this is a re-promoted report
-        previous_research = await database_sync_to_async(_load_previous_research, thread_sensitive=False)(
-            input.report_id
-        )
-        # 3. Run the agentic research in the sandbox
-        result = await run_multi_turn_research(
-            input.signals,
-            context,
-            previous_report_id=input.report_id if previous_research else None,
-            previous_report_research=previous_research,
-            branch="master",
-        )
-        # 4. Persist artefacts, avoid partial data from failed runs
-        await database_sync_to_async(_persist_agentic_report_artefacts, thread_sensitive=False)(
-            input.team_id,
-            input.report_id,
-            result,
-            input.repo_selection,
-        )
+        async with Heartbeater():
+            # 1. Get context for the sandbox
+            user_id = await database_sync_to_async(_resolve_user_id, thread_sensitive=False)(input.team_id)
+            context = CustomPromptSandboxContext(
+                team_id=input.team_id,
+                user_id=user_id,
+                repository=repository,
+            )
+            # 2. Load previous research if this is a re-promoted report
+            previous_research = await database_sync_to_async(_load_previous_research, thread_sensitive=False)(
+                input.report_id
+            )
+            # 3. Run the agentic research in the sandbox
+            result = await run_multi_turn_research(
+                input.signals,
+                context,
+                previous_report_id=input.report_id if previous_research else None,
+                previous_report_research=previous_research,
+                branch="master",
+            )
+            # 4. Persist artefacts, avoid partial data from failed runs
+            await database_sync_to_async(_persist_agentic_report_artefacts, thread_sensitive=False)(
+                input.team_id,
+                input.report_id,
+                result,
+                input.repo_selection,
+            )
         logger.info(
             "signals agentic report completed",
             report_id=input.report_id,
