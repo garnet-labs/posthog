@@ -1,27 +1,27 @@
-import { sourceWizardLogic } from './sourceWizardLogic'
-
 const SESSION_STORAGE_KEY = 'sourceWizard_formState'
 
-export function saveSourceFormState(): void {
+function storageKey(sourceKind: string): string {
+    return `${SESSION_STORAGE_KEY}_${sourceKind}`
+}
+
+export function saveSourceFormState(sourceKind: string, formValues: Record<string, unknown>): void {
     try {
-        const formValues = sourceWizardLogic.values.sourceConnectionDetails
-        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(formValues))
+        sessionStorage.setItem(storageKey(sourceKind), JSON.stringify(formValues))
     } catch {
         // sessionStorage may be unavailable
     }
 }
 
-export function restoreSourceFormState(): boolean {
+export function restoreSourceFormState(sourceKind: string): Record<string, unknown> | null {
     try {
-        const saved = sessionStorage.getItem(SESSION_STORAGE_KEY)
+        const key = storageKey(sourceKind)
+        const saved = sessionStorage.getItem(key)
         if (saved) {
-            sessionStorage.removeItem(SESSION_STORAGE_KEY)
-            const values = JSON.parse(saved)
-            sourceWizardLogic.actions.setSourceConnectionDetailsValues(values)
-            return true
+            sessionStorage.removeItem(key)
+            return JSON.parse(saved) as Record<string, unknown>
         }
     } catch {
         // sessionStorage may be unavailable or data may be corrupted
     }
-    return false
+    return null
 }
