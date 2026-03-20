@@ -29,18 +29,23 @@ export const semanticColors: Record<string, ColorTuple> = {
     'muted-foreground': ['oklch(0.446 0.03 257)', 'oklch(0.709 0 0)', 'text-muted-foreground'],
 
     accent: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'bg-accent'],
+    'accent-muted': ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'bg-accent-muted'],
     'accent-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)', 'text-accent-foreground'],
 
     destructive: ['oklch(0.92 0.03 32.22)', 'oklch(0.24 0.03 2.79)', 'bg-destructive'],
+    'destructive-subtle': ['oklch(0.92 0.03 32.22)', 'oklch(0.24 0.03 2.79)', 'bg-destructive-subtle'],
     'destructive-foreground': ['oklch(0.59 0.2 23.61)', 'oklch(0.76 0.46 76.51)', 'text-destructive-foreground'],
 
     success: ['oklch(0.94 0.06 154.03)', 'oklch(0.27 0.04 157.6)', 'bg-success'],
+    'success-subtle': ['oklch(0.94 0.06 154.03)', 'oklch(0.27 0.04 157.6)', 'bg-success-subtle'],
     'success-foreground': ['oklch(0.448 0.119 151.328)', 'oklch(0.925 0.084 155.995)', 'text-success-foreground'],
 
     warning: ['oklch(0.93 0.04 74.41)', 'oklab(0.29 0.03 0.05)', 'bg-warning'],
+    'warning-subtle': ['oklch(0.93 0.04 74.41)', 'oklab(0.29 0.03 0.05)', 'bg-warning-subtle'],
     'warning-foreground': ['oklch(0.476 0.114 61.907)', 'oklch(0.77 0.14 99.29)', 'text-warning-foreground'],
 
     info: ['oklch(0.882 0.059 254.128)', 'oklch(0.4242 0.1982 265.5 / 40%)', 'bg-info'],
+    'info-subtle': ['oklch(0.882 0.059 254.128)', 'oklch(0.4242 0.1982 265.5 / 40%)', 'bg-info-subtle'],
     'info-foreground': ['oklab(0.49 -0.02 -0.24)', 'oklch(0.882 0.059 254.128)', 'text-info-foreground'],
 
     border: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-border'],

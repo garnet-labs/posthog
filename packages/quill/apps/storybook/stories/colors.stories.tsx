@@ -199,12 +199,21 @@ export const AllColors: Story = {
                         usages={['Accent (used for hover states, etc.)`']}
                     />
 
-                    <div className="p-2 font-mono bg-muted text-muted-foreground">
-                        muted/muted-foreground: {semanticColors.muted[0]}
+                    <div className="flex gap-2">
+                        <div className="size-64 text-center border flex flex-col p-8 items-center justify-center rounded-sm" style={{ backgroundColor: semanticColors.destructive[0] }}>
+                            <span className="text-lg font-bold text-destructive-foreground text-shadow-lg">Aa</span>
+                            <span className="text-xs text-foreground font-mono">{semanticColors.destructive[2]}</span>
+                        </div>
+                        <div className="size-64 text-center border flex flex-col p-8 items-center justify-center rounded-sm" style={{ backgroundColor: semanticColors['destructive-subtle'][0] }}>
+                            <span className="text-lg font-bold text-destructive-foreground text-shadow-lg">Aa</span>
+                            <span className="text-xs text-foreground font-mono">{semanticColors['destructive-subtle'][2]}</span>
+                        </div>
+                        <div className="size-64 text-center border flex flex-col p-8 items-center justify-center rounded-sm" style={{ backgroundColor: semanticColors['destructive-foreground'][0] }}>
+                            <span className="text-lg font-bold text-destructive-foreground text-shadow-lg">Aa</span>
+                            <span className="text-xs text-foreground font-mono">{semanticColors['destructive-foreground'][2]}</span>
+                        </div>
                     </div>
-                    <div className="p-2 font-mono bg-accent text-accent-foreground">
-                        accent/accent-foreground: {semanticColors.accent[0]}
-                    </div>
+
                     <div className="p-2 font-mono bg-destructive text-destructive-foreground">
                         destructive/destructive-foreground: {semanticColors.destructive[0]}
                     </div>
