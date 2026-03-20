@@ -136,7 +136,10 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(config.address)
         .await
         .expect("could not bind port");
-    tracing::info!("listening on {:?}", listener.local_addr().unwrap());
+    tracing::info!(
+        "capture server listening on {:?}",
+        listener.local_addr().unwrap()
+    );
 
     let components = setup::build_components(config, handles).await;
 
