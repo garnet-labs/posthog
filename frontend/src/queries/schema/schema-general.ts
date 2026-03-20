@@ -3030,6 +3030,7 @@ export type FileSystemIconType =
     | 'folder_open'
     | 'conversations'
     | 'toolbar'
+    | 'ci_monitoring'
     | 'visual_review'
     | 'settings'
     | 'health'
@@ -5818,6 +5819,7 @@ export enum ProductKey {
     TRACING = 'tracing',
     METRICS = 'metrics',
     USER_INTERVIEWS = 'user_interviews',
+    CI_MONITORING = 'ci_monitoring',
     VISUAL_REVIEW = 'visual_review',
     WEB_ANALYTICS = 'web_analytics',
     WORKFLOWS = 'workflows',

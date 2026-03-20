@@ -7,15 +7,12 @@
  * PostHog API - generated
  * OpenAPI spec version: 1.0.0
  */
-export type RepoApiBaselineFilePaths = { [key: string]: string }
-
 export interface RepoApi {
     id: string
     team_id: number
     repo_external_id: number
     repo_full_name: string
-    baseline_file_paths: RepoApiBaselineFilePaths
-    enable_pr_comments: boolean
+    default_branch: string
     created_at: string
 }
 
@@ -29,9 +26,12 @@ export interface PaginatedRepoListApi {
 }
 
 export interface CreateRepoInputApi {
+    /** GitHub numeric repository ID (stable across renames) */
+    repo_external_id: number
+    /** Full repository name (e.g., 'PostHog/posthog') */
     repo_full_name: string
-    /** @nullable */
-    repo_external_id?: number | null
+    /** Default branch name */
+    default_branch?: string
 }
 
 /**
@@ -42,8 +42,6 @@ export type PatchedUpdateRepoRequestInputApiBaselineFilePaths = { [key: string]:
 export interface PatchedUpdateRepoRequestInputApi {
     /** @nullable */
     baseline_file_paths?: PatchedUpdateRepoRequestInputApiBaselineFilePaths
-    /** @nullable */
-    enable_pr_comments?: boolean | null
 }
 
 export interface RunSummaryApi {
@@ -112,9 +110,6 @@ export interface CreateRunInputApi {
     /** @nullable */
     pr_number?: number | null
     baseline_hashes?: CreateRunInputApiBaselineHashes
-    unchanged_count?: number
-    removed_identifiers?: string[]
-    purpose?: string
     metadata?: CreateRunInputApiMetadata
 }
 
@@ -131,26 +126,13 @@ export interface CreateRunResultApi {
     uploads: UploadTargetApi[]
 }
 
-export type AddSnapshotsInputApiBaselineHashes = { [key: string]: string }
-
-export interface AddSnapshotsInputApi {
-    snapshots: SnapshotManifestItemApi[]
-    baseline_hashes?: AddSnapshotsInputApiBaselineHashes
-}
-
-export interface AddSnapshotsResultApi {
-    added: number
-    uploads: UploadTargetApi[]
-}
-
 export interface ApproveSnapshotInputApi {
     identifier: string
     new_hash: string
 }
 
 export interface ApproveRunRequestInputApi {
-    snapshots?: ApproveSnapshotInputApi[]
-    approve_all?: boolean
+    snapshots: ApproveSnapshotInputApi[]
     commit_to_github?: boolean
 }
 
