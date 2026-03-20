@@ -69,8 +69,15 @@ def parse_manifest(manifest_path: Path) -> MigrationManifest:
     if "steps" not in data:
         raise ValueError("Manifest must have a 'steps' field")
 
-    steps = [_parse_step(s) for s in data["steps"]]
-    rollback = [_parse_step(s) for s in data.get("rollback", [])]
+    raw_steps = data["steps"]
+    if not isinstance(raw_steps, list):
+        raise ValueError(f"Manifest 'steps' must be a list, got {type(raw_steps).__name__}")
+    raw_rollback = data.get("rollback", [])
+    if not isinstance(raw_rollback, list):
+        raise ValueError(f"Manifest 'rollback' must be a list, got {type(raw_rollback).__name__}")
+
+    steps = [_parse_step(s) for s in raw_steps]
+    rollback = [_parse_step(s) for s in raw_rollback]
 
     return MigrationManifest(
         description=data["description"],
