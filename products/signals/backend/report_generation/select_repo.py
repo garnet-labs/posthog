@@ -37,7 +37,7 @@ def _list_candidate_repos(team_id: int) -> list[str]:
         for repo in github.list_repositories():
             full_name = repo.get("full_name")
             if full_name:
-                repos.add(full_name)
+                repos.add(full_name.lower())
     return sorted(repos)
 
 
@@ -124,7 +124,7 @@ async def select_repository_for_report(
     )
     # Validate that the selected repo is actually in the candidate list
     if result.repository is not None:
-        result.repository = result.repository.strip()
+        result.repository = result.repository.strip().lower()
     if result.repository is not None and result.repository not in candidate_repos:
         logger.warning(
             "repo selection agent returned unknown repository %s, treating as no match",
