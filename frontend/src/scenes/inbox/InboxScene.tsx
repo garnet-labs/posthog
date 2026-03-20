@@ -57,7 +57,7 @@ import { SignalCard } from './SignalCard'
 import { SignalGraphTab } from './SignalGraphTab'
 import { signalSourcesLogic } from './signalSourcesLogic'
 import { SourcesModal } from './SourcesModal'
-import { SignalReport, SignalReportArtefact, SignalReportStatus } from './types'
+import { SignalFinding, SignalReport, SignalReportArtefact, SignalReportStatus } from './types'
 
 export const scene: SceneExport = {
     component: InboxScene,
@@ -442,6 +442,34 @@ function JudgmentBadges({ artefacts }: { artefacts: SignalReportArtefact[] }): J
     )
 }
 
+function SignalCardList({
+    signals,
+    artefacts,
+}: {
+    signals: SignalNode[]
+    artefacts: SignalReportArtefact[] | undefined
+}): JSX.Element {
+    const findingsBySignalId = new Map<string, SignalFinding>()
+    if (artefacts) {
+        for (const artefact of artefacts) {
+            if (artefact.type === 'signal_finding' && artefact.content?.signal_id) {
+                findingsBySignalId.set(
+                    artefact.content.signal_id as string,
+                    artefact.content as unknown as SignalFinding
+                )
+            }
+        }
+    }
+
+    return (
+        <div className="space-y-3">
+            {signals.map((signal: SignalNode) => (
+                <SignalCard key={signal.signal_id} signal={signal} finding={findingsBySignalId.get(signal.signal_id)} />
+            ))}
+        </div>
+    )
+}
+
 function ReportDetailPane(): JSX.Element {
     const {
         selectedReport,
@@ -621,11 +649,7 @@ function ReportDetailPane(): JSX.Element {
                                             Loading signals...
                                         </div>
                                     ) : selectedReportSignals && selectedReportSignals.length > 0 ? (
-                                        <div className="space-y-3">
-                                            {selectedReportSignals.map((signal: SignalNode) => (
-                                                <SignalCard key={signal.signal_id} signal={signal} />
-                                            ))}
-                                        </div>
+                                        <SignalCardList signals={selectedReportSignals} artefacts={reportArtefacts} />
                                     ) : (
                                         <p className="text-sm text-tertiary m-0">No signals yet.</p>
                                     )}

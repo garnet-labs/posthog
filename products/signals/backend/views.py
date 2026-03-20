@@ -34,12 +34,7 @@ from posthog.temporal.common.client import sync_connect
 from products.data_warehouse.backend.data_load.service import trigger_external_data_workflow
 from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
 from products.signals.backend.api import emit_signal
-from products.signals.backend.models import (
-    InvalidStatusTransition,
-    SignalReport,
-    SignalReportArtefact,
-    SignalSourceConfig,
-)
+from products.signals.backend.models import InvalidStatusTransition, SignalReport, SignalSourceConfig
 from products.signals.backend.serializers import (
     SignalReportArtefactSerializer,
     SignalReportSerializer,
@@ -266,9 +261,7 @@ class SignalReportViewSet(
     @action(detail=True, methods=["get"], url_path="artefacts", required_scopes=["task:read"])
     def artefacts(self, request, pk=None, **kwargs):
         report = cast(SignalReport, self.get_object())
-        artefacts = report.artefacts.filter(type=SignalReportArtefact.ArtefactType.VIDEO_SEGMENT).order_by(
-            "-created_at"
-        )
+        artefacts = report.artefacts.all().order_by("-created_at")
         serializer = SignalReportArtefactSerializer(artefacts, many=True)
         return Response(
             {

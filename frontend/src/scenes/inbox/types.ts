@@ -32,6 +32,13 @@ export interface SignalReportArtefactResponse {
     count: number
 }
 
+export interface SignalFinding {
+    signal_id: string
+    relevant_code_paths: string[] | null
+    data_queried: string | null
+    verified: boolean | null
+}
+
 export interface SignalSourceConfig {
     id: string
     source_product: SignalSourceProduct
