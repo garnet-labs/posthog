@@ -402,7 +402,7 @@ export function CardStackProductSelection(): JSX.Element {
     const [isComplete, setIsComplete] = useState(false)
     const [mounted, setMounted] = useState(false)
     // Track last exit direction so AnimatePresence exit knows which way to fly
-    const exitDirectionRef = useRef<'left' | 'right'>('right')
+    const [exitDirection, setExitDirection] = useState<'left' | 'right'>('right')
     const topCardRef = useRef<SwipeableCardHandle>(null)
 
     useEffect(() => {
@@ -416,7 +416,7 @@ export function CardStackProductSelection(): JSX.Element {
     const handleSwipe = useCallback(
         (direction: 'left' | 'right') => {
             const productKey = allProducts[currentIndex]
-            exitDirectionRef.current = direction
+            setExitDirection(direction)
 
             const newCard: SwipedCard = {
                 productKey,
@@ -444,7 +444,7 @@ export function CardStackProductSelection(): JSX.Element {
 
     const handleButtonSwipe = useCallback(
         (direction: 'left' | 'right') => {
-            exitDirectionRef.current = direction
+            setExitDirection(direction)
             if (topCardRef.current) {
                 topCardRef.current.swipeOut(direction)
             } else {
@@ -520,7 +520,7 @@ export function CardStackProductSelection(): JSX.Element {
                     className="relative flex items-center justify-center mb-4"
                     style={{ width: CARD_WIDTH, height: CARD_HEIGHT + 20, isolation: 'isolate' }}
                 >
-                    <AnimatePresence mode="popLayout" custom={exitDirectionRef.current}>
+                    <AnimatePresence mode="popLayout" custom={exitDirection}>
                         {!isComplete &&
                             remainingCards
                                 .slice(0, 3)
