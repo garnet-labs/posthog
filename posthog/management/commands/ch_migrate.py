@@ -1,17 +1,22 @@
 # ruff: noqa: T201 allow print statements
+from typing import Any
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from posthog.clickhouse.cluster import Query, get_cluster
-from posthog.clickhouse.migrations.tracking import get_tracking_ddl
+from posthog.clickhouse.migrations.tracking import (
+    get_infi_migration_status,
+    get_migration_status_all_hosts,
+    get_tracking_ddl,
+)
 
 
 class Command(BaseCommand):
     help = "ClickHouse migration management"
 
-    def add_arguments(self, parser: object) -> None:
-        subparsers = parser.add_subparsers(dest="subcommand")  # type: ignore[union-attr]
+    def add_arguments(self, parser: Any) -> None:  # type: ignore[override]
+        subparsers = parser.add_subparsers(dest="subcommand")
         subparsers.add_parser("bootstrap", help="Create tracking table on all nodes")
         subparsers.add_parser("plan", help="Show pending migrations without executing")
 
@@ -23,6 +28,28 @@ class Command(BaseCommand):
             help="Apply migrations up to this number (inclusive).",
         )
 
+        down_parser = subparsers.add_parser("down", help="Roll back a specific migration")
+        down_parser.add_argument(
+            "migration_number",
+            type=int,
+            help="Migration number to roll back.",
+        )
+
+        status_parser = subparsers.add_parser("status", help="Show per-host migration state")
+        status_parser.add_argument(
+            "--node",
+            type=str,
+            default=None,
+            help="Filter to a specific node hostname (e.g. host1:9000).",
+        )
+
+        trial_parser = subparsers.add_parser("trial", help="Sandbox validation: up, verify, down, verify")
+        trial_parser.add_argument(
+            "migration_number",
+            type=int,
+            help="Migration number to trial.",
+        )
+
     def handle(self, *args: object, **options: object) -> None:
         subcommand = options.get("subcommand")
         if subcommand == "bootstrap":
@@ -31,6 +58,12 @@ class Command(BaseCommand):
             self.handle_plan()
         elif subcommand == "up":
             self.handle_up(options)
+        elif subcommand == "status":
+            self.handle_status(options)
+        elif subcommand == "down":
+            self.handle_down(options)
+        elif subcommand == "trial":
+            self.handle_trial(options)
         else:
             self.print_help("manage.py", "ch_migrate")
 
@@ -143,3 +176,130 @@ class Command(BaseCommand):
                 print("(legacy, skipping — use migrate_clickhouse)")
 
         print("\nAll migrations applied successfully.")
+
+    def handle_status(self, options: dict | object) -> None:
+        """Show per-host migration state. Reads both infi and new tracking tables."""
+        database: str = settings.CLICKHOUSE_DATABASE
+        cluster = get_cluster()
+        node_filter: str | None = options.get("node") if isinstance(options, dict) else None  # type: ignore[union-attr]
+
+        new_status = get_migration_status_all_hosts(cluster, database)
+        infi_status = get_infi_migration_status(cluster, database)
+
+        all_hosts = sorted(set(list(new_status.keys()) + list(infi_status.keys())))
+
+        if node_filter:
+            all_hosts = [h for h in all_hosts if h == node_filter]
+
+        if not all_hosts:
+            self.stdout.write("No migrations found on any host.\n")
+            return
+
+        for host in all_hosts:
+            self.stdout.write(f"\n== {host} ==\n")
+
+            # Legacy (infi) migrations
+            infi_data = infi_status.get(host)
+            if infi_data and infi_data.get("migrations"):
+                self.stdout.write("  Legacy (infi) migrations:\n")
+                for mig_name in infi_data["migrations"]:
+                    self.stdout.write(f"    [applied] {mig_name}\n")
+            else:
+                self.stdout.write("  Legacy (infi) migrations: none\n")
+
+            # New-style migrations
+            new_data = new_status.get(host)
+            if new_data and new_data.get("migrations"):
+                self.stdout.write("  New-style migrations:\n")
+                for row in new_data["migrations"]:
+                    if isinstance(row, (tuple, list)):
+                        number, name, last_step, _host, direction, all_success = row
+                        status_label = "applied" if all_success else "PARTIAL"
+                        self.stdout.write(f"    [{status_label}] {name} (steps: {last_step + 1})\n")
+                    else:
+                        self.stdout.write(f"    {row}\n")
+            else:
+                self.stdout.write("  New-style migrations: none\n")
+
+        self.stdout.write("\n")
+
+    def handle_down(self, options: object) -> None:
+        from posthog.clickhouse.client.migration_tools import get_migrations_cluster
+        from posthog.clickhouse.migrations.new_style import NewStyleMigration
+        from posthog.clickhouse.migrations.runner import discover_migrations, is_new_style, run_migration_down
+
+        database: str = settings.CLICKHOUSE_DATABASE
+        target: int = options.get("migration_number")  # type: ignore[union-attr]
+        cluster = get_migrations_cluster()
+
+        all_migrations = discover_migrations()
+        target_mig = next((m for m in all_migrations if m["number"] == target), None)
+
+        if target_mig is None:
+            print(f"Migration {target} not found.")
+            return
+
+        if target_mig["style"] != "new" or not is_new_style(target_mig["path"]):
+            print(f"Migration {target_mig['name']} is not a new-style migration. Rollback not supported.")
+            return
+
+        migration = NewStyleMigration(target_mig["path"])
+
+        if not migration.get_rollback_steps():
+            print(f"Migration {target_mig['name']} has no rollback steps defined.")
+            return
+
+        print(f"Rolling back {target_mig['name']}...", end=" ", flush=True)
+
+        success = run_migration_down(
+            cluster=cluster,
+            migration=migration,
+            database=database,
+            migration_number=target_mig["number"],
+            migration_name=target_mig["name"],
+        )
+
+        if success:
+            print("OK")
+        else:
+            print("FAILED")
+
+    def handle_trial(self, options: object) -> None:
+        from posthog.clickhouse.client.migration_tools import get_migrations_cluster
+        from posthog.clickhouse.migrations.new_style import NewStyleMigration
+        from posthog.clickhouse.migrations.runner import discover_migrations, is_new_style
+        from posthog.clickhouse.migrations.trial import run_trial
+
+        database: str = settings.CLICKHOUSE_DATABASE
+        target: int = options.get("migration_number")  # type: ignore[union-attr]
+        cluster = get_migrations_cluster()
+
+        all_migrations = discover_migrations()
+        target_mig = next((m for m in all_migrations if m["number"] == target), None)
+
+        if target_mig is None:
+            print(f"Migration {target} not found.")
+            return
+
+        if target_mig["style"] != "new" or not is_new_style(target_mig["path"]):
+            print(f"Migration {target_mig['name']} is not a new-style migration. Trial not supported.")
+            return
+
+        migration = NewStyleMigration(target_mig["path"])
+
+        print(f"Running trial for {target_mig['name']}...")
+        print("  Phase 1: UP...")
+
+        success = run_trial(
+            cluster=cluster,
+            migration=migration,
+            database=database,
+            migration_number=target_mig["number"],
+            migration_name=target_mig["name"],
+        )
+
+        if success:
+            print("  Phase 2: DOWN... OK")
+            print(f"\nTrial PASSED for {target_mig['name']}.")
+        else:
+            print(f"\nTrial FAILED for {target_mig['name']}.")

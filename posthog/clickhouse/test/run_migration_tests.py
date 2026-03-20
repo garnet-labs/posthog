@@ -31,6 +31,10 @@ if __name__ == "__main__":
                 "posthog/clickhouse/test/test_jinja_env.py",
                 "posthog/clickhouse/test/test_tracking_table.py",
                 "posthog/clickhouse/test/test_runner.py",
+                "posthog/clickhouse/test/test_rollback.py",
+                "posthog/clickhouse/test/test_trial.py",
+                "posthog/clickhouse/test/test_status_command.py",
+                "posthog/clickhouse/test/test_create_migration.py",
             ]
         )
     )

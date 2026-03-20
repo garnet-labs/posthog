@@ -124,7 +124,7 @@ def execute_migration_step(
     cluster: ClickhouseCluster,
     step: ManifestStep,
     rendered_sql: str,
-) -> dict[str, Any]:
+) -> dict[Any, Any]:
     """Execute a single step using the correct ClickhouseCluster method.
 
     Returns dict with per-host results.
@@ -238,6 +238,61 @@ def _record_for_tracking(
         )
 
     tracking_cluster.any_host(_do_record).result()
+
+
+def run_migration_down(
+    cluster: ClickhouseCluster,
+    migration: Any,
+    database: str,
+    migration_number: int,
+    migration_name: str,
+) -> bool:
+    """Execute rollback steps. Records in tracking table with direction='down'.
+
+    Returns True if all steps succeeded on all hosts.
+    On partial failure: halts, tracking table shows which hosts succeeded.
+    """
+    steps = migration.get_rollback_steps()
+
+    for step_index, (step, rendered_sql) in enumerate(steps):
+        checksum = compute_checksum(rendered_sql)
+
+        try:
+            host_results = execute_migration_step(cluster, step, rendered_sql)
+        except Exception as exc:
+            logger.exception(
+                "Rollback %s step %d failed: %s",
+                migration_name,
+                step_index,
+                exc,
+            )
+            _record_for_tracking(
+                database=database,
+                migration_number=migration_number,
+                migration_name=migration_name,
+                step_index=step_index,
+                host="unknown",
+                node_role=",".join(step.node_roles),
+                direction="down",
+                checksum=checksum,
+                success=False,
+            )
+            return False
+
+        for host_key in host_results:
+            _record_for_tracking(
+                database=database,
+                migration_number=migration_number,
+                migration_name=migration_name,
+                step_index=step_index,
+                host=str(host_key),
+                node_role=",".join(step.node_roles),
+                direction="down",
+                checksum=checksum,
+                success=True,
+            )
+
+    return True
 
 
 def compute_checksum(sql: str) -> str:
