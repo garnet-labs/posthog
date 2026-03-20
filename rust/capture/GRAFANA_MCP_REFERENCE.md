@@ -1,9 +1,12 @@
 # Capture Service -- Production Metrics Reference
 
 > **Purpose**: comprehensive enumeration of every production metric relevant to the
-> `capture` service so an LLM (or human) can produce a detailed health summary on demand.
+> `capture` service so an LLM can produce a detailed health summary or answer high-level performance and service health questions on demand.
 > Each entry includes the metric name, type, labels, histogram bucket config where applicable,
 > operational meaning, and a ready-to-use PromQL query.
+>
+> **Setup**
+> if the Grafana MCP server is not set up or is erroring when the LLM runs it, refer the user to https://github.com/PostHog/posthog/blob/master/tools/infra-scripts/mcp/README.md for setup guide.
 >
 > **Datasource**: VictoriaMetrics (Prometheus-compatible), UID `victoriametrics`.
 > MSK broker-side metrics are scraped into the same datasource with the `aws_msk_` prefix.
@@ -124,6 +127,7 @@ Source: [`src/prometheus.rs`](src/prometheus.rs) and metric emission sites acros
 | **Source** | `metrics_middleware.rs` |
 | **Meaning** | Tracks requests that hit internal request-time thresholds. `exceeded` means the request took longer than the configured middleware threshold. |
 | **PromQL** | `sum(rate(middleware_pass_total{role=~"$role", threshold="exceeded"}[5m]))` |
+| **Note** | ⚠️ No active series in prod — this metric is defined in code but only emitted when middleware thresholds are configured. |
 
 #### `middleware_request_timed_out_total`
 
@@ -135,6 +139,7 @@ Source: [`src/prometheus.rs`](src/prometheus.rs) and metric emission sites acros
 | **Meaning** | Requests that timed out in middleware. Indicates requests dropped before reaching handler. |
 | **PromQL** | `sum(rate(middleware_request_timed_out_total{role=~"$role", threshold="exceeded"}[5m]))` |
 | **Alert** | Any non-zero rate means requests are being shed. |
+| **Note** | ⚠️ No active series in prod — same as `middleware_pass_total`. |
 
 ---
 
@@ -244,16 +249,6 @@ Source: [`src/prometheus.rs`](src/prometheus.rs) and metric emission sites acros
 | **PromQL** | `sum(rate(capture_events_rerouted_overflow{role=~"$role"}[5m])) by (reason)` |
 | **Alert** | High `rate_limited` overflow means the global rate limiter is active and shedding load. |
 
-#### `capture_events_rerouted_dlq`
-
-| | |
-|---|---|
-| **Type** | counter |
-| **Labels** | `reason` (`event_restriction`) |
-| **Source** | `sinks/kafka.rs` |
-| **Meaning** | Events sent to the dead-letter queue topic due to event restrictions. |
-| **PromQL** | `sum(rate(capture_events_rerouted_dlq{role=~"$role"}[5m]))` |
-
 #### `capture_events_rerouted_custom_topic`
 
 | | |
@@ -264,7 +259,18 @@ Source: [`src/prometheus.rs`](src/prometheus.rs) and metric emission sites acros
 | **Meaning** | Events redirected to a custom Kafka topic via event restrictions config. |
 | **PromQL** | `sum(rate(capture_events_rerouted_custom_topic{role=~"$role"}[5m]))` |
 
-#### `capture_events_rerouted_historical`
+#### `capture_events_rerouted_dlq` *(code-only)*
+
+| | |
+|---|---|
+| **Type** | counter |
+| **Labels** | `reason` (`event_restriction`) |
+| **Source** | `sinks/kafka.rs` |
+| **Meaning** | Events sent to the dead-letter queue topic due to event restrictions. |
+| **PromQL** | `sum(rate(capture_events_rerouted_dlq{role=~"$role"}[5m]))` |
+| **Note** | ⚠️ No active series in prod — DLQ routing is defined in code but not currently triggered. |
+
+#### `capture_events_rerouted_historical` *(code-only)*
 
 | | |
 |---|---|
@@ -273,8 +279,9 @@ Source: [`src/prometheus.rs`](src/prometheus.rs) and metric emission sites acros
 | **Source** | `events/analytics.rs` |
 | **Meaning** | Events rerouted to the historical ingestion topic because their timestamp is far in the past. |
 | **PromQL** | `sum(rate(capture_events_rerouted_historical{role=~"$role"}[5m]))` |
+| **Note** | ⚠️ No active series in prod — metric name not registered in VictoriaMetrics. |
 
-#### `capture_exception_events_dual_written`
+#### `capture_exception_events_dual_written` *(code-only)*
 
 | | |
 |---|---|
@@ -283,6 +290,7 @@ Source: [`src/prometheus.rs`](src/prometheus.rs) and metric emission sites acros
 | **Source** | `events/analytics.rs` |
 | **Meaning** | Exception events that were dual-written to the error tracking pipeline (when error tracking dual-write is enabled). |
 | **PromQL** | `sum(rate(capture_exception_events_dual_written{role=~"$role"}[5m]))` |
+| **Note** | ⚠️ No active series in prod — metric name not registered in VictoriaMetrics. |
 
 #### `capture_distinct_id_has_whitespace_total`
 
@@ -493,6 +501,11 @@ These metrics come from the librdkafka statistics callback and are emitted in `s
 ---
 
 ### 1.5 S3 Sink
+
+> ⚠️ **No active series in prod.** All `capture_s3_*` metrics below are defined in the Rust code but are
+> not present in VictoriaMetrics. The `capture-replay` role uses S3 for session recordings, but these
+> metrics are either not scraped or the S3 sink is not emitting to Prometheus. Queries will return empty
+> results until this is resolved. Included here for completeness when the metrics become available.
 
 Used by `capture-replay` role for session recording data.
 
@@ -834,7 +847,11 @@ Low-level TCP accept loop metrics from the custom Hyper server implementation.
 
 ### 1.11 Fallback Sink
 
-#### `capture_primary_sink_health`
+> ⚠️ **No active series in prod.** The fallback sink is defined in code (`sinks/fallback.rs`) but these
+> metrics are not present in VictoriaMetrics. The fallback sink may not be enabled in the current
+> production configuration. Included for completeness.
+
+#### `capture_primary_sink_health` *(code-only)*
 
 | | |
 |---|---|
@@ -845,7 +862,7 @@ Low-level TCP accept loop metrics from the custom Hyper server implementation.
 | **PromQL** | `min(capture_primary_sink_health{role=~"$role"})` |
 | **Alert** | 0 means all traffic is going through the fallback path. |
 
-#### `capture_fallback_sink_failovers_total`
+#### `capture_fallback_sink_failovers_total` *(code-only)*
 
 | | |
 |---|---|
@@ -1574,8 +1591,11 @@ VictoriaMetrics with the `aws_msk_` prefix.
 | | |
 |---|---|
 | **Type** | gauge |
-| **Meaning** | Rate of requests processed by the handler thread pool per second. Use alongside `Request_queue_size` to detect if the pool is keeping up. |
-| **PromQL** | `sum(aws_msk_kafka_server_KafkaRequestHandlerPool_OneMinuteRate{environment=~"$environment"}) by (instance)` |
+| **Labels** | `name` — must filter by `name="RequestHandlerAvgIdlePercent"` (unfiltered returns high-cardinality hash-named series) |
+| **Meaning** | Request handler thread pool idle ratio (0.0 - 1.0). Values close to 0 mean all handler threads are busy processing requests — a leading indicator of broker CPU saturation. |
+| **PromQL** | `min(aws_msk_kafka_server_KafkaRequestHandlerPool_OneMinuteRate{environment=~"$environment", name="RequestHandlerAvgIdlePercent"}) by (instance)` |
+| **Current** | ~0.70-0.80 (healthy — 70-80% idle) |
+| **Alert** | < 0.30 (30% idle) sustained is a warning. < 0.10 is critical — broker is severely overloaded. |
 
 #### `aws_msk_kafka_network_Processor_Value{name="IdlePercent"}`
 
@@ -1706,10 +1726,11 @@ To query these from CloudWatch, use the CloudWatch datasource directly (not Vict
 | | |
 |---|---|
 | **Type** | gauge |
-| **Labels** | `name` (Records, Time), `client_id`, `topic`, `partition` |
-| **Meaning** | Consumer group lag per partition. `Records` = offset lag, `Time` = estimated time lag in ms. |
-| **PromQL (total lag by group)** | `sum(aws_msk_kafka_consumer_group_ConsumerLagMetrics_Value{environment=~"$environment", name="Records"}) by (client_id, topic)` |
-| **Alert** | Growing lag on ingestion topics indicates downstream consumers can't keep up. |
+| **Labels** | `name` (`SumOffsetLag`, `MaxOffsetLag`, `OffsetLag`), `groupId`, `topic`, `partition` (per-partition only for `OffsetLag`) |
+| **Meaning** | Consumer group lag. `SumOffsetLag` = total offset lag across all partitions for a group/topic. `OffsetLag` = per-partition lag. `MaxOffsetLag` = worst-case partition lag. |
+| **PromQL (total lag by group)** | `sum(aws_msk_kafka_consumer_group_ConsumerLagMetrics_Value{environment=~"$environment", name="SumOffsetLag"}) by (groupId, topic)` |
+| **PromQL (max partition lag)** | `max(aws_msk_kafka_consumer_group_ConsumerLagMetrics_Value{environment=~"$environment", name="OffsetLag", topic="ingestion-events-1024"}) by (groupId)` |
+| **Alert** | Growing `SumOffsetLag` on ingestion topics indicates downstream consumers can't keep up. |
 
 #### `aws_msk_kafka_consumer_consumer_coordinator_metrics_commit_latency_avg`
 
@@ -1889,7 +1910,7 @@ sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~"$environ
 | Kafka producer queue saturation | > 0.7 | > 0.9 | Approaching message loss |
 | `capture_kafka_produce_rtt_latency_us` p99 | > 100ms (100000) | > 500ms (500000) | Broker overload |
 | `capture_events_dropped_total` `retryable_sink` | > 0 | > 100/s | Kafka delivery failures |
-| `capture_primary_sink_health` | 0 on any pod | 0 on all pods | Fallback sink active |
+| `capture_primary_sink_health` | 0 on any pod | 0 on all pods | Fallback sink active *(code-only, no active series)* |
 | Container memory (% of limit) | > 80% | > 90% | OOM kill risk |
 | Container CPU throttling | > 25% | > 50% | Latency impact |
 | Pod restarts (per hour) | > 1 | > 3 | Stability issues |
