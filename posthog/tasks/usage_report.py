@@ -1748,6 +1748,11 @@ def capture_report(
     # which makes it harder to filter on in customer.io
     per_person_properties = {
         "has_non_zero_usage": full_report_dict.get("has_non_zero_usage"),
+        "org_member_count": full_report_dict.get("organization_user_count", 0),
+        "org_project_count": full_report_dict.get("team_count", 0),
+        "org_dashboard_count": full_report_dict.get("dashboard_count", 0),
+        "org_ff_count": full_report_dict.get("ff_count", 0),
+        "org_survey_count": full_report_dict.get("survey_count", 0),
     }
 
     for membership in OrganizationMembership.objects.filter(organization_id=organization_id).select_related("user"):
@@ -1761,7 +1766,11 @@ def capture_report(
                 name="organization usage report per person",
                 organization_id=organization_id,
                 distinct_id=distinct_id,
-                properties=per_person_properties,
+                properties={
+                    **per_person_properties,
+                    "org_membership_level": membership.get_level_display(),
+                    "role_at_organization": membership.user.role_at_organization or "",
+                },
                 timestamp=at_date,
             )
         except Exception as err:
