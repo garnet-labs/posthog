@@ -1,0 +1,120 @@
+from datetime import UTC, datetime
+from typing import Any
+
+TRACKING_TABLE_NAME = "clickhouse_schema_migrations"
+
+TRACKING_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS {database}.clickhouse_schema_migrations (
+    migration_number UInt32,
+    migration_name String,
+    step_index UInt32,
+    host String,
+    node_role String,
+    direction Enum8('up' = 1, 'down' = 2),
+    checksum String,
+    applied_at DateTime64(3),
+    success Bool
+) ENGINE = MergeTree()
+ORDER BY (migration_number, step_index, host, direction, applied_at)
+"""
+
+
+def get_tracking_ddl(database: str) -> str:
+    return TRACKING_TABLE_DDL.format(database=database)
+
+
+def record_step(
+    client: Any,
+    migration_number: int,
+    migration_name: str,
+    step_index: int,
+    host: str,
+    node_role: str,
+    direction: str,
+    checksum: str,
+    success: bool,
+) -> None:
+    sql = f"""
+        INSERT INTO {TRACKING_TABLE_NAME}
+        (migration_number, migration_name, step_index, host, node_role, direction, checksum, applied_at, success)
+        VALUES
+    """
+    now = datetime.now(tz=UTC)
+    params = [
+        (
+            migration_number,
+            migration_name,
+            step_index,
+            host,
+            node_role,
+            direction,
+            checksum,
+            now,
+            success,
+        )
+    ]
+    client.execute(sql, params)
+
+
+def get_applied_migrations(client: Any, database: str) -> list[dict[str, Any]]:
+    sql = f"""
+        SELECT
+            migration_number,
+            migration_name,
+            step_index,
+            host,
+            node_role,
+            direction,
+            checksum,
+            applied_at,
+            success
+        FROM {database}.{TRACKING_TABLE_NAME}
+        WHERE success = 1 AND direction = 'up'
+        ORDER BY migration_number, step_index
+    """
+    rows = client.execute(sql)
+    columns = [
+        "migration_number",
+        "migration_name",
+        "step_index",
+        "host",
+        "node_role",
+        "direction",
+        "checksum",
+        "applied_at",
+        "success",
+    ]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def get_migration_status_all_hosts(cluster: Any, database: str) -> dict[str, Any]:
+    from posthog.clickhouse.cluster import Query
+
+    sql = f"""
+        SELECT
+            migration_number,
+            migration_name,
+            max(step_index) AS last_step,
+            host,
+            direction,
+            min(success) AS all_success
+        FROM {database}.{TRACKING_TABLE_NAME}
+        WHERE direction = 'up'
+        GROUP BY migration_number, migration_name, host, direction
+        ORDER BY migration_number
+    """
+
+    futures_map = cluster.map_all_hosts(Query(sql))
+    results: dict[str, Any] = {}
+    try:
+        host_results = futures_map.result()
+        for host_info, rows in host_results.items():
+            host_key = str(host_info)
+            results[host_key] = {
+                "reachable": True,
+                "migrations": rows,
+            }
+    except Exception:
+        pass
+
+    return results
