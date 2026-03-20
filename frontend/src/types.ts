@@ -3049,6 +3049,7 @@ export interface TrendResult {
     label: string
     labels: string[]
     breakdown_value?: string | number | string[]
+    breakdown?: string
     aggregated_value: number
     status?: string
     compare_label?: CompareLabelType
@@ -4662,6 +4663,7 @@ export type GraphDataset = ChartDataset<ChartType> &
             | 'action'
             | 'actions'
             | 'breakdown_value'
+            | 'breakdown'
             | 'persons_urls'
             | 'persons'
             | 'filter'
