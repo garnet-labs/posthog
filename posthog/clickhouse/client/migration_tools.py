@@ -1,4 +1,5 @@
 import logging
+import warnings
 from functools import cache
 from typing import Optional
 
@@ -53,6 +54,13 @@ def run_sql_with_exceptions(
         Raised in certain scenarios when the input arguments conflict with the expected
         configuration, such as when the sharded flag is set for roles other than DATA.
     """
+
+    warnings.warn(
+        "run_sql_with_exceptions is deprecated. Use directory-based migrations "
+        "with manifest.yaml instead. See posthog/clickhouse/migrations/README.md",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     if node_roles and not isinstance(node_roles, list):
         node_roles = [node_roles]

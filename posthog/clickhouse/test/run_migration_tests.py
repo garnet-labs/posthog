@@ -37,6 +37,7 @@ if __name__ == "__main__":
                 "posthog/clickhouse/test/test_create_migration.py",
                 "posthog/clickhouse/test/test_validator.py",
                 "posthog/clickhouse/test/test_multi_cluster.py",
+                "posthog/clickhouse/test/test_deprecation.py",
             ]
         )
     )

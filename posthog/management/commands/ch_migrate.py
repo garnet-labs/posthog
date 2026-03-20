@@ -1,4 +1,5 @@
 # ruff: noqa: T201 allow print statements
+import sys
 from typing import Any
 
 from django.conf import settings
@@ -18,6 +19,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser: Any) -> None:  # type: ignore[override]
         subparsers = parser.add_subparsers(dest="subcommand")
         subparsers.add_parser("bootstrap", help="Create tracking table on all nodes")
+        subparsers.add_parser("check", help="Exit non-zero if unapplied new-style migrations exist")
         subparsers.add_parser("plan", help="Show pending migrations without executing")
 
         up_parser = subparsers.add_parser("up", help="Apply pending migrations")
@@ -79,6 +81,8 @@ class Command(BaseCommand):
         subcommand = options.get("subcommand")
         if subcommand == "bootstrap":
             self.handle_bootstrap()
+        elif subcommand == "check":
+            self.handle_check(options)
         elif subcommand == "plan":
             self.handle_plan()
         elif subcommand == "up":
@@ -111,6 +115,28 @@ class Command(BaseCommand):
             for exc in eg.exceptions:
                 print(f"  FAILED: {exc}")
             raise
+
+    def handle_check(self, options: object) -> None:
+        """Exit with non-zero status if unapplied new-style migrations exist."""
+        from posthog.clickhouse.client.migration_tools import get_migrations_cluster
+        from posthog.clickhouse.migrations.runner import get_pending_migrations
+
+        database: str = settings.CLICKHOUSE_DATABASE
+        cluster = get_migrations_cluster()
+
+        def _get_client_for_query(client):  # type: ignore[no-untyped-def]
+            return client
+
+        pending = get_pending_migrations(
+            client=cluster.any_host(_get_client_for_query).result(),
+            database=database,
+        )
+
+        if pending:
+            self.stderr.write(f"{len(pending)} unapplied new-style migration(s)")
+            sys.exit(1)
+
+        self.stdout.write("All new-style migrations applied.")
 
     def handle_plan(self) -> None:
         from posthog.clickhouse.client.migration_tools import get_migrations_cluster
