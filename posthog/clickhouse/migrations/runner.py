@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from posthog.clickhouse.migrations.manifest import ManifestStep
+from posthog.clickhouse.migrations.manifest import ManifestStep, MigrationManifest
 from posthog.clickhouse.migrations.tracking import get_applied_migrations, record_step
 
 if TYPE_CHECKING:
@@ -60,6 +60,54 @@ def _map_node_roles(manifest_roles: list[str]) -> list[NodeRole]:
             raise ValueError(f"Unknown node role '{role}'. Valid roles: {sorted(_ROLE_MAP.keys())}")
         result.append(NodeRole(role_value))
     return result
+
+
+def resolve_step_clusters(step: ManifestStep, manifest: MigrationManifest) -> list[str] | None:
+    """Determine the effective cluster list for a step.
+
+    Priority: step.clusters > manifest.clusters > manifest.cluster (as single-element list).
+    Returns None when no cluster targeting is configured.
+    """
+    if step.clusters is not None:
+        return step.clusters
+    if manifest.clusters is not None:
+        return manifest.clusters
+    if manifest.cluster is not None:
+        return [manifest.cluster]
+    return None
+
+
+def check_cross_cluster_ordering(
+    cluster_clients: dict[str, Any],
+    migration_number: int,
+    database: str,
+) -> bool:
+    """Verify migration N-1 has completed on all target clusters before applying N.
+
+    Args:
+        cluster_clients: mapping of cluster name to a ClickHouse client.
+        migration_number: the migration about to be applied.
+        database: the ClickHouse database name.
+
+    Returns True if all clusters have applied the predecessor, or if this is
+    the first migration (number <= 1).
+    """
+    predecessor = migration_number - 1
+    if predecessor < 1:
+        return True
+
+    for cluster_name, client in cluster_clients.items():
+        applied = get_applied_migrations(client, database)
+        applied_numbers: set[int] = {row["migration_number"] for row in applied}
+        if predecessor not in applied_numbers:
+            logger.warning(
+                "Cross-cluster ordering check failed: cluster %s has not applied migration %d",
+                cluster_name,
+                predecessor,
+            )
+            return False
+
+    return True
 
 
 def discover_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> list[dict[str, Any]]:
@@ -149,21 +197,57 @@ def execute_migration_step(
         return futures_map.result()
 
 
+def _should_execute_step(
+    step: ManifestStep,
+    manifest: MigrationManifest,
+    current_cluster: str | None,
+) -> bool:
+    """Decide whether a step should run on the current cluster.
+
+    When *current_cluster* is None (single-cluster mode), every step runs.
+    Otherwise, the step runs only when the resolved cluster list includes
+    *current_cluster*, or when no cluster targeting is configured.
+    """
+    if current_cluster is None:
+        return True
+    effective = resolve_step_clusters(step, manifest)
+    if effective is None:
+        return True
+    return current_cluster in effective
+
+
 def run_migration_up(
     cluster: ClickhouseCluster,
     migration: Any,
     database: str,
     migration_number: int,
     migration_name: str,
+    current_cluster: str | None = None,
 ) -> bool:
     """Run all steps in a migration. Records results in tracking table.
+
+    Args:
+        current_cluster: when set, only steps targeting this cluster are executed.
+            Steps with no cluster targeting always execute.
 
     Returns True if all steps succeeded on all hosts.
     On partial failure: halts, tracking table shows which hosts succeeded.
     """
     steps = migration.get_steps()
+    manifest: MigrationManifest = getattr(migration, "manifest", None) or MigrationManifest(
+        description="", steps=[], rollback=[]
+    )
 
     for step_index, (step, rendered_sql) in enumerate(steps):
+        if not _should_execute_step(step, manifest, current_cluster):
+            logger.info(
+                "Migration %s step %d skipped (cluster=%s not targeted)",
+                migration_name,
+                step_index,
+                current_cluster,
+            )
+            continue
+
         checksum = compute_checksum(rendered_sql)
 
         try:
