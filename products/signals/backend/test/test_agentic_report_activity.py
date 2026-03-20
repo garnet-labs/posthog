@@ -179,6 +179,36 @@ async def test_select_repository_activity_returns_repo(monkeypatch, ateam):
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
+async def test_select_repository_activity_reuses_previous_selection(monkeypatch, ateam):
+    previous = RepoSelectionResult(repository="posthog/posthog", reason="Previously selected")
+
+    monkeypatch.setattr(
+        "products.signals.backend.temporal.agentic.select_repository._load_previous_repo_selection",
+        lambda report_id: previous,
+    )
+
+    select_repo_called = False
+
+    async def fake_select_repo(*args, **kwargs):
+        nonlocal select_repo_called
+        select_repo_called = True
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(
+        "products.signals.backend.temporal.agentic.select_repository.select_repository_for_report",
+        fake_select_repo,
+    )
+
+    result = await select_repository_activity(
+        SelectRepositoryInput(team_id=ateam.id, report_id="test-report-id", signals=_build_signals())
+    )
+
+    assert result is previous
+    assert not select_repo_called
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
 async def test_select_repository_activity_no_repo(monkeypatch, ateam):
     monkeypatch.setattr(
         "products.signals.backend.temporal.agentic.select_repository._load_previous_repo_selection",
