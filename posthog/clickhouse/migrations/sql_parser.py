@@ -22,6 +22,8 @@ def parse_sql_sections(content: str) -> dict[str, str]:
     sections: dict[str, str] = {}
     for i, match in enumerate(matches):
         name = match.group(1)
+        if name in sections:
+            raise ValueError(f"Duplicate section name '{name}' in SQL file")
         start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         section_sql = content[start:end].strip()

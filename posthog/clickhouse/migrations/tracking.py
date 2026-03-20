@@ -104,6 +104,9 @@ def get_migration_status_all_hosts(cluster: Any, database: str) -> dict[str, Any
         ORDER BY migration_number
     """
 
+    import logging
+
+    logger = logging.getLogger(__name__)
     futures_map = cluster.map_all_hosts(Query(sql))
     results: dict[str, Any] = {}
     try:
@@ -114,8 +117,13 @@ def get_migration_status_all_hosts(cluster: Any, database: str) -> dict[str, Any
                 "reachable": True,
                 "migrations": rows,
             }
-    except Exception:
-        pass
+    except ExceptionGroup as eg:
+        # Some hosts failed — extract partial results from successful ones
+        logger.warning("Some hosts unreachable during status query: %s", eg)
+        for exc in eg.exceptions:
+            results[str(exc)] = {"reachable": False, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("Status query failed: %s", exc)
 
     return results
 
