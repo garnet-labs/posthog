@@ -5,6 +5,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::cache::{self, CachedResult};
 use crate::error::GatewayError;
 use crate::routing::Workload;
 use crate::state::AppState;
@@ -33,17 +34,22 @@ pub struct QueryResponse {
     pub rows: u64,
     pub bytes_read: u64,
     pub elapsed_ms: u64,
+    /// Whether this response was served from cache.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub cached: bool,
 }
 
 /// POST /query — the primary gateway endpoint.
 ///
 /// 1. Validates the request (readonly check, settings ceiling)
-/// 2. Routes to the correct ClickHouse cluster based on workload
-/// 3. Enforces max_execution_time from config (not caller-overridable)
-/// 4. Constructs log_comment JSON from query_tags
-/// 5. Forwards the query to ClickHouse via HTTP
-/// 6. Records metrics
-/// 7. Returns the response
+/// 2. Checks the cache for read queries with a TTL
+/// 3. Routes to the correct ClickHouse cluster based on workload
+/// 4. Enforces max_execution_time from config (not caller-overridable)
+/// 5. Constructs log_comment JSON from query_tags
+/// 6. Forwards the query to ClickHouse via HTTP
+/// 7. Stores the result in cache if applicable
+/// 8. Records metrics
+/// 9. Returns the response
 pub async fn handle_query(
     State(state): State<AppState>,
     Json(req): Json<QueryRequest>,
@@ -56,6 +62,39 @@ pub async fn handle_query(
 
     // Validate read-only constraint
     validation::validate_readonly(&req)?;
+
+    // Determine if this is a write query — writes skip cache and EXPLAIN
+    let is_write = cache::is_write_query(&req.sql);
+
+    // Compute cache key for read queries with a TTL
+    let cache_key = if !is_write {
+        Some(cache::compute_cache_key(
+            req.team_id,
+            &req.sql,
+            &req.params,
+        ))
+    } else {
+        None
+    };
+
+    // Check cache before forwarding to ClickHouse
+    if let (Some(ttl), Some(ref key)) = (req.cache_ttl_seconds, &cache_key) {
+        if ttl > 0 {
+            if let Some(cached) = state.cache.get(req.team_id, key).await {
+                metrics::counter!("gateway_cache_hits").increment(1);
+
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                return Ok(Json(QueryResponse {
+                    data: cached.data,
+                    rows: cached.rows,
+                    bytes_read: cached.bytes_read,
+                    elapsed_ms,
+                    cached: true,
+                }));
+            }
+            metrics::counter!("gateway_cache_misses").increment(1);
+        }
+    }
 
     // Get workload limits from config
     let (_max_concurrent, max_execution_time) = state.config.limits_for_workload(&workload);
@@ -81,6 +120,7 @@ pub async fn handle_query(
         workload = workload.as_str(),
         ch_user = %req.ch_user,
         host = %host,
+        is_write = is_write,
         "routing query"
     );
 
@@ -98,6 +138,18 @@ pub async fn handle_query(
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
+    // Store in cache after successful CH response (read queries only)
+    if let (Some(ttl), Some(ref key)) = (req.cache_ttl_seconds, &cache_key) {
+        if ttl > 0 {
+            let cached_result = CachedResult {
+                data: response.data.clone(),
+                rows: response.rows,
+                bytes_read: response.bytes_read,
+            };
+            state.cache.set(req.team_id, key, &cached_result, ttl).await;
+        }
+    }
+
     // Record metrics
     let labels = [
         ("workload".to_string(), workload.as_str().to_string()),
@@ -111,6 +163,7 @@ pub async fn handle_query(
         rows: response.rows,
         bytes_read: response.bytes_read,
         elapsed_ms,
+        cached: false,
     }))
 }
 

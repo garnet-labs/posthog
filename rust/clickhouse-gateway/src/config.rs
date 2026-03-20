@@ -51,6 +51,10 @@ pub struct Config {
 
     #[envconfig(from = "GATEWAY_LOG_LEVEL", default = "info")]
     pub log_level: String,
+
+    // Redis cache
+    #[envconfig(from = "GATEWAY_REDIS_URL")]
+    pub redis_url: Option<String>,
 }
 
 impl Config {
