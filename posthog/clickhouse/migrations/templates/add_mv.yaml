@@ -1,0 +1,8 @@
+# Migration: add materialized view for {table}
+# TODO: Update description, source table, target table, and SELECT query.
+description: "Add materialized view for {table}"
+
+steps:
+  # Step 1: Create the materialized view
+  - sql: up.sql#create_mv
+    node_roles: [DATA]

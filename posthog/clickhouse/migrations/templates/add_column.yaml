@@ -1,0 +1,14 @@
+# Migration: add column to {table}
+# TODO: Update description, column name, type, and default value.
+description: "Add column to {table}"
+
+steps:
+  # Step 1: ALTER the sharded (local) table
+  - sql: up.sql#alter_local
+    node_roles: [DATA]
+    sharded: true
+    is_alter_on_replicated_table: true
+
+  # Step 2: ALTER the distributed table
+  - sql: up.sql#alter_distributed
+    node_roles: [COORDINATOR]

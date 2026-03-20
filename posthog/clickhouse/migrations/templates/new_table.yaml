@@ -1,0 +1,20 @@
+# Migration: create new table {table}
+# TODO: Update description, table name, columns, engine, and order by.
+description: "Create {table} table with distributed, kafka, and materialized view"
+
+steps:
+  # Step 1: Create the local (sharded) table
+  - sql: up.sql#create_local
+    node_roles: [DATA]
+
+  # Step 2: Create the distributed table
+  - sql: up.sql#create_distributed
+    node_roles: [COORDINATOR]
+
+  # Step 3: Create the Kafka engine table
+  - sql: up.sql#create_kafka
+    node_roles: [DATA]
+
+  # Step 4: Create the materialized view (Kafka -> local)
+  - sql: up.sql#create_mv
+    node_roles: [DATA]

@@ -118,3 +118,34 @@ def get_migration_status_all_hosts(cluster: Any, database: str) -> dict[str, Any
         pass
 
     return results
+
+
+def get_infi_migration_status(cluster: Any, database: str) -> dict[str, Any]:
+    """Query the legacy infi clickhouse_orm migrations table for applied migrations.
+
+    Returns per-host dict similar to get_migration_status_all_hosts.
+    """
+    from posthog.clickhouse.cluster import Query
+
+    sql = f"""
+        SELECT name
+        FROM {database}.clickhouseorm_migrations
+        ORDER BY name
+    """
+
+    results: dict[str, Any] = {}
+    try:
+        futures_map = cluster.map_all_hosts(Query(sql))
+        host_results = futures_map.result()
+        for host_info, rows in host_results.items():
+            host_key = str(host_info)
+            # Rows are tuples like (name,)
+            migration_names = [row[0] if isinstance(row, (tuple, list)) else row for row in rows]
+            results[host_key] = {
+                "reachable": True,
+                "migrations": migration_names,
+            }
+    except Exception:
+        pass
+
+    return results
