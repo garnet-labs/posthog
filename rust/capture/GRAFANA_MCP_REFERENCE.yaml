@@ -1,0 +1,1741 @@
+# Capture Service — Production Metrics Reference (compact, LLM-friendly)
+#
+# Purpose: comprehensive enumeration of every production metric relevant to the
+# capture service so an LLM can produce a detailed health summary or answer
+# high-level performance and service health questions on demand.
+# Each entry includes the metric name, type, labels, histogram bucket config
+# where applicable, operational meaning, and ready-to-use PromQL queries.
+#
+# Setup: if the Grafana MCP server is not set up or erroring, refer the user to
+# https://github.com/PostHog/posthog/blob/master/tools/infra-scripts/mcp/README.md
+
+meta:
+  service: capture
+  datasource: {uid: victoriametrics, type: prometheus}
+  global_labels:
+    role: [capture, capture-ai, capture-replay]
+    capture_mode: [events, recordings]
+  variables:
+    role: "deployment role (capture, capture-ai, capture-replay, ...)"
+    namespace: "k8s namespace (posthog)"
+    pod: "specific pod name"
+    environment: "MSK environment label: prod-us or prod-eu"
+  msk_clusters:
+    prod-us: {region: us-east-1, broker_pattern: "b-{1..12}.posthogprodusevents*.kafka.us-east-1.amazonaws.com", label: 'environment="prod-us"'}
+    prod-eu: {region: eu-central-1, label: 'environment="prod-eu"'}
+  msk_note: >-
+    All MSK metrics use environment=~"$environment" to scope to the correct region.
+    The cluster_name label contains the full dated name (e.g. posthog-prod).
+
+envoy_clusters:
+  posthog_capture_3000: "Main capture — events, decide, batch"
+  posthog_capture-ai_3000: "Capture AI — AI/LLM event ingestion"
+  posthog_capture-ai-canary_3000: "Capture AI canary rollout"
+  posthog_capture-replay_3000: "Capture replay — session recording ingestion"
+  posthog_capture-replay-canary_3000: "Capture replay canary rollout"
+  posthog_capture-logs_4318: "Capture logs — OpenTelemetry log ingestion"
+  posthog_capture-logs-canary_4318: "Capture logs canary rollout"
+
+# ===========================================================================
+# Section 1: Capture Application Metrics
+# ===========================================================================
+capture_app:
+  # -- 1.1 HTTP Layer --
+  http_requests_total:
+    type: counter
+    labels: [method, path, status]
+    meaning: "Total HTTP requests handled. Primary throughput signal."
+    queries:
+      by_status: >-
+        sum(rate(http_requests_total{role=~"$role"}[5m])) by (status)
+    alert: "Spike in 4xx/5xx rate relative to total indicates client or server issues."
+
+  http_requests_duration_seconds:
+    type: histogram
+    labels: [method, path, status]
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0]
+    meaning: "Request latency distribution end-to-end. Primary latency signal."
+    queries:
+      p99: >-
+        histogram_quantile(0.99, sum(rate(http_requests_duration_seconds_bucket{role=~"$role"}[5m])) by (le))
+      p50: >-
+        histogram_quantile(0.50, sum(rate(http_requests_duration_seconds_bucket{role=~"$role"}[5m])) by (le))
+    alert: "p99 > 1s sustained = backpressure or Kafka slowness. p99 > 10s = critical."
+
+  capture_active_connections:
+    type: gauge
+    meaning: "Current in-flight HTTP connections. Saturation signal."
+    queries:
+      total: >-
+        sum(capture_active_connections{role=~"$role"})
+    alert: "Sustained high value (relative to pod count) = connection pooling issues or slow backends."
+
+  middleware_pass_total:
+    type: counter
+    labels: [method, path, status, threshold]
+    meaning: "Tracks requests hitting internal request-time thresholds. threshold=exceeded means request took longer than configured."
+    queries:
+      exceeded: >-
+        sum(rate(middleware_pass_total{role=~"$role", threshold="exceeded"}[5m]))
+    note: "no_active_series — defined in code but only emitted when middleware thresholds are configured."
+
+  middleware_request_timed_out_total:
+    type: counter
+    labels: [method, path, threshold]
+    meaning: "Requests that timed out in middleware — dropped before reaching handler."
+    queries:
+      exceeded: >-
+        sum(rate(middleware_request_timed_out_total{role=~"$role", threshold="exceeded"}[5m]))
+    alert: "Any non-zero rate means requests are being shed."
+    note: "no_active_series — same as middleware_pass_total."
+
+  # -- 1.2 Payload Processing --
+  capture_full_payload_size:
+    type: histogram
+    labels: [oversize]
+    buckets: [1KB, 5KB, 10KB, 50KB, 100KB, 1MB, 10MB, 20MB]
+    meaning: "Size of fully decompressed payload. oversize=true means exceeded max but was measured."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_full_payload_size_bucket{role=~"$role", oversize="false"}[5m])) by (le))
+    alert: "Growth in oversize=true count means clients sending excessively large batches."
+
+  capture_raw_payload_size:
+    type: histogram
+    buckets: default
+    meaning: "Raw (pre-decompression) payload size. Compare with full_payload_size for compression ratio."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_raw_payload_size_bucket{role=~"$role"}[5m])) by (le))
+
+  capture_gzip_decompression_ratio:
+    type: histogram
+    buckets: default
+    meaning: "Ratio of decompressed/compressed size. High ratios may indicate gzip bomb attempts."
+    queries:
+      avg: >-
+        sum(rate(capture_gzip_decompression_ratio_sum{role=~"$role"}[5m])) / sum(rate(capture_gzip_decompression_ratio_count{role=~"$role"}[5m]))
+
+  capture_payload_size_exceeded:
+    type: counter
+    labels: [kind]
+    meaning: "Payloads rejected for exceeding max size. kind=gzip or none."
+    queries:
+      by_kind: >-
+        sum(rate(capture_payload_size_exceeded{role=~"$role"}[5m])) by (kind)
+    alert: "Sustained non-zero rate from a single team token = misbehaving SDK."
+
+  capture_body_read_timeout_total:
+    type: counter
+    labels: [path]
+    meaning: "HTTP body not fully read before timeout. Slow clients or network issues."
+    queries:
+      total: >-
+        sum(rate(capture_body_read_timeout_total{role=~"$role"}[5m]))
+    alert: "Sustained rate > 1/s may indicate network degradation."
+
+  # -- 1.3 Event Lifecycle --
+  capture_events_received_total:
+    type: counter
+    meaning: "Total events parsed from incoming payloads (before filtering). Top-of-funnel count."
+    queries:
+      rate: >-
+        sum(rate(capture_events_received_total{role=~"$role"}[5m]))
+
+  capture_events_ingested_total:
+    type: counter
+    meaning: "Events successfully handed off to the sink (Kafka, S3, etc). Bottom-of-funnel count."
+    queries:
+      rate: >-
+        sum(rate(capture_events_ingested_total{role=~"$role"}[5m]))
+    key_ratio: "ingested / received = acceptance rate. Drop below ~0.95 warrants investigation."
+
+  capture_events_dropped_total:
+    type: counter
+    labels: [cause]
+    known_values:
+      cause: [ai_opt_in, encoding, event_restriction_drop, event_too_big, events_over_quota, exceptions_over_quota, gathering, invalid_session, kafka_message_size, llm_events_over_quota, no_distinct_id, no_event_name, no_session_id, oversize_event, recordings_over_quota, retryable_sink, survey_responses_over_quota, token_dropper]
+    meaning: "Events intentionally dropped with reason in cause. Critical for understanding data loss."
+    queries:
+      by_cause: >-
+        sum(rate(capture_events_dropped_total{role=~"$role"}[5m])) by (cause)
+    alert: "retryable_sink drops = Kafka producer failures. *_over_quota drops are normal but worth monitoring per-team."
+
+  capture_events_rerouted_overflow:
+    type: counter
+    labels: [reason]
+    known_values:
+      reason: [event_restriction, force_limited, rate_limited]
+    meaning: "Events sent to overflow topic instead of primary."
+    queries:
+      by_reason: >-
+        sum(rate(capture_events_rerouted_overflow{role=~"$role"}[5m])) by (reason)
+    alert: "High rate_limited overflow = global rate limiter shedding load."
+
+  capture_events_rerouted_custom_topic:
+    type: counter
+    labels: [reason]
+    meaning: "Events redirected to a custom Kafka topic via event restrictions."
+    queries:
+      rate: >-
+        sum(rate(capture_events_rerouted_custom_topic{role=~"$role"}[5m]))
+
+  capture_events_rerouted_dlq:
+    type: counter
+    labels: [reason]
+    meaning: "Events sent to dead-letter queue topic via event restrictions."
+    queries:
+      rate: >-
+        sum(rate(capture_events_rerouted_dlq{role=~"$role"}[5m]))
+    note: "no_active_series — DLQ routing defined in code but not currently triggered."
+
+  capture_events_rerouted_historical:
+    type: counter
+    labels: [reason]
+    meaning: "Events rerouted to historical ingestion topic (far-past timestamp)."
+    queries:
+      rate: >-
+        sum(rate(capture_events_rerouted_historical{role=~"$role"}[5m]))
+    note: "no_active_series — metric name not registered in VictoriaMetrics."
+
+  capture_exception_events_dual_written:
+    type: counter
+    meaning: "Exception events dual-written to error tracking pipeline."
+    queries:
+      rate: >-
+        sum(rate(capture_exception_events_dual_written{role=~"$role"}[5m]))
+    note: "no_active_series — metric name not registered in VictoriaMetrics."
+
+  capture_distinct_id_has_whitespace_total:
+    type: counter
+    meaning: "Events where distinct_id contained whitespace (trimmed). Indicates SDK bugs."
+    queries:
+      rate: >-
+        sum(rate(capture_distinct_id_has_whitespace_total{role=~"$role"}[5m]))
+
+  capture_logs_timestamps_overridden:
+    type: counter
+    meaning: "Log events where client timestamp was overridden by server (e.g. future timestamps clamped)."
+    queries:
+      rate: >-
+        sum(rate(capture_logs_timestamps_overridden{role=~"$role"}[5m]))
+
+  capture_internal_event_submitted_total:
+    type: counter
+    meaning: "Internal capture events submitted (e.g. from Django capture_internal endpoint)."
+    queries:
+      rate: >-
+        sum(rate(capture_internal_event_submitted_total{role=~"$role"}[5m]))
+
+  # -- 1.4 Kafka Producer (Client-Side) --
+  # These metrics come from the librdkafka statistics callback (sinks/kafka.rs).
+  capture_kafka_any_brokers_down:
+    type: gauge
+    meaning: "1 if any Kafka broker unreachable, 0 otherwise. Top-level health signal."
+    queries:
+      max: >-
+        max(capture_kafka_any_brokers_down{role=~"$role"})
+    alert: "Any pod reporting 1 is critical — Kafka connectivity issues."
+
+  capture_kafka_callback_queue_depth:
+    type: gauge
+    meaning: "Messages waiting in delivery report callback queue. High = callback handler falling behind."
+    queries:
+      max: >-
+        max(capture_kafka_callback_queue_depth{role=~"$role"})
+
+  capture_kafka_producer_queue_depth:
+    type: gauge
+    meaning: "Messages queued in producer buffer waiting to be sent."
+    queries:
+      max: >-
+        max(capture_kafka_producer_queue_depth{role=~"$role"})
+
+  capture_kafka_producer_queue_depth_limit:
+    type: gauge
+    meaning: "Configured max producer queue depth. Compare with queue_depth for saturation."
+    queries:
+      saturation: >-
+        capture_kafka_producer_queue_depth{role=~"$role"} / capture_kafka_producer_queue_depth_limit{role=~"$role"}
+    alert: "Ratio > 0.8 = producer near saturation, will start blocking or dropping."
+
+  capture_kafka_producer_queue_bytes:
+    type: gauge
+    meaning: "Bytes queued in producer buffer."
+    queries:
+      max: >-
+        max(capture_kafka_producer_queue_bytes{role=~"$role"})
+
+  capture_kafka_producer_queue_bytes_limit:
+    type: gauge
+    meaning: "Max bytes allowed in producer queue."
+    queries:
+      saturation: >-
+        capture_kafka_producer_queue_bytes{role=~"$role"} / capture_kafka_producer_queue_bytes_limit{role=~"$role"}
+
+  capture_kafka_produce_avg_batch_size_bytes:
+    type: gauge
+    labels: [topic]
+    meaning: "Average size in bytes of Kafka produce batches per topic."
+    queries:
+      by_topic: >-
+        avg(capture_kafka_produce_avg_batch_size_bytes{role=~"$role"}) by (topic)
+
+  capture_kafka_produce_avg_batch_size_events:
+    type: gauge
+    labels: [topic]
+    meaning: "Average number of events per Kafka produce batch per topic."
+    queries:
+      by_topic: >-
+        avg(capture_kafka_produce_avg_batch_size_events{role=~"$role"}) by (topic)
+
+  capture_kafka_broker_connected:
+    type: gauge
+    labels: [broker]
+    meaning: "1 if broker connected, 0 otherwise. Per-broker connectivity status."
+    queries:
+      by_broker: >-
+        min(capture_kafka_broker_connected{role=~"$role"}) by (broker)
+    alert: "Any broker showing 0 across all pods needs immediate investigation."
+
+  capture_kafka_produce_rtt_latency_us:
+    type: gauge
+    labels: [quantile, broker]
+    meaning: "Produce request RTT in microseconds from librdkafka per broker at various quantiles (p50, p90, p95, p99)."
+    queries:
+      p99: >-
+        max(capture_kafka_produce_rtt_latency_us{role=~"$role", quantile="p99"}) by (broker)
+    alert: "p99 > 100000 (100ms) sustained = broker overload or network issues. p99 > 500000 (500ms) = critical."
+
+  capture_kafka_broker_requests_pending:
+    type: gauge
+    labels: [broker]
+    meaning: "Produce requests in flight to each broker."
+    queries:
+      by_broker: >-
+        max(capture_kafka_broker_requests_pending{role=~"$role"}) by (broker)
+
+  capture_kafka_broker_responses_awaiting:
+    type: gauge
+    labels: [broker]
+    meaning: "Responses being waited on from each broker."
+    queries:
+      by_broker: >-
+        max(capture_kafka_broker_responses_awaiting{role=~"$role"}) by (broker)
+
+  capture_kafka_broker_tx_errors_total:
+    type: counter
+    labels: [broker]
+    meaning: "Cumulative transmit errors to each broker (absolute from librdkafka stats)."
+    queries:
+      by_broker: >-
+        sum(rate(capture_kafka_broker_tx_errors_total{role=~"$role"}[5m])) by (broker)
+    alert: "Any sustained non-zero rate = network-level errors to a broker."
+
+  capture_kafka_broker_rx_errors_total:
+    type: counter
+    labels: [broker]
+    meaning: "Cumulative receive errors from each broker."
+    queries:
+      by_broker: >-
+        sum(rate(capture_kafka_broker_rx_errors_total{role=~"$role"}[5m])) by (broker)
+
+  capture_kafka_broker_request_timeouts:
+    type: counter
+    labels: [broker]
+    meaning: "Cumulative request timeouts to each broker."
+    queries:
+      by_broker: >-
+        sum(rate(capture_kafka_broker_request_timeouts{role=~"$role"}[5m])) by (broker)
+    alert: "Non-zero rate = broker too slow to respond within configured timeout."
+
+  capture_kafka_produce_errors_total:
+    type: counter
+    meaning: "Failed Kafka produce calls (delivery failures, queue full, etc)."
+    queries:
+      rate: >-
+        sum(rate(capture_kafka_produce_errors_total{role=~"$role"}[5m]))
+    alert: "Any sustained rate > 0 is critical — events may be lost."
+
+  capture_kafka_produce_bytes_total:
+    type: counter
+    labels: [topic]
+    meaning: "Total bytes produced to Kafka by topic. Primary throughput metric."
+    queries:
+      by_topic: >-
+        sum(rate(capture_kafka_produce_bytes_total{role=~"$role"}[5m])) by (topic)
+
+  capture_event_batch_size:
+    type: histogram
+    buckets: [1, 10, 25, 50, 75, 100, 250, 500, 750, 1000]
+    meaning: "Number of events per batch sent to the sink."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_event_batch_size_bucket{role=~"$role"}[5m])) by (le))
+
+  # -- 1.5 S3 Sink --
+  # WARNING: No active series in prod. All capture_s3_* metrics are defined in Rust code
+  # but not present in VictoriaMetrics. Queries will return empty results.
+  capture_s3_upload_duration_seconds:
+    type: histogram
+    buckets: [0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24]
+    meaning: "Latency of individual S3 PutObject calls."
+    queries:
+      p99: >-
+        histogram_quantile(0.99, sum(rate(capture_s3_upload_duration_seconds_bucket{role=~"$role"}[5m])) by (le))
+    alert: "p99 > 2s sustained = S3 throttling or network issue."
+    note: no_active_series
+
+  capture_s3_upload_body_size_bytes:
+    type: histogram
+    buckets: "1KB to 32MB (2x steps)"
+    meaning: "Size of each S3 upload body."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_s3_upload_body_size_bytes_bucket{role=~"$role"}[5m])) by (le))
+    note: no_active_series
+
+  capture_s3_upload_total:
+    type: counter
+    labels: [outcome, reason]
+    meaning: "Total S3 upload attempts with outcome (success/error)."
+    queries:
+      by_outcome: >-
+        sum(rate(capture_s3_upload_total{role=~"$role"}[5m])) by (outcome)
+    alert: "outcome=error rate > 0 sustained = S3 issues."
+    note: no_active_series
+
+  capture_s3_flush_duration_ms:
+    type: histogram
+    meaning: "Duration of flushing a batch of events to S3 (serialization + upload)."
+    queries:
+      p99: >-
+        histogram_quantile(0.99, sum(rate(capture_s3_flush_duration_ms_bucket{role=~"$role"}[5m])) by (le))
+    note: no_active_series
+
+  capture_s3_batch_size_events:
+    type: histogram
+    meaning: "Events per S3 flush batch."
+    note: no_active_series
+
+  capture_s3_batch_size_bytes:
+    type: histogram
+    meaning: "Bytes per S3 flush batch."
+    note: no_active_series
+
+  capture_s3_batch_size:
+    type: histogram
+    meaning: "S3 flush batch size."
+    note: no_active_series
+
+  capture_s3_flush_errors_total:
+    type: counter
+    labels: [error]
+    meaning: "S3 flush failures."
+    queries:
+      by_error: >-
+        sum(rate(capture_s3_flush_errors_total{role=~"$role"}[5m])) by (error)
+    note: no_active_series
+
+  capture_s3_events_written_total:
+    type: counter
+    meaning: "Cumulative events successfully written to S3."
+    queries:
+      rate: >-
+        sum(rate(capture_s3_events_written_total{role=~"$role"}[5m]))
+    note: no_active_series
+
+  capture_s3_bytes_written_total:
+    type: counter
+    meaning: "Cumulative bytes successfully written to S3."
+    queries:
+      rate: >-
+        sum(rate(capture_s3_bytes_written_total{role=~"$role"}[5m]))
+    note: no_active_series
+
+  capture_s3_write_errors_total:
+    type: counter
+    meaning: "Individual S3 write failures within a batch."
+    queries:
+      rate: >-
+        sum(rate(capture_s3_write_errors_total{role=~"$role"}[5m]))
+    note: no_active_series
+
+  # -- 1.6 AI / OTel Ingestion --
+  capture_ai_otel_requests_total:
+    type: counter
+    labels: [format]
+    meaning: "Total OTel ingest requests."
+    queries:
+      by_format: >-
+        sum(rate(capture_ai_otel_requests_total{role=~"$role"}[5m])) by (format)
+
+  capture_ai_otel_requests_success:
+    type: counter
+    meaning: "OTel requests that completed successfully."
+    queries:
+      rate: >-
+        sum(rate(capture_ai_otel_requests_success{role=~"$role"}[5m]))
+
+  capture_ai_otel_body_size_bytes:
+    type: histogram
+    buckets: [1KB, 5KB, 10KB, 50KB, 100KB, 1MB, 10MB, 20MB]
+    meaning: "OTel request body size after decompression."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_ai_otel_body_size_bytes_bucket{role=~"$role"}[5m])) by (le))
+
+  capture_ai_otel_spans_received:
+    type: counter
+    meaning: "Total OTel spans received across all requests."
+    queries:
+      rate: >-
+        sum(rate(capture_ai_otel_spans_received{role=~"$role"}[5m]))
+
+  capture_ai_otel_spans_per_request:
+    type: histogram
+    buckets: [1, 10, 25, 50, 75, 100, 250, 500, 750, 1000]
+    meaning: "Number of spans per OTel request."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_ai_otel_spans_per_request_bucket{role=~"$role"}[5m])) by (le))
+
+  capture_ai_otel_events_ingested:
+    type: counter
+    meaning: "PostHog events generated from OTel spans and successfully ingested."
+    queries:
+      rate: >-
+        sum(rate(capture_ai_otel_events_ingested{role=~"$role"}[5m]))
+
+  capture_ai_blob_count_per_event:
+    type: histogram
+    buckets: [1, 2, 4, 8, 16, 32]
+    meaning: "Binary blobs (images, etc.) per AI event."
+    queries:
+      p95: >-
+        histogram_quantile(0.95, sum(rate(capture_ai_blob_count_per_event_bucket{role=~"$role"}[5m])) by (le))
+
+  capture_ai_blob_size_bytes:
+    type: histogram
+    buckets: "1KB to 32MB (2x steps)"
+    meaning: "Size of each individual blob."
+
+  capture_ai_blob_total_bytes_per_event:
+    type: histogram
+    buckets: "1KB to 32MB (2x steps)"
+    meaning: "Total blob bytes per event (sum of all blobs in one event)."
+
+  capture_ai_blob_events_total:
+    type: counter
+    labels: [has_blobs, content_type]
+    meaning: "Total AI events processed, partitioned by whether they contain blobs."
+    queries:
+      by_has_blobs: >-
+        sum(rate(capture_ai_blob_events_total{role=~"$role"}[5m])) by (has_blobs)
+
+  # -- 1.7 Quota and Rate Limiting --
+  capture_quota_limit_exceeded:
+    type: counter
+    labels: [resource]
+    meaning: "Events rejected because team exceeded billing quota for given resource."
+    queries:
+      by_resource: >-
+        sum(rate(capture_quota_limit_exceeded{role=~"$role"}[5m])) by (resource)
+    alert: "Spikes correlate with billing enforcement. Normal operation."
+
+  capture_partition_key_capacity_exceeded_total:
+    type: counter
+    meaning: "Events where partition key (team token) exceeded capacity, triggering overflow routing."
+    queries:
+      rate: >-
+        sum(rate(capture_partition_key_capacity_exceeded_total{role=~"$role"}[5m]))
+
+  capture_billing_limits_loaded_tokens:
+    type: gauge
+    meaning: "Team tokens with active billing limits loaded in memory. Operational health of quota system."
+    queries:
+      min: >-
+        min(capture_billing_limits_loaded_tokens{role=~"$role"})
+    alert: "Drop to 0 = billing limits not loaded, all quota enforcement disabled."
+
+  # -- 1.8 Event Restrictions --
+  # Dynamic rules (from Redis) that drop, reroute, or modify events for specific teams/event types.
+  capture_event_restrictions_applied:
+    type: counter
+    labels: [restriction_type, pipeline]
+    known_values:
+      restriction_type: [drop_event, force_overflow, redirect_to_dlq, redirect_to_topic, skip_person_processing]
+    meaning: "Event restrictions actually applied."
+    queries:
+      by_type_pipeline: >-
+        sum(rate(capture_event_restrictions_applied{role=~"$role"}[5m])) by (restriction_type, pipeline)
+
+  capture_event_restrictions_last_refresh_timestamp:
+    type: gauge
+    labels: [pipeline]
+    known_values:
+      pipeline: [analytics, clustering, session_recordings, summarization]
+    meaning: "Unix timestamp of last successful restriction config refresh."
+    queries:
+      staleness: >-
+        time() - capture_event_restrictions_last_refresh_timestamp{role=~"$role"}
+    alert: "Exceeds several minutes = restrictions config is stale."
+
+  capture_event_restrictions_loaded_count:
+    type: gauge
+    labels: [pipeline]
+    meaning: "Restriction rules currently loaded per pipeline."
+    queries:
+      current: >-
+        capture_event_restrictions_loaded_count{role=~"$role"}
+
+  capture_event_restrictions_tokens_count:
+    type: gauge
+    labels: [pipeline]
+    meaning: "Distinct team tokens with restrictions."
+
+  capture_event_restrictions_stale:
+    type: gauge
+    labels: [pipeline]
+    meaning: "1 if restrictions for this pipeline are stale (refresh failed), 0 otherwise."
+    queries:
+      by_pipeline: >-
+        max(capture_event_restrictions_stale{role=~"$role"}) by (pipeline)
+    alert: "Any 1 = restrictions may not be applied correctly."
+
+  capture_event_restrictions_redis_fetch:
+    type: counter
+    labels: [restriction_type, result]
+    known_values:
+      result: [success, error, not_found, parse_error]
+    meaning: "Redis fetch operations for restriction configs with outcome."
+    queries:
+      errors: >-
+        sum(rate(capture_event_restrictions_redis_fetch{role=~"$role", result="error"}[5m]))
+    alert: "Sustained errors = Redis connectivity issues."
+
+  # -- 1.9 Error Tracking and Internal Errors --
+  capture_error_by_stage_and_type:
+    type: counter
+    labels: [error, stage]
+    known_values:
+      error: [NONE, REQUEST_TIMED_OUT, UNKNOWN_SERVER_ERROR, NOT_LEADER_OR_FOLLOWER, UNKNOWN_TOPIC_OR_PARTITION, OFFSET_OUT_OF_RANGE, body_read_timeout, empty_batch, empty_payload, invalid_session, invalid_token, no_distinct_id, no_event_name, no_session_id, no_token, oversize_event, req_decoding, req_hydration, req_parsing, retryable_sink]
+      stage: [ALPHA, BETA, DEPRECATED, accept, normalized, parsing, processing, received, sampled]
+    meaning: "Internal errors categorized by type and processing stage. Most detailed error breakdown."
+    queries:
+      by_error_stage: >-
+        sum(rate(capture_error_by_stage_and_type{role=~"$role"}[5m])) by (error, stage)
+      top_errors: >-
+        topk(10, sum(rate(capture_error_by_stage_and_type{role=~"$role"}[5m])) by (error))
+    alert: "retryable_sink at processing stage = Kafka delivery failures. Kafka error codes like NOT_LEADER_OR_FOLLOWER = broker issues."
+
+  # -- 1.10 Hyper Server Internals --
+  # Low-level TCP accept loop metrics from custom Hyper server implementation.
+  capture_hyper_accepted_connections:
+    type: counter
+    labels: [stage]
+    meaning: "Total TCP connections accepted. drain stage = connections during graceful shutdown."
+    queries:
+      by_stage: >-
+        sum(rate(capture_hyper_accepted_connections{role=~"$role"}[5m])) by (stage)
+
+  capture_hyper_accept_error:
+    type: counter
+    labels: [err_type, stage]
+    known_values:
+      err_type: [set_tcp_nodelay, conn_closed, connection, resources]
+    meaning: "TCP accept errors. resources = file descriptor exhaustion. connection = transient."
+    queries:
+      by_type: >-
+        sum(rate(capture_hyper_accept_error{role=~"$role"}[5m])) by (err_type)
+    alert: "resources errors = pod running out of file descriptors."
+
+  capture_hyper_header_read_timeout:
+    type: counter
+    labels: [stage]
+    meaning: "Connections where HTTP headers not fully read within timeout. Slowloris-style."
+    queries:
+      rate: >-
+        sum(rate(capture_hyper_header_read_timeout{role=~"$role"}[5m]))
+
+  # -- 1.11 Fallback Sink --
+  # WARNING: No active series in prod. Fallback sink defined in code but not enabled in production.
+  capture_primary_sink_health:
+    type: gauge
+    meaning: "Primary sink health status. 1=healthy, 0=degraded/failing (fallback used)."
+    queries:
+      min: >-
+        min(capture_primary_sink_health{role=~"$role"})
+    alert: "0 = all traffic going through fallback path."
+    note: no_active_series
+
+  capture_fallback_sink_failovers_total:
+    type: counter
+    meaning: "Times sink switched from primary to fallback (or back)."
+    queries:
+      rate: >-
+        sum(rate(capture_fallback_sink_failovers_total{role=~"$role"}[5m]))
+    alert: "Flapping (high rate) = primary sink unstable."
+    note: no_active_series
+
+# ===========================================================================
+# Section 2: Contour / Envoy Ingress Metrics
+# ===========================================================================
+# Contour manages Envoy as L7 ingress proxy in front of all capture services.
+# Each backend identified by envoy_cluster_name using <namespace>_<service>_<port>.
+# Use envoy_cluster_name=~"posthog_capture.*" to match all capture clusters.
+# Dashboard: https://grafana.prod-us.posthog.dev/d/contour/contour-ingress (UID: contour)
+#   Set endpoint_namespace=posthog, envoy_cluster_name=posthog_capture_3000
+contour_envoy:
+  # -- 2.1 Request Throughput and Response Codes --
+  envoy_cluster_upstream_rq_xx:
+    type: counter
+    labels: [envoy_cluster_name, envoy_response_code_class]
+    meaning: "Total upstream requests by HTTP response code class (1-5). Primary throughput and error signal at ingress."
+    queries:
+      rps_by_class: >-
+        sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name, envoy_response_code_class)
+      5xx_ratio: >-
+        sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~"posthog_capture.*", envoy_response_code_class="5"}[5m])) / sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~"posthog_capture.*"}[5m]))
+    alert: "5xx ratio > 0.1% sustained over 5m is abnormal for capture."
+
+  envoy_cluster_upstream_rq_completed:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Total completed upstream requests (all codes). Useful as denominator in ratio calculations."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_completed{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  # -- 2.2 Upstream Latency --
+  envoy_cluster_upstream_rq_time:
+    type: histogram
+    unit: milliseconds
+    labels: [envoy_cluster_name, le]
+    meaning: "End-to-end upstream request latency as seen by Envoy — includes connect, send, backend processing, response receive. Ingress-eye view of capture latency."
+    queries:
+      p50: >-
+        histogram_quantile(0.50, sum(rate(envoy_cluster_upstream_rq_time_bucket{envoy_cluster_name="posthog_capture_3000"}[5m])) by (le))
+      p99: >-
+        histogram_quantile(0.99, sum(rate(envoy_cluster_upstream_rq_time_bucket{envoy_cluster_name="posthog_capture_3000"}[5m])) by (le))
+      p99_all_capture: >-
+        histogram_quantile(0.99, sum(rate(envoy_cluster_upstream_rq_time_bucket{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name, le))
+    alert: "p99 > 500ms sustained = backend slowness or resource pressure."
+
+  envoy_cluster_upstream_cx_connect_ms:
+    type: histogram
+    unit: milliseconds
+    labels: [envoy_cluster_name, le]
+    meaning: "Time to establish upstream TCP connection. High values = pod scheduling delays, network issues, exhausted backend capacity."
+    queries:
+      p99: >-
+        histogram_quantile(0.99, sum(rate(envoy_cluster_upstream_cx_connect_ms_bucket{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name, le))
+
+  envoy_cluster_upstream_cx_length_ms:
+    type: histogram
+    unit: milliseconds
+    labels: [envoy_cluster_name, le]
+    meaning: "Duration of upstream connections open-to-close. Very short lifetimes = connection churn."
+    queries:
+      p50: >-
+        histogram_quantile(0.50, sum(rate(envoy_cluster_upstream_cx_length_ms_bucket{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name, le))
+
+  # -- 2.3 Active Connections and Requests --
+  envoy_cluster_upstream_cx_active:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Currently active upstream connections. Reflects load distribution across capture pods."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_upstream_cx_active{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_active:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Currently in-flight upstream requests. Spikes may indicate backend stalls."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_upstream_rq_active{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_pending_active:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Requests queued waiting for available connection. Non-zero = connection pool pressure."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_upstream_rq_pending_active{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+    alert: "Sustained non-zero = connection exhaustion."
+
+  # -- 2.4 Connection Errors --
+  envoy_cluster_upstream_cx_connect_fail:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Failed upstream connection attempts. Pods unreachable, port not listening, or network partition."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_connect_fail{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+    alert: "Any sustained non-zero rate needs investigation."
+
+  envoy_cluster_upstream_cx_connect_timeout:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Connection establishment timeouts. Backend pods may be overloaded or unresponsive."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_connect_timeout{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_cx_overflow:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Connection pool overflow — new connections rejected at capacity."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_overflow{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+    alert: "Non-zero = Envoy dropping connections due to resource limits."
+
+  envoy_cluster_upstream_cx_destroy_remote_with_active_rq:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Backend closed connection while requests in flight. Backend crashes, restarts, or premature resets."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_destroy_remote_with_active_rq{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_cx_destroy_local_with_active_rq:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Envoy closed connection while requests in flight (timeout, circuit break)."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_destroy_local_with_active_rq{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_cx_protocol_error:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "HTTP protocol errors on upstream connections (malformed responses, HTTP/2 framing errors)."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_protocol_error{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  # -- 2.5 Timeouts and Retries --
+  envoy_cluster_upstream_rq_timeout:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Requests exceeding route-level timeout. Returns 504 to client."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_timeout{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+    alert: "Any sustained non-zero = backend latency exceeding Contour route timeout."
+
+  envoy_cluster_upstream_rq_per_try_timeout:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Individual attempt timeouts (before retry). Distinct from route-level timeout."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_per_try_timeout{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_retry:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Total retry attempts by Envoy. High rates amplify backend load."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_retry{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_retry_success:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Retries that succeeded. retry - retry_success = wasted attempts."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_retry_success{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_retry_limit_exceeded:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Requests that exhausted all retries and still failed. Become 5xx responses."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_retry_limit_exceeded{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+    alert: "Non-zero = persistent backend failures."
+
+  envoy_cluster_upstream_rq_retry_overflow:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Retries rejected because retry budget / circuit breaker exhausted."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_retry_overflow{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_rx_reset:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Upstream sent a reset (RST_STREAM / connection reset). Backend aborted the response."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_rx_reset{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_tx_reset:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Downstream (client) reset request before completion. High rates = client timeouts or SDK bugs."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_tx_reset{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  # -- 2.6 Backend Membership and Health --
+  envoy_cluster_membership_healthy:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Healthy backend endpoints in cluster. Should equal membership_total in steady state."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_membership_healthy{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+    alert: "healthy < total = some pods failing health checks."
+
+  envoy_cluster_membership_total:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Total backend endpoints (healthy + unhealthy). Correlates with k8s pod count."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_membership_total{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_membership_degraded:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Endpoints in degraded state (health check passing but flagged)."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_membership_degraded{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_healthy_ratio:
+    type: derived
+    meaning: "Ratio of healthy to total endpoints."
+    queries:
+      ratio: >-
+        sum(envoy_cluster_membership_healthy{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name) / sum(envoy_cluster_membership_total{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+    alert: "Ratio < 1.0 = unhealthy endpoints. Brief drops during deploys are normal."
+
+  # -- 2.7 Circuit Breakers --
+  envoy_cluster_circuit_breakers_default_rq_open:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Request circuit breaker tripped (1=open, shedding requests)."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_circuit_breakers_default_rq_open{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+    alert: "Any non-zero = Envoy actively rejecting requests to this cluster."
+
+  envoy_cluster_circuit_breakers_default_cx_open:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Connection circuit breaker tripped. New connections rejected."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_circuit_breakers_default_cx_open{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_circuit_breakers_default_rq_pending_open:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Pending-request circuit breaker tripped. New requests immediately rejected (503)."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_circuit_breakers_default_rq_pending_open{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_circuit_breakers_default_rq_retry_open:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Retry circuit breaker tripped. No further retries attempted."
+    queries:
+      by_cluster: >-
+        sum(envoy_cluster_circuit_breakers_default_rq_retry_open{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_circuit_breakers_default_remaining_rq:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Remaining request capacity before circuit break. Low = approaching limit."
+    queries:
+      by_cluster: >-
+        min(envoy_cluster_circuit_breakers_default_remaining_rq{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_circuit_breakers_default_remaining_cx:
+    type: gauge
+    labels: [envoy_cluster_name]
+    meaning: "Remaining connection capacity before circuit break."
+    queries:
+      by_cluster: >-
+        min(envoy_cluster_circuit_breakers_default_remaining_cx{envoy_cluster_name=~"posthog_capture.*"}) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_rq_pending_overflow:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Requests rejected by pending-request circuit breaker. Each count = dropped request (503)."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_rq_pending_overflow{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+    alert: "Non-zero rate = connection pool / circuit breaker saturation."
+
+  # -- 2.8 Bytes Transferred --
+  envoy_cluster_upstream_cx_rx_bytes_total:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Total bytes received from upstream (capture response bodies)."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_rx_bytes_total{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+
+  envoy_cluster_upstream_cx_tx_bytes_total:
+    type: counter
+    labels: [envoy_cluster_name]
+    meaning: "Total bytes sent to upstream (capture request bodies — event payloads)."
+    queries:
+      by_cluster: >-
+        sum(rate(envoy_cluster_upstream_cx_tx_bytes_total{envoy_cluster_name=~"posthog_capture.*"}[5m])) by (envoy_cluster_name)
+    alert: "Sudden drops in TX bytes = traffic routing issues or upstream errors."
+
+# ===========================================================================
+# Section 3: Kubernetes Pod and Node Health
+# ===========================================================================
+# Filter with container="capture" or namespace="posthog".
+# The role label maps to k8s deployment name (capture, capture-ai, capture-replay).
+kubernetes:
+  # -- 3.1 Container Resource Usage (cAdvisor) --
+  container_cpu_usage_seconds_total:
+    type: counter
+    meaning: "CPU time consumed by the container."
+    queries:
+      usage_rate: >-
+        sum(rate(container_cpu_usage_seconds_total{container="capture", namespace="posthog"}[5m])) by (pod)
+      pct_of_request: >-
+        sum(rate(container_cpu_usage_seconds_total{container="capture", namespace="posthog"}[5m])) by (pod) / on(pod) group_left() sum(kube_pod_container_resource_requests{container="capture", resource="cpu"}) by (pod) * 100
+    alert: "Sustained > 90% of CPU request = needs more resources or replicas."
+
+  container_cpu_cfs_throttled_periods_total:
+    type: counter
+    meaning: "CFS throttling. Ratio of throttled/total periods = how often container is CPU-capped."
+    queries:
+      throttle_pct: >-
+        sum(rate(container_cpu_cfs_throttled_periods_total{container="capture", namespace="posthog"}[5m])) by (pod) / sum(rate(container_cpu_cfs_periods_total{container="capture", namespace="posthog"}[5m])) by (pod) * 100
+    alert: "> 25% throttling sustained degrades request latency."
+
+  container_memory_working_set_bytes:
+    type: gauge
+    meaning: "Current working set memory (used for OOM decisions)."
+    queries:
+      by_pod: >-
+        sum(container_memory_working_set_bytes{container="capture", namespace="posthog"}) by (pod)
+      pct_of_limit: >-
+        sum(container_memory_working_set_bytes{container="capture", namespace="posthog"}) by (pod) / on(pod) group_left() sum(kube_pod_container_resource_limits{container="capture", resource="memory"}) by (pod) * 100
+    alert: "> 85% of memory limit = OOM kill risk."
+
+  container_memory_rss:
+    type: gauge
+    meaning: "Resident set size. More stable than working_set for tracking actual Rust process memory."
+    queries:
+      by_pod: >-
+        sum(container_memory_rss{container="capture", namespace="posthog"}) by (pod)
+
+  container_oom_events_total:
+    type: counter
+    meaning: "OOM events for the container."
+    queries:
+      hourly: >-
+        sum(increase(container_oom_events_total{container="capture", namespace="posthog"}[1h])) by (pod)
+    alert: "Any > 0 = memory pressure severe enough for OOM kills."
+
+  container_network_receive_bytes_total:
+    type: counter
+    meaning: "Network I/O (receive). Correlate with Kafka throughput."
+    queries:
+      by_pod: >-
+        sum(rate(container_network_receive_bytes_total{namespace="posthog", pod=~"capture-.*"}[5m])) by (pod)
+
+  container_network_transmit_bytes_total:
+    type: counter
+    meaning: "Network I/O (transmit)."
+    queries:
+      by_pod: >-
+        sum(rate(container_network_transmit_bytes_total{namespace="posthog", pod=~"capture-.*"}[5m])) by (pod)
+
+  container_file_descriptors:
+    type: gauge
+    meaning: "Open file descriptors. Capture uses many for TCP and Kafka connections."
+    queries:
+      by_pod: >-
+        max(container_file_descriptors{container="capture", namespace="posthog"}) by (pod)
+    alert: "Approaching ulimit = connection leak or extreme load."
+
+  # -- 3.2 Pod Status (kube-state-metrics) --
+  kube_pod_status_phase:
+    type: gauge
+    labels: [phase]
+    known_values:
+      phase: [Pending, Running, Succeeded, Failed, Unknown]
+    queries:
+      by_phase: >-
+        sum(kube_pod_status_phase{namespace="posthog", pod=~"capture-.*"}) by (phase)
+    alert: "Pods stuck in Pending or Failed need investigation."
+
+  kube_pod_container_status_restarts_total:
+    type: counter
+    queries:
+      recent_restarts: >-
+        sum(increase(kube_pod_container_status_restarts_total{container="capture", namespace="posthog"}[1h])) by (pod)
+    alert: "> 2 restarts/hour = CrashLoopBackOff or OOM."
+
+  kube_pod_container_status_waiting_reason:
+    type: gauge
+    labels: [reason]
+    known_values:
+      reason: [CrashLoopBackOff, ImagePullBackOff, CreateContainerConfigError]
+    queries:
+      by_reason: >-
+        sum(kube_pod_container_status_waiting_reason{container="capture", namespace="posthog"}) by (pod, reason)
+    alert: "Any CrashLoopBackOff is critical."
+
+  kube_pod_container_status_terminated_reason:
+    type: gauge
+    labels: [reason]
+    known_values:
+      reason: [OOMKilled, Error, Completed]
+    queries:
+      by_reason: >-
+        sum(kube_pod_container_status_terminated_reason{container="capture", namespace="posthog"}) by (pod, reason)
+
+  kube_pod_container_resource_requests:
+    type: gauge
+    labels: [resource]
+    meaning: "Configured resource requests. Use to compute utilization percentages."
+    queries:
+      cpu: >-
+        kube_pod_container_resource_requests{container="capture", resource="cpu"}
+
+  kube_pod_container_resource_limits:
+    type: gauge
+    labels: [resource]
+    meaning: "Configured resource limits."
+
+  # -- 3.3 Node Health --
+  node_cpu_seconds_total:
+    type: counter
+    labels: [mode]
+    queries:
+      node_cpu_pct: >-
+        100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+    alert: "Node CPU > 85% sustained may cause scheduling issues."
+
+  node_memory_MemAvailable_bytes:
+    type: gauge
+    meaning: "Available memory on the node. If not directly available, compute from MemTotal - MemFree - Buffers - Cached."
+    queries:
+      check: "node_memory_MemAvailable_bytes or compute from sub-metrics"
+
+  node_load1:
+    type: gauge
+    meaning: "Node load averages (1/5/15 min). Compare with CPU core count."
+    queries:
+      all: >-
+        node_load5{instance=~".*"}
+
+  kube_node_status_condition:
+    type: gauge
+    labels: [condition, status]
+    known_values:
+      condition: [Ready, MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable]
+    queries:
+      not_ready: >-
+        kube_node_status_condition{condition="Ready", status="true"} == 0
+    alert: "Any node with Ready=false or pressure conditions active affects scheduling."
+
+  kube_node_status_allocatable:
+    type: gauge
+    labels: [resource]
+    meaning: "Allocatable resources per node. Compare with pod requests for headroom."
+
+  kube_node_labels:
+    type: gauge
+    meaning: "Node labels including nodepool selectors. Filter to capture nodepool."
+    queries:
+      capture_nodes: >-
+        kube_node_labels{label_karpenter_sh_nodepool=~".*capture.*"}
+
+  karpenter_cluster_state_node_count:
+    type: gauge
+    meaning: "Nodes managed by Karpenter. Track autoscaling of capture nodepool."
+    queries:
+      total: >-
+        karpenter_cluster_state_node_count
+
+  # -- 3.4 HPA / Autoscaling --
+  kube_horizontalpodautoscaler_status_current_replicas:
+    type: gauge
+    queries:
+      capture: >-
+        kube_horizontalpodautoscaler_status_current_replicas{namespace="posthog", horizontalpodautoscaler=~"capture.*"}
+
+  kube_horizontalpodautoscaler_status_desired_replicas:
+    type: gauge
+    queries:
+      capture: >-
+        kube_horizontalpodautoscaler_status_desired_replicas{namespace="posthog", horizontalpodautoscaler=~"capture.*"}
+    alert: "desired > current sustained = cluster can't scale up (resource exhaustion)."
+
+  kube_horizontalpodautoscaler_spec_max_replicas:
+    type: gauge
+    queries:
+      capture: >-
+        kube_horizontalpodautoscaler_spec_max_replicas{namespace="posthog", horizontalpodautoscaler=~"capture.*"}
+    alert: "current_replicas == max_replicas = HPA at ceiling."
+
+  kube_horizontalpodautoscaler_spec_min_replicas:
+    type: gauge
+    queries:
+      capture: >-
+        kube_horizontalpodautoscaler_spec_min_replicas{namespace="posthog", horizontalpodautoscaler=~"capture.*"}
+
+  kube_horizontalpodautoscaler_status_condition:
+    type: gauge
+    labels: [condition, status]
+    known_values:
+      condition: [AbleToScale, ScalingActive, ScalingLimited]
+    queries:
+      scaling_limited: >-
+        kube_horizontalpodautoscaler_status_condition{namespace="posthog", horizontalpodautoscaler=~"capture.*", condition="ScalingLimited", status="true"}
+    alert: "ScalingLimited=true = HPA wants to scale but can't (min/max boundary)."
+
+# ===========================================================================
+# Section 4: Kafka / AWS MSK Cluster Metrics
+# ===========================================================================
+# Scraped into VictoriaMetrics with aws_msk_ prefix from MSK open monitoring.
+# Scrape jobs: aws-msk-jmx (Kafka JMX), aws-msk-node (broker host node-exporter).
+# Scope to capture ingestion cluster with environment=~"$environment".
+# prod-us: brokers b-{1..12}.posthogprodusevents*.kafka.us-east-1.amazonaws.com
+# prod-eu: same scheme with eu-central-1
+kafka_msk:
+  # -- 4.1 Broker Topic Metrics --
+  aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate:
+    type: gauge
+    labels: [name, topic, instance]
+    known_values:
+      name: [BytesInPerSec, BytesOutPerSec, MessagesInPerSec, TotalFetchRequestsPerSec, TotalProduceRequestsPerSec, FailedFetchRequestsPerSec, FailedProduceRequestsPerSec]
+    meaning: "Per-topic, per-broker throughput rates. Most important MSK throughput signal."
+    queries:
+      bytes_in_by_topic: >-
+        sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~"$environment", name="BytesInPerSec"}) by (topic)
+      messages_in_by_topic: >-
+        sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~"$environment", name="MessagesInPerSec"}) by (topic)
+      failed_produces: >-
+        sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~"$environment", name="FailedProduceRequestsPerSec"}) by (topic)
+    alert: "FailedProduceRequestsPerSec > 0 sustained = broker rejecting writes. BytesIn flatlining while capture running = disconnect."
+
+  aws_msk_kafka_server_BrokerTopicMetrics_Count:
+    type: counter
+    labels: [name, topic, instance]
+    meaning: "Cumulative counts (total bytes, messages, etc). Use rate() for point-in-time throughput."
+    queries:
+      bytes_in_rate: >-
+        sum(rate(aws_msk_kafka_server_BrokerTopicMetrics_Count{environment=~"$environment", name="BytesInPerSec"}[5m])) by (topic)
+
+  # -- 4.2 Request / Network Metrics --
+  aws_msk_kafka_network_RequestMetrics_Mean:
+    type: gauge
+    labels: [name, request]
+    known_values:
+      name: [TotalTimeMs, RequestQueueTimeMs, LocalTimeMs, RemoteTimeMs, ResponseQueueTimeMs, ResponseSendTimeMs, ThrottleTimeMs]
+      request: [Produce, Fetch, FetchConsumer, FetchFollower]
+    meaning: "Broker-side request processing latency broken into stages."
+
+  aws_msk_kafka_network_RequestMetrics_99thPercentile:
+    type: gauge
+    labels: [name, request]
+    meaning: "Broker-side request latency p99."
+    queries:
+      produce_p99: >-
+        max(aws_msk_kafka_network_RequestMetrics_99thPercentile{environment=~"$environment", name="TotalTimeMs", request="Produce"}) by (instance)
+      fetch_p99: >-
+        max(aws_msk_kafka_network_RequestMetrics_99thPercentile{environment=~"$environment", name="TotalTimeMs", request="Fetch"}) by (instance)
+    alert: "Produce TotalTimeMs p99 > 100ms = elevated. > 500ms = critical, will back-pressure capture."
+
+  aws_msk_kafka_network_RequestMetrics_999thPercentile:
+    type: gauge
+    labels: [name, request]
+    meaning: "Broker-side request latency p999."
+
+  aws_msk_kafka_network_RequestMetrics_OneMinuteRate:
+    type: gauge
+    labels: [name, request]
+    meaning: "Request rate per second to each broker."
+    queries:
+      produce_rate: >-
+        sum(aws_msk_kafka_network_RequestMetrics_OneMinuteRate{environment=~"$environment", name="RequestsPerSec", request="Produce"}) by (instance)
+
+  aws_msk_kafka_network_RequestChannel_Value:
+    type: gauge
+    labels: [name]
+    known_values:
+      name: [RequestQueueSize, ResponseQueueSize]
+    meaning: "Broker request/response queue depth."
+    queries:
+      request_queue: >-
+        max(aws_msk_kafka_network_RequestChannel_Value{environment=~"$environment", name="RequestQueueSize"}) by (instance)
+    alert: "Growing queue sizes = broker overloaded."
+
+  aws_msk_kafka_network_Processor_Value:
+    type: gauge
+    labels: [name]
+    meaning: "Network processor idle percentage. Low idle = saturated network threads."
+    queries:
+      idle_pct: >-
+        avg(aws_msk_kafka_network_Processor_Value{environment=~"$environment", name="IdlePercent"}) by (instance)
+    alert: "< 30% idle sustained = network threads near saturation."
+
+  # -- 4.3 Broker Resource Saturation and Throttling --
+  aws_msk_throttle_time:
+    _real_metric: "aws_msk_kafka_network_RequestMetrics_{Mean,99thPercentile}"
+    labels: [name, request]
+    meaning: "Broker-side throttle time. Primary Kafka-level throttling signal. Non-zero = Kafka quotas actively delaying requests."
+    queries:
+      mean_produce: >-
+        max(aws_msk_kafka_network_RequestMetrics_Mean{environment=~"$environment", name="ThrottleTimeMs", request="Produce"}) by (instance)
+      p99_produce: >-
+        max(aws_msk_kafka_network_RequestMetrics_99thPercentile{environment=~"$environment", name="ThrottleTimeMs", request="Produce"}) by (instance)
+      p99_fetch: >-
+        max(aws_msk_kafka_network_RequestMetrics_99thPercentile{environment=~"$environment", name="ThrottleTimeMs", request="Fetch"}) by (instance)
+      p99_any: >-
+        max(aws_msk_kafka_network_RequestMetrics_99thPercentile{environment=~"$environment", name="ThrottleTimeMs"}) by (instance, request)
+    alert: "Any non-zero ThrottleTimeMs = active quota enforcement. p99 > 100ms on Produce = significant."
+
+  aws_msk_kafka_server_Request_queue_size:
+    type: gauge
+    meaning: "Requests queued waiting for handler thread. Saturation signal for request handler pool."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_server_Request_queue_size{environment=~"$environment"}) by (instance)
+    alert: "Sustained > 0 = handler threads all busy, broker saturated."
+
+  aws_msk_kafka_server_Produce_queue_size:
+    type: gauge
+    meaning: "Produce requests in purgatory (waiting for acks=all replication)."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_server_Produce_queue_size{environment=~"$environment"}) by (instance)
+    alert: "Growing values = replication can't keep up with produce rate."
+
+  aws_msk_kafka_server_Fetch_queue_size:
+    type: gauge
+    meaning: "Fetch requests in purgatory (waiting for data)."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_server_Fetch_queue_size{environment=~"$environment"}) by (instance)
+
+  aws_msk_kafka_server_KafkaRequestHandlerPool_OneMinuteRate:
+    type: gauge
+    labels: [name]
+    filter: 'name="RequestHandlerAvgIdlePercent"'
+    meaning: "Request handler thread pool idle ratio (0.0-1.0). Close to 0 = all threads busy, leading indicator of CPU saturation."
+    queries:
+      by_instance: >-
+        min(aws_msk_kafka_server_KafkaRequestHandlerPool_OneMinuteRate{environment=~"$environment", name="RequestHandlerAvgIdlePercent"}) by (instance)
+    current: "~0.70-0.80 (healthy)"
+    alert: "< 0.30 (30% idle) = warning. < 0.10 = critical, broker severely overloaded."
+
+  aws_msk_kafka_network_Processor_Value_idle:
+    _real_metric: aws_msk_kafka_network_Processor_Value
+    filter: 'name="IdlePercent"'
+    type: gauge
+    meaning: "Network processor thread idle percentage (0.0-1.0). Socket I/O threads."
+    queries:
+      by_instance: >-
+        avg(aws_msk_kafka_network_Processor_Value{environment=~"$environment", name="IdlePercent"}) by (instance)
+    current: "~0.78-0.86 (healthy)"
+    alert: "< 0.30 = near saturation. < 0.10 = critical."
+
+  aws_msk_kafka_server_socket_server_metrics_MemoryPoolAvgDepletedPercent:
+    type: gauge
+    meaning: "Average % of time broker's network memory pool fully depleted. When depleted, broker can't accept new requests."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_server_socket_server_metrics_MemoryPoolAvgDepletedPercent{environment=~"$environment"}) by (instance)
+    alert: "Any non-zero = serious red flag, broker running out of network buffer memory."
+
+  aws_msk_kafka_server_socket_server_metrics_MemoryPoolDepletedTimeTotal:
+    type: counter
+    meaning: "Cumulative time (ns) network memory pool fully depleted."
+    queries:
+      rate: >-
+        rate(aws_msk_kafka_server_socket_server_metrics_MemoryPoolDepletedTimeTotal{environment=~"$environment"}[5m])
+    alert: "Any non-zero rate = broker unable to process requests for some period."
+
+  aws_msk_kafka_server_socket_server_metrics_io_ratio:
+    type: gauge
+    meaning: "Fraction of time socket server doing actual I/O (vs waiting). Higher = busier."
+    queries:
+      by_instance: >-
+        avg(aws_msk_kafka_server_socket_server_metrics_io_ratio{environment=~"$environment"}) by (instance)
+    current: "~0.10-0.15 (healthy)"
+    alert: "> 0.70 sustained = I/O thread saturation."
+
+  aws_msk_kafka_server_socket_server_metrics_connection_count:
+    type: gauge
+    meaning: "Active connections to each broker (producers, consumers, inter-broker, admin)."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_server_socket_server_metrics_connection_count{environment=~"$environment"}) by (instance)
+    alert: "Approaching max.connections config = connection rejections."
+
+  aws_msk_kafka_server_socket_server_metrics_expired_connections_killed_count:
+    type: counter
+    meaning: "Connections killed due to idle timeout expiry."
+    queries:
+      rate: >-
+        rate(aws_msk_kafka_server_socket_server_metrics_expired_connections_killed_count{environment=~"$environment"}[5m])
+
+  aws_msk_kafka_server_socket_server_metrics_failed_authentication_total:
+    type: counter
+    meaning: "Failed authentication attempts. Spikes = credential issues or unauthorized access."
+    queries:
+      by_instance: >-
+        sum(rate(aws_msk_kafka_server_socket_server_metrics_failed_authentication_total{environment=~"$environment"}[5m])) by (instance)
+    alert: "Any sustained rate warrants investigation."
+
+  aws_msk_kafka_server_Request_exempt_request_time:
+    type: gauge
+    meaning: "Time on requests exempt from throttling (e.g. internal replication). High = even internal ops slow."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_server_Request_exempt_request_time{environment=~"$environment"}) by (instance)
+
+  # CloudWatch-only MSK metrics (not in VictoriaMetrics)
+  cloudwatch_only_msk_metrics:
+    _note: "Available via CloudWatch datasource P034F075C744B399F, not VictoriaMetrics. Require namespace=AWS/Kafka and Cluster Name dimension."
+    metrics:
+      BurstBalance: {meaning: "EBS volume burst credit balance (%)", alert: "< 50% declining = risk of I/O throttling"}
+      CPUCreditBalance: {meaning: "CPU credit balance (burstable instances t3/t4g)", alert: "< 100 declining = CPU throttling risk"}
+      EstimatedTimeLag: {meaning: "Consumer lag in seconds", alert: "Growing = consumers falling behind"}
+      KafkaDataLogsDiskUsed: {meaning: "% data log disk used", alert: "> 85% = retention reduction needed"}
+      CpuUser_CpuSystem: {meaning: "Per-broker CPU from AWS (not JMX)", alert: "Combined > 70% = scaling signal"}
+      MemoryUsed: {meaning: "Per-broker memory from AWS", alert: "Compare with instance total"}
+
+  # -- 4.4 Controller and Replica Health --
+  aws_msk_kafka_controller_KafkaController_Value:
+    type: gauge
+    labels: [name]
+    known_values:
+      name: [ActiveControllerCount, OfflinePartitionsCount, PreferredReplicaImbalanceCount, GlobalTopicCount, GlobalPartitionCount]
+    meaning: "Cluster-wide controller state. Exactly one broker should have ActiveControllerCount=1."
+    queries:
+      offline_partitions: >-
+        sum(aws_msk_kafka_controller_KafkaController_Value{environment=~"$environment", name="OfflinePartitionsCount"})
+      controller_count: >-
+        sum(aws_msk_kafka_controller_KafkaController_Value{environment=~"$environment", name="ActiveControllerCount"})
+    alert: "OfflinePartitionsCount > 0 is CRITICAL — data unavailable. ActiveControllerCount != 1 = controller election issues."
+
+  aws_msk_kafka_server_ReplicaManager_Value:
+    type: gauge
+    labels: [name]
+    known_values:
+      name: [UnderReplicatedPartitions, UnderMinIsrPartitionCount, PartitionCount, LeaderCount, OfflineReplicaCount]
+    meaning: "Per-broker replica state."
+    queries:
+      under_replicated: >-
+        sum(aws_msk_kafka_server_ReplicaManager_Value{environment=~"$environment", name="UnderReplicatedPartitions"}) by (instance)
+    alert: "UnderReplicatedPartitions > 0 sustained = broker falling behind replication. UnderMinIsrPartitionCount > 0 = data durability at risk."
+
+  aws_msk_kafka_server_KafkaServer_Value:
+    type: gauge
+    labels: [name]
+    meaning: "Broker state. BrokerState=3 = running normally."
+
+  # -- 4.5 Consumer Lag --
+  aws_msk_kafka_consumer_group_ConsumerLagMetrics_Value:
+    type: gauge
+    labels: [name, groupId, topic, partition]
+    known_values:
+      name: [SumOffsetLag, MaxOffsetLag, OffsetLag]
+    meaning: "Consumer group lag. SumOffsetLag = total across all partitions. OffsetLag = per-partition. MaxOffsetLag = worst partition."
+    queries:
+      total_lag_by_group: >-
+        sum(aws_msk_kafka_consumer_group_ConsumerLagMetrics_Value{environment=~"$environment", name="SumOffsetLag"}) by (groupId, topic)
+      max_partition_lag: >-
+        max(aws_msk_kafka_consumer_group_ConsumerLagMetrics_Value{environment=~"$environment", name="OffsetLag", topic="ingestion-events-1024"}) by (groupId)
+    alert: "Growing SumOffsetLag on ingestion topics = downstream consumers can't keep up."
+
+  aws_msk_kafka_consumer_consumer_coordinator_metrics_commit_latency_avg:
+    type: gauge
+    meaning: "Average offset commit latency. High values = coordinator issues."
+
+  aws_msk_kafka_consumer_consumer_coordinator_metrics_rebalance_rate_per_hour:
+    type: gauge
+    meaning: "Consumer group rebalance frequency. Frequent rebalances = instability."
+    alert: "> 5/hour for single consumer group warrants investigation."
+
+  # -- 4.6 MSK Node (Broker Host) Metrics --
+  # Scraped from MSK node exporter on each broker host.
+  aws_msk_node_cpu_seconds_total:
+    type: counter
+    labels: [mode]
+    queries:
+      cpu_pct: >-
+        100 - (avg by (instance) (rate(aws_msk_node_cpu_seconds_total{environment=~"$environment", mode="idle"}[5m])) * 100)
+    alert: "Broker CPU > 70% sustained = scaling signal. > 90% = critical."
+
+  aws_msk_node_filesystem_avail_bytes:
+    type: gauge
+    meaning: "Broker disk available bytes (EBS volumes)."
+    queries:
+      disk_usage_pct: >-
+        100 - (aws_msk_node_filesystem_avail_bytes{environment=~"$environment"} / aws_msk_node_filesystem_size_bytes{environment=~"$environment"} * 100)
+    alert: "> 80% disk usage requires immediate attention (retention reduction or broker scaling)."
+
+  aws_msk_node_filesystem_size_bytes:
+    type: gauge
+    meaning: "Broker disk total size."
+
+  aws_msk_node_disk_written_bytes_total:
+    type: counter
+    meaning: "Broker disk write throughput."
+    queries:
+      by_instance: >-
+        sum(rate(aws_msk_node_disk_written_bytes_total{environment=~"$environment"}[5m])) by (instance)
+
+  aws_msk_node_disk_read_bytes_total:
+    type: counter
+    meaning: "Broker disk read throughput."
+    queries:
+      by_instance: >-
+        sum(rate(aws_msk_node_disk_read_bytes_total{environment=~"$environment"}[5m])) by (instance)
+
+  aws_msk_kafka_log_LogManager_Value:
+    type: gauge
+    labels: [name]
+    known_values:
+      name: [LogDirectoryOffline, Size]
+    meaning: "Log directory health and total log size on broker."
+    queries:
+      offline: >-
+        aws_msk_kafka_log_LogManager_Value{environment=~"$environment", name="LogDirectoryOffline"}
+    alert: "LogDirectoryOffline > 0 = data volume unavailable."
+
+  aws_msk_kafka_log_LogFlushStats_99thPercentile:
+    type: gauge
+    labels: [name]
+    meaning: "Time to flush log segments to disk (p99)."
+    queries:
+      by_instance: >-
+        max(aws_msk_kafka_log_LogFlushStats_99thPercentile{environment=~"$environment", name="LogFlushRateAndTimeMs"}) by (instance)
+    alert: "> 1000ms = disk I/O bottleneck."
+
+# ===========================================================================
+# Section 5: Query Template Patterns
+# ===========================================================================
+query_patterns:
+  current_rate:
+    description: "For any counter metric, 5m rate window"
+    templates:
+      total: "sum(rate(METRIC{role=~\"$role\"}[5m]))"
+      by_label: "sum(rate(METRIC{role=~\"$role\"}[5m])) by (LABEL)"
+      by_pod: "sum(rate(METRIC{role=~\"$role\"}[5m])) by (pod)"
+
+  latency_percentiles:
+    description: "For histogram metrics"
+    templates:
+      p50: "histogram_quantile(0.50, sum(rate(METRIC_bucket{role=~\"$role\"}[5m])) by (le))"
+      p95: "histogram_quantile(0.95, sum(rate(METRIC_bucket{role=~\"$role\"}[5m])) by (le))"
+      p99: "histogram_quantile(0.99, sum(rate(METRIC_bucket{role=~\"$role\"}[5m])) by (le))"
+      p99_by_label: "histogram_quantile(0.99, sum(rate(METRIC_bucket{role=~\"$role\"}[5m])) by (le, LABEL))"
+      average: "sum(rate(METRIC_sum{role=~\"$role\"}[5m])) / sum(rate(METRIC_count{role=~\"$role\"}[5m]))"
+
+  saturation:
+    description: "Resource saturation ratios"
+    templates:
+      kafka_queue_depth: "capture_kafka_producer_queue_depth{role=~\"$role\"} / capture_kafka_producer_queue_depth_limit{role=~\"$role\"}"
+      kafka_queue_bytes: "capture_kafka_producer_queue_bytes{role=~\"$role\"} / capture_kafka_producer_queue_bytes_limit{role=~\"$role\"}"
+      memory: "container_memory_working_set_bytes{container=\"capture\"} / on(pod) group_left() kube_pod_container_resource_limits{container=\"capture\", resource=\"memory\"}"
+      cpu: "sum(rate(container_cpu_usage_seconds_total{container=\"capture\"}[5m])) by (pod) / on(pod) group_left() sum(kube_pod_container_resource_requests{container=\"capture\", resource=\"cpu\"}) by (pod)"
+      hpa: "kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler=~\"capture.*\"} / kube_horizontalpodautoscaler_spec_max_replicas{horizontalpodautoscaler=~\"capture.*\"}"
+      msk_disk: "1 - (aws_msk_node_filesystem_avail_bytes{environment=~\"$environment\"} / aws_msk_node_filesystem_size_bytes{environment=~\"$environment\"})"
+
+  error_ratios:
+    description: "Error rate calculations"
+    templates:
+      http_errors: "sum(rate(http_requests_total{role=~\"$role\", status=~\"[45]..\"}[5m])) / sum(rate(http_requests_total{role=~\"$role\"}[5m]))"
+      event_drop_rate: "sum(rate(capture_events_dropped_total{role=~\"$role\"}[5m])) / sum(rate(capture_events_received_total{role=~\"$role\"}[5m]))"
+      kafka_produce_errors: "sum(rate(capture_kafka_produce_errors_total{role=~\"$role\"}[5m])) / sum(rate(capture_events_ingested_total{role=~\"$role\"}[5m]))"
+      s3_upload_errors: "sum(rate(capture_s3_upload_total{role=~\"$role\", outcome=\"error\"}[5m])) / sum(rate(capture_s3_upload_total{role=~\"$role\"}[5m]))"
+      restrictions_redis_errors: "sum(rate(capture_event_restrictions_redis_fetch{role=~\"$role\", result=~\"error|parse_error\"}[5m])) / sum(rate(capture_event_restrictions_redis_fetch{role=~\"$role\"}[5m]))"
+      msk_failed_produces: "sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~\"$environment\", name=\"FailedProduceRequestsPerSec\"}) / sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~\"$environment\", name=\"TotalProduceRequestsPerSec\"})"
+
+# ===========================================================================
+# Alert Threshold Suggestions
+# ===========================================================================
+alerts:
+  - signal: http_requests_duration_seconds p99
+    warn: "> 1s"
+    critical: "> 10s"
+    notes: "Backpressure from Kafka or S3"
+  - signal: HTTP 5xx error rate
+    warn: "> 1%"
+    critical: "> 5%"
+    notes: "Server-side failures"
+  - signal: capture_kafka_produce_errors_total rate
+    warn: "> 0"
+    critical: "> 10/s"
+    notes: "Events being lost"
+  - signal: capture_kafka_any_brokers_down
+    warn: "1 on any pod"
+    critical: "1 on all pods"
+    notes: "Kafka connectivity"
+  - signal: Kafka producer queue saturation
+    warn: "> 0.7"
+    critical: "> 0.9"
+    notes: "Approaching message loss"
+  - signal: capture_kafka_produce_rtt_latency_us p99
+    warn: "> 100ms (100000)"
+    critical: "> 500ms (500000)"
+    notes: "Broker overload"
+  - signal: capture_events_dropped_total retryable_sink
+    warn: "> 0"
+    critical: "> 100/s"
+    notes: "Kafka delivery failures"
+  - signal: capture_primary_sink_health
+    warn: "0 on any pod"
+    critical: "0 on all pods"
+    notes: "Fallback sink active (code-only, no active series)"
+  - signal: Container memory (% of limit)
+    warn: "> 80%"
+    critical: "> 90%"
+    notes: "OOM kill risk"
+  - signal: Container CPU throttling
+    warn: "> 25%"
+    critical: "> 50%"
+    notes: "Latency impact"
+  - signal: Pod restarts (per hour)
+    warn: "> 1"
+    critical: "> 3"
+    notes: "Stability issues"
+  - signal: HPA at max replicas
+    warn: "desired > current"
+    critical: "current == max"
+    notes: "Can't scale further"
+  - signal: MSK OfflinePartitionsCount
+    warn: "> 0"
+    critical: "> 0"
+    notes: "ALWAYS critical"
+  - signal: MSK UnderReplicatedPartitions
+    warn: "> 0 for > 5m"
+    critical: "> 0 for > 15m"
+    notes: "Replication lag"
+  - signal: MSK broker CPU
+    warn: "> 70%"
+    critical: "> 90%"
+    notes: "Need to scale brokers"
+  - signal: MSK disk usage
+    warn: "> 70%"
+    critical: "> 85%"
+    notes: "Retention or scaling needed"
+  - signal: MSK produce TotalTimeMs p99
+    warn: "> 100ms"
+    critical: "> 500ms"
+    notes: "Broker overload"
+  - signal: Consumer lag (records)
+    warn: "growing"
+    critical: "growing > 30m"
+    notes: "Downstream can't keep up"
+  - signal: capture_event_restrictions_stale
+    warn: "1 on any pipeline"
+    critical: "1 on all pipelines"
+    notes: "Restrictions not applied"
+  - signal: MSK ThrottleTimeMs (Produce) p99
+    warn: "> 0"
+    critical: "> 100ms"
+    notes: "Kafka quota enforcement active"
+  - signal: MSK Network Processor idle
+    warn: "< 30%"
+    critical: "< 10%"
+    notes: "Broker network thread saturation"
+  - signal: MSK MemoryPoolAvgDepletedPercent
+    warn: "> 0"
+    critical: "> 0.1"
+    notes: "Broker can't accept requests"
+  - signal: MSK Request_queue_size
+    warn: "> 0 sustained"
+    critical: "> 10 sustained"
+    notes: "Request handler threads saturated"
+  - signal: MSK socket I/O ratio
+    warn: "> 0.5"
+    critical: "> 0.7"
+    notes: "Broker I/O thread saturation"
+  - signal: Envoy upstream p99 latency
+    warn: "> 500ms"
+    critical: "> 2s"
+    notes: "Backend slowness seen from ingress"
+  - signal: Envoy 5xx error ratio
+    warn: "> 0.1%"
+    critical: "> 1%"
+    notes: "Backend returning errors"
+  - signal: Envoy upstream rq timeout rate
+    warn: "> 0"
+    critical: "> 10/s"
+    notes: "Requests timing out at ingress"
+  - signal: Envoy circuit breaker open
+    warn: "any _open = 1"
+    critical: "sustained"
+    notes: "Envoy shedding traffic"
+  - signal: Envoy membership healthy < total
+    warn: "any cluster"
+    critical: "sustained > 5m"
+    notes: "Backend pods failing health checks"
+  - signal: Envoy connect failures rate
+    warn: "> 0 sustained"
+    critical: "> 10/s"
+    notes: "Pods unreachable"
+  - signal: Envoy pending request overflow rate
+    warn: "> 0"
+    critical: "> 10/s"
+    notes: "Connection pool exhaustion"
+
+# ===========================================================================
+# Appendices
+# ===========================================================================
+appendix:
+  kafka_topics:
+    events_plugin_ingestion: "Primary events for plugin/ingestion processing"
+    events_plugin_ingestion_overflow: "Overflow for high-volume / rate-limited tokens"
+    events_plugin_ingestion_historical: "Historical (backfill) events with old timestamps"
+    events_plugin_ingestion_dlq: "Dead-letter queue for failed events"
+    ingestion-events-1024: "High-partition main ingestion (new pipeline)"
+    ingestion-events-1024-duplicates: "Deduplication tracking for main pipeline"
+    ingestion-events-overflow-128: "Overflow topic (new pipeline)"
+    ingestion-events-historical-128: "Historical events (new pipeline)"
+    ingestion-events_testing-overflow-128: "Testing overflow"
+    ingestion-session_replay-main-256: "Session replay main pipeline"
+    ingestion-session_replay-overflow-32: "Session replay overflow"
+    ingestion-heatmaps-128: "Heatmap ingestion pipeline"
+    ingestion-logs: "Log ingestion pipeline"
+    ingestion-traces: "Trace ingestion pipeline"
+    ingestion-error_tracking-main-128: "Error tracking main pipeline"
+    ingestion-error_tracking-overflow-32: "Error tracking overflow"
+    ingestion-general-turbo-1024: "General turbo ingestion pipeline"
+
+  datasources:
+    VictoriaMetrics: {uid: victoriametrics, type: prometheus, desc: "All capture, k8s, and MSK metrics (default)"}
+    VictoriaMetrics-Realtime: {uid: victoriametrics-realtime, type: prometheus, desc: "Lower-retention, higher-resolution queries"}
+    CloudWatch: {uid: P034F075C744B399F, type: cloudwatch, desc: "AWS service metrics (fallback for MSK if not in VM)"}
+    CloudWatch_Root: {uid: PAAE47F430CFD1449, type: cloudwatch, desc: "Root account AWS metrics"}
+    Loki: {uid: P8E80F9AEF21F6940, type: loki, desc: "Log queries"}
+    Pyroscope: {uid: pyroscope, type: pyroscope, desc: "Continuous profiling"}
+
+  dashboards:
+    capture: "Main capture service dashboard"
+    ingestion-capture: "Capture-specific ingestion metrics"
+    ingestion-general: "Cross-service ingestion overview"
+    ingestion-reliability: "Error rates and reliability signals"
+    ingestion-pipeline-performance: "End-to-end pipeline latency"
+    ingestion-autoscaling: "HPA and scaling metrics"
+    qZz6iq9Wx: "AWS MSK — Kafka Cluster"
+    ddpxkllwxg268e: "ClickHouse — Kafka consumption"
+    dbfgkwxs3gw8owd: "KMinion Consumer Group Lag"
+    ingestion-session-recordings: "Session Replay — Ingestion"
+    contour: "Envoy L7 proxy metrics per cluster — set endpoint_namespace=posthog, envoy_cluster_name=posthog_capture_3000"
