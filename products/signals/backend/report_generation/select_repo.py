@@ -26,6 +26,10 @@ class RepoSelectionResult(BaseModel):
     reason: str = Field(description="Why this repository was selected, or why none of the candidates matched.")
 
 
+_GITHUB_REPOS_PER_PAGE = 100
+_MAX_GITHUB_REPOS = 500
+
+
 def _list_candidate_repos(team_id: int) -> list[str]:
     """Fetch all repositories accessible via the team's GitHub integrations."""
     from posthog.models.integration import GitHubIntegration, Integration
@@ -34,10 +38,19 @@ def _list_candidate_repos(team_id: int) -> list[str]:
     repos: set[str] = set()
     for integration in integrations:
         github = GitHubIntegration(integration)
-        for repo in github.list_repositories():
-            full_name = repo.get("full_name")
-            if full_name:
-                repos.add(full_name.lower())
+        page = 1
+        while True:
+            repo_entries = github.list_repositories(page=page)
+            for repo in repo_entries:
+                full_name = repo.get("full_name")
+                if full_name:
+                    repos.add(full_name.lower())
+                    if len(repos) >= _MAX_GITHUB_REPOS:
+                        logger.warning("repo_list_capped", team_id=team_id, cap=_MAX_GITHUB_REPOS)
+                        return sorted(repos)
+            if len(repo_entries) < _GITHUB_REPOS_PER_PAGE:
+                break
+            page += 1
     return sorted(repos)
 
 
