@@ -26,6 +26,11 @@ meta:
   msk_note: >-
     All MSK metrics use environment=~"$environment" to scope to the correct region.
     The cluster_name label contains the full dated name (e.g. posthog-prod).
+  conventions:
+    _real_metric: >-
+      When a metric entry uses '_real_metric', that key names the actual
+      VictoriaMetrics/Prometheus metric used in queries. The parent key is
+      a human-readable alias used only for organisation within this document.
 
 envoy_clusters:
   posthog_capture_3000: "Main capture — events, decide, batch"
