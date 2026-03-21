@@ -4,7 +4,6 @@ import { IconInfo, IconPencil } from '@posthog/icons'
 import { LemonBanner, LemonInput } from '@posthog/lemon-ui'
 
 import { DataWarehousePopoverField } from 'lib/components/TaxonomicFilter/types'
-import { FEATURE_FLAGS } from 'lib/constants'
 import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { IconOpenInNew } from 'lib/lemon-ui/icons'
 import { LemonLabel } from 'lib/lemon-ui/LemonLabel'
@@ -132,7 +131,7 @@ export function ExperimentMetricForm({
     const [eventCount, setEventCount] = useState<number | null>(null)
     const [isLoading, setIsLoading] = useState(false)
 
-    const isExperimentFunnelDWHSupport = useFeatureFlag(FEATURE_FLAGS.EXPERIMENT_FUNNEL_DWH_SUPPORT)
+    const isExperimentFunnelDWHSupport = useFeatureFlag('EXPERIMENT_FUNNEL_DWH_SUPPORT')
 
     const getEventTypeLabel = (): string => {
         if (isExperimentMeanMetric(metric)) {
