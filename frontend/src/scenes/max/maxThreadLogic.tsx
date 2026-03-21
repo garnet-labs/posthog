@@ -1133,7 +1133,11 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
 
         loadConversationHistorySuccess: ({ conversationHistory, payload }) => {
             const doNotUpdate = typeof payload === 'object' && payload?.doNotUpdateCurrentThread
-            if (doNotUpdate || values.autoRun || values.streamingActive || values.multiQuestionFormPending) {
+            if (doNotUpdate || values.autoRun || values.streamingActive) {
+                return
+            }
+            // Don't auto-reconnect if there's a pending form
+            if (values.multiQuestionFormPending) {
                 return
             }
             const conversation = conversationHistory.find((c) => c.id === values.conversationId)
@@ -1151,7 +1155,11 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
         },
 
         loadActiveConversationSuccess: ({ activeConversation }) => {
-            if (values.autoRun || values.streamingActive || values.multiQuestionFormPending) {
+            if (values.autoRun || values.streamingActive) {
+                return
+            }
+            // Don't auto-reconnect if there's a pending form
+            if (values.multiQuestionFormPending) {
                 return
             }
             if (!activeConversation || activeConversation.id !== values.conversationId) {

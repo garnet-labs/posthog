@@ -99,6 +99,7 @@ export const maxGlobalLogic = kea<maxGlobalLogicType>([
     }),
 
     loaders(() => ({
+        // Lightweight list for the sidebar/navbar — no messages, no checkpoint fetching
         conversationHistory: [
             [] as Conversation[],
             {
@@ -114,6 +115,7 @@ export const maxGlobalLogic = kea<maxGlobalLogicType>([
                 },
             },
         ],
+        // Full conversation detail hydrated on demand when a thread is opened
         activeConversation: [
             null as ConversationDetail | null,
             {
