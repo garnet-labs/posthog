@@ -2141,3 +2141,78 @@ class TestExperimentService(APIBaseTest):
         assert result["launched_previous_30d"] == 3
         expected_change = round(((1 - 3) / 3) * 100, 1)
         assert result["percent_change"] == expected_change
+
+    # ------------------------------------------------------------------
+    # DTO-based creation (products architecture)
+    # ------------------------------------------------------------------
+
+    def test_create_experiment_from_dto_with_new_format(self):
+        """Test creating experiment using CreateExperimentInput DTO with feature_flag_filters."""
+        from products.experiments.backend.facade.contracts import (
+            CreateExperimentInput,
+            CreateFeatureFlagInput,
+            FeatureFlagVariant,
+        )
+
+        service = self._service()
+        input_dto = CreateExperimentInput(
+            name="DTO Experiment",
+            feature_flag_key="dto-flag",
+            description="Testing DTO approach",
+            feature_flag_filters=CreateFeatureFlagInput(
+                key="dto-flag",
+                name="DTO Flag",
+                variants=[
+                    FeatureFlagVariant(key="control", name="Control", rollout_percentage=50),
+                    FeatureFlagVariant(key="test", name="Test", rollout_percentage=50),
+                ],
+            ),
+        )
+
+        experiment = service.create_experiment_from_dto(input_dto)
+
+        assert experiment.name == "DTO Experiment"
+        assert experiment.description == "Testing DTO approach"
+        assert experiment.feature_flag.key == "dto-flag"
+        assert len(experiment.feature_flag.filters["multivariate"]["variants"]) == 2
+
+    def test_create_experiment_from_dto_with_old_format(self):
+        """Test creating experiment using CreateExperimentInput DTO with legacy parameters."""
+        from products.experiments.backend.facade.contracts import CreateExperimentInput
+
+        service = self._service()
+        input_dto = CreateExperimentInput(
+            name="Legacy DTO Experiment",
+            feature_flag_key="legacy-dto-flag",
+            description="Testing legacy format via DTO",
+            parameters={
+                "feature_flag_variants": [
+                    {"key": "control", "name": "Control", "rollout_percentage": 50},
+                    {"key": "test", "name": "Test", "rollout_percentage": 50},
+                ]
+            },
+        )
+
+        experiment = service.create_experiment_from_dto(input_dto)
+
+        assert experiment.name == "Legacy DTO Experiment"
+        assert experiment.description == "Testing legacy format via DTO"
+        assert experiment.feature_flag.key == "legacy-dto-flag"
+        assert len(experiment.feature_flag.filters["multivariate"]["variants"]) == 2
+
+    def test_create_experiment_from_dto_minimal(self):
+        """Test creating experiment with minimal DTO (no variants specified)."""
+        from products.experiments.backend.facade.contracts import CreateExperimentInput
+
+        service = self._service()
+        input_dto = CreateExperimentInput(
+            name="Minimal DTO",
+            feature_flag_key="minimal-dto-flag",
+        )
+
+        experiment = service.create_experiment_from_dto(input_dto)
+
+        assert experiment.name == "Minimal DTO"
+        assert experiment.feature_flag.key == "minimal-dto-flag"
+        # Should use default variants
+        assert len(experiment.feature_flag.filters["multivariate"]["variants"]) == 2
