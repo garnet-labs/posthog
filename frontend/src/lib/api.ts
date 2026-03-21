@@ -5563,8 +5563,9 @@ const api = {
             return new ApiRequest().conversation(conversationId).withAction('cancel').update()
         },
 
-        list(): Promise<PaginatedResponse<ConversationDetail>> {
-            return new ApiRequest().conversations().withQueryString({ view: 'basic' }).get()
+        list(basic: boolean = true): Promise<PaginatedResponse<ConversationDetail>> {
+            const request = new ApiRequest().conversations()
+            return (basic ? request.withQueryString({ view: 'basic' }) : request).get()
         },
 
         get(conversationId: string): Promise<ConversationDetail> {
