@@ -37,13 +37,13 @@ class CreateExperimentInput:
     Input for creating an experiment.
 
     Supports both old format (parameters.feature_flag_variants)
-    and new format (feature_flag_data).
+    and new format (feature_flag_filters).
     """
 
     name: str
     feature_flag_key: str
     description: str = ""
-    feature_flag_data: CreateFeatureFlagInput | None = None
+    feature_flag_filters: CreateFeatureFlagInput | None = None
     parameters: dict[str, Any] | None = None
 
 

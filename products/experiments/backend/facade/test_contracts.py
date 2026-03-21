@@ -8,6 +8,7 @@ hashable, and have the correct structure.
 from datetime import UTC, datetime
 
 import pytest
+from freezegun import freeze_time
 
 from products.experiments.backend.facade.contracts import (
     CreateExperimentInput,
@@ -100,11 +101,11 @@ class TestCreateExperimentInput:
         assert input_dto.name == "My Experiment"
         assert input_dto.feature_flag_key == "my-flag"
         assert input_dto.description == ""
-        assert input_dto.feature_flag_data is None
+        assert input_dto.feature_flag_filters is None
         assert input_dto.parameters is None
 
     def test_create_experiment_input_with_new_flag_format(self):
-        """Test creating experiment with new feature flag format."""
+        """Test creating experiment with new feature flag filters format."""
         flag_input = CreateFeatureFlagInput(
             key="my-flag",
             name="My Flag",
@@ -117,12 +118,12 @@ class TestCreateExperimentInput:
         input_dto = CreateExperimentInput(
             name="My Experiment",
             feature_flag_key="my-flag",
-            feature_flag_data=flag_input,
+            feature_flag_filters=flag_input,
         )
 
-        assert input_dto.feature_flag_data is not None
-        assert input_dto.feature_flag_data.key == "my-flag"
-        assert len(input_dto.feature_flag_data.variants) == 2
+        assert input_dto.feature_flag_filters is not None
+        assert input_dto.feature_flag_filters.key == "my-flag"
+        assert len(input_dto.feature_flag_filters.variants) == 2
 
     def test_create_experiment_input_with_old_parameters_format(self):
         """Test creating experiment with old parameters format."""
@@ -151,6 +152,7 @@ class TestCreateExperimentInput:
             input_dto.name = "modified"  # type: ignore
 
 
+@freeze_time("2026-03-21T12:00:00Z")
 class TestFeatureFlag:
     def test_feature_flag_output(self):
         """Test feature flag output DTO."""
@@ -190,6 +192,7 @@ class TestFeatureFlag:
         assert hash(flag) is not None
 
 
+@freeze_time("2026-03-21T12:00:00Z")
 class TestExperiment:
     def test_experiment_output_minimal(self):
         """Test experiment output DTO with minimal fields."""
