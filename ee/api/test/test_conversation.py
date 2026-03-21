@@ -571,6 +571,16 @@ class TestConversation(APIBaseTest):
             self.assertIn("title", results[0])
             self.assertIn("status", results[0])
 
+    def test_retrieve_ignores_basic_view_param(self):
+        conversation = Conversation.objects.create(
+            user=self.user, team=self.team, title="Conversation 1", type=Conversation.Type.ASSISTANT
+        )
+
+        with patch("langgraph.graph.state.CompiledStateGraph.aget_state", new_callable=AsyncMock):
+            response = self.client.get(f"/api/environments/{self.team.id}/conversations/{conversation.id}/?view=basic")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn("messages", response.json())
+
     def test_retrieve_own_conversation_succeeds(self):
         """Test that user can retrieve their own conversation"""
         conversation = Conversation.objects.create(

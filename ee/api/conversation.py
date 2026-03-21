@@ -299,7 +299,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             return MessageSerializer
         if self.action == "append_message":
             return MessageMinimalSerializer
-        if self.request.query_params.get("view") == "basic":
+        if self.action == "list" and self.request.query_params.get("view") == "basic":
             return ConversationMinimalSerializer
         return super().get_serializer_class()
 
