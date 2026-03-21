@@ -12,6 +12,7 @@ import structlog
 from asgiref.sync import async_to_sync as asgi_async_to_sync
 from drf_spectacular.utils import extend_schema
 from loginas.utils import is_impersonated_session
+from opentelemetry import trace
 from prometheus_client import Histogram
 from rest_framework import exceptions, serializers, status
 from rest_framework.decorators import action
@@ -48,7 +49,7 @@ from posthog.temporal.ai.research_agent import (
 )
 
 from ee.billing.quota_limiting import QuotaLimitingCaches, QuotaResource, is_team_limited
-from ee.hogai.api.serializers import ConversationSerializer
+from ee.hogai.api.serializers import ConversationMinimalSerializer, ConversationSerializer
 from ee.hogai.chat_agent import AssistantGraph
 from ee.hogai.core.executor import AgentExecutor
 from ee.hogai.queue import ConversationQueueMessage, ConversationQueueStore, QueueFullError, build_queue_message
@@ -59,6 +60,7 @@ from ee.hogai.utils.sse import AssistantSSESerializer
 from ee.hogai.utils.types import PartialAssistantState
 from ee.models.assistant import Conversation
 
+tracer = trace.get_tracer(__name__)
 logger = structlog.get_logger(__name__)
 
 RESEARCH_RATE_LIMIT_MESSAGE = (
@@ -204,6 +206,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
     def _queue_response(self, queue_store: ConversationQueueStore, queue: list[ConversationQueueMessage]) -> Response:
         return Response({"messages": queue, "max_queue_messages": queue_store.max_messages})
 
+    @tracer.start_as_current_span("conversations.get_queryset")
     def safely_get_queryset(self, queryset):
         # Only single retrieval of a specific conversation is allowed for other users' conversations (if ID known)
         if self.action != "retrieve":
@@ -219,6 +222,11 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
                 queryset = queryset.filter(is_internal=False)
             queryset = queryset.order_by("-updated_at")
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        with tracer.start_as_current_span("conversations.list") as span:
+            span.set_attribute("conversations.serializer", self.get_serializer_class().__name__)
+            return super().list(request, *args, **kwargs)
 
     def get_throttles(self):
         # For create action, throttling is handled in check_throttles() for conditional logic
@@ -293,6 +301,10 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             return MessageSerializer
         if self.action == "append_message":
             return MessageMinimalSerializer
+        if self.action == "list":
+            return ConversationMinimalSerializer
+        if self.action == "retrieve" and self.request.query_params.get("view") == "basic":
+            return ConversationMinimalSerializer
         return super().get_serializer_class()
 
     def get_serializer_context(self):

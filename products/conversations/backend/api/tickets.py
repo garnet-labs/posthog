@@ -14,7 +14,6 @@ import structlog
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from loginas.utils import is_impersonated_session
 from openai import APITimeoutError, RateLimitError
-from opentelemetry import trace
 from rest_framework import (
     pagination,
     serializers,
@@ -54,7 +53,6 @@ from products.conversations.backend.services.ai_suggest import NoMessagesError, 
 
 from ee.models.rbac.role import Role
 
-tracer = trace.get_tracer(__name__)
 logger = structlog.get_logger(__name__)
 
 
@@ -149,41 +147,6 @@ class TicketSerializer(TaggedItemSerializerMixin, serializers.ModelSerializer):
         ]
 
 
-class TicketBasicSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for navbar/sidebar ticket lists.
-
-    Skips expensive fields (person, session_context, tags) and avoids
-    the person DB lookup entirely.
-    """
-
-    assignee = TicketAssignmentSerializer(source="assignment", read_only=True)
-
-    class Meta:
-        model = Ticket
-        fields = [
-            "id",
-            "ticket_number",
-            "channel_source",
-            "channel_detail",
-            "status",
-            "priority",
-            "assignee",
-            "anonymous_traits",
-            "ai_resolved",
-            "created_at",
-            "updated_at",
-            "message_count",
-            "last_message_at",
-            "last_message_text",
-            "unread_team_count",
-            "unread_customer_count",
-            "sla_due_at",
-            "email_subject",
-            "email_from",
-        ]
-        read_only_fields = fields
-
-
 class TicketViewSet(TaggedItemViewSetMixin, TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "ticket"
     queryset = Ticket.objects.all()
@@ -194,7 +157,6 @@ class TicketViewSet(TaggedItemViewSetMixin, TeamAndOrgViewSetMixin, viewsets.Mod
         "product-support-ai-suggestion": ["suggest_reply"],
     }
 
-    @tracer.start_as_current_span("conversations.tickets.get_queryset")
     def safely_get_queryset(self, queryset: QuerySet) -> QuerySet:
         """Filter tickets by team."""
         queryset = queryset.filter(team_id=self.team_id)
@@ -330,89 +292,61 @@ class TicketViewSet(TaggedItemViewSetMixin, TeamAndOrgViewSetMixin, viewsets.Mod
 
     def _attach_persons_to_tickets(self, tickets: Sequence[Ticket]) -> None:
         """Batch-fetch persons by distinct_id and attach to tickets."""
-        with tracer.start_as_current_span("conversations.attach_persons") as span:
-            distinct_ids = sorted([t.distinct_id for t in tickets if t.distinct_id])
-            span.set_attribute("conversations.ticket_count", len(tickets))
-            span.set_attribute("conversations.distinct_id_count", len(distinct_ids))
-            if not distinct_ids:
-                return
+        distinct_ids = sorted([t.distinct_id for t in tickets if t.distinct_id])
+        if not distinct_ids:
+            return
 
-            # Query PersonDistinctId to get Person objects in a single batch
-            with tracer.start_as_current_span("conversations.attach_persons.fetch_person_distinct_ids"):
-                person_distinct_ids = list(
-                    PersonDistinctId.objects.db_manager(READ_DB_FOR_PERSONS)
-                    .filter(distinct_id__in=distinct_ids, team_id=self.team_id)
-                    .prefetch_related(
-                        Prefetch(
-                            "person",
-                            queryset=Person.objects.db_manager(READ_DB_FOR_PERSONS).filter(team_id=self.team_id),
-                        )
-                    )
+        # Query PersonDistinctId to get Person objects in a single batch
+        person_distinct_ids = (
+            PersonDistinctId.objects.db_manager(READ_DB_FOR_PERSONS)
+            .filter(distinct_id__in=distinct_ids, team_id=self.team_id)
+            .prefetch_related(
+                Prefetch(
+                    "person",
+                    queryset=Person.objects.db_manager(READ_DB_FOR_PERSONS).filter(team_id=self.team_id),
                 )
+            )
+        )
 
-            # Build distinct_id -> person mapping
-            distinct_id_to_person: dict[str, Person] = {}
-            person_ids: set[int] = set()
-            for pdi in person_distinct_ids:
-                if pdi.person:
-                    distinct_id_to_person[pdi.distinct_id] = pdi.person
-                    person_ids.add(pdi.person.id)
+        # Build distinct_id -> person mapping
+        distinct_id_to_person: dict[str, Person] = {}
+        person_ids: set[int] = set()
+        for pdi in person_distinct_ids:
+            if pdi.person:
+                distinct_id_to_person[pdi.distinct_id] = pdi.person
+                person_ids.add(pdi.person.id)
 
-            span.set_attribute("conversations.person_count", len(person_ids))
+        # Batch-load all distinct_ids for all persons
+        if person_ids:
+            all_pdis = PersonDistinctId.objects.db_manager(READ_DB_FOR_PERSONS).filter(
+                person_id__in=person_ids, team_id=self.team_id
+            )
+            person_to_distinct_ids: dict[int, list[str]] = {}
+            for pdi in all_pdis:
+                person_to_distinct_ids.setdefault(pdi.person_id, []).append(pdi.distinct_id)
 
-            # Batch-load all distinct_ids for all persons
-            if person_ids:
-                with tracer.start_as_current_span("conversations.attach_persons.fetch_all_distinct_ids") as ids_span:
-                    ids_span.set_attribute("conversations.person_id_count", len(person_ids))
-                    all_pdis = PersonDistinctId.objects.db_manager(READ_DB_FOR_PERSONS).filter(
-                        person_id__in=person_ids, team_id=self.team_id
-                    )
-                    person_to_distinct_ids: dict[int, list[str]] = {}
-                    for pdi in all_pdis:
-                        person_to_distinct_ids.setdefault(pdi.person_id, []).append(pdi.distinct_id)
+            for person in distinct_id_to_person.values():
+                person._distinct_ids = person_to_distinct_ids.get(person.id, [])
 
-                    for person in distinct_id_to_person.values():
-                        person._distinct_ids = person_to_distinct_ids.get(person.id, [])
-
-            # Attach person to each ticket (dynamic attribute for serialization)
-            for ticket in tickets:
-                if ticket.distinct_id:
-                    ticket.person = distinct_id_to_person.get(ticket.distinct_id)
-
-    def _is_basic_view(self) -> bool:
-        return self.request.query_params.get("view") == "basic"
+        # Attach person to each ticket (dynamic attribute for serialization)
+        for ticket in tickets:
+            if ticket.distinct_id:
+                ticket.person = distinct_id_to_person.get(ticket.distinct_id)
 
     def list(self, request, *args, **kwargs):
-        """List tickets with person data attached.
+        """List tickets with person data attached."""
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
 
-        Pass ?view=basic for a lightweight response suitable for navbars/sidebars.
-        The basic view skips person lookup and omits heavy fields like
-        session_context, tags, and person data.
-        """
-        with tracer.start_as_current_span("conversations.tickets.list") as span:
-            basic = self._is_basic_view()
-            span.set_attribute("conversations.view", "basic" if basic else "full")
+        if page is not None:
+            self._attach_persons_to_tickets(page)
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
 
-            with tracer.start_as_current_span("conversations.tickets.list.query"):
-                queryset = self.filter_queryset(self.get_queryset())
-                page = self.paginate_queryset(queryset)
-
-            tickets = page if page is not None else list(queryset)
-            span.set_attribute("conversations.result_count", len(tickets))
-
-            if not basic:
-                self._attach_persons_to_tickets(tickets)
-
-            with tracer.start_as_current_span("conversations.tickets.list.serialize"):
-                if basic:
-                    serializer = TicketBasicSerializer(tickets, many=True, context=self.get_serializer_context())
-                else:
-                    serializer = self.get_serializer(tickets, many=True)
-
-                if page is not None:
-                    return self.get_paginated_response(serializer.data)
-
-                return Response(serializer.data)
+        tickets = list(queryset)
+        self._attach_persons_to_tickets(tickets)
+        serializer = self.get_serializer(tickets, many=True)
+        return Response(serializer.data)
 
     def retrieve(self, request, *args, **kwargs):
         """Get single ticket and mark as read by team."""
