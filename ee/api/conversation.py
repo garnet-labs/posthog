@@ -206,7 +206,6 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
     def _queue_response(self, queue_store: ConversationQueueStore, queue: list[ConversationQueueMessage]) -> Response:
         return Response({"messages": queue, "max_queue_messages": queue_store.max_messages})
 
-    @tracer.start_as_current_span("conversations.get_queryset")
     def safely_get_queryset(self, queryset):
         # Only single retrieval of a specific conversation is allowed for other users' conversations (if ID known)
         if self.action != "retrieve":
