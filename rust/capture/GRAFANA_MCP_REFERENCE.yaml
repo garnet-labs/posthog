@@ -1573,6 +1573,96 @@ query_patterns:
       msk_failed_produces: "sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~\"$environment\", name=\"FailedProduceRequestsPerSec\"}) / sum(aws_msk_kafka_server_BrokerTopicMetrics_OneMinuteRate{environment=~\"$environment\", name=\"TotalProduceRequestsPerSec\"})"
 
 # ===========================================================================
+# Section 6: Pyroscope Continuous Profiling
+# ===========================================================================
+# Datasource: {uid: pyroscope, type: pyroscope}
+# Collection method: eBPF (kernel-level, no application instrumentation)
+#
+# Profile types available for capture services:
+#   process_cpu:cpu:nanoseconds:cpu:nanoseconds        — CPU time per function
+#   wall:wall:nanoseconds:wall:nanoseconds              — wall-clock time per function
+#   wall:samples:count:wall:nanoseconds                 — wall-clock sample counts
+#   memory:inuse_space:bytes:inuse_space:bytes           — heap bytes currently in use
+#   memory:inuse_objects:count:inuse_space:bytes         — heap objects currently in use
+#
+# Queries use Grafana's Pyroscope query language, not PromQL.
+# The fetch_pyroscope_profile MCP tool returns a DOT-format flamegraph.
+
+pyroscope:
+  services:
+    capture/capture: "Main capture — events, decide, batch"
+    capture/capture-ai: "Capture AI — AI/LLM event ingestion"
+    capture-replay/capture-replay: "Session recording capture"
+    capture-logs/capture-logs: "OpenTelemetry log capture"
+
+  labels:
+    service_name: "Primary selector — format is namespace/container (e.g. capture/capture)"
+    pod: "Individual pod name"
+    node: "k8s node"
+    nodepool: "k8s node pool"
+    namespace: "k8s namespace"
+    container: "Container name within the pod"
+
+  profile_types:
+    process_cpu:
+      id: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+      meaning: "On-CPU time. Use for hot-path analysis — which functions burn the most CPU."
+      use_when: "High CPU usage, investigating throughput bottlenecks, optimizing hot loops."
+
+    wall_time:
+      id: "wall:wall:nanoseconds:wall:nanoseconds"
+      meaning: "Wall-clock time including off-CPU waits (I/O, locks, sleeps). Broader than CPU."
+      use_when: "Latency investigation — a function may not be CPU-hot but still slow due to blocking."
+
+    wall_samples:
+      id: "wall:samples:count:wall:nanoseconds"
+      meaning: "Wall-clock sample counts (number of times a stack was observed)."
+      use_when: "Frequency analysis — how often a code path is hit, regardless of duration."
+
+    memory_space:
+      id: "memory:inuse_space:bytes:inuse_space:bytes"
+      meaning: "Heap bytes currently allocated. Shows where memory is held."
+      use_when: "Memory growth, OOM investigation, large allocation identification."
+
+    memory_objects:
+      id: "memory:inuse_objects:count:inuse_space:bytes"
+      meaning: "Count of live heap objects. High counts suggest allocation churn."
+      use_when: "GC pressure, allocation-heavy code paths, object pool sizing."
+
+  example_queries:
+    cpu_all_capture_pods:
+      tool: fetch_pyroscope_profile
+      profile_type: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+      matchers: '{service_name="capture/capture"}'
+      desc: "Aggregate CPU flamegraph across all main capture pods."
+
+    cpu_single_pod:
+      tool: fetch_pyroscope_profile
+      profile_type: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+      matchers: '{service_name="capture/capture", pod="capture-75448554b-2rbpg"}'
+      desc: "CPU profile for a specific pod — useful when one pod is hotter than others."
+
+    wall_time_replay:
+      tool: fetch_pyroscope_profile
+      profile_type: "wall:wall:nanoseconds:wall:nanoseconds"
+      matchers: '{service_name="capture-replay/capture-replay"}'
+      desc: "Wall-clock flamegraph for replay capture — find blocking I/O or lock contention."
+
+    memory_capture_ai:
+      tool: fetch_pyroscope_profile
+      profile_type: "memory:inuse_space:bytes:inuse_space:bytes"
+      matchers: '{service_name="capture/capture-ai"}'
+      desc: "Heap usage for capture-ai — identify large buffers or retained allocations."
+
+  notes: >-
+    Profiles are collected via eBPF at the kernel level — no Rust application
+    instrumentation required. Time ranges default to the last hour; pass
+    start_rfc_3339/end_rfc_3339 for custom windows. The returned DOT graph
+    represents a flamegraph; top-level nodes are entry points and leaf nodes
+    are the hottest callees. Use max_node_depth to limit result size for
+    broad queries (default 100, -1 for unbounded).
+
+# ===========================================================================
 # Alert Threshold Suggestions
 # ===========================================================================
 alerts:
