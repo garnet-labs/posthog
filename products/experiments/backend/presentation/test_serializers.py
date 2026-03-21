@@ -191,3 +191,138 @@ class TestExperimentCreateSerializer(BaseTest):
         assert dto.feature_flag_filters.variants[0].name == "Control"
         assert dto.feature_flag_filters.variants[1].key == "test_a"
         assert dto.feature_flag_filters.rollout_percentage == 80
+
+    def test_validate_control_variant_required(self):
+        """Test that control variant is required in new format."""
+        data = {
+            "name": "No Control Test",
+            "feature_flag_key": "no-control-flag",
+            "feature_flag_filters": {
+                "key": "no-control-flag",
+                "variants": [
+                    {"key": "test_a", "rollout_percentage": 50},
+                    {"key": "test_b", "rollout_percentage": 50},
+                ],
+            },
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "feature_flag_filters" in serializer.errors
+        assert "control" in str(serializer.errors).lower()
+
+    def test_validate_control_variant_required_old_format(self):
+        """Test that control variant is required in old format."""
+        data = {
+            "name": "No Control Old Format",
+            "feature_flag_key": "no-control-old-flag",
+            "parameters": {
+                "feature_flag_variants": [
+                    {"key": "test_a", "rollout_percentage": 50},
+                    {"key": "test_b", "rollout_percentage": 50},
+                ]
+            },
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "parameters" in serializer.errors
+        assert "control" in str(serializer.errors).lower()
+
+    def test_validate_duplicate_variant_keys(self):
+        """Test that duplicate variant keys are rejected."""
+        data = {
+            "name": "Duplicate Keys Test",
+            "feature_flag_key": "duplicate-keys-flag",
+            "feature_flag_filters": {
+                "key": "duplicate-keys-flag",
+                "variants": [
+                    {"key": "control", "rollout_percentage": 33},
+                    {"key": "test", "rollout_percentage": 33},
+                    {"key": "test", "rollout_percentage": 34},  # Duplicate
+                ],
+            },
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "feature_flag_filters" in serializer.errors
+        assert "unique" in str(serializer.errors).lower()
+
+    def test_validate_duplicate_variant_keys_old_format(self):
+        """Test that duplicate variant keys are rejected in old format."""
+        data = {
+            "name": "Duplicate Keys Old",
+            "feature_flag_key": "duplicate-keys-old-flag",
+            "parameters": {
+                "feature_flag_variants": [
+                    {"key": "control", "rollout_percentage": 33},
+                    {"key": "test", "rollout_percentage": 33},
+                    {"key": "test", "rollout_percentage": 34},  # Duplicate
+                ]
+            },
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "parameters" in serializer.errors
+        assert "unique" in str(serializer.errors).lower()
+
+    def test_validate_too_many_variants(self):
+        """Test that more than 20 variants are rejected."""
+        variants = [{"key": "control", "rollout_percentage": 5}]
+        variants.extend([{"key": f"test_{i}", "rollout_percentage": 5} for i in range(20)])
+
+        data = {
+            "name": "Too Many Variants",
+            "feature_flag_key": "too-many-variants-flag",
+            "feature_flag_filters": {
+                "key": "too-many-variants-flag",
+                "variants": variants,
+            },
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "feature_flag_filters" in serializer.errors
+        assert "21" in str(serializer.errors)
+
+    def test_validate_too_many_variants_old_format(self):
+        """Test that more than 20 variants are rejected in old format."""
+        variants = [{"key": "control", "rollout_percentage": 5}]
+        variants.extend([{"key": f"test_{i}", "rollout_percentage": 5} for i in range(20)])
+
+        data = {
+            "name": "Too Many Variants Old",
+            "feature_flag_key": "too-many-variants-old-flag",
+            "parameters": {"feature_flag_variants": variants},
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "parameters" in serializer.errors
+        assert "21" in str(serializer.errors)
+
+    def test_validate_feature_flag_key_already_exists(self):
+        """Test that existing feature flag keys are rejected."""
+        from posthog.models.feature_flag.feature_flag import FeatureFlag
+
+        # Create an existing feature flag
+        FeatureFlag.objects.create(team=self.team, key="existing-flag", created_by=self.user)
+
+        data = {
+            "name": "Duplicate Flag Key",
+            "feature_flag_key": "existing-flag",
+            "feature_flag_filters": {
+                "key": "existing-flag",
+                "variants": [
+                    {"key": "control", "rollout_percentage": 50},
+                    {"key": "test", "rollout_percentage": 50},
+                ],
+            },
+        }
+
+        serializer = ExperimentCreateSerializer(data=data, context={"get_team": lambda: self.team})
+        assert not serializer.is_valid()
+        assert "feature_flag_key" in serializer.errors
+        assert "already exists" in str(serializer.errors).lower()
