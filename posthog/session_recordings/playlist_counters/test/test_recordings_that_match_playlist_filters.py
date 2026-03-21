@@ -4,7 +4,10 @@ from datetime import datetime, timedelta
 
 from freezegun import freeze_time
 from posthog.test.base import APIBaseTest, QueryMatchingTest, snapshot_postgres_queries
-from unittest import mock
+from unittest import (
+    TestCase as UnitTestCase,
+    mock,
+)
 from unittest.mock import MagicMock, call, patch
 
 from django.utils import timezone
@@ -28,6 +31,8 @@ from posthog.session_recordings.playlist_counters.recordings_that_match_playlist
     DEFAULT_RECORDING_FILTERS,
     count_recordings_that_match_playlist_filters,
     enqueue_recordings_that_match_playlist_filters,
+    is_session_unexpired,
+    parse_expiry,
 )
 from posthog.session_recordings.session_recording_playlist_api import PLAYLIST_COUNT_REDIS_PREFIX
 
@@ -489,6 +494,13 @@ class TestRecordingsThatMatchPlaylistFilters(APIBaseTest, QueryMatchingTest):
                 (timezone.now() + timedelta(days=5)).isoformat(),
                 ["session_new", "session_no_expiry"],
             ),
+            (
+                "treats_malformed_expiry_as_expired",
+                {"session_bad": "not-a-date"},
+                "session_new",
+                (timezone.now() + timedelta(days=5)).isoformat(),
+                ["session_new"],
+            ),
         ]
     )
     @patch("posthoganalytics.capture_exception")
@@ -594,3 +606,34 @@ class TestRecordingsThatMatchPlaylistFilters(APIBaseTest, QueryMatchingTest):
         enqueue_recordings_that_match_playlist_filters()
         # Should not be called for playlist with pinned items
         assert playlist.id not in [call_args[0][0] for call_args in mock_count_task.delay.call_args_list]
+
+
+class TestParseExpiry(UnitTestCase):
+    @parameterized.expand(
+        [
+            ("none_returns_none", None, None),
+            ("malformed_returns_none", "not-a-date", None),
+            ("empty_string_returns_none", "", None),
+            ("valid_aware_datetime", "2026-01-15T10:00:00+00:00", datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc)),
+            (
+                "valid_naive_datetime_becomes_aware",
+                "2026-01-15T10:00:00",
+                datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    def test_parse_expiry(self, _name: str, expiry: str | None, expected: datetime | None):
+        assert parse_expiry(expiry) == expected
+
+
+class TestIsSessionUnexpired(UnitTestCase):
+    @parameterized.expand(
+        [
+            ("none_expiry_is_unexpired", None, True),
+            ("future_expiry_is_unexpired", (timezone.now() + timedelta(days=1)).isoformat(), True),
+            ("past_expiry_is_expired", (timezone.now() - timedelta(days=1)).isoformat(), False),
+            ("malformed_expiry_is_expired", "garbage", False),
+        ]
+    )
+    def test_is_session_unexpired(self, _name: str, expiry: str | None, expected: bool):
+        assert is_session_unexpired(expiry, timezone.now()) == expected

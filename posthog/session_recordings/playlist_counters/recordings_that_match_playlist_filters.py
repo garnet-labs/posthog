@@ -345,6 +345,27 @@ def try_to_store_error_count(playlist_short_id: str | None) -> None:
         pass
 
 
+def parse_expiry(expiry: str | None) -> datetime | None:
+    if expiry is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(expiry)
+        if parsed.tzinfo is None:
+            parsed = timezone.make_aware(parsed)
+        return parsed
+    except (ValueError, TypeError):
+        return None
+
+
+def is_session_unexpired(expiry: str | None, now: datetime) -> bool:
+    if expiry is None:
+        return True
+    parsed = parse_expiry(expiry)
+    if parsed is None:
+        return False
+    return parsed >= now
+
+
 def safe_seconds_difference(dt1: datetime, dt2: datetime) -> int:
     """
     Returns the difference in seconds between two datetime objects,
@@ -441,7 +462,7 @@ def count_recordings_that_match_playlist_filters(playlist_id: int) -> None:
                 for sid, expiry in existing_sessions.items():
                     if sid in new_sessions:
                         continue
-                    if expiry is None or datetime.fromisoformat(expiry) >= counted_at_date:
+                    if is_session_unexpired(expiry, counted_at_date):
                         new_sessions[sid] = expiry
 
             value_to_set = json.dumps(
