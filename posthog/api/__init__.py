@@ -54,6 +54,7 @@ from products.error_tracking.backend.api import (
     ErrorTrackingSymbolSetViewSet,
     GitProviderFileLinksViewSet,
 )
+from products.experiments.backend.presentation.views import ExperimentViewSet
 from products.llm_analytics.backend.api import (
     ClusteringConfigViewSet,
     ClusteringJobViewSet,
@@ -353,6 +354,13 @@ environments_router.register(
     r"customer_journeys",
     customer_analytics.CustomerJourneyViewSet,
     "environment_customer_journeys",
+    ["team_id"],
+)
+
+environments_router.register(
+    r"experiments",
+    ExperimentViewSet,
+    "environment_experiments",
     ["team_id"],
 )
 
