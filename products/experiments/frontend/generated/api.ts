@@ -11,6 +11,7 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
 import type {
     EndExperimentApi,
     ExperimentApi,
+    ExperimentCreateApi,
     ExperimentHoldoutApi,
     ExperimentHoldoutsListParams,
     ExperimentSavedMetricApi,
@@ -40,6 +41,34 @@ type NonReadonly<T> = [T] extends [UnionToIntersection<T>]
           [P in keyof Writable<T>]: T[P] extends object ? NonReadonly<NonNullable<T[P]>> : T[P]
       }
     : DistributeReadOnlyOverUnions<T>
+
+/**
+ * Create a new experiment using the facade API.
+
+Supports both:
+- Old format: parameters.feature_flag_variants
+- New format: feature_flag_filters
+
+Returns:
+    201 Created with experiment data
+    400 Bad Request if validation fails
+ */
+export const getExperimentsCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/experiments/`
+}
+
+export const experimentsCreate = async (
+    projectId: string,
+    experimentCreateApi: ExperimentCreateApi,
+    options?: RequestInit
+): Promise<ExperimentCreateApi> => {
+    return apiMutator<ExperimentCreateApi>(getExperimentsCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(experimentCreateApi),
+    })
+}
 
 export const getExperimentHoldoutsListUrl = (projectId: string, params?: ExperimentHoldoutsListParams) => {
     const normalizedParams = new URLSearchParams()
@@ -288,16 +317,16 @@ export const experimentsList = async (
     })
 }
 
-export const getExperimentsCreateUrl = (projectId: string) => {
+export const getExperimentsCreate2Url = (projectId: string) => {
     return `/api/projects/${projectId}/experiments/`
 }
 
-export const experimentsCreate = async (
+export const experimentsCreate2 = async (
     projectId: string,
     experimentApi: NonReadonly<ExperimentApi>,
     options?: RequestInit
 ): Promise<ExperimentApi> => {
-    return apiMutator<ExperimentApi>(getExperimentsCreateUrl(projectId), {
+    return apiMutator<ExperimentApi>(getExperimentsCreate2Url(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },

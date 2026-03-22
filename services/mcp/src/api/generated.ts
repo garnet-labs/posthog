@@ -7375,6 +7375,57 @@ export namespace Schemas {
       readonly updated_at: string;
     }
 
+    /**
+     * Serializer for feature flag variant.
+     */
+    export interface FeatureFlagVariant {
+      /** Unique key for the variant */
+      key: string;
+      /**
+       * Display name for the variant
+       * @nullable
+       */
+      name?: string | null;
+      /**
+       * Percentage of users to assign to this variant
+       * @minimum 0
+       * @maximum 100
+       */
+      rollout_percentage: number;
+    }
+
+    /**
+     * Serializer for new feature flag creation data.
+     */
+    export interface CreateFeatureFlagInput {
+      /** Unique key for the feature flag */
+      key: string;
+      /**
+       * Display name for the feature flag
+       * @nullable
+       */
+      name?: string | null;
+      /** List of variants for the multivariate flag */
+      variants: FeatureFlagVariant[];
+      /**
+       * Percentage of users to include in the experiment
+       * @minimum 0
+       * @maximum 100
+       * @nullable
+       */
+      rollout_percentage?: number | null;
+      /**
+       * Group type index for group-based experiments
+       * @nullable
+       */
+      aggregation_group_type_index?: number | null;
+      /**
+       * Whether to ensure users see consistent variants
+       * @nullable
+       */
+      ensure_experience_continuity?: boolean | null;
+    }
+
     export interface CreateGroup {
       /**
        * @minimum -2147483648
@@ -13672,6 +13723,25 @@ export namespace Schemas {
       breakdown_value: (string | number | number)[];
       /** Test variant results with statistical comparisons for this breakdown */
       variants: ExperimentVariantResultFrequentist[] | ExperimentVariantResultBayesian[];
+    }
+
+    /**
+     * Serializer for experiment creation.
+
+    Supports both old format (parameters.feature_flag_variants)
+    and new format (feature_flag_filters).
+     */
+    export interface ExperimentCreate {
+      /** Name of the experiment */
+      name: string;
+      /** Key of the feature flag (existing or to be created) */
+      feature_flag_key: string;
+      /** Description of the experiment */
+      description?: string;
+      /** [Deprecated] Old format for experiment parameters including feature_flag_variants */
+      parameters?: unknown | null;
+      /** New format for feature flag configuration */
+      feature_flag_filters?: CreateFeatureFlagInput | null;
     }
 
     export type ExperimentDataWarehouseNodeKind = typeof ExperimentDataWarehouseNodeKind[keyof typeof ExperimentDataWarehouseNodeKind];
