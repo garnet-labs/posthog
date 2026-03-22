@@ -28,7 +28,7 @@ export interface LineChartProps {
     percentStackView?: boolean
 
     // Axis formatting
-    xTickFormatter?: (value: string, index: number) => string
+    xTickFormatter?: (value: string, index: number) => string | null
     yTickFormatter?: (value: number) => string
 
     // Tooltip (render prop)
@@ -379,7 +379,7 @@ export function LineChart({
         <div
             ref={wrapperRef as React.RefObject<HTMLDivElement>}
             className={className}
-            style={{ position: 'relative', width: '100%', height: '100%', cursor: cursorStyle }}
+            style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, cursor: cursorStyle }}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
             onMouseDown={handleMouseDown}

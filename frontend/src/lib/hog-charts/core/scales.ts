@@ -14,7 +14,7 @@ export function createXScale(labels: string[], dimensions: ChartDimensions): d3.
         .scalePoint<string>()
         .domain(labels)
         .range([dimensions.plotLeft, dimensions.plotLeft + dimensions.plotWidth])
-        .padding(0.5)
+        .padding(0)
 }
 
 export function createYScale(

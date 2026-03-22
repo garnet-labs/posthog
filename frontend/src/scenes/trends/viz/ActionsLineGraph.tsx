@@ -2,6 +2,7 @@ import { type DeepPartial } from 'chart.js/dist/types/utils'
 import { useValues } from 'kea'
 
 import { Chart, ChartType, LegendOptions, defaults } from 'lib/Chart'
+import { createXAxisTickCallback } from 'lib/charts/utils/dates'
 import { insightAlertsLogic } from 'lib/components/Alerts/insightAlertsLogic'
 import { DateDisplay } from 'lib/components/DateDisplay'
 import { PropertyKeyInfo } from 'lib/components/PropertyKeyInfo'
@@ -183,10 +184,17 @@ export function ActionsLineGraph({
         const incompleteIdx =
             !isStickiness && incompletenessOffsetFromEnd < 0 ? labels.length + incompletenessOffsetFromEnd : undefined
 
+        const xTickFormatter = createXAxisTickCallback({
+            interval: interval ?? 'day',
+            allDays: currentPeriodResult?.days ?? [],
+            timezone,
+        })
+
         return (
             <HogLineChart
                 series={hogSeries}
                 labels={labels}
+                xTickFormatter={xTickFormatter}
                 showGrid
                 showCrosshair
                 showDataLabels={!!showValuesOnSeries}
