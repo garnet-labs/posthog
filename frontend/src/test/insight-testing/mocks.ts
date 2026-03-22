@@ -30,7 +30,7 @@ export interface MockResponse {
     response: TrendsQueryResponse | ((query: QueryBody) => TrendsQueryResponse)
 }
 
-function buildTrendsResponse(series: SeriesData[]): TrendsQueryResponse {
+export function buildTrendsResponse(series: SeriesData[]): TrendsQueryResponse {
     return {
         results: series.map((s) => ({
             action: {

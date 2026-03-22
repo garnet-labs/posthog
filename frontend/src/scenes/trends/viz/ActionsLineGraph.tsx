@@ -2,26 +2,21 @@ import { type DeepPartial } from 'chart.js/dist/types/utils'
 import { useValues } from 'kea'
 
 import { Chart, ChartType, LegendOptions, defaults } from 'lib/Chart'
-import { createXAxisTickCallback } from 'lib/charts/utils/dates'
 import { insightAlertsLogic } from 'lib/components/Alerts/insightAlertsLogic'
 import { DateDisplay } from 'lib/components/DateDisplay'
 import { PropertyKeyInfo } from 'lib/components/PropertyKeyInfo'
-import { LineChart as HogLineChart } from 'lib/hog-charts'
-import type { Series as HogSeries } from 'lib/hog-charts'
 import { ciRanges, movingAverage } from 'lib/statistics'
 import { capitalizeFirstLetter, hexToRGBA } from 'lib/utils'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { teamLogic } from 'scenes/teamLogic'
 import { datasetToActorsQuery } from 'scenes/trends/viz/datasetToActorsQuery'
 
-import { GoalLine } from '~/queries/schema/schema-general'
 import { ChartDisplayType, ChartParams, GraphType } from '~/types'
 
 import { InsightEmptyState } from '../../insights/EmptyStates'
 import { LineGraph } from '../../insights/views/LineGraph/LineGraph'
 import { openPersonsModal } from '../persons-modal/PersonsModal'
 import { trendsDataLogic } from '../trendsDataLogic'
-import type { IndexedTrendResult } from '../types'
 
 export function ActionsLineGraph({
     inSharedMode = false,
@@ -91,16 +86,12 @@ export function ActionsLineGraph({
     }
 
     if (
-        !(
-            indexedResults &&
-            indexedResults[0]?.data &&
-            indexedResults.filter((result: IndexedTrendResult) => result.count !== 0).length > 0
-        )
+        !(indexedResults && indexedResults[0]?.data && indexedResults.filter((result) => result.count !== 0).length > 0)
     ) {
         return <InsightEmptyState heading={context?.emptyStateHeading} detail={context?.emptyStateDetail} />
     }
 
-    const finalDatasets = indexedResults.flatMap((originalDataset: IndexedTrendResult, index: number) => {
+    const finalDatasets = indexedResults.flatMap((originalDataset, index) => {
         const yAxisID = showMultipleYAxes && index > 0 ? `y${index}` : 'y'
         const mainSeries = { ...originalDataset, yAxisID }
         const datasets = [mainSeries]
@@ -166,87 +157,16 @@ export function ActionsLineGraph({
         return datasets
     })
 
-    const isLineDisplay =
-        display !== ChartDisplayType.ActionsBar && display !== ChartDisplayType.ActionsUnstackedBar && !isLifecycle
-
-    if (isLineDisplay) {
-        const hogSeries: HogSeries[] = indexedResults
-            .filter((r: IndexedTrendResult) => r.count !== 0)
-            .map((r: IndexedTrendResult) => ({
-                key: `${r.id}`,
-                label: r.label ?? '',
-                data: r.data,
-                color: getTrendsColor(r),
-                fillArea: display === ChartDisplayType.ActionsAreaGraph,
-                yAxisId: showMultipleYAxes && r.id > 0 ? `y${r.id}` : undefined,
-            }))
-
-        const incompleteIdx =
-            !isStickiness && incompletenessOffsetFromEnd < 0 ? labels.length + incompletenessOffsetFromEnd : undefined
-
-        const xTickFormatter = createXAxisTickCallback({
-            interval: interval ?? 'day',
-            allDays: currentPeriodResult?.days ?? [],
-            timezone,
-        })
-
-        return (
-            <HogLineChart
-                series={hogSeries}
-                labels={labels}
-                xTickFormatter={xTickFormatter}
-                showGrid
-                showCrosshair
-                showDataLabels={!!showValuesOnSeries}
-                showTrendLines={!!showTrendLines}
-                yScaleType={yAxisScaleType === 'log10' ? 'log' : 'linear'}
-                multipleYAxes={!!showMultipleYAxes}
-                percentStackView={!!showPercentStackView && !!supportsPercentStackView}
-                goalLines={goalLines?.map((g: GoalLine) => ({
-                    value: g.value,
-                    label: g.label ?? undefined,
-                    borderColor: g.borderColor ?? undefined,
-                }))}
-                incompleteFromIndex={incompleteIdx}
-                hideXAxis={false}
-                hideYAxis={false}
-                renderTooltip={(ctx) => (
-                    <div
-                        style={{
-                            background: 'var(--bg-surface-tooltip)',
-                            color: 'var(--text-primary)',
-                            padding: '8px 12px',
-                            borderRadius: 6,
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                            fontSize: 13,
-                        }}
-                    >
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>{ctx.label}</div>
-                        {ctx.seriesData.map((s) => (
-                            <div key={s.series.key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <span
-                                    style={{
-                                        width: 8,
-                                        height: 8,
-                                        borderRadius: '50%',
-                                        backgroundColor: s.color,
-                                        display: 'inline-block',
-                                    }}
-                                />
-                                <span>{s.series.label}:</span>
-                                <strong>{s.value.toLocaleString()}</strong>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            />
-        )
-    }
-
     return (
         <LineGraph
             data-attr="trend-line-graph"
-            type={GraphType.Bar}
+            type={
+                display === ChartDisplayType.ActionsBar ||
+                display === ChartDisplayType.ActionsUnstackedBar ||
+                isLifecycle
+                    ? GraphType.Bar
+                    : GraphType.Line
+            }
             datasets={finalDatasets}
             labels={labels}
             inSharedMode={inSharedMode}

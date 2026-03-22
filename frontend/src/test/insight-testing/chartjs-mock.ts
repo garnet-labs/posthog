@@ -1,47 +1,23 @@
-export interface ChartDataset {
-    label?: string
-    data?: number[]
-    hidden?: boolean
-    count?: number
-    compare?: boolean
-    compare_label?: string
-    status?: string
-    borderColor?: string
-    backgroundColor?: string
-    yAxisID?: string
-}
+import {
+    type CapturedChartConfig,
+    getCapturedCharts,
+    pushCapturedChart,
+    resetCapturedCharts as resetSharedCapture,
+} from './captured-charts'
 
-export interface ChartScaleConfig {
-    display?: boolean
-    type?: string
-    stacked?: boolean
-    position?: string
-    ticks?: { callback?: (value: number | string, index: number, values: unknown[]) => string }
-}
-
-export interface ChartConfig {
-    type?: string
-    data?: { labels?: string[]; datasets?: ChartDataset[] }
-    options?: { scales?: Record<string, ChartScaleConfig>; [key: string]: unknown }
-}
-
-interface CapturedChart {
-    config: ChartConfig
-    canvas: HTMLCanvasElement
-}
-
-let capturedCharts: CapturedChart[] = []
+// Re-export types so existing consumers (chart-accessor, etc.) keep working
+export type ChartDataset = NonNullable<NonNullable<CapturedChartConfig['data']>['datasets']>[number]
+export type ChartScaleConfig = NonNullable<NonNullable<CapturedChartConfig['options']>['scales']>[string]
+export type ChartConfig = CapturedChartConfig
 
 export function resetCapturedCharts(): void {
-    capturedCharts = []
+    resetSharedCapture()
     MockChart._instances = []
 }
 
-/** Returns all captured chart snapshots. The latest entry is always a live
- *  snapshot of the most recent MockChart instance so that callers see
- *  post-update data without needing a new Chart constructor call. */
-export function getCapturedChartConfigs(): CapturedChart[] {
-    return capturedCharts
+/** Returns all captured chart snapshots from both Chart.js and HogLineChart mocks. */
+export function getCapturedChartConfigs(): ReturnType<typeof getCapturedCharts> {
+    return getCapturedCharts()
 }
 
 const defaults: Record<string, unknown> = {
@@ -61,7 +37,7 @@ class MockChart {
         this.config = config
         this.data = config.data
         MockChart._instances.push(this)
-        capturedCharts.push({ config, canvas })
+        pushCapturedChart(config, canvas)
 
         const container = canvas.parentElement
         if (container) {

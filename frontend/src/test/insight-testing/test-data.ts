@@ -1,10 +1,11 @@
+import { NodeKind, TrendsQueryResponse } from '~/queries/schema/schema-general'
 import { EventDefinition, PropertyDefinition, PropertyType } from '~/types'
 
 const friday = '2024-06-14T16:00:00.000Z'
 const setupWeek = '2024-06-03T10:00:00.000Z'
 
-const days = ['2024-06-10', '2024-06-11', '2024-06-12', '2024-06-13', '2024-06-14']
-const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+export const days = ['2024-06-10', '2024-06-11', '2024-06-12', '2024-06-13', '2024-06-14']
+export const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 
 export const eventDefinitions: EventDefinition[] = [
     {
@@ -121,4 +122,91 @@ export function lookupSeries(eventName: string, breakdownProperty?: string): Ser
         return config.breakdowns[breakdownProperty]
     }
     return [config.default]
+}
+
+// ---- Ready-made TrendsQueryResponse factories ----
+// Each returns a fresh object so tests can't leak state between each other.
+
+function makeResult(label: string, data: number[], extra?: Record<string, unknown>): Record<string, unknown> {
+    return {
+        action: { id: label, type: 'events', name: label },
+        label,
+        count: data.reduce((a, b) => a + b, 0),
+        data,
+        labels: labels.slice(0, data.length),
+        days: days.slice(0, data.length),
+        ...extra,
+    }
+}
+
+/** Two series ($pageview + sign_up) with known values. */
+export function multiSeriesResponse(): TrendsQueryResponse {
+    return {
+        results: [makeResult('$pageview', [45, 82, 134, 210, 95]), makeResult('sign_up', [2, 5, 8, 10, 5])],
+    } as TrendsQueryResponse
+}
+
+/** Same event twice with compare_label current/previous and different data. */
+export function compareResponse(): TrendsQueryResponse {
+    return {
+        results: [
+            makeResult('$pageview', [100, 200, 300, 400, 500], {
+                compare: true,
+                compare_label: 'current',
+            }),
+            makeResult('$pageview', [50, 75, 100, 125, 150], {
+                compare: true,
+                compare_label: 'previous',
+            }),
+        ],
+    } as TrendsQueryResponse
+}
+
+/** Single data point — tests edge case rendering. */
+export function singlePointResponse(): TrendsQueryResponse {
+    return {
+        results: [makeResult('$pageview', [42])],
+    } as TrendsQueryResponse
+}
+
+/** One non-zero series + one zero-count series. */
+export function zeroCountResponse(): TrendsQueryResponse {
+    return {
+        results: [
+            makeResult('$pageview', [20, 50, 80, 100, 50]),
+            { ...makeResult('sign_up', [0, 0, 0, 0, 0]), count: 0 },
+        ],
+    } as TrendsQueryResponse
+}
+
+const weeklyDays = ['2024-06-03', '2024-06-10', '2024-06-17']
+const weeklyLabels = ['3 Jun', '10 Jun', '17 Jun']
+
+/** Weekly-aggregated data — used for interval-change tests. */
+export function weeklyResponse(): TrendsQueryResponse {
+    return {
+        results: [
+            {
+                action: { id: '$pageview', type: 'events', name: '$pageview' },
+                label: '$pageview',
+                count: 900,
+                data: [250, 400, 250],
+                labels: weeklyLabels,
+                days: weeklyDays,
+            },
+        ],
+    } as TrendsQueryResponse
+}
+
+// ---- Mock helper ----
+
+/** Wrap a response factory into a MockResponse that matches TrendsQuery. */
+export function makeTrendsMock(response: () => TrendsQueryResponse): {
+    match: (query: { kind?: string }) => boolean
+    response: () => TrendsQueryResponse
+} {
+    return {
+        match: (query) => query.kind === NodeKind.TrendsQuery,
+        response,
+    }
 }
