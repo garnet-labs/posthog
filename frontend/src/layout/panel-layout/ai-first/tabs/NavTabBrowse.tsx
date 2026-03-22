@@ -402,7 +402,7 @@ export function NavTabBrowse(): JSX.Element {
                         <SectionTrigger icon={<IconApps />} label="My apps" isCollapsed={isLayoutNavCollapsed} />
                         <ButtonPrimitive
                             iconOnly
-                            tooltip="Edit my sidebar apps"
+                            tooltip="Edit my apps"
                             tooltipPlacement="right"
                             onClick={openEditCustomProductsModal}
                             data-attr="edit-sidebar-apps-button"
