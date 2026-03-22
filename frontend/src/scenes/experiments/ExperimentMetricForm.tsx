@@ -375,6 +375,9 @@ export function ExperimentMetricForm({
                                   )
                         }
                         propertiesTaxonomicGroupTypes={commonActionFilterProps.propertiesTaxonomicGroupTypes}
+                        dataWarehousePopoverFields={
+                            isExperimentFunnelDWHSupport ? dataWarehousePopoverFields : undefined
+                        }
                     />
                 )}
 
