@@ -6,6 +6,7 @@ import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonModal } from 'lib/lemon-ui/LemonModal'
 import { LemonSkeleton } from 'lib/lemon-ui/LemonSkeleton'
 import { LemonTable, LemonTableColumns } from 'lib/lemon-ui/LemonTable'
+import { compareDatetimes } from 'lib/dayjs'
 import { humanFriendlyDetailedTime } from 'lib/utils'
 import { PersonDisplay } from 'scenes/persons/PersonDisplay'
 import { urls } from 'scenes/urls'
@@ -31,7 +32,7 @@ export function HeatmapEventsPanel({ context, exportToken }: HeatmapDataLogicPro
         {
             title: 'Time',
             dataIndex: 'timestamp',
-            sorter: (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+            sorter: (a, b) => compareDatetimes(a.timestamp, b.timestamp),
             render: (_, event) => humanFriendlyDetailedTime(event.timestamp),
         },
         {

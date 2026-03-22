@@ -4,6 +4,7 @@ import { IconRevert, IconTarget, IconX } from '@posthog/icons'
 import { LemonDialog, LemonTable, Link, Spinner } from '@posthog/lemon-ui'
 
 import { FEATURE_FLAGS } from 'lib/constants'
+import { durationMs } from 'lib/dayjs'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonProgress } from 'lib/lemon-ui/LemonProgress'
 import { LemonSegmentedButton } from 'lib/lemon-ui/LemonSegmentedButton'
@@ -357,15 +358,13 @@ export function QueryInfo({ tabId }: QueryInfoProps): JSX.Element {
                                         if (job.status === 'Running') {
                                             return 'In progress'
                                         }
-                                        // Convert date strings to timestamps before subtraction
-                                        const start = new Date(job.created_at).getTime()
-                                        const end = new Date(job.last_run_at).getTime()
+                                        const elapsed = durationMs(job.created_at, job.last_run_at)
 
-                                        if (start > end) {
+                                        if (elapsed <= 0) {
                                             return 'N/A'
                                         }
 
-                                        return humanFriendlyDuration((end - start) / 1000)
+                                        return humanFriendlyDuration(elapsed / 1000)
                                     },
                                 },
                             ]}

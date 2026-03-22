@@ -1,3 +1,5 @@
+import { dayjs, toTimestampMs } from 'lib/dayjs'
+
 import { LiveMetricsSlidingWindow } from './LiveMetricsSlidingWindow'
 
 const MINUTE = 60 * 1000
@@ -8,10 +10,10 @@ const getDeviceCount = (
 ): number | undefined => breakdown.find((d) => d.device === deviceType)?.count
 
 const WALL_CLOCK = '2026-01-16T16:30:00Z'
-const WALL_CLOCK_MS = new Date(WALL_CLOCK).getTime()
+const WALL_CLOCK_MS = toTimestampMs(WALL_CLOCK)
 
-const relativeTime = (offsetMs: number): string => new Date(WALL_CLOCK_MS + offsetMs).toISOString()
-const toUnixSeconds = (isoString: string): number => new Date(isoString).getTime() / 1000
+const relativeTime = (offsetMs: number): string => dayjs(WALL_CLOCK_MS + offsetMs).toISOString()
+const toUnixSeconds = (isoString: string): number => toTimestampMs(isoString) / 1000
 
 describe('LiveMetricsSlidingWindow', () => {
     const WINDOW_SIZE_MINUTES = 30

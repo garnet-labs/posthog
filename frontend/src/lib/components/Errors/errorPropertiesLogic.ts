@@ -18,7 +18,7 @@ import {
     getSessionId,
     stacktraceHasInAppFrames,
 } from 'lib/components/Errors/utils'
-import { dayjs } from 'lib/dayjs'
+import { compareDatetimes } from 'lib/dayjs'
 import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
 
 import type { errorPropertiesLogicType } from './errorPropertiesLogicType'
@@ -120,7 +120,7 @@ export const errorPropertiesLogic = kea<errorPropertiesLogicType>([
                 }
                 // get most recent release
                 const sortedReleases = relatedReleases.sort(
-                    (a, b) => dayjs(b.created_at).unix() - dayjs(a.created_at).unix()
+                    (a, b) => -compareDatetimes(a.created_at, b.created_at)
                 )
                 return sortedReleases[0]
             },

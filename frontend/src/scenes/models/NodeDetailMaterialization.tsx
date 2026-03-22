@@ -3,6 +3,7 @@ import { useActions, useValues } from 'kea'
 import { LemonButton, LemonTable, LemonTag, Tooltip } from '@posthog/lemon-ui'
 
 import { TZLabel } from 'lib/components/TZLabel'
+import { durationMs } from 'lib/dayjs'
 import { humanFriendlyDuration } from 'lib/utils'
 
 import { DataModelingJob } from '~/types'
@@ -14,9 +15,8 @@ function computeDuration(job: DataModelingJob): string {
     if (!job.created_at || !job.last_run_at) {
         return '-'
     }
-    const start = new Date(job.created_at).getTime()
-    const end = new Date(job.last_run_at).getTime()
-    const durationSeconds = (end - start) / 1000
+    const elapsed = durationMs(job.created_at, job.last_run_at)
+    const durationSeconds = elapsed / 1000
     if (durationSeconds <= 0) {
         return '-'
     }

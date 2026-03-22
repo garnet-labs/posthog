@@ -5,7 +5,7 @@ import { LemonTableColumns, Link } from '@posthog/lemon-ui'
 
 import { TZLabel } from 'lib/components/TZLabel'
 import { LOGS_PORTION_LIMIT } from 'lib/constants'
-import { dayjs } from 'lib/dayjs'
+import { compareDatetimes } from 'lib/dayjs'
 import { teamLogic } from 'scenes/teamLogic'
 
 import api from '~/lib/api'
@@ -239,7 +239,7 @@ export const pipelineNodeLogsLogic = kea<pipelineNodeLogsLogicType>([
                         title: 'Timestamp',
                         key: 'timestamp',
                         dataIndex: 'timestamp',
-                        sorter: (a: LogEntry, b: LogEntry) => dayjs(a.timestamp).unix() - dayjs(b.timestamp).unix(),
+                        sorter: (a: LogEntry, b: LogEntry) => compareDatetimes(a.timestamp, b.timestamp),
                         render: (timestamp: string) => <TZLabel time={timestamp} />,
                         width: 0,
                     },

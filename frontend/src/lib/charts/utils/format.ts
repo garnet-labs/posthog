@@ -1,3 +1,5 @@
+import { dayjs } from 'lib/dayjs'
+
 import type { AxisFormat } from '../types'
 
 export function formatValue(
@@ -93,17 +95,9 @@ function formatDuration(seconds: number): string {
 }
 
 function formatDate(timestamp: number): string {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-    })
+    return dayjs(timestamp).format('MMM D')
 }
 
 function formatDateTime(timestamp: number): string {
-    return new Date(timestamp).toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-    })
+    return dayjs(timestamp).format('MMM D, h:mm A')
 }

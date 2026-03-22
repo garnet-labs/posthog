@@ -6,6 +6,7 @@ import { IconPlus } from '@posthog/icons'
 import { Spinner } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
+import { compareDatetimes } from 'lib/dayjs'
 import { LemonTreeSelectMode, TreeDataItem } from 'lib/lemon-ui/LemonTree/LemonTree'
 
 import { breadcrumbsLogic } from '~/layout/navigation/Breadcrumbs/breadcrumbsLogic'
@@ -208,7 +209,7 @@ export const projectTreeLogic = kea<projectTreeLogicType>([
                             return true
                         })
                         .sort((a, b) => {
-                            return new Date(b.created_at ?? '').getTime() - new Date(a.created_at ?? '').getTime()
+                            return -compareDatetimes(a.created_at ?? '', b.created_at ?? '')
                         })
                     if (response.users?.length > 0) {
                         actions.addLoadedUsers(response.users)
@@ -323,7 +324,7 @@ export const projectTreeLogic = kea<projectTreeLogicType>([
                         }
                     } else if (savedItem.created_at && savedItem.type !== 'folder') {
                         const newResults = [...state.results, savedItem].sort((a, b) => {
-                            return new Date(b.created_at ?? '').getTime() - new Date(a.created_at ?? '').getTime()
+                            return -compareDatetimes(a.created_at ?? '', b.created_at ?? '')
                         })
                         return { ...state, results: newResults }
                     }

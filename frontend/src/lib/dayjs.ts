@@ -30,6 +30,21 @@ const now = (): Dayjs => dayjs()
 
 export { dayjs, isDayjs, now }
 
+/** Convert an ISO datetime string to a Unix timestamp in milliseconds. Use dayjs instead of `new Date()` for consistency. */
+export function toTimestampMs(isoString: string): number {
+    return dayjs(isoString).valueOf()
+}
+
+/** Compare two ISO datetime strings for sorting. Returns negative if a < b (a is older). */
+export function compareDatetimes(a: string, b: string): number {
+    return dayjs(a).valueOf() - dayjs(b).valueOf()
+}
+
+/** Compute duration in milliseconds between two ISO datetime strings. */
+export function durationMs(start: string, end: string): number {
+    return dayjs(end).valueOf() - dayjs(start).valueOf()
+}
+
 /** Parse UTC datetime string using Day.js, taking into account time zone conversion edge cases. */
 export function dayjsUtcToTimezone(
     isoString: string,

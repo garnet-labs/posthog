@@ -68,7 +68,7 @@ export const liveWebAnalyticsMetricsLogic = kea<liveWebAnalyticsMetricsLogicType
                 },
                 addEvents: (window, { events, newerThan }) => {
                     for (const event of events) {
-                        const eventTs = new Date(event.timestamp).getTime() / 1000
+                        const eventTs = dayjs(event.timestamp).valueOf() / 1000
                         const newerThanTs = newerThan.getTime() / 1000
 
                         if (eventTs > newerThanTs) {

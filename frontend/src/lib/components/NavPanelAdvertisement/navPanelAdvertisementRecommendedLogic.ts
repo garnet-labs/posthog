@@ -1,5 +1,7 @@
 import { connect, kea, path, selectors } from 'kea'
 
+import { dayjs } from 'lib/dayjs'
+
 import { customProductsLogic } from '~/layout/panel-layout/ProjectTree/customProductsLogic'
 import { type UserProductListItem, UserProductListReason } from '~/queries/schema/schema-general'
 
@@ -30,7 +32,7 @@ export const navPanelAdvertisementRecommendedLogic = kea<navPanelAdvertisementRe
                     (item) =>
                         RECOMMENDED_PRODUCT_REASONS.includes(item.reason) &&
                         item.enabled &&
-                        new Date(item.created_at) >= createdAtThreshold
+                        dayjs(item.created_at).toDate() >= createdAtThreshold
                 )
             },
         ],

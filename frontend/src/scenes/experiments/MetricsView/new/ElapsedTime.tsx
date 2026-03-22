@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { dayjs } from 'lib/dayjs'
 import { usePageVisibility } from 'lib/hooks/usePageVisibility'
 
 interface ElapsedTimeProps {
@@ -16,7 +17,7 @@ export function ElapsedTime({ startTime }: ElapsedTimeProps): JSX.Element | null
         }
 
         const updateElapsed = (): void => {
-            const start = new Date(startTime).getTime()
+            const start = dayjs(startTime).valueOf()
             const now = Date.now()
             const elapsed = Math.floor((now - start) / 1000)
             setElapsedSeconds(Math.max(0, elapsed))

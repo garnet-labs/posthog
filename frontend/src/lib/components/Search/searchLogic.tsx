@@ -4,6 +4,7 @@ import { loaders } from 'kea-loaders'
 import { IconClock, IconDownload } from '@posthog/icons'
 
 import api from 'lib/api'
+import { compareDatetimes } from 'lib/dayjs'
 import { commandLogic } from 'lib/components/Command/commandLogic'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { toSentenceCase } from 'lib/utils'
@@ -376,7 +377,7 @@ export const searchLogic = kea<searchLogicType>([
                     if (!b.lastViewedAt) {
                         return -1
                     }
-                    return new Date(b.lastViewedAt).getTime() - new Date(a.lastViewedAt).getTime()
+                    return -compareDatetimes(a.lastViewedAt, b.lastViewedAt)
                 })
             },
         ],
@@ -427,7 +428,7 @@ export const searchLogic = kea<searchLogicType>([
                     if (!b.lastViewedAt) {
                         return -1
                     }
-                    return new Date(b.lastViewedAt).getTime() - new Date(a.lastViewedAt).getTime()
+                    return -compareDatetimes(a.lastViewedAt, b.lastViewedAt)
                 })
             },
         ],

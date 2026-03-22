@@ -42,7 +42,7 @@ const truncateToSeconds = (time: string | number | Dayjs): number => {
         case 'number':
             return Math.floor(time / 1000) * 1000
         case 'string':
-            return Math.floor(new Date(time).getTime() / 1000) * 1000
+            return Math.floor(dayjs(time).valueOf() / 1000) * 1000
         default:
             return time.startOf('second').valueOf()
     }
