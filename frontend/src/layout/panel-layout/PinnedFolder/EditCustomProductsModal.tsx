@@ -1,5 +1,7 @@
 import { useActions, useValues } from 'kea'
 
+import { IconInfo, IconStarFilled } from '@posthog/icons'
+
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonCheckbox } from 'lib/lemon-ui/LemonCheckbox'
 import { LemonModal } from 'lib/lemon-ui/LemonModal'
@@ -12,7 +14,6 @@ import { FileSystemIconType, FileSystemImport } from '~/queries/schema/schema-ge
 import { UserShortcutPosition } from '~/types'
 
 import { editCustomProductsModalLogic } from './editCustomProductsModalLogic'
-
 export function EditCustomProductsModal(): JSX.Element {
     const {
         isOpen,
@@ -26,6 +27,7 @@ export function EditCustomProductsModal(): JSX.Element {
         categories,
         productsByCategory,
         productLoading,
+        isAiFirst,
     } = useValues(editCustomProductsModalLogic)
     const { toggleProduct, toggleCategory, toggleSidebarSuggestions, setShortcutPosition, closeModal } =
         useActions(editCustomProductsModalLogic)
@@ -35,6 +37,7 @@ export function EditCustomProductsModal(): JSX.Element {
             isOpen={isOpen}
             onClose={closeModal}
             title="Edit my sidebar apps"
+            description="Select which products you want to see in your sidebar. You can change this anytime."
             footer={
                 <LemonButton type="secondary" onClick={closeModal}>
                     Close
@@ -42,12 +45,9 @@ export function EditCustomProductsModal(): JSX.Element {
             }
             width={600}
         >
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
                 <div>
-                    <p className="text-sm text-muted">
-                        Select which products you want to see in your sidebar. You can change this anytime.
-                        {customProductsLoading && <Spinner />}
-                    </p>
+                    <p className="text-sm text-tertiary">{customProductsLoading && <Spinner />}</p>
                 </div>
 
                 <div className="flex flex-col gap-4 mb-4 px-2">
@@ -77,7 +77,7 @@ export function EditCustomProductsModal(): JSX.Element {
                                         label={<span className="font-semibold text-tertiary">{category}</span>}
                                     />
                                 </div>
-                                <div className="space-y-1">
+                                <div className="space-y-1 group/colorful-product-icons colorful-product-icons-true">
                                     {products.map((product: FileSystemImport) => {
                                         const icon = iconForType(
                                             ('iconType' in product ? product.iconType : undefined) ||
@@ -144,19 +144,22 @@ export function EditCustomProductsModal(): JSX.Element {
                             </span>
                         }
                     />
-                    <span className="text-sm text-muted">
+                    <span className="text-sm text-tertiary">
                         When we detect you are using a new product, we'll automatically add it to your sidebar as a
                         suggestion. We might also suggest products that are related to the ones you are using when we
                         launch a new product.
-                        <br />
-                        You can always remove these suggestions later.
                     </span>
+                    <span className="text-sm text-tertiary">You can always remove these suggestions later.</span>
                 </div>
 
                 <div className="flex flex-col items-start gap-2 border-t pt-4">
                     <div className="flex flex-col gap-2 w-full">
-                        <label className="text-sm font-semibold text-tertiary">Shortcut position</label>
+                        <label className="text-sm font-semibold">Shortcut position</label>
+                        <span className="text-sm text-tertiary">
+                            Choose where shortcuts appear in your sidebar when using custom products.
+                        </span>
                         <LemonSelect<UserShortcutPosition>
+                            disabled={isAiFirst}
                             value={shortcutPosition}
                             onChange={(value) => setShortcutPosition(value)}
                             options={[
@@ -167,9 +170,12 @@ export function EditCustomProductsModal(): JSX.Element {
                             disabledReason={shortcutPositionLoading ? 'Saving...' : undefined}
                             fullWidth
                         />
-                        <span className="text-sm text-muted">
-                            Choose where shortcuts appear in your sidebar when using custom products.
-                        </span>
+                        {isAiFirst && (
+                            <span className="text-sm">
+                                <IconInfo className="size-4 text-warning" /> We've renamed shortcuts to "
+                                <IconStarFilled /> Starred". You can access them in the navigation above.
+                            </span>
+                        )}
                     </div>
                 </div>
             </div>

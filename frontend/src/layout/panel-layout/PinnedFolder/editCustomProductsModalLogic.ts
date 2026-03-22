@@ -3,6 +3,7 @@ import { actions, afterMount, connect, kea, listeners, path, reducers, selectors
 import { lemonToast } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
+import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { userLogic } from 'scenes/userLogic'
 
@@ -140,6 +141,12 @@ export const editCustomProductsModalLogic = kea<editCustomProductsModalLogicType
                 return Array.from(productsByCategory.keys()).sort((a, b) => getCategoryOrder(a) - getCategoryOrder(b))
             },
         ],
+        isAiFirst: [
+            (s) => [s.featureFlags],
+            (featureFlags: Record<string, boolean | string>): boolean => {
+                return !!featureFlags[FEATURE_FLAGS.AI_FIRST]
+            },
+        ],
     }),
     listeners(({ actions, values }) => ({
         loadCustomProductsSuccess: ({ customProducts }) => {
@@ -151,7 +158,11 @@ export const editCustomProductsModalLogic = kea<editCustomProductsModalLogicType
         loadUserSuccess: ({ user }) => {
             if (user) {
                 actions.setAllowSidebarSuggestions(user.allow_sidebar_suggestions ?? false)
-                actions.setShortcutPosition((user.shortcut_position ?? 'above') as UserShortcutPosition, false)
+                if (values.isAiFirst) {
+                    actions.setShortcutPosition('hidden', false)
+                } else {
+                    actions.setShortcutPosition((user.shortcut_position ?? 'above') as UserShortcutPosition, false)
+                }
             }
         },
         toggleProduct: async ({ productPath }) => {
@@ -237,7 +248,11 @@ export const editCustomProductsModalLogic = kea<editCustomProductsModalLogicType
     afterMount(({ actions, values }) => {
         if (values.user) {
             actions.setAllowSidebarSuggestions(values.user.allow_sidebar_suggestions ?? false)
-            actions.setShortcutPosition((values.user.shortcut_position ?? 'above') as UserShortcutPosition, false)
+            if (values.isAiFirst) {
+                actions.setShortcutPosition('hidden', false)
+            } else {
+                actions.setShortcutPosition((values.user.shortcut_position ?? 'above') as UserShortcutPosition, false)
+            }
         }
 
         if (values.customProducts.length > 0) {

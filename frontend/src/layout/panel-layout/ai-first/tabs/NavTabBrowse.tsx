@@ -8,6 +8,7 @@ import {
     IconDatabase,
     IconFolder,
     IconFolderOpen,
+    IconGear,
     IconHome,
     IconNotification,
     IconStar,
@@ -31,6 +32,8 @@ import { urls } from 'scenes/urls'
 
 import { NavLink } from '~/layout/panel-layout/ai-first/NavLink'
 import { PanelLayoutNavIdentifier, panelLayoutLogic } from '~/layout/panel-layout/panelLayoutLogic'
+import { EditCustomProductsModal } from '~/layout/panel-layout/PinnedFolder/EditCustomProductsModal'
+import { editCustomProductsModalLogic } from '~/layout/panel-layout/PinnedFolder/editCustomProductsModalLogic'
 import { iconForType } from '~/layout/panel-layout/ProjectTree/defaultTree'
 import { ProjectTree } from '~/layout/panel-layout/ProjectTree/ProjectTree'
 import { projectTreeDataLogic } from '~/layout/panel-layout/ProjectTree/projectTreeDataLogic'
@@ -186,6 +189,7 @@ export function NavTabBrowse(): JSX.Element {
     const isProductAutonomyEnabled = useFeatureFlag('PRODUCT_AUTONOMY')
     const { recentItems, recentItemsLoading } = useValues(navRecentsLogic)
     const { loadRecentItems } = useActions(navRecentsLogic)
+    const { openModal: openEditCustomProductsModal } = useActions(editCustomProductsModalLogic)
     const currentPath = removeProjectIdIfPresent(pathname)
 
     function handlePanelTriggerClick(item: PanelLayoutNavIdentifier): void {
@@ -394,11 +398,23 @@ export function NavTabBrowse(): JSX.Element {
                     className="mt-2 group/colorful-product-icons colorful-product-icons-true"
                     data-attr="nav-section-apps"
                 >
-                    <SectionTrigger icon={<IconApps />} label="Apps" isCollapsed={isLayoutNavCollapsed} />
+                    <div className="flex items-center pr-[2px]">
+                        <SectionTrigger icon={<IconApps />} label="My apps" isCollapsed={isLayoutNavCollapsed} />
+                        <ButtonPrimitive
+                            iconOnly
+                            tooltip="Edit my sidebar apps"
+                            tooltipPlacement="right"
+                            onClick={openEditCustomProductsModal}
+                            data-attr="edit-sidebar-apps-button"
+                            className="opacity-50 hover:!opacity-100 transition-all duration-50 -outline-offset-2 focus-visible:opacity-100 z-5"
+                        >
+                            <IconGear className="size-3 text-secondary" />
+                        </ButtonPrimitive>
+                    </div>
                     <Collapsible.Panel className="-ml-2 pl-3 pr-1 w-[calc(100%+(var(--spacing)*4))]">
                         {(expandedNavSections.apps ?? false) && (
                             <ProjectTree
-                                root="products://"
+                                root="custom-products://"
                                 onlyTree
                                 treeSize={isLayoutNavCollapsed ? 'narrow' : 'default'}
                             />
@@ -406,6 +422,8 @@ export function NavTabBrowse(): JSX.Element {
                     </Collapsible.Panel>
                 </Collapsible>
             )}
+
+            <EditCustomProductsModal />
         </ScrollableShadows>
     )
 }
