@@ -18,6 +18,8 @@ from products.experiments.backend.facade import create_experiment
 from products.experiments.backend.models.experiment import Experiment
 from products.experiments.backend.presentation.serializers import ExperimentCreateSerializer
 
+from ee.clickhouse.views.experiments import ExperimentSerializer
+
 
 class ExperimentViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.GenericViewSet):
     """
@@ -69,20 +71,8 @@ class ExperimentViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, views
             # (will be caught by DRF's exception handler)
             raise
 
-        # Convert DTO to response format
-        # For now, return a simple dict matching the Experiment model structure
-        # In the future, we can create a response serializer
+        # Convert DTO to response format using ExperimentSerializer
+        # This ensures we return the same response format as the old endpoint
         experiment = Experiment.objects.get(id=experiment_dto.id)
-        response_data = {
-            "id": experiment.id,
-            "name": experiment.name,
-            "description": experiment.description,
-            "feature_flag_key": experiment.feature_flag.key,
-            "feature_flag": experiment.feature_flag.id,
-            "start_date": experiment.start_date,
-            "end_date": experiment.end_date,
-            "created_at": experiment.created_at,
-            "updated_at": experiment.updated_at,
-        }
-
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        response_serializer = ExperimentSerializer(experiment, context=self.get_serializer_context())
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
