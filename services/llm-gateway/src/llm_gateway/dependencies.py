@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from llm_gateway.auth.models import AuthenticatedUser
 from llm_gateway.auth.service import AuthService, get_auth_service
+from llm_gateway.config import get_settings
 from llm_gateway.products.config import ALLOWED_PRODUCTS, check_product_access, resolve_product_alias
 from llm_gateway.rate_limiting.cost_refresh import ensure_costs_fresh
 from llm_gateway.rate_limiting.runner import ThrottleRunner
@@ -18,6 +19,7 @@ from llm_gateway.request_context import (
     get_request_id,
     set_throttle_context,
 )
+from llm_gateway.services.plan_resolver import PlanResolver
 
 logger = structlog.get_logger(__name__)
 
@@ -157,11 +159,29 @@ async def enforce_throttles(
     else:
         end_user_id = await _extract_end_user_id_from_body(request)
 
+    plan_key: str | None = None
+    in_trial_period: bool = True
+    settings = get_settings()
+    if product == "posthog_code" and settings.plan_aware_throttling_enabled:
+        plan_resolver: PlanResolver = request.app.state.plan_resolver
+        auth_header = request.headers.get("Authorization", "")
+        try:
+            plan_info = await plan_resolver.get_plan(
+                user_id=user.user_id,
+                auth_header=auth_header,
+            )
+            plan_key = plan_info.plan_key
+            in_trial_period = plan_info.in_trial_period
+        except Exception:
+            logger.warning("plan_resolve_failed", user_id=user.user_id)
+
     context = ThrottleContext(
         user=user,
         product=product,
         request_id=get_request_id() or None,
         end_user_id=end_user_id,
+        plan_key=plan_key,
+        in_trial_period=in_trial_period,
     )
     request.state.throttle_context = context
     set_throttle_context(runner, context)
