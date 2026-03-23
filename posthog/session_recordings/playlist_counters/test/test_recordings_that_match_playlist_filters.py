@@ -501,6 +501,13 @@ class TestRecordingsThatMatchPlaylistFilters(APIBaseTest, QueryMatchingTest):
                 (timezone.now() + timedelta(days=5)).isoformat(),
                 ["session_new"],
             ),
+            (
+                "new_result_overwrites_cached_expiry_for_same_session",
+                {"session_shared": (timezone.now() - timedelta(days=1)).isoformat()},
+                "session_shared",
+                (timezone.now() + timedelta(days=5)).isoformat(),
+                ["session_shared"],
+            ),
         ]
     )
     @patch("posthoganalytics.capture_exception")
