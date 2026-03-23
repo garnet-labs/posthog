@@ -390,6 +390,7 @@
          raw_sessions_v3.has_autocapture AS has_autocapture,
          raw_sessions_v3.hosts AS hosts,
          raw_sessions_v3.emails AS emails,
+         raw_sessions_v3.event_names AS event_names,
          raw_sessions_v3.has_replay_events AS has_replay_events
   FROM raw_sessions_v3
   WHERE equals(raw_sessions_v3.team_id, 99999)
