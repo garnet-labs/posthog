@@ -14,22 +14,25 @@ from temporalio.worker import Worker
 
 from posthog.hogql import ast
 
-from posthog.temporal.data_imports.signals.registry import SignalEmitterOutput, SignalSourceTableConfig
-from posthog.temporal.data_imports.workflow_activities.emit_signals import (
+from posthog.temporal.data_imports.signals.fetchers.data_warehouse import data_warehouse_record_fetcher
+from posthog.temporal.data_imports.signals.pipeline import (
     LLM_MAX_ATTEMPTS,
     TEMPORAL_PAYLOAD_MAX_BYTES,
+    _check_actionability,
+    _summarize_description,
+    build_emitter_outputs,
+    emit_signals,
+    filter_actionable,
+    summarize_long_descriptions,
+)
+from posthog.temporal.data_imports.signals.registry import SignalEmitterOutput, SignalSourceTableConfig
+from posthog.temporal.data_imports.workflow_activities.emit_signals import (
     EmitDataImportSignalsWorkflow,
     EmitSignalsActivityInputs,
-    _build_emitter_outputs,
-    _check_actionability,
-    _emit_signals,
-    _filter_actionable,
-    _query_new_records,
-    _summarize_description,
-    _summarize_long_descriptions,
 )
 
-MODULE_PATH = "posthog.temporal.data_imports.workflow_activities.emit_signals"
+PIPELINE_MODULE_PATH = "posthog.temporal.data_imports.signals.pipeline"
+FETCHER_MODULE_PATH = "posthog.temporal.data_imports.signals.fetchers.data_warehouse"
 
 
 def _make_config(**overrides: Any) -> SignalSourceTableConfig:
@@ -44,6 +47,7 @@ def _make_config(**overrides: Any) -> SignalSourceTableConfig:
             weight=0.5,
             extra=record,
         ),
+        "record_fetcher": data_warehouse_record_fetcher,
         "partition_field": "created_at",
         "fields": ("id", "description"),
     }
@@ -89,14 +93,12 @@ class TestQueryNewRecords:
         mock_result.columns = ["id", "name"]
         mock_result.results = [(1, "alice")]
 
-        with patch(f"{MODULE_PATH}.execute_hogql_query", return_value=mock_result):
-            with patch(f"{MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
-                records = _query_new_records(
+        with patch(f"{FETCHER_MODULE_PATH}.execute_hogql_query", return_value=mock_result):
+            with patch(f"{FETCHER_MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
+                records = data_warehouse_record_fetcher(
                     team=MagicMock(),
-                    table_name="test_table",
-                    last_synced_at="2025-01-01T00:00:00Z",
                     config=config,
-                    extra={},
+                    context={"table_name": "test_table", "last_synced_at": "2025-01-01T00:00:00Z", "extra": {}},
                 )
 
         query_arg = mock_parse.call_args[0][0]
@@ -113,14 +115,12 @@ class TestQueryNewRecords:
         mock_result.columns = ["id", "name"]
         mock_result.results = [(1, "alice")]
 
-        with patch(f"{MODULE_PATH}.execute_hogql_query", return_value=mock_result):
-            with patch(f"{MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
-                _query_new_records(
+        with patch(f"{FETCHER_MODULE_PATH}.execute_hogql_query", return_value=mock_result):
+            with patch(f"{FETCHER_MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
+                data_warehouse_record_fetcher(
                     team=MagicMock(),
-                    table_name="test_table",
-                    last_synced_at="2025-01-01T00:00:00Z",
                     config=config,
-                    extra={},
+                    context={"table_name": "test_table", "last_synced_at": "2025-01-01T00:00:00Z", "extra": {}},
                 )
 
         query_arg = mock_parse.call_args[0][0]
@@ -132,14 +132,12 @@ class TestQueryNewRecords:
         mock_result.results = []
         mock_result.columns = []
 
-        with patch(f"{MODULE_PATH}.execute_hogql_query", return_value=mock_result):
-            with patch(f"{MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
-                _query_new_records(
+        with patch(f"{FETCHER_MODULE_PATH}.execute_hogql_query", return_value=mock_result):
+            with patch(f"{FETCHER_MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
+                data_warehouse_record_fetcher(
                     team=MagicMock(),
-                    table_name="test_table",
-                    last_synced_at=None,
                     config=config,
-                    extra={},
+                    context={"table_name": "test_table", "last_synced_at": None, "extra": {}},
                 )
 
         query_arg = mock_parse.call_args[0][0]
@@ -155,14 +153,12 @@ class TestQueryNewRecords:
         mock_result.results = []
         mock_result.columns = []
 
-        with patch(f"{MODULE_PATH}.execute_hogql_query", return_value=mock_result):
-            with patch(f"{MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
-                _query_new_records(
+        with patch(f"{FETCHER_MODULE_PATH}.execute_hogql_query", return_value=mock_result):
+            with patch(f"{FETCHER_MODULE_PATH}.parse_select", return_value="parsed") as mock_parse:
+                data_warehouse_record_fetcher(
                     team=MagicMock(),
-                    table_name="test_table",
-                    last_synced_at=None,
                     config=config,
-                    extra={},
+                    context={"table_name": "test_table", "last_synced_at": None, "extra": {}},
                 )
 
         query_arg = mock_parse.call_args[0][0]
@@ -172,16 +168,13 @@ class TestQueryNewRecords:
         config = _make_config()
 
         with (
-            patch(f"{MODULE_PATH}.execute_hogql_query", side_effect=Exception("query failed")),
-            patch(f"{MODULE_PATH}.parse_select", return_value="parsed"),
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{FETCHER_MODULE_PATH}.execute_hogql_query", side_effect=Exception("query failed")),
+            patch(f"{FETCHER_MODULE_PATH}.parse_select", return_value="parsed"),
         ):
-            records = _query_new_records(
+            records = data_warehouse_record_fetcher(
                 team=MagicMock(),
-                table_name="test_table",
-                last_synced_at="2025-01-01T00:00:00Z",
                 config=config,
-                extra={},
+                context={"table_name": "test_table", "last_synced_at": "2025-01-01T00:00:00Z", "extra": {}},
             )
 
         assert records == []
@@ -195,7 +188,7 @@ class TestBuildEmitterOutputs:
             return None
 
         records = [{"id": 1, "valid": True}, {"id": 2, "valid": False}, {"id": 3, "valid": True}]
-        outputs, error_count = _build_emitter_outputs(team_id=1, records=records, emitter=selective_emitter)
+        outputs, error_count = build_emitter_outputs(team_id=1, records=records, emitter=selective_emitter)
 
         assert [o.source_id for o in outputs] == ["1", "3"]
         assert error_count == 0
@@ -213,7 +206,7 @@ class TestBuildEmitterOutputs:
                 extra={"created_at": dt, "name": "keep_as_is"},
             )
 
-        outputs, _ = _build_emitter_outputs(team_id=1, records=[{"id": 1}], emitter=emitter_with_datetime)
+        outputs, _ = build_emitter_outputs(team_id=1, records=[{"id": 1}], emitter=emitter_with_datetime)
 
         assert outputs[0].extra["created_at"] == "2025-06-15T12:30:00+00:00"
         assert outputs[0].extra["name"] == "keep_as_is"
@@ -295,11 +288,11 @@ class TestFilterActionable:
         mock_client.models.generate_content = mock_generate
 
         with (
-            patch(f"{MODULE_PATH}.genai") as mock_genai,
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.genai") as mock_genai,
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
             mock_genai.AsyncClient.return_value = mock_client
-            result = await _filter_actionable(outputs, "prompt {description}", extra={})
+            result = await filter_actionable(outputs, "prompt {description}", extra={})
 
         assert [o.source_id for o in result] == ["1", "3"]
 
@@ -346,7 +339,7 @@ class TestSummarizeDescription:
         original = "x" * 500
         output = _make_output(description=original)
 
-        with patch(f"{MODULE_PATH}.posthoganalytics"):
+        with patch(f"{PIPELINE_MODULE_PATH}.posthoganalytics"):
             result = await _summarize_description(client, output, self.PROMPT, self.THRESHOLD)
 
         assert result.description == original[: self.THRESHOLD]
@@ -387,11 +380,11 @@ class TestSummarizeLongDescriptions:
         mock_client.models.generate_content = AsyncMock(return_value=mock_response)
 
         with (
-            patch(f"{MODULE_PATH}.genai") as mock_genai,
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.genai") as mock_genai,
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
             mock_genai.AsyncClient.return_value = mock_client
-            result = await _summarize_long_descriptions([short, long], self.PROMPT, self.THRESHOLD, extra={})
+            result = await summarize_long_descriptions([short, long], self.PROMPT, self.THRESHOLD, extra={})
 
         assert result[0].description == "short"
         assert result[1].description == "Summarized."
@@ -400,7 +393,7 @@ class TestSummarizeLongDescriptions:
     async def test_returns_unchanged_when_all_under_threshold(self):
         outputs = [_make_output(source_id="1", description="short"), _make_output(source_id="2", description="also")]
 
-        result = await _summarize_long_descriptions(outputs, self.PROMPT, self.THRESHOLD, extra={})
+        result = await summarize_long_descriptions(outputs, self.PROMPT, self.THRESHOLD, extra={})
 
         assert result == outputs
 
@@ -412,10 +405,10 @@ class TestEmitSignals:
         team = MagicMock()
 
         with (
-            patch(f"{MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
-            count = await _emit_signals(team=team, outputs=[output], extra={})
+            count = await emit_signals(team=team, outputs=[output], extra={})
 
         assert count == 1
         mock_emit.assert_called_once_with(
@@ -440,10 +433,10 @@ class TestEmitSignals:
                 raise Exception("emit failed")
 
         with (
-            patch(f"{MODULE_PATH}.emit_signal", side_effect=mock_emit),
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.emit_signal", side_effect=mock_emit),
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
-            count = await _emit_signals(team=MagicMock(), outputs=outputs, extra={})
+            count = await emit_signals(team=MagicMock(), outputs=outputs, extra={})
 
         assert count == 2
         assert call_count == 3
@@ -461,10 +454,10 @@ class TestEmitSignals:
         )
 
         with (
-            patch(f"{MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
-            count = await _emit_signals(team=MagicMock(), outputs=[output], extra={})
+            count = await emit_signals(team=MagicMock(), outputs=[output], extra={})
 
         assert count == 1
         mock_emit.assert_called_once()
@@ -476,11 +469,11 @@ class TestEmitSignals:
         output = _make_output(source_id="1", description=huge_description)
 
         with (
-            patch(f"{MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
             with pytest.raises(RuntimeError, match="All 1 signal emissions failed"):
-                await _emit_signals(team=MagicMock(), outputs=[output], extra={})
+                await emit_signals(team=MagicMock(), outputs=[output], extra={})
 
         mock_emit.assert_not_called()
 
@@ -489,11 +482,11 @@ class TestEmitSignals:
         outputs = [_make_output(source_id="1"), _make_output(source_id="2")]
 
         with (
-            patch(f"{MODULE_PATH}.emit_signal", side_effect=Exception("boom")),
-            patch(f"{MODULE_PATH}.activity"),
+            patch(f"{PIPELINE_MODULE_PATH}.emit_signal", side_effect=Exception("boom")),
+            patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
             with pytest.raises(RuntimeError, match="All 2 signal emissions failed"):
-                await _emit_signals(team=MagicMock(), outputs=outputs, extra={})
+                await emit_signals(team=MagicMock(), outputs=outputs, extra={})
 
 
 class TestEmitDataImportSignalsWorkflow:
