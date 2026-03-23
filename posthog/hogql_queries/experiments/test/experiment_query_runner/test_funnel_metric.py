@@ -11,7 +11,6 @@ from posthog.test.base import (
     flush_persons_and_events,
     snapshot_clickhouse_queries,
 )
-from pytest import mark
 
 from django.test import override_settings
 
@@ -22,6 +21,7 @@ from posthog.schema import (
     ActionsNode,
     EventPropertyFilter,
     EventsNode,
+    ExperimentDataWarehouseNode,
     ExperimentFunnelMetric,
     ExperimentQuery,
     FunnelConversionWindowTimeUnit,
@@ -660,10 +660,9 @@ class TestExperimentFunnelMetric(ExperimentQueryRunnerBaseTest):
             # Skip precomputed for data warehouse - not yet supported
         ]
     )
-    @mark.skip("Funnel metrics on data warehouse tables are not supported yet")
     @snapshot_clickhouse_queries
     def test_query_runner_data_warehouse_funnel_metric(self, name, use_precomputation):
-        # table_name = self.create_data_warehouse_table_with_usage()
+        table_name = self.create_data_warehouse_table_with_usage()
 
         feature_flag = self.create_feature_flag()
         experiment = self.create_experiment(
@@ -674,15 +673,13 @@ class TestExperimentFunnelMetric(ExperimentQueryRunnerBaseTest):
         feature_flag_property = f"$feature/{feature_flag.key}"
 
         metric = ExperimentFunnelMetric(
-            # TODO: fix this once supported
-            # source=ExperimentDataWarehouseNode(
-            #     table_name=table_name,
-            #     events_join_key="properties.$user_id",
-            #     data_warehouse_join_key="userid",
-            #     timestamp_field="ds",
-            # ),
             series=[
-                EventsNode(event="purchase"),
+                ExperimentDataWarehouseNode(
+                    table_name=table_name,
+                    events_join_key="properties.$user_id",
+                    data_warehouse_join_key="userid",
+                    timestamp_field="ds",
+                ),
             ],
         )
         experiment_query = ExperimentQuery(
@@ -727,10 +724,13 @@ class TestExperimentFunnelMetric(ExperimentQueryRunnerBaseTest):
         test_result = result.variant_results[0]
         assert test_result is not None
 
-        self.assertEqual(control_result.sum, 1)  # success_count
-        self.assertEqual(test_result.sum, 3)  # success_count
-        self.assertEqual(control_result.number_of_samples - control_result.sum, 6)  # failure_count
-        self.assertEqual(test_result.number_of_samples - test_result.sum, 6)  # failure_count
+        # usage.csv has rows for user_control_0..5 and user_test_0..6
+        # Control: 7 exposed, 6 have DW rows → 6 successes, 1 failure
+        # Test: 9 exposed, 7 have DW rows → 7 successes, 2 failures
+        self.assertEqual(control_result.sum, 6)  # success_count
+        self.assertEqual(test_result.sum, 7)  # success_count
+        self.assertEqual(control_result.number_of_samples - control_result.sum, 1)  # failure_count
+        self.assertEqual(test_result.number_of_samples - test_result.sum, 2)  # failure_count
 
     @parameterized.expand(
         [
