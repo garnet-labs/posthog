@@ -27,8 +27,11 @@ grep -q 'SESSION_COOKIE_NAME.*get_from_env' posthog/settings/web.py || \
 # When running as a non-root UID (the default — see docker-compose.sandbox.yml),
 # HOME and cache dirs point to unwritable locations. Redirect to /tmp.
 export HOME=/tmp/sandbox-home
+export PATH="/usr/local/cargo/bin:$PATH"
+
 export UV_CACHE_DIR=/cache/uv
 export UV_LINK_MODE=copy
+export UV_PROJECT_ENVIRONMENT=/usr/local/
 export XDG_CACHE_HOME=/tmp/sandbox-cache
 export COREPACK_ENABLE_AUTO_PIN=0
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -50,13 +53,10 @@ mkdir -p "$CARGO_TARGET_DIR"
 export npm_config_store_dir=/cache/pnpm
 
 echo "==> Installing Python dependencies..."
-uv sync
-
-# Activate the venv so python/pip resolve to the right environment
-source .venv/bin/activate
+uv sync --no-editable
 
 # Make hogli available — normally done by flox on-activate.sh
-ln -sfn "$(pwd)/bin/hogli" .venv/bin/hogli
+ln -sfn /workspace/bin/hogli /usr/local/bin/hogli
 
 echo "==> Installing Node dependencies..."
 # CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed because
@@ -100,4 +100,4 @@ echo "==> Starting PostHog via mprocs in tmux..."
 # Use `sandbox shell <branch>` to attach and see the mprocs UI.
 rm -f /workspace/bin/start.lock
 
-exec tmux -L sandbox new-session -s posthog "bash -c 'source .venv/bin/activate && bin/start'"
+exec tmux -L sandbox new-session -s posthog "bin/start"
