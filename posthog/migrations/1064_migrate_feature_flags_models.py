@@ -57,6 +57,67 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Update FK references first — must happen while posthog.FeatureFlag
+        # still exists in state so Django can resolve the old FK target
+        migrations.AlterField(
+            model_name="survey",
+            name="internal_response_sampling_flag",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="surveys_internal_response_sampling_flag",
+                related_query_name="surveys_internal_response_sampling_flag",
+                to="feature_flags.featureflag",
+            ),
+        ),
+        migrations.AlterField(
+            model_name="survey",
+            name="internal_targeting_flag",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="surveys_internal_targeting_flag",
+                related_query_name="survey_internal_targeting_flag",
+                to="feature_flags.featureflag",
+            ),
+        ),
+        migrations.AlterField(
+            model_name="survey",
+            name="linked_flag",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="surveys_linked_flag",
+                related_query_name="survey_linked_flag",
+                to="feature_flags.featureflag",
+            ),
+        ),
+        migrations.AlterField(
+            model_name="survey",
+            name="targeting_flag",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="surveys_targeting_flag",
+                related_query_name="survey_targeting_flag",
+                to="feature_flags.featureflag",
+            ),
+        ),
+        migrations.AlterField(
+            model_name="taggeditem",
+            name="feature_flag",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="tagged_items",
+                to="feature_flags.featureflag",
+            ),
+        ),
         # State-only: remove models from posthog app state (tables stay)
         migrations.SeparateDatabaseAndState(
             state_operations=[
@@ -196,66 +257,6 @@ class Migration(migrations.Migration):
                 ),
             ],
             database_operations=[],
-        ),
-        # Real DB operations: update FK references in models that stay in posthog
-        migrations.AlterField(
-            model_name="survey",
-            name="internal_response_sampling_flag",
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name="surveys_internal_response_sampling_flag",
-                related_query_name="surveys_internal_response_sampling_flag",
-                to="feature_flags.featureflag",
-            ),
-        ),
-        migrations.AlterField(
-            model_name="survey",
-            name="internal_targeting_flag",
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name="surveys_internal_targeting_flag",
-                related_query_name="survey_internal_targeting_flag",
-                to="feature_flags.featureflag",
-            ),
-        ),
-        migrations.AlterField(
-            model_name="survey",
-            name="linked_flag",
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name="surveys_linked_flag",
-                related_query_name="survey_linked_flag",
-                to="feature_flags.featureflag",
-            ),
-        ),
-        migrations.AlterField(
-            model_name="survey",
-            name="targeting_flag",
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name="surveys_targeting_flag",
-                related_query_name="survey_targeting_flag",
-                to="feature_flags.featureflag",
-            ),
-        ),
-        migrations.AlterField(
-            model_name="taggeditem",
-            name="feature_flag",
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.CASCADE,
-                related_name="tagged_items",
-                to="feature_flags.featureflag",
-            ),
         ),
         # Update content types
         migrations.RunPython(update_content_types, reverse_content_types),
