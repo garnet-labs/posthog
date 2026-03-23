@@ -179,8 +179,11 @@ def _setup_from_intents(intent_map: IntentMap) -> DevenvConfig:
 
     if not selected_intents:
         click.echo("")
-        click.echo(click.style("Minimal mode:", fg="yellow") + " only backend + frontend + database will start.")
-        click.echo("No celery, nodejs, or other services. Exclude docker-compose if you manage docker yourself.")
+        click.echo(
+            click.style("Minimal mode:", fg="yellow")
+            + " backend + frontend + core docker (db, redis, clickhouse, kafka)."
+        )
+        click.echo("No celery, nodejs, capture, or other service processes.")
 
     return DevenvConfig(intents=selected_intents)
 

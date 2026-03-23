@@ -21,7 +21,7 @@ capabilities:
     event_ingestion:
         description: 'Kafka-based event pipeline for event capture'
         requires: [core_infra]
-        docker_profiles: []
+        docker_profiles: [routing, objectstorage]
 
     property_definitions:
         description: 'Track and define event/person properties'
@@ -41,7 +41,7 @@ capabilities:
     flag_evaluation:
         description: 'Fast feature flag evaluation service'
         requires: [core_infra]
-        docker_profiles: []
+        docker_profiles: [flags]
 
     coordination:
         description: 'etcd-based coordination for PersonHog and Kafka partition assignment'
@@ -97,7 +97,7 @@ capabilities:
     livestream:
         description: 'Real-time event streaming'
         requires: [event_ingestion]
-        docker_profiles: []
+        docker_profiles: [livestream]
 
     cyclotron:
         description: 'Cyclotron job queue infrastructure (includes shadow for testing)'
@@ -183,7 +183,7 @@ capabilities:
 # Intents map to products/features developers work on
 intents:
     backend_only:
-        description: 'Minimal setup - just backend + frontend (manage docker yourself)'
+        description: 'Minimal setup - backend + frontend + core database stack only'
         capabilities: []
 
     product_analytics:

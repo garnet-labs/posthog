@@ -11,6 +11,22 @@
 # Services not listed here have no profile constraint and always start.
 
 services:
+    # Routing - reverse proxy for capture/flags/plugins/replay routing
+    proxy:
+        profiles: [routing]
+
+    # Object storage - S3 emulator (MinIO) for replay blobs, batch exports, etc.
+    objectstorage:
+        profiles: [objectstorage]
+
+    # Feature flag evaluation - Redis-backed flag service
+    feature-flags:
+        profiles: [flags]
+
+    # Redis cluster - required by livestream service
+    redis-cluster:
+        profiles: [livestream]
+
     # Temporal capability - workflow orchestration
     temporal:
         profiles: [temporal]
@@ -53,4 +69,4 @@ services:
     etcd:
         profiles: [etcd]
 # Core services NOT listed = always start:
-# - proxy, db, redis7, clickhouse, zookeeper, kafka, objectstorage, feature-flags
+# - db, redis7, clickhouse, zookeeper, kafka
