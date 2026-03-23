@@ -265,6 +265,22 @@ class TestDashboard(APIBaseTest, QueryMatchingTest):
         dashboard.refresh_from_db()
         self.assertEqual(dashboard.filters, {})
 
+    def test_cannot_update_dashboard_with_invalid_variables(self):
+        dashboard = Dashboard.objects.create(
+            team=self.team,
+            name="dashboard",
+            created_by=self.user,
+            variables={"existing": "value"},
+        )
+        self.dashboard_api.update_dashboard(
+            dashboard.pk,
+            {"variables": ["not", "a", "dict"]},
+            expected_status=status.HTTP_400_BAD_REQUEST,
+        )
+
+        dashboard.refresh_from_db()
+        self.assertEqual(dashboard.variables, {"existing": "value"})
+
     def test_create_dashboard_item(self):
         dashboard = Dashboard.objects.create(team=self.team, name="public dashboard")
         self.dashboard_api.create_insight(
@@ -910,6 +926,13 @@ class TestDashboard(APIBaseTest, QueryMatchingTest):
             team=ANY,
             request=ANY,
         )
+
+    def test_invalid_template_key_returns_400(self):
+        _, response = self.dashboard_api.create_dashboard(
+            {"name": "bad template", "use_template": "NONEXISTENT_KEY_abc123"},
+            expected_status=status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(response["attr"], "use_template")
 
     def test_dashboard_creation_validation(self):
         existing_dashboard = Dashboard.objects.create(team=self.team, name="existing dashboard", created_by=self.user)
@@ -1672,6 +1695,7 @@ class TestDashboard(APIBaseTest, QueryMatchingTest):
 
         assert response.json()["tiles"] == [
             {
+                "button_tile": None,
                 "color": None,
                 "filters_overrides": {},
                 "id": ANY,
@@ -1689,6 +1713,7 @@ class TestDashboard(APIBaseTest, QueryMatchingTest):
                     "last_modified_by": None,
                     "team": self.team.pk,
                 },
+                "transparent_background": None,
             },
         ]
 
@@ -1789,12 +1814,14 @@ class TestDashboard(APIBaseTest, QueryMatchingTest):
                     "hogql": ANY,
                     "types": ANY,
                 },
+                "button_tile": None,
                 "is_cached": False,
                 "last_refresh": None,
                 "layouts": {},
                 "order": 0,
                 "show_description": None,
                 "text": None,
+                "transparent_background": None,
             },
         ]
 

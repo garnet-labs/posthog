@@ -1,12 +1,13 @@
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
-import React from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
-import { IconThumbsDown, IconThumbsUp } from '@posthog/icons'
+import { IconInfo, IconThumbsDown, IconThumbsUp } from '@posthog/icons'
 import { lemonToast } from '@posthog/lemon-ui'
 
 import { CardMeta } from 'lib/components/Cards/CardMeta'
 import { TopHeading } from 'lib/components/Cards/InsightCard/TopHeading'
+import { EditableField } from 'lib/components/EditableField/EditableField'
 import { ExportButton } from 'lib/components/ExportButton/ExportButton'
 import { ObjectTags } from 'lib/components/ObjectTags/ObjectTags'
 import { TZLabel } from 'lib/components/TZLabel'
@@ -19,13 +20,14 @@ import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
 import { LemonMenu } from 'lib/lemon-ui/LemonMenu'
 import { LemonTableLoader } from 'lib/lemon-ui/LemonTable/LemonTableLoader'
 import { Link } from 'lib/lemon-ui/Link'
+import { Popover } from 'lib/lemon-ui/Popover'
 import { Spinner } from 'lib/lemon-ui/Spinner'
 import { Splotch, SplotchColor } from 'lib/lemon-ui/Splotch'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { capitalizeFirstLetter } from 'lib/utils'
 import { accessLevelSatisfied } from 'lib/utils/accessControlUtils'
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { DashboardEventSource, eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { insightDataLogic } from 'scenes/insights/insightDataLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
@@ -47,9 +49,11 @@ import {
     DashboardTile,
     ExporterFormat,
     InsightColor,
+    InsightLogicProps,
     QueryBasedInsightModel,
 } from '~/types'
 
+import { getDisplayLabelsToggleText, toggleDisplayLabelsInInsightQuery } from './displayLabelsToggle'
 import { InsightCardProps } from './InsightCard'
 import { InsightDetails } from './InsightDetails'
 import { InsightMoveToDashboardMenu } from './InsightMoveToDashboardMenu'
@@ -115,22 +119,35 @@ export function InsightMeta({
     onDragHandleMouseDown,
 }: InsightMetaProps): JSX.Element {
     const { short_id, name, dashboards, next_allowed_client_refresh: nextAllowedClientRefresh } = insight
-    const { insightProps, insightFeedback } = useValues(insightLogic)
-    const { setInsightFeedback } = useActions(insightLogic)
-    const { exportContext, insightData } = useValues(insightDataLogic(insightProps))
-    const { samplingFactor } = useValues(insightVizDataLogic(insightProps))
+    const insightLogicProps: InsightLogicProps = {
+        dashboardItemId: insight.short_id,
+        dashboardId,
+        cachedInsight: insight,
+        filtersOverride: filtersOverride ?? null,
+        variablesOverride: variablesOverride ?? null,
+        tileFiltersOverride: tile?.filters_overrides ?? null,
+    }
+    const { insightFeedback, canToggleDisplayLabelsForInsight } = useValues(insightLogic(insightLogicProps))
+    const { setInsightFeedback } = useActions(insightLogic(insightLogicProps))
+    const { exportContext, insightData } = useValues(insightDataLogic(insightLogicProps))
+    const { samplingFactor } = useValues(insightVizDataLogic(insightLogicProps))
     const { nameSortedDashboards } = useValues(dashboardsModel)
     const { updateInsightDirect } = useActions(insightsModel)
-    const { reportDashboardInsightMetaUpdated } = useActions(eventUsageLogic)
+    const { reportDashboardInsightMetaUpdated, reportDashboardInsightValuesOnSeriesToggled } =
+        useActions(eventUsageLogic)
     const { featureFlags } = useValues(featureFlagLogic)
 
     const showCompactTile =
-        !!featureFlags[FEATURE_FLAGS.DASHBOARD_TILE_REDESIGN] &&
-        (placement === DashboardPlacement.Dashboard ||
-            placement === DashboardPlacement.ProjectHomepage ||
-            placement === DashboardPlacement.Public)
+        placement === DashboardPlacement.Dashboard ||
+        placement === DashboardPlacement.ProjectHomepage ||
+        placement === DashboardPlacement.Public
+    const isDashboardCardPlacement =
+        placement === DashboardPlacement.Dashboard ||
+        placement === DashboardPlacement.Public ||
+        placement === DashboardPlacement.Builtin
 
     const isSqlInsight = isDataVisualizationNode(insight.query)
+    const displayLabelsToggleText = getDisplayLabelsToggleText(insight.query)
     const showCompactHeading = !showCompactTile || (!filtersOverride?.date_from && !isSqlInsight)
 
     const topHeadingProps = {
@@ -155,6 +172,7 @@ export function InsightMeta({
                   AccessControlLevel.Editor
               )
             : true
+    const canToggleDisplayLabels = isDashboardCardPlacement && canEditInsight && canToggleDisplayLabelsForInsight
 
     // For dashboard-specific actions (remove from dashboard, change tile color), check dashboard permissions
     const currentDashboard = dashboardId ? nameSortedDashboards.find((d) => d.id === dashboardId) : null
@@ -235,6 +253,33 @@ export function InsightMeta({
               ? 'Refreshing...'
               : undefined
 
+    const topHeadingEl = showCompactHeading ? (
+        <TopHeading {...topHeadingProps} showInsightType={!showCompactTile} />
+    ) : null
+    const popoverTopHeadingEl = showCompactTile ? <TopHeading {...topHeadingProps} /> : undefined
+
+    const metaDescriptionEl =
+        insight.description && tile?.show_description === false ? (
+            <LemonMarkdown className="text-xs" lowKeyHeadings>
+                {insight.description}
+            </LemonMarkdown>
+        ) : null
+
+    const metaDetailsEl = showDetailsControls ? (
+        <InsightDetails query={insight.query} footerInfo={insight} variablesOverride={variablesOverride} />
+    ) : null
+
+    const onMetaSave = canEditInsight
+        ? (updates: { name?: string; description?: string }) => {
+              updateInsightDirect(insight, updates)
+              if (updates.description && !tile?.show_description && toggleShowDescription) {
+                  toggleShowDescription()
+              }
+              const attribute = updates.name !== undefined ? 'name' : 'description'
+              reportDashboardInsightMetaUpdated(dashboardId, insight.id, attribute)
+          }
+        : undefined
+
     return (
         <CardMeta
             compact={showCompactTile}
@@ -245,10 +290,8 @@ export function InsightMeta({
             areDetailsShown={areDetailsShown}
             detailsTooltip="Show insight details, such as creator, last edit, and applied filters."
             onMouseDown={onDragHandleMouseDown}
-            topHeading={
-                showCompactHeading ? <TopHeading {...topHeadingProps} showInsightType={!showCompactTile} /> : null
-            }
-            popoverTopHeading={showCompactTile ? <TopHeading {...topHeadingProps} /> : undefined}
+            topHeading={topHeadingEl}
+            popoverTopHeading={popoverTopHeadingEl}
             content={
                 <InsightMetaContent
                     link={urls.insightView(
@@ -266,34 +309,25 @@ export function InsightMeta({
                     tags={insight.tags}
                     compact={showCompactTile}
                     showDescription={tile?.show_description !== false}
+                    infoPopover={
+                        showCompactTile ? (
+                            <CompactInfoPopover
+                                popoverTopHeading={popoverTopHeadingEl ?? topHeadingEl}
+                                metaTitle={name}
+                                metaDescription={metaDescriptionEl}
+                                metaDescriptionText={insight.description || ''}
+                                onMetaSave={onMetaSave}
+                                metaDetails={metaDetailsEl}
+                            />
+                        ) : null
+                    }
                 />
             }
             metaTitle={name}
-            metaDescription={
-                insight.description && tile?.show_description === false ? (
-                    <LemonMarkdown className="text-xs" lowKeyHeadings>
-                        {insight.description}
-                    </LemonMarkdown>
-                ) : null
-            }
+            metaDescription={metaDescriptionEl}
             metaDescriptionText={insight.description || ''}
-            onMetaSave={
-                canEditInsight
-                    ? (updates) => {
-                          updateInsightDirect(insight, updates)
-                          if (updates.description && !tile?.show_description && toggleShowDescription) {
-                              toggleShowDescription()
-                          }
-                          const attribute = updates.name !== undefined ? 'name' : 'description'
-                          reportDashboardInsightMetaUpdated(dashboardId, insight.id, attribute)
-                      }
-                    : undefined
-            }
-            metaDetails={
-                showDetailsControls ? (
-                    <InsightDetails query={insight.query} footerInfo={insight} variablesOverride={variablesOverride} />
-                ) : null
-            }
+            onMetaSave={onMetaSave}
+            metaDetails={metaDetailsEl}
             samplingFactor={samplingFactor}
             moreButtons={
                 <>
@@ -344,11 +378,33 @@ export function InsightMeta({
                     >
                         Duplicate
                     </LemonButton>
+                    {canToggleDisplayLabels && (
+                        <>
+                            <LemonDivider />
+                            <LemonButton
+                                onClick={() => {
+                                    const query = toggleDisplayLabelsInInsightQuery(insight.query)
+                                    if (query !== insight.query) {
+                                        updateInsightDirect(insight, { query })
+                                        reportDashboardInsightValuesOnSeriesToggled(
+                                            dashboardId,
+                                            insight.id,
+                                            DashboardEventSource.MoreDropdown
+                                        )
+                                    }
+                                }}
+                                fullWidth
+                            >
+                                {displayLabelsToggleText}
+                            </LemonButton>
+                            <LemonDivider />
+                        </>
+                    )}
 
                     {/* Dashboard related */}
                     {canEditDashboard && (
                         <>
-                            <LemonDivider />
+                            {!canToggleDisplayLabels && <LemonDivider />}
                             {showCompactTile && toggleShowDescription && !!insight.description && (
                                 <LemonButton onClick={toggleShowDescription} fullWidth>
                                     {tile?.show_description === false ? 'Show description' : 'Hide description'}
@@ -446,7 +502,7 @@ export function InsightMeta({
                                     {
                                         export_format: ExporterFormat.PNG,
                                         insight: insight.id,
-                                        dashboard: insightProps.dashboardId,
+                                        dashboard: insightLogicProps.dashboardId,
                                     },
                                     {
                                         export_format: ExporterFormat.CSV,
@@ -515,6 +571,7 @@ export function InsightMetaContent({
     tags,
     compact,
     showDescription,
+    infoPopover,
 }: {
     title: string
     fallbackTitle?: string
@@ -525,10 +582,15 @@ export function InsightMetaContent({
     tags?: string[]
     compact?: boolean
     showDescription?: boolean
+    infoPopover?: JSX.Element | null
 }): JSX.Element {
     let titleEl: JSX.Element = (
-        <h4 title={!compact ? title : undefined} data-attr="insight-card-title">
-            {title || <i>{fallbackTitle || 'Untitled'}</i>}
+        <h4
+            title={!compact ? title : undefined}
+            data-attr="insight-card-title"
+            className={clsx(infoPopover && 'inline-flex items-center overflow-visible')}
+        >
+            <span className={clsx(infoPopover && 'truncate')}>{title || <i>{fallbackTitle || 'Untitled'}</i>}</span>
             {(loading || loadingQueued) && (
                 <Tooltip
                     title={loading ? 'This insight is loading results.' : 'This insight is waiting to load results.'}
@@ -540,6 +602,7 @@ export function InsightMetaContent({
                     </span>
                 </Tooltip>
             )}
+            {infoPopover}
         </h4>
     )
     if (link) {
@@ -561,5 +624,134 @@ export function InsightMetaContent({
             {!compact && tags && tags.length > 0 && <ObjectTags tags={tags} staticOnly />}
             <LemonTableLoader loading={loading} />
         </>
+    )
+}
+
+function CompactInfoPopover({
+    popoverTopHeading,
+    metaTitle,
+    metaDescription,
+    metaDescriptionText,
+    onMetaSave,
+    metaDetails,
+}: {
+    popoverTopHeading?: JSX.Element | null
+    metaTitle: string
+    metaDescription?: JSX.Element | null
+    metaDescriptionText: string
+    onMetaSave?: (updates: { name?: string; description?: string }) => void
+    metaDetails?: JSX.Element | null
+}): JSX.Element {
+    const [popoverVisible, setPopoverVisible] = useState(false)
+    const [pinned, setPinned] = useState(false)
+    const hoverTimerRef = useRef<ReturnType<typeof setTimeout>>()
+
+    useEffect(() => () => clearTimeout(hoverTimerRef.current), [])
+
+    const clearHoverTimer = (): void => clearTimeout(hoverTimerRef.current)
+
+    const showDetails = useCallback(() => {
+        clearHoverTimer()
+        hoverTimerRef.current = setTimeout(() => setPopoverVisible(true), 300)
+    }, [])
+
+    const hideDetails = useCallback(() => {
+        clearHoverTimer()
+        hoverTimerRef.current = setTimeout(() => setPopoverVisible(false), 800)
+    }, [])
+
+    const handleClickInfo = useCallback(
+        (e: React.MouseEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+            clearHoverTimer()
+            const newPinned = !pinned
+            setPinned(newPinned)
+            setPopoverVisible(newPinned)
+        },
+        [pinned]
+    )
+
+    const handleClickOutside = useCallback(() => {
+        clearHoverTimer()
+        setPinned(false)
+        setPopoverVisible(false)
+    }, [])
+
+    return (
+        <Popover
+            visible={popoverVisible}
+            placement="bottom"
+            showArrow
+            onClickOutside={handleClickOutside}
+            onMouseEnterInside={showDetails}
+            onMouseLeaveInside={pinned ? undefined : hideDetails}
+            overlay={
+                <div
+                    className="p-4 max-w-md space-y-3"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                    }}
+                >
+                    {popoverTopHeading && (
+                        <h5 className="uppercase text-xs font-bold text-muted tracking-wide m-0">
+                            {popoverTopHeading}
+                        </h5>
+                    )}
+                    {onMetaSave ? (
+                        <>
+                            <EditableField
+                                name="title"
+                                value={metaTitle || ''}
+                                onSave={(value) => onMetaSave({ name: value })}
+                                placeholder="Untitled"
+                                saveOnBlur
+                                clickToEdit
+                                compactButtons
+                                compactIcon
+                                className="font-semibold text-sm mt-1"
+                                data-attr="insight-card-title"
+                            />
+                            <EditableField
+                                name="description"
+                                value={metaDescriptionText || ''}
+                                onSave={(value) => onMetaSave({ description: value })}
+                                placeholder="Enter description (optional)"
+                                saveOnBlur
+                                clickToEdit
+                                multiline
+                                markdown
+                                compactButtons
+                                compactIcon
+                                className="text-xs w-full"
+                                data-attr="insight-card-description"
+                            />
+                        </>
+                    ) : (
+                        <>
+                            {metaTitle && <p className="font-semibold m-0">{metaTitle}</p>}
+                            {metaDescription}
+                        </>
+                    )}
+                    {metaDetails}
+                </div>
+            }
+        >
+            <span
+                className="ml-1 flex-shrink-0"
+                onMouseEnter={showDetails}
+                onMouseLeave={pinned ? undefined : hideDetails}
+            >
+                <LemonButton
+                    icon={<IconInfo />}
+                    size="small"
+                    noPadding
+                    data-attr="card-meta-info"
+                    onClick={handleClickInfo}
+                />
+            </span>
+        </Popover>
     )
 }
