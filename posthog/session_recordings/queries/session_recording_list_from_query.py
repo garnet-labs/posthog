@@ -1,7 +1,8 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, Union, cast
+from typing import Any, Literal, NamedTuple, Union, cast
 
 import structlog
+import posthoganalytics
 from opentelemetry import trace
 
 from posthog.schema import (
@@ -16,6 +17,7 @@ from posthog.schema import (
 
 from posthog.hogql import ast
 from posthog.hogql.constants import HogQLGlobalSettings
+from posthog.hogql.database.schema.util.uuid import uuid_uint128_to_uuid_expr
 from posthog.hogql.parser import parse_select
 from posthog.hogql.property import property_to_expr
 
@@ -33,6 +35,27 @@ from posthog.session_recordings.queries.utils import (
     _strip_person_and_event_and_cohort_properties,
     expand_test_account_filters,
 )
+from posthog.types import AnyPropertyFilter
+
+# Mapping from property filter key to sessions v3 array column name
+SESSIONS_V3_PROPERTY_COLUMN_MAP: dict[str, dict[str, str]] = {
+    # event properties
+    "event": {
+        "$host": "hosts",
+        "$current_url": "urls",
+    },
+    # person properties
+    "person": {
+        "email": "emails",
+    },
+}
+
+
+class SessionsV3PropertyFilter(NamedTuple):
+    column: str
+    operator: PropertyOperator
+    value: Any
+
 
 logger = structlog.get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -146,6 +169,49 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
                     remaining_properties.append(prop)
             expanded_query.properties = remaining_properties if remaining_properties else None
 
+        # Intercept eligible property filters to route through sessions v3 instead of
+        # the events table. This avoids expensive events table scans for common filters
+        # like $host, $current_url (event properties) and email (person property).
+        self._sessions_v3_property_filters: list[SessionsV3PropertyFilter] = []
+        self._sessions_v3_event_names: list[str] = []
+        self._use_sessions_v3 = posthoganalytics.feature_enabled(
+            "replay-filters-via-sessions-v3",
+            str(team.id),
+            send_feature_flag_events=False,
+        )
+
+        if self._use_sessions_v3 and expanded_query.properties:
+            remaining_properties_v3: list[AnyPropertyFilter] = []
+            for prop in expanded_query.properties:
+                prop_type = getattr(prop, "type", None)
+                prop_key = getattr(prop, "key", None)
+                column_map = SESSIONS_V3_PROPERTY_COLUMN_MAP.get(prop_type or "", {})
+                column = column_map.get(prop_key or "")
+                if column:
+                    self._sessions_v3_property_filters.append(
+                        SessionsV3PropertyFilter(
+                            column=column,
+                            operator=getattr(prop, "operator", PropertyOperator.EXACT),
+                            value=getattr(prop, "value", None),
+                        )
+                    )
+                else:
+                    remaining_properties_v3.append(prop)
+            expanded_query.properties = remaining_properties_v3 if remaining_properties_v3 else None
+
+        # Intercept simple event entities (no property filters) to route through
+        # sessions v3 event_names column instead of scanning the events table
+        if self._use_sessions_v3 and expanded_query.events:
+            remaining_events: list[dict[str, Any]] = []
+            for event_dict in expanded_query.events:
+                event_name = event_dict.get("id") or event_dict.get("name")
+                has_properties = bool(event_dict.get("properties"))
+                if event_name and not has_properties:
+                    self._sessions_v3_event_names.append(str(event_name))
+                else:
+                    remaining_events.append(event_dict)
+            expanded_query.events = remaining_events if remaining_events else None
+
         super().__init__(team, expanded_query)
 
         # Use offset-based pagination only when offset is explicitly provided, otherwise use cursor-based
@@ -251,6 +317,170 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
 
         return ast.OrderExpr(expr=ast.Field(chain=[order_by]), order=direction)
 
+    def _property_filter_to_array_expr(
+        self, f: SessionsV3PropertyFilter, col_override: ast.Expr | None = None
+    ) -> ast.Expr:
+        """Translate a property filter into an array predicate on a sessions v3 column."""
+        table = "raw_sessions_v3"
+        col: ast.Expr = col_override if col_override is not None else ast.Field(chain=[table, f.column])
+        val = f.value
+
+        match f.operator:
+            case PropertyOperator.EXACT:
+                if isinstance(val, list):
+                    return ast.Call(name="hasAny", args=[col, ast.Constant(value=val)])
+                return ast.Call(name="has", args=[col, ast.Constant(value=val)])
+            case PropertyOperator.IS_NOT:
+                if isinstance(val, list):
+                    return ast.Not(expr=ast.Call(name="hasAny", args=[col, ast.Constant(value=val)]))
+                return ast.Not(expr=ast.Call(name="has", args=[col, ast.Constant(value=val)]))
+            case PropertyOperator.ICONTAINS:
+                return ast.Call(
+                    name="arrayExists",
+                    args=[
+                        ast.Lambda(
+                            args=["x"],
+                            expr=ast.Call(name="ilike", args=[ast.Field(chain=["x"]), ast.Constant(value=f"%{val}%")]),
+                        ),
+                        col,
+                    ],
+                )
+            case PropertyOperator.NOT_ICONTAINS:
+                return ast.Not(
+                    expr=ast.Call(
+                        name="arrayExists",
+                        args=[
+                            ast.Lambda(
+                                args=["x"],
+                                expr=ast.Call(
+                                    name="ilike", args=[ast.Field(chain=["x"]), ast.Constant(value=f"%{val}%")]
+                                ),
+                            ),
+                            col,
+                        ],
+                    )
+                )
+            case PropertyOperator.REGEX:
+                return ast.Call(
+                    name="arrayExists",
+                    args=[
+                        ast.Lambda(
+                            args=["x"],
+                            expr=ast.Call(name="match", args=[ast.Field(chain=["x"]), ast.Constant(value=val)]),
+                        ),
+                        col,
+                    ],
+                )
+            case PropertyOperator.NOT_REGEX:
+                return ast.Not(
+                    expr=ast.Call(
+                        name="arrayExists",
+                        args=[
+                            ast.Lambda(
+                                args=["x"],
+                                expr=ast.Call(name="match", args=[ast.Field(chain=["x"]), ast.Constant(value=val)]),
+                            ),
+                            col,
+                        ],
+                    )
+                )
+            case PropertyOperator.IS_SET:
+                return ast.Call(name="notEmpty", args=[col])
+            case PropertyOperator.IS_NOT_SET:
+                return ast.Call(name="empty", args=[col])
+            case _:
+                # Fallback: treat as exact match
+                return ast.Call(name="has", args=[col, ast.Constant(value=val)])
+
+    @staticmethod
+    def _merged_array_col(table: str, column: str) -> ast.Expr:
+        """Aggregate a SimpleAggregateFunction array column across parts.
+
+        Uses arrayDistinct(arrayFlatten(groupArray(col))) which is the same
+        pattern the sessions v3 HogQL schema uses (collect_array_field)."""
+        return ast.Call(
+            name="arrayDistinct",
+            args=[
+                ast.Call(
+                    name="arrayFlatten",
+                    args=[ast.Call(name="groupArray", args=[ast.Field(chain=[table, column])])],
+                )
+            ],
+        )
+
+    def _sessions_v3_subquery(self) -> ast.SelectQuery | None:
+        """Build a subquery against raw_sessions_v3 that returns session IDs matching
+        the intercepted property and event name filters.
+
+        Because raw_sessions_v3 is an AggregatingMergeTree, multiple parts may exist
+        per session. Array columns (hosts, emails, urls, event_names) must be merged
+        via aggregation before filtering, so predicates go in HAVING."""
+        if not self._sessions_v3_property_filters and not self._sessions_v3_event_names:
+            return None
+
+        table = "raw_sessions_v3"
+        where_exprs: list[ast.Expr] = [
+            ast.CompareOperation(
+                op=ast.CompareOperationOp.Eq,
+                left=ast.Field(chain=[table, "team_id"]),
+                right=ast.Constant(value=self._team.pk),
+            ),
+        ]
+
+        # Date range pruning (safe in WHERE — these are SimpleAggregateFunction min/max)
+        query_date_from = self.query_date_range.date_from()
+        if query_date_from:
+            where_exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.GtEq,
+                    left=ast.Field(chain=[table, "min_timestamp"]),
+                    right=ast.Constant(value=query_date_from - timedelta(days=1)),
+                )
+            )
+        query_date_to = self.query_date_range.date_to()
+        if query_date_to:
+            where_exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.LtEq,
+                    left=ast.Field(chain=[table, "min_timestamp"]),
+                    right=ast.Constant(value=query_date_to + timedelta(days=1)),
+                )
+            )
+
+        # HAVING predicates: array columns must be aggregated before filtering
+        having_exprs: list[ast.Expr] = []
+
+        for f in self._sessions_v3_property_filters:
+            merged_col = self._merged_array_col(table, f.column)
+            having_exprs.append(self._property_filter_to_array_expr(f, col_override=merged_col))
+
+        for event_name in self._sessions_v3_event_names:
+            merged_col = self._merged_array_col(table, "event_names")
+            having_exprs.append(
+                ast.Call(
+                    name="has",
+                    args=[merged_col, ast.Constant(value=event_name)],
+                )
+            )
+
+        # Convert session_id_v7 (UInt128) → string UUID
+        session_id_expr = ast.Call(
+            name="toString",
+            args=[uuid_uint128_to_uuid_expr(ast.Field(chain=[table, "session_id_v7"]))],
+        )
+
+        return ast.SelectQuery(
+            select=[ast.Alias(alias="session_id", expr=session_id_expr)],
+            select_from=ast.JoinExpr(table=ast.Field(chain=[table])),
+            where=ast.And(exprs=where_exprs),
+            having=ast.And(exprs=having_exprs) if having_exprs else None,
+            group_by=[
+                ast.Field(chain=[table, "session_id_v7"]),
+                ast.Field(chain=[table, "session_timestamp"]),
+                ast.Field(chain=[table, "team_id"]),
+            ],
+        )
+
     @tracer.start_as_current_span("SessionRecordingListFromQuery._where_predicates")
     def _where_predicates(self) -> Union[ast.And, ast.Or]:
         exprs: list[ast.Expr] = []
@@ -299,6 +529,17 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
             )
 
         optional_exprs: list[ast.Expr] = []
+
+        # Use sessions v3 subquery for eligible filters instead of scanning events table
+        sessions_v3_subquery = self._sessions_v3_subquery()
+        if sessions_v3_subquery:
+            optional_exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.GlobalIn,
+                    left=ast.Field(chain=["s", "session_id"]),
+                    right=sessions_v3_subquery,
+                )
+            )
 
         # if in PoE mode then we should be pushing person property queries into here
         events_sub_queries = ReplayFiltersEventsSubQuery(

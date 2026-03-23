@@ -86,6 +86,7 @@ RAW_SESSIONS_FIELDS: dict[str, FieldOrTable] = {
     "has_autocapture": BooleanDatabaseField(name="has_autocapture", nullable=False),
     "hosts": StringArrayDatabaseField(name="hosts", nullable=False),
     "emails": StringArrayDatabaseField(name="emails", nullable=False),
+    "event_names": StringArrayDatabaseField(name="event_names", nullable=False),
     "has_replay_events": BooleanDatabaseField(name="has_replay_events", nullable=False),
 }
 
