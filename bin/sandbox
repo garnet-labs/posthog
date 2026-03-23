@@ -631,8 +631,8 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     print()
     success(f"PostHog running at http://localhost:{port}")
     info(f"Worktree: {worktree_path}")
-    info(f"Shell:    bin/sandbox shell {branch}")
-    info(f"Logs:     bin/sandbox logs {branch}")
+    info(f"Shell:    sandbox shell {branch}")
+    info(f"Logs:     sandbox logs {branch}")
 
 
 def cmd_start(branch: str) -> None:
@@ -692,7 +692,7 @@ def cmd_list() -> None:
     entries = registry.list_all()
 
     if not entries:
-        print("No sandboxes found. Create one with: bin/sandbox create <branch>")
+        print("No sandboxes found. Create one with: sandbox create <branch>")
         return
 
     print(f"{'BRANCH':<40} {'PORT':<8} {'STATUS':<10} URL")
@@ -759,7 +759,7 @@ def cmd_nuke() -> None:
 def _require_registered(registry: Registry, branch: str) -> SandboxEntry:
     entry = registry.get(branch)
     if not entry:
-        fatal(f"No sandbox found for branch '{branch}'. Create one with: bin/sandbox create {branch}")
+        fatal(f"No sandbox found for branch '{branch}'. Create one with: sandbox create {branch}")
     return entry
 
 
@@ -775,13 +775,13 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
-  bin/sandbox create aspicer/cool-feature
-  bin/sandbox create aspicer/bugfix main
-  bin/sandbox list
-  bin/sandbox shell aspicer/cool-feature
-  bin/sandbox stop aspicer/cool-feature
-  bin/sandbox start aspicer/cool-feature
-  bin/sandbox destroy aspicer/cool-feature""",
+  sandbox create aspicer/cool-feature
+  sandbox create aspicer/bugfix main
+  sandbox list
+  sandbox shell aspicer/cool-feature
+  sandbox stop aspicer/cool-feature
+  sandbox start aspicer/cool-feature
+  sandbox destroy aspicer/cool-feature""",
     )
     sub = parser.add_subparsers(dest="command")
 
