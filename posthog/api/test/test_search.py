@@ -7,11 +7,12 @@ from django.test.utils import CaptureQueriesContext
 
 from posthog.api.search import ENTITY_MAP, class_queryset, search_entities
 from posthog.helpers.full_text_search import process_query
-from posthog.models import Dashboard, FeatureFlag, Insight, Team
+from posthog.models import Dashboard, Insight, Team
 from posthog.models.hog_flow.hog_flow import HogFlow
 
 from products.early_access_features.backend.models import EarlyAccessFeature
 from products.event_definitions.backend.models.event_definition import EventDefinition
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 from products.notebooks.backend.models import Notebook
 
 

@@ -12,12 +12,12 @@ from parameterized import parameterized
 
 from posthog.cdp.templates.helpers import mock_transpile
 from posthog.models.action.action import Action
-from posthog.models.feature_flag.feature_flag import FeatureFlag
 from posthog.models.hog_functions.hog_function import HogFunction, HogFunctionType
 from posthog.models.plugin import Plugin, PluginConfig, PluginSourceFile
 from posthog.models.project import Project
 from posthog.models.remote_config import RemoteConfig
 
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 from products.surveys.backend.models import Survey
 
 CONFIG_REFRESH_QUERY_COUNT = 6

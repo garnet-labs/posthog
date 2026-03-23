@@ -29,15 +29,15 @@ from posthog.cdp.validation import (
     generate_template_bytecode,
 )
 from posthog.models import Team
-from posthog.models.feature_flag.user_blast_radius import (
-    PERSON_BATCH_SIZE,
-    get_user_blast_radius,
-    get_user_blast_radius_persons,
-)
 from posthog.models.hog_flow.hog_flow import BILLABLE_ACTION_TYPES, HogFlow
 from posthog.models.hog_function_template import HogFunctionTemplate
 from posthog.plugins.plugin_server_api import create_hog_flow_invocation_test
 
+from products.feature_flags.backend.user_blast_radius import (
+    PERSON_BATCH_SIZE,
+    get_user_blast_radius,
+    get_user_blast_radius_persons,
+)
 from products.workflows.backend.models.hog_flow_batch_job import HogFlowBatchJob
 
 logger = structlog.get_logger(__name__)

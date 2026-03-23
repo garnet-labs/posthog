@@ -16,8 +16,9 @@ from unittest.mock import MagicMock, patch
 from posthog import redis
 from posthog.api.feature_flag import _create_usage_dashboard
 from posthog.constants import FlagRequestType
-from posthog.models.feature_flag.feature_flag import FeatureFlag
-from posthog.models.feature_flag.flag_analytics import (
+from posthog.models.team.team import Team
+
+from products.feature_flags.backend.flag_analytics import (
     SDK_LIBRARIES,
     _extract_sdk_breakdown_from_redis,
     capture_team_decide_usage,
@@ -26,7 +27,7 @@ from posthog.models.feature_flag.flag_analytics import (
     get_team_request_library_key,
     increment_request_count,
 )
-from posthog.models.team.team import Team
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 
 class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):

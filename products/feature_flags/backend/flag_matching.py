@@ -46,7 +46,7 @@ from posthog.person_db_router import PERSONS_DB_FOR_READ, PERSONS_DB_FOR_WRITE
 from posthog.queries.base import match_property, properties_to_Q, sanitize_property_key
 from posthog.utils import label_for_team_id_to_track
 
-from .feature_flag import (
+from .models.feature_flag import (
     FeatureFlag,
     FeatureFlagHashKeyOverride,
     get_feature_flags_for_team_in_cache,

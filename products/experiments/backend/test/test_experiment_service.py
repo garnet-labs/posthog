@@ -10,8 +10,7 @@ from django.utils import timezone
 from parameterized import parameterized
 from rest_framework.exceptions import ValidationError
 
-from posthog.models import FeatureFlag, Team
-from posthog.models.evaluation_context import EvaluationContext, FeatureFlagEvaluationContext
+from posthog.models import Team
 
 from products.experiments.backend.experiment_service import ExperimentService
 from products.experiments.backend.models.experiment import (
@@ -21,6 +20,8 @@ from products.experiments.backend.models.experiment import (
     ExperimentSavedMetric,
     ExperimentTimeseriesRecalculation,
 )
+from products.feature_flags.backend.models.evaluation_context import EvaluationContext, FeatureFlagEvaluationContext
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 
 class TestExperimentService(APIBaseTest):

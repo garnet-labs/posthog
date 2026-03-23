@@ -9,8 +9,10 @@ from posthog.schema import FeatureFlagGroupType
 
 from posthog.api.feature_flag import FeatureFlagSerializer
 from posthog.exceptions_capture import capture_exception
-from posthog.models import FeatureFlag, GroupTypeMapping
+from posthog.models import GroupTypeMapping
 from posthog.sync import database_sync_to_async
+
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 from ee.hogai.tool import MaxTool
 

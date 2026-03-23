@@ -27,7 +27,7 @@ class ProductTour(models.Model):
     description = models.TextField(blank=True, default="")
 
     internal_targeting_flag = models.ForeignKey(
-        "posthog.FeatureFlag",
+        "feature_flags.FeatureFlag",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
@@ -36,7 +36,7 @@ class ProductTour(models.Model):
     )
 
     linked_flag = models.ForeignKey(
-        "posthog.FeatureFlag",
+        "feature_flags.FeatureFlag",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

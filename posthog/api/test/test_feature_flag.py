@@ -24,12 +24,9 @@ from rest_framework import status
 from posthog import redis
 from posthog.api.cohort import get_cohort_actors_for_feature_flag
 from posthog.api.feature_flag import FeatureFlagSerializer, extract_etag_from_header
-from posthog.models import FeatureFlag, GroupTypeMapping, TaggedItem, User
+from posthog.models import GroupTypeMapping, TaggedItem, User
 from posthog.models.cohort import Cohort
 from posthog.models.dashboard import Dashboard
-from posthog.models.feature_flag import FeatureFlagDashboards, get_feature_flags_for_team_in_cache
-from posthog.models.feature_flag.feature_flag import FeatureFlagHashKeyOverride
-from posthog.models.feature_flag.flag_status import FeatureFlagStatus
 from posthog.models.group.group import Group
 from posthog.models.group.util import create_group
 from posthog.models.organization import Organization
@@ -42,6 +39,13 @@ from posthog.test.test_utils import create_group_type_mapping_without_created_at
 
 from products.early_access_features.backend.models import EarlyAccessFeature
 from products.experiments.backend.models.experiment import Experiment
+from products.feature_flags.backend.flag_status import FeatureFlagStatus
+from products.feature_flags.backend.models.feature_flag import (
+    FeatureFlag,
+    FeatureFlagDashboards,
+    FeatureFlagHashKeyOverride,
+    get_feature_flags_for_team_in_cache,
+)
 from products.product_tours.backend.models import ProductTour
 from products.surveys.backend.models import Survey
 
@@ -6486,7 +6490,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
         )
 
         # Clear both Redis and S3 caches
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -6862,7 +6866,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
     @patch("django.db.transaction.on_commit", side_effect=lambda func: func())
     def test_local_evaluation_cache_invalidation_on_feature_flag_delete(self, mock_on_commit):
         """Test that cache invalidates when FeatureFlag is deleted."""
-        from posthog.models.feature_flag.local_evaluation import (
+        from products.feature_flags.backend.local_evaluation import (
             flag_definitions_hypercache,
             flag_definitions_without_cohorts_hypercache,
         )
@@ -6937,7 +6941,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
     @patch("django.db.transaction.on_commit", side_effect=lambda func: func())
     def test_local_evaluation_cache_invalidation_on_cohort_delete(self, mock_on_commit):
         """Test that cache invalidates when Cohort is deleted."""
-        from posthog.models.feature_flag.local_evaluation import (
+        from products.feature_flags.backend.local_evaluation import (
             flag_definitions_hypercache,
             flag_definitions_without_cohorts_hypercache,
         )
@@ -7029,7 +7033,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7060,7 +7064,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7100,7 +7104,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7134,7 +7138,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7189,7 +7193,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7239,7 +7243,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7284,7 +7288,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -7324,7 +7328,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             label="Test", user=self.user, scopes=["*"], secure_value=hash_key_value(personal_api_key)
         )
 
-        from posthog.models.feature_flag.local_evaluation import clear_flag_definition_caches
+        from products.feature_flags.backend.local_evaluation import clear_flag_definition_caches
 
         clear_flag_definition_caches(self.team)
 
@@ -9455,7 +9459,7 @@ class TestFeatureFlagEvaluationTags(APIBaseTest):
         self.assertEqual(tag_names, ["app", "docs", "marketing"])
 
         # Check that evaluation contexts are created (using new model)
-        from posthog.models.evaluation_context import FeatureFlagEvaluationContext
+        from products.feature_flags.backend.models.evaluation_context import FeatureFlagEvaluationContext
 
         eval_contexts = FeatureFlagEvaluationContext.objects.filter(feature_flag=flag)
         self.assertEqual(eval_contexts.count(), 2)
@@ -9483,7 +9487,7 @@ class TestFeatureFlagEvaluationTags(APIBaseTest):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        from posthog.models.evaluation_context import FeatureFlagEvaluationContext
+        from products.feature_flags.backend.models.evaluation_context import FeatureFlagEvaluationContext
 
         eval_contexts = FeatureFlagEvaluationContext.objects.filter(feature_flag=flag)
         self.assertEqual(eval_contexts.count(), 1)
@@ -9527,7 +9531,7 @@ class TestFeatureFlagEvaluationTags(APIBaseTest):
             format="json",
         )
 
-        from posthog.models.evaluation_context import FeatureFlagEvaluationContext
+        from products.feature_flags.backend.models.evaluation_context import FeatureFlagEvaluationContext
 
         self.assertEqual(FeatureFlagEvaluationContext.objects.filter(feature_flag=flag).count(), 2)
 
@@ -9552,7 +9556,11 @@ class TestFeatureFlagEvaluationTags(APIBaseTest):
     @pytest.mark.ee
     def test_evaluation_tags_in_minimal_serializer(self):
         from posthog.api.feature_flag import MinimalFeatureFlagSerializer
-        from posthog.models.evaluation_context import EvaluationContext, FeatureFlagEvaluationContext
+
+        from products.feature_flags.backend.models.evaluation_context import (
+            EvaluationContext,
+            FeatureFlagEvaluationContext,
+        )
 
         flag = FeatureFlag.objects.create(
             team=self.team,
@@ -9663,8 +9671,11 @@ class TestFeatureFlagEvaluationTags(APIBaseTest):
 
     @pytest.mark.ee
     def test_evaluation_tags_in_cache(self):
-        from posthog.models.evaluation_context import EvaluationContext, FeatureFlagEvaluationContext
-        from posthog.models.feature_flag import set_feature_flags_for_team_in_cache
+        from products.feature_flags.backend.models.evaluation_context import (
+            EvaluationContext,
+            FeatureFlagEvaluationContext,
+        )
+        from products.feature_flags.backend.models.feature_flag import set_feature_flags_for_team_in_cache
 
         flag = FeatureFlag.objects.create(
             team=self.team,
@@ -9696,8 +9707,10 @@ class TestFeatureFlagEvaluationTags(APIBaseTest):
     @pytest.mark.ee
     def test_evaluation_tags_cache_invalidation(self):
         """Test that cache is invalidated when evaluation tags are updated"""
-
-        from posthog.models.feature_flag import get_feature_flags_for_team_in_cache, set_feature_flags_for_team_in_cache
+        from products.feature_flags.backend.models.feature_flag import (
+            get_feature_flags_for_team_in_cache,
+            set_feature_flags_for_team_in_cache,
+        )
 
         flag = FeatureFlag.objects.create(
             team=self.team,

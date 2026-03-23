@@ -15,7 +15,6 @@ from posthog.models import (
     Cohort,
     Dashboard,
     ExportedAsset,
-    FeatureFlag,
     Group,
     GroupTypeMapping,
     Insight,
@@ -39,6 +38,7 @@ from products.data_warehouse.backend.models.table import DataWarehouseTable as D
 from products.early_access_features.backend.models import EarlyAccessFeature
 from products.error_tracking.backend.models import ErrorTrackingIssue
 from products.experiments.backend.models.experiment import Experiment
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 from products.notebooks.backend.models import Notebook
 from products.surveys.backend.models import Survey
 

@@ -38,9 +38,7 @@ from posthog.models.activity_logging.activity_log import (
 )
 from posthog.models.activity_logging.activity_page import activity_page_response
 from posthog.models.data_color_theme import DataColorTheme
-from posthog.models.evaluation_context import EvaluationContext, TeamDefaultEvaluationContext, normalize_context_name
 from posthog.models.event_ingestion_restriction_config import EventIngestionRestrictionConfig
-from posthog.models.feature_flag import TeamDefaultEvaluationTag
 from posthog.models.group_type_mapping import get_group_types_for_project
 from posthog.models.organization import OrganizationMembership
 from posthog.models.product_intent.product_intent import ProductIntentSerializer, calculate_product_activation
@@ -74,6 +72,12 @@ from posthog.utils import get_instance_realm, get_instance_region, get_ip_addres
 
 from products.customer_analytics.backend.models.team_customer_analytics_config import TeamCustomerAnalyticsConfig
 from products.feature_flags.backend.models import TeamFeatureFlagDefaultsConfig
+from products.feature_flags.backend.models.evaluation_context import (
+    EvaluationContext,
+    TeamDefaultEvaluationContext,
+    normalize_context_name,
+)
+from products.feature_flags.backend.models.feature_flag import TeamDefaultEvaluationTag
 from products.signals.backend.models import SignalSourceConfig
 
 

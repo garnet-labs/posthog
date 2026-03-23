@@ -50,7 +50,7 @@ from posthog.demo.matrix.matrix import Cluster, Matrix
 from posthog.demo.matrix.models import SimEvent
 from posthog.demo.matrix.randomization import Industry
 from posthog.exceptions_capture import capture_exception
-from posthog.models import Action, Cohort, Dashboard, DashboardTile, FeatureFlag, Insight, InsightViewed
+from posthog.models import Action, Cohort, Dashboard, DashboardTile, Insight, InsightViewed
 from posthog.models.oauth import OAuthApplication
 from posthog.storage import object_storage
 
@@ -65,6 +65,7 @@ from products.event_definitions.backend.models.schema import (
     SchemaPropertyGroupProperty,
 )
 from products.experiments.backend.models.experiment import Experiment, ExperimentSavedMetric, ExperimentToSavedMetric
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 from .models import HedgeboxAccount, HedgeboxPerson
 from .taxonomy import (

@@ -50,8 +50,8 @@ class FeatureFlag(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models
     # DEPRECATED: rollout percentage now lives in filters["groups"][N]["rollout_percentage"]
     rollout_percentage = deprecate_field(models.IntegerField(null=True, blank=True))
 
-    team = models.ForeignKey("Team", on_delete=models.CASCADE)
-    created_by = models.ForeignKey("User", on_delete=models.SET_NULL, null=True)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
+    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(null=True, auto_now=True)
     deleted = models.BooleanField(default=False)
@@ -59,7 +59,7 @@ class FeatureFlag(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models
 
     version = models.IntegerField(default=1, null=True)
     last_modified_by = models.ForeignKey(
-        "User",
+        "posthog.User",
         on_delete=models.SET_NULL,
         null=True,
         related_name="updated_feature_flags",
@@ -70,9 +70,9 @@ class FeatureFlag(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models
     performed_rollback = models.BooleanField(null=True, blank=True)
 
     ensure_experience_continuity = models.BooleanField(default=False, null=True, blank=True)
-    usage_dashboard = models.ForeignKey("Dashboard", on_delete=models.SET_NULL, null=True, blank=True)
+    usage_dashboard = models.ForeignKey("posthog.Dashboard", on_delete=models.SET_NULL, null=True, blank=True)
     analytics_dashboards: models.ManyToManyField = models.ManyToManyField(
-        "Dashboard",
+        "posthog.Dashboard",
         through="FeatureFlagDashboards",
         related_name="analytics_dashboards",
         related_query_name="analytics_dashboard",
@@ -128,6 +128,7 @@ class FeatureFlag(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["team", "key"], name="unique key for team")]
+        db_table = "posthog_featureflag"
 
     def __str__(self):
         return f"{self.key} ({self.pk})"
@@ -526,8 +527,8 @@ class FeatureFlagHashKeyOverride(models.Model):
     # DO_NOTHING: Person/Team deletion handled manually via FeatureFlagHashKeyOverride.objects.filter(...).delete()
     # in delete_bulky_postgres_data(). Django CASCADE doesn't work across separate databases.
     # db_constraint=False: No database FK constraint - FeatureFlagHashKeyOverride may live in separate database
-    person = models.ForeignKey("Person", on_delete=models.DO_NOTHING, db_constraint=False)
-    team = models.ForeignKey("Team", on_delete=models.DO_NOTHING, db_constraint=False)
+    person = models.ForeignKey("posthog.Person", on_delete=models.DO_NOTHING, db_constraint=False)
+    team = models.ForeignKey("posthog.Team", on_delete=models.DO_NOTHING, db_constraint=False)
     hash_key = models.CharField(max_length=400)
 
     class Meta:
@@ -539,14 +540,15 @@ class FeatureFlagHashKeyOverride(models.Model):
                 name="Unique hash_key for a user/team/feature_flag combo",
             )
         ]
+        db_table = "posthog_featureflaghashkeyoverride"
 
 
 # DEPRECATED: This model is no longer used, but it's not deleted to avoid downtime
 class FeatureFlagOverride(models.Model):
-    feature_flag = models.ForeignKey("FeatureFlag", on_delete=models.CASCADE)
-    user = models.ForeignKey("User", on_delete=models.CASCADE)
+    feature_flag = models.ForeignKey("feature_flags.FeatureFlag", on_delete=models.CASCADE)
+    user = models.ForeignKey("posthog.User", on_delete=models.CASCADE)
     override_value = models.JSONField()
-    team = models.ForeignKey("Team", on_delete=models.CASCADE)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
 
     class Meta:
         constraints = [
@@ -555,6 +557,7 @@ class FeatureFlagOverride(models.Model):
                 name="unique feature flag for a user/team combo",
             )
         ]
+        db_table = "posthog_featureflagoverride"
 
 
 def get_feature_flags(
@@ -695,8 +698,8 @@ def get_feature_flags_for_team_in_cache(project_id: int) -> Optional[list[Featur
 
 
 class FeatureFlagDashboards(models.Model):
-    feature_flag = models.ForeignKey("FeatureFlag", on_delete=models.CASCADE)
-    dashboard = models.ForeignKey("Dashboard", on_delete=models.CASCADE)
+    feature_flag = models.ForeignKey("feature_flags.FeatureFlag", on_delete=models.CASCADE)
+    dashboard = models.ForeignKey("posthog.Dashboard", on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)
 
@@ -707,6 +710,7 @@ class FeatureFlagDashboards(models.Model):
                 name="unique feature flag for a dashboard",
             )
         ]
+        db_table = "posthog_featureflagdashboards"
 
 
 class FeatureFlagEvaluationTag(models.Model):
@@ -720,12 +724,15 @@ class FeatureFlagEvaluationTag(models.Model):
     "marketing-site", "app", etc.
     """
 
-    feature_flag = models.ForeignKey("FeatureFlag", on_delete=models.CASCADE, related_name="evaluation_tags")
-    tag = models.ForeignKey("Tag", on_delete=models.CASCADE, related_name="evaluation_flags")
+    feature_flag = models.ForeignKey(
+        "feature_flags.FeatureFlag", on_delete=models.CASCADE, related_name="evaluation_tags"
+    )
+    tag = models.ForeignKey("posthog.Tag", on_delete=models.CASCADE, related_name="evaluation_flags")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = [["feature_flag", "tag"]]
+        db_table = "posthog_featureflagevaluationtag"
 
     def __str__(self) -> str:
         return f"{self.feature_flag.key} - {self.tag.name}"
@@ -750,12 +757,13 @@ class TeamDefaultEvaluationTag(UUIDModel):
     these contexts will be automatically added as evaluation contexts for the new flag.
     """
 
-    team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="default_evaluation_contexts")
-    tag = models.ForeignKey("Tag", on_delete=models.CASCADE, related_name="team_defaults")
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="default_evaluation_contexts")
+    tag = models.ForeignKey("posthog.Tag", on_delete=models.CASCADE, related_name="team_defaults")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = [["team", "tag"]]
+        db_table = "posthog_teamdefaultevaluationtag"
 
     def __str__(self) -> str:
         return f"{self.team.name} - {self.tag.name}"

@@ -55,7 +55,6 @@ from posthog.exceptions import generate_exception_response
 from posthog.models import Action
 from posthog.models.activity_logging.activity_log import Change, Detail, changes_between, load_activity, log_activity
 from posthog.models.activity_logging.activity_page import activity_page_response
-from posthog.models.feature_flag import FeatureFlag
 from posthog.models.team.team import Team
 from posthog.models.user import User
 from posthog.models.utils import UUIDT
@@ -63,6 +62,7 @@ from posthog.rbac.access_control_api_mixin import AccessControlViewSetMixin
 from posthog.rbac.user_access_control import UserAccessControlSerializerMixin
 from posthog.utils_cors import cors_response
 
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 from products.surveys.backend.models import (
     MAX_ITERATION_COUNT,
     Survey,

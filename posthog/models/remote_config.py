@@ -16,7 +16,6 @@ from prometheus_client import Counter
 
 from posthog.database_healthcheck import DATABASE_FOR_FLAG_MATCHING
 from posthog.exceptions_capture import capture_exception
-from posthog.models.feature_flag.feature_flag import FeatureFlag
 from posthog.models.hog_functions.hog_function import HogFunction
 from posthog.models.plugin import PluginConfig
 from posthog.models.team.team import Team
@@ -24,6 +23,7 @@ from posthog.models.utils import UUIDTModel, execute_with_timeout
 from posthog.storage.hypercache import HyperCache, HyperCacheStoreMissing
 
 from products.error_tracking.backend.models import ErrorTrackingSuppressionRule
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 from products.product_tours.backend.models import ProductTour
 from products.surveys.backend.models import Survey
 
@@ -122,7 +122,6 @@ class RemoteConfig(UUIDTModel):
 
     @tracer.start_as_current_span("RemoteConfig.build_config")
     def build_config(self):
-        from posthog.models.feature_flag import FeatureFlag
         from posthog.models.team import Team
         from posthog.plugins.site import get_decide_site_apps
 

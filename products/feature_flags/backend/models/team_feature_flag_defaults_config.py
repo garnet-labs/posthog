@@ -2,8 +2,8 @@ import logging
 
 from django.db import models
 
-from posthog.models import Team
 from posthog.models.team.extensions import register_team_extension_signal
+from posthog.models.team.team import Team
 
 logger = logging.getLogger(__name__)
 

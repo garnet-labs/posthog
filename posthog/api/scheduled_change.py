@@ -6,7 +6,8 @@ from rest_framework import serializers, viewsets
 from posthog.api.feature_flag import CanEditFeatureFlag
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.shared import UserBasicSerializer
-from posthog.models import ScheduledChange
+
+from products.feature_flags.backend.models.scheduled_change import ScheduledChange
 
 
 class ScheduledChangeSerializer(serializers.ModelSerializer):
@@ -101,8 +102,7 @@ class ScheduledChangeSerializer(serializers.ModelSerializer):
         if validated_data.get("model_name") == "FeatureFlag":
             record_id = validated_data.get("record_id")
             if record_id:
-                # Get the feature flag to check permissions
-                from posthog.models import FeatureFlag
+                from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
                 try:
                     feature_flag = FeatureFlag.objects.get(id=record_id, team_id=validated_data["team_id"])

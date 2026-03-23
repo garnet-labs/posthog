@@ -3,8 +3,9 @@ from unittest.mock import patch
 
 from rest_framework import status
 
-from posthog.models import FeatureFlag, Tag
-from posthog.models.feature_flag import TeamDefaultEvaluationTag
+from posthog.models import Tag
+
+from products.feature_flags.backend.models.feature_flag import FeatureFlag, TeamDefaultEvaluationTag
 
 
 class TestFeatureFlagDefaultEnvironments(APIBaseTest):

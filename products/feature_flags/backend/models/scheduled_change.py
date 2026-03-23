@@ -42,15 +42,16 @@ class ScheduledChange(RootTeamMixin, models.Model):
     # Optional end date for recurring schedules - stops recurring after this date
     end_date = models.DateTimeField(null=True, blank=True)
 
-    team = models.ForeignKey("Team", on_delete=models.CASCADE)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey("User", on_delete=models.SET_NULL, null=True)
+    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         indexes = [
             models.Index(fields=["scheduled_at", "executed_at"]),
         ]
+        db_table = "posthog_scheduledchange"
 
     @property
     def formatted_failure_reason(self) -> str:

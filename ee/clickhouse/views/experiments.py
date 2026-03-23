@@ -20,7 +20,6 @@ from posthog.api.utils import action
 from posthog.hogql_queries.experiments.experiment_metric_fingerprint import compute_metric_fingerprint
 from posthog.hogql_queries.experiments.utils import get_experiment_stats_method
 from posthog.models.activity_logging.activity_log import Detail, changes_between, log_activity
-from posthog.models.evaluation_context import FeatureFlagEvaluationContext
 from posthog.models.filters.filter import Filter
 from posthog.models.signals import model_activity_signal, mutable_receiver
 from posthog.models.team.team import Team
@@ -35,6 +34,7 @@ from products.experiments.backend.models.experiment import (
     ExperimentHoldout,
     ExperimentTimeseriesRecalculation,
 )
+from products.feature_flags.backend.models.evaluation_context import FeatureFlagEvaluationContext
 from products.product_tours.backend.models import ProductTour
 from products.surveys.backend.models import Survey
 

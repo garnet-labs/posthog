@@ -15,8 +15,6 @@ from posthog.schema import (
     MaxExperimentVariantResultFrequentist,
 )
 
-from posthog.models.feature_flag.feature_flag import FeatureFlag
-
 from products.experiments.backend.experiment_summary_data_service import (
     ExperimentSummaryDataService,
     get_chance_to_win,
@@ -26,6 +24,7 @@ from products.experiments.backend.experiment_summary_data_service import (
     transform_variant_for_max,
 )
 from products.experiments.backend.models.experiment import Experiment
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 
 @override_settings(IN_UNIT_TESTING=True)

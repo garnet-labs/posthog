@@ -44,12 +44,6 @@ import structlog
 
 from posthog.caching.flags_redis_cache import FLAGS_DEDICATED_CACHE_ALIAS
 from posthog.metrics import TOMBSTONE_COUNTER
-from posthog.models.feature_flag import FeatureFlag
-from posthog.models.feature_flag.feature_flag import (
-    FeatureFlagEvaluationTag,
-    get_feature_flags,
-    serialize_feature_flags,
-)
 from posthog.models.tag import Tag
 from posthog.models.team import Team
 from posthog.storage.cache_expiry_manager import (
@@ -61,6 +55,13 @@ from posthog.storage.hypercache import HyperCache
 from posthog.storage.hypercache_manager import (
     HyperCacheManagementConfig,
     get_cache_stats as get_cache_stats_generic,
+)
+
+from products.feature_flags.backend.models.feature_flag import (
+    FeatureFlag,
+    FeatureFlagEvaluationTag,
+    get_feature_flags,
+    serialize_feature_flags,
 )
 
 logger = structlog.get_logger(__name__)

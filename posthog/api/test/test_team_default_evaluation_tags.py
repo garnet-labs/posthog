@@ -3,7 +3,8 @@ from posthog.test.base import APIBaseTest
 from rest_framework import status
 
 from posthog.models import OrganizationMembership, Tag, Team
-from posthog.models.feature_flag import TeamDefaultEvaluationTag
+
+from products.feature_flags.backend.models.feature_flag import TeamDefaultEvaluationTag
 
 
 class TestTeamDefaultEvaluationTags(APIBaseTest):

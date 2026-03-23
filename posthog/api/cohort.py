@@ -45,7 +45,7 @@ from posthog.constants import LIMIT, OFFSET, PropertyOperatorType
 from posthog.event_usage import report_user_action
 from posthog.exceptions_capture import capture_exception
 from posthog.metrics import LABEL_TEAM_ID
-from posthog.models import Cohort, FeatureFlag, Person, User
+from posthog.models import Cohort, Person, User
 from posthog.models.activity_logging.activity_log import (
     Change,
     Detail,
@@ -60,11 +60,6 @@ from posthog.models.cohort.calculation_history import CohortCalculationHistory
 from posthog.models.cohort.cohort import REALTIME_COHORT_MAX_PERSON_COUNT, CohortType
 from posthog.models.cohort.util import get_all_cohort_dependencies, get_friendly_error_message, print_cohort_hogql_query
 from posthog.models.cohort.validation import CohortTypeValidationSerializer
-from posthog.models.feature_flag.flag_matching import (
-    FeatureFlagMatcher,
-    FlagsMatcherCache,
-    get_feature_flag_hash_key_overrides,
-)
 from posthog.models.filters.filter import Filter
 from posthog.models.insight import Insight
 from posthog.models.person.person import READ_DB_FOR_PERSONS, PersonDistinctId
@@ -78,6 +73,13 @@ from posthog.queries.person_query import PersonQuery
 from posthog.queries.util import get_earliest_timestamp
 from posthog.renderers import SafeJSONRenderer
 from posthog.utils import format_query_params_absolute_url
+
+from products.feature_flags.backend.flag_matching import (
+    FeatureFlagMatcher,
+    FlagsMatcherCache,
+    get_feature_flag_hash_key_overrides,
+)
+from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 
 def validate_filters_and_compute_realtime_support(
