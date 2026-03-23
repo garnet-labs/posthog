@@ -107,9 +107,15 @@ MOCK_CONVERSATIONS_TICKET_RECORD: dict = {
     "email_subject": None,
     "email_from": None,
     "messages": [
-        "Hi, I'm trying to create a funnel but it keeps showing 0 results even though I know there are events.",
-        "Could you share a screenshot of your funnel setup? Also, which date range are you using?",
-        "Sure, here's a screenshot. I'm using the last 7 days. The events show up in the activity feed but the funnel is empty.",
+        (
+            "customer",
+            "Hi, I'm trying to create a funnel but it keeps showing 0 results even though I know there are events.",
+        ),
+        ("team", "Could you share a screenshot of your funnel setup? Also, which date range are you using?"),
+        (
+            "customer",
+            "Sure, here's a screenshot. I'm using the last 7 days. The events show up in the activity feed but the funnel is empty.",
+        ),
     ],
 }
 

@@ -71,7 +71,7 @@ def conversations_ticket_emitter(team_id: int, record: dict[str, Any]) -> Signal
         msg = f"Conversations ticket record has empty required field: id={ticket_id!r}"
         logger.exception(msg, record=record, team_id=team_id, signals_type="conversations-signals")
         raise ValueError(msg)
-    messages: list[str] = record.get("messages", [])
+    messages: list[tuple[str, str]] = record.get("messages", [])
     if not messages:
         logger.info(
             "Ignoring conversations ticket without messages",
@@ -80,13 +80,14 @@ def conversations_ticket_emitter(team_id: int, record: dict[str, Any]) -> Signal
             signals_type="conversations-signals",
         )
         return None
-    # Follow the title\nbody convention used by all other sources.
-    # Email tickets have a subject; for widget/slack the first message serves as the title line.
+    # Prefix each message with a short author tag so turns are distinguishable
+    # without adding much embedding noise. C = customer, T = team member, AI = bot.
+    tagged_lines = [f"{_author_tag(author)}: {content}" for author, content in messages]
     email_subject = record.get("email_subject")
     if email_subject:
-        signal_description = f"{email_subject}\n" + "\n".join(messages)
+        signal_description = f"{email_subject}\n" + "\n".join(tagged_lines)
     else:
-        signal_description = "\n".join(messages)
+        signal_description = "\n".join(tagged_lines)
     return SignalEmitterOutput(
         source_product="conversations",
         source_type="ticket",
@@ -95,6 +96,13 @@ def conversations_ticket_emitter(team_id: int, record: dict[str, Any]) -> Signal
         weight=1.0,
         extra=_build_extra(record),
     )
+
+
+_AUTHOR_TAGS = {"customer": "C", "team": "T", "AI": "AI"}
+
+
+def _author_tag(author_type: str) -> str:
+    return _AUTHOR_TAGS.get(author_type, "C")
 
 
 def _build_extra(record: dict[str, Any]) -> dict[str, Any]:

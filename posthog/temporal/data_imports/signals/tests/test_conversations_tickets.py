@@ -4,7 +4,7 @@ from posthog.temporal.data_imports.signals.conversations_tickets import EXTRA_FI
 
 
 class TestConversationsTicketEmitter:
-    def test_emits_signal_with_messages_as_description(self, conversations_ticket_record):
+    def test_emits_signal_with_tagged_messages(self, conversations_ticket_record):
         result = conversations_ticket_emitter(team_id=1, record=conversations_ticket_record)
 
         assert result is not None
@@ -12,7 +12,10 @@ class TestConversationsTicketEmitter:
         assert result.source_type == "ticket"
         assert result.source_id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.weight == 1.0
-        assert result.description == "\n".join(conversations_ticket_record["messages"])
+        assert "C: " in result.description
+        assert "T: " in result.description
+        for _author, content in conversations_ticket_record["messages"]:
+            assert content in result.description
 
     def test_prepends_email_subject_as_title_line(self, conversations_ticket_record):
         conversations_ticket_record["email_subject"] = "Cannot export dashboard"
@@ -21,8 +24,8 @@ class TestConversationsTicketEmitter:
         assert result is not None
         lines = result.description.split("\n")
         assert lines[0] == "Cannot export dashboard"
-        for msg in conversations_ticket_record["messages"]:
-            assert msg in result.description
+        for _author, content in conversations_ticket_record["messages"]:
+            assert content in result.description
 
     @pytest.mark.parametrize("messages", [[], None])
     def test_returns_none_without_messages(self, conversations_ticket_record, messages):

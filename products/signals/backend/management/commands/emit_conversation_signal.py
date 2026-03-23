@@ -165,7 +165,7 @@ class Command(BaseCommand):
         for field in config.fields:
             record[field] = getattr(ticket, field, None)
 
-        # Fetch messages
+        # Fetch messages as (author_type, content) tuples matching the fetcher's format
         comments = (
             Comment.objects.filter(
                 team=team,
@@ -174,9 +174,11 @@ class Command(BaseCommand):
                 deleted=False,
             )
             .order_by("created_at")
-            .values_list("content", flat=True)
+            .values_list("content", "item_context")
         )
-        record["messages"] = [c for c in comments if c]
+        record["messages"] = [
+            ((ctx or {}).get("author_type", "customer"), content) for content, ctx in comments if content
+        ]
         return record
 
     async def _run_llm_pipeline(self, config, outputs):

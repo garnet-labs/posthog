@@ -44,8 +44,9 @@ def conversations_ticket_fetcher(
         ticket_count=len(tickets),
         signals_type="conversations-signals",
     )
-    # Fetch all comments for these tickets, in one query (should not be too many given time cutoff)
-    comments_by_ticket: dict[str, list[str]] = {}
+    # Fetch all comments for these tickets in one query.
+    # Each message is a (author_type, content) tuple so the emitter can attribute them.
+    comments_by_ticket: dict[str, list[tuple[str, str]]] = {}
     comments_qs = (
         Comment.objects.filter(
             team=team,
@@ -54,11 +55,12 @@ def conversations_ticket_fetcher(
             deleted=False,
         )
         .order_by("created_at")
-        .values_list("item_id", "content")
+        .values_list("item_id", "content", "item_context")
     )
-    for item_id, content in comments_qs:
+    for item_id, content, item_context in comments_qs:
         if content:
-            comments_by_ticket.setdefault(item_id, []).append(content)
+            author_type = (item_context or {}).get("author_type", "customer")
+            comments_by_ticket.setdefault(item_id, []).append((author_type, content))
     # Attach messages to each ticket record
     for ticket in tickets:
         ticket["messages"] = comments_by_ticket.get(str(ticket["id"]), [])
