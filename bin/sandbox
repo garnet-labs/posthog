@@ -1,586 +1,797 @@
-#!/bin/bash
-#
-# Manages isolated dev sandboxes — each branch gets its own
-# Docker Compose project with fully independent infrastructure.
-#
-# Usage: sandbox <command> [arguments]
-# Run `sandbox help` for details.
+#!/usr/bin/env python3
+"""
+Manages isolated dev sandboxes — each branch gets its own
+Docker Compose project with fully independent infrastructure.
 
-set -e
+Usage: sandbox <command> [arguments]
+Run `sandbox --help` for details.
+"""
 
-source "$(dirname "$0")/helpers/_utils.sh"
+from __future__ import annotations
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REGISTRY_DIR="${HOME}/.posthog-sandboxes"
-REGISTRY_FILE="${REGISTRY_DIR}/registry.json"
-SANDBOX_COMPOSE_FILE="${REPO_ROOT}/docker-compose.sandbox.yml"
-PORT_BASE=48001
+import argparse
+import fcntl
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import NoReturn
 
-# ---------------------------------------------------------------------------
-# Registry helpers — persistent JSON store at ~/.posthog-sandboxes/registry.json
-# ---------------------------------------------------------------------------
-
-ensure_registry() {
-    mkdir -p "$REGISTRY_DIR"
-    [[ -f "$REGISTRY_FILE" ]] || echo '{}' > "$REGISTRY_FILE"
-}
-
-slugify() {
-    echo "$1" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g'
-}
-
-next_port() {
-    ensure_registry
-    local used_ports
-    used_ports=$(jq -r '.[].port // empty' "$REGISTRY_FILE" 2>/dev/null)
-    local port=$PORT_BASE
-    while echo "$used_ports" | grep -qxF "$port"; do
-        port=$((port + 1))
-    done
-    echo "$port"
-}
-
-registry_save() {
-    local branch="$1" slug="$2" port="$3" worktree_path="$4"
-    ensure_registry
-    local tmp
-    tmp=$(mktemp)
-    jq --arg b "$branch" --arg s "$slug" --arg p "$port" --arg w "$worktree_path" \
-        '.[$b] = {slug: $s, port: ($p | tonumber), worktree: $w}' \
-        "$REGISTRY_FILE" > "$tmp" && mv "$tmp" "$REGISTRY_FILE"
-}
-
-registry_remove() {
-    local branch="$1"
-    ensure_registry
-    local tmp
-    tmp=$(mktemp)
-    jq --arg b "$branch" 'del(.[$b])' "$REGISTRY_FILE" > "$tmp" && mv "$tmp" "$REGISTRY_FILE"
-}
-
-registry_get() {
-    local branch="$1" field="$2"
-    ensure_registry
-    jq -r --arg b "$branch" --arg f "$field" '.[$b][$f] // empty' "$REGISTRY_FILE"
-}
-
-# Resolve compose project name for a branch
-project_name() {
-    local branch="$1"
-    local slug
-    slug=$(registry_get "$branch" "slug")
-    [[ -z "$slug" ]] && slug=$(slugify "$branch")
-    echo "sandbox-${slug}"
-}
-
-# Require a branch to exist in the registry; fatal if not found.
-require_registered() {
-    local branch="$1"
-    local port
-    port=$(registry_get "$branch" "port")
-    if [[ -z "$port" ]]; then
-        fatal "No sandbox found for branch '${branch}'. Create one with: sandbox create ${branch}"
-    fi
-}
-
-# Common env vars passed to every docker compose invocation.
-# Usage: compose_env <port> <worktree_path> <command...>
-compose_env() {
-    local port="$1" worktree_path="$2"
-    shift 2
-    local vite_port=$((port + 1000))
-    SANDBOX_PORT="$port" \
-    SANDBOX_VITE_PORT="$vite_port" \
-    SANDBOX_CODE="$worktree_path" \
-    SANDBOX_UID="$(id -u)" \
-    SANDBOX_GID="$(id -g)" \
-    "$@"
-}
 
 # ---------------------------------------------------------------------------
-# Subcommands
+# Constants
 # ---------------------------------------------------------------------------
 
-# Build the database cache from a temporary master checkout.
-# Called automatically on first sandbox create so every branch benefits.
-# Teardown helper for cache init — always called before exit/fatal.
-_cleanup_cache_init() {
-    local port="$1" worktree="$2"
-    compose_env "$port" "$worktree" \
-        docker compose -p sandbox-cache-init -f "$SANDBOX_COMPOSE_FILE" down -v 2>/dev/null || true
-    rm -rf "$worktree"
-}
+REPO_ROOT = Path(__file__).resolve().parent.parent
+COMPOSE_FILE = REPO_ROOT / "docker-compose.sandbox.yml"
+WORKTREE_CMD = REPO_ROOT / "bin" / "posthog-worktree"
 
-_init_cache_from_master() {
-    print_color blue "No database cache found. Building from master (one-time setup, ~10 min)..."
+REGISTRY_DIR = Path.home() / ".posthog-sandboxes"
+REGISTRY_FILE = REGISTRY_DIR / "registry.json"
 
-    local init_project="sandbox-cache-init"
-    local init_port=47999
-    local init_worktree="/tmp/sandbox-cache-init"
+PORT_BASE = 48001
 
-    rm -rf "$init_worktree"
+INFRA_SERVICES = [
+    "db",
+    "redis7",
+    "clickhouse",
+    "kafka",
+    "zookeeper",
+    "objectstorage",
+    "elasticsearch",
+    "temporal",
+]
 
-    git fetch origin master --quiet
-    git worktree add --force --detach "$init_worktree" origin/master \
-        || fatal "Could not check out master for cache init."
+SHARED_VOLUMES = [
+    "sandbox-uv-cache",
+    "sandbox-pnpm-store",
+    "sandbox-db-cache",
+    "sandbox-cargo-target",
+]
 
-    # Pre-merge overlay for ClickHouse backup config
-    mkdir -p "${init_worktree}/docker/clickhouse/config.d"
-    cp "${REPO_ROOT}/docker/clickhouse/config.d/sandbox-backup.xml" \
-        "${init_worktree}/docker/clickhouse/config.d/sandbox-backup.xml"
+# These need 777 so that containers running as different UIDs
+# (clickhouse=101, app=host UID) can all write.
+WORLD_WRITABLE_VOLUMES = [
+    "sandbox-db-cache",
+    "sandbox-cargo-target",
+]
 
-    compose_env "$init_port" "$init_worktree" \
-        docker compose -p "$init_project" -f "$SANDBOX_COMPOSE_FILE" up -d --build
+SANDBOX_BACKUP_XML = REPO_ROOT / "docker/clickhouse/config.d/sandbox-backup.xml"
 
-    print_color blue "Waiting for master to boot..."
-    local max_wait=1800 elapsed=0
-    while [[ $elapsed -lt $max_wait ]]; do
-        if curl -sf "http://localhost:${init_port}/_health" > /dev/null 2>&1; then
-            break
-        fi
-        sleep 10
-        elapsed=$((elapsed + 10))
-        if (( elapsed % 30 == 0 )); then
-            echo "  ... still waiting (${elapsed}s)"
-        fi
-    done
 
-    if [[ $elapsed -ge $max_wait ]]; then
-        _cleanup_cache_init "$init_port" "$init_worktree"
-        fatal "Cache init timed out after ${max_wait}s. Check docker logs for errors."
-    fi
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
 
-    # Cache postgres: stop for consistent snapshot
-    compose_env "$init_port" "$init_worktree" \
-        docker compose -p "$init_project" -f "$SANDBOX_COMPOSE_FILE" stop db
-    docker run --rm \
-        -v "${init_project}_postgres-data:/src:ro" \
-        -v sandbox-db-cache:/dst \
-        alpine sh -c "rm -rf /dst/postgres && cp -a /src /dst/postgres"
+_COLORS = {"red": "31", "green": "32", "yellow": "33", "blue": "34"}
 
-    # Cache ClickHouse
-    local ch_container="${init_project}-clickhouse-1"
-    docker exec "$ch_container" clickhouse-client \
-        --query "BACKUP DATABASE posthog TO Disk('sandbox_cache', 'posthog/')" \
-        || { _cleanup_cache_init "$init_port" "$init_worktree"; fatal "ClickHouse backup failed during cache init."; }
 
-    # Snapshot migration state so we can detect stale caches later.
-    docker run --rm \
-        -v "${init_worktree}:/src:ro" \
-        -v sandbox-db-cache:/dst \
-        alpine sh -c "
-            mkdir -p /dst/migrations
-            find /src -name max_migration.txt -not -path '*/node_modules/*' | while read f; do
-                # Turn /src/posthog/migrations/max_migration.txt → posthog__migrations
-                key=\$(echo \"\$f\" | sed 's|^/src/||;s|/max_migration.txt||;s|/|__|g')
-                cp \"\$f\" \"/dst/migrations/\${key}\"
-            done
-            touch /dst/.cache-ready"
+def _colored(color: str, text: str, *, stream: object = sys.stdout) -> str:
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        return text
+    code = _COLORS.get(color, "0")
+    return f"\033[{code}m{text}\033[0m"
 
-    _cleanup_cache_init "$init_port" "$init_worktree"
-    success "Database cache built from master."
-}
 
-cmd_create() {
-    local branch="${1:?Branch name required. Usage: sandbox create <branch> [base-branch]}"
-    local base_branch="${2:-master}"
+def info(msg: str) -> None:
+    print(_colored("blue", msg))
 
-    local slug
-    slug=$(slugify "$branch")
-    local project="sandbox-${slug}"
 
-    # Guard against duplicate creation
-    if [[ -n "$(registry_get "$branch" "port")" ]]; then
-        error "Sandbox already exists for branch '${branch}' on port $(registry_get "$branch" "port")"
-        echo "Use 'sandbox start ${branch}' to start it, or 'sandbox destroy ${branch}' first."
-        exit 1
-    fi
+def success(msg: str) -> None:
+    print(_colored("green", f"\u2713 {msg}"))
 
-    local port
-    port=$(next_port)
 
-    # Create worktree (or reuse existing one)
-    local worktree_path
-    worktree_path=$(git worktree list | grep -E "\[${branch}\]$" | awk '{print $1}')
+def warn(msg: str) -> None:
+    print(_colored("yellow", f"Warning: {msg}", stream=sys.stderr), file=sys.stderr)
 
-    if [[ -n "$worktree_path" ]]; then
-        print_color blue "Reusing existing worktree at ${worktree_path}"
-    else
-        git fetch origin --quiet
-        # Update local base branch so new branches start from the latest remote state.
-        # This ensures the branch has the same migrations as the cache (built from origin/master).
-        git update-ref "refs/heads/${base_branch}" "origin/${base_branch}" 2>/dev/null || true
 
-        if git show-ref --verify --quiet "refs/heads/${branch}" 2>/dev/null || \
-           git show-ref --verify --quiet "refs/remotes/origin/${branch}" 2>/dev/null; then
-            print_color blue "Checking out existing branch ${branch}..."
-            "${SCRIPT_DIR}/posthog-worktree" checkout "$branch"
-        else
-            print_color blue "Creating new branch ${branch} from ${base_branch}..."
-            "${SCRIPT_DIR}/posthog-worktree" create "$branch" "$base_branch"
-        fi
-        worktree_path=$(git worktree list | grep -E "\[${branch}\]$" | awk '{print $1}')
-    fi
+def error(msg: str) -> None:
+    print(_colored("red", f"Error: {msg}", stream=sys.stderr), file=sys.stderr)
 
-    if [[ -z "$worktree_path" || ! -d "$worktree_path" ]]; then
-        fatal "Worktree not found for branch '${branch}'"
-    fi
-    if [[ ! -f "${worktree_path}/manage.py" ]]; then
-        fatal "Worktree at ${worktree_path} does not contain PostHog code"
-    fi
 
-    registry_save "$branch" "$slug" "$port" "$worktree_path"
+def fatal(msg: str) -> NoReturn:
+    error(msg)
+    sys.exit(1)
 
-    # Ensure shared cache volumes exist (external: true means compose won't create them).
-    docker volume create sandbox-uv-cache      >/dev/null 2>&1 || true
-    docker volume create sandbox-pnpm-store    >/dev/null 2>&1 || true
-    docker volume create sandbox-db-cache      >/dev/null 2>&1 || true
-    docker volume create sandbox-cargo-target  >/dev/null 2>&1 || true
-    # Ensure cache volumes are writable by any UID (clickhouse runs as UID 101,
-    # app runs as host UID).
-    docker run --rm -v sandbox-db-cache:/data alpine chmod 777 /data
-    docker run --rm -v sandbox-cargo-target:/data alpine chmod 777 /data
 
-    # Ensure ClickHouse backup config exists in the worktree (needed before ClickHouse starts).
-    # Pre-merge branches won't have this file, so copy it from the main repo.
-    mkdir -p "${worktree_path}/docker/clickhouse/config.d"
-    cp "${REPO_ROOT}/docker/clickhouse/config.d/sandbox-backup.xml" \
-        "${worktree_path}/docker/clickhouse/config.d/sandbox-backup.xml"
+# ---------------------------------------------------------------------------
+# Registry — persistent JSON store at ~/.posthog-sandboxes/registry.json
+# ---------------------------------------------------------------------------
 
-    # Ensure the database cache exists. On first run, this boots a temporary
-    # master stack, generates demo data, and snapshots both databases.
-    local cache_ready
-    cache_ready=$(docker run --rm -v sandbox-db-cache:/cache:ro alpine \
-        sh -c "[ -f /cache/.cache-ready ] && echo yes || echo no" 2>/dev/null || echo no)
 
-    if [[ "$cache_ready" == "no" ]]; then
-        _init_cache_from_master
-        cache_ready="yes"
-    fi
+@dataclass
+class SandboxEntry:
+    slug: str
+    port: int
+    worktree: str
 
-    # Check if the cache has migrations that the branch doesn't have.
-    # The cache stores max_migration.txt snapshots from when it was built.
-    # If any cached migration number is higher than the branch's, the
-    # cached database has schema changes the branch code doesn't expect.
-    if [[ "$cache_ready" == "yes" ]]; then
-        # Read all cached migration numbers in one container invocation.
-        # Output format: key<TAB>number (e.g. "posthog__migrations\t1059")
-        local cached_migrations
-        cached_migrations=$(docker run --rm -v sandbox-db-cache:/cache:ro alpine \
-            sh -c 'for f in /cache/migrations/*; do
-                key=$(basename "$f")
-                num=$(grep -oE "^[0-9]+" "$f" 2>/dev/null || echo 0)
-                printf "%s\t%s\n" "$key" "$num"
-            done' 2>/dev/null || true)
 
-        local behind_migrations=""
-        while IFS=$'\t' read -r key cached_num; do
-            [[ -z "$key" ]] && continue
-            local branch_path="${worktree_path}/$(echo "$key" | sed 's|__|/|g')/max_migration.txt"
-            local branch_num="0"
-            if [[ -f "$branch_path" ]]; then
-                branch_num=$(grep -oE '^[0-9]+' "$branch_path" || echo "0")
-            fi
-            if [[ "$cached_num" -gt "$branch_num" ]]; then
-                behind_migrations+="  $(echo "$key" | sed 's|__|/|g'): cache=${cached_num} branch=${branch_num}\n"
-            fi
-        done <<< "$cached_migrations"
+class Registry:
+    """Process-safe JSON registry of sandbox metadata.
 
-        if [[ -n "$behind_migrations" ]]; then
-            print_color yellow "The cache has newer migrations than your branch:"
-            echo -e "$behind_migrations"
-            echo "This can cause issues if those migrations deleted or renamed columns."
-            echo ""
-            echo "  [c] Use cache anyway (usually fine for small differences)"
-            echo "  [f] Skip cache and build from scratch (~10 min)"
-            echo "  [q] Quit and merge master first"
-            echo ""
-            read -rp "Choice [c/f/q]: " choice
-            case "$choice" in
-                f|F) cache_ready="skip" ;;
-                q|Q) exit 0 ;;
-            esac
-        fi
-    fi
+    Uses file locking so concurrent `sandbox create` calls
+    cannot allocate the same port.
+    """
 
-    # Restore databases from cache.
-    if [[ "$cache_ready" == "yes" ]]; then
-        print_color blue "Restoring postgres from cache..."
-        docker run --rm \
-            -v sandbox-db-cache:/src:ro \
-            -v "${project}_postgres-data:/dst" \
-            alpine sh -c "cp -a /src/postgres/. /dst/"
-    fi
+    def __init__(self, path: Path = REGISTRY_FILE) -> None:
+        self._path = path
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._path.exists():
+            self._path.write_text("{}\n")
 
-    local vite_port=$((port + 1000))
-    print_color blue "Starting sandbox '${project}' on port ${port} (Vite: ${vite_port})..."
+    @contextmanager
+    def _locked(self):
+        """Acquire an exclusive lock for read-modify-write operations."""
+        with open(self._path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield f
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
-    if [[ "$cache_ready" == "yes" ]]; then
-        # Start infra services first so we can RESTORE ClickHouse before the
-        # app runs migrations. This avoids a race between RESTORE and
-        # migrate_clickhouse which both touch the same tables.
-        compose_env "$port" "$worktree_path" \
-            docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" up -d \
-            db redis7 clickhouse kafka zookeeper objectstorage elasticsearch temporal
+    def _read(self) -> dict[str, dict]:
+        try:
+            return json.loads(self._path.read_text())
+        except (json.JSONDecodeError, FileNotFoundError):
+            return {}
 
-        print_color blue "Waiting for ClickHouse to be ready..."
-        local ch_container="${project}-clickhouse-1"
-        local ch_elapsed=0
-        while [[ $ch_elapsed -lt 120 ]]; do
-            if docker exec "$ch_container" wget -qO- http://localhost:8123/ping 2>/dev/null | grep -q Ok; then
-                break
-            fi
-            sleep 2
-            ch_elapsed=$((ch_elapsed + 2))
-        done
+    def _write(self, f, data: dict) -> None:
+        f.seek(0)
+        f.truncate()
+        json.dump(data, f, indent=2)
+        f.write("\n")
 
-        print_color blue "Restoring ClickHouse from cache..."
-        if docker exec "$ch_container" clickhouse-client \
-            --query "RESTORE DATABASE posthog FROM Disk('sandbox_cache', 'posthog/')" 2>/dev/null; then
-            print_color blue "ClickHouse restored."
-        else
-            echo "WARNING: ClickHouse restore failed — migrations will recreate tables."
-        fi
+    def list_all(self) -> dict[str, SandboxEntry]:
+        return {branch: SandboxEntry(**entry) for branch, entry in self._read().items()}
 
-        # Now start app + proxy — migrations run against the restored data.
-        compose_env "$port" "$worktree_path" \
-            docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" up -d --build
-    else
-        # User chose to skip cache — cold boot.
-        compose_env "$port" "$worktree_path" \
-            docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" up -d --build
-    fi
+    def get(self, branch: str) -> SandboxEntry | None:
+        entry = self._read().get(branch)
+        return SandboxEntry(**entry) if entry else None
 
-    # Wait for Django to start accepting requests.
-    print_color blue "Waiting for PostHog to start..."
-    local max_wait=1800
-    local elapsed=0
-    while [[ $elapsed -lt $max_wait ]]; do
-        if curl -sf "http://localhost:${port}/_health" > /dev/null 2>&1; then
-            break
-        fi
-        sleep 10
-        elapsed=$((elapsed + 10))
-        if (( elapsed % 30 == 0 )); then
-            echo "  ... still waiting (${elapsed}s)"
-        fi
-    done
+    def allocate(self, branch: str, slug: str, worktree: str) -> SandboxEntry:
+        """Atomically allocate a port and save the entry under the file lock."""
+        with self._locked() as f:
+            data = json.loads(f.read() or "{}")
+            used = {e["port"] for e in data.values() if "port" in e}
+            port = PORT_BASE
+            while port in used:
+                port += 1
+            entry = SandboxEntry(slug=slug, port=port, worktree=worktree)
+            data[branch] = asdict(entry)
+            self._write(f, data)
+            return entry
 
-    echo ""
-    if [[ $elapsed -ge $max_wait ]]; then
-        error "PostHog did not start after ${max_wait}s. Something is likely broken."
-        echo "Troubleshooting:"
-        echo "  Logs:   sandbox logs ${branch}"
-        echo "  Shell:  sandbox shell ${branch}"
-        exit 1
-    fi
+    def save(self, branch: str, entry: SandboxEntry) -> None:
+        with self._locked() as f:
+            data = json.loads(f.read() or "{}")
+            data[branch] = asdict(entry)
+            self._write(f, data)
 
-    success "PostHog running at http://localhost:${port}"
-    print_color blue "Worktree: ${worktree_path}"
-    print_color blue "Shell:    sandbox shell ${branch}"
-    print_color blue "Logs:     sandbox logs ${branch}"
-}
+    def remove(self, branch: str) -> None:
+        with self._locked() as f:
+            data = json.loads(f.read() or "{}")
+            data.pop(branch, None)
+            self._write(f, data)
 
-cmd_stop() {
-    local branch="${1:?Branch name required. Usage: sandbox stop <branch>}"
-    require_registered "$branch"
 
-    local project port worktree_path
-    project=$(project_name "$branch")
-    port=$(registry_get "$branch" "port")
-    worktree_path=$(registry_get "$branch" "worktree")
+# ---------------------------------------------------------------------------
+# Shell / Docker helpers
+# ---------------------------------------------------------------------------
 
-    print_color blue "Stopping sandbox '${project}'..."
-    compose_env "$port" "$worktree_path" \
-        docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" stop
 
-    success "Sandbox stopped. Volumes preserved."
-}
+def run(
+    cmd: list[str],
+    *,
+    check: bool = True,
+    capture: bool = False,
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a subprocess, optionally merging extra env vars."""
+    full_env = {**os.environ, **(env_extra or {})} if env_extra else None
+    return subprocess.run(
+        cmd,
+        check=check,
+        capture_output=capture,
+        text=capture,
+        env=full_env,
+    )
 
-cmd_start() {
-    local branch="${1:?Branch name required. Usage: sandbox start <branch>}"
-    require_registered "$branch"
 
-    local project port worktree_path
-    project=$(project_name "$branch")
-    port=$(registry_get "$branch" "port")
-    worktree_path=$(registry_get "$branch" "worktree")
+def slugify(branch: str) -> str:
+    return re.sub(r"[^a-z0-9-]", "-", branch.lower().replace("/", "-"))
 
-    local vite_port=$((port + 1000))
-    print_color blue "Starting sandbox '${project}' on port ${port} (Vite: ${vite_port})..."
-    compose_env "$port" "$worktree_path" \
-        docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" up -d
 
-    success "PostHog running at http://localhost:${port}"
-}
+def project_name(slug: str) -> str:
+    return f"sandbox-{slug}"
 
-cmd_destroy() {
-    local branch="${1:?Branch name required. Usage: sandbox destroy <branch>}"
 
-    local project port worktree_path
-    project=$(project_name "$branch")
-    port=$(registry_get "$branch" "port")
-    worktree_path=$(registry_get "$branch" "worktree")
+def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
+    """Env vars threaded through every docker compose invocation."""
+    return {
+        "SANDBOX_PORT": str(port),
+        "SANDBOX_VITE_PORT": str(port + 1000),
+        "SANDBOX_CODE": worktree_path,
+        "SANDBOX_UID": str(os.getuid()),
+        "SANDBOX_GID": str(os.getgid()),
+    }
 
-    print_color yellow "Destroying sandbox '${project}'..."
 
-    # Stop containers and remove per-sandbox volumes.
-    compose_env "${port:-0}" "${worktree_path:-.}" \
-        docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" down -v 2>/dev/null || true
+def compose(
+    project: str,
+    port: int,
+    worktree_path: str,
+    *args: str,
+    check: bool = True,
+    capture: bool = False,
+) -> subprocess.CompletedProcess:
+    """Run `docker compose` with sandbox env vars."""
+    return run(
+        ["docker", "compose", "-p", project, "-f", str(COMPOSE_FILE), *args],
+        check=check,
+        capture=capture,
+        env_extra=_compose_env(port, worktree_path),
+    )
 
-    # Remove the worktree directory. Containers may have created files owned
-    # by root or other UIDs (e.g. clickhouse UID 101), so we use a container
-    # to delete contents, then rmdir the empty directory from the host.
-    if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
-        docker run --rm -v "${worktree_path}:/cleanup" alpine \
-            sh -c "find /cleanup -mindepth 1 -delete" 2>/dev/null || true
-        rmdir "$worktree_path" 2>/dev/null || true
-    fi
 
-    # Clean up the git worktree association. We removed the directory above
-    # (git worktree remove can't handle root-owned files), so git worktree
-    # prune is the correct way to drop the now-stale association.
-    git worktree prune 2>/dev/null || true
-    registry_remove "$branch"
+def docker_volume_run(volume: str, shell_cmd: str) -> None:
+    """Run a one-shot alpine container with a volume mounted at /data."""
+    run(["docker", "run", "--rm", "-v", f"{volume}:/data", "alpine", "sh", "-c", shell_cmd])
 
-    success "Sandbox destroyed."
-}
 
-cmd_list() {
-    ensure_registry
+def wait_for_url(url: str, *, timeout: int = 1800, interval: int = 10) -> bool:
+    """Poll a URL until it returns HTTP 200 or timeout is reached."""
+    elapsed = 0
+    while elapsed < timeout:
+        result = run(["curl", "-sf", url], check=False, capture=True)
+        if result.returncode == 0:
+            return True
+        time.sleep(interval)
+        elapsed += interval
+        if elapsed % 30 == 0:
+            print(f"  ... still waiting ({elapsed}s)")
+    return False
 
-    local branches
-    branches=$(jq -r 'keys[]' "$REGISTRY_FILE" 2>/dev/null)
 
-    if [[ -z "$branches" ]]; then
-        echo "No sandboxes found. Create one with: sandbox create <branch>"
+# ---------------------------------------------------------------------------
+# Git worktree helpers
+# ---------------------------------------------------------------------------
+
+
+def find_worktree(branch: str) -> str | None:
+    """Return the filesystem path of an existing worktree for *branch*, or None."""
+    result = run(["git", "worktree", "list", "--porcelain"], capture=True, check=False)
+    # Porcelain format: blocks separated by blank lines, each block has
+    # "worktree <path>", "branch refs/heads/<name>", etc.
+    current_path: str | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = line[len("worktree "):]
+        elif line == f"branch refs/heads/{branch}":
+            return current_path
+    return None
+
+
+def ensure_worktree(branch: str, base_branch: str) -> str:
+    """Create or find a git worktree. Returns its absolute path."""
+    existing = find_worktree(branch)
+    if existing:
+        info(f"Reusing existing worktree at {existing}")
+        return existing
+
+    run(["git", "fetch", "origin", "--quiet"])
+    run(
+        ["git", "update-ref", f"refs/heads/{base_branch}", f"origin/{base_branch}"],
+        check=False,
+    )
+
+    has_branch = any(
+        run(["git", "show-ref", "--verify", "--quiet", ref], check=False).returncode == 0
+        for ref in [f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"]
+    )
+
+    if has_branch:
+        info(f"Checking out existing branch {branch}...")
+        run([str(WORKTREE_CMD), "checkout", branch])
+    else:
+        info(f"Creating new branch {branch} from {base_branch}...")
+        run([str(WORKTREE_CMD), "create", branch, base_branch])
+
+    path = find_worktree(branch)
+    if not path:
+        fatal(f"Worktree not found for branch '{branch}'")
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Database cache
+# ---------------------------------------------------------------------------
+
+
+def _is_cache_ready() -> bool:
+    result = run(
+        [
+            "docker", "run", "--rm",
+            "-v", "sandbox-db-cache:/cache:ro",
+            "alpine", "sh", "-c",
+            "[ -f /cache/.cache-ready ] && echo yes || echo no",
+        ],
+        capture=True,
+        check=False,
+    )
+    return result.stdout.strip() == "yes"
+
+
+def _ensure_cache_volumes() -> None:
+    """Create shared Docker volumes and set permissions."""
+    for vol in SHARED_VOLUMES:
+        run(["docker", "volume", "create", vol], capture=True, check=False)
+    for vol in WORLD_WRITABLE_VOLUMES:
+        docker_volume_run(vol, "chmod 777 /data")
+
+
+def _copy_sandbox_backup_xml(worktree_path: str) -> None:
+    """Ensure ClickHouse backup config exists in the worktree."""
+    dest_dir = Path(worktree_path) / "docker/clickhouse/config.d"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SANDBOX_BACKUP_XML, dest_dir / "sandbox-backup.xml")
+
+
+def _init_cache_cleanup(port: int, worktree: str) -> None:
+    compose("sandbox-cache-init", port, worktree, "down", "-v", check=False)
+    shutil.rmtree(worktree, ignore_errors=True)
+    run(["git", "worktree", "prune"], check=False)
+
+
+def init_cache_from_master() -> None:
+    """Boot a temporary master stack, generate demo data, and snapshot both databases."""
+    info("No database cache found. Building from master (one-time setup, ~10 min)...")
+
+    init_project = "sandbox-cache-init"
+    init_port = 47999
+    init_worktree = "/tmp/sandbox-cache-init"
+
+    shutil.rmtree(init_worktree, ignore_errors=True)
+
+    run(["git", "fetch", "origin", "master", "--quiet"])
+    if run(["git", "worktree", "add", "--force", "--detach", init_worktree, "origin/master"], check=False).returncode != 0:
+        fatal("Could not check out master for cache init.")
+
+    try:
+        _copy_sandbox_backup_xml(init_worktree)
+        compose(init_project, init_port, init_worktree, "up", "-d", "--build")
+
+        info("Waiting for master to boot...")
+        if not wait_for_url(f"http://localhost:{init_port}/_health"):
+            fatal("Cache init timed out. Check docker logs for errors.")
+
+        # Snapshot postgres (stop first for consistency)
+        compose(init_project, init_port, init_worktree, "stop", "db")
+        run([
+            "docker", "run", "--rm",
+            "-v", f"{init_project}_postgres-data:/src:ro",
+            "-v", "sandbox-db-cache:/dst",
+            "alpine", "sh", "-c", "rm -rf /dst/postgres && cp -a /src /dst/postgres",
+        ])
+
+        # Snapshot ClickHouse
+        ch = f"{init_project}-clickhouse-1"
+        if run(["docker", "exec", ch, "clickhouse-client", "--query",
+                "BACKUP DATABASE posthog TO Disk('sandbox_cache', 'posthog/')"], check=False).returncode != 0:
+            fatal("ClickHouse backup failed during cache init.")
+
+        # Record migration versions for staleness detection
+        run([
+            "docker", "run", "--rm",
+            "-v", f"{init_worktree}:/src:ro",
+            "-v", "sandbox-db-cache:/dst",
+            "alpine", "sh", "-c", """
+                mkdir -p /dst/migrations
+                find /src -name max_migration.txt -not -path '*/node_modules/*' | while read f; do
+                    key=$(echo "$f" | sed 's|^/src/||;s|/max_migration.txt||;s|/|__|g')
+                    cp "$f" "/dst/migrations/${key}"
+                done
+                touch /dst/.cache-ready
+            """,
+        ])
+    finally:
+        _init_cache_cleanup(init_port, init_worktree)
+
+    success("Database cache built from master.")
+
+
+def check_migration_staleness(worktree_path: str) -> str | None:
+    """Compare cached migration versions against the branch.
+
+    Returns a human-readable description of stale migrations, or None if fresh.
+    """
+    result = run(
+        [
+            "docker", "run", "--rm",
+            "-v", "sandbox-db-cache:/cache:ro",
+            "alpine", "sh", "-c",
+            'for f in /cache/migrations/*; do '
+            '  key=$(basename "$f"); '
+            '  num=$(grep -oE "^[0-9]+" "$f" 2>/dev/null || echo 0); '
+            '  printf "%s\\t%s\\n" "$key" "$num"; '
+            "done",
+        ],
+        capture=True,
+        check=False,
+    )
+
+    behind: list[str] = []
+    for line in result.stdout.strip().splitlines():
+        if "\t" not in line:
+            continue
+        key, cached_num_str = line.split("\t", 1)
+        cached_num = int(cached_num_str)
+
+        branch_file = Path(worktree_path) / key.replace("__", "/") / "max_migration.txt"
+        branch_num = 0
+        if branch_file.exists():
+            match = re.match(r"^(\d+)", branch_file.read_text())
+            if match:
+                branch_num = int(match.group(1))
+
+        if cached_num > branch_num:
+            label = key.replace("__", "/")
+            behind.append(f"  {label}: cache={cached_num} branch={branch_num}")
+
+    return "\n".join(behind) if behind else None
+
+
+def _prompt_migration_choice(stale_info: str) -> str:
+    """Ask the user what to do about stale migrations."""
+    warn("The cache has newer migrations than your branch:")
+    print(stale_info)
+    print("This can cause issues if those migrations deleted or renamed columns.")
+    print()
+    print("  [c] Use cache anyway (usually fine for small differences)")
+    print("  [f] Skip cache and build from scratch (~10 min)")
+    print("  [q] Quit and merge master first")
+    print()
+
+    while True:
+        choice = input("Choice [c/f/q]: ").strip().lower()
+        if choice in ("c", "f", "q"):
+            return choice
+        print("Please enter c, f, or q.")
+
+
+# ---------------------------------------------------------------------------
+# Service startup helpers
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_clickhouse(project: str, timeout: int = 120) -> None:
+    info("Waiting for ClickHouse to be ready...")
+    container = f"{project}-clickhouse-1"
+    elapsed = 0
+    while elapsed < timeout:
+        result = run(
+            ["docker", "exec", container, "wget", "-qO-", "http://localhost:8123/ping"],
+            capture=True,
+            check=False,
+        )
+        if "Ok" in (result.stdout or ""):
+            return
+        time.sleep(2)
+        elapsed += 2
+    warn("ClickHouse did not become ready within timeout -- continuing anyway.")
+
+
+def _restore_and_start(
+    project: str, port: int, worktree_path: str, use_cache: bool
+) -> None:
+    """Restore databases from cache (if available) and bring up the stack."""
+    vite_port = port + 1000
+
+    if not use_cache:
+        info(f"Starting sandbox '{project}' on port {port} (Vite: {vite_port})...")
+        compose(project, port, worktree_path, "up", "-d", "--build")
         return
-    fi
 
-    printf "%-40s %-8s %-10s %-s\n" "BRANCH" "PORT" "STATUS" "URL"
-    printf "%-40s %-8s %-10s %-s\n" "------" "----" "------" "---"
+    # Restore postgres from volume snapshot
+    info("Restoring postgres from cache...")
+    run([
+        "docker", "run", "--rm",
+        "-v", "sandbox-db-cache:/src:ro",
+        "-v", f"{project}_postgres-data:/dst",
+        "alpine", "sh", "-c", "cp -a /src/postgres/. /dst/",
+    ])
 
-    local branch port slug project running status url
-    while IFS= read -r branch; do
-        port=$(registry_get "$branch" "port")
-        slug=$(registry_get "$branch" "slug")
-        project="sandbox-${slug}"
+    # Start infra first — we need ClickHouse up before restoring its backup,
+    # and both must finish before the app runs migrations.
+    info(f"Starting sandbox '{project}' on port {port} (Vite: {vite_port})...")
+    compose(project, port, worktree_path, "up", "-d", *INFRA_SERVICES)
 
-        running=$(docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" ps --status running -q 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$running" -gt 0 ]]; then
-            status="running"
-            url="http://localhost:${port}"
-        else
-            status="stopped"
-            url="-"
-        fi
+    _wait_for_clickhouse(project)
 
-        printf "%-40s %-8s %-10s %-s\n" "$branch" "$port" "$status" "$url"
-    done <<< "$branches"
-}
+    info("Restoring ClickHouse from cache...")
+    ch = f"{project}-clickhouse-1"
+    result = run(
+        ["docker", "exec", ch, "clickhouse-client", "--query",
+         "RESTORE DATABASE posthog FROM Disk('sandbox_cache', 'posthog/')"],
+        check=False,
+    )
+    if result.returncode == 0:
+        info("ClickHouse restored.")
+    else:
+        print("WARNING: ClickHouse restore failed -- migrations will recreate tables.")
 
-cmd_shell() {
-    local branch="${1:?Branch name required. Usage: sandbox shell <branch>}"
-    require_registered "$branch"
+    # Now start the app + proxy on top of restored infra
+    compose(project, port, worktree_path, "up", "-d", "--build")
 
-    local slug
-    slug=$(registry_get "$branch" "slug")
-    [[ -z "$slug" ]] && slug=$(slugify "$branch")
-
-    local container="sandbox-${slug}-app-1"
-    print_color blue "Attaching to mprocs in ${container}... (detach with Ctrl-b d)"
-    docker exec -it "$container" tmux -L sandbox attach-session -t posthog
-}
-
-cmd_logs() {
-    local branch="${1:?Branch name required. Usage: sandbox logs <branch>}"
-    require_registered "$branch"
-
-    local project port worktree_path
-    project=$(project_name "$branch")
-    port=$(registry_get "$branch" "port")
-    worktree_path=$(registry_get "$branch" "worktree")
-
-    compose_env "$port" "$worktree_path" \
-        docker compose -p "$project" -f "$SANDBOX_COMPOSE_FILE" logs -f app
-}
-
-cmd_rebuild_cache() {
-    print_color blue "Clearing database cache..."
-
-    # Wipe everything in the cache volume (including hidden marker files).
-    docker run --rm -v sandbox-db-cache:/cache alpine \
-        sh -c "find /cache -mindepth 1 -delete"
-    # Re-create writable directory for ClickHouse backups.
-    docker run --rm -v sandbox-db-cache:/data alpine chmod 777 /data
-
-    _init_cache_from_master
-}
-
-cmd_nuke() {
-    print_color yellow "Destroying all sandboxes and clearing cache..."
-
-    ensure_registry
-    local branches
-    branches=$(jq -r 'keys[]' "$REGISTRY_FILE" 2>/dev/null)
-
-    if [[ -n "$branches" ]]; then
-        while IFS= read -r branch; do
-            cmd_destroy "$branch"
-        done <<< "$branches"
-    fi
-
-    cmd_rebuild_cache
-
-    success "All sandboxes destroyed and cache rebuilt."
-}
 
 # ---------------------------------------------------------------------------
-# Main
+# Commands
 # ---------------------------------------------------------------------------
 
-COMMAND="${1:-help}"
-shift || true
 
-case "$COMMAND" in
-    create)           cmd_create "$@" ;;
-    stop)             cmd_stop "$@" ;;
-    start)            cmd_start "$@" ;;
-    destroy)          cmd_destroy "$@" ;;
-    list|ls)          cmd_list ;;
-    shell)            cmd_shell "$@" ;;
-    logs)             cmd_logs "$@" ;;
-    rebuild-cache)    cmd_rebuild_cache ;;
-    nuke)             cmd_nuke ;;
-    help)
-        echo "PostHog Dev Sandbox Manager"
-        echo ""
-        echo "Usage: sandbox <command> [arguments]"
-        echo ""
-        echo "Commands:"
-        echo "  create <branch> [base-branch]   Create a new isolated sandbox"
-        echo "  start <branch>                  Start a stopped sandbox"
-        echo "  stop <branch>                   Stop a sandbox (preserves state)"
-        echo "  destroy <branch>                Destroy a sandbox and clean up"
-        echo "  list                            List all sandboxes"
-        echo "  shell <branch>                  Attach to the mprocs UI"
-        echo "  logs <branch>                   Tail logs from a sandbox"
-        echo "  rebuild-cache                   Rebuild the database cache from master"
-        echo "  nuke                            Destroy all sandboxes and clear the cache"
-        echo ""
-        echo "Examples:"
-        echo "  sandbox create aspicer/cool-feature"
-        echo "  sandbox create aspicer/bugfix main"
-        echo "  sandbox list"
-        echo "  sandbox shell aspicer/cool-feature"
-        echo "  sandbox stop aspicer/cool-feature"
-        echo "  sandbox start aspicer/cool-feature"
-        echo "  sandbox destroy aspicer/cool-feature"
-        ;;
-    *)
-        error "Unknown command: ${COMMAND}"
-        echo "Run 'sandbox help' for usage."
-        exit 1
-        ;;
-esac
+def cmd_create(branch: str, base_branch: str = "master") -> None:
+    registry = Registry()
+    slug = slugify(branch)
+    project = project_name(slug)
+
+    existing = registry.get(branch)
+    if existing:
+        error(f"Sandbox already exists for branch '{branch}' on port {existing.port}")
+        print(f"Use 'sandbox start {branch}' to start it, or 'sandbox destroy {branch}' first.")
+        sys.exit(1)
+
+    worktree_path = ensure_worktree(branch, base_branch)
+
+    if not (Path(worktree_path) / "manage.py").exists():
+        fatal(f"Worktree at {worktree_path} does not contain PostHog code")
+
+    # Atomically allocate a port and register — prevents races between
+    # concurrent `sandbox create` calls.
+    entry = registry.allocate(branch, slug, worktree_path)
+    port = entry.port
+    _ensure_cache_volumes()
+    _copy_sandbox_backup_xml(worktree_path)
+
+    # Build or verify the database cache
+    cache_ready = _is_cache_ready()
+    if not cache_ready:
+        init_cache_from_master()
+        cache_ready = True
+
+    # Let the user decide if the cache is stale relative to their branch
+    use_cache = cache_ready
+    if cache_ready:
+        stale = check_migration_staleness(worktree_path)
+        if stale:
+            choice = _prompt_migration_choice(stale)
+            if choice == "q":
+                sys.exit(0)
+            if choice == "f":
+                use_cache = False
+
+    _restore_and_start(project, port, worktree_path, use_cache)
+
+    info("Waiting for PostHog to start...")
+    if not wait_for_url(f"http://localhost:{port}/_health"):
+        error("PostHog did not start after 1800s. Something is likely broken.")
+        print("Troubleshooting:")
+        print(f"  Logs:   sandbox logs {branch}")
+        print(f"  Shell:  sandbox shell {branch}")
+        sys.exit(1)
+
+    print()
+    success(f"PostHog running at http://localhost:{port}")
+    info(f"Worktree: {worktree_path}")
+    info(f"Shell:    sandbox shell {branch}")
+    info(f"Logs:     sandbox logs {branch}")
+
+
+def cmd_start(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    project = project_name(entry.slug)
+    vite_port = entry.port + 1000
+
+    info(f"Starting sandbox '{project}' on port {entry.port} (Vite: {vite_port})...")
+    compose(project, entry.port, entry.worktree, "up", "-d")
+    success(f"PostHog running at http://localhost:{entry.port}")
+
+
+def cmd_stop(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    project = project_name(entry.slug)
+
+    info(f"Stopping sandbox '{project}'...")
+    compose(project, entry.port, entry.worktree, "stop")
+    success("Sandbox stopped. Volumes preserved.")
+
+
+def cmd_destroy(branch: str) -> None:
+    registry = Registry()
+    entry = registry.get(branch)
+    slug = entry.slug if entry else slugify(branch)
+    project = project_name(slug)
+    port = entry.port if entry else 0
+    worktree = entry.worktree if entry else "."
+
+    warn(f"Destroying sandbox '{project}'...")
+
+    # Tear down containers and per-sandbox volumes
+    compose(project, port, worktree, "down", "-v", check=False)
+
+    # Remove worktree — containers may have created root-owned files,
+    # so we use a container to delete, then rmdir the empty directory.
+    if entry and entry.worktree and Path(entry.worktree).is_dir():
+        run(
+            ["docker", "run", "--rm", "-v", f"{entry.worktree}:/cleanup",
+             "alpine", "sh", "-c", "find /cleanup -mindepth 1 -delete"],
+            check=False,
+        )
+        try:
+            Path(entry.worktree).rmdir()
+        except OSError:
+            pass
+
+    run(["git", "worktree", "prune"], check=False)
+    registry.remove(branch)
+    success("Sandbox destroyed.")
+
+
+def cmd_list() -> None:
+    registry = Registry()
+    entries = registry.list_all()
+
+    if not entries:
+        print("No sandboxes found. Create one with: sandbox create <branch>")
+        return
+
+    print(f"{'BRANCH':<40} {'PORT':<8} {'STATUS':<10} URL")
+    print(f"{'------':<40} {'----':<8} {'------':<10} ---")
+
+    for branch, entry in entries.items():
+        project = project_name(entry.slug)
+        result = compose(
+            project, entry.port, entry.worktree,
+            "ps", "--status", "running", "-q",
+            check=False, capture=True,
+        )
+        running = len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0
+        status = "running" if running > 0 else "stopped"
+        url = f"http://localhost:{entry.port}" if running > 0 else "-"
+        print(f"{branch:<40} {entry.port:<8} {status:<10} {url}")
+
+
+def cmd_shell(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    container = f"sandbox-{entry.slug}-app-1"
+
+    info(f"Attaching to mprocs in {container}... (detach with Ctrl-b d)")
+    # exec replaces this process so the TTY is passed through cleanly
+    os.execvp("docker", [
+        "docker", "exec", "-it", container,
+        "tmux", "-L", "sandbox", "attach-session", "-t", "posthog",
+    ])
+
+
+def cmd_logs(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    project = project_name(entry.slug)
+
+    compose(project, entry.port, entry.worktree, "logs", "-f", "app")
+
+
+def cmd_rebuild_cache() -> None:
+    info("Clearing database cache...")
+    run([
+        "docker", "run", "--rm", "-v", "sandbox-db-cache:/cache",
+        "alpine", "sh", "-c", "find /cache -mindepth 1 -delete",
+    ])
+    docker_volume_run("sandbox-db-cache", "chmod 777 /data")
+    init_cache_from_master()
+
+
+def cmd_nuke() -> None:
+    warn("Destroying all sandboxes and clearing cache...")
+    registry = Registry()
+    for branch in list(registry.list_all()):
+        cmd_destroy(branch)
+    cmd_rebuild_cache()
+    success("All sandboxes destroyed and cache rebuilt.")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _require_registered(registry: Registry, branch: str) -> SandboxEntry:
+    entry = registry.get(branch)
+    if not entry:
+        fatal(f"No sandbox found for branch '{branch}'. Create one with: sandbox create {branch}")
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sandbox",
+        description="PostHog Dev Sandbox Manager",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  sandbox create aspicer/cool-feature
+  sandbox create aspicer/bugfix main
+  sandbox list
+  sandbox shell aspicer/cool-feature
+  sandbox stop aspicer/cool-feature
+  sandbox start aspicer/cool-feature
+  sandbox destroy aspicer/cool-feature""",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    p = sub.add_parser("create", help="Create a new isolated sandbox")
+    p.add_argument("branch")
+    p.add_argument("base_branch", nargs="?", default="master")
+
+    for name, help_text in [
+        ("start", "Start a stopped sandbox"),
+        ("stop", "Stop a sandbox (preserves state)"),
+        ("destroy", "Destroy a sandbox and clean up"),
+        ("shell", "Attach to the mprocs UI"),
+        ("logs", "Tail logs from a sandbox"),
+    ]:
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("branch")
+
+    sub.add_parser("list", aliases=["ls"], help="List all sandboxes")
+    sub.add_parser("rebuild-cache", help="Rebuild the database cache from master")
+    sub.add_parser("nuke", help="Destroy all sandboxes and clear the cache")
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        return
+
+    dispatch = {
+        "create": lambda: cmd_create(args.branch, args.base_branch),
+        "start": lambda: cmd_start(args.branch),
+        "stop": lambda: cmd_stop(args.branch),
+        "destroy": lambda: cmd_destroy(args.branch),
+        "list": cmd_list,
+        "ls": cmd_list,
+        "shell": lambda: cmd_shell(args.branch),
+        "logs": lambda: cmd_logs(args.branch),
+        "rebuild-cache": cmd_rebuild_cache,
+        "nuke": cmd_nuke,
+    }
+
+    try:
+        dispatch[args.command]()
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)
+    except subprocess.CalledProcessError as e:
+        cmd_str = " ".join(str(a) for a in e.cmd)
+        fatal(f"Command failed (exit {e.returncode}): {cmd_str}")
+
+
+if __name__ == "__main__":
+    main()
