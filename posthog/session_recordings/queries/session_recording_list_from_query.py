@@ -172,6 +172,11 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
         # Intercept eligible property filters to route through sessions v3 instead of
         # the events table. This avoids expensive events table scans for common filters
         # like $host, $current_url (event properties) and email (person property).
+        #
+        # Note: the sessions v3 `emails` column contains all emails seen across events in
+        # the session, whereas the existing PersonsPropertiesSubQuery checks the *current*
+        # person record. For test-account filtering (email not_icontains @company.com) this
+        # is equivalent or better — it catches sessions even if the person was updated since.
         self._sessions_v3_property_filters: list[SessionsV3PropertyFilter] = []
         self._sessions_v3_event_names: list[str] = []
         self._use_sessions_v3 = posthoganalytics.feature_enabled(
@@ -191,7 +196,7 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
                     self._sessions_v3_property_filters.append(
                         SessionsV3PropertyFilter(
                             column=column,
-                            operator=getattr(prop, "operator", PropertyOperator.EXACT),
+                            operator=getattr(prop, "operator", None) or PropertyOperator.EXACT,
                             value=getattr(prop, "value", None),
                         )
                     )
@@ -325,6 +330,9 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
         col: ast.Expr = col_override if col_override is not None else ast.Field(chain=[table, f.column])
         val = f.value
 
+        # Unwrap single-element lists for operators that expect scalar values
+        scalar_val = val[0] if isinstance(val, list) and len(val) == 1 else val
+
         match f.operator:
             case PropertyOperator.EXACT:
                 if isinstance(val, list):
@@ -335,17 +343,51 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
                     return ast.Not(expr=ast.Call(name="hasAny", args=[col, ast.Constant(value=val)]))
                 return ast.Not(expr=ast.Call(name="has", args=[col, ast.Constant(value=val)]))
             case PropertyOperator.ICONTAINS:
+                if isinstance(scalar_val, list):
+                    # Multi-value: any element in array matches any search term
+                    return ast.Call(
+                        name="arrayExists",
+                        args=[
+                            ast.Lambda(
+                                args=["x"],
+                                expr=ast.Call(
+                                    name="multiSearchAnyCaseInsensitive",
+                                    args=[ast.Field(chain=["x"]), ast.Constant(value=scalar_val)],
+                                ),
+                            ),
+                            col,
+                        ],
+                    )
                 return ast.Call(
                     name="arrayExists",
                     args=[
                         ast.Lambda(
                             args=["x"],
-                            expr=ast.Call(name="ilike", args=[ast.Field(chain=["x"]), ast.Constant(value=f"%{val}%")]),
+                            expr=ast.Call(
+                                name="ilike",
+                                args=[ast.Field(chain=["x"]), ast.Constant(value=f"%{scalar_val}%")],
+                            ),
                         ),
                         col,
                     ],
                 )
             case PropertyOperator.NOT_ICONTAINS:
+                if isinstance(scalar_val, list):
+                    return ast.Not(
+                        expr=ast.Call(
+                            name="arrayExists",
+                            args=[
+                                ast.Lambda(
+                                    args=["x"],
+                                    expr=ast.Call(
+                                        name="multiSearchAnyCaseInsensitive",
+                                        args=[ast.Field(chain=["x"]), ast.Constant(value=scalar_val)],
+                                    ),
+                                ),
+                                col,
+                            ],
+                        )
+                    )
                 return ast.Not(
                     expr=ast.Call(
                         name="arrayExists",
@@ -353,7 +395,8 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
                             ast.Lambda(
                                 args=["x"],
                                 expr=ast.Call(
-                                    name="ilike", args=[ast.Field(chain=["x"]), ast.Constant(value=f"%{val}%")]
+                                    name="ilike",
+                                    args=[ast.Field(chain=["x"]), ast.Constant(value=f"%{scalar_val}%")],
                                 ),
                             ),
                             col,
@@ -361,24 +404,30 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
                     )
                 )
             case PropertyOperator.REGEX:
+                if isinstance(scalar_val, list):
+                    scalar_val = "|".join(str(v) for v in scalar_val)
                 return ast.Call(
                     name="arrayExists",
                     args=[
                         ast.Lambda(
                             args=["x"],
-                            expr=ast.Call(name="match", args=[ast.Field(chain=["x"]), ast.Constant(value=val)]),
+                            expr=ast.Call(name="match", args=[ast.Field(chain=["x"]), ast.Constant(value=scalar_val)]),
                         ),
                         col,
                     ],
                 )
             case PropertyOperator.NOT_REGEX:
+                if isinstance(scalar_val, list):
+                    scalar_val = "|".join(str(v) for v in scalar_val)
                 return ast.Not(
                     expr=ast.Call(
                         name="arrayExists",
                         args=[
                             ast.Lambda(
                                 args=["x"],
-                                expr=ast.Call(name="match", args=[ast.Field(chain=["x"]), ast.Constant(value=val)]),
+                                expr=ast.Call(
+                                    name="match", args=[ast.Field(chain=["x"]), ast.Constant(value=scalar_val)]
+                                ),
                             ),
                             col,
                         ],
@@ -389,7 +438,11 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
             case PropertyOperator.IS_NOT_SET:
                 return ast.Call(name="empty", args=[col])
             case _:
-                # Fallback: treat as exact match
+                logger.warning(
+                    "sessions_v3_unsupported_operator",
+                    operator=str(f.operator),
+                    column=f.column,
+                )
                 return ast.Call(name="has", args=[col, ast.Constant(value=val)])
 
     @staticmethod
@@ -427,13 +480,15 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
             ),
         ]
 
-        # Date range pruning (safe in WHERE — these are SimpleAggregateFunction min/max)
+        # Date range pruning (safe in WHERE — these are SimpleAggregateFunction min/max).
+        # Use max_timestamp for the lower bound to prune sessions that ended before the
+        # query window, and min_timestamp for the upper bound (session started before date_to).
         query_date_from = self.query_date_range.date_from()
         if query_date_from:
             where_exprs.append(
                 ast.CompareOperation(
                     op=ast.CompareOperationOp.GtEq,
-                    left=ast.Field(chain=[table, "min_timestamp"]),
+                    left=ast.Field(chain=[table, "max_timestamp"]),
                     right=ast.Constant(value=query_date_from - timedelta(days=1)),
                 )
             )
@@ -454,14 +509,15 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
             merged_col = self._merged_array_col(table, f.column)
             having_exprs.append(self._property_filter_to_array_expr(f, col_override=merged_col))
 
-        for event_name in self._sessions_v3_event_names:
-            merged_col = self._merged_array_col(table, "event_names")
-            having_exprs.append(
-                ast.Call(
-                    name="has",
-                    args=[merged_col, ast.Constant(value=event_name)],
+        if self._sessions_v3_event_names:
+            merged_event_names = self._merged_array_col(table, "event_names")
+            for event_name in self._sessions_v3_event_names:
+                having_exprs.append(
+                    ast.Call(
+                        name="has",
+                        args=[merged_event_names, ast.Constant(value=event_name)],
+                    )
                 )
-            )
 
         # Convert session_id_v7 (UInt128) → string UUID
         session_id_expr = ast.Call(
