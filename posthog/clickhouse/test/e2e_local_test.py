@@ -64,7 +64,7 @@ from posthog.clickhouse.migrations.runner import discover_migrations, is_new_sty
 # --------------------------------------------------------------------------
 # Test 1: Parse the test migration manifest
 # --------------------------------------------------------------------------
-manifest = parse_manifest(Path("posthog/clickhouse/migrations/0221_test_new_migration_system/manifest.yaml"))
+manifest = parse_manifest(Path("posthog/clickhouse/migrations/0222_test_new_migration_system/manifest.yaml"))
 print(f"PASS  Test 1 - Manifest parsed: {manifest.description}")
 print(f"       Steps: {len(manifest.steps)}, Rollback: {len(manifest.rollback)}")
 assert len(manifest.steps) == 1
@@ -73,7 +73,7 @@ assert len(manifest.rollback) == 1
 # --------------------------------------------------------------------------
 # Test 2: Parse SQL sections
 # --------------------------------------------------------------------------
-up_sql = Path("posthog/clickhouse/migrations/0221_test_new_migration_system/up.sql").read_text()
+up_sql = Path("posthog/clickhouse/migrations/0222_test_new_migration_system/up.sql").read_text()
 sections = parse_sql_sections(up_sql)
 print(f"PASS  Test 2 - SQL parsed: {len(sections)} section(s)")
 
@@ -97,7 +97,7 @@ except ValueError as e:
 # --------------------------------------------------------------------------
 # Test 5: Validate the test migration
 # --------------------------------------------------------------------------
-results = validate_migration(Path("posthog/clickhouse/migrations/0221_test_new_migration_system"))
+results = validate_migration(Path("posthog/clickhouse/migrations/0222_test_new_migration_system"))
 # The down.sql contains DROP TABLE which triggers a warning (not error) -- that's expected
 errors = [r for r in results if r.severity == "error"]
 warnings = [r for r in results if r.severity == "warning"]
@@ -137,7 +137,7 @@ print("PASS  Test 8 - Tracking table uses local MergeTree (no ZK dependency)")
 # --------------------------------------------------------------------------
 # Test 9: NewStyleMigration
 # --------------------------------------------------------------------------
-migration = NewStyleMigration(Path("posthog/clickhouse/migrations/0221_test_new_migration_system"))
+migration = NewStyleMigration(Path("posthog/clickhouse/migrations/0222_test_new_migration_system"))
 steps = migration.get_steps()
 print(f"PASS  Test 9 - NewStyleMigration: {len(steps)} step(s)")
 for step, sql in steps:

@@ -455,7 +455,7 @@ class TestFirstMigrationValidation:
     def test_real_0220_migration_validates(self):
         from posthog.clickhouse.migrations.validator import validate_migration
 
-        mig_dir = Path("posthog/clickhouse/migrations/0221_test_new_migration_system")
+        mig_dir = Path("posthog/clickhouse/migrations/0222_test_new_migration_system")
         if not mig_dir.exists():
             return
         results = validate_migration(mig_dir)
