@@ -723,3 +723,7 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
+    sandbox:
+        bin_script: sandbox
+        description: Manage isolated dev sandboxes
+        hidden: true

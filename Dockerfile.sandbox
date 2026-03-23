@@ -11,21 +11,26 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.2 /uv /uvx /usr/local/bin/
 
 SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
 
-# System deps for building Python packages + dev tools
+# System deps for building Python/Rust packages + dev tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     brotli \
     build-essential \
+    cmake \
     curl \
     git \
     jq \
+    libclang-dev \
     libffi-dev \
     libpq-dev \
+    libssl-dev \
     libxml2-dev \
     libxmlsec1-dev \
     libxslt1-dev \
     pkg-config \
     postgresql-client \
+    protobuf-compiler \
     tmux \
+    unzip \
     vim \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -41,8 +46,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
     | tar xJ -C /usr/local --strip-components=1 --no-same-owner
 
-# pnpm (version determined by corepack from package.json)
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# pnpm (corepack reads the pinned version from package.json at install time)
+RUN corepack enable
 
 # mprocs (process manager used by bin/start)
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -57,15 +62,6 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
-# GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
-
 # Rust toolchain (cyclotron-node native addon + Rust services)
 # Installed to /usr/local so non-root container users can access cargo
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -74,13 +70,11 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
     && chmod -R a+rwx /usr/local/cargo /usr/local/rustup
 
-# Rust native build deps (cmake for librdkafka, protobuf for gRPC)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake \
-    libclang-dev \
-    libssl-dev \
-    protobuf-compiler \
-    && rm -rf /var/lib/apt/lists/*
+# rpk (Redpanda CLI) — used to pre-create Kafka topics before services start.
+# Version pinned to match the Redpanda image in docker-compose.base.yml.
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/redpanda-data/redpanda/releases/download/v25.1.9/rpk-linux-${ARCH}.zip" \
+    -o /tmp/rpk.zip && unzip -o /tmp/rpk.zip -d /usr/local/bin/ rpk && rm /tmp/rpk.zip
 
 # Shared cache directories — mounted as named volumes in docker-compose.sandbox.yml.
 # Created with open permissions so any UID can write (container runs as host user).
@@ -98,6 +92,8 @@ COPY bin/mprocs.yaml         /usr/local/share/sandbox/bin/mprocs.yaml
 COPY bin/start-backend       /usr/local/share/sandbox/bin/start-backend
 COPY bin/start-rust-service  /usr/local/share/sandbox/bin/start-rust-service
 COPY posthog/management/commands/sandbox_migrate.py /usr/local/share/sandbox/posthog/management/commands/sandbox_migrate.py
+COPY nodejs/package.json     /usr/local/share/sandbox/nodejs/package.json
+COPY rust/cyclotron-node/package.json /usr/local/share/sandbox/rust/cyclotron-node/package.json
 # --- END PRE-MERGE WORKAROUND ---
 
 ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint.sh"]

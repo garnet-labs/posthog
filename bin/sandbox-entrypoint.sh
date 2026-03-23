@@ -15,6 +15,8 @@ cp /usr/local/share/sandbox/bin/mprocs.yaml        bin/mprocs.yaml
 cp /usr/local/share/sandbox/bin/start-backend      bin/start-backend
 cp /usr/local/share/sandbox/bin/start-rust-service bin/start-rust-service
 cp /usr/local/share/sandbox/posthog/management/commands/sandbox_migrate.py posthog/management/commands/sandbox_migrate.py
+cp /usr/local/share/sandbox/nodejs/package.json    nodejs/package.json
+cp /usr/local/share/sandbox/rust/cyclotron-node/package.json rust/cyclotron-node/package.json
 # Fix hardcoded Vite dev server port in older branches (no-op after merge).
 sed -i "s|http://localhost:8234|${JS_URL}|g" posthog/utils.py
 # Add SESSION_COOKIE_NAME env var support if not present (no-op after merge).
@@ -50,7 +52,7 @@ uv sync
 source .venv/bin/activate
 
 # Make hogli available — normally done by flox on-activate.sh
-ln -sf "$(pwd)/bin/hogli" .venv/bin/hogli 2>/dev/null || true
+ln -sf "$(pwd)/bin/hogli" .venv/bin/hogli
 
 echo "==> Installing Node dependencies..."
 # CI=1 suppresses interactive prompts (e.g. "reinstall from scratch? Y/n")
@@ -62,7 +64,7 @@ echo "==> Running database migrations..."
 python manage.py sandbox_migrate
 
 echo "==> Downloading GeoIP database..."
-bin/download-mmdb || true
+bin/download-mmdb
 
 # Generate demo data if the demo user doesn't exist yet (test@posthog.com / 12345678).
 # When database volumes are pre-populated from cache (see bin/sandbox), the user
@@ -73,6 +75,15 @@ else
     echo "==> Generating demo data (first boot)..."
     python manage.py generate_demo_data
 fi
+
+echo "==> Pre-creating Kafka topics..."
+# librdkafka consumers set allowAutoTopicCreation=false in metadata requests,
+# so Redpanda won't auto-create topics despite auto_create_topics_enabled=true.
+# In normal dev, ClickHouse Kafka engine tables or the plugin server create these
+# topics first. In a fresh sandbox volume nothing has, so we create them explicitly.
+for topic in clickhouse_events_json exceptions_ingestion; do
+    rpk topic create "$topic" --brokers kafka:9092 -p 1 -r 1
+done
 
 echo "==> Starting PostHog via mprocs in tmux..."
 # mprocs needs a real TTY, so we wrap bin/start in a tmux session.

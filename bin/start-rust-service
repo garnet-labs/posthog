@@ -31,6 +31,7 @@ case "$RS_SVC" in
     export RUST_BACKTRACE=1
     export KAFKA_HOSTS="$DEFAULT_KAFKA"
     export DATABASE_URL="${DATABASE_URL:-$DEFAULT_PG}"
+    export PERSONHOG_ADDR="${PERSONHOG_ADDR:-http://127.0.0.1:50052}"
     export SKIP_WRITES=false
     export SKIP_READS=false
     export FILTER_MODE=opt-out
