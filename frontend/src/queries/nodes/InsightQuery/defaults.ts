@@ -106,7 +106,6 @@ function getPathsQueryDefault(): PathsQuery {
         pathsFilter: {
             includeEventTypes: [pathType],
             showFullUrls: true,
-            pathReplacements: true,
         },
     }
 }
