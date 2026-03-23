@@ -16,6 +16,7 @@ import { errorTrackingIssueSceneLogic } from '../scenes/ErrorTrackingIssueScene/
 import { sourceDisplay } from '../utils'
 import { AssigneeIconDisplay, AssigneeLabelDisplay } from './Assignee/AssigneeDisplay'
 import { AssigneeSelect } from './Assignee/AssigneeSelect'
+import { IssueActions } from './IssueActions/IssueActions'
 import { issueActionsLogic } from './IssueActions/issueActionsLogic'
 import { issueFiltersLogic, updateFilterSearchParams } from './IssueFilters/issueFiltersLogic'
 import { IssueStatusSelect } from './IssueStatusSelect'
@@ -36,7 +37,11 @@ export const IssueListTitleHeader = ({
                 checked={allSelected}
                 onChange={() => (allSelected ? setSelectedIssueIds([]) : setSelectedIssueIds(results.map((r) => r.id)))}
             />
-            <span>Issue</span>
+            {selectedIssueIds.length > 0 ? (
+                <IssueActions issues={results as ErrorTrackingIssue[]} selectedIds={selectedIssueIds} />
+            ) : (
+                <span>Issue</span>
+            )}
         </div>
     )
 }

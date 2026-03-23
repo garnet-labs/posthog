@@ -15,13 +15,7 @@ import { ERROR_TRACKING_SCENE_LOGIC_KEY } from '../../errorTrackingSceneLogic'
 
 const QUICK_FILTER_CONTEXT = QuickFilterContext.ErrorTrackingIssueFilters
 
-export function IssuesFilters({
-    reload,
-    actions,
-}: {
-    reload?: React.ReactNode
-    actions?: React.ReactNode
-}): JSX.Element {
+export function IssuesFilters({ reload }: { reload?: React.ReactNode }): JSX.Element {
     const { orderBy, orderDirection } = useValues(issueQueryOptionsLogic)
     const { setOrderBy, setOrderDirection } = useActions(issueQueryOptionsLogic)
 
@@ -72,11 +66,6 @@ export function IssuesFilters({
                     </LemonButton>
                 </div>
             </ErrorFilters.SearchBar>
-            {actions && (
-                <div className="flex items-center">
-                    <div className="ml-auto">{actions}</div>
-                </div>
-            )}
         </ErrorFilters.Root>
     )
 }

@@ -33,7 +33,7 @@ import {
 } from './errorTrackingSceneLogic'
 import { ErrorTrackingInsights } from './tabs/insights/ErrorTrackingInsights'
 import { IssuesFilters } from './tabs/issues/IssuesFilters'
-import { insightProps, IssuesList, ListReloadButton, ListSortOptions } from './tabs/issues/IssuesList'
+import { insightProps, IssuesList, ListReloadButton } from './tabs/issues/IssuesList'
 
 const ERROR_TRACKING_ALERT_FILTER_GROUPS: CyclotronJobFiltersType[] = [
     { events: [{ id: '$error_tracking_issue_created', type: 'events' }] },
@@ -86,7 +86,7 @@ export function ErrorTrackingScene(): JSX.Element {
                         {hasSentExceptionEventLoading || hasSentExceptionEvent ? null : <IngestionStatusCheck />}
                     </>
                     <SceneStickyBar showBorderBottom={false} className="pb-2">
-                        <IssuesFilters reload={<ListReloadButton />} actions={<ListSortOptions />} />
+                        <IssuesFilters reload={<ListReloadButton />} />
                     </SceneStickyBar>
                     <div className="px-4">
                         <IssuesList />

@@ -14,12 +14,10 @@ import {
 } from '~/queries/types'
 import { InsightLogicProps } from '~/types'
 
-import { IssueActions } from 'products/error_tracking/frontend/components/IssueActions/IssueActions'
 import { IssueReloadButton } from 'products/error_tracking/frontend/components/IssueQueryOptions/IssueQueryOptions'
 import { OccurrenceSparkline } from 'products/error_tracking/frontend/components/OccurrenceSparkline'
 import { IssueListTitleColumn, IssueListTitleHeader } from 'products/error_tracking/frontend/components/TableColumns'
 import { useSparklineData } from 'products/error_tracking/frontend/hooks/use-sparkline-data'
-import { bulkSelectLogic } from 'products/error_tracking/frontend/logics/bulkSelectLogic'
 import { issuesDataNodeLogic } from 'products/error_tracking/frontend/logics/issuesDataNodeLogic'
 import { errorTrackingSceneLogic } from 'products/error_tracking/frontend/scenes/ErrorTrackingScene/errorTrackingSceneLogic'
 import { ERROR_TRACKING_LISTING_RESOLUTION } from 'products/error_tracking/frontend/utils'
@@ -113,15 +111,4 @@ export function IssuesList(): JSX.Element {
 
 export const ListReloadButton = (): JSX.Element => {
     return <IssueReloadButton />
-}
-
-export const ListSortOptions = (): JSX.Element | null => {
-    const { selectedIssueIds } = useValues(bulkSelectLogic)
-    const { results } = useValues(issuesDataNodeLogic)
-
-    if (selectedIssueIds.length > 0) {
-        return <IssueActions issues={results} selectedIds={selectedIssueIds} />
-    }
-
-    return null
 }
