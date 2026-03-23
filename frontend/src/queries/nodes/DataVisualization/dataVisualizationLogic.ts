@@ -59,6 +59,14 @@ export interface Column {
     dataIndex: number
 }
 
+/** Filter out rows with null values in a date/datetime column — null dates are not plottable on a time axis */
+export function filterNullDateRows(data: any[], column: Column): any[] {
+    if (column.type.name === 'DATE' || column.type.name === 'DATETIME') {
+        return data.filter((row) => row[column.dataIndex] != null)
+    }
+    return data
+}
+
 export interface TableDataCell<T extends string | number | boolean | Date | null> {
     value: T
     formattedValue: string | object | null
@@ -802,12 +810,8 @@ export const dataVisualizationLogic = kea<dataVisualizationLogicType>([
                           ? response.result
                           : []
 
-                // Filter out rows with null date/datetime x-axis values
                 const xColumn = xSeries !== null ? columns.find((n) => n.name === xSeries) : null
-                const data =
-                    xColumn && (xColumn.type.name === 'DATE' || xColumn.type.name === 'DATETIME')
-                        ? allData.filter((row: Record<number, unknown>) => row[xColumn.dataIndex] != null)
-                        : allData
+                const data = xColumn ? filterNullDateRows(allData, xColumn) : allData
 
                 return ySeries
                     .map((series): AxisSeries<number | null> | null => {
@@ -897,15 +901,9 @@ export const dataVisualizationLogic = kea<dataVisualizationLogicType>([
                     return null
                 }
 
-                // Filter out rows with null date/datetime x-axis values
-                const filteredData =
-                    column.type.name === 'DATE' || column.type.name === 'DATETIME'
-                        ? data.filter((n: Record<number, unknown>) => n[column.dataIndex] != null)
-                        : data
-
                 return {
                     column,
-                    data: filteredData.map((n: any) => n[column.dataIndex]),
+                    data: filterNullDateRows(data, column).map((n: any) => n[column.dataIndex]),
                 }
             },
         ],
