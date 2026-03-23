@@ -5,7 +5,7 @@
 # Extends service definitions from docker-compose.base.yml to stay in sync
 # with image versions, healthchecks, and environment defaults.
 #
-# Managed by `bin/sandbox` — not intended for direct invocation.
+# Managed by bin/sandbox — not intended for direct invocation.
 # See `sandbox help` for usage.
 #
 
