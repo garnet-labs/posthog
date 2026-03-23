@@ -992,6 +992,14 @@ export const SETTINGS_MAP: SettingSection[] = [
                 keywords: ['crash', 'bug', 'exception', 'stack trace'],
             },
             {
+                id: 'error-tracking-suppression-rules',
+                title: 'Suppression rules',
+                description:
+                    'Filter autocaptured exceptions by type or message to skip capturing certain exceptions in the web SDK.',
+                component: <SuppressionRules />,
+                keywords: ['filter', 'ignore', 'suppress', 'exception', 'type', 'message'],
+            },
+            {
                 id: 'error-tracking-spike-detection',
                 title: 'Spike detection',
                 component: <SpikeDetectionSettings />,
@@ -1026,15 +1034,6 @@ export const SETTINGS_MAP: SettingSection[] = [
                 description: 'Define rules for how errors are grouped together into issues.',
                 component: <GroupingRules />,
                 keywords: ['group', 'merge', 'fingerprint', 'dedup'],
-            },
-            {
-                id: 'error-tracking-suppression-rules',
-                title: 'Suppression rules',
-                description:
-                    'Filter autocaptured exceptions by type or message to skip capturing certain exceptions in the web SDK.',
-                platformSupport: FEATURE_SUPPORT.errorTrackingSuppressionRules,
-                component: <SuppressionRules />,
-                keywords: ['filter', 'ignore', 'suppress', 'exception', 'type', 'message'],
             },
             {
                 id: 'error-tracking-alerting',
