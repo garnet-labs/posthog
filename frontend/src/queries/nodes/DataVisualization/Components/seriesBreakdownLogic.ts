@@ -1,6 +1,12 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, selectors } from 'kea'
 
-import { AxisSeries, AxisSeriesSettings, SelectedYAxis, dataVisualizationLogic } from '../dataVisualizationLogic'
+import {
+    AxisSeries,
+    AxisSeriesSettings,
+    filterNullDateRows,
+    SelectedYAxis,
+    dataVisualizationLogic,
+} from '../dataVisualizationLogic'
 import type { seriesBreakdownLogicType } from './seriesBreakdownLogicType'
 
 export interface AxisBreakdownSeries<T> {
@@ -139,11 +145,7 @@ export const seriesBreakdownLogic = kea<seriesBreakdownLogicType>([
                           ? response.result
                           : []
 
-                // Filter out rows with null date/datetime x-axis values
-                const data =
-                    xColumn.type.name === 'DATE' || xColumn.type.name === 'DATETIME'
-                        ? allData.filter((n) => n[xColumn.dataIndex] != null)
-                        : allData
+                const data = filterNullDateRows(allData, xColumn)
 
                 // xData is unique x values
                 const xData = Array.from(new Set(data.map((n) => n[xColumn.dataIndex])))
