@@ -1,8 +1,7 @@
 import { actions, connect, kea, listeners, path, reducers, selectors } from 'kea'
-import CORE_FILTER_DEFINITIONS_BY_GROUP from 'taxonomy/core-filter-definitions-by-group.json'
 
 import api, { ApiMethodOptions, CountedPaginatedResponse } from 'lib/api'
-import { TaxonomicFilterGroupType, TaxonomicFilterValue } from 'lib/components/TaxonomicFilter/types'
+import { TaxonomicFilterValue } from 'lib/components/TaxonomicFilter/types'
 import { dayjs } from 'lib/dayjs'
 import { captureTimeToSeeData } from 'lib/internalMetrics'
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
@@ -280,32 +279,6 @@ export const propertyDefinitionsModel = kea<propertyDefinitionsModelType>([
     }),
     listeners(({ actions, values, cache }) => ({
         loadPropertyDefinitions: async ({ propertyKeys, type, groupTypeIndex }) => {
-            // Resource type properties (e.g. error tracking issues) are resolved
-            // from static taxonomy definitions and don't need an API fetch
-            if (type === PropertyDefinitionType.Resource) {
-                const taxonomyGroup =
-                    CORE_FILTER_DEFINITIONS_BY_GROUP[
-                        TaxonomicFilterGroupType.ErrorTrackingIssues as keyof typeof CORE_FILTER_DEFINITIONS_BY_GROUP
-                    ] ?? {}
-                const resolved: PropertyDefinitionStorage = {}
-                for (const propertyKey of propertyKeys) {
-                    const key = getPropertyKey(type, propertyKey, groupTypeIndex)
-                    const taxonomyEntry = taxonomyGroup[propertyKey as keyof typeof taxonomyGroup]
-                    if (taxonomyEntry) {
-                        resolved[key] = {
-                            id: String(propertyKey),
-                            name: String(propertyKey),
-                            property_type: (taxonomyEntry as Record<string, string>).type ?? PropertyType.String,
-                            type: PropertyDefinitionType.Resource,
-                        } as PropertyDefinition
-                    } else {
-                        resolved[key] = PropertyDefinitionState.Missing
-                    }
-                }
-                actions.updatePropertyDefinitions(resolved)
-                return
-            }
-
             const { rawPropertyDefinitionStorage } = values
 
             const pendingStateUpdate: PropertyDefinitionStorage = {}
@@ -361,7 +334,8 @@ export const propertyDefinitionsModel = kea<propertyDefinitionsModelType>([
                 if (isKeyOf(type, pendingByType)) {
                     pendingByType[type].push(rest.join('/'))
                 } else {
-                    throw new Error(`Unknown property definition type: ${type}`)
+                    // Mark unknown types as missing so they don't stay pending forever
+                    actions.updatePropertyDefinitions({ [key]: PropertyDefinitionState.Missing })
                 }
             }
             try {
