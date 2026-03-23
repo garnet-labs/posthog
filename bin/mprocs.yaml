@@ -228,13 +228,13 @@ procs:
 
     migrate-persons-db:
         shell: 'bin/wait-for-docker && bin/migrate --scope=persons'
+        capability: core_infra
         ready_pattern: 'All migrations completed successfully'
-        # no capability - optional migration
 
     migrate-behavioral-cohorts:
         shell: 'bin/wait-for-docker && bin/migrate --scope=behavioral-cohorts'
+        capability: core_infra
         ready_pattern: 'All migrations completed successfully'
-        # no capability - optional migration
 
     generate-demo-data:
         shell: |-
