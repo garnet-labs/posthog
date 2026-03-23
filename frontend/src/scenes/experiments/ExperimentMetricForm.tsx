@@ -95,10 +95,12 @@ const dataWarehousePopoverFields: DataWarehousePopoverField[] = [
     {
         key: 'timestamp_field',
         label: 'Timestamp Field',
+        description: 'The column in your data warehouse table that contains the timestamp of each row',
     },
     {
         key: 'distinct_id_field',
         label: 'Distinct ID Field',
+        description: 'The column in your data warehouse table that identifies which user each row belongs to',
         allowHogQL: true,
     },
 ]
