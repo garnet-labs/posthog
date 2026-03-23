@@ -112,7 +112,7 @@ const FilterSettingsMenuCore = ({
 
     const quickFilterItems: LemonMenuItems[number]['items'] = quickFilterContext
         ? quickFilters.map((filter: QuickFilter) => {
-              const selectedFilter = selectedQuickFilters[filter.property_name]
+              const selectedFilter = selectedQuickFilters[filter.id]
               const selectedOptionId = selectedFilter?.optionId || null
 
               if (filter.options.length === 1) {
@@ -123,8 +123,8 @@ const FilterSettingsMenuCore = ({
                       active: isActive,
                       onClick: () =>
                           isActive
-                              ? clearQuickFilter(filter.property_name)
-                              : setQuickFilterValue(filter.property_name, opt),
+                              ? clearQuickFilter(filter.id)
+                              : setQuickFilterValue(filter.id, filter.property_name, opt),
                   }
               }
 
@@ -134,7 +134,7 @@ const FilterSettingsMenuCore = ({
                   items: filter.options.map((opt) => ({
                       label: opt.label,
                       active: selectedOptionId === opt.id,
-                      onClick: () => setQuickFilterValue(filter.property_name, opt),
+                      onClick: () => setQuickFilterValue(filter.id, filter.property_name, opt),
                   })),
               }
           })

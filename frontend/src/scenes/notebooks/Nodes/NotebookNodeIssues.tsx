@@ -18,7 +18,8 @@ import { issuesDataNodeLogic } from 'products/error_tracking/frontend/logics/iss
 import { errorTrackingQuery } from 'products/error_tracking/frontend/queries'
 import { IssuesFilters } from 'products/error_tracking/frontend/scenes/ErrorTrackingScene/tabs/issues/IssuesFilters'
 import {
-    ListOptions,
+    ListReloadButton,
+    ListSortOptions,
     useIssueQueryContext,
 } from 'products/error_tracking/frontend/scenes/ErrorTrackingScene/tabs/issues/IssuesList'
 
@@ -135,7 +136,10 @@ export const Settings = ({
         <ContextualFilters logicKey={logicKey}>
             <div className="p-2 space-y-2 mb-2">
                 <IssuesFilters />
-                <ListOptions />
+                <span className="flex items-center gap-2">
+                    <ListReloadButton />
+                    <ListSortOptions />
+                </span>
             </div>
         </ContextualFilters>
     )

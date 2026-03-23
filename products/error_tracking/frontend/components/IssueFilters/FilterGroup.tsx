@@ -221,7 +221,7 @@ const QuickFilterChips = ({
                                 icon={<IconX className="w-3 h-3" />}
                                 onClick={(e) => {
                                     e.stopPropagation()
-                                    clearQuickFilter(selected.propertyName)
+                                    clearQuickFilter(selected.filterId)
                                 }}
                                 className="p-0.5"
                             />
