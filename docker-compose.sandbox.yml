@@ -1,0 +1,328 @@
+#
+# Self-contained compose file for isolated dev sandboxes.
+# Each sandbox is a complete PostHog stack with its own infra.
+#
+# Extends service definitions from docker-compose.base.yml to stay in sync
+# with image versions, healthchecks, and environment defaults.
+#
+# Managed by `bin/sandbox` — not intended for direct invocation.
+# See `sandbox help` for usage.
+#
+
+services:
+    # Caddy reverse proxy — routes capture/flags/replay traffic to the
+    # appropriate service inside the app container, mirroring the dev proxy
+    # in docker-compose.dev.yml. Can't extend base because sandbox routes
+    # to a single `app` container (not separate service containers).
+    proxy:
+        extends:
+            file: docker-compose.base.yml
+            service: proxy
+        restart: on-failure
+        ports:
+            - "${SANDBOX_PORT:-48001}:8000"
+        volumes: []
+        environment:
+            CADDYFILE: |
+                http://localhost:8000 {
+                    @replay-capture {
+                        path /s
+                        path /s/*
+                    }
+
+                    @capture-ai {
+                        path /i/v0/ai
+                        path /i/v0/ai/*
+                    }
+
+                    @capture {
+                        path /e
+                        path /e/*
+                        path /i/v0/*
+                        path /batch
+                        path /batch*
+                        path /capture
+                        path /capture*
+                    }
+
+                    @flags {
+                        path /flags
+                        path /flags*
+                    }
+
+                    @webhooks {
+                        path /public/webhooks
+                        path /public/webhooks/*
+                        path /public/m
+                        path /public/m/*
+                    }
+
+                    handle @capture-ai {
+                        reverse_proxy app:3309
+                    }
+
+                    handle @capture {
+                        reverse_proxy app:3307
+                    }
+
+                    handle @replay-capture {
+                        reverse_proxy app:3306
+                    }
+
+                    handle @flags {
+                        reverse_proxy app:3001
+                    }
+
+                    handle @webhooks {
+                        reverse_proxy app:6738
+                    }
+
+                    handle {
+                        reverse_proxy app:8000
+                    }
+                }
+        depends_on:
+            - app
+
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile.sandbox
+        restart: on-failure
+        # Run as the host user so files created in the mounted worktree
+        # (node_modules, .venv) have correct ownership
+        user: "${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000}"
+        # mprocs (used by bin/start) requires a TTY
+        tty: true
+        stdin_open: true
+        ports:
+            # Vite dev server exposed directly (not proxied)
+            - "${SANDBOX_VITE_PORT:-49001}:8234"
+        volumes:
+            - ${SANDBOX_CODE:-.}:/workspace
+            # Shared caches — persist across sandboxes so the second one is fast.
+            # uv and pnpm download packages here; subsequent sandboxes get cache hits.
+            - uv-cache:/cache/uv
+            - pnpm-store:/cache/pnpm
+            - cargo-target:/cache/cargo-target
+        environment:
+            # --- Sandbox identity ---
+            POSTHOG_SANDBOX: '1'
+            DEBUG: '1'
+            HOST_BIND: '0.0.0.0'
+            SKIP_SERVICE_VERSION_REQUIREMENTS: '1'
+            IS_BEHIND_PROXY: 'true'
+            DISABLE_SECURE_SSL_REDIRECT: 'true'
+            # Unique session cookie per sandbox so multiple sandboxes on localhost
+            # don't overwrite each other's login sessions.
+            # (CSRF cookie is NOT varied — frontend hardcodes 'posthog_csrftoken'.)
+            SESSION_COOKIE_NAME: 'sessionid_${SANDBOX_PORT:-48001}'
+
+            # --- Core datastores (point at compose services, not localhost) ---
+            DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog'
+            PGHOST: db
+            PGUSER: posthog
+            PGPASSWORD: posthog
+            CLICKHOUSE_HOST: 'clickhouse'
+            CLICKHOUSE_DATABASE: 'posthog'
+            CLICKHOUSE_SECURE: 'false'
+            CLICKHOUSE_VERIFY: 'false'
+            CLICKHOUSE_API_USER: 'api'
+            CLICKHOUSE_API_PASSWORD: 'apipass'
+            CLICKHOUSE_APP_USER: 'app'
+            CLICKHOUSE_APP_PASSWORD: 'apppass'
+            KAFKA_HOSTS: 'kafka:9092'
+            REDIS_URL: 'redis://redis7:6379/'
+            TEMPORAL_HOST: 'temporal'
+
+            # --- Object storage (MinIO) ---
+            OBJECT_STORAGE_ENDPOINT: 'http://objectstorage:19000'
+            OBJECT_STORAGE_ACCESS_KEY_ID: 'object_storage_root_user'
+            OBJECT_STORAGE_SECRET_ACCESS_KEY: 'object_storage_root_password'
+            SESSION_RECORDING_V2_S3_ENDPOINT: 'http://objectstorage:19000'
+
+            # --- Persons DB ---
+            # Multiple env var names because Django, nodejs, and Rust services
+            # each read a different config key for the same connection.
+            PERSONS_DB_WRITER_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            PERSONS_DB_READER_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            PERSONS_WRITE_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            PERSONS_READ_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            PERSONS_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            PERSONS_READONLY_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            BEHAVIORAL_COHORTS_DATABASE_URL: 'postgres://posthog:posthog@db:5432/behavioral_cohorts'
+
+            # --- Rust services ---
+            COOKIELESS_REDIS_HOST: 'redis7'
+            COOKIELESS_REDIS_PORT: '6379'
+            AI_S3_ENDPOINT: 'http://objectstorage:19000'
+
+            # --- NodeJS plugin server ---
+            CDP_REDIS_HOST: 'redis7'
+            CDP_API_URL: 'http://localhost:6738'
+            SESSION_RECORDING_API_REDIS_HOST: 'redis7'
+            SESSION_RECORDING_API_REDIS_PORT: '6379'
+            ENCRYPTION_SALT_KEYS: '00beef0000beef0000beef0000beef00'
+
+            # --- Frontend ---
+            JS_URL: 'http://localhost:${SANDBOX_VITE_PORT:-49001}'
+
+            # --- DuckLake ---
+            DUCKLAKE_RDS_HOST: 'db'
+            DUCKLAKE_RDS_PORT: '5432'
+            DUCKLAKE_RDS_USERNAME: 'posthog'
+            DUCKLAKE_RDS_PASSWORD: 'posthog'
+            DUCKLAKE_S3_ACCESS_KEY: 'object_storage_root_user'
+            DUCKLAKE_S3_SECRET_KEY: 'object_storage_root_password'
+            DUCKLAKE_BUCKET: 'ducklake-dev'
+            DUCKLAKE_BUCKET_REGION: 'us-east-1'
+        depends_on:
+            db:
+                condition: service_healthy
+            redis7:
+                condition: service_healthy
+            clickhouse:
+                condition: service_healthy
+            kafka:
+                condition: service_healthy
+            objectstorage:
+                condition: service_started
+
+    db:
+        # Not using extends — base mounts volumes that merge with ours,
+        # causing duplicate /docker-entrypoint-initdb.d mounts.
+        image: postgres:15.12-alpine
+        restart: on-failure
+        environment:
+            POSTGRES_USER: posthog
+            POSTGRES_DB: posthog
+            POSTGRES_PASSWORD: posthog
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U posthog']
+            interval: 5s
+            timeout: 30s
+            retries: 30
+            start_period: 10s
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+            - ${SANDBOX_CODE:-.}/docker/postgres-init-scripts:/docker-entrypoint-initdb.d:ro
+        command: postgres -c max_connections=1000 -c idle_in_transaction_session_timeout=300000
+
+    redis7:
+        extends:
+            file: docker-compose.base.yml
+            service: redis7
+
+    clickhouse:
+        extends:
+            file: docker-compose.base.yml
+            service: clickhouse
+        mem_limit: 8g
+        cpus: 2
+        environment:
+            AWS_ACCESS_KEY_ID: object_storage_root_user
+            AWS_SECRET_ACCESS_KEY: object_storage_root_password
+        volumes:
+            - clickhouse-data:/var/lib/clickhouse
+            # Shared cache volume for ClickHouse BACKUP/RESTORE
+            - db-cache:/cache/chbackup
+            # Config from the worktree (read-only — sandbox ClickHouse never writes these)
+            - ${SANDBOX_CODE:-.}/posthog/idl:/idl:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/config.d/default.xml:/etc/clickhouse-server/config.d/default.xml:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/config.d/dev-memory.xml:/etc/clickhouse-server/config.d/dev-memory.xml:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/config.d/sandbox-backup.xml:/etc/clickhouse-server/config.d/sandbox-backup.xml:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/users-dev.xml:/etc/clickhouse-server/users.xml:ro
+            - ${SANDBOX_CODE:-.}/docker/clickhouse/user_defined_function.xml:/etc/clickhouse-server/user_defined_function.xml:ro
+            - ${SANDBOX_CODE:-.}/posthog/user_scripts:/var/lib/clickhouse/user_scripts:ro
+        depends_on:
+            - kafka
+            - zookeeper
+
+    zookeeper:
+        extends:
+            file: docker-compose.base.yml
+            service: zookeeper
+
+    kafka:
+        extends:
+            file: docker-compose.base.yml
+            service: kafka
+        # Lighter resources than dev (1 core, 1G RAM vs 2 cores, 3G)
+        command:
+            - redpanda
+            - start
+            - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+            - --advertise-kafka-addr internal://kafka:9092,external://localhost:19092
+            - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+            - --advertise-pandaproxy-addr internal://kafka:8082,external://localhost:18082
+            - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+            - --rpc-addr kafka:33145
+            - --advertise-rpc-addr kafka:33145
+            - --mode dev-container
+            - --smp 1
+            - --memory 1G
+            - --reserve-memory 200M
+            - --overprovisioned
+            - --set redpanda.empty_seed_starts_cluster=false
+            - --seeds kafka:33145
+            - --set redpanda.auto_create_topics_enabled=true
+
+    objectstorage:
+        extends:
+            file: docker-compose.base.yml
+            service: objectstorage
+
+    elasticsearch:
+        extends:
+            file: docker-compose.base.yml
+            service: elasticsearch
+
+    temporal:
+        # Not using extends — base exposes port 7233 to host and Docker Compose
+        # merges lists, so `ports: []` can't remove it. Inline to avoid conflicts.
+        restart: on-failure
+        healthcheck:
+            test: ['CMD-SHELL', 'nc -z $(hostname) 7233']
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 300s
+        environment:
+            - DB=postgres12
+            - DB_PORT=5432
+            - POSTGRES_USER=posthog
+            - POSTGRES_PWD=posthog
+            - POSTGRES_SEEDS=db
+            - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+            - ENABLE_ES=true
+            - ES_SEEDS=elasticsearch
+            - ES_VERSION=v7
+        image: temporalio/auto-setup:1.26.2
+        labels:
+            kompose.volume.type: configMap
+        volumes:
+            - ${SANDBOX_CODE:-.}/docker/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+        depends_on:
+            db:
+                condition: service_healthy
+            elasticsearch:
+                condition: service_started
+
+volumes:
+    postgres-data:
+    redpanda-data:
+    clickhouse-data:
+    uv-cache:
+        name: sandbox-uv-cache
+        external: true
+    pnpm-store:
+        name: sandbox-pnpm-store
+        external: true
+    db-cache:
+        name: sandbox-db-cache
+        external: true
+    cargo-target:
+        name: sandbox-cargo-target
+        external: true
