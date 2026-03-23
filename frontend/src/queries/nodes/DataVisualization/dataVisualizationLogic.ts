@@ -788,19 +788,28 @@ export const dataVisualizationLogic = kea<dataVisualizationLogicType>([
             (cachedResults: AnyResponseType | null): boolean => !!cachedResults,
         ],
         yData: [
-            (s) => [s.selectedYAxis, s.response, s.columns, s.chartSettings],
-            (ySeries, response, columns, chartSettings): AxisSeries<number | null>[] => {
+            (s) => [s.selectedYAxis, s.response, s.columns, s.chartSettings, s.selectedXAxis],
+            (ySeries, response, columns, chartSettings, xSeries): AxisSeries<number | null>[] => {
                 if (!response || ySeries === null || ySeries.length === 0) {
                     return [EmptyYAxisSeries]
                 }
 
                 const showNullsAsZero = chartSettings.showNullsAsZero ?? false
-                const data =
+                const allData =
                     'results' in response && Array.isArray(response.results)
                         ? response.results
                         : 'result' in response && Array.isArray(response.result)
                           ? response.result
                           : []
+
+                // Filter out rows with null date/datetime x-axis values — these are
+                // aggregation artifacts (e.g. from GROUP BY on Nullable columns with
+                // enable_analyzer) that produce outlier values and break chart scaling
+                const xColumn = xSeries !== null ? columns.find((n) => n.name === xSeries) : null
+                const data =
+                    xColumn && (xColumn.type.name === 'DATE' || xColumn.type.name === 'DATETIME')
+                        ? allData.filter((row: Record<number, unknown>) => row[xColumn.dataIndex] != null)
+                        : allData
 
                 return ySeries
                     .map((series): AxisSeries<number | null> | null => {
@@ -890,9 +899,17 @@ export const dataVisualizationLogic = kea<dataVisualizationLogicType>([
                     return null
                 }
 
+                // Filter out rows with null date/datetime x-axis values — these are
+                // aggregation artifacts (e.g. from GROUP BY on Nullable columns with
+                // enable_analyzer) that produce outlier values and break chart scaling
+                const filteredData =
+                    column.type.name === 'DATE' || column.type.name === 'DATETIME'
+                        ? data.filter((n: Record<number, unknown>) => n[column.dataIndex] != null)
+                        : data
+
                 return {
                     column,
-                    data: data.map((n: any) => n[column.dataIndex]),
+                    data: filteredData.map((n: any) => n[column.dataIndex]),
                 }
             },
         ],

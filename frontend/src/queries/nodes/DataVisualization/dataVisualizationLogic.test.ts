@@ -317,6 +317,60 @@ describe('dataVisualizationLogic', () => {
             },
         })
     })
+    it('filters out rows with null date x-axis values from chart data', async () => {
+        dataNodeLogic({ key: testKey, query: defaultQuery.source, dataNodeCollectionId }).actions.setResponse({
+            columns: ['created_at', 'succeeded', 'failed'],
+            types: [
+                ['created_at', 'Nullable(Date)'],
+                ['succeeded', 'UInt64'],
+                ['failed', 'UInt64'],
+            ],
+            results: [
+                ['2025-01-01', 100, 5],
+                ['2025-01-02', 200, 10],
+                [null, 300, 15],
+            ],
+        })
+
+        await expectLogic(logic).toMatchValues({
+            xData: {
+                column: expect.objectContaining({ name: 'created_at' }),
+                data: ['2025-01-01', '2025-01-02'],
+            },
+            yData: expect.arrayContaining([
+                expect.objectContaining({
+                    column: expect.objectContaining({ name: 'succeeded' }),
+                    data: [100, 200],
+                }),
+                expect.objectContaining({
+                    column: expect.objectContaining({ name: 'failed' }),
+                    data: [5, 10],
+                }),
+            ]),
+        })
+    })
+
+    it('does not filter null x-axis values for non-date columns', async () => {
+        dataNodeLogic({ key: testKey, query: defaultQuery.source, dataNodeCollectionId }).actions.setResponse({
+            columns: ['category', 'count'],
+            types: [
+                ['category', 'Nullable(String)'],
+                ['count', 'UInt64'],
+            ],
+            results: [
+                ['A', 10],
+                [null, 20],
+            ],
+        })
+
+        await expectLogic(logic).toMatchValues({
+            xData: {
+                column: expect.objectContaining({ name: 'category' }),
+                data: ['A', null],
+            },
+        })
+    })
+
     it('auto-fills 2d heatmap columns when selecting auto on heatmap data', async () => {
         dataNodeLogic({ key: testKey, query: defaultQuery.source, dataNodeCollectionId }).actions.setResponse({
             columns: ['region', 'segment', 'count'],

@@ -132,12 +132,20 @@ export const seriesBreakdownLogic = kea<seriesBreakdownLogicType>([
                     return createEmptyBreakdownSeriesWithError('Too many breakdown values (max 50)')
                 }
 
-                const data: any[] =
+                const allData: any[] =
                     'results' in response && Array.isArray(response.results)
                         ? response.results
                         : 'result' in response && Array.isArray(response.result)
                           ? response.result
                           : []
+
+                // Filter out rows with null date/datetime x-axis values — these are
+                // aggregation artifacts (e.g. from GROUP BY on Nullable columns with
+                // enable_analyzer) that produce outlier values and break chart scaling
+                const data =
+                    xColumn.type.name === 'DATE' || xColumn.type.name === 'DATETIME'
+                        ? allData.filter((n) => n[xColumn.dataIndex] != null)
+                        : allData
 
                 // xData is unique x values
                 const xData = Array.from(new Set(data.map((n) => n[xColumn.dataIndex])))
