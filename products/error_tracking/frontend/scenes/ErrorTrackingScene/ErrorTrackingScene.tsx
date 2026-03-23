@@ -85,7 +85,7 @@ export function ErrorTrackingScene(): JSX.Element {
                         <ErrorTrackingIssueFilteringTool />
                         {hasSentExceptionEventLoading || hasSentExceptionEvent ? null : <IngestionStatusCheck />}
                     </>
-                    <SceneStickyBar showBorderBottom={false} className="pb-2">
+                    <SceneStickyBar showBorderBottom={false} className="py-2">
                         <IssuesFilters reload={<ListReloadButton />} />
                     </SceneStickyBar>
                     <div className="px-4">
