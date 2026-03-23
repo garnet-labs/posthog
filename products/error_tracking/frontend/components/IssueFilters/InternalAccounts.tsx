@@ -49,6 +49,7 @@ const FilterSettingsMenuWithIssueOptions = (props: FilterSettingsMenuProps): JSX
         {
             label: 'Status',
             sideIcon: <IconChevronRight className="size-3" />,
+            trigger: 'hover',
             items: statusOptions.map((opt) => ({
                 label: <StatusIndicator status={opt.value} size="small" />,
                 active: status === opt.value || (!status && opt.value === 'active'),
@@ -58,6 +59,7 @@ const FilterSettingsMenuWithIssueOptions = (props: FilterSettingsMenuProps): JSX
         {
             label: 'Assignee',
             sideIcon: <IconChevronRight className="size-3" />,
+            trigger: 'hover',
             custom: true,
             items: [
                 {
@@ -131,6 +133,7 @@ const FilterSettingsMenuCore = ({
               return {
                   label: filter.name,
                   sideIcon: <IconChevronRight className="size-3" />,
+                  trigger: 'hover' as const,
                   items: filter.options.map((opt) => ({
                       label: opt.label,
                       active: selectedOptionId === opt.id,
