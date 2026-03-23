@@ -1,4 +1,5 @@
 import { MOCK_DEFAULT_BASIC_USER, MOCK_SECOND_BASIC_USER } from 'lib/api.mock'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 
 import '@testing-library/jest-dom'
 
@@ -12,7 +13,14 @@ import { initKeaTests } from '~/test/init'
 import { SavedInsightsFilters } from './SavedInsightsFilters'
 import { SavedInsightFilters, cleanFilters } from './savedInsightsLogic'
 
+jest.mock('lib/hooks/useFeatureFlag', () => ({
+    useFeatureFlag: jest.fn(),
+}))
+
 const DEFAULT_FILTERS: SavedInsightFilters = cleanFilters({})
+const mockedUseFeatureFlag = useFeatureFlag as jest.MockedFunction<typeof useFeatureFlag>
+const OUTLINE_HEART_PATH_PREFIX = 'M16.925 4.6'
+const FILLED_HEART_PATH_PREFIX = 'M12.367 21.404'
 
 describe('SavedInsightsFilters Created by dropdown', () => {
     let setFilters: jest.Mock
@@ -48,6 +56,7 @@ describe('SavedInsightsFilters Created by dropdown', () => {
         })
         initKeaTests()
         setFilters = jest.fn()
+        mockedUseFeatureFlag.mockReturnValue(true)
     })
 
     afterEach(() => {
@@ -118,5 +127,21 @@ describe('SavedInsightsFilters Created by dropdown', () => {
         await userEvent.click(screen.getByText('Rose'))
 
         expect(setFilters).toHaveBeenCalledWith({ createdBy: [MOCK_SECOND_BASIC_USER.id] })
+    })
+
+    it('renders the outlined heart icon when favorites filter is disabled', () => {
+        renderFilters({ favorited: false })
+
+        const favoritesIconPath = screen.getByRole('button', { name: 'Favorites' }).querySelector('svg path')
+
+        expect(favoritesIconPath?.getAttribute('d')).toContain(OUTLINE_HEART_PATH_PREFIX)
+    })
+
+    it('renders the filled heart icon when favorites filter is enabled', () => {
+        renderFilters({ favorited: true })
+
+        const favoritesIconPath = screen.getByRole('button', { name: 'Favorites' }).querySelector('svg path')
+
+        expect(favoritesIconPath?.getAttribute('d')).toContain(FILLED_HEART_PATH_PREFIX)
     })
 })
