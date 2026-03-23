@@ -3,7 +3,7 @@
  * shared capture array used by the Chart.js mock. This lets getChart() and
  * waitForChart() work identically regardless of which renderer is active.
  */
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo } from 'react'
 
 import type { CapturedChartConfig } from './captured-charts'
 import { pushCapturedChart } from './captured-charts'
@@ -191,15 +191,11 @@ function buildTestDOM(config: CapturedChartConfig): React.ReactElement {
 }
 
 export function LineChart(props: LineChartProps): React.ReactElement {
-    const capturedRef = useRef(false)
+    const config = useMemo(() => propsToCapturedChartConfig(props), [props])
 
     useEffect(() => {
-        const config = propsToCapturedChartConfig(props)
         pushCapturedChart(config, null)
-        capturedRef.current = true
-    })
-
-    const config = propsToCapturedChartConfig(props)
+    }, [config])
 
     return (
         <div data-testid="hog-line-chart" className={props.className}>

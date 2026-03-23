@@ -87,27 +87,14 @@ export function ActionsLineGraphD3({ context }: ChartParams): JSX.Element | null
             hideXAxis={false}
             hideYAxis={false}
             renderTooltip={(ctx) => (
-                <div
-                    style={{
-                        background: 'var(--bg-surface-tooltip)',
-                        color: 'var(--text-primary)',
-                        padding: '8px 12px',
-                        borderRadius: 6,
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                        fontSize: 13,
-                    }}
-                >
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{ctx.label}</div>
+                <div className="bg-[var(--bg-surface-tooltip)] text-primary px-3 py-2 rounded-md shadow-lg text-[13px]">
+                    <div className="font-semibold mb-1">{ctx.label}</div>
                     {ctx.seriesData.map((s) => (
-                        <div key={s.series.key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <div key={s.series.key} className="flex items-center gap-2">
                             <span
-                                style={{
-                                    width: 8,
-                                    height: 8,
-                                    borderRadius: '50%',
-                                    backgroundColor: s.color,
-                                    display: 'inline-block',
-                                }}
+                                className="inline-block size-2 rounded-full"
+                                // eslint-disable-next-line react/forbid-dom-props
+                                style={{ backgroundColor: s.color }}
                             />
                             <span>{s.series.label}:</span>
                             <strong>{s.value.toLocaleString()}</strong>
