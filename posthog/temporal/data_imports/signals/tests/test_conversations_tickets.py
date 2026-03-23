@@ -14,6 +14,16 @@ class TestConversationsTicketEmitter:
         assert result.weight == 1.0
         assert result.description == "\n".join(conversations_ticket_record["messages"])
 
+    def test_prepends_email_subject_as_title_line(self, conversations_ticket_record):
+        conversations_ticket_record["email_subject"] = "Cannot export dashboard"
+        result = conversations_ticket_emitter(team_id=1, record=conversations_ticket_record)
+
+        assert result is not None
+        lines = result.description.split("\n")
+        assert lines[0] == "Cannot export dashboard"
+        for msg in conversations_ticket_record["messages"]:
+            assert msg in result.description
+
     @pytest.mark.parametrize("messages", [[], None])
     def test_returns_none_without_messages(self, conversations_ticket_record, messages):
         if messages is None:
