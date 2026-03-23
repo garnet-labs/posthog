@@ -274,9 +274,9 @@ def main():
         if saved and isinstance(result, dict):
             checks = "all" if result["all_checks"] else "required only"
             max_r = result["max_retries"]
-            print(
+            print(  # noqa: T201
                 f"Settings saved: checks={checks}, max-retries={max_r}, interval={format_interval(result['interval'])}"
-            )  # noqa: T201
+            )
         else:
             print(result)  # noqa: T201
 
