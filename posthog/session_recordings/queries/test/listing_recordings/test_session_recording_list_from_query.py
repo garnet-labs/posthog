@@ -4673,48 +4673,66 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             ensure_analytics_event_in_session=False,
         )
 
+    @parameterized.expand(
+        [
+            (
+                "exact",
+                {"key": "$host", "value": "app.example.com", "operator": "exact", "type": "event"},
+                {"match": "app.example.com", "no_match": "other.example.com"},
+                "match",
+            ),
+            (
+                "is_not",
+                {"key": "$host", "value": "localhost:8000", "operator": "is_not", "type": "event"},
+                {"match": "app.example.com", "no_match": "localhost:8000"},
+                "match",
+            ),
+            (
+                "icontains",
+                {"key": "$host", "value": "example", "operator": "icontains", "type": "event"},
+                {"match": "app.example.com", "no_match": "localhost:8000"},
+                "match",
+            ),
+            (
+                "not_icontains",
+                {"key": "$host", "value": "localhost", "operator": "not_icontains", "type": "event"},
+                {"match": "app.example.com", "no_match": "localhost:8000"},
+                "match",
+            ),
+            (
+                "regex",
+                {"key": "$host", "value": r"^app\.example", "operator": "regex", "type": "event"},
+                {"match": "app.example.com", "no_match": "other.example.com"},
+                "match",
+            ),
+            (
+                "not_regex",
+                {
+                    "key": "$host",
+                    "value": r"^(localhost|127\.0\.0\.1)($|:)",
+                    "operator": "not_regex",
+                    "type": "event",
+                },
+                {"match": "app.example.com", "no_match": "localhost:8000"},
+                "match",
+            ),
+        ]
+    )
     @patch("posthoganalytics.feature_enabled", return_value=True)
-    def test_host_filter_not_regex_via_sessions_v3(self, _mock_feature_enabled):
-        session_id_app = str(uuid7())
-        session_id_localhost = str(uuid7())
-
-        Person.objects.create(team=self.team, distinct_ids=["user"], properties={"email": "test@example.com"})
-        self._create_session_with_properties(session_id=session_id_app, host="app.example.com")
-        self._create_session_with_properties(session_id=session_id_localhost, host="localhost:8000")
-        flush_persons_and_events()
-
-        assert_query_matches_session_ids(
-            team=self.team,
-            query={
-                "properties": [
-                    {
-                        "key": "$host",
-                        "value": r"^(localhost|127\.0\.0\.1)($|:)",
-                        "operator": "not_regex",
-                        "type": "event",
-                    }
-                ],
-            },
-            expected=[session_id_app],
-        )
-
-    @snapshot_clickhouse_queries
-    @patch("posthoganalytics.feature_enabled", return_value=True)
-    def test_host_filter_exact_via_sessions_v3(self, _mock_feature_enabled):
+    def test_host_filter_via_sessions_v3(self, _name, prop_filter, hosts, expected_key, _mock_feature_enabled):
         session_id_match = str(uuid7())
-        session_id_other = str(uuid7())
+        session_id_no_match = str(uuid7())
 
         Person.objects.create(team=self.team, distinct_ids=["user"], properties={"email": "test@example.com"})
-        self._create_session_with_properties(session_id=session_id_match, host="app.example.com")
-        self._create_session_with_properties(session_id=session_id_other, host="other.example.com")
+        self._create_session_with_properties(session_id=session_id_match, host=hosts["match"])
+        self._create_session_with_properties(session_id=session_id_no_match, host=hosts["no_match"])
         flush_persons_and_events()
 
+        expected_id = session_id_match if expected_key == "match" else session_id_no_match
         assert_query_matches_session_ids(
             team=self.team,
-            query={
-                "properties": [{"key": "$host", "value": "app.example.com", "operator": "exact", "type": "event"}],
-            },
-            expected=[session_id_match],
+            query={"properties": [prop_filter]},
+            expected=[expected_id],
         )
 
     @patch("posthoganalytics.feature_enabled", return_value=True)
@@ -4945,8 +4963,14 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id_match_a, session_id_match_b],
         )
 
+    @parameterized.expand(
+        [
+            ("is_set", "is_set", "with_host"),
+            ("is_not_set", "is_not_set", "without_host"),
+        ]
+    )
     @patch("posthoganalytics.feature_enabled", return_value=True)
-    def test_host_filter_is_set_via_sessions_v3(self, _mock_feature_enabled):
+    def test_host_filter_set_operators_via_sessions_v3(self, _name, operator, expected_key, _mock_feature_enabled):
         session_id_with_host = str(uuid7())
         session_id_without_host = str(uuid7())
 
@@ -4955,28 +4979,11 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
         self._create_session_with_properties(session_id=session_id_without_host)
         flush_persons_and_events()
 
+        expected_id = session_id_with_host if expected_key == "with_host" else session_id_without_host
         assert_query_matches_session_ids(
             team=self.team,
             query={
-                "properties": [{"key": "$host", "operator": "is_set", "type": "event"}],
+                "properties": [{"key": "$host", "operator": operator, "type": "event"}],
             },
-            expected=[session_id_with_host],
-        )
-
-    @patch("posthoganalytics.feature_enabled", return_value=True)
-    def test_host_filter_is_not_set_via_sessions_v3(self, _mock_feature_enabled):
-        session_id_with_host = str(uuid7())
-        session_id_without_host = str(uuid7())
-
-        Person.objects.create(team=self.team, distinct_ids=["user"], properties={"email": "test@example.com"})
-        self._create_session_with_properties(session_id=session_id_with_host, host="app.example.com")
-        self._create_session_with_properties(session_id=session_id_without_host)
-        flush_persons_and_events()
-
-        assert_query_matches_session_ids(
-            team=self.team,
-            query={
-                "properties": [{"key": "$host", "operator": "is_not_set", "type": "event"}],
-            },
-            expected=[session_id_without_host],
+            expected=[expected_id],
         )

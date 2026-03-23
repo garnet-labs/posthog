@@ -51,6 +51,20 @@ SESSIONS_V3_PROPERTY_COLUMN_MAP: dict[str, dict[str, str]] = {
 }
 
 
+SESSIONS_V3_SUPPORTED_OPERATORS: frozenset[PropertyOperator] = frozenset(
+    {
+        PropertyOperator.EXACT,
+        PropertyOperator.IS_NOT,
+        PropertyOperator.ICONTAINS,
+        PropertyOperator.NOT_ICONTAINS,
+        PropertyOperator.REGEX,
+        PropertyOperator.NOT_REGEX,
+        PropertyOperator.IS_SET,
+        PropertyOperator.IS_NOT_SET,
+    }
+)
+
+
 class SessionsV3PropertyFilter(NamedTuple):
     column: str
     operator: PropertyOperator
@@ -192,11 +206,12 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
                 prop_key = getattr(prop, "key", None)
                 column_map = SESSIONS_V3_PROPERTY_COLUMN_MAP.get(prop_type or "", {})
                 column = column_map.get(prop_key or "")
-                if column:
+                operator = getattr(prop, "operator", None) or PropertyOperator.EXACT
+                if column and operator in SESSIONS_V3_SUPPORTED_OPERATORS:
                     self._sessions_v3_property_filters.append(
                         SessionsV3PropertyFilter(
                             column=column,
-                            operator=getattr(prop, "operator", None) or PropertyOperator.EXACT,
+                            operator=operator,
                             value=getattr(prop, "value", None),
                         )
                     )
@@ -438,12 +453,7 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
             case PropertyOperator.IS_NOT_SET:
                 return ast.Call(name="empty", args=[col])
             case _:
-                logger.warning(
-                    "sessions_v3_unsupported_operator",
-                    operator=str(f.operator),
-                    column=f.column,
-                )
-                return ast.Call(name="has", args=[col, ast.Constant(value=val)])
+                raise ValueError(f"Unsupported operator for sessions v3 array predicate: {f.operator}")
 
     @staticmethod
     def _merged_array_col(table: str, column: str) -> ast.Expr:
