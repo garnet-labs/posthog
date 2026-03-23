@@ -26,7 +26,7 @@ This service has some known data quality issues that are being addressed by a re
 
 ### batch-import-worker
 
-Backend service that handles PostHog user requests to import bulk datasets from external sources (S3, Amplitude, Segment, etc.)
+Backend service that handles PostHog user requests to import bulk datasets from external sources (S3, Amplitude, Segment, etc).
 
 ### kafka-deduplicator
 
