@@ -3,7 +3,7 @@ import { BindLogic, useActions, useValues } from 'kea'
 import { useEffect } from 'react'
 
 import { IconGear } from '@posthog/icons'
-import { LemonBanner, LemonButton, LemonSkeleton, Link } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, LemonSkeleton, LemonTabs, Link } from '@posthog/lemon-ui'
 
 import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
@@ -13,6 +13,7 @@ import { Scene, SceneExport } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
 import { QueryTile } from 'scenes/web-analytics/common'
 import { NonIntegratedConversionsTable } from 'scenes/web-analytics/tabs/marketing-analytics/frontend/components/NonIntegratedConversionsTable/NonIntegratedConversionsTable'
+import { UtmAuditTab } from 'scenes/web-analytics/tabs/marketing-analytics/frontend/components/UtmAuditTab/UtmAuditTab'
 import { WebQuery } from 'scenes/web-analytics/tiles/WebAnalyticsTile'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
@@ -22,7 +23,10 @@ import { ProductKey } from '~/queries/schema/schema-general'
 
 import { MarketingAnalyticsFilters } from '../web-analytics/tabs/marketing-analytics/frontend/components/MarketingAnalyticsFilters/MarketingAnalyticsFilters'
 import { MarketingAnalyticsSourceStatusBanner } from '../web-analytics/tabs/marketing-analytics/frontend/components/MarketingAnalyticsSourceStatusBanner'
-import { marketingAnalyticsLogic } from '../web-analytics/tabs/marketing-analytics/frontend/logic/marketingAnalyticsLogic'
+import {
+    MarketingAnalyticsTab,
+    marketingAnalyticsLogic,
+} from '../web-analytics/tabs/marketing-analytics/frontend/logic/marketingAnalyticsLogic'
 import { marketingAnalyticsSettingsLogic } from '../web-analytics/tabs/marketing-analytics/frontend/logic/marketingAnalyticsSettingsLogic'
 import {
     MARKETING_ANALYTICS_DATA_COLLECTION_NODE_ID,
@@ -158,6 +162,47 @@ const MarketingAnalyticsDashboard = (): JSX.Element => {
     )
 }
 
+const MarketingAnalyticsContent = (): JSX.Element => {
+    const { featureFlags } = useValues(featureFlagLogic)
+    const { activeTab } = useValues(marketingAnalyticsLogic)
+    const { setActiveTab } = useActions(marketingAnalyticsLogic)
+
+    const showUtmAudit = !!featureFlags[FEATURE_FLAGS.MARKETING_ANALYTICS_UTM_AUDIT]
+
+    return (
+        <>
+            {showUtmAudit ? (
+                <LemonTabs
+                    activeKey={activeTab}
+                    onChange={(key) => setActiveTab(key as MarketingAnalyticsTab)}
+                    tabs={[
+                        {
+                            key: MarketingAnalyticsTab.DASHBOARD,
+                            label: 'Dashboard',
+                            content: (
+                                <>
+                                    <MarketingAnalyticsFilters tabs={<></>} />
+                                    <MarketingAnalyticsDashboard />
+                                </>
+                            ),
+                        },
+                        {
+                            key: MarketingAnalyticsTab.UTM_AUDIT,
+                            label: 'UTM audit',
+                            content: <UtmAuditTab />,
+                        },
+                    ]}
+                />
+            ) : (
+                <>
+                    <MarketingAnalyticsFilters tabs={<></>} />
+                    <MarketingAnalyticsDashboard />
+                </>
+            )}
+        </>
+    )
+}
+
 export function MarketingAnalyticsScene(): JSX.Element {
     return (
         <BindLogic logic={marketingAnalyticsLogic} props={{}}>
@@ -192,8 +237,7 @@ export function MarketingAnalyticsScene(): JSX.Element {
                             </>
                         }
                     />
-                    <MarketingAnalyticsFilters tabs={<></>} />
-                    <MarketingAnalyticsDashboard />
+                    <MarketingAnalyticsContent />
                 </SceneContent>
             </BindLogic>
         </BindLogic>
