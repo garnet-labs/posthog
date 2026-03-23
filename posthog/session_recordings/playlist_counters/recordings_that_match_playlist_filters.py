@@ -443,11 +443,13 @@ def count_recordings_that_match_playlist_filters(playlist_id: int) -> None:
 
             query = convert_playlist_to_recordings_query(playlist)
 
-            has_existing_data = existing_value.get("refreshed_at", None)
-            can_query_only_new_recordings = query.order == "start_time"
-            has_versioned_expiry_data = existing_value.get("version") == 2
+            should_query_incrementally = (
+                existing_value.get("refreshed_at", None)
+                and query.order == "start_time"
+                and existing_value.get("version") == 2
+            )
 
-            if has_existing_data and can_query_only_new_recordings and has_versioned_expiry_data:
+            if should_query_incrementally:
                 query.date_from = existing_value["refreshed_at"]
 
             (recordings, more_recordings_available, _, _) = list_recordings_from_query(
@@ -457,7 +459,7 @@ def count_recordings_that_match_playlist_filters(playlist_id: int) -> None:
             counted_at_date = timezone.now()
             new_sessions = {r.session_id: r.expiry_time.isoformat() if r.expiry_time else None for r in recordings}
 
-            if has_existing_data and can_query_only_new_recordings and has_versioned_expiry_data:
+            if should_query_incrementally:
                 existing_sessions = existing_value.get("sessions_with_expiry", {})
                 for sid, expiry in existing_sessions.items():
                     if sid in new_sessions:

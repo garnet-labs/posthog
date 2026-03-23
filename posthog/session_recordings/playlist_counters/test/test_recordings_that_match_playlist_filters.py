@@ -1,6 +1,6 @@
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from freezegun import freeze_time
 from posthog.test.base import APIBaseTest, QueryMatchingTest, snapshot_postgres_queries
@@ -621,11 +621,11 @@ class TestParseExpiry(UnitTestCase):
             ("none_returns_none", None, None),
             ("malformed_returns_none", "not-a-date", None),
             ("empty_string_returns_none", "", None),
-            ("valid_aware_datetime", "2026-01-15T10:00:00+00:00", datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc)),
+            ("valid_aware_datetime", "2026-01-15T10:00:00+00:00", datetime(2026, 1, 15, 10, 0, tzinfo=UTC)),
             (
                 "valid_naive_datetime_becomes_aware",
                 "2026-01-15T10:00:00",
-                datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc),
+                datetime(2026, 1, 15, 10, 0, tzinfo=UTC),
             ),
         ]
     )
