@@ -74,7 +74,7 @@ export const WorldMapEmpty: StoryFn = () => {
 }
 WorldMapEmpty.parameters = {
     testOptions: {
-        waitForSelector: '[data-attr="insight-empty-state"]',
+        waitForSelector: '.WorldMap',
     },
 }
 

@@ -104,7 +104,7 @@ export const RetentionEmpty: StoryFn = () => {
 }
 RetentionEmpty.parameters = {
     testOptions: {
-        waitForSelector: '[data-attr="insight-empty-state"]',
+        waitForSelector: '[data-attr="retention-table"]',
     },
 }
 
