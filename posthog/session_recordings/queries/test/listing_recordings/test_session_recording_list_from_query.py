@@ -4718,7 +4718,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             ),
         ]
     )
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_host_filter_via_sessions_v3(self, _name, prop_filter, hosts, expected_key, _mock_feature_enabled):
         session_id_match = str(uuid7())
         session_id_no_match = str(uuid7())
@@ -4735,7 +4738,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[expected_id],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_email_filter_not_icontains_via_sessions_v3(self, _mock_feature_enabled):
         session_id_external = str(uuid7())
         session_id_internal = str(uuid7())
@@ -4761,7 +4767,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id_external],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_current_url_filter_icontains_via_sessions_v3(self, _mock_feature_enabled):
         session_id_match = str(uuid7())
         session_id_other = str(uuid7())
@@ -4779,7 +4788,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id_match],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_simple_event_entity_via_sessions_v3(self, _mock_feature_enabled):
         session_id_with_pageview = str(uuid7())
         session_id_without_pageview = str(uuid7())
@@ -4801,7 +4813,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id_with_pageview],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_event_entity_with_properties_still_uses_events_subquery(self, _mock_feature_enabled):
         """Entities with additional property filters can't be routed to sessions v3
         because we need to verify event name + properties co-occur on the same event row."""
@@ -4836,7 +4851,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
         )
 
     @snapshot_clickhouse_queries
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_filter_test_accounts_via_sessions_v3(self, _mock_feature_enabled):
         """The default test account filters ($host not_regex localhost, email not_icontains @company.com)
         should be routed through sessions v3."""
@@ -4870,7 +4888,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id_external],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=False)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=False,
+    )
     def test_feature_flag_off_uses_existing_behavior(self, _mock_feature_enabled):
         """When the feature flag is off, $host and email filters should go through
         the events subquery as before."""
@@ -4888,7 +4909,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_mixed_filters_sessions_v3_and_events(self, _mock_feature_enabled):
         """$host goes through sessions v3, but a custom event property still goes through events subquery."""
         session_id_match = str(uuid7())
@@ -4936,7 +4960,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             expected=[session_id_match],
         )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_host_filter_exact_multiple_values_via_sessions_v3(self, _mock_feature_enabled):
         session_id_match_a = str(uuid7())
         session_id_match_b = str(uuid7())
@@ -4969,7 +4996,10 @@ class TestSessionRecordingsListFromQuerySessionsV3(ClickhouseTestMixin, APIBaseT
             ("is_not_set", "is_not_set", "without_host"),
         ]
     )
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthog.session_recordings.queries.session_recording_list_from_query._is_sessions_v3_enabled",
+        return_value=True,
+    )
     def test_host_filter_set_operators_via_sessions_v3(self, _name, operator, expected_key, _mock_feature_enabled):
         session_id_with_host = str(uuid7())
         session_id_without_host = str(uuid7())

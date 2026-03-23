@@ -75,6 +75,14 @@ logger = structlog.get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
+def _is_sessions_v3_enabled(team_id: int) -> bool:
+    return posthoganalytics.feature_enabled(
+        "replay-filters-via-sessions-v3",
+        str(team_id),
+        send_feature_flag_events=False,
+    )
+
+
 class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
     SESSION_RECORDINGS_DEFAULT_LIMIT = 50
 
@@ -193,11 +201,7 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
         # is equivalent or better — it catches sessions even if the person was updated since.
         self._sessions_v3_property_filters: list[SessionsV3PropertyFilter] = []
         self._sessions_v3_event_names: list[str] = []
-        self._use_sessions_v3 = posthoganalytics.feature_enabled(
-            "replay-filters-via-sessions-v3",
-            str(team.id),
-            send_feature_flag_events=False,
-        )
+        self._use_sessions_v3 = _is_sessions_v3_enabled(team.id)
 
         if self._use_sessions_v3 and expanded_query.properties:
             remaining_properties_v3: list[AnyPropertyFilter] = []

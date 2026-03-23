@@ -80,7 +80,11 @@ class TestPersonPropertyHybridQuery(ClickhouseTestMixin, APIBaseTest):
                 [session_id_after],
             )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthoganalytics.feature_enabled",
+        side_effect=lambda key, *args, **kwargs: key
+        in ("enable-hybrid-poe-replay-filtering", "remove-order-by-for-event-subquery"),
+    )
     def test_hybrid_query_enabled_finds_sessions(self, mock_feature_enabled) -> None:
         with freeze_time("2021-08-21T20:00:00.000Z"):
             anonymous_id = "anonymous_user_456"
@@ -136,7 +140,11 @@ class TestPersonPropertyHybridQuery(ClickhouseTestMixin, APIBaseTest):
                 [session_id_before, session_id_after],
             )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthoganalytics.feature_enabled",
+        side_effect=lambda key, *args, **kwargs: key
+        in ("enable-hybrid-poe-replay-filtering", "remove-order-by-for-event-subquery"),
+    )
     def test_hybrid_query_finds_all_person_sessions(self, mock_feature_enabled) -> None:
         with freeze_time("2021-08-21T20:00:00.000Z"):
             distinct_id_1 = "distinct_1"
@@ -208,7 +216,11 @@ class TestPersonPropertyHybridQuery(ClickhouseTestMixin, APIBaseTest):
                 [session_id_1, session_id_2, session_id_3],
             )
 
-    @patch("posthoganalytics.feature_enabled", return_value=True)
+    @patch(
+        "posthoganalytics.feature_enabled",
+        side_effect=lambda key, *args, **kwargs: key
+        in ("enable-hybrid-poe-replay-filtering", "remove-order-by-for-event-subquery"),
+    )
     def test_hybrid_query_skips_negative_operators(self, mock_feature_enabled) -> None:
         """
         Test that _should_use_hybrid_query returns False when person property filters
