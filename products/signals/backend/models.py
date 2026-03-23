@@ -13,6 +13,7 @@ class SignalSourceConfig(UUIDModel):
         GITHUB = "github", "GitHub"
         LINEAR = "linear", "Linear"
         ZENDESK = "zendesk", "Zendesk"
+        CONVERSATIONS = "conversations", "Conversations"
 
     class SourceType(models.TextChoices):
         SESSION_ANALYSIS_CLUSTER = "session_analysis_cluster", "Session analysis cluster"
