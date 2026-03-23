@@ -1727,7 +1727,7 @@ export const queryDatabaseLogic = kea<queryDatabaseLogicType>([
                         return
                     }
 
-                    if (item.record?.type === 'managed-views') {
+                    if (item.record?.type === 'managed-views' || item.record?.type === 'unsaved-folder') {
                         return
                     }
 
