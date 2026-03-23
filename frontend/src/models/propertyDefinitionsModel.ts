@@ -1,7 +1,7 @@
 import { actions, connect, kea, listeners, path, reducers, selectors } from 'kea'
 
 import api, { ApiMethodOptions, CountedPaginatedResponse } from 'lib/api'
-import { TaxonomicFilterValue } from 'lib/components/TaxonomicFilter/types'
+import { TaxonomicFilterGroupType, TaxonomicFilterValue } from 'lib/components/TaxonomicFilter/types'
 import { dayjs } from 'lib/dayjs'
 import { captureTimeToSeeData } from 'lib/internalMetrics'
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
@@ -9,6 +9,7 @@ import { colonDelimitedDuration, toString, isKeyOf } from 'lib/utils'
 import { permanentlyMount } from 'lib/utils/kea-logic-builders'
 import { teamLogic } from 'scenes/teamLogic'
 
+import CORE_FILTER_DEFINITIONS_BY_GROUP from '~/taxonomy/core-filter-definitions-by-group.json'
 import {
     BreakdownKeyType,
     GroupTypeIndex,
@@ -279,6 +280,35 @@ export const propertyDefinitionsModel = kea<propertyDefinitionsModelType>([
     }),
     listeners(({ actions, values, cache }) => ({
         loadPropertyDefinitions: async ({ propertyKeys, type, groupTypeIndex }) => {
+            // Resource type properties (e.g. error tracking issues) have no API endpoint,
+            // resolve them from static taxonomy definitions instead
+            if (type === PropertyDefinitionType.Resource) {
+                const taxonomyGroup =
+                    CORE_FILTER_DEFINITIONS_BY_GROUP[
+                        TaxonomicFilterGroupType.ErrorTrackingIssues as keyof typeof CORE_FILTER_DEFINITIONS_BY_GROUP
+                    ]
+                const resolved: PropertyDefinitionStorage = {}
+                for (const propertyKey of propertyKeys) {
+                    const key = getPropertyKey(type, propertyKey, groupTypeIndex)
+                    if (key in values.rawPropertyDefinitionStorage) {
+                        continue
+                    }
+                    const entry = taxonomyGroup?.[propertyKey as keyof typeof taxonomyGroup] as
+                        | { type?: string }
+                        | undefined
+                    resolved[key] = {
+                        id: String(propertyKey),
+                        name: String(propertyKey),
+                        property_type: entry?.type ?? PropertyType.String,
+                        type: PropertyDefinitionType.Resource,
+                    } as PropertyDefinition
+                }
+                if (Object.keys(resolved).length > 0) {
+                    actions.updatePropertyDefinitions(resolved)
+                }
+                return
+            }
+
             const { rawPropertyDefinitionStorage } = values
 
             const pendingStateUpdate: PropertyDefinitionStorage = {}
