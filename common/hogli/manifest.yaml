@@ -723,3 +723,11 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
+    pr:selector:
+        bin_script: pr-selector.py
+        description: Interactive TUI for toggling PR watch settings
+        hidden: true
+    rerun:failed:checks:
+        bin_script: rerun-failed-checks.sh
+        description: Auto-rerun failed CI checks on your open PRs
+        hidden: true
