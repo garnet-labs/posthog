@@ -16,7 +16,6 @@ import { AnyEntityNode, FunnelExclusionSteps, FunnelsFilter } from '~/queries/sc
 import { integer } from '~/queries/schema/type-utils'
 import {
     AnyPropertyFilter,
-    Breakdown,
     BreakdownKeyType,
     CorrelationConfigType,
     ElementPropertyFilter,
@@ -172,18 +171,6 @@ export function isBreakdownFunnelResults(results: FunnelResultType): results is 
     return Array.isArray(results) && (results.length === 0 || Array.isArray(results[0]))
 }
 
-/** Breakdown parameter could be a string (property breakdown) or object/number (list of cohort ids). */
-export function isValidBreakdownParameter(
-    breakdown: BreakdownKeyType | undefined,
-    breakdowns: Breakdown[] | undefined
-): boolean {
-    return (
-        (Array.isArray(breakdowns) && breakdowns.length > 0) ||
-        ['string', 'null', 'undefined', 'number'].includes(typeof breakdown) ||
-        Array.isArray(breakdown)
-    )
-}
-
 /** String identifier for breakdowns used when determining visibility. */
 export function getVisibilityKey(breakdownValue?: BreakdownKeyType): string {
     const breakdownValues = getBreakdownStepValues(
@@ -192,8 +179,6 @@ export function getVisibilityKey(breakdownValue?: BreakdownKeyType): string {
     ).breakdown_value
     return breakdownValues.join('::')
 }
-
-export const SECONDS_TO_POLL = 3 * 60
 
 interface BreakdownStepValues {
     rowKey: string
