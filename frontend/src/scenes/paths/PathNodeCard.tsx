@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
+import { useRef, useState } from 'react'
 
-import { LemonDropdown } from '@posthog/lemon-ui'
+import { Popover } from 'lib/lemon-ui/Popover/Popover'
 
 import { FunnelPathsFilter } from '~/queries/schema/schema-general'
 import { InsightLogicProps } from '~/types'
@@ -24,11 +25,27 @@ export function PathNodeCard({ insightProps, node, canvasHeight }: PathNodeCardP
     const pathsFilter = _pathsFilter || {}
     const funnelPathsFilter = _funnelPathsFilter || ({} as FunnelPathsFilter)
 
+    const [isCardHovered, setIsCardHovered] = useState(false)
+    const [isPopoverHovered, setIsPopoverHovered] = useState(false)
+    const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    const showPopover = isCardHovered || isPopoverHovered
+
+    const clearHideTimeout = (): void => {
+        if (hideTimeoutRef.current) {
+            clearTimeout(hideTimeoutRef.current)
+            hideTimeoutRef.current = null
+        }
+    }
+
+    const scheduleHide = (setter: (v: boolean) => void): void => {
+        hideTimeoutRef.current = setTimeout(() => setter(false), 100)
+    }
+
     if (!node.visible) {
         return null
     }
 
-    // Attention: targetLinks are the incoming links, sourceLinks are the outgoing links
     const isPathStart = node.targetLinks.length === 0
     const isPathEnd = node.sourceLinks.length === 0
     const continuingCount = node.sourceLinks.reduce((prev, curr) => prev + curr.value, 0)
@@ -39,7 +56,8 @@ export function PathNodeCard({ insightProps, node, canvasHeight }: PathNodeCardP
         : null
 
     return (
-        <LemonDropdown
+        <Popover
+            visible={showPopover}
             overlay={
                 <PathNodeCardMenu
                     name={node.name}
@@ -50,12 +68,20 @@ export function PathNodeCard({ insightProps, node, canvasHeight }: PathNodeCardP
                     isPathStart={isPathStart}
                     isPathEnd={isPathEnd}
                     openPersonsModal={openPersonsModal}
+                    data-attr="path-node-card-popover"
                 />
             }
-            trigger="hover"
             placement="bottom"
             padded={false}
             matchWidth
+            onMouseEnterInside={() => {
+                clearHideTimeout()
+                setIsPopoverHovered(true)
+            }}
+            onMouseLeaveInside={() => {
+                scheduleHide(setIsPopoverHovered)
+            }}
+            className="PathNodeCard__popover"
         >
             <div
                 className="absolute rounded bg-surface-primary p-1"
@@ -72,7 +98,14 @@ export function PathNodeCard({ insightProps, node, canvasHeight }: PathNodeCardP
                             : 'var(--color-border-primary)'
                     }`,
                 }}
-                data-attr="path-node-card-button"
+                data-attr="path-node-card"
+                onMouseEnter={() => {
+                    clearHideTimeout()
+                    setIsCardHovered(true)
+                }}
+                onMouseLeave={() => {
+                    scheduleHide(setIsCardHovered)
+                }}
             >
                 <PathNodeCardButton
                     name={node.name}
@@ -86,6 +119,6 @@ export function PathNodeCard({ insightProps, node, canvasHeight }: PathNodeCardP
                     tooltipContent={pageUrl(node, true, true)}
                 />
             </div>
-        </LemonDropdown>
+        </Popover>
     )
 }

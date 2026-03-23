@@ -18,6 +18,7 @@ type PathNodeCardMenuProps = {
     isPathEnd: boolean
     isPathStart: boolean
     openPersonsModal: pathsDataLogicType['actions']['openPersonsModal']
+    'data-attr'?: string
 }
 
 export function PathNodeCardMenu({
@@ -29,6 +30,7 @@ export function PathNodeCardMenu({
     isPathEnd,
     isPathStart,
     openPersonsModal,
+    'data-attr': dataAttr,
 }: PathNodeCardMenuProps): JSX.Element {
     const continuingPercentage = ((continuingCount / count) * 100).toFixed(1)
     const dropoffPercentage = ((dropOffCount / count) * 100).toFixed(1)
@@ -40,6 +42,7 @@ export function PathNodeCardMenu({
         <div
             // eslint-disable-next-line react/forbid-dom-props
             style={{ width: PATH_NODE_CARD_WIDTH }}
+            data-attr={dataAttr}
         >
             {!isPathEnd && (
                 <CardItem
