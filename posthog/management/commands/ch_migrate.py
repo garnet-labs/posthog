@@ -1,4 +1,5 @@
 # ruff: noqa: T201 allow print statements
+import re
 import sys
 from typing import Any
 
@@ -11,6 +12,15 @@ from posthog.clickhouse.migrations.tracking import (
     get_migration_status_all_hosts,
     get_tracking_ddl,
 )
+
+
+def _get_direct_client(cluster: Any) -> Any:
+    """Return a raw ClickHouse client from a cluster any-host call."""
+
+    def _identity(client: Any) -> Any:
+        return client
+
+    return cluster.any_host(_identity).result()
 
 
 class Command(BaseCommand):
@@ -124,13 +134,15 @@ class Command(BaseCommand):
         database: str = settings.CLICKHOUSE_DATABASE
         cluster = get_migrations_cluster()
 
-        def _get_client_for_query(client):  # type: ignore[no-untyped-def]
-            return client
-
         pending = get_pending_migrations(
-            client=cluster.any_host(_get_client_for_query).result(),
+            client=_get_direct_client(cluster),
             database=database,
         )
+
+        # Only check new-style (directory-based) migrations — legacy .py
+        # migrations are tracked in the infi clickhouseorm_migrations table,
+        # not in our tracking table, so they always appear as "pending".
+        pending = [m for m in pending if m["style"] == "new"]
 
         if pending:
             self.stderr.write(f"{len(pending)} unapplied new-style migration(s)")
@@ -146,11 +158,8 @@ class Command(BaseCommand):
         database: str = settings.CLICKHOUSE_DATABASE
         cluster = get_migrations_cluster()
 
-        def _get_client_for_query(client):  # type: ignore[no-untyped-def]
-            return client
-
         pending = get_pending_migrations(
-            client=cluster.any_host(_get_client_for_query).result(),
+            client=_get_direct_client(cluster),
             database=database,
         )
 
@@ -197,11 +206,8 @@ class Command(BaseCommand):
         force: bool = options.get("force", False)  # type: ignore[union-attr]
         cluster = get_migrations_cluster()
 
-        def _get_client_for_query(client):  # type: ignore[no-untyped-def]
-            return client
-
         pending = get_pending_migrations(
-            client=cluster.any_host(_get_client_for_query).result(),
+            client=_get_direct_client(cluster),
             database=database,
         )
 
@@ -220,9 +226,6 @@ class Command(BaseCommand):
                         m = NewStyleMigration(mig["path"])
                         for step, _sql in m.get_steps():
                             if step.sharded or step.is_alter_on_replicated_table:
-                                # Try to extract table name from SQL
-                                import re
-
                                 match = re.search(r"ALTER\s+TABLE\s+(\S+)", _sql, re.IGNORECASE)
                                 if match:
                                     tables_to_check.append(match.group(1).split(".")[-1])

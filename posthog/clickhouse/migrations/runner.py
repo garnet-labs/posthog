@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from posthog.clickhouse.migrations.manifest import ManifestStep, MigrationManifest
-from posthog.clickhouse.migrations.tracking import get_applied_migrations, record_step
+from posthog.clickhouse.migrations.tracking import MIGRATION_COMPLETE_STEP, get_applied_migrations, record_step
 
 if TYPE_CHECKING:
     from posthog.clickhouse.client.connection import NodeRole
@@ -284,6 +284,22 @@ def run_migration_up(
                 checksum=checksum,
                 success=True,
             )
+
+    # Record a migration-complete sentinel so get_applied_migrations knows
+    # all steps finished successfully. Without this, a partial failure
+    # (e.g. step 0 OK, step 1 fails) would still mark the migration as
+    # applied and silently skip it on the next run.
+    _record_for_tracking(
+        database=database,
+        migration_number=migration_number,
+        migration_name=migration_name,
+        step_index=MIGRATION_COMPLETE_STEP,
+        host="*",
+        node_role="*",
+        direction="up",
+        checksum="complete",
+        success=True,
+    )
 
     return True
 

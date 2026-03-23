@@ -7,7 +7,7 @@ TRACKING_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS {database}.clickhouse_schema_migrations (
     migration_number UInt32,
     migration_name String,
-    step_index UInt32,
+    step_index Int32,
     host String,
     node_role String,
     direction Enum8('up' = 1, 'down' = 2),
@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS {database}.clickhouse_schema_migrations (
 ) ENGINE = MergeTree()
 ORDER BY (migration_number, step_index, host, direction, applied_at)
 """
+
+# Sentinel step_index used to mark a migration as fully applied.
+MIGRATION_COMPLETE_STEP = -1
 
 
 def get_tracking_ddl(database: str) -> str:
@@ -57,6 +60,12 @@ def record_step(
 
 
 def get_applied_migrations(client: Any, database: str) -> list[dict[str, Any]]:
+    """Return migrations that have a complete sentinel record (step_index = -1, success = 1).
+
+    Only migrations where ALL steps succeeded and a completion marker was
+    recorded are considered applied. This prevents partial failures from
+    being silently skipped on the next run.
+    """
     sql = f"""
         SELECT
             migration_number,
@@ -69,8 +78,8 @@ def get_applied_migrations(client: Any, database: str) -> list[dict[str, Any]]:
             applied_at,
             success
         FROM {database}.{TRACKING_TABLE_NAME}
-        WHERE success = 1 AND direction = 'up'
-        ORDER BY migration_number, step_index
+        WHERE success = 1 AND direction = 'up' AND step_index = {MIGRATION_COMPLETE_STEP}
+        ORDER BY migration_number
     """
     rows = client.execute(sql)
     columns = [

@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS posthog_test.ch_migrate_test
+DROP TABLE IF EXISTS {{ database }}.ch_migrate_test

@@ -346,7 +346,12 @@ class TestRunMigrationUp:
 
         assert result is True
         assert mock_execute.call_count == 2
-        assert mock_record.call_count == 2
+        # 2 step records + 1 migration-complete sentinel
+        assert mock_record.call_count == 3
+        # Verify the sentinel record
+        sentinel_call = mock_record.call_args_list[-1]
+        assert sentinel_call[1]["step_index"] == -1
+        assert sentinel_call[1]["checksum"] == "complete"
 
     @patch("posthog.clickhouse.migrations.runner._record_for_tracking")
     @patch("posthog.clickhouse.migrations.runner.execute_migration_step")
@@ -364,8 +369,10 @@ class TestRunMigrationUp:
             migration_name="0001_test",
         )
 
-        assert mock_record.call_count == 2
-        hosts_recorded = {c[1]["host"] for c in mock_record.call_args_list}
+        # 2 per-host records + 1 migration-complete sentinel
+        assert mock_record.call_count == 3
+        # Exclude sentinel (host="*") when checking per-host records
+        hosts_recorded = {c[1]["host"] for c in mock_record.call_args_list if c[1]["host"] != "*"}
         assert hosts_recorded == {"host1", "host2"}
 
 
