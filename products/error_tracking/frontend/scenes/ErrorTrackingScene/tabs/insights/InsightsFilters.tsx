@@ -35,7 +35,7 @@ export function InsightsFilters({ reload }: { reload?: React.ReactNode }): JSX.E
                     />
                 </div>
                 <ErrorFilters.SearchBarDivider />
-                <div className="flex flex-1 items-stretch rounded-r-full overflow-hidden">
+                <div className="flex-1 rounded-r-full overflow-hidden">
                     <ErrorFilters.FilterGroup
                         taxonomicGroupTypes={INSIGHTS_TAXONOMIC_GROUP_TYPES}
                         excludeFilterTypes={[PropertyFilterType.ErrorTrackingIssue]}

@@ -288,7 +288,7 @@ const ExceptionsTab = (): JSX.Element => {
                         />
                     </div>
                     <ErrorFilters.SearchBarDivider />
-                    <div className="flex flex-1 items-stretch overflow-hidden">
+                    <div className="flex-1 overflow-hidden">
                         <ErrorFilters.FilterGroup
                             showIssueFilters={false}
                             taxonomicGroupTypes={ISSUE_SCENE_TAXONOMIC_GROUP_TYPES}

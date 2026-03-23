@@ -35,7 +35,7 @@ export function IssuesFilters({ reload }: { reload?: React.ReactNode }): JSX.Ele
                     />
                 </div>
                 <ErrorFilters.SearchBarDivider />
-                <div className="flex flex-1 items-stretch overflow-hidden">
+                <div className="flex-1 overflow-hidden">
                     <ErrorFilters.FilterGroup
                         quickFilterContext={QUICK_FILTER_CONTEXT}
                         logicKey={ERROR_TRACKING_SCENE_LOGIC_KEY}
