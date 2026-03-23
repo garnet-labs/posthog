@@ -2,6 +2,8 @@ import time
 from datetime import timedelta
 from typing import Any
 
+from django.db.utils import ProgrammingError
+
 import structlog
 
 from posthog.cache_utils import cache_for
@@ -51,7 +53,11 @@ def delete_bulky_postgres_data(team_ids: list[int]):
     cohort_ids = list(Cohort.objects.filter(team_id__in=team_ids).values_list("id", flat=True))
     _raw_delete(CohortPeople.objects.filter(cohort_id__in=cohort_ids))
 
-    _raw_delete(FeatureFlagHashKeyOverride.objects.filter(team_id__in=team_ids))
+    try:
+        _raw_delete(FeatureFlagHashKeyOverride.objects.filter(team_id__in=team_ids))
+    except ProgrammingError:
+        # FeatureFlagHashKeyOverride is managed=False — table may not exist in test DBs
+        pass
     _raw_delete(Group.objects.filter(team_id__in=team_ids))
     _raw_delete(GroupTypeMapping.objects.filter(team_id__in=team_ids))
     _raw_delete_batch(Person.objects.filter(team_id__in=team_ids))

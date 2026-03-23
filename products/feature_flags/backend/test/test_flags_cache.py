@@ -897,7 +897,7 @@ class TestGetTeamsWithExpiringCaches(BaseTest):
 class TestBatchOperations(BaseTest):
     """Test batch operations for flags cache."""
 
-    @patch("posthog.models.feature_flag.flags_cache.refresh_expiring_caches")
+    @patch("products.feature_flags.backend.flags_cache.refresh_expiring_caches")
     def test_refresh_expiring_caches(self, mock_refresh):
         """Test refreshing expiring caches calls generic function."""
         from products.feature_flags.backend.flags_cache import (
@@ -1228,7 +1228,7 @@ class TestManagementCommands(BaseTest):
 
     # Comprehensive tests for analyze_flags_cache_sizes
 
-    @patch("posthog.models.feature_flag.flags_cache._get_feature_flags_for_teams_batch")
+    @patch("products.feature_flags.backend.flags_cache._get_feature_flags_for_teams_batch")
     def test_analyze_percentile_calculation(self, mock_batch_get_flags):
         """Test that percentile calculation is accurate."""
         from io import StringIO
@@ -1327,7 +1327,7 @@ class TestManagementCommands(BaseTest):
         self.assertIn("FLAG FIELD SIZE ANALYSIS", output)
         self.assertIn("Largest flag fields", output)
 
-    @patch("posthog.models.feature_flag.flags_cache._get_feature_flags_for_teams_batch")
+    @patch("products.feature_flags.backend.flags_cache._get_feature_flags_for_teams_batch")
     def test_analyze_compression_ratio(self, mock_batch_get_flags):
         """Test that compression ratios are calculated correctly."""
         from io import StringIO
@@ -1408,7 +1408,7 @@ class TestManagementCommands(BaseTest):
 
         # Mock the hypercache's set_cache_value to fail
         with patch(
-            "posthog.models.feature_flag.flags_cache.flags_hypercache.set_cache_value", side_effect=failing_set_cache
+            "products.feature_flags.backend.flags_cache.flags_hypercache.set_cache_value", side_effect=failing_set_cache
         ):
             out = StringIO()
             call_command("warm_flags_cache", stdout=out)
@@ -1455,7 +1455,7 @@ class TestManagementCommands(BaseTest):
         # Should show TTL range in output
         self.assertIn("TTL range: 3-10 days", output)
 
-    @patch("posthog.models.feature_flag.flags_cache.update_flags_cache")
+    @patch("products.feature_flags.backend.flags_cache.update_flags_cache")
     def test_warm_missing_team_ids_warning(self, mock_update):
         """Test that warming with non-existent team IDs shows warning."""
         from io import StringIO
@@ -1614,7 +1614,7 @@ class TestManagementCommands(BaseTest):
         )
 
         # Make the hypercache update fail by mocking update_cache
-        with patch("posthog.models.feature_flag.flags_cache.flags_hypercache.update_cache", return_value=False):
+        with patch("products.feature_flags.backend.flags_cache.flags_hypercache.update_cache", return_value=False):
             out = StringIO()
             call_command("verify_flags_cache", f"--team-ids={self.team.id}", "--fix", stdout=out)
 
@@ -1622,8 +1622,8 @@ class TestManagementCommands(BaseTest):
             self.assertIn("Failed to fix", output)
             self.assertIn("Cache fixes failed:   1", output)
 
-    @patch("posthog.models.feature_flag.flags_cache.get_flags_from_cache")
-    @patch("posthog.models.feature_flag.flags_cache._get_feature_flags_for_teams_batch")
+    @patch("products.feature_flags.backend.flags_cache.get_flags_from_cache")
+    @patch("products.feature_flags.backend.flags_cache._get_feature_flags_for_teams_batch")
     def test_verify_with_sample(self, mock_batch_get_flags, mock_get_cache):
         """Test verify command with --sample parameter."""
         from io import StringIO
@@ -1703,7 +1703,7 @@ class TestManagementCommands(BaseTest):
         self.assertIn("CACHE_MISS", output)
         self.assertIn("Cache misses:", output)
 
-    @patch("posthog.models.feature_flag.flags_cache._get_feature_flags_for_teams_batch")
+    @patch("products.feature_flags.backend.flags_cache._get_feature_flags_for_teams_batch")
     def test_analyze_batch_load_fallback(self, mock_batch_get_flags):
         """Test analyze command falls back gracefully when batch load fails."""
         from io import StringIO
