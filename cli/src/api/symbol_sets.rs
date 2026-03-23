@@ -12,7 +12,7 @@ use crate::{
     utils::{files::content_hash, raise_for_err},
 };
 
-const MAX_FILE_SIZE: usize = 100 * 1024 * 1024; // 100 MB
+const MAX_FILE_SIZE: usize = 250 * 1024 * 1024; // 250 MB
 
 #[derive(Error, Debug)]
 pub enum UploadError {
