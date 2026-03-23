@@ -813,16 +813,14 @@ class TestExperimentRatioMetric(ExperimentQueryRunnerBaseTest):
         metric = ExperimentRatioMetric(
             numerator=ExperimentDataWarehouseNode(
                 table_name=table_name,
-                events_join_key="properties.$user_id",
-                data_warehouse_join_key="userid",
+                distinct_id_field="userid",
                 timestamp_field="ds",
                 math=ExperimentMetricMathType.SUM,
                 math_property="usage",
             ),
             denominator=ExperimentDataWarehouseNode(
                 table_name=table_name,
-                events_join_key="properties.$user_id",
-                data_warehouse_join_key="userid",
+                distinct_id_field="userid",
                 timestamp_field="ds",
                 math=ExperimentMetricMathType.TOTAL,
                 math_property=None,
@@ -845,7 +843,7 @@ class TestExperimentRatioMetric(ExperimentQueryRunnerBaseTest):
                 _create_event(
                     team=self.team,
                     event="$feature_flag_called",
-                    distinct_id=f"distinct_{variant}_{i}",
+                    distinct_id=f"user_{variant}_{i}",
                     properties={
                         "$feature_flag_response": variant,
                         feature_flag_property: variant,

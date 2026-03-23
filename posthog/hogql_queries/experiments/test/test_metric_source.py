@@ -36,8 +36,7 @@ class TestMetricSourceInfo(BaseTest):
         source = ExperimentDataWarehouseNode(
             table_name="revenue_table",
             timestamp_field="purchase_date",
-            data_warehouse_join_key="customer_id",
-            events_join_key="properties.$user_id",
+            distinct_id_field="customer_id",
         )
         info = MetricSourceInfo.from_source(source, entity_key="person_id")
 
@@ -46,7 +45,7 @@ class TestMetricSourceInfo(BaseTest):
         assert info.timestamp_field == "purchase_date"
         assert info.has_uuid is False
         assert info.has_session_id is False
-        # entity_key should be parsed from data_warehouse_join_key
+        # entity_key should be parsed from distinct_id_field
         assert isinstance(info.entity_key, ast.Field)
 
     def test_actions_node_behavior(self):

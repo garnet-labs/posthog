@@ -13530,8 +13530,7 @@ export namespace Schemas {
     export interface ExperimentDataWarehouseNode {
       /** @nullable */
       custom_name?: string | null;
-      data_warehouse_join_key: string;
-      events_join_key: string;
+      distinct_id_field: string;
       /**
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable

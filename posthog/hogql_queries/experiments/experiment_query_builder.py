@@ -514,15 +514,15 @@ class ExperimentQueryBuilder:
         exposure_query = self._get_exposure_query()
         if source_info.kind == "datawarehouse":
             assert isinstance(self.metric.source, ExperimentDataWarehouseNode)
-            events_join_key_parts = cast(list[str | int], self.metric.source.events_join_key.split("."))
+            distinct_id_parts = cast(list[str | int], ["distinct_id"])
             exposure_query.select.append(
                 ast.Alias(
                     alias="exposure_identifier",
-                    expr=ast.Field(chain=events_join_key_parts),
+                    expr=ast.Field(chain=distinct_id_parts),
                 )
             )
             if exposure_query.group_by:
-                exposure_query.group_by.append(ast.Field(chain=events_join_key_parts))
+                exposure_query.group_by.append(ast.Field(chain=distinct_id_parts))
 
         placeholders: dict = {
             "exposure_select_query": exposure_query,
@@ -722,8 +722,7 @@ class ExperimentQueryBuilder:
             # Add exposure_identifier fields for data warehouse joins
             # Support different join keys for numerator and denominator
             if num_source_info.kind == "datawarehouse":
-                num_source = cast(ExperimentDataWarehouseNode, self.metric.numerator)
-                num_join_key_parts = cast(list[str | int], num_source.events_join_key.split("."))
+                num_join_key_parts = cast(list[str | int], ["distinct_id"])
                 exposure_query.select.append(
                     ast.Alias(
                         alias="exposure_identifier_num",
@@ -734,8 +733,7 @@ class ExperimentQueryBuilder:
                     exposure_query.group_by.append(ast.Field(chain=num_join_key_parts))
 
             if denom_source_info.kind == "datawarehouse":
-                denom_source = cast(ExperimentDataWarehouseNode, self.metric.denominator)
-                denom_join_key_parts = cast(list[str | int], denom_source.events_join_key.split("."))
+                denom_join_key_parts = cast(list[str | int], ["distinct_id"])
                 exposure_query.select.append(
                     ast.Alias(
                         alias="exposure_identifier_denom",

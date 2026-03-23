@@ -11702,8 +11702,7 @@ class ExperimentDataWarehouseNode(BaseModel):
         extra="forbid",
     )
     custom_name: str | None = None
-    data_warehouse_join_key: str
-    events_join_key: str
+    distinct_id_field: str
     fixedProperties: (
         list[
             EventPropertyFilter

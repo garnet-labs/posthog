@@ -88,8 +88,8 @@ const convertSourceToQueryNode = (source: ExperimentMetricSource): EventsNode | 
                 name: dataWarehouse.name,
                 table_name: dataWarehouse.table_name,
                 timestamp_field: dataWarehouse.timestamp_field,
-                distinct_id_field: dataWarehouse.events_join_key,
-                id_field: dataWarehouse.data_warehouse_join_key,
+                distinct_id_field: dataWarehouse.distinct_id_field,
+                id_field: dataWarehouse.distinct_id_field,
             })
         )
         .exhaustive()
@@ -367,8 +367,7 @@ export function filterToMetricSource(
             name: data_warehouse[0].name,
             table_name: data_warehouse[0].id,
             timestamp_field: data_warehouse[0].timestamp_field,
-            events_join_key: data_warehouse[0].events_join_key,
-            data_warehouse_join_key: data_warehouse[0].data_warehouse_join_key,
+            distinct_id_field: data_warehouse[0].distinct_id_field,
             math: data_warehouse[0].math || ExperimentMetricMathType.TotalCount,
             math_property: data_warehouse[0].math_property,
             math_hogql: data_warehouse[0].math_hogql,

@@ -3221,8 +3221,7 @@ export interface ExperimentDataWarehouseNode extends EntityNode {
     kind: NodeKind.ExperimentDataWarehouseNode
     table_name: string
     timestamp_field: string
-    events_join_key: string
-    data_warehouse_join_key: string
+    distinct_id_field: string
 }
 
 export type ExperimentMetricSource = EventsNode | ActionsNode | ExperimentDataWarehouseNode

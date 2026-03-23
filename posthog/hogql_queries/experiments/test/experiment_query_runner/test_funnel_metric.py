@@ -677,8 +677,7 @@ class TestExperimentFunnelMetric(ExperimentQueryRunnerBaseTest):
             # TODO: fix this once supported
             # source=ExperimentDataWarehouseNode(
             #     table_name=table_name,
-            #     events_join_key="properties.$user_id",
-            #     data_warehouse_join_key="userid",
+            #     distinct_id_field="userid",
             #     timestamp_field="ds",
             # ),
             series=[

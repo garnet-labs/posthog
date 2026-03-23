@@ -19,8 +19,7 @@ class TestHogQLInjectionPrevention(BaseTest):
         source = ExperimentDataWarehouseNode(
             table_name="some_table",
             timestamp_field="sleep(3)",
-            data_warehouse_join_key="distinct_id",
-            events_join_key="distinct_id",
+            distinct_id_field="distinct_id",
         )
         info = MetricSourceInfo.from_source(source)
 
@@ -46,8 +45,7 @@ class TestHogQLInjectionPrevention(BaseTest):
         source = ExperimentDataWarehouseNode(
             table_name="events) SELECT 1 --",
             timestamp_field="ts",
-            data_warehouse_join_key="distinct_id",
-            events_join_key="distinct_id",
+            distinct_id_field="distinct_id",
         )
         info = MetricSourceInfo.from_source(source)
 
@@ -67,8 +65,7 @@ class TestHogQLInjectionPrevention(BaseTest):
         source = ExperimentDataWarehouseNode(
             table_name="some_table",
             timestamp_field="(SELECT currentDatabase())",
-            data_warehouse_join_key="distinct_id",
-            events_join_key="distinct_id",
+            distinct_id_field="distinct_id",
         )
         info = MetricSourceInfo.from_source(source)
 

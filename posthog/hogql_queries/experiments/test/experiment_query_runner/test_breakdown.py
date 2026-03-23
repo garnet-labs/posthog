@@ -1659,8 +1659,7 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
         metric = ExperimentMeanMetric(
             source=ExperimentDataWarehouseNode(
                 table_name=table_name,
-                events_join_key="properties.$user_id",
-                data_warehouse_join_key="userid",
+                distinct_id_field="userid",
                 timestamp_field="ds",
                 math=ExperimentMetricMathType.SUM,
                 math_property="usage",
@@ -1684,7 +1683,7 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
             _create_event(
                 team=self.team,
                 event="$feature_flag_called",
-                distinct_id=f"distinct_control_{i}",
+                distinct_id=f"user_control_{i}",
                 properties={
                     "$feature_flag_response": "control",
                     feature_flag_property: "control",
@@ -1699,7 +1698,7 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
             _create_event(
                 team=self.team,
                 event="$feature_flag_called",
-                distinct_id=f"distinct_test_{i}",
+                distinct_id=f"user_test_{i}",
                 properties={
                     "$feature_flag_response": "test",
                     feature_flag_property: "test",
@@ -1730,7 +1729,6 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
     def test_data_warehouse_ratio_metric_with_breakdown(self):
         """Test data warehouse ratio metrics work with breakdowns"""
         usage_table = self.create_data_warehouse_table_with_usage()
-        subscriptions_table = self.create_data_warehouse_table_with_subscriptions()
 
         feature_flag = self.create_feature_flag()
         experiment = self.create_experiment(
@@ -1742,17 +1740,15 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
         metric = ExperimentRatioMetric(
             numerator=ExperimentDataWarehouseNode(
                 table_name=usage_table,
-                events_join_key="properties.$user_id",
-                data_warehouse_join_key="userid",
+                distinct_id_field="userid",
                 timestamp_field="ds",
                 math=ExperimentMetricMathType.SUM,
                 math_property="usage",
             ),
             denominator=ExperimentDataWarehouseNode(
-                table_name=subscriptions_table,
-                events_join_key="person.properties.email",
-                data_warehouse_join_key="subscription_customer.customer_email",
-                timestamp_field="subscription_created_at",
+                table_name=usage_table,
+                distinct_id_field="userid",
+                timestamp_field="ds",
                 math=ExperimentMetricMathType.TOTAL,
             ),
             breakdownFilter=BreakdownFilter(breakdowns=[Breakdown(property="region")]),
@@ -1771,9 +1767,6 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
 
         # Control group
         for i in range(3):
-            _create_person(
-                team=self.team, distinct_ids=[f"user_control_{i}"], properties={"email": f"user{i}@example.com"}
-            )
             _create_event(
                 team=self.team,
                 event="$feature_flag_called",
@@ -1782,16 +1775,12 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
                     "$feature_flag_response": "control",
                     feature_flag_property: "control",
                     "$feature_flag": feature_flag.key,
-                    "$user_id": f"user_control_{i}",
                 },
                 timestamp=datetime(2023, 1, i + 1),
             )
 
         # Test group
         for i in range(3):
-            _create_person(
-                team=self.team, distinct_ids=[f"user_test_{i}"], properties={"email": f"test{i}@example.com"}
-            )
             _create_event(
                 team=self.team,
                 event="$feature_flag_called",
@@ -1800,7 +1789,6 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
                     "$feature_flag_response": "test",
                     feature_flag_property: "test",
                     "$feature_flag": feature_flag.key,
-                    "$user_id": f"user_test_{i}",
                 },
                 timestamp=datetime(2023, 1, i + 1),
             )
@@ -1809,8 +1797,6 @@ class TestExperimentBreakdown(ExperimentQueryRunnerBaseTest):
 
         query_runner = ExperimentQueryRunner(query=experiment_query, team=self.team)
         result = cast(ExperimentQueryResponse, query_runner.calculate())
-
-        # Verify breakdown structure
 
         # Verify ratio-specific fields per breakdown
         assert result.breakdown_results is not None

@@ -83,8 +83,7 @@ describe('getDefaultMetricTitle', () => {
                 kind: NodeKind.ExperimentDataWarehouseNode,
                 table_name: 'purchase_events',
                 timestamp_field: 'timestamp',
-                events_join_key: 'person_id',
-                data_warehouse_join_key: 'person_id',
+                distinct_id_field: 'person_id',
             },
         }
         expect(getDefaultMetricTitle(metric)).toBe('purchase_events')

@@ -14213,10 +14213,7 @@
                 "custom_name": {
                     "type": "string"
                 },
-                "data_warehouse_join_key": {
-                    "type": "string"
-                },
-                "events_join_key": {
+                "distinct_id_field": {
                     "type": "string"
                 },
                 "fixedProperties": {
@@ -14279,7 +14276,7 @@
                     "type": "number"
                 }
             },
-            "required": ["data_warehouse_join_key", "events_join_key", "kind", "table_name", "timestamp_field"],
+            "required": ["distinct_id_field", "kind", "table_name", "timestamp_field"],
             "type": "object"
         },
         "ExperimentEventExposureConfig": {

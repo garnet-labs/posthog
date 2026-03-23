@@ -803,10 +803,10 @@ const getEventCountSeries = (metric: ExperimentMetric): AnyEntityNode[] => {
             {
                 kind: NodeKind.DataWarehouseNode as const,
                 id: dataWarehouseNode.table_name,
-                id_field: dataWarehouseNode.data_warehouse_join_key,
+                id_field: dataWarehouseNode.distinct_id_field,
                 table_name: dataWarehouseNode.table_name,
                 timestamp_field: dataWarehouseNode.timestamp_field,
-                distinct_id_field: dataWarehouseNode.events_join_key,
+                distinct_id_field: dataWarehouseNode.distinct_id_field,
                 name: dataWarehouseNode.name,
                 math: ExperimentMetricMathType.TotalCount,
                 ...(dataWarehouseNode.properties &&

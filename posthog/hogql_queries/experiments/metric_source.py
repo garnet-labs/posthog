@@ -55,7 +55,7 @@ class MetricSourceInfo:
             source: The metric source (EventsNode, ActionsNode, or ExperimentDataWarehouseNode)
             entity_key: Entity key from experiment context (e.g., "person_id" or "$group_0").
                        Required for events/actions sources to support group aggregation.
-                       Ignored for datawarehouse sources (uses data_warehouse_join_key instead).
+                       Ignored for datawarehouse sources (uses distinct_id_field instead).
 
         Returns:
             MetricSourceInfo with appropriate metadata for the source type
@@ -76,7 +76,7 @@ class MetricSourceInfo:
             return cls(
                 kind="datawarehouse",
                 table_name=source.table_name,
-                entity_key=parse_expr(source.data_warehouse_join_key),
+                entity_key=parse_expr(source.distinct_id_field),
                 timestamp_field=source.timestamp_field,
                 has_uuid=False,
                 has_session_id=False,

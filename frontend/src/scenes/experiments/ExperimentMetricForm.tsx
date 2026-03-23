@@ -97,16 +97,9 @@ const dataWarehousePopoverFields: DataWarehousePopoverField[] = [
         label: 'Timestamp Field',
     },
     {
-        key: 'data_warehouse_join_key',
-        label: 'Data Warehouse Join Key',
+        key: 'distinct_id_field',
+        label: 'Distinct ID Field',
         allowHogQL: true,
-    },
-    {
-        key: 'events_join_key',
-        label: 'Events Join Key',
-        allowHogQL: true,
-        hogQLOnly: true,
-        tableName: 'events',
     },
 ]
 

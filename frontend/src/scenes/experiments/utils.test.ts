@@ -898,8 +898,7 @@ describe('filterToMetricConfig', () => {
             name: 'mysql_payments',
             type: 'data_warehouse',
             timestamp_field: 'timestamp',
-            events_join_key: 'person.properties.email',
-            data_warehouse_join_key: 'customer.email',
+            distinct_id_field: 'customer.email',
         } as Record<string, any>
         const metricConfig = filterToMetricConfig(ExperimentMetricType.MEAN, undefined, undefined, [dataWarehouse])
         expect(metricConfig).toEqual({
@@ -909,8 +908,7 @@ describe('filterToMetricConfig', () => {
                 table_name: 'mysql_payments',
                 name: 'mysql_payments',
                 timestamp_field: 'timestamp',
-                events_join_key: 'person.properties.email',
-                data_warehouse_join_key: 'customer.email',
+                distinct_id_field: 'customer.email',
                 math: ExperimentMetricMathType.TotalCount,
                 math_property: undefined,
                 math_hogql: undefined,
@@ -925,8 +923,7 @@ describe('filterToMetricConfig', () => {
             name: 'mysql_payments',
             type: 'data_warehouse',
             timestamp_field: 'timestamp',
-            events_join_key: 'person.properties.email',
-            data_warehouse_join_key: 'customer.email',
+            distinct_id_field: 'customer.email',
             properties: [
                 {
                     key: 'amount',
@@ -950,8 +947,7 @@ describe('filterToMetricConfig', () => {
                 table_name: 'mysql_payments',
                 name: 'mysql_payments',
                 timestamp_field: 'timestamp',
-                events_join_key: 'person.properties.email',
-                data_warehouse_join_key: 'customer.email',
+                distinct_id_field: 'customer.email',
                 math: ExperimentMetricMathType.TotalCount,
                 math_property: undefined,
                 math_hogql: undefined,
