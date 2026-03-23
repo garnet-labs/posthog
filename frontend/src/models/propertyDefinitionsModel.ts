@@ -334,7 +334,8 @@ export const propertyDefinitionsModel = kea<propertyDefinitionsModelType>([
                 if (isKeyOf(type, pendingByType)) {
                     pendingByType[type].push(rest.join('/'))
                 } else {
-                    throw new Error(`Unknown property definition type: ${type}`)
+                    // Mark unknown types as missing so they don't stay pending forever
+                    actions.updatePropertyDefinitions({ [key]: PropertyDefinitionState.Missing })
                 }
             }
             try {
