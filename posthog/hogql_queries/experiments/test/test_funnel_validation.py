@@ -352,7 +352,7 @@ class TestFunnelDWValidator(BaseTest):
         assert error is None
 
     def test_validate_funnel_metric_all_valid(self):
-        """DW funnel metrics are blocked until implementation is complete."""
+        """Valid funnel metric passes all validations."""
         metric = create_mock_metric(
             series=[
                 EventsNode(event="pageview"),
@@ -365,17 +365,11 @@ class TestFunnelDWValidator(BaseTest):
             ]
         )
 
-        # Should raise not_implemented error
-        with self.assertRaises(ValidationError) as context:
-            FunnelDWValidator.validate_funnel_metric(metric)
-
-        error_detail = context.exception.detail
-        assert isinstance(error_detail, dict)
-        self.assertIn("not_implemented", error_detail)
-        self.assertIn("not yet supported", str(error_detail["not_implemented"]))
+        # Should not raise
+        FunnelDWValidator.validate_funnel_metric(metric)
 
     def test_validate_funnel_metric_missing_fields_raises(self):
-        """DW funnels are blocked regardless of configuration."""
+        """Missing required fields raises ValidationError."""
         metric = create_mock_metric(
             series=[
                 ExperimentDataWarehouseNode(
@@ -391,10 +385,12 @@ class TestFunnelDWValidator(BaseTest):
             FunnelDWValidator.validate_funnel_metric(metric)
 
         error_detail = context.exception.detail
-        self.assertIn("not_implemented", error_detail)
+        assert isinstance(error_detail, dict)
+        self.assertIn("datawarehouse_configuration", error_detail)
+        self.assertIn("help", error_detail)
 
     def test_validate_funnel_metric_join_key_mismatch_raises(self):
-        """DW funnels are blocked regardless of join key configuration."""
+        """Join key mismatch raises ValidationError."""
         metric = create_mock_metric(
             series=[
                 ExperimentDataWarehouseNode(
@@ -416,10 +412,11 @@ class TestFunnelDWValidator(BaseTest):
             FunnelDWValidator.validate_funnel_metric(metric)
 
         error_detail = context.exception.detail
-        self.assertIn("not_implemented", error_detail)
+        assert isinstance(error_detail, dict)
+        self.assertIn("join_key_mismatch", error_detail)
 
     def test_validate_funnel_metric_complexity_limit_raises(self):
-        """DW funnels are blocked regardless of complexity."""
+        """Exceeding complexity limits raises ValidationError."""
         metric = create_mock_metric(
             series=[
                 ExperimentDataWarehouseNode(
@@ -447,10 +444,11 @@ class TestFunnelDWValidator(BaseTest):
             FunnelDWValidator.validate_funnel_metric(metric)
 
         error_detail = context.exception.detail
-        self.assertIn("not_implemented", error_detail)
+        assert isinstance(error_detail, dict)
+        self.assertIn("complexity_limit", error_detail)
 
     def test_validate_funnel_metric_multiple_errors(self):
-        """DW funnels are blocked with a single not_implemented error."""
+        """Multiple validation failures - field errors reported first."""
         metric = create_mock_metric(
             series=[
                 ExperimentDataWarehouseNode(
@@ -463,7 +461,7 @@ class TestFunnelDWValidator(BaseTest):
                     table_name="table_b",
                     timestamp_field="ds",
                     data_warehouse_join_key="id",
-                    events_join_key="properties.$email",  # Different join key - consistency error
+                    events_join_key="properties.$email",  # Different join key - would be consistency error
                 ),
             ]
         )
@@ -472,7 +470,10 @@ class TestFunnelDWValidator(BaseTest):
             FunnelDWValidator.validate_funnel_metric(metric)
 
         error_detail = context.exception.detail
-        self.assertIn("not_implemented", error_detail)
+        assert isinstance(error_detail, dict)
+        # Field errors are reported first, early return prevents consistency check
+        self.assertIn("datawarehouse_configuration", error_detail)
+        self.assertIn("help", error_detail)
 
     def test_validate_funnel_metric_events_only_passes(self):
         """Events-only funnel requires no DW validation."""
