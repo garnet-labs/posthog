@@ -33,6 +33,10 @@ export XDG_CACHE_HOME=/tmp/sandbox-cache
 export COREPACK_ENABLE_AUTO_PIN=0
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 mkdir -p "$HOME" "$UV_CACHE_DIR" "$XDG_CACHE_HOME"
+# Copy Claude Code auth from read-only mounts so it can write to ~/.claude
+mkdir -p "$HOME/.claude"
+cp -r /tmp/claude-auth/. "$HOME/.claude/" 2>/dev/null || true
+cp /tmp/claude-auth.json "$HOME/.claude.json" 2>/dev/null || true
 
 # Point Rust builds at the shared cargo-target volume (native ext4, not host-mounted).
 # This avoids the VirtioFS overhead on macOS for the ~7GB of small-file random I/O
@@ -52,13 +56,16 @@ uv sync
 source .venv/bin/activate
 
 # Make hogli available — normally done by flox on-activate.sh
-ln -sf "$(pwd)/bin/hogli" .venv/bin/hogli
+ln -sfn "$(pwd)/bin/hogli" .venv/bin/hogli
 
 echo "==> Installing Node dependencies..."
-# CI=1 suppresses interactive prompts (e.g. "reinstall from scratch? Y/n")
-# that hang when there's no TTY. The worktree may already have partial
-# node_modules from posthog-worktree setup.
-CI=1 pnpm install
+# CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed because
+# the pre-merge overlay may update package.json files that don't match the
+# worktree's lockfile. GIT_DIR works around the worktree's .git file pointing
+# to the host's .git/worktrees/ dir (not mounted in the container) — pnpm
+# needs a working git for git-based dependencies (e.g. uWebSockets.js).
+git init -q /tmp/sandbox-git
+GIT_DIR=/tmp/sandbox-git CI=1 pnpm install --no-frozen-lockfile
 
 echo "==> Running database migrations..."
 python manage.py sandbox_migrate
@@ -82,7 +89,8 @@ echo "==> Pre-creating Kafka topics..."
 # In normal dev, ClickHouse Kafka engine tables or the plugin server create these
 # topics first. In a fresh sandbox volume nothing has, so we create them explicitly.
 for topic in clickhouse_events_json exceptions_ingestion; do
-    rpk topic create "$topic" --brokers kafka:9092 -p 1 -r 1
+    rpk topic describe "$topic" --brokers kafka:9092 >/dev/null 2>&1 \
+        || rpk topic create "$topic" --brokers kafka:9092 -p 1 -r 1
 done
 
 echo "==> Starting PostHog via mprocs in tmux..."
