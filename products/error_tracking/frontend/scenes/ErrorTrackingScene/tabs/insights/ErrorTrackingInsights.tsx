@@ -19,7 +19,7 @@ export function ErrorTrackingInsights(): JSX.Element {
 
     return (
         <div>
-            <SceneStickyBar showBorderBottom={false}>
+            <SceneStickyBar showBorderBottom={false} className="py-3">
                 <InsightsFilters
                     reload={
                         <LemonButton
