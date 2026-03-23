@@ -3,7 +3,7 @@ import { Survey, SurveyEventName, SurveyQuestionType } from '~/types'
 import {
     buildProperties,
     getSelectedSurveyId,
-    getSurveyResponsePropertyKeys,
+    getSurveyQuestionOptions,
     getUserProperties,
     isSurveyTriggerConfig,
 } from './surveys'
@@ -233,21 +233,31 @@ describe('surveys', () => {
         })
     })
 
-    describe('getSurveyResponsePropertyKeys', () => {
-        it('generates correct keys for multiple questions', () => {
-            const survey = makeSurvey([
-                { question: 'How likely are you to recommend us?', type: SurveyQuestionType.Rating },
-                { question: 'What can we improve?', type: SurveyQuestionType.Open },
-            ])
-            const result = getSurveyResponsePropertyKeys(survey)
+    describe('getSurveyQuestionOptions', () => {
+        it('includes choices for single choice questions', () => {
+            const survey = makeSurvey([{ question: 'Why are you leaving?', type: SurveyQuestionType.SingleChoice }])
+            ;(survey.questions[0] as any).choices = ['Too expensive', 'Found alternative', 'Other']
+            const result = getSurveyQuestionOptions(survey)
             expect(result).toEqual([
                 {
                     key: '$survey_response',
-                    buttonLabel: 'How likely are you to recommend us?',
-                    question: 'How likely are you to recommend us?',
+                    question: 'Why are you leaving?',
+                    options: ['Too expensive', 'Found alternative', 'Other'],
                 },
-                { key: '$survey_response_1', buttonLabel: 'What can we improve?', question: 'What can we improve?' },
             ])
+        })
+
+        it('generates scale options for rating questions', () => {
+            const survey = makeSurvey([{ question: 'Rate us', type: SurveyQuestionType.Rating }])
+            ;(survey.questions[0] as any).scale = 5
+            const result = getSurveyQuestionOptions(survey)
+            expect(result[0].options).toEqual(['1', '2', '3', '4', '5'])
+        })
+
+        it('returns no options for open text questions', () => {
+            const survey = makeSurvey([{ question: 'Any feedback?', type: SurveyQuestionType.Open }])
+            const result = getSurveyQuestionOptions(survey)
+            expect(result[0].options).toBeUndefined()
         })
 
         it('skips link questions but preserves indices', () => {
@@ -256,23 +266,8 @@ describe('surveys', () => {
                 { question: 'Visit our site', type: SurveyQuestionType.Link },
                 { question: 'Any feedback?', type: SurveyQuestionType.Open },
             ])
-            const result = getSurveyResponsePropertyKeys(survey)
-            expect(result).toEqual([
-                { key: '$survey_response', buttonLabel: 'Rate us', question: 'Rate us' },
-                { key: '$survey_response_2', buttonLabel: 'Any feedback?', question: 'Any feedback?' },
-            ])
-        })
-
-        it('truncates long question text', () => {
-            const survey = makeSurvey([
-                {
-                    question: 'This is a very long question that should be truncated at forty characters',
-                    type: SurveyQuestionType.Open,
-                },
-            ])
-            const result = getSurveyResponsePropertyKeys(survey)
-            expect(result[0].buttonLabel).toBe('This is a very long question that shoul...')
-            expect(result[0].question).toBe('This is a very long question that should be truncated at forty characters')
+            const result = getSurveyQuestionOptions(survey)
+            expect(result.map((r) => r.key)).toEqual(['$survey_response', '$survey_response_2'])
         })
     })
 })

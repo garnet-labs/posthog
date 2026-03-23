@@ -43,6 +43,8 @@ export type HogFlowFiltersProps = {
     setFilters: (filters: HogFlowAction['filters']) => void
     typeKey?: string
     buttonCopy?: string
+    eventNames?: string[]
+    allowNew?: boolean
 }
 
 /**
@@ -95,7 +97,13 @@ export function HogFlowEventFilters({ filters, setFilters, typeKey, buttonCopy }
     )
 }
 
-export function HogFlowPropertyFilters({ filtersKey, filters, setFilters }: HogFlowFiltersProps): JSX.Element {
+export function HogFlowPropertyFilters({
+    filtersKey,
+    filters,
+    setFilters,
+    eventNames,
+    allowNew,
+}: HogFlowFiltersProps): JSX.Element {
     const sampleGlobals = useSampleGlobals()
     return (
         <PropertyFilters
@@ -104,6 +112,8 @@ export function HogFlowPropertyFilters({ filtersKey, filters, setFilters }: HogF
                 setFilters({ ...filters, properties: properties ?? [] } as HogFlowAction['filters'])
             }}
             pageKey={`HogFlowPropertyFilters.${filtersKey}`}
+            eventNames={eventNames}
+            allowNew={allowNew}
             taxonomicGroupTypes={[
                 TaxonomicFilterGroupType.WorkflowVariables,
                 TaxonomicFilterGroupType.EventProperties,

@@ -158,7 +158,7 @@ export function formatPropertyLabel(
     return resolvedType === PropertyFilterType.Cohort
         ? `${capitalizeFirstLetter(cohortOperatorMap[resolvedOperator] || 'user in')} ` +
               (cohortName || (typeof value === 'number' ? cohortsById[value]?.name : undefined) || `ID ${value}`)
-        : (getCoreFilterDefinition(key, taxonomicFilterGroupType)?.label || label || key) +
+        : (label || getCoreFilterDefinition(key, taxonomicFilterGroupType)?.label || key) +
               (isOperatorFlag(resolvedOperator)
                   ? ` ${allOperatorsMapping[resolvedOperator]}`
                   : ` ${(allOperatorsMapping[resolvedOperator] || '?').split(' ')[0]} ${

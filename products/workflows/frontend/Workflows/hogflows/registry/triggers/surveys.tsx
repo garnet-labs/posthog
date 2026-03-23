@@ -1,17 +1,16 @@
 import { useActions, useValues } from 'kea'
 
-import { IconMessage, IconPlusSmall } from '@posthog/icons'
-import { LemonBanner, LemonButton, LemonInput, LemonSelect, Spinner } from '@posthog/lemon-ui'
+import { IconMessage } from '@posthog/icons'
+import { LemonBanner, LemonInput, LemonSelect, Spinner } from '@posthog/lemon-ui'
 
 import { IconOpenInNew } from 'lib/lemon-ui/icons'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { LemonRadio } from 'lib/lemon-ui/LemonRadio'
 import { Link } from 'lib/lemon-ui/Link'
-import { truncate } from 'lib/utils'
 import { TestAccountFilter } from 'scenes/insights/filters/TestAccountFilter/TestAccountFilter'
 import { urls } from 'scenes/urls'
 
-import { Survey, SurveyEventName, SurveyQuestionType } from '~/types'
+import { MultipleSurveyQuestion, RatingSurveyQuestion, Survey, SurveyEventName, SurveyQuestionType } from '~/types'
 
 import { HogFlowPropertyFilters } from 'products/workflows/frontend/Workflows/hogflows/filters/HogFlowFilters'
 import {
@@ -50,18 +49,29 @@ function getCompletedResponsesOnly(config: EventTriggerConfig): boolean {
     return completedProp?.value === true
 }
 
-export function getSurveyResponsePropertyKeys(
-    survey: Survey
-): { key: string; buttonLabel: string; question: string }[] {
+export interface SurveyQuestionInfo {
+    key: string
+    question: string
+    options?: string[]
+}
+
+export function getSurveyQuestionOptions(survey: Survey): SurveyQuestionInfo[] {
     return survey.questions
         .map((q, index) => {
             if (q.type === SurveyQuestionType.Link) {
                 return null
             }
             const key = index === 0 ? '$survey_response' : `$survey_response_${index}`
-            return { key, buttonLabel: truncate(q.question, 40), question: q.question }
+            if (q.type === SurveyQuestionType.SingleChoice || q.type === SurveyQuestionType.MultipleChoice) {
+                return { key, question: q.question, options: (q as MultipleSurveyQuestion).choices }
+            }
+            if (q.type === SurveyQuestionType.Rating) {
+                const scale = (q as RatingSurveyQuestion).scale || 5
+                return { key, question: q.question, options: Array.from({ length: scale }, (_, i) => String(i + 1)) }
+            }
+            return { key, question: q.question }
         })
-        .filter(Boolean) as { key: string; buttonLabel: string; question: string }[]
+        .filter(Boolean) as SurveyQuestionInfo[]
 }
 
 const MANAGED_PROPERTY_KEYS = new Set(['$survey_id', '$survey_completed'])
@@ -122,6 +132,16 @@ function StepTriggerConfigurationSurvey({ node }: { node: any }): JSX.Element {
 
     const selectedSurvey =
         selectedSurveyId && selectedSurveyId !== 'any' ? allSurveys.find((s) => s.id === selectedSurveyId) : null
+
+    // Backfill question labels on existing filters that don't have them
+    if (selectedSurvey) {
+        const questionMap = new Map(getSurveyQuestionOptions(selectedSurvey).map((q) => [q.key, q.question]))
+        for (const prop of userProperties) {
+            if (!prop.label && questionMap.has(prop.key)) {
+                prop.label = questionMap.get(prop.key)
+            }
+        }
+    }
     const selectedSurveyLabel =
         selectedSurvey?.name ?? (selectedSurveyId && selectedSurveyId !== 'any' ? 'Loading...' : null)
 
@@ -315,30 +335,35 @@ function StepTriggerConfigurationSurvey({ node }: { node: any }): JSX.Element {
                         setFilters={(filters) => {
                             updateTriggerConfig(selectedSurveyId, completedOnly, filters?.properties ?? [])
                         }}
+                        allowNew={false}
                     />
                     {selectedSurvey && selectedSurvey.questions.length > 0 && (
-                        <div className="flex flex-col gap-1">
-                            <span className="text-xs text-muted">Add filter for a question:</span>
-                            <div className="flex flex-wrap gap-1">
-                                {getSurveyResponsePropertyKeys(selectedSurvey).map(({ key, buttonLabel, question }) => (
-                                    <LemonButton
-                                        key={key}
-                                        type="secondary"
-                                        size="xsmall"
-                                        icon={<IconPlusSmall />}
-                                        tooltip={question}
-                                        onClick={() => {
-                                            updateTriggerConfig(selectedSurveyId, completedOnly, [
-                                                ...userProperties,
-                                                { key, type: 'event' },
-                                            ])
-                                        }}
-                                    >
-                                        {buttonLabel}
-                                    </LemonButton>
-                                ))}
-                            </div>
-                        </div>
+                        <LemonSelect
+                            options={getSurveyQuestionOptions(selectedSurvey).map(({ key, question, options }) => ({
+                                title: question,
+                                options: options
+                                    ? options.map((option) => ({
+                                          label: option,
+                                          value: JSON.stringify({ key, question, value: option }),
+                                      }))
+                                    : [{ label: 'Add custom filter...', value: JSON.stringify({ key, question }) }],
+                            }))}
+                            value={null}
+                            onChange={(encoded) => {
+                                if (!encoded) {
+                                    return
+                                }
+                                const { key, question, value } = JSON.parse(encoded)
+                                updateTriggerConfig(selectedSurveyId, completedOnly, [
+                                    ...userProperties,
+                                    value
+                                        ? { key, value, operator: 'exact', type: 'event', label: question }
+                                        : { key, type: 'event', label: question },
+                                ])
+                            }}
+                            placeholder="Add answer filter..."
+                            size="small"
+                        />
                     )}
                 </div>
             </LemonField.Pure>
