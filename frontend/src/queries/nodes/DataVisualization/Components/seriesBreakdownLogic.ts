@@ -139,9 +139,7 @@ export const seriesBreakdownLogic = kea<seriesBreakdownLogicType>([
                           ? response.result
                           : []
 
-                // Filter out rows with null date/datetime x-axis values — these are
-                // aggregation artifacts (e.g. from GROUP BY on Nullable columns with
-                // enable_analyzer) that produce outlier values and break chart scaling
+                // Filter out rows with null date/datetime x-axis values
                 const data =
                     xColumn.type.name === 'DATE' || xColumn.type.name === 'DATETIME'
                         ? allData.filter((n) => n[xColumn.dataIndex] != null)

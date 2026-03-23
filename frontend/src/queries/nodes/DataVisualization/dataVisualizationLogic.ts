@@ -802,9 +802,7 @@ export const dataVisualizationLogic = kea<dataVisualizationLogicType>([
                           ? response.result
                           : []
 
-                // Filter out rows with null date/datetime x-axis values — these are
-                // aggregation artifacts (e.g. from GROUP BY on Nullable columns with
-                // enable_analyzer) that produce outlier values and break chart scaling
+                // Filter out rows with null date/datetime x-axis values
                 const xColumn = xSeries !== null ? columns.find((n) => n.name === xSeries) : null
                 const data =
                     xColumn && (xColumn.type.name === 'DATE' || xColumn.type.name === 'DATETIME')
@@ -899,9 +897,7 @@ export const dataVisualizationLogic = kea<dataVisualizationLogicType>([
                     return null
                 }
 
-                // Filter out rows with null date/datetime x-axis values — these are
-                // aggregation artifacts (e.g. from GROUP BY on Nullable columns with
-                // enable_analyzer) that produce outlier values and break chart scaling
+                // Filter out rows with null date/datetime x-axis values
                 const filteredData =
                     column.type.name === 'DATE' || column.type.name === 'DATETIME'
                         ? data.filter((n: Record<number, unknown>) => n[column.dataIndex] != null)
