@@ -19,9 +19,9 @@ from posthog.temporal.data_imports.signals.pipeline import (
     LLM_MAX_ATTEMPTS,
     TEMPORAL_PAYLOAD_MAX_BYTES,
     _check_actionability,
+    _emit_signals,
     _summarize_description,
     build_emitter_outputs,
-    emit_signals,
     filter_actionable,
     summarize_long_descriptions,
 )
@@ -408,7 +408,7 @@ class TestEmitSignals:
             patch(f"{PIPELINE_MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
             patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
-            count = await emit_signals(team=team, outputs=[output], extra={})
+            count = await _emit_signals(team=team, outputs=[output], extra={})
 
         assert count == 1
         mock_emit.assert_called_once_with(
@@ -436,7 +436,7 @@ class TestEmitSignals:
             patch(f"{PIPELINE_MODULE_PATH}.emit_signal", side_effect=mock_emit),
             patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
-            count = await emit_signals(team=MagicMock(), outputs=outputs, extra={})
+            count = await _emit_signals(team=MagicMock(), outputs=outputs, extra={})
 
         assert count == 2
         assert call_count == 3
@@ -457,7 +457,7 @@ class TestEmitSignals:
             patch(f"{PIPELINE_MODULE_PATH}.emit_signal", new_callable=AsyncMock) as mock_emit,
             patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
-            count = await emit_signals(team=MagicMock(), outputs=[output], extra={})
+            count = await _emit_signals(team=MagicMock(), outputs=[output], extra={})
 
         assert count == 1
         mock_emit.assert_called_once()
@@ -473,7 +473,7 @@ class TestEmitSignals:
             patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
             with pytest.raises(RuntimeError, match="All 1 signal emissions failed"):
-                await emit_signals(team=MagicMock(), outputs=[output], extra={})
+                await _emit_signals(team=MagicMock(), outputs=[output], extra={})
 
         mock_emit.assert_not_called()
 
@@ -486,7 +486,7 @@ class TestEmitSignals:
             patch(f"{PIPELINE_MODULE_PATH}.activity"),
         ):
             with pytest.raises(RuntimeError, match="All 2 signal emissions failed"):
-                await emit_signals(team=MagicMock(), outputs=outputs, extra={})
+                await _emit_signals(team=MagicMock(), outputs=outputs, extra={})
 
 
 class TestEmitDataImportSignalsWorkflow:
