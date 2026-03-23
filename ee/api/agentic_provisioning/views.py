@@ -674,6 +674,85 @@ def provisioning_resources_create(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# POST /provisioning/resources/:id/update_service
+# ---------------------------------------------------------------------------
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+def provisioning_update_service(request: Request, resource_id: str) -> Response:
+    auth_error, user, access_token = _authenticate_bearer(request)
+    if auth_error:
+        return auth_error
+
+    error = verify_stripe_signature(request)
+    if error:
+        return error
+    if error := verify_api_version(request):
+        return error
+
+    scoped_teams = access_token.scoped_teams or []
+
+    try:
+        team_id = int(resource_id)
+    except (ValueError, TypeError):
+        return _error_response("invalid_resource_id", "Invalid resource ID", resource_id=resource_id)
+
+    if team_id not in scoped_teams:
+        return _error_response(
+            "forbidden", "Resource not accessible with this token", resource_id=resource_id, status=403
+        )
+
+    try:
+        team = Team.objects.get(id=team_id)
+    except Team.DoesNotExist:
+        return _error_response("not_found", "Resource not found", resource_id=resource_id, status=404)
+
+    service_id = request.data.get("service_id", "")
+    if service_id and service_id not in VALID_SERVICE_IDS:
+        return _error_response("unknown_service", f"Unknown service_id: {service_id}", resource_id=resource_id)
+
+    resolved_service_id = service_id or ANALYTICS_SERVICE_ID
+    cache.set(f"{RESOURCE_SERVICE_CACHE_PREFIX}{team_id}", resolved_service_id, timeout=None)
+
+    payment_credentials = request.data.get("payment_credentials")
+    if payment_credentials:
+        logger.info(
+            "agentic_provisioning.update_service.payment_credentials_received",
+            team_id=team_id,
+            credential_type=payment_credentials.get("type"),
+            has_token=bool(payment_credentials.get("stripe_payment_token")),
+        )
+        posthoganalytics.capture(
+            "agentic_provisioning update_service payment credentials",
+            distinct_id="agentic_provisioning_system",
+            properties={
+                "team_id": team_id,
+                "credential_type": payment_credentials.get("type"),
+                "has_token": bool(payment_credentials.get("stripe_payment_token")),
+            },
+        )
+
+    region = get_instance_region() or "US"
+    host = _region_to_host(region)
+
+    return Response(
+        {
+            "status": "complete",
+            "id": resource_id,
+            "service_id": resolved_service_id,
+            "complete": {
+                "access_configuration": {
+                    "api_key": team.api_token,
+                    "host": host,
+                },
+            },
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /provisioning/resources/:id
 # ---------------------------------------------------------------------------
 
