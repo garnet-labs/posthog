@@ -64,6 +64,7 @@ def rename_experiment_dw_fields(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("posthog", "1061_add_session_recording_trigger_groups"),
+        ("experiments", "0001_migrate_experiments_models"),
     ]
 
     operations = [
