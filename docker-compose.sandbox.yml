@@ -20,7 +20,7 @@ services:
             service: proxy
         restart: on-failure
         ports:
-            - "${SANDBOX_PORT:-48001}:8000"
+            - '${SANDBOX_PORT:-48001}:8000'
         volumes: []
         environment:
             CADDYFILE: |
@@ -91,15 +91,20 @@ services:
         restart: on-failure
         # Run as the host user so files created in the mounted worktree
         # (node_modules, .venv) have correct ownership
-        user: "${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000}"
+        user: '${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000}'
         # mprocs (used by bin/start) requires a TTY
         tty: true
         stdin_open: true
         ports:
             # Vite dev server exposed directly (not proxied)
-            - "${SANDBOX_VITE_PORT:-49001}:8234"
+            - '${SANDBOX_VITE_PORT:-49001}:8234'
         volumes:
             - ${SANDBOX_CODE:-.}:/workspace
+            # Claude Code auth — mounted outside HOME to avoid Docker creating
+            # /tmp/sandbox-home as root (which breaks DuckDB and other writers).
+            # The entrypoint copies these into $HOME.
+            - ${HOME}/.claude:/tmp/claude-auth:ro
+            - ${HOME}/.claude.json:/tmp/claude-auth.json:ro
             # Shared caches — persist across sandboxes so the second one is fast.
             # uv and pnpm download packages here; subsequent sandboxes get cache hits.
             - uv-cache:/cache/uv
