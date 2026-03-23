@@ -24,6 +24,9 @@ from posthog.temporal.ai.sync_vectors import EmbeddingVersion
 from posthog.temporal.ai.video_segment_clustering.schedule import create_video_segment_clustering_coordinator_schedule
 from posthog.temporal.common.client import async_connect
 from posthog.temporal.common.schedule import a_create_schedule, a_schedule_exists, a_update_schedule
+from posthog.temporal.data_imports.signals.conversations_schedule import (
+    create_conversations_signals_coordinator_schedule,
+)
 from posthog.temporal.delete_recordings.types import PurgeDeletedMetadataInput
 from posthog.temporal.ducklake.compaction_types import DucklakeCompactionInput
 from posthog.temporal.enforce_max_replay_retention.types import EnforceMaxReplayRetentionInput
@@ -367,6 +370,7 @@ schedules = [
     create_all_realtime_cohort_calculation_schedules,
     create_ingestion_acceptance_test_schedule,
     create_health_check_schedules,
+    create_conversations_signals_coordinator_schedule,
 ]
 
 if settings.EE_AVAILABLE:
