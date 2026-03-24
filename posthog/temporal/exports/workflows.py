@@ -36,7 +36,7 @@ class ExportAssetWorkflow(PostHogWorkflow):
     @wf.run
     async def run(self, inputs: ExportAssetWorkflowInputs) -> None:
         if inputs.slo:
-            inputs.slo.completion_context["export_format"] = inputs.export_format or ""
+            inputs.slo.completion_properties["export_format"] = inputs.export_format or ""
 
         try:
             await wf.execute_activity(
@@ -53,12 +53,12 @@ class ExportAssetWorkflow(PostHogWorkflow):
             if inputs.slo:
                 cause = e.cause if isinstance(e, ActivityError) and isinstance(e.cause, ApplicationError) else None
                 if isinstance(cause, ApplicationError) and cause.details:
-                    inputs.slo.completion_context["error"] = {
-                        "exception_class": cause.details[0] if cause.details else type(e).__name__,
+                    inputs.slo.completion_properties["error"] = {
+                        "exception_class": cause.details[0] if len(cause.details) >= 1 else type(e).__name__,
                         "error_trace": cause.details[4] if len(cause.details) >= 5 else "",
                     }
                 else:
-                    inputs.slo.completion_context["error"] = {
+                    inputs.slo.completion_properties["error"] = {
                         "exception_class": type(e).__name__,
                         "error_trace": "\n".join(traceback.format_exception(e)[:5]),
                     }
