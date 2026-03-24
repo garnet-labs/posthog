@@ -20,18 +20,33 @@ _BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 _stubs_installed = False
 
 
+def _django_is_configured() -> bool:
+    """Return True if Django is already set up (e.g. running inside the full test suite)."""
+    try:
+        from django.conf import settings
+
+        return hasattr(settings, "USE_I18N")
+    except Exception:
+        return False
+
+
 def _install_stubs() -> None:
     global _stubs_installed
     if _stubs_installed:
         return
     _stubs_installed = True
 
+    # When running inside a Django test suite, real modules are already loaded.
+    # Only install stubs for standalone execution (no Django).
+    if _django_is_configured():
+        return
+
     # posthog.clickhouse.client — replace the package with a hollow shell
     # that still resolves submodules from the real filesystem path
     fake_client = types.ModuleType("posthog.clickhouse.client")
     fake_client.__path__ = [os.path.join(_BASE, "posthog/clickhouse/client")]  # type: ignore[attr-defined]
     fake_client.__package__ = "posthog.clickhouse.client"
-    sys.modules["posthog.clickhouse.client"] = fake_client
+    sys.modules.setdefault("posthog.clickhouse.client", fake_client)
 
     # posthog.clickhouse.client.connection — only NodeRole is needed
     fake_conn = types.ModuleType("posthog.clickhouse.client.connection")
@@ -42,37 +57,39 @@ def _install_stubs() -> None:
         ALL = "ALL"
 
     fake_conn.NodeRole = NodeRole  # type: ignore[attr-defined]
-    sys.modules["posthog.clickhouse.client.connection"] = fake_conn
+    sys.modules.setdefault("posthog.clickhouse.client.connection", fake_conn)
 
     # posthog.clickhouse.cluster
     fake_cluster = types.ModuleType("posthog.clickhouse.cluster")
     fake_cluster.Query = MagicMock()  # type: ignore[attr-defined]
     fake_cluster.get_cluster = MagicMock()  # type: ignore[attr-defined]
-    sys.modules["posthog.clickhouse.cluster"] = fake_cluster
+    sys.modules.setdefault("posthog.clickhouse.cluster", fake_cluster)
 
     # infi.clickhouse_orm.migrations
     for mod_name in ("infi", "infi.clickhouse_orm", "infi.clickhouse_orm.migrations"):
         m = types.ModuleType(mod_name)
         m.__path__ = ["/fake"]  # type: ignore[attr-defined]
-        sys.modules[mod_name] = m
+        sys.modules.setdefault(mod_name, m)
 
-    class _FakeRunPython:
-        def __init__(self, fn: object) -> None:
-            pass
+    if not hasattr(sys.modules.get("infi.clickhouse_orm.migrations"), "RunPython"):
 
-    sys.modules["infi.clickhouse_orm.migrations"].RunPython = _FakeRunPython  # type: ignore[attr-defined]
+        class _FakeRunPython:
+            def __init__(self, fn: object) -> None:
+                pass
+
+        sys.modules["infi.clickhouse_orm.migrations"].RunPython = _FakeRunPython  # type: ignore[attr-defined]
 
     # posthog.settings / posthog.settings.data_stores
     fake_settings = types.ModuleType("posthog.settings")
     fake_settings.E2E_TESTING = False  # type: ignore[attr-defined]
     fake_settings.DEBUG = True  # type: ignore[attr-defined]
     fake_settings.CLOUD_DEPLOYMENT = False  # type: ignore[attr-defined]
-    sys.modules["posthog.settings"] = fake_settings
+    sys.modules.setdefault("posthog.settings", fake_settings)
 
     fake_ds = types.ModuleType("posthog.settings.data_stores")
     fake_ds.CLICKHOUSE_MIGRATIONS_CLUSTER = "default"  # type: ignore[attr-defined]
     fake_ds.CLICKHOUSE_MIGRATIONS_HOST = "localhost"  # type: ignore[attr-defined]
-    sys.modules["posthog.settings.data_stores"] = fake_ds
+    sys.modules.setdefault("posthog.settings.data_stores", fake_ds)
 
     # django stubs (for ch_migrate command)
     for mod_name in ("django", "django.conf", "django.core", "django.core.management", "django.core.management.base"):
@@ -80,8 +97,9 @@ def _install_stubs() -> None:
         m.__path__ = ["/fake"]  # type: ignore[attr-defined]
         sys.modules.setdefault(mod_name, m)
 
-    settings_ns = types.SimpleNamespace(CLICKHOUSE_DATABASE="default")
-    sys.modules["django.conf"].settings = settings_ns  # type: ignore[attr-defined]
+    if not hasattr(sys.modules.get("django.conf"), "settings"):
+        settings_ns = types.SimpleNamespace(CLICKHOUSE_DATABASE="default")
+        sys.modules["django.conf"].settings = settings_ns  # type: ignore[attr-defined]
 
     class _FakeBaseCommand:
         def __init__(self) -> None:
@@ -91,7 +109,8 @@ def _install_stubs() -> None:
         def print_help(self, *args: object) -> None:
             pass
 
-    sys.modules["django.core.management.base"].BaseCommand = _FakeBaseCommand  # type: ignore[attr-defined]
+    if not hasattr(sys.modules.get("django.core.management.base"), "BaseCommand"):
+        sys.modules["django.core.management.base"].BaseCommand = _FakeBaseCommand  # type: ignore[attr-defined]
 
     # posthog.management.commands — make it a resolvable package
     for mod_name in ("posthog.management", "posthog.management.commands"):

@@ -4,8 +4,25 @@ import types
 from unittest.mock import MagicMock
 
 
+def _django_is_configured() -> bool:
+    """Return True if Django is already set up (e.g. running inside the full test suite)."""
+    try:
+        from django.conf import settings
+
+        return hasattr(settings, "USE_I18N")
+    except Exception:
+        return False
+
+
 def _ensure_django_mocks():
-    """Ensure minimal Django mocks exist so ch_migrate can be imported."""
+    """Ensure minimal Django mocks exist so ch_migrate can be imported.
+
+    Skips all stubs when running inside a Django test suite to avoid
+    corrupting already-configured modules.
+    """
+    if _django_is_configured():
+        return
+
     if "django.conf" not in sys.modules:
         mock_settings = MagicMock()
         mock_settings.CLICKHOUSE_DATABASE = "test_db"
@@ -13,7 +30,7 @@ def _ensure_django_mocks():
         sys.modules.setdefault("django", types.ModuleType("django"))
         django_conf = types.ModuleType("django.conf")
         django_conf.settings = mock_settings  # type: ignore[attr-defined]
-        sys.modules["django.conf"] = django_conf
+        sys.modules.setdefault("django.conf", django_conf)
 
     if "django.core.management.base" not in sys.modules:
 
@@ -28,14 +45,14 @@ def _ensure_django_mocks():
         sys.modules.setdefault("django.core.management", types.ModuleType("django.core.management"))
         base_mod = types.ModuleType("django.core.management.base")
         base_mod.BaseCommand = FakeBaseCommand  # type: ignore[attr-defined]
-        sys.modules["django.core.management.base"] = base_mod
+        sys.modules.setdefault("django.core.management.base", base_mod)
 
     # Mock posthog.clickhouse.cluster so it can be imported
     if "posthog.clickhouse.cluster" not in sys.modules:
         cluster_mod = types.ModuleType("posthog.clickhouse.cluster")
         cluster_mod.Query = MagicMock  # type: ignore[attr-defined]
         cluster_mod.get_cluster = MagicMock  # type: ignore[attr-defined]
-        sys.modules["posthog.clickhouse.cluster"] = cluster_mod
+        sys.modules.setdefault("posthog.clickhouse.cluster", cluster_mod)
 
 
 # Set up mocks before any test imports
