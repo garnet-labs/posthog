@@ -133,6 +133,14 @@ const EMAIL_METRICS: EmailMetric[] = [
     'email_spam',
 ]
 
+const EMAIL_ENGAGEMENT_METRICS: EmailMetric[] = [
+    'email_opened',
+    'email_link_clicked',
+    'email_bounced',
+    'email_blocked',
+    'email_spam',
+]
+
 export interface WorkflowMetricsSummaryLogicProps {
     logicKey: string
     id: string
@@ -196,6 +204,38 @@ export const workflowMetricsSummaryLogic = kea<workflowMetricsSummaryLogicType>(
                     await breakpoint(10)
 
                     return mapEmailMetricsToActions(totalsResponse)
+                },
+            },
+        ],
+        // Engagement metrics (opened, clicked) from SES webhooks are stored with
+        // per-run invocation IDs, not action node IDs, so they don't match the
+        // per-action breakdown. Load workflow-level totals as a fallback.
+        emailEngagementTotals: [
+            {} as Partial<Record<EmailMetric, number>>,
+            {
+                loadEmailEngagementTotals: async (_, breakpoint) => {
+                    await breakpoint(10)
+                    const dateRange = values.getDateRangeAbsolute()
+                    const request: AppMetricsTotalsRequest = {
+                        appSource: values.params.appSource,
+                        appSourceId: values.params.appSourceId,
+                        breakdownBy: ['metric_name'],
+                        metricName: [...EMAIL_ENGAGEMENT_METRICS],
+                        dateFrom: dateRange.dateFrom.toISOString(),
+                        dateTo: dateRange.dateTo.toISOString(),
+                    }
+
+                    const totalsResponse = await loadAppMetricsTotals(request, values.currentTeam?.timezone ?? 'UTC')
+                    await breakpoint(10)
+
+                    const result: Partial<Record<EmailMetric, number>> = {}
+                    Object.values(totalsResponse).forEach(({ total, breakdowns }) => {
+                        const metricName = breakdowns[0]
+                        if (isEmailMetric(metricName)) {
+                            result[metricName] = total
+                        }
+                    })
+                    return result
                 },
             },
         ],
@@ -309,20 +349,26 @@ export const workflowMetricsSummaryLogic = kea<workflowMetricsSummaryLogicType>(
         ],
 
         emailMetricsRows: [
-            (s) => [s.emailActions, s.emailTotalsByActionId],
-            (emailActions, emailTotalsByActionId): EmailMetricRow[] =>
+            (s) => [s.emailActions, s.emailTotalsByActionId, s.emailEngagementTotals],
+            (emailActions, emailTotalsByActionId, emailEngagementTotals): EmailMetricRow[] =>
                 emailActions.map((action: { id: string; name: string }) => {
                     const totals = emailTotalsByActionId[action.id] || {}
                     const sent = totals.email_sent ?? 0
                     const bounced = totals.email_bounced ?? 0
                     const blocked = totals.email_blocked ?? 0
+
+                    // Per-action engagement if available (from correctly attributed metrics),
+                    // otherwise fall back to workflow-level totals
+                    const opened = totals.email_opened ?? emailEngagementTotals.email_opened ?? 0
+                    const linkClicked = totals.email_link_clicked ?? emailEngagementTotals.email_link_clicked ?? 0
+
                     return {
                         id: action.id,
                         email: action.name,
                         delivered: Math.max(0, sent - bounced - blocked),
                         sent,
-                        opened: totals.email_opened ?? 0,
-                        linkClicked: totals.email_link_clicked ?? 0,
+                        opened,
+                        linkClicked,
                     }
                 }),
         ],
@@ -330,6 +376,7 @@ export const workflowMetricsSummaryLogic = kea<workflowMetricsSummaryLogicType>(
 
     afterMount(({ actions }) => {
         actions.loadEmailTotals({})
+        actions.loadEmailEngagementTotals({})
         actions.loadInProgressTotal({})
     }),
 
@@ -345,6 +392,7 @@ export const workflowMetricsSummaryLogic = kea<workflowMetricsSummaryLogicType>(
                 dateTo: values.params.dateTo,
             })
             actions.loadEmailTotals({})
+            actions.loadEmailEngagementTotals({})
         },
     })),
 ])
