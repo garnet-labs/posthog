@@ -10,6 +10,7 @@ type keyMap struct {
 	GotoTop    key.Binding
 	GotoBottom key.Binding
 	NextPane   key.Binding
+	PrevPane   key.Binding
 	RunSuite   key.Binding
 	RunAll     key.Binding
 	RunFailed  key.Binding
@@ -50,7 +51,11 @@ func defaultKeyMap() keyMap {
 		),
 		NextPane: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("↹:", "switch pane"),
+			key.WithHelp("↹:", "next pane"),
+		),
+		PrevPane: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("⇧↹:", "prev pane"),
 		),
 		RunSuite: key.NewBinding(
 			key.WithKeys("enter"),
@@ -82,6 +87,7 @@ func defaultKeyMap() keyMap {
 		),
 		Backspace: key.NewBinding(
 			key.WithKeys("backspace"),
+			key.WithHelp("⌫:", "del char"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
@@ -102,9 +108,9 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.NextSuite, k.PrevSuite},
 		{k.ScrollUp, k.ScrollDown},
-		{k.GotoTop, k.GotoBottom},
-		{k.RunSuite, k.RunAll, k.RunFailed, k.StopSuite},
+		{k.GotoTop, k.GotoBottom, k.StopSuite},
+		{k.RunSuite, k.RunAll, k.RunFailed},
 		{k.Search, k.SearchNext, k.SearchPrev},
-		{k.NextPane, k.Quit, k.Help},
+		{k.NextPane, k.PrevPane, k.Quit, k.Help},
 	}
 }

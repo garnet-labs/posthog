@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/posthog/posthog/phtest/internal/runner"
 )
@@ -18,51 +19,46 @@ func (m *Model) clearSearch() {
 }
 
 func (m *Model) recomputeSearch() {
-	m.searchMatches = nil
-	m.searchCursor = 0
 	if m.searchQuery == "" {
+		m.searchMatches = nil
+		m.searchCursor = 0
 		m.viewport.StyleLineFunc = nil
 		return
 	}
-	content := m.viewport.View()
-	q := strings.ToLower(m.searchQuery)
-	for i, line := range strings.Split(content, "\n") {
-		if strings.Contains(strings.ToLower(line), q) {
-			m.searchMatches = append(m.searchMatches, i)
-		}
-	}
-	// Rebuild from actual lines for accuracy
-	m.searchMatches = nil
 	s := m.activeSuite()
 	if s == nil {
+		m.searchMatches = nil
 		return
 	}
+	q := strings.ToLower(m.searchQuery)
+	m.searchMatches = nil
 	for i, line := range s.Lines() {
-		if strings.Contains(strings.ToLower(line), q) {
+		if strings.Contains(strings.ToLower(ansi.Strip(line)), q) {
 			m.searchMatches = append(m.searchMatches, i)
 		}
 	}
-	if len(m.searchMatches) > 0 {
-		m.searchCursor = 0
+	if m.searchCursor >= len(m.searchMatches) {
+		m.searchCursor = max(len(m.searchMatches)-1, 0)
 	}
 	m.applySearchStyle()
 }
 
 func (m *Model) applySearchStyle() {
-	if m.searchQuery == "" || len(m.searchMatches) == 0 {
+	if len(m.searchMatches) == 0 {
 		m.viewport.StyleLineFunc = nil
 		return
 	}
-	matches := m.searchMatches
-	current := m.searchCursor
-	m.viewport.StyleLineFunc = func(lineIdx int) lipgloss.Style {
-		for i, matchIdx := range matches {
-			if matchIdx == lineIdx {
-				if i == current {
-					return searchCurrentMatchStyle
-				}
-				return searchMatchStyle
-			}
+	matchSet := make(map[int]bool, len(m.searchMatches))
+	for _, idx := range m.searchMatches {
+		matchSet[idx] = true
+	}
+	current := m.searchMatches[m.searchCursor]
+	m.viewport.StyleLineFunc = func(idx int) lipgloss.Style {
+		if idx == current {
+			return searchCurrentMatchStyle
+		}
+		if matchSet[idx] {
+			return searchMatchStyle
 		}
 		return lipgloss.NewStyle()
 	}
@@ -81,23 +77,22 @@ func (m *Model) updateSearchForNewLine(msg runner.OutputMsg) {
 	if m.searchQuery == "" {
 		return
 	}
-	q := strings.ToLower(m.searchQuery)
 
 	if msg.Evicted && len(m.searchMatches) > 0 {
-		// Shift all match indices down by 1; remove index 0 if it was a match
-		var shifted []int
-		for _, idx := range m.searchMatches {
-			if idx > 0 {
-				shifted = append(shifted, idx-1)
+		if m.searchMatches[0] == 0 {
+			m.searchMatches = m.searchMatches[1:]
+			if m.searchCursor > 0 {
+				m.searchCursor--
+			} else if len(m.searchMatches) == 0 {
+				m.searchCursor = 0
 			}
 		}
-		m.searchMatches = shifted
-		if m.searchCursor >= len(m.searchMatches) {
-			m.searchCursor = max(0, len(m.searchMatches)-1)
+		for i := range m.searchMatches {
+			m.searchMatches[i]--
 		}
 	}
 
-	if strings.Contains(strings.ToLower(msg.Line), q) {
+	if strings.Contains(strings.ToLower(ansi.Strip(msg.Line)), strings.ToLower(m.searchQuery)) {
 		m.searchMatches = append(m.searchMatches, msg.LineIndex)
 	}
 	m.applySearchStyle()

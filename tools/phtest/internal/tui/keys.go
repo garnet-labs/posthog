@@ -34,6 +34,13 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 			m.focusedPane = focusSidebar
 		}
 
+	case key.Matches(msg, m.keys.PrevPane):
+		if m.focusedPane == focusOutput {
+			m.focusedPane = focusSidebar
+		} else {
+			m.focusedPane = focusOutput
+		}
+
 	case key.Matches(msg, m.keys.NextSuite):
 		if m.focusedPane == focusSidebar {
 			if m.moveCursor(+1) {

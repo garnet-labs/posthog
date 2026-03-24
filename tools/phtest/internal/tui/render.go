@@ -12,14 +12,11 @@ import (
 func (m Model) renderHeader() string {
 	brand := headerBrandStyle.Render("phtest")
 
-	// Aggregate stats
+	// Aggregate stats across all suites (not just visible entries)
 	var passed, failed, running, total int
-	for _, e := range m.entries {
-		if e.isCategoryHeader {
-			continue
-		}
+	for _, s := range m.mgr.Suites() {
 		total++
-		switch e.suite.Status() {
+		switch s.Status() {
 		case runner.StatusPassed:
 			passed++
 		case runner.StatusFailed:
