@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
 
-import { IconPlusSmall, IconTrash, IconUndo } from '@posthog/icons'
+import { IconPencil, IconPlusSmall, IconTrash, IconUndo } from '@posthog/icons'
 import { LemonButton, Tooltip } from '@posthog/lemon-ui'
 
 import { HogQLEditor } from 'lib/components/HogQLEditor/HogQLEditor'
@@ -88,12 +88,12 @@ export function ActionFilterGroup({
     ].filter((groupType) => groupType !== TaxonomicFilterGroupType.DataWarehouse)
 
     const { currentTeamId } = useValues(teamLogic)
-    const { removeLocalFilter, splitLocalFilter } = useActions(entityFilterLogic({ typeKey }))
+    const { removeLocalFilter, splitLocalFilter, showModal, selectFilter } = useActions(entityFilterLogic({ typeKey }))
     const { mathDefinitions } = useValues(mathsLogic)
     const { setNodeRef, attributes, transform, transition, listeners, isDragging } = useSortable({ id: filter.uuid })
 
     const groupLogic = actionFilterGroupLogic({ filterUuid: filter.uuid, typeKey, groupIndex: index })
-    const { nestedFilters, operator, isHogQLDropdownVisible } = useValues(groupLogic)
+    const { nestedFilters, operator, isHogQLDropdownVisible, groupFilter } = useValues(groupLogic)
     const {
         addNestedFilter,
         updateNestedFilterProperties,
@@ -163,8 +163,8 @@ export function ActionFilterGroup({
                                         mathAvailability={mathAvailability}
                                         trendsDisplayCategory={trendsDisplayCategory}
                                     />
-                                    {(mathDefinitions as Record<string, any>)[filter.math || BaseMathType.TotalCount]
-                                        ?.category === MathCategory.PropertyValue && (
+                                    {mathDefinitions[filter.math || BaseMathType.TotalCount]?.category ===
+                                        MathCategory.PropertyValue && (
                                         <TaxonomicStringPopover
                                             size="small"
                                             groupType={
@@ -189,9 +189,7 @@ export function ActionFilterGroup({
                                                         currentValue === '$session_duration' ? (
                                                             <>
                                                                 Calculate{' '}
-                                                                {(mathDefinitions as Record<string, any>)[
-                                                                    filter.math ?? ''
-                                                                ].name.toLowerCase()}{' '}
+                                                                {mathDefinitions[filter.math ?? '']?.name.toLowerCase()}{' '}
                                                                 of the session duration. This is based on the{' '}
                                                                 <code>$session_id</code> property associated with
                                                                 events. The duration is derived from the time difference
@@ -201,9 +199,7 @@ export function ActionFilterGroup({
                                                         ) : (
                                                             <>
                                                                 Calculate{' '}
-                                                                {(mathDefinitions as Record<string, any>)[
-                                                                    filter.math ?? ''
-                                                                ].name.toLowerCase()}{' '}
+                                                                {mathDefinitions[filter.math ?? '']?.name.toLowerCase()}{' '}
                                                                 from property <code>{currentValue}</code>. Note that
                                                                 only event occurrences where <code>{currentValue}</code>{' '}
                                                                 is set with a numeric value will be taken into account.
@@ -222,8 +218,8 @@ export function ActionFilterGroup({
                                         />
                                     )}
                                     {/* HogQL expression selector */}
-                                    {(mathDefinitions as Record<string, any>)[filter.math || BaseMathType.TotalCount]
-                                        ?.category === MathCategory.HogQLExpression && (
+                                    {mathDefinitions[filter.math || BaseMathType.TotalCount]?.category ===
+                                        MathCategory.HogQLExpression && (
                                         <LemonDropdown
                                             visible={isHogQLDropdownVisible}
                                             closeOnClickInside={false}
@@ -258,6 +254,17 @@ export function ActionFilterGroup({
 
                     {!readOnly && (
                         <div className="flex shrink-0 gap-1">
+                            <Tooltip title="Rename group series">
+                                <LemonButton
+                                    size="small"
+                                    icon={<IconPencil />}
+                                    onClick={() => {
+                                        selectFilter(groupFilter ?? null)
+                                        showModal()
+                                    }}
+                                    data-attr={`group-filter-rename-${index}`}
+                                />
+                            </Tooltip>
                             <Tooltip title="Remove group">
                                 <LemonButton
                                     size="small"

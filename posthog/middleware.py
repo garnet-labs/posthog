@@ -32,6 +32,7 @@ from posthog.clickhouse.client.execute import clickhouse_query_counter
 from posthog.clickhouse.query_tagging import QueryCounter, reset_query_tags, tag_queries
 from posthog.cloud_utils import is_cloud, is_dev_mode
 from posthog.constants import AUTH_BACKEND_KEYS
+from posthog.event_usage import get_event_source, get_mcp_properties
 from posthog.geoip import get_geoip_properties
 from posthog.models import Action, Cohort, Dashboard, FeatureFlag, Insight, Team, User
 from posthog.models.activity_logging.utils import activity_storage
@@ -339,6 +340,8 @@ class CHQueries:
             session_id=self._get_param(request, "session_id"),
             http_referer=request.headers.get("referer"),
             http_user_agent=request.headers.get("user-agent"),
+            source=get_event_source(request),
+            **get_mcp_properties(request),
         )
 
         try:
@@ -673,28 +676,33 @@ class Fix204Middleware:
         return response
 
 
-class ToolbarOAuthCoopMiddleware:
+class OAuthCoopMiddleware:
     """
-    Override Cross-Origin-Opener-Policy for popup pages that need cross-origin communication.
+    Override Cross-Origin-Opener-Policy for OAuth pages that need cross-origin communication.
 
     Django's SecurityMiddleware sets COOP to "same-origin" by default. This severs
     window.opener when a cross-origin popup navigates to our pages — breaking
-    the postMessage flow or Vercel's popup monitoring.
+    popup-based OAuth flows that rely on the opener reference to detect completion.
 
-    We set COOP to "unsafe-none" on the specific paths involved in popup flows
-    so the opener reference is preserved.
+    We set COOP to "unsafe-none" on all OAuth-related paths so the opener
+    reference is preserved.
     """
+
+    OAUTH_PATH_PREFIXES = (
+        "/toolbar_oauth/",
+        "/oauth/",
+        "/connect/vercel/",
+        "/login/vercel/",
+        "/api/agentic/authorize",
+        "/api/agentic/oauth/",
+    )
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         response = self.get_response(request)
-        is_toolbar_flow = request.path.startswith("/toolbar_oauth/") or (
-            request.path.startswith("/oauth/authorize") and request.session.get("toolbar_oauth_redirect_flow")
-        )
-        is_vercel_connect = request.path.startswith("/connect/vercel/")
-        if is_toolbar_flow or is_vercel_connect:
+        if any(request.path.startswith(prefix) for prefix in self.OAUTH_PATH_PREFIXES):
             response["Cross-Origin-Opener-Policy"] = "unsafe-none"
         return response
 
@@ -892,6 +900,8 @@ READ_ONLY_IMPERSONATION_ALLOWLISTED_PATHS: list[str | re.Pattern] = [
     re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/endpoints/[^/]+/run/?$"),
     re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/endpoints/last_execution_times/?$"),
     re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/persons/batch_by_distinct_ids/?$"),
+    # POST but read-only: loads stack frame records (source context) for error tracking UI
+    re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/error_tracking/stack_frames/batch_get/?$"),
     # Allow upgrading from read-only to read-write impersonation
     "/admin/impersonation/upgrade/",
 ]

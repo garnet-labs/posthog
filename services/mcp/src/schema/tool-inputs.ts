@@ -1,52 +1,9 @@
 import { z } from 'zod'
 
-import { CreateActionInputSchema, ListActionsInputSchema, UpdateActionInputSchema } from './actions'
-import {
-    AddInsightToDashboardSchema,
-    CreateDashboardInputSchema,
-    ListDashboardsSchema,
-    ReorderDashboardTilesSchema,
-    UpdateDashboardInputSchema,
-} from './dashboards'
 import { ErrorDetailsSchema, ListErrorsSchema, UpdateIssueStatusSchema } from './errors'
-import { FilterGroupsSchema, UpdateFeatureFlagInputSchema } from './flags'
 import { CreateInsightInputSchema, ListInsightsSchema, UpdateInsightInputSchema } from './insights'
 import { LogsListAttributeValuesInputSchema, LogsListAttributesInputSchema, LogsQueryInputSchema } from './logs'
 import { InsightQuerySchema, PropertyFilter } from './query'
-import {
-    CreateSurveyInputSchema,
-    GetSurveySpecificStatsInputSchema,
-    GetSurveyStatsInputSchema,
-    ListSurveysInputSchema,
-    UpdateSurveyInputSchema,
-} from './surveys'
-
-export const DashboardAddInsightSchema = z.object({
-    data: AddInsightToDashboardSchema,
-})
-
-export const DashboardCreateSchema = z.object({
-    data: CreateDashboardInputSchema,
-})
-
-export const DashboardDeleteSchema = z.object({
-    dashboardId: z.number(),
-})
-
-export const DashboardGetSchema = z.object({
-    dashboardId: z.number(),
-})
-
-export const DashboardGetAllSchema = z.object({
-    data: ListDashboardsSchema.optional(),
-})
-
-export const DashboardUpdateSchema = z.object({
-    dashboardId: z.number(),
-    data: UpdateDashboardInputSchema,
-})
-
-export const DashboardReorderTilesSchema = ReorderDashboardTilesSchema
 
 export const DocumentationSearchSchema = z.object({
     query: z.string(),
@@ -285,38 +242,6 @@ export const ExperimentCreateSchema = z.object({
         .describe('Holdout group ID if this experiment should exclude users from other experiments'),
 })
 
-export const FeatureFlagCreateSchema = z.object({
-    name: z.string(),
-    key: z.string(),
-    description: z.string(),
-    filters: FilterGroupsSchema,
-    active: z.boolean(),
-    tags: z.array(z.string()).optional(),
-})
-
-export const FeatureFlagDeleteSchema = z.object({
-    flagKey: z.string(),
-})
-
-export const FeatureFlagGetAllSchema = z.object({
-    data: z
-        .object({
-            limit: z.number().int().positive().optional(),
-            offset: z.number().int().min(0).optional(),
-        })
-        .optional(),
-})
-
-export const FeatureFlagGetDefinitionSchema = z.object({
-    flagId: z.number().int().positive().optional(),
-    flagKey: z.string().optional(),
-})
-
-export const FeatureFlagUpdateSchema = z.object({
-    flagKey: z.string(),
-    data: UpdateFeatureFlagInputSchema,
-})
-
 export const InsightCreateSchema = z.object({
     data: CreateInsightInputSchema,
 })
@@ -405,53 +330,13 @@ export const ProjectSetActiveSchema = z.object({
     projectId: z.number().int().positive(),
 })
 
-export const SurveyCreateSchema = CreateSurveyInputSchema
-
 export const SurveyResponseCountsSchema = z.object({})
-
-export const SurveyGlobalStatsSchema = GetSurveyStatsInputSchema
-
-export const SurveyStatsSchema = GetSurveySpecificStatsInputSchema
-
-export const SurveyDeleteSchema = z.object({
-    surveyId: z.string(),
-})
-
-export const SurveyGetSchema = z.object({
-    surveyId: z.string(),
-})
-
-export const SurveyGetAllSchema = ListSurveysInputSchema
-
-export const SurveyUpdateSchema = UpdateSurveyInputSchema.extend({
-    surveyId: z.string(),
-})
 
 export const QueryRunInputSchema = z.object({
     query: InsightQuerySchema,
 })
 
 export { LogsQueryInputSchema, LogsListAttributesInputSchema, LogsListAttributeValuesInputSchema }
-
-// Actions
-export const ActionCreateSchema = CreateActionInputSchema
-
-export const ActionDeleteSchema = z.object({
-    actionId: z.number().int().positive().describe('The ID of the action to delete'),
-})
-
-export const ActionGetSchema = z.object({
-    actionId: z.number().int().positive().describe('The ID of the action to retrieve'),
-})
-
-export const ActionGetAllSchema = z.object({
-    data: ListActionsInputSchema.optional(),
-})
-
-export const ActionUpdateSchema = z.object({
-    actionId: z.number().int().positive().describe('The ID of the action to update'),
-    data: UpdateActionInputSchema,
-})
 
 // Entity Search
 export const EntitySearchSchema = z.object({
@@ -476,9 +361,9 @@ export const EntitySearchSchema = z.object({
         ),
 })
 
-// Demo MCP UI Apps
-export const DemoMcpUiAppsSchema = z.object({
-    message: z.string().optional().describe('Optional message to include in the demo data'),
+// Debug MCP UI Apps
+export const DebugMcpUiAppsSchema = z.object({
+    message: z.string().optional().describe('Optional message to include in the debug data'),
 })
 
 // PostHog AI tools
@@ -499,6 +384,8 @@ export const ReadDataWarehouseSchemaSchema = z
 
 const ReadEventsQuerySchema = z.object({
     kind: z.literal('events'),
+    limit: z.number().int().min(1).max(500).default(500).optional().describe('Number of events to return per page.'),
+    offset: z.number().int().min(0).default(0).optional().describe('Number of events to skip for pagination.'),
 })
 
 const ReadEventPropertiesQuerySchema = z.object({

@@ -11,10 +11,8 @@ import {
     FramerInstallation,
     GoInstallation,
     GoogleTagManagerInstallation,
-    HTMLSnippetInstallation,
     HeliconeInstallation,
     IOSInstallation,
-    JSWebInstallation,
     LangfuseInstallation,
     LaravelInstallation,
     MoEngageInstallation,
@@ -39,6 +37,7 @@ import {
     VueInstallation,
     WebflowInstallation,
     WordpressInstallation,
+    WebInstallation,
     ZapierInstallation,
 } from '@posthog/shared-onboarding/product-analytics'
 import { StepDefinition } from '@posthog/shared-onboarding/steps'
@@ -77,12 +76,8 @@ function workflowsModifySteps(steps: StepDefinition[]): StepDefinition[] {
 }
 
 // JS Web SDKs
-const WorkflowsJSWebInstructionsWrapper = withOnboardingDocsWrapper({
-    Installation: JSWebInstallation,
-    modifySteps: workflowsModifySteps,
-})
-const WorkflowsHTMLSnippetInstructionsWrapper = withOnboardingDocsWrapper({
-    Installation: HTMLSnippetInstallation,
+const WorkflowsWebInstructionsWrapper = withOnboardingDocsWrapper({
+    Installation: WebInstallation,
     modifySteps: workflowsModifySteps,
 })
 
@@ -90,38 +85,47 @@ const WorkflowsHTMLSnippetInstructionsWrapper = withOnboardingDocsWrapper({
 const WorkflowsReactInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: ReactInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'React',
 })
 const WorkflowsNextJSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: NextJSInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Next.js',
 })
 const WorkflowsSvelteInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: SvelteInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Svelte',
 })
 const WorkflowsAstroInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: AstroInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Astro',
 })
 const WorkflowsTanStackInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: TanStackInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'TanStack Start',
 })
 const WorkflowsAngularInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: AngularInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Angular',
 })
 const WorkflowsVueInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: VueInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Vue',
 })
 const WorkflowsNuxtJSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: NuxtInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Nuxt',
 })
 const WorkflowsRemixJSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: RemixInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'React Router',
 })
 
 // Website builders
@@ -162,10 +166,12 @@ const WorkflowsRetoolInstructionsWrapper = withOnboardingDocsWrapper({
 const WorkflowsAndroidInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: AndroidInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Android',
 })
 const WorkflowsIOSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: IOSInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Swift',
 })
 const WorkflowsFlutterInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: FlutterInstallation,
@@ -174,6 +180,7 @@ const WorkflowsFlutterInstructionsWrapper = withOnboardingDocsWrapper({
 const WorkflowsRNInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: ReactNativeInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'React Native',
 })
 
 // Server-side SDKs
@@ -184,10 +191,12 @@ const WorkflowsNodeInstructionsWrapper = withOnboardingDocsWrapper({
 const WorkflowsPythonInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: PythonInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Python',
 })
 const WorkflowsDjangoInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: DjangoInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Django',
 })
 const WorkflowsGoInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: GoInstallation,
@@ -200,10 +209,12 @@ const WorkflowsPHPInstructionsWrapper = withOnboardingDocsWrapper({
 const WorkflowsLaravelInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: LaravelInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Laravel',
 })
 const WorkflowsRubyInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: RubyInstallation,
     modifySteps: workflowsModifySteps,
+    wizardIntegrationName: 'Ruby',
 })
 const WorkflowsElixirInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: ElixirInstallation,
@@ -261,7 +272,7 @@ export const WorkflowsSDKTagOverrides: SDKTagOverrides = {
 }
 
 export const WorkflowsSDKInstructions: SDKInstructionsMap = {
-    [SDKKey.JS_WEB]: WorkflowsJSWebInstructionsWrapper,
+    [SDKKey.JS_WEB]: WorkflowsWebInstructionsWrapper,
     [SDKKey.ANDROID]: WorkflowsAndroidInstructionsWrapper,
     [SDKKey.ANGULAR]: WorkflowsAngularInstructionsWrapper,
     [SDKKey.API]: WorkflowsAPIInstructionsWrapper,
@@ -275,7 +286,6 @@ export const WorkflowsSDKInstructions: SDKInstructionsMap = {
     [SDKKey.GO]: WorkflowsGoInstructionsWrapper,
     [SDKKey.GOOGLE_TAG_MANAGER]: WorkflowsGoogleTagManagerInstructionsWrapper,
     [SDKKey.HELICONE]: WorkflowsHeliconeInstructionsWrapper,
-    [SDKKey.HTML_SNIPPET]: WorkflowsHTMLSnippetInstructionsWrapper,
     [SDKKey.IOS]: WorkflowsIOSInstructionsWrapper,
     [SDKKey.LANGFUSE]: WorkflowsLangfuseInstructionsWrapper,
     [SDKKey.LARAVEL]: WorkflowsLaravelInstructionsWrapper,

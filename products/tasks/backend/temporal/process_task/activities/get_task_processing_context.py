@@ -27,12 +27,13 @@ class TaskProcessingContext:
     task_id: str
     run_id: str
     team_id: int
-    github_integration_id: int
-    repository: str
+    github_integration_id: int | None
+    repository: str | None
     distinct_id: str
     create_pr: bool = True
     branch: str | None = None
     state: dict | None = None
+    _branch: str | None = None
 
     @property
     def mode(self) -> str:
@@ -42,6 +43,14 @@ class TaskProcessingContext:
     @property
     def interaction_origin(self) -> str | None:
         return (self.state or {}).get("interaction_origin")
+
+    @property
+    def branch(self) -> str | None:
+        # Prefer the dedicated model field; fall back to state for backward compatibility
+        if self._branch:
+            return self._branch
+        value = (self.state or {}).get("branch")
+        return value if isinstance(value, str) else None
 
     def to_log_context(self) -> dict:
         """Return a dict suitable for structured logging."""
@@ -71,28 +80,6 @@ def get_task_processing_context(input: GetTaskProcessingContextInput) -> TaskPro
 
     task = task_run.task
 
-    if not task.github_integration_id:
-        raise TaskInvalidStateError(
-            f"Task {task.id} has no GitHub integration",
-            {"task_id": str(task.id), "run_id": run_id},
-            cause=RuntimeError(f"Task {task.id} missing github_integration_id"),
-        )
-
-    if not task.repository:
-        raise TaskInvalidStateError(
-            f"Task {task.id} has no repository configured",
-            {"task_id": str(task.id), "run_id": run_id},
-            cause=RuntimeError(f"Task {task.id} missing repository"),
-        )
-
-    repository_full_name = task.repository
-    if not repository_full_name:
-        raise TaskInvalidStateError(
-            f"Task {task.id} repository missing value",
-            {"task_id": str(task.id), "run_id": run_id},
-            cause=RuntimeError(f"Task {task.id} repository field is empty"),
-        )
-
     if not task.created_by:
         raise TaskInvalidStateError(
             f"Task {task.id} has no created_by user",
@@ -109,7 +96,7 @@ def get_task_processing_context(input: GetTaskProcessingContextInput) -> TaskPro
         task_id=str(task.id),
         run_id=run_id,
         team_id=task.team_id,
-        repository=repository_full_name,
+        repository=task.repository,
         distinct_id=distinct_id,
     )
 
@@ -118,9 +105,10 @@ def get_task_processing_context(input: GetTaskProcessingContextInput) -> TaskPro
         run_id=run_id,
         team_id=task.team_id,
         github_integration_id=task.github_integration_id,
-        repository=repository_full_name,
+        repository=task.repository,
         distinct_id=distinct_id,
         create_pr=input.create_pr,
         branch=task_run.branch,
         state=task_run.state,
+        _branch=task_run.branch,
     )

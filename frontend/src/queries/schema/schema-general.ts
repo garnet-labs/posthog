@@ -81,6 +81,8 @@ export enum NodeKind {
     GroupNode = 'GroupNode',
     ActionsNode = 'ActionsNode',
     DataWarehouseNode = 'DataWarehouseNode',
+    FunnelsDataWarehouseNode = 'FunnelsDataWarehouseNode',
+    LifecycleDataWarehouseNode = 'LifecycleDataWarehouseNode',
     EventsQuery = 'EventsQuery',
     SessionsQuery = 'SessionsQuery',
     PersonsNode = 'PersonsNode',
@@ -104,6 +106,7 @@ export enum NodeKind {
     LogsQuery = 'LogsQuery',
     LogAttributesQuery = 'LogAttributesQuery',
     LogValuesQuery = 'LogValuesQuery',
+    TraceSpansQuery = 'TraceSpansQuery',
     SessionBatchEventsQuery = 'SessionBatchEventsQuery',
 
     // Interface nodes
@@ -224,6 +227,7 @@ export type AnyDataNode =
     | LogsQuery
     | LogAttributesQuery
     | LogValuesQuery
+    | TraceSpansQuery
     | ExperimentFunnelsQuery
     | ExperimentTrendsQuery
     | CalendarHeatmapQuery
@@ -246,6 +250,8 @@ export type QuerySchema =
     | ActionsNode // old actions API endpoint
     | PersonsNode // old persons API endpoint
     | DataWarehouseNode
+    | FunnelsDataWarehouseNode
+    | LifecycleDataWarehouseNode
     | EventsQuery
     | SessionsQuery
     | ActorsQuery
@@ -315,6 +321,9 @@ export type QuerySchema =
     | LogAttributesQuery
     | LogValuesQuery
 
+    // Tracing
+    | TraceSpansQuery
+
     // AI
     | SuggestedQuestionsQuery
     | TeamTaxonomyQuery
@@ -371,6 +380,7 @@ export type AnyResponseType =
     | LogsQueryResponse
     | LogAttributesQueryResponse
     | LogValuesQueryResponse
+    | TraceSpansQueryResponse
 
 /** Tags that will be added to the Query log comment  **/
 export interface QueryLogTags {
@@ -470,6 +480,8 @@ export interface HogQLVariable {
 export interface HogQLQuery extends DataNode<HogQLQueryResponse> {
     kind: NodeKind.HogQLQuery
     query: string
+    /** Optional direct external data source id for running against a specific source */
+    connectionId?: string
     filters?: HogQLFilters
     /** Variables to be substituted into the query */
     variables?: Record<string, HogQLVariable>
@@ -677,6 +689,8 @@ export interface HogQLMetadata extends DataNode<HogQLMetadataResponse> {
     language: HogLanguage
     /** Query to validate */
     query: string
+    /** Optional direct external data source id for running against a specific source */
+    connectionId?: string
     /** Query within which "expr" and "template" are validated. Defaults to "select * from events" */
     sourceQuery?: AnyDataNode
     /** Extra globals for the query */
@@ -695,6 +709,8 @@ export interface HogQLAutocomplete extends DataNode<HogQLAutocompleteResponse> {
     language: HogLanguage
     /** Query to validate */
     query: string
+    /** Optional direct external data source id for running against a specific source */
+    connectionId?: string
     /** Query in whose context to validate. */
     sourceQuery?: AnyDataNode
     /** Global values in scope */
@@ -757,19 +773,40 @@ export interface DataWarehouseNode extends EntityNode {
     dw_source_type?: string
 }
 
+export interface FunnelsDataWarehouseNode extends EntityNode {
+    id: string
+    kind: NodeKind.FunnelsDataWarehouseNode
+    id_field: string
+    table_name: string
+    timestamp_field: string
+    aggregation_target_field: string
+    dw_source_type?: string
+}
+
+export interface LifecycleDataWarehouseNode extends EntityNode {
+    id: string
+    kind: NodeKind.LifecycleDataWarehouseNode
+    table_name: string
+    timestamp_field: string
+    aggregation_target_field: string
+    created_at_field: string
+}
+
 export interface ActionsNode extends EntityNode {
     kind: NodeKind.ActionsNode
     id: integer
 }
 
-export type AnyEntityNode = EventsNode | ActionsNode | DataWarehouseNode
+export type AnyEntityNode<WarehouseNode = DataWarehouseNode> = EventsNode | ActionsNode | WarehouseNode
 
-export interface GroupNode extends EntityNode {
+export type AnyDataWarehouseNode = DataWarehouseNode | FunnelsDataWarehouseNode | LifecycleDataWarehouseNode
+
+export interface GroupNode<WarehouseNode = DataWarehouseNode> extends EntityNode {
     kind: NodeKind.GroupNode
     /** Group of entities combined with AND/OR operator */
     operator: FilterLogicalOperator
     /** Entities to combine in this group */
-    nodes: AnyEntityNode[]
+    nodes: AnyEntityNode<WarehouseNode>[]
     limit?: integer
     /** Columns to order by */
     orderBy?: string[]
@@ -789,6 +826,8 @@ export interface EventsQueryResponse extends AnalyticsQueryResponseBase {
     hasMore?: boolean
     limit?: integer
     offset?: integer
+    /** Cursor for fetching the next page of results */
+    nextCursor?: string
 }
 
 export type CachedEventsQueryResponse = CachedQueryResponse<EventsQueryResponse>
@@ -1067,6 +1106,7 @@ export interface ChartSettings {
     showYAxisBorder?: boolean
     showLegend?: boolean
     showTotalRow?: boolean
+    showNullsAsZero?: boolean
     heatmap?: HeatmapSettings
 }
 
@@ -1088,6 +1128,7 @@ export interface TableSettings {
 
 export interface SharingConfigurationSettings {
     whitelabel?: boolean
+    theme?: 'light' | 'dark' | 'system'
     // Insights
     noHeader?: boolean
     legend?: boolean
@@ -1351,6 +1392,8 @@ export interface BoxPlotDatum {
     p75: number
     max: number
     mean: number
+    series_index?: integer
+    series_label?: string
 }
 
 export interface TrendsQueryResponse extends AnalyticsQueryResponseBase {
@@ -1472,6 +1515,8 @@ export type FunnelsFilter = {
     breakdownAttributionType?: FunnelsFilterLegacy['breakdown_attribution_type']
     breakdownAttributionValue?: integer
     funnelAggregateByHogQL?: FunnelsFilterLegacy['funnel_aggregate_by_hogql']
+    /** For data warehouse based funnel insights when the aggregation target can't be mapped to persons or groups. */
+    customAggregationTarget?: boolean
     /** To select the range of steps for trends & time to convert funnels, 0-indexed */
     funnelToStep?: integer
     funnelFromStep?: integer
@@ -1504,7 +1549,7 @@ export interface FunnelsQuery extends InsightsQueryBase<FunnelsQueryResponse> {
     /** Granularity of the response. Can be one of `hour`, `day`, `week` or `month` */
     interval?: IntervalType
     /** Events and actions to include */
-    series: (AnyEntityNode | GroupNode)[]
+    series: (AnyEntityNode<FunnelsDataWarehouseNode> | GroupNode)[]
     /** Properties specific to the funnels insight */
     funnelsFilter?: FunnelsFilter
     /** Breakdown of the events and actions */
@@ -2005,9 +2050,11 @@ export interface LifecycleQuery extends InsightsQueryBase<LifecycleQueryResponse
      */
     interval?: IntervalType
     /** Events and actions to include */
-    series: AnyEntityNode[]
+    series: AnyEntityNode<LifecycleDataWarehouseNode>[]
     /** Properties specific to the lifecycle insight */
     lifecycleFilter?: LifecycleFilter
+    /** For data warehouse based lifecycle insights when the aggregation target can't be mapped to persons or groups. */
+    customAggregationTarget?: boolean
 }
 
 export interface ActorsQueryResponse extends AnalyticsQueryResponseBase {
@@ -2185,6 +2232,7 @@ export enum WebStatsBreakdown {
     ScreenName = 'ScreenName',
     InitialChannelType = 'InitialChannelType',
     InitialReferringDomain = 'InitialReferringDomain',
+    InitialReferringURL = 'InitialReferringURL',
     InitialUTMSource = 'InitialUTMSource',
     InitialUTMCampaign = 'InitialUTMCampaign',
     InitialUTMMedium = 'InitialUTMMedium',
@@ -2208,6 +2256,7 @@ export interface WebStatsTableQuery extends WebAnalyticsQueryBase<WebStatsTableQ
     includeScrollDepth?: boolean // automatically sets includeBounceRate to true
     includeBounceRate?: boolean
     includeAvgTimeOnPage?: boolean
+    includeHost?: boolean
     limit?: integer
     offset?: integer
 }
@@ -2458,10 +2507,8 @@ export type CachedRevenueExampleDataWarehouseTablesQueryResponse =
 export interface ErrorTrackingQuery extends DataNode<ErrorTrackingQueryResponse> {
     kind: NodeKind.ErrorTrackingQuery
     issueId?: ErrorTrackingIssue['id']
-    orderBy: 'last_seen' | 'first_seen' | 'occurrences' | 'users' | 'sessions' | 'revenue'
+    orderBy: 'last_seen' | 'first_seen' | 'occurrences' | 'users' | 'sessions'
     orderDirection?: 'ASC' | 'DESC'
-    revenuePeriod?: 'all_time' | 'mrr'
-    revenueEntity?: 'person' | 'group_0' | 'group_1' | 'group_2' | 'group_3' | 'group_4'
     dateRange: DateRange
     status?: ErrorTrackingQueryStatus
     assignee?: ErrorTrackingIssueAssignee | null
@@ -2477,6 +2524,8 @@ export interface ErrorTrackingQuery extends DataNode<ErrorTrackingQueryResponse>
     personId?: string
     groupKey?: string
     groupTypeIndex?: integer
+    /** Use V2 query path (ClickHouse postgres connector join instead of separate Postgres queries) */
+    useQueryV2?: boolean
 }
 
 export interface ErrorTrackingSimilarIssuesQuery extends DataNode<ErrorTrackingSimilarIssuesQueryResponse> {
@@ -2559,6 +2608,7 @@ export interface ErrorTrackingIssueCohort {
 export type QuickFilterType = 'manual-options' | 'auto-discovery'
 
 export enum QuickFilterContext {
+    Dashboards = 'dashboards',
     ErrorTrackingIssueFilters = 'error-tracking-issue-filters',
     LogsFilters = 'logs-filters',
 }
@@ -2598,7 +2648,6 @@ export type ErrorTrackingIssue = ErrorTrackingRelationalIssue & {
         timestamp: string
         properties: string
     }
-    revenue?: number
     aggregations?: ErrorTrackingIssueAggregations
     library: string | null
 }
@@ -2847,6 +2896,32 @@ export type CachedSessionBatchEventsQueryResponse = CachedEventsQueryResponse & 
 }
 export type CachedLogsQueryResponse = CachedQueryResponse<LogsQueryResponse>
 
+export interface TraceSpansQuery extends DataNode<TraceSpansQueryResponse> {
+    kind: NodeKind.TraceSpansQuery
+    dateRange: DateRange
+    limit?: integer
+    offset?: integer
+    orderBy?: 'latest' | 'earliest'
+    searchTerm?: string
+    serviceNames?: string[]
+    statusCodes?: integer[]
+    traceId?: string
+    rootSpans?: boolean
+    /** Cursor for fetching the next page of results */
+    after?: string
+}
+
+export interface TraceSpansQueryResponse extends AnalyticsQueryResponseBase {
+    results: unknown
+    hasMore?: boolean
+    limit?: integer
+    offset?: integer
+    /** Cursor for fetching the next page of results */
+    nextCursor?: string
+}
+
+export type CachedTraceSpansQueryResponse = CachedQueryResponse<TraceSpansQueryResponse>
+
 export interface FileSystemCount {
     count: number
     entries: FileSystemEntry[]
@@ -2911,6 +2986,8 @@ export type FileSystemIconType =
     | 'link'
     | 'live_debugger'
     | 'logs'
+    | 'tracing'
+    | 'metrics'
     | 'workflows'
     | 'notebook'
     | 'action'
@@ -2942,6 +3019,7 @@ export type FileSystemIconType =
     | 'folder_open'
     | 'conversations'
     | 'toolbar'
+    | 'visual_review'
     | 'settings'
     | 'health'
     | 'inbox'
@@ -2978,6 +3056,8 @@ export interface FileSystemImport extends Omit<FileSystemEntry, 'id'> {
     reason?: UserProductListReason
     /** Custom reason text for custom product suggestion (from UserProductList) */
     reasonText?: string | null
+    /** Display label override — when set, shown in the nav instead of the last segment of `path` */
+    displayLabel?: string
 }
 
 export interface FileSystemViewLogEntry {
@@ -3287,6 +3367,9 @@ export interface ExperimentQueryResponse {
 
     clickhouse_sql?: string
     hogql?: string
+
+    /** Whether exposures were served from the precomputation system */
+    is_precomputed?: boolean
 }
 
 // Strongly typed variants of ExperimentQueryResponse for better type safety
@@ -3371,6 +3454,8 @@ export interface NewExperimentQueryResponse {
     baseline: ExperimentStatsBaseValidated
     variant_results: ExperimentVariantResultFrequentist[] | ExperimentVariantResultBayesian[]
     breakdown_results?: ExperimentBreakdownResult[]
+    /** Whether exposures were served from the precomputation system */
+    is_precomputed?: boolean
 }
 
 export interface ExperimentExposureTimeSeries {
@@ -3606,6 +3691,7 @@ export interface DatabaseSchemaSource {
     source_type: string
     prefix: string
     last_synced_at?: string
+    access_method?: string
 }
 
 export interface DatabaseSchemaField {
@@ -3714,6 +3800,8 @@ export interface DatabaseSchemaQueryResponse {
 
 export interface DatabaseSchemaQuery extends DataNode<DatabaseSchemaQueryResponse> {
     kind: NodeKind.DatabaseSchemaQuery
+    /** Optional direct external data source id for schema introspection */
+    connectionId?: string
 }
 
 export type DatabaseSerializedFieldType =
@@ -3804,7 +3892,9 @@ export interface TileFilters {
 }
 
 export interface InsightsThresholdBounds {
+    /** Alert fires when the value drops below this number. */
     lower?: number
+    /** Alert fires when the value exceeds this number. */
     upper?: number
 }
 
@@ -3814,6 +3904,7 @@ export enum InsightThresholdType {
 }
 
 export interface InsightThreshold {
+    /** Whether bounds are compared as absolute values or as percentage change from the previous interval. */
     type: InsightThresholdType
     bounds?: InsightsThresholdBounds
 }
@@ -3846,9 +3937,202 @@ export enum AlertCalculationInterval {
 
 export interface TrendsAlertConfig {
     type: 'TrendsAlertConfig'
+    /** Zero-based index of the series in the insight's query to monitor. */
     series_index: integer
+    /** When true, evaluate the current (still incomplete) time interval in addition to completed ones. */
     check_ongoing_interval?: boolean
 }
+
+// Detector types for anomaly detection alerts
+export enum DetectorType {
+    ZSCORE = 'zscore',
+    MAD = 'mad',
+    THRESHOLD = 'threshold',
+    IQR = 'iqr',
+    COPOD = 'copod',
+    ECOD = 'ecod',
+    ISOLATION_FOREST = 'isolation_forest',
+    KNN = 'knn',
+    HBOS = 'hbos',
+    LOF = 'lof',
+    OCSVM = 'ocsvm',
+    PCA = 'pca',
+}
+
+/** Preprocessing transforms applied to the time series before detection */
+export interface PreprocessingConfig {
+    /** Order of differencing. 0 = raw values, 1 = first-order diffs (default: 0) */
+    diffs_n?: integer
+    /** Moving average window size. 0 = no smoothing, >1 = smooth over n points (default: 0) */
+    smooth_n?: integer
+    /** Number of lag features. 0 = none, >0 = include n lagged values (default: 0) */
+    lags_n?: integer
+}
+
+export interface ZScoreDetectorConfig {
+    type: 'zscore'
+    /** Anomaly probability threshold [0-1]. Points above this probability are flagged (default: 0.9) */
+    threshold?: number
+    /** Rolling window size for calculating mean/std (default: 30) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface MADDetectorConfig {
+    type: 'mad'
+    /** Anomaly probability threshold [0-1]. Points above this probability are flagged (default: 0.9) */
+    threshold?: number
+    /** Rolling window size for calculating median/MAD (default: 30) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface IQRDetectorConfig {
+    type: 'iqr'
+    /** IQR multiplier for fence calculation (default: 1.5, use 3.0 for far outliers) */
+    multiplier?: number
+    /** Rolling window size for calculating quartiles (default: 30) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface ThresholdDetectorConfig {
+    type: 'threshold'
+    /** Upper bound - values above this are anomalies */
+    upper_bound?: number
+    /** Lower bound - values below this are anomalies */
+    lower_bound?: number
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface ECODDetectorConfig {
+    type: 'ecod'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface COPODDetectorConfig {
+    type: 'copod'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface IsolationForestDetectorConfig {
+    type: 'isolation_forest'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Number of trees in the forest (default: 100) */
+    n_estimators?: integer
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface KNNDetectorConfig {
+    type: 'knn'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Number of neighbors to consider (default: 5) */
+    n_neighbors?: integer
+    /** Distance method: 'largest', 'mean', 'median' (default: 'largest') */
+    method?: 'largest' | 'mean' | 'median'
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface HBOSDetectorConfig {
+    type: 'hbos'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Number of histogram bins (default: 10) */
+    n_bins?: integer
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface LOFDetectorConfig {
+    type: 'lof'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Number of neighbors for LOF (default: 20) */
+    n_neighbors?: integer
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface OCSVMDetectorConfig {
+    type: 'ocsvm'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** SVM kernel type (default: "rbf") */
+    kernel?: string
+    /** Upper bound on training errors fraction (default: 0.1) */
+    nu?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export interface PCADetectorConfig {
+    type: 'pca'
+    /** Anomaly probability threshold (default: 0.9) */
+    threshold?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
+    /** Preprocessing transforms applied before detection */
+    preprocessing?: PreprocessingConfig
+}
+
+export enum EnsembleOperator {
+    AND = 'and',
+    OR = 'or',
+}
+
+/** A single (leaf) detector config */
+export type SingleDetectorConfig =
+    | ZScoreDetectorConfig
+    | MADDetectorConfig
+    | IQRDetectorConfig
+    | ThresholdDetectorConfig
+    | ECODDetectorConfig
+    | COPODDetectorConfig
+    | IsolationForestDetectorConfig
+    | KNNDetectorConfig
+    | HBOSDetectorConfig
+    | LOFDetectorConfig
+    | OCSVMDetectorConfig
+    | PCADetectorConfig
+
+export interface EnsembleDetectorConfig {
+    type: 'ensemble'
+    /** How to combine sub-detector results */
+    operator: EnsembleOperator
+    /** Sub-detector configurations (minimum 2) */
+    detectors: SingleDetectorConfig[]
+}
+
+/** Detector configuration types */
+export type DetectorConfig = SingleDetectorConfig | EnsembleDetectorConfig
 
 export interface HogCompileResponse {
     bytecode: any[]
@@ -3874,10 +4158,17 @@ export type TeamTaxonomyResponse = TeamTaxonomyItem[]
 
 export interface TeamTaxonomyQuery extends DataNode<TeamTaxonomyQueryResponse> {
     kind: NodeKind.TeamTaxonomyQuery
+    /** Number of rows to return */
+    limit?: integer
+    /** Number of rows to skip before returning rows */
+    offset?: integer
 }
 
 export interface TeamTaxonomyQueryResponse extends AnalyticsQueryResponseBase {
     results: TeamTaxonomyResponse
+    hasMore?: boolean
+    limit?: integer
+    offset?: integer
 }
 
 export type CachedTeamTaxonomyQueryResponse = CachedQueryResponse<TeamTaxonomyQueryResponse>
@@ -4462,6 +4753,8 @@ export interface MarketingAnalyticsTableQuery extends Omit<
     compareFilter?: CompareFilter
     /** Filter by integration type */
     integrationFilter?: IntegrationFilter
+    /** Drill-down hierarchy level: channel, source, or campaign (default) */
+    drillDownLevel?: MarketingAnalyticsDrillDownLevel
 }
 
 export interface MarketingAnalyticsItem extends WebAnalyticsItemBase<number | string> {
@@ -4501,6 +4794,8 @@ export interface MarketingAnalyticsAggregatedQuery extends Omit<
     draftConversionGoal?: ConversionGoalFilter
     /** Filter by integration IDs */
     integrationFilter?: IntegrationFilter
+    /** Drill-down hierarchy level: channel, source, or campaign (default) */
+    drillDownLevel?: MarketingAnalyticsDrillDownLevel
 }
 
 /** Columns for non-integrated conversions table */
@@ -4695,6 +4990,12 @@ export interface MarketingAnalyticsConfig {
     campaign_field_preferences?: Record<string, CampaignFieldPreference>
 }
 
+export enum MarketingAnalyticsDrillDownLevel {
+    Channel = 'channel',
+    Source = 'source',
+    Campaign = 'campaign',
+}
+
 export enum MarketingAnalyticsBaseColumns {
     Id = 'ID',
     Campaign = 'Campaign',
@@ -4704,10 +5005,41 @@ export enum MarketingAnalyticsBaseColumns {
     Impressions = 'Impressions',
     CPC = 'CPC',
     CTR = 'CTR',
-    ReportedConversion = 'Reported Conversion',
+    ReportedConversions = 'Reported Conversions',
     ReportedConversionValue = 'Reported Conversion Value',
     ReportedROAS = 'Reported ROAS',
-    CostPerReportedConversion = 'Cost per Reported Conversion',
+    CostPerReportedConversions = 'Cost per Reported Conversions',
+}
+
+export type MarketingAnalyticsDrillDownConfig = {
+    columnAlias: string
+    excludedBaseColumns: MarketingAnalyticsBaseColumns[]
+}
+
+export const MARKETING_ANALYTICS_DRILL_DOWN_CONFIG: Record<
+    MarketingAnalyticsDrillDownLevel,
+    MarketingAnalyticsDrillDownConfig
+> = {
+    [MarketingAnalyticsDrillDownLevel.Channel]: {
+        columnAlias: 'Channel',
+        excludedBaseColumns: [
+            MarketingAnalyticsBaseColumns.Id,
+            MarketingAnalyticsBaseColumns.Campaign,
+            MarketingAnalyticsBaseColumns.Source,
+        ],
+    },
+    [MarketingAnalyticsDrillDownLevel.Source]: {
+        columnAlias: 'Source',
+        excludedBaseColumns: [
+            MarketingAnalyticsBaseColumns.Id,
+            MarketingAnalyticsBaseColumns.Campaign,
+            MarketingAnalyticsBaseColumns.Source,
+        ],
+    },
+    [MarketingAnalyticsDrillDownLevel.Campaign]: {
+        columnAlias: MarketingAnalyticsBaseColumns.Campaign,
+        excludedBaseColumns: [],
+    },
 }
 
 export enum MarketingAnalyticsConstants {
@@ -4836,6 +5168,8 @@ export interface SourceConfig {
     iconPath: string
     featureFlag?: string
     iconClassName?: string
+    webhookSetupCaption?: string
+    webhookFields?: SourceFieldConfig[]
 
     /**
      * Tables to suggest enabling, with optional tooltip explaining why
@@ -5003,6 +5337,7 @@ export const VALID_NATIVE_MARKETING_SOURCES = [
     'RedditAds',
     'BingAds',
     'SnapchatAds',
+    'PinterestAds',
 ] as const
 
 export type NativeMarketingSource = (typeof VALID_NATIVE_MARKETING_SOURCES)[number]
@@ -5034,9 +5369,9 @@ export const MARKETING_INTEGRATION_CONFIGS = {
         sourceType: 'LinkedinAds' as const,
         nameField: 'name',
         idField: 'id',
-        campaignTableName: 'campaigns',
-        statsTableName: 'campaign_stats',
-        tableKeywords: ['campaigns'] as const,
+        campaignTableName: 'campaign_groups',
+        statsTableName: 'campaign_group_stats',
+        tableKeywords: ['campaign_groups'] as const,
         tableExclusions: ['stats'] as const,
         defaultSources: ['linkedin', 'li'] as const,
         primarySource: 'linkedin',
@@ -5069,20 +5404,16 @@ export const MARKETING_INTEGRATION_CONFIGS = {
                 'omni_app_install',
                 'omni_subscribe',
             ] as const,
-            fallback: [
-                'purchase',
+            fallback: ['purchase', 'lead', 'complete_registration', 'app_install', 'subscribe'] as const,
+            specific: [
                 'offsite_conversion.fb_pixel_purchase',
                 'app_custom_event.fb_mobile_purchase',
-                'lead',
                 'offsite_conversion.fb_pixel_lead',
                 'onsite_conversion.lead_grouped',
-                'complete_registration',
                 'offsite_conversion.fb_pixel_complete_registration',
                 'app_custom_event.fb_mobile_complete_registration',
                 'offsite_complete_registration_add_meta_leads',
-                'app_install',
                 'mobile_app_install',
-                'subscribe',
                 'offsite_conversion.fb_pixel_subscribe',
             ] as const,
         },
@@ -5137,6 +5468,17 @@ export const MARKETING_INTEGRATION_CONFIGS = {
             'conversion_subscribe_value',
         ] as const,
     },
+    PinterestAds: {
+        sourceType: 'PinterestAds' as const,
+        nameField: 'name',
+        idField: 'id',
+        campaignTableName: 'campaigns',
+        statsTableName: 'campaign_analytics',
+        tableKeywords: ['campaigns'] as const,
+        tableExclusions: ['analytics'] as const,
+        defaultSources: ['pinterest'] as const,
+        primarySource: 'pinterest',
+    },
 } as const
 
 export type MarketingIntegrationConfig = (typeof MARKETING_INTEGRATION_CONFIGS)[NativeMarketingSource]
@@ -5148,6 +5490,8 @@ export type TikTokAdsDefaultSources = (typeof MARKETING_INTEGRATION_CONFIGS)['Ti
 export type RedditAdsDefaultSources = (typeof MARKETING_INTEGRATION_CONFIGS)['RedditAds']['defaultSources'][number]
 export type BingAdsDefaultSources = (typeof MARKETING_INTEGRATION_CONFIGS)['BingAds']['defaultSources'][number]
 export type SnapchatAdsDefaultSources = (typeof MARKETING_INTEGRATION_CONFIGS)['SnapchatAds']['defaultSources'][number]
+export type PinterestAdsDefaultSources =
+    (typeof MARKETING_INTEGRATION_CONFIGS)['PinterestAds']['defaultSources'][number]
 
 export type GoogleAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['GoogleAds']['tableKeywords'][number]
 export type LinkedinAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['LinkedinAds']['tableKeywords'][number]
@@ -5156,6 +5500,7 @@ export type TikTokAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['Tik
 export type RedditAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['RedditAds']['tableKeywords'][number]
 export type BingAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['BingAds']['tableKeywords'][number]
 export type SnapchatAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['SnapchatAds']['tableKeywords'][number]
+export type PinterestAdsTableKeywords = (typeof MARKETING_INTEGRATION_CONFIGS)['PinterestAds']['tableKeywords'][number]
 
 export type GoogleAdsTableExclusions = (typeof MARKETING_INTEGRATION_CONFIGS)['GoogleAds']['tableExclusions'][number]
 export type LinkedinAdsTableExclusions =
@@ -5166,6 +5511,8 @@ export type RedditAdsTableExclusions = (typeof MARKETING_INTEGRATION_CONFIGS)['R
 export type BingAdsTableExclusions = (typeof MARKETING_INTEGRATION_CONFIGS)['BingAds']['tableExclusions'][number]
 export type SnapchatAdsTableExclusions =
     (typeof MARKETING_INTEGRATION_CONFIGS)['SnapchatAds']['tableExclusions'][number]
+export type PinterestAdsTableExclusions =
+    (typeof MARKETING_INTEGRATION_CONFIGS)['PinterestAds']['tableExclusions'][number]
 
 // Conversion fields for Snapchat Ads - extracted as types so they generate as StrEnum in Python
 export type SnapchatAdsConversionFields =
@@ -5178,6 +5525,8 @@ export type MetaAdsConversionOmniActionTypes =
     (typeof MARKETING_INTEGRATION_CONFIGS)['MetaAds']['conversionActionTypes']['omni'][number]
 export type MetaAdsConversionFallbackActionTypes =
     (typeof MARKETING_INTEGRATION_CONFIGS)['MetaAds']['conversionActionTypes']['fallback'][number]
+export type MetaAdsConversionSpecificActionTypes =
+    (typeof MARKETING_INTEGRATION_CONFIGS)['MetaAds']['conversionActionTypes']['specific'][number]
 
 export const MARKETING_INTEGRATION_FIELD_MAP = Object.fromEntries(
     VALID_NATIVE_MARKETING_SOURCES.map((source) => [
@@ -5445,7 +5794,10 @@ export enum ProductKey {
     TASKS = 'tasks',
     TEAMS = 'teams',
     TOOLBAR = 'toolbar',
+    TRACING = 'tracing',
+    METRICS = 'metrics',
     USER_INTERVIEWS = 'user_interviews',
+    VISUAL_REVIEW = 'visual_review',
     WEB_ANALYTICS = 'web_analytics',
     WORKFLOWS = 'workflows',
 }
@@ -5619,6 +5971,7 @@ export interface ReplayInactivityPeriod {
 
 export enum DomainConnectProviderName {
     Cloudflare = 'Cloudflare',
+    Vercel = 'Vercel',
 }
 
 export enum PropertyType {

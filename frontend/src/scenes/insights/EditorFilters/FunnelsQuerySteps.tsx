@@ -12,13 +12,14 @@ import { getProjectEventExistence } from 'lib/utils/getAppContext'
 import { MathAvailability } from 'scenes/insights/filters/ActionFilter/ActionFilterRow/ActionFilterRow'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 import { keyForInsightLogicProps } from 'scenes/insights/sharedUtils'
+import { getInsightPropertyFilterGroupTypes } from 'scenes/insights/utils/propertyTaxonomicGroupTypes'
 
 import { groupsModel } from '~/models/groupsModel'
 import { actionsAndEventsToSeries } from '~/queries/nodes/InsightQuery/utils/filtersToQueryNode'
 import { queryNodeToFilter } from '~/queries/nodes/InsightQuery/utils/queryNodeToFilter'
-import { FunnelsQuery } from '~/queries/schema/schema-general'
+import { FunnelsQuery, NodeKind } from '~/queries/schema/schema-general'
 import { isInsightQueryNode } from '~/queries/utils'
-import { EditorFilterProps, FilterType } from '~/types'
+import { EditorFilterProps, FilterType, FunnelVizType as FunnelVizTypeEnum } from '~/types'
 
 import { ActionFilter } from '../filters/ActionFilter/ActionFilter'
 import { AggregationSelect } from '../filters/AggregationSelect'
@@ -32,16 +33,21 @@ export function FunnelsQuerySteps({ insightProps }: EditorFilterProps): JSX.Elem
     const { series, querySource } = useValues(insightVizDataLogic(insightProps))
     const { updateQuerySource } = useActions(insightVizDataLogic(insightProps))
     const { featureFlags } = useValues(featureFlagLogic)
-    const supportsDwhFunnels = featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_FUNNEL_DWH_SUPPORT]
+    const supportsDwhFunnels = featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_DWH_FUNNEL_SUPPORT]
     const isFunnelDwhStepPopoverVariant =
-        supportsDwhFunnels && featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_FUNNEL_DWH_STEP_UI] === 'popover'
+        supportsDwhFunnels && featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_DWH_FUNNEL_STEP_UI] === 'popover'
 
     const { hasPageview, hasScreen } = getProjectEventExistence()
 
     const actionFilters = isInsightQueryNode(querySource) ? queryNodeToFilter(querySource) : null
     const setActionFilters = (payload: Partial<FilterType>): void => {
         updateQuerySource({
-            series: actionsAndEventsToSeries(payload as any, true, MathAvailability.FunnelsOnly),
+            series: actionsAndEventsToSeries(
+                payload as any,
+                true,
+                MathAvailability.FunnelsOnly,
+                NodeKind.FunnelsDataWarehouseNode
+            ),
         } as FunnelsQuery)
     }
 
@@ -60,12 +66,14 @@ export function FunnelsQuerySteps({ insightProps }: EditorFilterProps): JSX.Elem
             <div className="flex justify-between items-center">
                 <LemonLabel>Query Steps</LemonLabel>
 
-                <Tooltip docLink="https://posthog.com/docs/product-analytics/funnels#graph-type">
-                    <div className="flex items-center gap-2">
-                        <span className="text-secondary">Graph type</span>
-                        <FunnelVizType insightProps={insightProps} />
-                    </div>
-                </Tooltip>
+                {(querySource as FunnelsQuery)?.funnelsFilter?.funnelVizType !== FunnelVizTypeEnum.Flow && (
+                    <Tooltip docLink="https://posthog.com/docs/product-analytics/funnels#graph-type">
+                        <div className="flex items-center gap-2">
+                            <span className="text-secondary">Graph type</span>
+                            <FunnelVizType insightProps={insightProps} />
+                        </div>
+                    </Tooltip>
+                )}
             </div>
             <div className="FunnelsQuerySteps">
                 <ActionFilter
@@ -81,20 +89,11 @@ export function FunnelsQuerySteps({ insightProps }: EditorFilterProps): JSX.Elem
                     entitiesLimit={FUNNEL_STEP_COUNT_LIMIT}
                     sortable
                     showNestedArrow
-                    propertiesTaxonomicGroupTypes={[
-                        TaxonomicFilterGroupType.EventProperties,
-                        TaxonomicFilterGroupType.PersonProperties,
-                        TaxonomicFilterGroupType.EventFeatureFlags,
-                        TaxonomicFilterGroupType.EventMetadata,
-                        ...(hasPageview ? [TaxonomicFilterGroupType.PageviewUrls] : []),
-                        ...(hasScreen ? [TaxonomicFilterGroupType.Screens] : []),
-                        TaxonomicFilterGroupType.EmailAddresses,
-                        ...groupsTaxonomicTypes,
-                        TaxonomicFilterGroupType.Cohorts,
-                        TaxonomicFilterGroupType.Elements,
-                        TaxonomicFilterGroupType.SessionProperties,
-                        TaxonomicFilterGroupType.HogQLExpression,
-                    ]}
+                    propertiesTaxonomicGroupTypes={getInsightPropertyFilterGroupTypes({
+                        groupsTaxonomicTypes,
+                        hasPageview,
+                        hasScreen,
+                    })}
                     addFilterDocLink="https://posthog.com/docs/product-analytics/trends/filters"
                     actionsTaxonomicGroupTypes={[
                         TaxonomicFilterGroupType.Events,
@@ -107,6 +106,21 @@ export function FunnelsQuerySteps({ insightProps }: EditorFilterProps): JSX.Elem
                     definitionPopoverRenderer={
                         isFunnelDwhStepPopoverVariant ? FunnelDataWarehouseStepDefinitionPopover : undefined
                     }
+                    dataWarehousePopoverFields={[
+                        {
+                            key: 'id_field',
+                            label: 'Unique ID',
+                        },
+                        {
+                            key: 'timestamp_field',
+                            label: 'Timestamp',
+                        },
+                        {
+                            key: 'aggregation_target_field',
+                            label: 'Aggregation target',
+                            allowHogQL: true,
+                        },
+                    ]}
                 />
             </div>
             <div className="mt-4 deprecated-space-y-4">

@@ -73,6 +73,10 @@ from posthog.temporal.exports_video import (
     ACTIVITIES as VIDEO_EXPORT_ACTIVITIES,
     WORKFLOWS as VIDEO_EXPORT_WORKFLOWS,
 )
+from posthog.temporal.health_checks import (
+    ACTIVITIES as HEALTH_CHECK_ACTIVITIES,
+    WORKFLOWS as HEALTH_CHECK_WORKFLOWS,
+)
 from posthog.temporal.import_recording import (
     ACTIVITIES as IMPORT_RECORDING_ACTIVITIES,
     WORKFLOWS as IMPORT_RECORDING_WORKFLOWS,
@@ -104,6 +108,10 @@ from posthog.temporal.proxy_service import (
 from posthog.temporal.quota_limiting import (
     ACTIVITIES as QUOTA_LIMITING_ACTIVITIES,
     WORKFLOWS as QUOTA_LIMITING_WORKFLOWS,
+)
+from posthog.temporal.rasterize_recording import (
+    ACTIVITIES as RASTERIZE_RECORDING_ACTIVITIES,
+    WORKFLOWS as RASTERIZE_RECORDING_WORKFLOWS,
 )
 from posthog.temporal.salesforce_enrichment import (
     ACTIVITIES as SALESFORCE_ENRICHMENT_ACTIVITIES,
@@ -198,6 +206,11 @@ _task_queue_specs = [
         + INGESTION_ACCEPTANCE_TEST_ACTIVITIES,
     ),
     (
+        settings.HEALTH_CHECK_TASK_QUEUE,
+        HEALTH_CHECK_WORKFLOWS,
+        HEALTH_CHECK_ACTIVITIES,
+    ),
+    (
         settings.DUCKLAKE_TASK_QUEUE,
         DUCKLAKE_COPY_WORKFLOWS,
         DUCKLAKE_COPY_ACTIVITIES,
@@ -237,11 +250,13 @@ _task_queue_specs = [
         DELETE_RECORDING_WORKFLOWS
         + ENFORCE_MAX_REPLAY_RETENTION_WORKFLOWS
         + EXPORT_RECORDING_WORKFLOWS
-        + IMPORT_RECORDING_WORKFLOWS,
+        + IMPORT_RECORDING_WORKFLOWS
+        + RASTERIZE_RECORDING_WORKFLOWS,
         DELETE_RECORDING_ACTIVITIES
         + ENFORCE_MAX_REPLAY_RETENTION_ACTIVITIES
         + EXPORT_RECORDING_ACTIVITIES
-        + IMPORT_RECORDING_ACTIVITIES,
+        + IMPORT_RECORDING_ACTIVITIES
+        + RASTERIZE_RECORDING_ACTIVITIES,
     ),
     (
         settings.MESSAGING_TASK_QUEUE,
@@ -346,16 +361,19 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--graceful-shutdown-timeout-seconds",
+            type=int,
             default=settings.GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
             help="Time that the worker will wait after shutdown before canceling activities, in seconds",
         )
         parser.add_argument(
             "--max-concurrent-workflow-tasks",
+            type=int,
             default=settings.MAX_CONCURRENT_WORKFLOW_TASKS,
             help="Maximum number of concurrent workflow tasks for this worker",
         )
         parser.add_argument(
             "--max-concurrent-activities",
+            type=int,
             default=settings.MAX_CONCURRENT_ACTIVITIES,
             help="Maximum number of concurrent activity tasks for this worker",
         )
@@ -367,11 +385,13 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--target-memory-usage",
+            type=float,
             default=settings.TARGET_MEMORY_USAGE,
             help="Fraction of available memory to use",
         )
         parser.add_argument(
             "--target-cpu-usage",
+            type=float,
             default=settings.TARGET_CPU_USAGE,
             help="Fraction of available CPU to use",
         )

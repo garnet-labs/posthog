@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -46,7 +47,8 @@ impl Cohort {
                   c.is_static,
                   c.errors_calculating,
                   c.groups,
-                  c.created_by_id
+                  c.created_by_id,
+                  c.cohort_type
               FROM posthog_cohort AS c
               JOIN posthog_team AS t ON (c.team_id = t.id)
             WHERE t.id = $1
@@ -365,11 +367,12 @@ pub fn evaluate_dynamic_cohorts(
 /// 1. Checking each filter's cohort ID
 /// 2. Looking up the match result in the cohort_matches map
 /// 3. Applying the appropriate operator (IN/NOT_IN)
-pub fn apply_cohort_membership_logic(
-    cohort_filters: &[PropertyFilter],
+pub fn apply_cohort_membership_logic<F: Borrow<PropertyFilter>>(
+    cohort_filters: &[F],
     cohort_matches: &HashMap<CohortId, bool>,
 ) -> Result<bool, FlagError> {
     for filter in cohort_filters {
+        let filter = filter.borrow();
         let cohort_id = filter
             .get_cohort_id()
             .ok_or(FlagError::CohortFiltersParsingError)?;
@@ -563,6 +566,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         };
 
         // This should not fail even though the filters are malformed
@@ -588,6 +592,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         };
 
         let dependencies = static_cohort_empty_filters.extract_dependencies().unwrap();
@@ -610,6 +615,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         };
 
         // This should fail because it's dynamic and the filters are malformed
@@ -653,6 +659,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         }
     }
 
@@ -698,6 +705,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         };
 
         // Create a dynamic cohort (cohort 20) that depends on the static cohort
@@ -730,6 +738,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         };
 
         let cohorts = vec![static_cohort, dynamic_cohort];
@@ -815,6 +824,7 @@ mod tests {
             errors_calculating: 0,
             groups: json!({}),
             created_by_id: None,
+            cohort_type: None,
         };
 
         let cohorts = vec![cohort_with_negation];

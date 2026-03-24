@@ -23,6 +23,7 @@ import { LifecycleStackingFilter } from 'scenes/insights/EditorFilters/Lifecycle
 import { PercentStackViewFilter } from 'scenes/insights/EditorFilters/PercentStackViewFilter'
 import { ResultCustomizationByPicker } from 'scenes/insights/EditorFilters/ResultCustomizationByPicker'
 import { ScalePicker } from 'scenes/insights/EditorFilters/ScalePicker'
+import { ShowAlertAnomalyPointsFilter } from 'scenes/insights/EditorFilters/ShowAlertAnomalyPointsFilter'
 import { ShowAlertThresholdLinesFilter } from 'scenes/insights/EditorFilters/ShowAlertThresholdLinesFilter'
 import { ShowLegendFilter } from 'scenes/insights/EditorFilters/ShowLegendFilter'
 import { ShowMultipleYAxesFilter } from 'scenes/insights/EditorFilters/ShowMultipleYAxesFilter'
@@ -108,32 +109,46 @@ export function InsightDisplayConfig(): JSX.Element {
         trendsDataLogic(insightProps)
     )
 
+    const isBoxPlot = display === ChartDisplayType.BoxPlot
     const advancedOptions: LemonMenuItems = [
-        ...((isTrends && display !== ChartDisplayType.CalendarHeatmap && display !== ChartDisplayType.BoxPlot) ||
+        ...((isTrends && display !== ChartDisplayType.CalendarHeatmap) ||
         isRetention ||
         isTrendsFunnel ||
         isStickiness ||
         isLifecycle
             ? [
                   {
-                      title: 'Display',
-                      items: [
-                          ...(isLifecycle ? [{ label: () => <LifecycleStackingFilter /> }] : []),
-                          ...(supportsValueOnSeries ? [{ label: () => <ValueOnSeriesFilter /> }] : []),
-                          ...(supportsPercentStackView ? [{ label: () => <PercentStackViewFilter /> }] : []),
-                          ...(hasLegend ? [{ label: () => <ShowLegendFilter /> }] : []),
-                          ...(display === ChartDisplayType.ActionsPie ? [{ label: () => <ShowPieTotalFilter /> }] : []),
-                          ...(showAlertThresholdLinesConfig
-                              ? [{ label: () => <ShowAlertThresholdLinesFilter /> }]
-                              : []),
-                          ...(showMultipleYAxesConfig ? [{ label: () => <ShowMultipleYAxesFilter /> }] : []),
-                          ...((isTrends || isRetention || isTrendsFunnel) && !isNonTimeSeriesDisplay
-                              ? [{ label: () => <ShowTrendLinesFilter /> }]
-                              : []),
-                          ...(isTrends && !isNonTimeSeriesDisplay && hideWeekendsEnabled
-                              ? [{ label: () => <HideWeekendsFilter /> }]
-                              : []),
-                      ],
+                      title: (
+                          <h5 className="mx-2 my-1" data-attr="options-display-section">
+                              Display
+                          </h5>
+                      ),
+                      items: isBoxPlot
+                          ? hasLegend
+                              ? [{ label: () => <ShowLegendFilter /> }]
+                              : []
+                          : [
+                                ...(isLifecycle ? [{ label: () => <LifecycleStackingFilter /> }] : []),
+                                ...(supportsValueOnSeries ? [{ label: () => <ValueOnSeriesFilter /> }] : []),
+                                ...(supportsPercentStackView ? [{ label: () => <PercentStackViewFilter /> }] : []),
+                                ...(hasLegend ? [{ label: () => <ShowLegendFilter /> }] : []),
+                                ...(display === ChartDisplayType.ActionsPie
+                                    ? [{ label: () => <ShowPieTotalFilter /> }]
+                                    : []),
+                                ...(showAlertThresholdLinesConfig
+                                    ? [
+                                          { label: () => <ShowAlertThresholdLinesFilter /> },
+                                          { label: () => <ShowAlertAnomalyPointsFilter /> },
+                                      ]
+                                    : []),
+                                ...(showMultipleYAxesConfig ? [{ label: () => <ShowMultipleYAxesFilter /> }] : []),
+                                ...((isTrends || isRetention || isTrendsFunnel) && !isNonTimeSeriesDisplay
+                                    ? [{ label: () => <ShowTrendLinesFilter /> }]
+                                    : []),
+                                ...(isTrends && !isNonTimeSeriesDisplay && hideWeekendsEnabled
+                                    ? [{ label: () => <HideWeekendsFilter /> }]
+                                    : []),
+                            ],
                   },
               ]
             : []),
@@ -154,10 +169,7 @@ export function InsightDisplayConfig(): JSX.Element {
                   },
               ]
             : []),
-        ...(!showPercentStackView &&
-        isTrends &&
-        display !== ChartDisplayType.CalendarHeatmap &&
-        display !== ChartDisplayType.BoxPlot
+        ...(!showPercentStackView && isTrends && display !== ChartDisplayType.CalendarHeatmap
             ? [
                   {
                       title: axisLabel(display || ChartDisplayType.ActionsLineGraph),
@@ -250,10 +262,7 @@ export function InsightDisplayConfig(): JSX.Element {
                         ]),
               ]
             : []),
-        ...(mightContainFractionalNumbers &&
-        isTrends &&
-        display !== ChartDisplayType.CalendarHeatmap &&
-        display !== ChartDisplayType.BoxPlot
+        ...(mightContainFractionalNumbers && isTrends && display !== ChartDisplayType.CalendarHeatmap
             ? [
                   {
                       title: 'Decimal places',

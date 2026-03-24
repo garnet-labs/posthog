@@ -7,9 +7,7 @@ import {
     FlutterInstallation,
     FramerInstallation,
     GoogleTagManagerInstallation,
-    HTMLSnippetInstallation,
     IOSInstallation,
-    JSWebInstallation,
     MobileFinalSteps,
     NextJSInstallation,
     NuxtInstallation,
@@ -23,6 +21,7 @@ import {
     WebFinalSteps,
     WebflowInstallation,
     WordpressInstallation,
+    WebInstallation,
 } from '@posthog/shared-onboarding/web-analytics'
 
 import { SDKInstructionsMap, SDKKey } from '~/types'
@@ -39,12 +38,8 @@ const MOBILE_SNIPPETS = {
 }
 
 // JS Web SDKs
-const WebAnalyticsJSWebInstructionsWrapper = withOnboardingDocsWrapper({
-    Installation: JSWebInstallation,
-    snippets: WEB_SNIPPETS,
-})
-const WebAnalyticsHTMLSnippetInstructionsWrapper = withOnboardingDocsWrapper({
-    Installation: HTMLSnippetInstallation,
+const WebAnalyticsWebInstructionsWrapper = withOnboardingDocsWrapper({
+    Installation: WebInstallation,
     snippets: WEB_SNIPPETS,
 })
 
@@ -52,38 +47,47 @@ const WebAnalyticsHTMLSnippetInstructionsWrapper = withOnboardingDocsWrapper({
 const WebAnalyticsReactInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: ReactInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'React',
 })
 const WebAnalyticsNextJSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: NextJSInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'Next.js',
 })
 const WebAnalyticsSvelteInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: SvelteInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'Svelte',
 })
 const WebAnalyticsAstroInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: AstroInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'Astro',
 })
 const WebAnalyticsAngularInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: AngularInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'Angular',
 })
 const WebAnalyticsVueInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: VueInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'Vue',
 })
 const WebAnalyticsNuxtJSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: NuxtInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'Nuxt',
 })
 const WebAnalyticsRemixJSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: RemixInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'React Router',
 })
 const WebAnalyticsTanStackInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: TanStackInstallation,
     snippets: WEB_SNIPPETS,
+    wizardIntegrationName: 'TanStack Start',
 })
 
 // Website builders
@@ -120,10 +124,12 @@ const WebAnalyticsWordpressInstructionsWrapper = withOnboardingDocsWrapper({
 const WebAnalyticsAndroidInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: AndroidInstallation,
     snippets: MOBILE_SNIPPETS,
+    wizardIntegrationName: 'Android',
 })
 const WebAnalyticsIOSInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: IOSInstallation,
     snippets: MOBILE_SNIPPETS,
+    wizardIntegrationName: 'Swift',
 })
 const WebAnalyticsFlutterInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: FlutterInstallation,
@@ -132,11 +138,11 @@ const WebAnalyticsFlutterInstructionsWrapper = withOnboardingDocsWrapper({
 const WebAnalyticsRNInstructionsWrapper = withOnboardingDocsWrapper({
     Installation: ReactNativeInstallation,
     snippets: MOBILE_SNIPPETS,
+    wizardIntegrationName: 'React Native',
 })
 
 export const WebAnalyticsSDKInstructions: SDKInstructionsMap = {
-    [SDKKey.JS_WEB]: WebAnalyticsJSWebInstructionsWrapper,
-    [SDKKey.HTML_SNIPPET]: WebAnalyticsHTMLSnippetInstructionsWrapper,
+    [SDKKey.JS_WEB]: WebAnalyticsWebInstructionsWrapper,
     [SDKKey.ANGULAR]: WebAnalyticsAngularInstructionsWrapper,
     [SDKKey.ASTRO]: WebAnalyticsAstroInstructionsWrapper,
     [SDKKey.BUBBLE]: WebAnalyticsBubbleInstructionsWrapper,

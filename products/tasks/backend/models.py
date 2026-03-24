@@ -23,6 +23,7 @@ from posthog.models.team.team import Team
 from posthog.models.user import User
 from posthog.models.utils import DeletedMetaFields, UUIDModel
 from posthog.storage import object_storage
+from posthog.temporal.oauth import PosthogMcpScopes
 
 from products.tasks.backend.constants import DEFAULT_TRUSTED_DOMAINS
 
@@ -126,6 +127,7 @@ class Task(DeletedMetaFields, models.Model):
         environment: Optional["TaskRun.Environment"] = None,
         mode: str = "background",
         extra_state: dict | None = None,
+        branch: str | None = None,
     ) -> "TaskRun":
         state: dict = {"mode": mode}
         if extra_state:
@@ -136,6 +138,7 @@ class Task(DeletedMetaFields, models.Model):
             status=TaskRun.Status.QUEUED,
             environment=environment or TaskRun.Environment.CLOUD,
             state=state,
+            branch=branch,
         )
 
     def soft_delete(self):
@@ -154,21 +157,24 @@ class Task(DeletedMetaFields, models.Model):
         description: str,
         origin_product: "Task.OriginProduct",
         user_id: int,  # Will be used to validate the tasks feature flag and create a personal api key for interacting with PostHog.
-        repository: str,  # Format: "organization/repository", e.g. "posthog/posthog-js"
+        repository: str | None = None,  # Format: "organization/repository", e.g. "posthog/posthog-js"
         create_pr: bool = True,
         mode: str = "background",
         slack_thread_context: Optional["SlackThreadContext"] = None,
         slack_thread_url: str | None = None,
         start_workflow: bool = True,
+        posthog_mcp_scopes: PosthogMcpScopes = "full",
+        branch: str | None = None,
     ) -> "Task":
         from products.tasks.backend.temporal.client import execute_task_processing_workflow
 
         created_by = User.objects.get(id=user_id)
 
-        github_integration = Integration.objects.filter(team=team, kind="github").first()
-
-        if not github_integration:
-            raise ValueError(f"Team {team.id} does not have a GitHub integration")
+        github_integration = None
+        if repository:
+            github_integration = Integration.objects.filter(team=team, kind="github").first()
+            if not github_integration:
+                raise ValueError(f"Team {team.id} does not have a GitHub integration")
 
         task = Task.objects.create(
             team=team,
@@ -188,7 +194,7 @@ class Task(DeletedMetaFields, models.Model):
             if slack_thread_context:
                 extra_state["interaction_origin"] = "slack"
 
-        task_run = task.create_run(mode=mode, extra_state=extra_state)
+        task_run = task.create_run(mode=mode, extra_state=extra_state, branch=branch)
 
         if start_workflow:
             execute_task_processing_workflow(
@@ -198,6 +204,7 @@ class Task(DeletedMetaFields, models.Model):
                 user_id=user_id,
                 create_pr=create_pr,
                 slack_thread_context=slack_thread_context,
+                posthog_mcp_scopes=posthog_mcp_scopes,
             )
 
         return task
@@ -288,9 +295,6 @@ class TaskRun(models.Model):
         return self.get_workflow_id(self.task_id, self.id)
 
     def heartbeat_workflow(self) -> None:
-        if self.mode != "background":
-            return
-
         from django.core.cache import cache
 
         cache_key = f"tasks:task_run:heartbeat:{self.id}"

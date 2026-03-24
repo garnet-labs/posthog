@@ -64,6 +64,7 @@ export const urls = {
         outputTab,
         endpointName,
         source,
+        connectionId,
     }: {
         query?: string
         view_id?: string
@@ -72,6 +73,7 @@ export const urls = {
         outputTab?: OutputTab
         endpointName?: string
         source?: string
+        connectionId?: string
     } = {}): string => {
         const params = new URLSearchParams()
 
@@ -98,7 +100,13 @@ export const urls = {
         }
 
         const queryString = params.toString()
-        return `/sql${queryString ? `?${queryString}` : ''}`
+        const hashParams = new URLSearchParams()
+        if (connectionId) {
+            hashParams.set('c', connectionId)
+        }
+
+        const hashString = hashParams.toString()
+        return `/sql${queryString ? `?${queryString}` : ''}${hashString ? `#${hashString}` : ''}`
     },
     annotations: (): string => '/data-management/annotations',
     annotation: (id: AnnotationType['id'] | ':id'): string => `/data-management/annotations/${id}`,
@@ -218,16 +226,32 @@ export const urls = {
     links: (params?: string): string =>
         `/links${params ? `?${params.startsWith('?') ? params.slice(1) : params}` : ''}`,
     link: (id: string): string => `/link/${id}`,
+    tracing: (): string => '/tracing',
+    metrics: (): string => '/metrics',
     sessionAttributionExplorer: (): string => '/web/session-attribution-explorer',
     sessionProfile: (id: string): string => `/sessions/${id}`,
     wizard: (): string => `/wizard`,
     coupons: (campaign: string): string => `/coupons/${campaign}`,
     startups: (referrer?: string): string => `/startups${referrer ? `/${referrer}` : ''}`,
+    agenticAuthorize: (): string => '/agentic/authorize',
     oauthAuthorize: (): string => '/oauth/authorize',
     dataPipelinesNew: (kind?: DataPipelinesNewSceneKind): string => `/pipeline/new/${kind ?? ''}`,
     dataWarehouseSource: (id: string, tab?: DataWarehouseSourceSceneTab): string =>
         `/data-management/sources/${id}/${tab ?? 'schemas'}`,
-    dataWarehouseSourceNew: (kind?: string): string => `/data-warehouse/new-source${kind ? `?kind=${kind}` : ''}`,
+    dataWarehouseSourceNew: (kind?: string, returnUrl?: string, returnLabel?: string): string => {
+        const params = new URLSearchParams()
+        if (kind) {
+            params.set('kind', kind)
+        }
+        if (returnUrl) {
+            params.set('returnUrl', returnUrl)
+        }
+        if (returnLabel) {
+            params.set('returnLabel', returnLabel)
+        }
+        const queryString = params.toString()
+        return `/data-warehouse/new-source${queryString ? `?${queryString}` : ''}`
+    },
     batchExportNew: (service: string): string => `/pipeline/batch-exports/new/${service}`,
     batchExport: (id: string): string => `/pipeline/batch-exports/${id}`,
     legacyPlugin: (id: string): string => `/pipeline/plugins/${id}`,

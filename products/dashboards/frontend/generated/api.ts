@@ -9,9 +9,11 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * OpenAPI spec version: 1.0.0
  */
 import type {
+    CopyDashboardTileRequestApi,
     DashboardApi,
     DashboardCollaboratorApi,
     DashboardsAnalyzeRefreshResultCreateParams,
+    DashboardsCopyTileCreateParams,
     DashboardsCreateFromTemplateJsonCreateParams,
     DashboardsCreateParams,
     DashboardsCreateUnlistedDashboardCreateParams,
@@ -19,6 +21,7 @@ import type {
     DashboardsListParams,
     DashboardsMoveTilePartialUpdateParams,
     DashboardsPartialUpdateParams,
+    DashboardsReorderTilesCreateParams,
     DashboardsRetrieveParams,
     DashboardsSnapshotCreateParams,
     DashboardsStreamTilesRetrieveParams,
@@ -29,6 +32,7 @@ import type {
     PaginatedDataColorThemeListApi,
     PatchedDashboardApi,
     PatchedDataColorThemeApi,
+    ReorderTilesRequestApi,
     SharingConfigurationApi,
 } from './api.schemas'
 
@@ -441,6 +445,44 @@ export const dashboardsAnalyzeRefreshResultCreate = async (
     })
 }
 
+/**
+ * Copy an existing dashboard tile to another dashboard (insight or text card; new tile row).
+ */
+export const getDashboardsCopyTileCreateUrl = (
+    projectId: string,
+    id: number,
+    params?: DashboardsCopyTileCreateParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : value.toString())
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/dashboards/${id}/copy_tile/?${stringifiedParams}`
+        : `/api/projects/${projectId}/dashboards/${id}/copy_tile/`
+}
+
+export const dashboardsCopyTileCreate = async (
+    projectId: string,
+    id: number,
+    copyDashboardTileRequestApi: CopyDashboardTileRequestApi,
+    params?: DashboardsCopyTileCreateParams,
+    options?: RequestInit
+): Promise<DashboardApi> => {
+    return apiMutator<DashboardApi>(getDashboardsCopyTileCreateUrl(projectId, id, params), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(copyDashboardTileRequestApi),
+    })
+}
+
 export const getDashboardsMoveTilePartialUpdateUrl = (
     projectId: string,
     id: number,
@@ -473,6 +515,41 @@ export const dashboardsMoveTilePartialUpdate = async (
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(patchedDashboardApi),
+    })
+}
+
+export const getDashboardsReorderTilesCreateUrl = (
+    projectId: string,
+    id: number,
+    params?: DashboardsReorderTilesCreateParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : value.toString())
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/dashboards/${id}/reorder_tiles/?${stringifiedParams}`
+        : `/api/projects/${projectId}/dashboards/${id}/reorder_tiles/`
+}
+
+export const dashboardsReorderTilesCreate = async (
+    projectId: string,
+    id: number,
+    reorderTilesRequestApi: ReorderTilesRequestApi,
+    params?: DashboardsReorderTilesCreateParams,
+    options?: RequestInit
+): Promise<DashboardApi> => {
+    return apiMutator<DashboardApi>(getDashboardsReorderTilesCreateUrl(projectId, id, params), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(reorderTilesRequestApi),
     })
 }
 

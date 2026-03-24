@@ -95,6 +95,9 @@ case "$RS_SVC" in
     export OBJECT_STORAGE_SECRET_ACCESS_KEY=object_storage_root_password
     export FRAME_CACHE_TTL_SECONDS=1
     export FRAME_RESULT_TTL_MINUTES=0
+    export ASSIGNMENT_RULE_CACHE_TTL_SECS=0
+    export GROUPING_RULE_CACHE_TTL_SECS=0
+    export SUPPRESSION_RULE_CACHE_TTL_SECS=0
     export BIND_PORT=3302 # HACK! avoid local-dev clash with property-defs-rs port
     export ALLOW_INTERNAL_IPS="true"
     export PERSONS_URL=postgres://posthog:posthog@localhost:5432/posthog_persons
@@ -132,6 +135,7 @@ case "$RS_SVC" in
     export READ_DATABASE_URL=postgres://posthog:posthog@localhost:5432/posthog
     export MAXMIND_DB_PATH=../share/GeoLite2-City.mmdb
     export REDIS_URL=redis://localhost:6379/
+    export FLAGS_REDIS_URL=${FLAGS_REDIS_URL:-redis://localhost:6379/1}
     export ADDRESS=0.0.0.0:3001
     export DEBUG=1
     export ALLOW_INTERNAL_IPS=${ALLOW_INTERNAL_IPS:-true}
@@ -153,11 +157,11 @@ case "$RS_SVC" in
     ;;
 
   personhog-replica)
-    SQLX_QUERY_LEVEL=${SQLX_QUERY_LEVEL:-warn}
+    SQLX_QUERY_LEVEL=${SQLX_QUERY_LEVEL:-trace}
     export RUST_LOG=debug,sqlx::query=$SQLX_QUERY_LEVEL
     export RUST_BACKTRACE=1
     export GRPC_ADDRESS=127.0.0.1:50051
-    export PRIMARY_DATABASE_URL=postgres://posthog:posthog@localhost:5432/posthog
+    export PRIMARY_DATABASE_URL=postgres://posthog:posthog@localhost:5432/posthog_persons
     export METRICS_PORT=9100
     ;;
 

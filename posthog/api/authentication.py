@@ -821,9 +821,12 @@ class PasswordResetSerializer(serializers.Serializer):
             )
 
         try:
-            user = User.objects.filter(is_active=True).get(email=email)
+            user = User.objects.filter(is_active=True).get(email__iexact=email)
         except User.DoesNotExist:
             user = None
+        except User.MultipleObjectsReturned:
+            # If multiple users share the same email (different casing), use the exact match
+            user = User.objects.filter(is_active=True, email=email).first()
 
         if user:
             user.requested_password_reset_at = datetime.datetime.now(datetime.UTC)
@@ -850,7 +853,7 @@ class PasswordResetCompleteSerializer(serializers.Serializer):
 
         try:
             user = User.objects.filter(is_active=True).get(uuid=self.context["view"].kwargs["user_uuid"])
-        except User.DoesNotExist:
+        except (User.DoesNotExist, ValidationError):
             capture_exception(
                 Exception("User not found in password reset serializer"),
                 {"user_uuid": self.context["view"].kwargs["user_uuid"]},
@@ -910,7 +913,7 @@ class PasswordResetCompleteViewSet(NonCreatingViewSetMixin, mixins.RetrieveModel
 
         try:
             user = User.objects.filter(is_active=True).get(uuid=user_uuid)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, ValidationError):
             capture_exception(
                 Exception("User not found in password reset viewset"), {"user_uuid": user_uuid, "token": token}
             )

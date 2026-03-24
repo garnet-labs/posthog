@@ -1,5 +1,17 @@
 import { Monaco } from '@monaco-editor/react'
-import { actions, beforeUnmount, connect, kea, listeners, path, props, propsChanged, reducers, selectors } from 'kea'
+import {
+    actions,
+    afterMount,
+    beforeUnmount,
+    connect,
+    kea,
+    listeners,
+    path,
+    props,
+    propsChanged,
+    reducers,
+    selectors,
+} from 'kea'
 import { loaders } from 'kea-loaders'
 import { router } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
@@ -7,19 +19,23 @@ import isEqual from 'lodash.isequal'
 import { Uri, editor } from 'monaco-editor'
 import posthog from 'posthog-js'
 
-import { LemonDialog, LemonInput, lemonToast } from '@posthog/lemon-ui'
+import { LemonCheckbox, LemonDialog, LemonInput, lemonToast, Tooltip } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
 import { SetupTaskId, globalSetupLogic } from 'lib/components/ProductSetup'
+import { FEATURE_FLAGS } from 'lib/constants'
 import { LemonField } from 'lib/lemon-ui/LemonField'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { tabAwareActionToUrl } from 'lib/logic/scenes/tabAwareActionToUrl'
 import { tabAwareScene } from 'lib/logic/scenes/tabAwareScene'
 import { tabAwareUrlToAction } from 'lib/logic/scenes/tabAwareUrlToAction'
 import { initModel } from 'lib/monaco/CodeEditor'
 import { codeEditorLogic } from 'lib/monaco/codeEditorLogic'
-import { objectsEqual, removeUndefinedAndNull } from 'lib/utils'
+import { objectsEqual, removeUndefinedAndNull, slugify } from 'lib/utils'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
+import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import { parseQueryTablesAndColumns } from 'scenes/data-warehouse/editor/sql-utils'
+import { externalDataSourcesLogic } from 'scenes/data-warehouse/externalDataSourcesLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightsApi } from 'scenes/insights/utils/api'
 import { Scene } from 'scenes/sceneTypes'
@@ -43,10 +59,13 @@ import {
     ChartDisplayType,
     DataWarehouseSavedQuery,
     DataWarehouseSavedQueryDraft,
+    ExternalDataSource,
     ExportContext,
     LineageGraph,
     QueryBasedInsightModel,
 } from '~/types'
+
+import { validateEndpointName } from 'products/endpoints/frontend/common'
 
 import { dataWarehouseViewsLogic } from '../saved_queries/dataWarehouseViewsLogic'
 import { draftsLogic } from './draftsLogic'
@@ -123,6 +142,10 @@ function getTabHash(values: sqlEditorLogicType['values']): Record<string, any> {
     const hash: Record<string, any> = {
         q: values.queryInput ?? '',
     }
+    const connectionId = values.sourceQuery?.source.connectionId
+    if (values.featureFlags[FEATURE_FLAGS.DWH_POSTGRES_DIRECT_QUERY] && connectionId) {
+        hash['c'] = connectionId
+    }
     if (values.activeTab?.view) {
         hash['view'] = values.activeTab.view.id
     }
@@ -164,6 +187,12 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             ['user'],
             draftsLogic,
             ['drafts'],
+            featureFlagLogic,
+            ['featureFlags'],
+            externalDataSourcesLogic,
+            ['dataWarehouseSources'],
+            databaseTableListLogic,
+            ['database', 'databaseLoading'],
             outputPaneLogic({ tabId: props.tabId }),
             ['activeTab as outputActiveTab'],
         ],
@@ -187,6 +216,8 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             ['fixErrors', 'fixErrorsSuccess', 'fixErrorsFailure'],
             draftsLogic,
             ['saveAsDraft', 'deleteDraft', 'saveAsDraftSuccess', 'deleteDraftSuccess'],
+            databaseTableListLogic,
+            ['setConnection', 'loadDatabase'],
         ],
     })),
     actions(() => ({
@@ -211,10 +242,11 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         initialize: true,
         loadUpstream: (modelId: string) => ({ modelId }),
         saveAsView: (materializeAfterSave = false, fromDraft?: string) => ({ fromDraft, materializeAfterSave }),
-        saveAsViewSubmit: (name: string, materializeAfterSave = false, fromDraft?: string) => ({
+        saveAsViewSubmit: (name: string, materializeAfterSave = false, fromDraft?: string, isTest = false) => ({
             fromDraft,
             name,
             materializeAfterSave,
+            isTest,
         }),
         saveAsInsight: true,
         saveAsInsightSubmit: (name: string) => ({ name }),
@@ -622,6 +654,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             actions._setSuggestionPayload(null)
         },
         editView: ({ query, view }) => {
+            actions.setActiveTab(OutputTab.Materialization)
             actions.createTab(query, view)
         },
         editInsight: ({ query, insight }) => {
@@ -755,9 +788,10 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             globalSetupLogic.findMounted()?.actions.markTaskAsCompleted(SetupTaskId.RunFirstQuery)
         },
         saveAsView: async ({ fromDraft, materializeAfterSave = false }) => {
+            const isStaff = values.user?.is_staff ?? false
             LemonDialog.openForm({
                 title: 'Save as view',
-                initialValues: { viewName: values.activeTab?.name || '' },
+                initialValues: { viewName: values.activeTab?.name || '', isTest: false },
                 description: `View names can only contain letters, numbers, '_', or '$'. Spaces are not allowed.`,
                 content: (isLoading) =>
                     isLoading ? (
@@ -765,14 +799,33 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                             <ViewEmptyState />
                         </div>
                     ) : (
-                        <LemonField name="viewName">
-                            <LemonInput
-                                data-attr="sql-editor-input-save-view-name"
-                                disabled={isLoading}
-                                placeholder="Please enter the name of the view"
-                                autoFocus
-                            />
-                        </LemonField>
+                        <>
+                            <LemonField name="viewName">
+                                <LemonInput
+                                    data-attr="sql-editor-input-save-view-name"
+                                    disabled={isLoading}
+                                    placeholder="Please enter the name of the view"
+                                    autoFocus
+                                />
+                            </LemonField>
+                            {isStaff && (
+                                <LemonField name="isTest" className="mt-2">
+                                    {({ value, onChange }) => (
+                                        <div className="flex items-center gap-2">
+                                            <LemonCheckbox
+                                                checked={value}
+                                                onChange={onChange}
+                                                data-attr="sql-editor-input-save-view-is-test"
+                                                label="Is this view for testing only?"
+                                            />
+                                            <Tooltip title="Test views and any downstream assets that depend on them will be automatically deleted after 1 week.">
+                                                <span className="text-muted cursor-pointer">&#9432;</span>
+                                            </Tooltip>
+                                        </div>
+                                    )}
+                                </LemonField>
+                            )}
+                        </>
                     ),
                 errors: {
                     viewName: (name) =>
@@ -782,13 +835,13 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                               ? 'Name must be valid'
                               : undefined,
                 },
-                onSubmit: async ({ viewName }) => {
-                    await asyncActions.saveAsViewSubmit(viewName, materializeAfterSave, fromDraft)
+                onSubmit: async ({ viewName, isTest }) => {
+                    await asyncActions.saveAsViewSubmit(viewName, materializeAfterSave, fromDraft, isTest)
                 },
                 shouldAwaitSubmit: true,
             })
         },
-        saveAsViewSubmit: async ({ name, materializeAfterSave = false, fromDraft }) => {
+        saveAsViewSubmit: async ({ name, materializeAfterSave = false, fromDraft, isTest = false }) => {
             const query: HogQLQuery = values.sourceQuery.source
 
             const queryToSave = {
@@ -808,6 +861,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                     name,
                     query: queryToSave,
                     types,
+                    ...(isTest ? { is_test: true } : {}),
                 })
 
                 // Saved queries are unique by team,name
@@ -927,7 +981,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                     </>
                 ),
                 errors: {
-                    name: (name) => (!name ? 'You must enter a name' : undefined),
+                    name: (name) => validateEndpointName(name?.trim() || ''),
                 },
                 onSubmit: async ({ name, description }) => actions.saveAsEndpointSubmit(name, description),
             })
@@ -935,7 +989,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         saveAsEndpointSubmit: async ({ name, description }) => {
             try {
                 const endpoint = await api.endpoint.create({
-                    name,
+                    name: slugify(name),
                     description: description || undefined,
                     query: {
                         ...(values.sourceQuery.source as HogQLQuery),
@@ -945,8 +999,8 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 lemonToast.success('Endpoint created')
                 globalSetupLogic.findMounted()?.actions.markTaskAsCompleted(SetupTaskId.CreateFirstEndpoint)
                 router.actions.push(urls.endpoint(endpoint.name))
-            } catch {
-                lemonToast.error('Failed to create endpoint')
+            } catch (error: any) {
+                lemonToast.error(error.detail || 'Failed to create endpoint')
             }
         },
         updateInsight: async () => {
@@ -1056,7 +1110,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             }
         },
     })),
-    subscriptions(({ actions, values }) => ({
+    subscriptions(({ actions, values, cache }) => ({
         showLegacyFilters: (showLegacyFilters: boolean) => {
             if (showLegacyFilters) {
                 if (typeof values.sourceQuery.source.filters !== 'object') {
@@ -1098,6 +1152,15 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                     })
                 }
             }
+        },
+        selectedConnectionId: (selectedConnectionId) => {
+            if (cache.lastSelectedConnectionId === selectedConnectionId) {
+                return
+            }
+
+            cache.lastSelectedConnectionId = selectedConnectionId
+            actions.setConnection(selectedConnectionId ?? null)
+            actions.loadDatabase()
         },
     })),
     selectors({
@@ -1170,6 +1233,23 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                     ...queryExportContext(sourceQuery.source, undefined, undefined),
                     filename,
                 } as ExportContext
+            },
+        ],
+        selectedConnectionId: [
+            (s) => [s.sourceQuery, s.featureFlags],
+            (sourceQuery, featureFlags) => {
+                if (!featureFlags[FEATURE_FLAGS.DWH_POSTGRES_DIRECT_QUERY]) {
+                    return undefined
+                }
+                return sourceQuery.source && 'connectionId' in sourceQuery.source
+                    ? sourceQuery.source.connectionId
+                    : undefined
+            },
+        ],
+        selectedDirectSource: [
+            (s) => [s.dataWarehouseSources, s.selectedConnectionId],
+            (dataWarehouseSources, selectedConnectionId): ExternalDataSource | undefined => {
+                return dataWarehouseSources?.results.find((source) => source.id === selectedConnectionId)
             },
         ],
         isEditingMaterializedView: [
@@ -1416,11 +1496,33 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 !searchParams.open_draft &&
                 !searchParams.output_tab &&
                 !hashParams.q &&
+                !hashParams.c &&
                 !hashParams.view &&
                 !hashParams.insight &&
                 values.queryInput !== null
             ) {
                 return
+            }
+
+            const connectionIdFromHash =
+                values.featureFlags[FEATURE_FLAGS.DWH_POSTGRES_DIRECT_QUERY] &&
+                typeof hashParams.c === 'string' &&
+                hashParams.c !== ''
+                    ? hashParams.c
+                    : undefined
+            const currentConnectionId = values.sourceQuery.source.connectionId || undefined
+
+            if (connectionIdFromHash !== currentConnectionId) {
+                const { connectionId: _legacyConnectionId, ...sourceQueryWithoutLegacyConnectionId } =
+                    values.sourceQuery as typeof values.sourceQuery & { connectionId?: string }
+
+                actions.setSourceQuery({
+                    ...sourceQueryWithoutLegacyConnectionId,
+                    source: {
+                        ...values.sourceQuery.source,
+                        connectionId: connectionIdFromHash,
+                    },
+                })
             }
 
             let tabAdded = false
@@ -1454,11 +1556,13 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                     // Open view
                     const viewId = searchParams.open_view || hashParams.view
 
+                    actions.setActiveTab(OutputTab.Materialization)
+                    actions.setViewLoading(true)
+
                     if (values.dataWarehouseSavedQueries.length === 0) {
                         await dataWarehouseViewsLogic.asyncActions.loadDataWarehouseSavedQueries()
                     }
 
-                    actions.setViewLoading(true)
                     let view = values.dataWarehouseSavedQueries.find((n) => n.id === viewId)
                     if (!view) {
                         lemonToast.error('View not found')
@@ -1522,10 +1626,10 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
 
                     const queryToOpen = searchParams.open_query ? searchParams.open_query : query
 
-                    actions.editInsight(queryToOpen, insight)
                     if (insight.query) {
                         actions.setSourceQuery(insight.query as DataVisualizationNode)
                     }
+                    actions.editInsight(queryToOpen, insight)
                     actions.setActiveTab(OutputTab.Visualization)
 
                     // Only run the query if the results aren't already cached locally and we're not using the open_query search param
@@ -1585,8 +1689,25 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                     await createQueryTab()
                 })
             }
+
+            if (!values.database && !values.databaseLoading && connectionIdFromHash === undefined) {
+                actions.setConnection(values.selectedConnectionId ?? null)
+                actions.loadDatabase()
+            }
         },
     })),
+    afterMount(({ actions, props, values, cache }) => {
+        cache.lastSelectedConnectionId = values.selectedConnectionId
+
+        if (
+            isEmbeddedSQLEditorMode(props.mode ?? SQLEditorMode.FullScene) &&
+            !values.database &&
+            !values.databaseLoading
+        ) {
+            actions.setConnection(values.selectedConnectionId ?? null)
+            actions.loadDatabase()
+        }
+    }),
     beforeUnmount(({ cache }) => {
         cache.umountDataNode?.()
 
