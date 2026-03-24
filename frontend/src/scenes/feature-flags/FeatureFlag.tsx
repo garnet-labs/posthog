@@ -328,7 +328,7 @@ export function FeatureFlag({ id }: FeatureFlagLogicProps): JSX.Element {
                         props={props}
                         formKey="featureFlag"
                         enableFormOnSubmit
-                        className="deprecated-space-y-4"
+                        className="flex flex-col gap-y-4"
                     >
                         <SceneTitleSection
                             name={featureFlag.key}
@@ -1054,6 +1054,9 @@ function FeatureFlagRollout({
         distributeVariantsEqually,
         addVariant,
         removeVariant,
+        moveVariantUp,
+        moveVariantDown,
+        reorderVariants,
         setMultivariateEnabled,
         setFeatureFlag,
         setRemoteConfigEnabled,
@@ -1518,6 +1521,9 @@ function FeatureFlagRollout({
                                     filterGroups={filterGroups}
                                     onAddVariant={addVariant}
                                     onRemoveVariant={removeVariant}
+                                    onMoveVariantUp={moveVariantUp}
+                                    onMoveVariantDown={moveVariantDown}
+                                    onReorderVariants={reorderVariants}
                                     onDistributeEqually={distributeVariantsEqually}
                                     canEditVariant={canEditVariant}
                                     hasExperiment={hasExperiment ?? false}

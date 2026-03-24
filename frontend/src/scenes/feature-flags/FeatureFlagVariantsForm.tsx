@@ -1,10 +1,27 @@
 import 'kea'
 
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent,
+    DragOverlay,
+    DragStartEvent,
+} from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { useState } from 'react'
+
 import { IconBalance, IconMessage, IconPlus, IconTrash } from '@posthog/icons'
 import { LemonButton, LemonDivider, LemonInput } from '@posthog/lemon-ui'
 
 import { CopyToClipboardInline } from 'lib/components/CopyToClipboard'
 import ViewRecordingsPlaylistButton from 'lib/components/ViewRecordingButton/ViewRecordingsPlaylistButton'
+import { IconArrowDown, IconArrowUp, SortableDragIcon } from 'lib/lemon-ui/icons'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { Lettermark, LettermarkColor } from 'lib/lemon-ui/Lettermark'
 import { Link } from 'lib/lemon-ui/Link'
@@ -23,12 +40,11 @@ export interface FeatureFlagVariantsFormProps {
     filterGroups?: FeatureFlagGroupType[]
     onAddVariant?: () => void
     onRemoveVariant?: (index: number) => void
+    onMoveVariantUp?: (index: number) => void
+    onMoveVariantDown?: (index: number) => void
+    onReorderVariants?: (from: number, to: number) => void
     onDistributeEqually?: () => void
     canEditVariant?: (index: number) => boolean
-    hasExperiment?: boolean
-    experimentId?: number
-    experimentName?: string
-    isDraftExperiment?: boolean
     readOnly?: boolean
     flagKey?: string
     hasEnrichedAnalytics?: boolean
@@ -47,12 +63,202 @@ export function focusVariantKeyField(index: number): void {
     )
 }
 
+interface SortableVariantRowProps {
+    variant: MultivariateFlagVariant
+    index: number
+    payloads: Record<string, any>
+    filterGroups: FeatureFlagGroupType[]
+    variants: MultivariateFlagVariant[]
+    onRemoveVariant?: (index: number) => void
+    onMoveVariantUp?: (index: number) => void
+    onMoveVariantDown?: (index: number) => void
+    canEditVariant?: (index: number) => boolean
+    onVariantChange?: (index: number, field: 'key' | 'name' | 'rollout_percentage', value: any) => void
+    onPayloadChange?: (index: number, value: any) => void
+    variantErrors: VariantError[]
+    experimentDisabledReason: (action: string, controlOnly?: boolean) => React.ReactElement | undefined
+    variantConcatWithPunctuation: (phrases: string[]) => string
+}
+
+function SortableVariantRow({
+    variant,
+    index,
+    payloads,
+    filterGroups,
+    variants,
+    onRemoveVariant,
+    onMoveVariantUp,
+    onMoveVariantDown,
+    canEditVariant,
+    onVariantChange,
+    onPayloadChange,
+    variantErrors,
+    experimentDisabledReason,
+    variantConcatWithPunctuation,
+}: SortableVariantRowProps): JSX.Element {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: `variant-${index}`,
+    })
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 1000 : undefined,
+        // Maintain grid layout during dragging
+        width: isDragging ? '100%' : undefined,
+        boxSizing: 'border-box' as const,
+    }
+
+    return (
+        <div ref={setNodeRef} style={style} className="VariantFormList__row grid gap-2">
+            <div className="flex mt-2 justify-center">
+                <Lettermark name={alphabet[index]} color={LettermarkColor.Gray} />
+            </div>
+            <div className="col-span-4">
+                <LemonField.Pure error={variantErrors[index]?.key}>
+                    <LemonInput
+                        data-attr="feature-flag-variant-key"
+                        data-key-index={index.toString()}
+                        className="ph-ignore-input"
+                        placeholder={`example-variant-${index + 1}`}
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        disabledReason={
+                            !canEditVariant?.(index) ? experimentDisabledReason('cannot be modified', true) : undefined
+                        }
+                        value={variant.key}
+                        onChange={(value) => onVariantChange?.(index, 'key', value)}
+                    />
+                </LemonField.Pure>
+            </div>
+            <div className="col-span-6">
+                <LemonInput
+                    data-attr="feature-flag-variant-name"
+                    className="ph-ignore-input"
+                    placeholder="Description"
+                    value={variant.name || ''}
+                    onChange={(value) => onVariantChange?.(index, 'name', value)}
+                />
+            </div>
+            <div className="col-span-8">
+                <JSONEditorInput
+                    onChange={(newValue) => {
+                        onPayloadChange?.(index, newValue === '' ? undefined : newValue)
+                    }}
+                    value={payloads[index]}
+                    placeholder='{"key": "value"}'
+                />
+            </div>
+            <div className="col-span-3">
+                <div>
+                    <LemonInput
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={variant.rollout_percentage || 0}
+                        onChange={(changedValue) => {
+                            const valueInt =
+                                changedValue !== undefined && !isNaN(Number(changedValue))
+                                    ? parseInt(changedValue.toString())
+                                    : 0
+
+                            onVariantChange?.(index, 'rollout_percentage', valueInt)
+                        }}
+                        suffix={<span>%</span>}
+                        data-attr="feature-flag-variant-rollout-percentage-input"
+                    />
+                    {filterGroups.filter((group) => group.variant === variant.key).length > 0 && (
+                        <span className="text-secondary text-xs">
+                            Overridden by{' '}
+                            <strong>
+                                {variantConcatWithPunctuation(
+                                    filterGroups
+                                        .filter((group) => group.variant != null && group.variant === variant.key)
+                                        .map(
+                                            (variantGroup) =>
+                                                'Set ' + (filterGroups.findIndex((group) => group === variantGroup) + 1)
+                                        )
+                                )}
+                            </strong>
+                        </span>
+                    )}
+                </div>
+            </div>
+            <div className="flex items-start gap-1 mt-2">
+                {variants.length > 1 ? (
+                    <span className="text-muted-alt cursor-grab" {...listeners} {...attributes}>
+                        <SortableDragIcon />
+                    </span>
+                ) : (
+                    <span className="w-4 h-4" /> // Placeholder for drag handle
+                )}
+                {variants.length > 1 && (onMoveVariantUp || onMoveVariantDown) ? (
+                    <>
+                        <LemonButton
+                            icon={<IconArrowDown />}
+                            noPadding
+                            tooltip="Move down"
+                            disabledReason={
+                                !canEditVariant?.(index)
+                                    ? experimentDisabledReason('cannot be moved', true)
+                                    : index >= variants.length - 1
+                                      ? 'Already at bottom'
+                                      : undefined
+                            }
+                            onClick={() => onMoveVariantDown?.(index)}
+                        />
+                        <LemonButton
+                            icon={<IconArrowUp />}
+                            noPadding
+                            tooltip="Move up"
+                            disabledReason={
+                                !canEditVariant?.(index)
+                                    ? experimentDisabledReason('cannot be moved', true)
+                                    : index === 0
+                                      ? 'Already at top'
+                                      : undefined
+                            }
+                            onClick={() => onMoveVariantUp?.(index)}
+                        />
+                    </>
+                ) : (
+                    // Placeholders for move buttons
+                    <>
+                        <span className="w-6 h-6" />
+                        <span className="w-6 h-6" />
+                    </>
+                )}
+                {variants.length > 1 && onRemoveVariant ? (
+                    <LemonButton
+                        icon={<IconTrash />}
+                        data-attr={`delete-prop-filter-${index}`}
+                        noPadding
+                        onClick={() => onRemoveVariant(index)}
+                        disabledReason={
+                            !canEditVariant?.(index) ? experimentDisabledReason('cannot be deleted', true) : undefined
+                        }
+                        tooltipPlacement="top-end"
+                    />
+                ) : (
+                    <span className="w-6 h-6" /> // Placeholder for delete button
+                )}
+            </div>
+        </div>
+    )
+}
+
 export function FeatureFlagVariantsForm({
     variants,
     payloads = {},
     filterGroups = [],
     onAddVariant,
     onRemoveVariant,
+    onMoveVariantUp,
+    onMoveVariantDown,
+    onReorderVariants,
     onDistributeEqually,
     canEditVariant = () => true,
     hasExperiment = false,
@@ -79,6 +285,30 @@ export function FeatureFlagVariantsForm({
     ) : (
         'an experiment'
     )
+
+    const [activeId, setActiveId] = useState<string | null>(null)
+    const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor))
+
+    const handleDragStart = (event: DragStartEvent): void => {
+        setActiveId(event.active.id.toString())
+    }
+
+    const handleDragEnd = (event: DragEndEvent): void => {
+        const { active, over } = event
+
+        if (active.id !== over?.id) {
+            const activeIndex = parseInt(active.id.toString().replace('variant-', ''))
+            const overIndex = parseInt(over?.id.toString().replace('variant-', '') || '0')
+
+            if (onReorderVariants) {
+                onReorderVariants(activeIndex, overIndex)
+            }
+        }
+        setActiveId(null)
+    }
+
+    const activeVariantIndex = activeId ? parseInt(activeId.replace('variant-', '')) : -1
+    const activeVariant = activeVariantIndex >= 0 ? variants[activeVariantIndex] : null
 
     const experimentDisabledReason = (action: string, controlOnly = false): React.ReactElement | undefined => {
         if (!hasExperiment || (isDraftExperiment && !controlOnly)) {
@@ -207,107 +437,83 @@ export function FeatureFlagVariantsForm({
                         </LemonButton>
                     )}
                 </div>
-            </div>
-            {variants.map((variant: MultivariateFlagVariant, index: number) => (
-                <div key={index} className="VariantFormList__row grid gap-2">
-                    <div className="flex mt-2 justify-center">
-                        <Lettermark name={alphabet[index]} color={LettermarkColor.Gray} />
-                    </div>
-                    <div className="col-span-4">
-                        <LemonField.Pure error={variantErrors[index]?.key}>
-                            <LemonInput
-                                data-attr="feature-flag-variant-key"
-                                data-key-index={index.toString()}
-                                className="ph-ignore-input"
-                                placeholder={`example-variant-${index + 1}`}
-                                autoComplete="off"
-                                autoCapitalize="off"
-                                autoCorrect="off"
-                                spellCheck={false}
-                                disabledReason={
-                                    !canEditVariant(index)
-                                        ? experimentDisabledReason('cannot be modified', true)
-                                        : undefined
-                                }
-                                value={variant.key}
-                                onChange={(value) => onVariantChange?.(index, 'key', value)}
-                            />
-                        </LemonField.Pure>
-                    </div>
-                    <div className="col-span-6">
-                        <LemonInput
-                            data-attr="feature-flag-variant-name"
-                            className="ph-ignore-input"
-                            placeholder="Description"
-                            value={variant.name || ''}
-                            onChange={(value) => onVariantChange?.(index, 'name', value)}
-                        />
-                    </div>
-                    <div className="col-span-8">
-                        <JSONEditorInput
-                            onChange={(newValue) => {
-                                onPayloadChange?.(index, newValue === '' ? undefined : newValue)
-                            }}
-                            value={payloads[index]}
-                            placeholder='{"key": "value"}'
-                        />
-                    </div>
-                    <div className="col-span-3">
-                        <div>
-                            <LemonInput
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={variant.rollout_percentage || 0}
-                                onChange={(changedValue) => {
-                                    const valueInt =
-                                        changedValue !== undefined && !isNaN(Number(changedValue))
-                                            ? parseInt(changedValue.toString())
-                                            : 0
-
-                                    onVariantChange?.(index, 'rollout_percentage', valueInt)
-                                }}
-                                suffix={<span>%</span>}
-                                data-attr="feature-flag-variant-rollout-percentage-input"
-                            />
-                            {filterGroups.filter((group) => group.variant === variant.key).length > 0 && (
-                                <span className="text-secondary text-xs">
-                                    Overridden by{' '}
-                                    <strong>
-                                        {variantConcatWithPunctuation(
-                                            filterGroups
-                                                .filter(
-                                                    (group) => group.variant != null && group.variant === variant.key
-                                                )
-                                                .map(
-                                                    (variant) =>
-                                                        'Set ' +
-                                                        (filterGroups.findIndex((group) => group === variant) + 1)
-                                                )
-                                        )}
-                                    </strong>
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                    <div className="flex justify-center items-start mt-1.5">
-                        {variants.length > 1 && onRemoveVariant && (
-                            <LemonButton
-                                icon={<IconTrash />}
-                                data-attr={`delete-prop-filter-${index}`}
-                                noPadding
-                                onClick={() => onRemoveVariant(index)}
-                                disabledReason={
-                                    !canEditVariant(index)
-                                        ? experimentDisabledReason('cannot be deleted', true)
-                                        : undefined
-                                }
-                                tooltipPlacement="top-end"
-                            />
-                        )}
-                    </div>
+                <div className="flex justify-center">
+                    <span className="text-xs text-muted">Actions</span>
                 </div>
-            ))}
+            </div>
+            <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+            >
+                <SortableContext
+                    items={variants.map((_, index) => `variant-${index}`)}
+                    strategy={verticalListSortingStrategy}
+                >
+                    {variants.map((variant: MultivariateFlagVariant, index: number) => (
+                        <SortableVariantRow
+                            key={`variant-${index}`}
+                            variant={variant}
+                            index={index}
+                            payloads={payloads}
+                            filterGroups={filterGroups}
+                            variants={variants}
+                            onRemoveVariant={onRemoveVariant}
+                            onMoveVariantUp={onMoveVariantUp}
+                            onMoveVariantDown={onMoveVariantDown}
+                            canEditVariant={canEditVariant}
+                            onVariantChange={onVariantChange}
+                            onPayloadChange={onPayloadChange}
+                            variantErrors={variantErrors}
+                            experimentDisabledReason={experimentDisabledReason}
+                            variantConcatWithPunctuation={variantConcatWithPunctuation}
+                        />
+                    ))}
+                </SortableContext>
+                <DragOverlay>
+                    {activeVariant ? (
+                        <div className="VariantFormList__row grid gap-2 bg-bg-light border border-border rounded p-2 shadow-lg">
+                            <div className="flex mt-2 justify-center">
+                                <Lettermark name={alphabet[activeVariantIndex]} color={LettermarkColor.Gray} />
+                            </div>
+                            <div className="col-span-4">
+                                <LemonInput
+                                    value={activeVariant.key}
+                                    placeholder={`example-variant-${activeVariantIndex + 1}`}
+                                    disabled
+                                />
+                            </div>
+                            <div className="col-span-6">
+                                <LemonInput value={activeVariant.name || ''} placeholder="Description" disabled />
+                            </div>
+                            <div className="col-span-8">
+                                <JSONEditorInput
+                                    value={payloads[activeVariantIndex]}
+                                    placeholder='{"key": "value"}'
+                                    readOnly
+                                />
+                            </div>
+                            <div className="col-span-3">
+                                <LemonInput
+                                    type="number"
+                                    value={activeVariant.rollout_percentage || 0}
+                                    suffix={<span>%</span>}
+                                    disabled
+                                />
+                            </div>
+                            <div className="flex items-start gap-1 mt-2">
+                                <span className="text-muted-alt">
+                                    <SortableDragIcon />
+                                </span>
+                                <span className="w-6 h-6" />
+                                <span className="w-6 h-6" />
+                                <span className="w-6 h-6" />
+                            </div>
+                        </div>
+                    ) : null}
+                </DragOverlay>
+            </DndContext>
             {variants.length > 0 && !areVariantRolloutsValid && (
                 <p className="text-danger">
                     Percentage rollouts for variants must sum to 100 (currently {variantRolloutSum}).

@@ -281,6 +281,14 @@ export const convertIndexBasedPayloadsToVariantKeys = (
     return newPayloads
 }
 
+function moveVariant<T>(variants: T[], index: number, newIndex: number): T[] {
+    const updatedVariants = [...variants]
+    const item = updatedVariants[index]
+    updatedVariants.splice(index, 1)
+    updatedVariants.splice(newIndex, 0, item)
+    return updatedVariants
+}
+
 export const indexToVariantKeyFeatureFlagPayloads = (flag: Partial<FeatureFlagType>): Partial<FeatureFlagType> => {
     if (flag.filters?.multivariate) {
         const newPayloads = convertIndexBasedPayloadsToVariantKeys(
@@ -424,6 +432,9 @@ export const featureFlagLogic = kea<featureFlagLogicType>([
         addVariant: true,
         duplicateVariant: (index: number) => ({ index }),
         removeVariant: (index: number) => ({ index }),
+        moveVariantUp: (index: number) => ({ index }),
+        moveVariantDown: (index: number) => ({ index }),
+        reorderVariants: (from: number, to: number) => ({ from, to }),
         editFeatureFlag: (editing: boolean, options?: { expandAdvanced?: boolean }) => ({
             editing,
             expandAdvanced: options?.expandAdvanced ?? false,
@@ -632,6 +643,129 @@ export const featureFlagLogic = kea<featureFlagLogicType>([
                             multivariate: {
                                 ...state.filters.multivariate,
                                 variants,
+                            },
+                            payloads: newPayloads,
+                        },
+                    }
+                },
+                moveVariantUp: (state, { index }) => {
+                    if (!state || index <= 0) {
+                        return state
+                    }
+                    const variants = [...(state.filters.multivariate?.variants || [])]
+                    const movedVariants = moveVariant(variants, index, index - 1)
+
+                    // Also need to move payloads to keep them in sync
+                    const currentPayloads = { ...state.filters.payloads }
+                    const newPayloads: Record<number, any> = {}
+
+                    Object.keys(currentPayloads).forEach((key) => {
+                        const payloadIndex = parseInt(key)
+                        if (payloadIndex === index) {
+                            // Move current index payload to previous index
+                            newPayloads[index - 1] = currentPayloads[payloadIndex]
+                        } else if (payloadIndex === index - 1) {
+                            // Move previous index payload to current index
+                            newPayloads[index] = currentPayloads[payloadIndex]
+                        } else {
+                            // Keep other payloads in place
+                            newPayloads[payloadIndex] = currentPayloads[payloadIndex]
+                        }
+                    })
+
+                    return {
+                        ...state,
+                        filters: {
+                            ...state.filters,
+                            multivariate: {
+                                ...state.filters.multivariate,
+                                variants: movedVariants,
+                            },
+                            payloads: newPayloads,
+                        },
+                    }
+                },
+                moveVariantDown: (state, { index }) => {
+                    if (!state) {
+                        return state
+                    }
+                    const variants = [...(state.filters.multivariate?.variants || [])]
+                    if (index >= variants.length - 1) {
+                        return state
+                    }
+                    const movedVariants = moveVariant(variants, index, index + 1)
+
+                    // Also need to move payloads to keep them in sync
+                    const currentPayloads = { ...state.filters.payloads }
+                    const newPayloads: Record<number, any> = {}
+
+                    Object.keys(currentPayloads).forEach((key) => {
+                        const payloadIndex = parseInt(key)
+                        if (payloadIndex === index) {
+                            // Move current index payload to next index
+                            newPayloads[index + 1] = currentPayloads[payloadIndex]
+                        } else if (payloadIndex === index + 1) {
+                            // Move next index payload to current index
+                            newPayloads[index] = currentPayloads[payloadIndex]
+                        } else {
+                            // Keep other payloads in place
+                            newPayloads[payloadIndex] = currentPayloads[payloadIndex]
+                        }
+                    })
+
+                    return {
+                        ...state,
+                        filters: {
+                            ...state.filters,
+                            multivariate: {
+                                ...state.filters.multivariate,
+                                variants: movedVariants,
+                            },
+                            payloads: newPayloads,
+                        },
+                    }
+                },
+                reorderVariants: (state, { from, to }) => {
+                    if (!state || from === to) {
+                        return state
+                    }
+                    const variants = [...(state.filters.multivariate?.variants || [])]
+                    const reorderedVariants = moveVariant(variants, from, to)
+
+                    // Also need to reorder payloads to keep them in sync
+                    const currentPayloads = { ...state.filters.payloads }
+                    const newPayloads: Record<number, any> = {}
+
+                    // Create a mapping of old index to new index
+                    const indexMapping: Record<number, number> = {}
+                    variants.forEach((_, oldIndex) => {
+                        let newIndex = oldIndex
+                        if (oldIndex === from) {
+                            newIndex = to
+                        } else if (from < to && oldIndex > from && oldIndex <= to) {
+                            newIndex = oldIndex - 1
+                        } else if (from > to && oldIndex < from && oldIndex >= to) {
+                            newIndex = oldIndex + 1
+                        }
+                        indexMapping[oldIndex] = newIndex
+                    })
+
+                    // Apply the mapping to payloads
+                    Object.keys(currentPayloads).forEach((key) => {
+                        const oldIndex = parseInt(key)
+                        const newIndex = indexMapping[oldIndex]
+                        if (newIndex !== undefined) {
+                            newPayloads[newIndex] = currentPayloads[oldIndex]
+                        }
+                    })
+
+                    return {
+                        ...state,
+                        filters: {
+                            ...state.filters,
+                            multivariate: {
+                                ...state.filters.multivariate,
+                                variants: reorderedVariants,
                             },
                             payloads: newPayloads,
                         },
