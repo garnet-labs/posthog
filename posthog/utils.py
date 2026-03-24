@@ -363,10 +363,15 @@ def get_js_url(request: HttpRequest) -> str:
     As the web app may be loaded from a non-localhost url (e.g. from the worker container calling the web container)
     it is necessary to set the JS_URL host based on the calling origin.
     """
-    if settings.DEBUG and settings.JS_URL == "http://localhost:8234":
-        # given the strict usage of 'get_host()', this string is not susceptible to xss
+    from urllib.parse import urlparse
+
+    parsed = urlparse(settings.JS_URL)
+    if settings.DEBUG and parsed.hostname == "localhost":
+        # Rewrite the JS_URL hostname to match the request origin so the browser
+        # can reach the Vite dev server when accessed via a non-localhost address
+        # (e.g. from a Docker container or remote host).
         # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
-        return f"http://{request.get_host().split(':')[0]}:8234"
+        return f"http://{request.get_host().split(':')[0]}:{parsed.port}"
     return settings.JS_URL
 
 

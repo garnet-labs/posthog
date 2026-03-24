@@ -490,7 +490,12 @@ def check_migration_staleness(worktree_path: str) -> str | None:
 
 
 def _prompt_migration_choice(stale_info: str) -> str:
-    """Ask the user what to do about stale migrations."""
+    """Ask the user what to do about stale migrations.
+
+    Auto-selects 'c' after 10 seconds if no input is given.
+    """
+    import select
+
     warn("The cache has newer migrations than your branch:")
     print(stale_info)
     print("This can cause issues if those migrations deleted or renamed columns.")
@@ -500,11 +505,19 @@ def _prompt_migration_choice(stale_info: str) -> str:
     print("  [q] Quit and merge master first")
     print()
 
-    while True:
-        choice = input("Choice [c/f/q]: ").strip().lower()
-        if choice in ("c", "f", "q"):
-            return choice
-        print("Please enter c, f, or q.")
+    timeout = 10
+    while timeout > 0:
+        print(f"\rChoice [c/f/q] (auto-selecting c in {timeout}s): ", end="", flush=True)
+        ready, _, _ = select.select([sys.stdin], [], [], 1)
+        if ready:
+            choice = sys.stdin.readline().strip().lower()
+            if choice in ("c", "f", "q"):
+                return choice
+            print("Please enter c, f, or q.")
+        timeout -= 1
+
+    print("\rAuto-selecting: use cache anyway.                    ")
+    return "c"
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +801,11 @@ examples:
     p = sub.add_parser("create", help="Create a new isolated sandbox")
     p.add_argument("branch")
     p.add_argument("base_branch", nargs="?", default="master")
+    p.add_argument(
+        "--intents",
+        default="product_analytics",
+        help="Comma-separated hogli intents (default: product_analytics)",
+    )
 
     for name, help_text in [
         ("start", "Start a stopped sandbox"),
@@ -813,6 +831,9 @@ def main() -> None:
     if not args.command:
         parser.print_help()
         return
+
+    if args.command == "create":
+        os.environ["SANDBOX_INTENTS"] = args.intents
 
     dispatch = {
         "create": lambda: cmd_create(args.branch, args.base_branch),
