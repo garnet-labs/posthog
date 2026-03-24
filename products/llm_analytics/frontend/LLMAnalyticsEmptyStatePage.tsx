@@ -1,4 +1,4 @@
-import { IconLlmAnalytics } from '@posthog/icons'
+import { IconBolt, IconLlmAnalytics, IconReceipt, IconTarget } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { cn } from 'lib/utils/css-classes'
@@ -20,17 +20,13 @@ export interface LLMAnalyticsEmptyStatePageProps {
 export function LLMAnalyticsEmptyStatePage({ className, video }: LLMAnalyticsEmptyStatePageProps): JSX.Element {
     return (
         <div className={cn('flex flex-col items-center justify-center max-w-4xl mx-auto py-12 px-6', className)}>
-            <div className="flex items-center gap-2 mb-6">
-                <IconLlmAnalytics className="w-8 h-8 text-[var(--color-product-llm-analytics-light)]" />
-                <h1 className="text-2xl font-bold">LLM analytics</h1>
+            <div className="flex items-center gap-3 mb-6">
+                <IconLlmAnalytics className="w-8 h-8 shrink-0 text-[var(--color-product-llm-analytics-light)]" />
+                <h1 className="text-2xl font-bold m-0">LLM analytics</h1>
             </div>
 
-            <p className="text-center text-lg text-muted mb-2 max-w-2xl">
-                Monitor your AI and LLM application performance (observability, not AI-powered analytics).
-            </p>
-            <p className="text-center text-sm text-muted mb-8 max-w-2xl">
-                Track costs per model, measure latency and error rates, evaluate output quality, debug traces, and
-                understand how users interact with your AI features.
+            <p className="text-center text-muted mb-8 max-w-xl">
+                Understand costs, latency, and output quality across every model call your app makes.
             </p>
 
             <div className="w-full max-w-3xl rounded-lg overflow-hidden border border-border bg-bg-light mb-8 shadow-sm">
@@ -57,16 +53,25 @@ export function LLMAnalyticsEmptyStatePage({ className, video }: LLMAnalyticsEmp
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full max-w-3xl mb-8">
-                <div className="border border-border rounded-lg bg-bg-light p-4">
-                    <div className="font-semibold mb-1">Costs and usage</div>
+                <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 font-semibold mb-1">
+                        <IconReceipt className="w-5 h-5 text-muted" />
+                        Costs and usage
+                    </div>
                     <div className="text-sm text-muted">See spend by model, provider, and prompt.</div>
                 </div>
-                <div className="border border-border rounded-lg bg-bg-light p-4">
-                    <div className="font-semibold mb-1">Latency and reliability</div>
+                <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 font-semibold mb-1">
+                        <IconBolt className="w-5 h-5 text-muted" />
+                        Latency and reliability
+                    </div>
                     <div className="text-sm text-muted">Track performance over time and catch errors fast.</div>
                 </div>
-                <div className="border border-border rounded-lg bg-bg-light p-4">
-                    <div className="font-semibold mb-1">Quality and evaluations</div>
+                <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 font-semibold mb-1">
+                        <IconTarget className="w-5 h-5 text-muted" />
+                        Quality and evaluations
+                    </div>
                     <div className="text-sm text-muted">Measure output quality and compare prompt changes.</div>
                 </div>
             </div>

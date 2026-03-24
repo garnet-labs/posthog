@@ -1,5 +1,6 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { combineUrl, router } from 'kea-router'
+import { useFeatureFlagPayload, useFeatureFlagVariantKey } from 'posthog-js/react'
 import React, { useMemo } from 'react'
 
 import { LemonBanner, LemonButton, LemonTab, LemonTabs, Link, Spinner } from '@posthog/lemon-ui'
@@ -38,6 +39,7 @@ import { AccessControlLevel, AccessControlResourceType, DashboardPlacement, Even
 
 import { useSortableColumns } from './hooks/useSortableColumns'
 import { llmAnalyticsColumnRenderers } from './llmAnalyticsColumnRenderers'
+import { LLMAnalyticsEmptyStatePage, type LLMAnalyticsEmptyStateVideoPayload } from './LLMAnalyticsEmptyStatePage'
 import { LLMAnalyticsErrors } from './LLMAnalyticsErrors'
 import { LLMAnalyticsReloadAction } from './LLMAnalyticsReloadAction'
 import { LLMAnalyticsSessionsScene } from './LLMAnalyticsSessionsScene'
@@ -436,10 +438,15 @@ export function LLMAnalyticsScene({ tabId }: { tabId?: string }): JSX.Element {
 }
 
 function LLMAnalyticsSceneContent(): JSX.Element {
-    const { activeTab } = useValues(llmAnalyticsSharedLogic)
+    const { activeTab, hasSentAiEvent, hasSentAiEventLoading } = useValues(llmAnalyticsSharedLogic)
     const { featureFlags } = useValues(featureFlagLogic)
     const { searchParams } = useValues(router)
     const isTraceReviewEnabled = !!featureFlags[FEATURE_FLAGS.LLM_ANALYTICS_TRACE_REVIEW]
+
+    const richEmptyStateVariant = useFeatureFlagVariantKey(FEATURE_FLAGS.LLMA_RICH_EMPTY_STATE)
+    const richEmptyStatePayload = useFeatureFlagPayload(
+        FEATURE_FLAGS.LLMA_RICH_EMPTY_STATE
+    ) as LLMAnalyticsEmptyStateVideoPayload
 
     const { push } = useActions(router)
     const { toggleProduct, openModal: openEditCustomProductsModal } = useActions(editCustomProductsModalLogic)
@@ -661,8 +668,28 @@ function LLMAnalyticsSceneContent(): JSX.Element {
         ].filter(Boolean) as JSX.Element[]
     }, [featureFlags, isPromptManagementEnabled, searchParams, toggleProduct])
 
+    const showRichEmptyState = !hasSentAiEventLoading && !hasSentAiEvent && richEmptyStateVariant === 'test'
+
     if (activeTab === 'reviews' && !isTraceReviewEnabled) {
         return <NotFound object="page" />
+    }
+
+    if (hasSentAiEventLoading) {
+        return (
+            <SceneContent>
+                <div className="flex justify-center py-12">
+                    <Spinner />
+                </div>
+            </SceneContent>
+        )
+    }
+
+    if (showRichEmptyState) {
+        return (
+            <SceneContent>
+                <LLMAnalyticsEmptyStatePage video={richEmptyStatePayload} />
+            </SceneContent>
+        )
     }
 
     return (
