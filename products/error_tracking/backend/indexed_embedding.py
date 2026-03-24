@@ -370,7 +370,7 @@ class ModelTableDefinitions:
 
     def add_content_full_text_index_sql(self) -> str:
         """SQL to add a full text index on the content column using ngram tokenizer."""
-        return f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS content_full_text content TYPE full_text(tokenizer = ngrams(3)) GRANULARITY 1"
+        return f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS content_full_text content TYPE full_text(tokenizer = ngrams(3))"
 
 
 # Create table definition objects for each model
