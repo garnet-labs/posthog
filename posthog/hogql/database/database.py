@@ -1449,11 +1449,17 @@ def _use_error_tracking_issue_id_from_error_tracking_issue_overrides(database: D
     )
     table.fields["assigned_user_id"] = ExpressionField(
         name="assigned_user_id",
-        expr=parse_expr("exception_issue_denormalized.assigned_user_id"),
+        expr=parse_expr(
+            "if(equals(toString(exception_issue_denormalized.assigned_entity_type), 'user'), toInt64OrNull(exception_issue_denormalized.assigned_entity_id), NULL)",
+            start=None,
+        ),
     )
     table.fields["assigned_role_id"] = ExpressionField(
         name="assigned_role_id",
-        expr=parse_expr("exception_issue_denormalized.assigned_role_id"),
+        expr=parse_expr(
+            "if(equals(toString(exception_issue_denormalized.assigned_entity_type), 'role'), exception_issue_denormalized.assigned_entity_id, NULL)",
+            start=None,
+        ),
     )
     table.fields["issue_first_seen"] = ExpressionField(
         name="issue_first_seen",
