@@ -1,1 +1,1 @@
-0221_error_tracking_events_test_table
+0222_add_document_embeddings_content_text_index

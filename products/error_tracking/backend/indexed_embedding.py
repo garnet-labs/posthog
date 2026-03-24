@@ -222,9 +222,10 @@ EMBEDDING_MODELS_1 = [
 # - Add the new models to a new list like the one above
 # - Create a new list like EMBEDDING_TABLES_1
 # - Add that new list to EMBEDDING_TABLES full-list, so all the HOGQL modelling is automatically updated
-# And then write a migration (similar to 0187_model_specific_embedding_tables) that:
+# And then write a migration (similar to 0191_model_specific_embedding_tables) that:
 # - Drop the buffer-table-filling MV
 # - Create the new tables and MVs for the new model-specific tables
+# - Add vector indexes via add_vector_index_sql() and content text index via add_content_text_index_sql()
 # - Re-creates the buffer-table-filling MV
 
 
@@ -366,6 +367,10 @@ class ModelTableDefinitions:
             f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS embedding_idx_l2 embedding TYPE vector_similarity('hnsw', 'L2Distance', {self.dimension})",
             f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS embedding_idx_cosine embedding TYPE vector_similarity('hnsw', 'cosineDistance', {self.dimension})",
         ]
+
+    def add_content_text_index_sql(self) -> str:
+        """SQL to add a full text index on the content column using ngram tokenization."""
+        return f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS content_text_idx content TYPE text(tokenizer = ngrams(3))"
 
 
 # Create table definition objects for each model
