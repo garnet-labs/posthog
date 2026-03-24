@@ -91,7 +91,7 @@ function ContextMenuItem({
             data-inset={inset}
             data-variant={variant}
             className={cn(
-                "group/context-menu-item relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:ps-7.5 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+                "group/context-menu-item relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
                 className
             )}
             render={<Button variant={variant} size="sm" className="w-full" left />}
@@ -119,9 +119,10 @@ function ContextMenuSubTrigger({
             data-slot="context-menu-sub-trigger"
             data-inset={inset}
             className={cn(
-                "flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:ps-7.5 data-open:bg-accent data-open:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+                "flex min-h-7 cursor-default items-center gap-2 px-2 py-1 text-xs outline-hidden select-none data-inset:ps-7.5 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
                 className
             )}
+            render={<Button variant="ghost" size="sm" className="w-full" left />}
             {...props}
         >
             {children}
@@ -156,7 +157,7 @@ function ContextMenuCheckboxItem({
             data-slot="context-menu-checkbox-item"
             data-inset={inset}
             className={cn(
-                "relative flex min-h-7 cursor-default items-center gap-2 rounded-md py-1.5 pe-8 ps-2 text-xs outline-hidden select-none focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-inset:ps-7.5 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+                "relative flex min-h-7 cursor-default items-center gap-2 rounded-md py-1.5 pe-8 ps-2 text-xs outline-hidden select-none focus:text-accent-foreground focus:**:text-accent-foreground data-inset:ps-7.5 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
                 className
             )}
             checked={checked}
