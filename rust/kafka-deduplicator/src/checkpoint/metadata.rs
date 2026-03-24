@@ -11,9 +11,10 @@ use crate::utils::format_store_path;
 
 /// Deterministic 8-hex-char prefix for spreading S3 object keys across internal partitions.
 /// Applied ONLY to checkpoint object file paths, NEVER to metadata.json paths.
-pub fn hash_prefix_for_partition(topic: &str, partition: i32) -> String {
-    let input = format!("{topic}/{partition}");
-    let hash = Sha256::digest(input.as_bytes());
+/// Derived from topic name only so all partitions of the same topic share a prefix,
+/// simplifying S3 listing and lifecycle operations.
+pub fn hash_prefix_for_partition(topic: &str, _partition: i32) -> String {
+    let hash = Sha256::digest(topic.as_bytes());
     format!(
         "{:02x}{:02x}{:02x}{:02x}",
         hash[0], hash[1], hash[2], hash[3]
@@ -498,13 +499,20 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_prefix_different_partitions() {
+    fn test_hash_prefix_same_topic_same_hash() {
+        // All partitions of the same topic share a hash prefix
         let h0 = hash_prefix_for_partition("events", 0);
         let h1 = hash_prefix_for_partition("events", 1);
-        let h2 = hash_prefix_for_partition("other-topic", 0);
+        let h2 = hash_prefix_for_partition("events", 42);
+        assert_eq!(h0, h1);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_hash_prefix_different_topics() {
+        let h0 = hash_prefix_for_partition("events", 0);
+        let h1 = hash_prefix_for_partition("other-topic", 0);
         assert_ne!(h0, h1);
-        assert_ne!(h0, h2);
-        assert_ne!(h1, h2);
     }
 
     #[test]
