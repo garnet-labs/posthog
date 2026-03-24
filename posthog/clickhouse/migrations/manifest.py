@@ -5,7 +5,17 @@ from pathlib import Path
 
 import yaml
 
-VALID_NODE_ROLES = frozenset({"DATA", "COORDINATOR"})
+VALID_NODE_ROLES = frozenset({
+    "DATA",
+    "COORDINATOR",
+    "INGESTION_EVENTS",
+    "INGESTION_SMALL",
+    "INGESTION_MEDIUM",
+    "SHUFFLEHOG",
+    "ENDPOINTS",
+    "LOGS",
+    "ALL",
+})
 
 
 @dataclass
