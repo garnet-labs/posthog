@@ -65,6 +65,11 @@ PRODUCTS: Final[dict[str, ProductConfig]] = {
         allowed_models=None,
         allow_api_keys=True,
     ),
+    "llma_labeling": ProductConfig(
+        allowed_application_ids=None,
+        allowed_models=frozenset({"gpt-5.4"}),
+        allow_api_keys=True,
+    ),
     "django": ProductConfig(
         allowed_application_ids=None,
         allowed_models=None,
@@ -91,6 +96,11 @@ PRODUCTS: Final[dict[str, ProductConfig]] = {
         allow_api_keys=True,
     ),
     "llma_eval_summary": ProductConfig(
+        allowed_application_ids=None,
+        allowed_models=frozenset({"gpt-5-mini"}),
+        allow_api_keys=True,
+    ),
+    "customer_archetype_classification": ProductConfig(
         allowed_application_ids=None,
         allowed_models=frozenset({"gpt-5-mini"}),
         allow_api_keys=True,

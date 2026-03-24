@@ -408,6 +408,19 @@ migrations:
             - postgresql
             - clickhouse
 db:
+    db:pg:
+        cmd: psql postgres://posthog:posthog@localhost:5432/posthog
+        description: Connect to local PostgreSQL (extra args passed to psql)
+        services:
+            - postgresql
+    db:ch:
+        cmd: clickhouse client --host localhost --port 9000 --user default
+        description: Connect to local ClickHouse (extra args passed to clickhouse client)
+        services:
+            - clickhouse
+    db:dg:
+        cmd: psql postgres://posthog:posthog@localhost:15432/ducklake
+        description: Connect to local Duckgres (extra args passed to psql)
     db:upgrade:
         bin_script: upgrade-postgres
         description: Upgrade PostgreSQL from version 12 to 15 (interactive migration tool)
@@ -642,9 +655,8 @@ tools:
         description: 'TODO: add description for generate_personhog_proto.sh'
         hidden: true
     phrocs:build:
-        cmd: cd tools/phrocs && go build -o ../../bin/phrocs .
-        description: Build the phrocs binary from source (Go required; run once or after
-            changing tools/phrocs/)
+        cmd: cd tools/phrocs && make build && cp dist/phrocs ../../bin/phrocs
+        description: Build the phrocs binary from source
     phrocs:
         bin_script: phrocs
         description: Run phrocs directly with a custom mprocs-format YAML config
@@ -652,6 +664,9 @@ tools:
     phrocs.bak:
         bin_script: phrocs.bak
         description: 'TODO: add description for phrocs.bak'
+    ci:wait:for:docker:
+        bin_script: ci-wait-for-docker
+        description: Launch Docker Compose services in CI and later wait for readiness
         hidden: true
 utilities:
     nuke:
@@ -708,3 +723,9 @@ environment:
     setup:python:
         cmd: uv sync --active
         description: Install Python dependencies to active virtual environment
+    telemetry:on:
+        description: Enable anonymous usage telemetry
+    telemetry:off:
+        description: Disable anonymous usage telemetry
+    telemetry:status:
+        description: Show current telemetry settings

@@ -1,52 +1,20 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-# Connected worktrees: automatically share the main repo's dev environment
-# when `git worktree add` creates a new worktree.
-#
-# Args: $1=prev_ref, $2=new_ref, $3=is_branch_checkout (1) or file checkout (0)
-
-# Only act on branch checkouts (not file checkouts)
+# Args: $1=prev_ref, $2=new_ref, $3=1 if branch checkout, 0 if file checkout
 [ "$3" = "1" ] || exit 0
 
-# Detect: are we in a worktree? (.git is a file pointing to the main repo's
-# .git/worktrees/<name> directory, NOT a directory itself)
+# Detect worktree: .git is a file (not a directory) pointing to the main repo
 [ -f .git ] || exit 0
 
-# Already connected or explicitly disconnected? Don't touch it.
-[ -f .worktree-connected ] && exit 0
-[ -f .worktree-disconnected ] && exit 0
-
-# Parse the main repo path from the .git file.
-# Format: "gitdir: <main-repo>/.git/worktrees/<name>"
-main_repo=$(sed -n 's|^gitdir: \(.*\)/\.git/worktrees/.*|\1|p' .git)
-if [ -n "$main_repo" ]; then
-    # Resolve relative paths
-    main_repo=$(cd "$main_repo" 2>/dev/null && pwd)
-fi
-[ -d "$main_repo" ] || exit 0
-
-# Don't connect if the main repo hasn't been set up yet
-[ -d "$main_repo/.flox/cache/venv" ] || exit 0
-
-echo "⚡ Setting up connected worktree → $main_repo"
-echo "   Sharing: Python venv, node_modules, .env files"
-
-# Write marker file
-echo "$main_repo" > .worktree-connected
-
-# Symlink node_modules (needed for husky/lint-staged)
-if [ -d "$main_repo/node_modules" ] && [ ! -e node_modules ]; then
-    ln -s "$main_repo/node_modules" node_modules
-fi
-
-# Symlink .env files
-for env_file in "$main_repo"/.env "$main_repo"/.env.*; do
-    [ -f "$env_file" ] || continue
-    base=$(basename "$env_file")
-    [ "$base" = ".env.example" ] && continue
-    [ -e "$base" ] && continue
-    ln -s "$env_file" "$base"
+# Bootstrap husky + lint-staged so pre-commit hooks work in worktrees
+# pnpm may come from flox, corepack, brew, etc. — add flox bin to PATH if available
+MAIN_REPO="$(cd "$(dirname "$0")/.." && pwd)"
+for p in "$MAIN_REPO/.flox/run"/*/bin; do
+    [ -d "$p" ] && export PATH="$p:$PATH"
 done
 
-echo "Connected worktree ready (shared env, no install needed)"
+if [ ! -d node_modules/.pnpm ]; then
+    echo "husky: worktree detected, bootstrapping with pnpm install ..."
+    pnpm install --frozen-lockfile --filter=.
+fi
