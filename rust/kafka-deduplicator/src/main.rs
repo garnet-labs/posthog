@@ -20,10 +20,15 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-/// Install a panic hook that logs panics through the structured tracing logger.
+/// Install a panic hook that logs panics through both stderr and the structured
+/// tracing logger.
 ///
 /// Without this, panics write to stderr using the default formatter, which
 /// bypasses the JSON log layer and makes them invisible in Loki/Grafana.
+///
+/// We write to stderr first as a guaranteed fallback — tracing may be in a bad
+/// state (deadlocked, subscriber dropped) when the panic hook runs, so direct
+/// IO ensures the message is always visible in container logs.
 fn install_tracing_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -41,6 +46,13 @@ fn install_tracing_panic_hook() {
             "unknown panic payload".to_string()
         };
 
+        // Write directly to stderr first — this always works even if the tracing
+        // subscriber is deadlocked, poisoned, or already dropped.
+        eprintln!("PANIC in thread '{thread_name}' at {location}: {payload}");
+
+        // Also try to log through tracing for structured logging (Loki/Grafana).
+        // This may silently fail if the subscriber is in a bad state, which is
+        // why we always write to stderr above.
         error!(
             thread = %thread_name,
             location = %location,
@@ -163,9 +175,15 @@ fn start_server(config: &Config, liveness: HealthRegistry) -> JoinHandle<()> {
                         .filter(|(_, component_status)| !component_status.is_healthy())
                         .map(|(name, component_status)| format!("{name}: {component_status:?}"))
                         .collect();
+                    let all_components: Vec<String> = status
+                        .components
+                        .iter()
+                        .map(|(name, component_status)| format!("{name}: {component_status:?}"))
+                        .collect();
                     error!(
-                        "Health check FAILED - unhealthy components: [{}]",
-                        unhealthy_components.join(", ")
+                        unhealthy = %unhealthy_components.join(", "),
+                        all_components = %all_components.join(", "),
+                        "Health check FAILED"
                     );
                 }
                 status

@@ -544,14 +544,29 @@ impl KafkaDeduplicatorService {
         }
 
         // Start consumption
-        let consumer_handle = tokio::spawn(async move { consumer.start_consumption().await });
+        let mut consumer_handle = tokio::spawn(async move { consumer.start_consumption().await });
 
         // Wait for SIGTERM signal (Kubernetes graceful shutdown)
         use tokio::signal::unix::{signal, SignalKind};
         let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
 
-        sigterm.recv().await;
-        info!("Received SIGTERM signal, shutting down gracefully...");
+        // Monitor both SIGTERM and the consumer task — if the consumer dies
+        // unexpectedly, we log the error immediately instead of sitting idle
+        // with stale health checks until k8s eventually kills us.
+        let consumer_exited_early = tokio::select! {
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM signal, shutting down gracefully...");
+                false
+            }
+            result = &mut consumer_handle => {
+                match result {
+                    Ok(Ok(_)) => error!("Consumer exited unexpectedly without error"),
+                    Ok(Err(ref e)) => error!(error = %e, "Consumer stopped with error"),
+                    Err(ref e) => error!(error = %e, "Consumer task panicked"),
+                }
+                true
+            }
+        };
 
         // Send shutdown signal
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
@@ -569,15 +584,17 @@ impl KafkaDeduplicatorService {
             checkpoint_manager.stop().await;
         }
 
-        // Wait for consumer to finish with timeout
-        match tokio::time::timeout(self.config.shutdown_timeout(), consumer_handle).await {
-            Ok(Ok(Ok(_))) => info!("Consumer stopped normally"),
-            Ok(Ok(Err(e))) => error!("Consumer stopped with error: {e:#}"),
-            Ok(Err(e)) => error!("Consumer task panicked: {e:#}"),
-            Err(_) => error!(
-                "Consumer shutdown timed out after {:?}",
-                self.config.shutdown_timeout()
-            ),
+        // Wait for consumer to finish with timeout (only if it didn't already exit)
+        if !consumer_exited_early {
+            match tokio::time::timeout(self.config.shutdown_timeout(), consumer_handle).await {
+                Ok(Ok(Ok(_))) => info!("Consumer stopped normally"),
+                Ok(Ok(Err(e))) => error!("Consumer stopped with error: {e:#}"),
+                Ok(Err(e)) => error!("Consumer task panicked: {e:#}"),
+                Err(_) => error!(
+                    "Consumer shutdown timed out after {:?}",
+                    self.config.shutdown_timeout()
+                ),
+            }
         }
 
         // Shutdown all stores cleanly
@@ -616,12 +633,24 @@ impl KafkaDeduplicatorService {
         }
 
         // Start consumption
-        let consumer_handle = tokio::spawn(async move { consumer.start_consumption().await });
+        let mut consumer_handle = tokio::spawn(async move { consumer.start_consumption().await });
 
-        // Wait for shutdown signal
-        shutdown_signal.await;
-
-        info!("Received shutdown signal, shutting down gracefully...");
+        // Monitor both the shutdown signal and the consumer task — if the consumer
+        // dies unexpectedly, we log the error immediately.
+        let consumer_exited_early = tokio::select! {
+            _ = shutdown_signal => {
+                info!("Received shutdown signal, shutting down gracefully...");
+                false
+            }
+            result = &mut consumer_handle => {
+                match result {
+                    Ok(Ok(_)) => error!("Consumer exited unexpectedly without error"),
+                    Ok(Err(ref e)) => error!(error = %e, "Consumer stopped with error"),
+                    Err(ref e) => error!(error = %e, "Consumer task panicked"),
+                }
+                true
+            }
+        };
 
         // Send shutdown signal
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
@@ -639,15 +668,17 @@ impl KafkaDeduplicatorService {
             checkpoint_manager.stop().await;
         }
 
-        // Wait for consumer to finish with timeout
-        match tokio::time::timeout(self.config.shutdown_timeout(), consumer_handle).await {
-            Ok(Ok(Ok(_))) => info!("Consumer stopped normally"),
-            Ok(Ok(Err(e))) => error!("Consumer stopped with error: {e:#}"),
-            Ok(Err(e)) => error!("Consumer task panicked: {e:#}"),
-            Err(_) => error!(
-                "Consumer shutdown timed out after {:?}",
-                self.config.shutdown_timeout()
-            ),
+        // Wait for consumer to finish with timeout (only if it didn't already exit)
+        if !consumer_exited_early {
+            match tokio::time::timeout(self.config.shutdown_timeout(), consumer_handle).await {
+                Ok(Ok(Ok(_))) => info!("Consumer stopped normally"),
+                Ok(Ok(Err(e))) => error!("Consumer stopped with error: {e:#}"),
+                Ok(Err(e)) => error!("Consumer task panicked: {e:#}"),
+                Err(_) => error!(
+                    "Consumer shutdown timed out after {:?}",
+                    self.config.shutdown_timeout()
+                ),
+            }
         }
 
         // Shutdown all stores cleanly
