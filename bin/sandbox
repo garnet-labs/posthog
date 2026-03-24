@@ -655,7 +655,16 @@ def cmd_start(branch: str) -> None:
     vite_port = entry.port + 1000
 
     info(f"Starting sandbox '{project}' on port {entry.port} (Vite: {vite_port})...")
-    compose(project, entry.port, entry.worktree, "start")
+    compose(project, entry.port, entry.worktree, "up", "-d")
+
+    info("Waiting for PostHog to start...")
+    if not wait_for_health(f"http://localhost:{entry.port}/_health", f"{project}-app-1"):
+        error("PostHog did not start. Something is likely broken.")
+        print("Troubleshooting:")
+        print(f"  Logs:   sandbox logs {branch}")
+        print(f"  Shell:  sandbox shell {branch}")
+        sys.exit(1)
+
     success(f"PostHog running at http://localhost:{entry.port}")
 
 

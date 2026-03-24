@@ -92,13 +92,22 @@ for topic in clickhouse_events_json exceptions_ingestion; do
         || rpk topic create "$topic" --brokers kafka:9092 -p 1 -r 1
 done
 
-echo "==> Generating mprocs config for intents: ${SANDBOX_INTENTS:-product_analytics}..."
-_hogli_with=""
-IFS=',' read -ra _intents <<< "${SANDBOX_INTENTS:-product_analytics}"
-for _intent in "${_intents[@]}"; do
-    _hogli_with="$_hogli_with --with $_intent"
-done
-hogli dev:generate $_hogli_with 2>/dev/null || true
+echo "==> Generating mprocs config..."
+# Seed intents on first boot; on restart, reuse the saved config.
+mkdir -p .posthog/.generated
+if [ ! -f .posthog/.generated/mprocs.yaml ] || ! grep -q "^_posthog:" .posthog/.generated/mprocs.yaml; then
+    echo "    Seeding intents: ${SANDBOX_INTENTS:-product_analytics}"
+    {
+        echo "_posthog:"
+        echo "  intents:"
+        IFS=',' read -ra _intents <<< "${SANDBOX_INTENTS:-product_analytics}"
+        for _intent in "${_intents[@]}"; do
+            echo "  - ${_intent}"
+        done
+        echo "procs: {}"
+    } > .posthog/.generated/mprocs.yaml
+fi
+hogli dev:generate 2>/dev/null || true
 
 echo "==> Starting PostHog via mprocs in tmux..."
 rm -f /workspace/bin/start.lock
