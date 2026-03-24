@@ -222,6 +222,20 @@ def test_postgres_config():
     assert config.ssh_tunnel.auth.passphrase == ""
 
 
+def test_postgres_config_without_schema():
+    config = PostgresSourceConfig.from_dict(
+        {
+            "host": "host",
+            "port": 1433,
+            "database": "database",
+            "user": "user",
+            "password": "password",
+        }
+    )
+
+    assert config.schema is None
+
+
 def test_salesforce_config():
     config = SalesforceSourceConfig.from_dict({"salesforce_integration_id": 1})
     assert config.salesforce_integration_id == 1

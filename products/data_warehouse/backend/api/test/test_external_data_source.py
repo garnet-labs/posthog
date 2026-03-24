@@ -16,6 +16,7 @@ from posthog.models import Team
 from posthog.models.project import Project
 from posthog.temporal.data_imports.sources.bigquery.bigquery import BigQuerySourceConfig
 from posthog.temporal.data_imports.sources.common.schema import SourceSchema
+from posthog.temporal.data_imports.sources.postgres.postgres import PostgresDiscoveredSchema
 from posthog.temporal.data_imports.sources.stripe.constants import (
     BALANCE_TRANSACTION_RESOURCE_NAME as STRIPE_BALANCE_TRANSACTION_RESOURCE_NAME,
     CHARGE_RESOURCE_NAME as STRIPE_CHARGE_RESOURCE_NAME,
@@ -1355,6 +1356,86 @@ class TestExternalDataSource(APIBaseTest):
             1,
         )
 
+    @patch("products.data_warehouse.backend.api.external_data_source.SourceRegistry.get_source")
+    def test_create_direct_postgres_blank_schema_prefixes_table_names_and_preserves_physical_schema(
+        self, mock_get_source
+    ):
+        source_mock = mock_get_source.return_value
+        source_mock.validate_config.return_value = (True, [])
+        parsed_config = Mock()
+        parsed_config.to_dict.return_value = {
+            "host": "localhost",
+            "port": 5432,
+            "database": "app",
+            "user": "user",
+            "password": "pass",
+            "schema": "",
+        }
+        source_mock.parse_config.return_value = parsed_config
+        source_mock.validate_credentials.return_value = (True, None)
+        source_mock.get_schemas.return_value = [
+            SourceSchema(
+                name="public.accounts",
+                supports_incremental=False,
+                supports_append=False,
+                columns=[("id", "integer", False)],
+                foreign_keys=[],
+                source_schema="public",
+                source_table_name="accounts",
+            ),
+            SourceSchema(
+                name="analytics.accounts",
+                supports_incremental=False,
+                supports_append=False,
+                columns=[("id", "integer", False)],
+                foreign_keys=[],
+                source_schema="analytics",
+                source_table_name="accounts",
+            ),
+        ]
+
+        response = self.client.post(
+            f"/api/environments/{self.team.pk}/external_data_sources/",
+            data={
+                "source_type": "Postgres",
+                "access_method": "direct",
+                "prefix": "Primary database",
+                "payload": {
+                    "host": "localhost",
+                    "port": 5432,
+                    "database": "app",
+                    "user": "user",
+                    "password": "pass",
+                    "schema": "",
+                    "schemas": [
+                        {"name": "public.accounts", "should_sync": True, "sync_type": None},
+                        {"name": "analytics.accounts", "should_sync": True, "sync_type": None},
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        source = ExternalDataSource.objects.get(id=response.json()["id"])
+
+        public_schema = ExternalDataSchema.objects.get(
+            team_id=self.team.pk, source_id=source.pk, name="public.accounts"
+        )
+        analytics_schema = ExternalDataSchema.objects.get(
+            team_id=self.team.pk, source_id=source.pk, name="analytics.accounts"
+        )
+        assert public_schema.table is not None
+        assert analytics_schema.table is not None
+
+        self.assertEqual(public_schema.table.name, "public.accounts")
+        self.assertEqual(public_schema.table.options["direct_postgres_schema"], "public")
+        self.assertEqual(public_schema.table.options["direct_postgres_table"], "accounts")
+        self.assertEqual(analytics_schema.table.name, "analytics.accounts")
+        self.assertEqual(analytics_schema.table.options["direct_postgres_schema"], "analytics")
+        self.assertEqual(analytics_schema.table.options["direct_postgres_table"], "accounts")
+        self.assertEqual(public_schema.sync_type_config["schema_metadata"]["source_schema"], "public")
+        self.assertEqual(analytics_schema.sync_type_config["schema_metadata"]["source_schema"], "analytics")
+
     def test_create_direct_non_postgres_is_rejected(self):
         response = self.client.post(
             f"/api/environments/{self.team.pk}/external_data_sources/",
@@ -1551,7 +1632,13 @@ class TestExternalDataSource(APIBaseTest):
 
     @patch(
         "posthog.temporal.data_imports.sources.postgres.source.get_postgres_schemas",
-        return_value={"table_1": [("id", "integer", True)]},
+        return_value={
+            "table_1": PostgresDiscoveredSchema(
+                source_schema="public",
+                source_table_name="table_1",
+                columns=[("id", "integer", True)],
+            )
+        },
     )
     @patch(
         "posthog.temporal.data_imports.sources.postgres.source.get_postgres_row_count",
@@ -1683,7 +1770,13 @@ class TestExternalDataSource(APIBaseTest):
     )
     @patch(
         "posthog.temporal.data_imports.sources.postgres.source.get_postgres_schemas",
-        return_value={"table_1": [("id", "integer", True)]},
+        return_value={
+            "table_1": PostgresDiscoveredSchema(
+                source_schema="public",
+                source_table_name="table_1",
+                columns=[("id", "integer", True)],
+            )
+        },
     )
     def test_blocks_internal_host(self, host, _patch_schemas):
         database_schema_url = f"/api/environments/{self.team.pk}/external_data_sources/database_schema/"

@@ -1,14 +1,20 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from django.db.models import Q
 
 from posthog.temporal.data_imports.sources.common.schema import SourceSchema
 
-from products.data_warehouse.backend.models import DataWarehouseTable, ExternalDataSchema
 from products.data_warehouse.backend.models.external_data_source import ExternalDataSource
 from products.data_warehouse.backend.models.util import postgres_column_to_dwh_column, postgres_columns_to_dwh_columns
 
+if TYPE_CHECKING:
+    from products.data_warehouse.backend.models.table import DataWarehouseTable
+
 DIRECT_POSTGRES_URL_PATTERN = "direct://postgres"
+DIRECT_POSTGRES_SCHEMA_OPTION = "direct_postgres_schema"
+DIRECT_POSTGRES_TABLE_OPTION = "direct_postgres_table"
 
 type DirectPostgresColumns = dict[str, dict[str, Any]]
 
@@ -39,7 +45,10 @@ def postgres_schema_metadata_to_dwh_columns(schema_metadata: dict[str, Any] | No
 
 
 def postgres_schema_metadata(
-    columns: list[tuple[str, str, bool]], foreign_keys: list[tuple[str, str, str]] | None = None
+    columns: list[tuple[str, str, bool]],
+    foreign_keys: list[tuple[str, str, str]] | None = None,
+    source_schema: str | None = None,
+    source_table_name: str | None = None,
 ) -> dict[str, Any]:
     return {
         "columns": [
@@ -50,6 +59,34 @@ def postgres_schema_metadata(
             {"column": column_name, "target_table": target_table, "target_column": target_column}
             for column_name, target_table, target_column in (foreign_keys or [])
         ],
+        "source_schema": source_schema,
+        "source_table_name": source_table_name,
+    }
+
+
+def get_direct_postgres_location(
+    *,
+    schema_name: str,
+    schema_metadata: dict[str, Any] | None = None,
+    default_schema: str | None = None,
+) -> tuple[str, str]:
+    source_schema = schema_metadata.get("source_schema") if isinstance(schema_metadata, dict) else None
+    source_table_name = schema_metadata.get("source_table_name") if isinstance(schema_metadata, dict) else None
+
+    if isinstance(source_schema, str) and isinstance(source_table_name, str):
+        return source_schema, source_table_name
+
+    if (default_schema is None or default_schema == "") and "." in schema_name:
+        inferred_schema, inferred_table_name = schema_name.split(".", 1)
+        return inferred_schema, inferred_table_name
+
+    return default_schema or "public", schema_name
+
+
+def get_direct_postgres_table_options(*, source_schema: str, source_table_name: str) -> dict[str, str]:
+    return {
+        DIRECT_POSTGRES_SCHEMA_OPTION: source_schema,
+        DIRECT_POSTGRES_TABLE_OPTION: source_table_name,
     }
 
 
@@ -59,7 +96,16 @@ def upsert_direct_postgres_table(
     schema_name: str,
     source: ExternalDataSource,
     columns: DirectPostgresColumns,
+    source_schema: str,
+    source_table_name: str,
 ) -> DataWarehouseTable:
+    from products.data_warehouse.backend.models.table import DataWarehouseTable
+
+    options = {
+        **(existing_table.options if existing_table is not None and isinstance(existing_table.options, dict) else {}),
+        **get_direct_postgres_table_options(source_schema=source_schema, source_table_name=source_table_name),
+    }
+
     if existing_table is None:
         return DataWarehouseTable.objects.create(
             name=schema_name,
@@ -68,12 +114,14 @@ def upsert_direct_postgres_table(
             url_pattern=DIRECT_POSTGRES_URL_PATTERN,
             external_data_source=source,
             columns=columns,
+            options=options,
         )
 
     existing_table.name = schema_name
     existing_table.url_pattern = DIRECT_POSTGRES_URL_PATTERN
     existing_table.external_data_source = source
     existing_table.columns = columns
+    existing_table.options = options
     existing_table.deleted = False
     existing_table.deleted_at = None
     existing_table.save(
@@ -82,6 +130,7 @@ def upsert_direct_postgres_table(
             "url_pattern",
             "external_data_source",
             "columns",
+            "options",
             "deleted",
             "deleted_at",
             "updated_at",
@@ -101,6 +150,8 @@ def reconcile_direct_postgres_schemas(
     source_schemas: list[SourceSchema],
     team_id: int,
 ) -> list[str]:
+    from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
+
     source_schema_names = [schema.name for schema in source_schemas]
     schema_models = {
         schema.name: schema
@@ -112,7 +163,20 @@ def reconcile_direct_postgres_schemas(
         if schema_model is None:
             continue
 
-        schema_metadata = postgres_schema_metadata(source_schema.columns, source_schema.foreign_keys)
+        resolved_source_schema, resolved_source_table_name = get_direct_postgres_location(
+            schema_name=source_schema.name,
+            schema_metadata={
+                "source_schema": source_schema.source_schema,
+                "source_table_name": source_schema.source_table_name,
+            },
+            default_schema=(source.job_inputs or {}).get("schema"),
+        )
+        schema_metadata = postgres_schema_metadata(
+            source_schema.columns,
+            source_schema.foreign_keys,
+            source_schema=resolved_source_schema,
+            source_table_name=resolved_source_table_name,
+        )
         schema_model.sync_type_config = {**(schema_model.sync_type_config or {}), "schema_metadata": schema_metadata}
         schema_model.save(update_fields=["sync_type_config", "updated_at"])
 
@@ -125,6 +189,8 @@ def reconcile_direct_postgres_schemas(
             schema_name=source_schema.name,
             source=source,
             columns=postgres_columns_to_dwh_columns(source_schema.columns),
+            source_schema=resolved_source_schema,
+            source_table_name=resolved_source_table_name,
         )
         if schema_model.table_id != table_model.id:
             schema_model.table = table_model

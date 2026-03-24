@@ -105,10 +105,14 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                     ),
                     SourceFieldInputConfig(
                         name="schema",
-                        label="Schema",
+                        label="Schema (optional)",
                         type=SourceFieldInputConfigType.TEXT,
-                        required=True,
+                        required=False,
                         placeholder="public",
+                        caption=(
+                            "Leave blank to browse tables across all non-system schemas. "
+                            "You can narrow the list further in the next step."
+                        ),
                     ),
                     SourceFieldSSHTunnelConfig(name="ssh_tunnel", label="Use SSH tunnel?"),
                 ],
@@ -186,8 +190,8 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             else:
                 row_counts = {}
 
-        for table_name, columns in db_schemas.items():
-            incremental_field_tuples = filter_postgres_incremental_fields(columns)
+        for table_name, discovered_schema in db_schemas.items():
+            incremental_field_tuples = filter_postgres_incremental_fields(discovered_schema.columns)
             incremental_fields: list[IncrementalField] = [
                 {
                     "label": field_name,
@@ -206,8 +210,10 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                     supports_append=len(incremental_fields) > 0,
                     incremental_fields=incremental_fields,
                     row_count=row_counts.get(table_name, None),
-                    columns=columns,
+                    columns=discovered_schema.columns,
                     foreign_keys=db_foreign_keys.get(table_name, []),
+                    source_schema=discovered_schema.source_schema,
+                    source_table_name=discovered_schema.source_table_name,
                 )
             )
 
@@ -269,6 +275,15 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
         ssh_tunnel = self.make_ssh_tunnel_func(config)
 
         schema = ExternalDataSchema.objects.select_related("source").get(id=inputs.schema_id)
+        schema_metadata = schema.schema_metadata or {}
+        source_schema = (
+            schema_metadata.get("source_schema") if isinstance(schema_metadata.get("source_schema"), str) else None
+        )
+        source_table_name = (
+            schema_metadata.get("source_table_name")
+            if isinstance(schema_metadata.get("source_table_name"), str)
+            else None
+        )
 
         # Require SSL for sources created after the cutoff date
         require_ssl = schema.source.created_at >= SSL_REQUIRED_AFTER_DATE
@@ -279,8 +294,8 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             password=config.password,
             database=config.database,
             sslmode="prefer",
-            schema=config.schema,
-            table_names=[inputs.schema_name],
+            schema=source_schema or config.schema or "public",
+            table_names=[source_table_name or inputs.schema_name],
             should_use_incremental_field=inputs.should_use_incremental_field,
             logger=inputs.logger,
             incremental_field=inputs.incremental_field,

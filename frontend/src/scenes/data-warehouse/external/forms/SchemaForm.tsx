@@ -37,7 +37,8 @@ export default function SchemaForm(): JSX.Element {
             <div className="flex flex-col gap-2">
                 {isDirectQueryMode && (
                     <p className="text-sm text-muted-alt mb-0">
-                        Choose which tables should be available for querying in PostHog.
+                        Choose which tables should be available for querying in PostHog. If you left the schema field
+                        blank, tables from different schemas appear here with schema-prefixed names.
                     </p>
                 )}
                 <div className="max-h-[60vh] overflow-y-auto">

@@ -47,6 +47,7 @@ from products.data_warehouse.backend.data_load.service import (
     trigger_external_data_source_workflow,
 )
 from products.data_warehouse.backend.direct_postgres import (
+    get_direct_postgres_location,
     postgres_schema_metadata,
     reconcile_direct_postgres_schemas,
     upsert_direct_postgres_table,
@@ -637,6 +638,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             )
             new_source_model.save(update_fields=["connection_metadata", "updated_at"])
         schema_names = [schema.name for schema in source_schemas]
+        default_source_schema = source_config.to_dict().get("schema")
 
         payload_schemas = payload.get("schemas", None)
         if not payload_schemas or not isinstance(payload_schemas, list):
@@ -683,10 +685,20 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             source_schema = next(
                 (source_schema for source_schema in source_schemas if source_schema.name == schema_name), None
             )
+            resolved_source_schema, resolved_source_table_name = get_direct_postgres_location(
+                schema_name=schema_name,
+                schema_metadata={
+                    "source_schema": source_schema.source_schema if source_schema else None,
+                    "source_table_name": source_schema.source_table_name if source_schema else None,
+                },
+                default_schema=default_source_schema,
+            )
             schema_metadata = (
                 postgres_schema_metadata(
                     source_schema.columns if source_schema else [],
                     source_schema.foreign_keys if source_schema else [],
+                    source_schema=resolved_source_schema,
+                    source_table_name=resolved_source_table_name,
                 )
                 if source_type_model == ExternalDataSourceType.POSTGRES
                 else {}
@@ -717,6 +729,8 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                     schema_name=schema_name,
                     source=new_source_model,
                     columns=postgres_columns_to_dwh_columns(source_schema.columns if source_schema else []),
+                    source_schema=resolved_source_schema,
+                    source_table_name=resolved_source_table_name,
                 )
                 schema_model.save(update_fields=["table"])
 

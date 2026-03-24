@@ -1,8 +1,9 @@
 from datetime import date
 
 import pytest
+from unittest import mock
 
-from posthog.temporal.data_imports.sources.postgres.postgres import SafeDateLoader
+from posthog.temporal.data_imports.sources.postgres.postgres import SafeDateLoader, get_foreign_keys, get_schemas
 from posthog.temporal.data_imports.sources.postgres.source import PostgresSource
 
 
@@ -71,3 +72,66 @@ class TestPostgresSourceNonRetryableErrors:
         non_retryable = source.get_non_retryable_errors()
         is_non_retryable = any(pattern in error_msg for pattern in non_retryable.keys())
         assert is_non_retryable, f"Permanent error should be non-retryable: {error_msg}"
+
+
+class TestPostgresSchemaDiscovery:
+    def _mock_connection(self, *fetchall_results: list[tuple[object, ...]]):
+        cursor = mock.MagicMock()
+        cursor.fetchall.side_effect = list(fetchall_results)
+
+        cursor_context = mock.MagicMock()
+        cursor_context.__enter__.return_value = cursor
+        cursor_context.__exit__.return_value = None
+
+        connection = mock.MagicMock()
+        connection.cursor.return_value = cursor_context
+        return connection
+
+    def test_get_schemas_qualifies_table_names_when_schema_is_blank(self):
+        connection = self._mock_connection(
+            [("public", "users"), ("analytics", "events")],
+            [
+                ("analytics", "events", "id", "integer", "NO", 1),
+                ("public", "users", "id", "integer", "NO", 1),
+            ],
+        )
+
+        with mock.patch(
+            "posthog.temporal.data_imports.sources.postgres.postgres._connect_to_postgres",
+            return_value=connection,
+        ):
+            schemas = get_schemas(
+                host="localhost",
+                port=5432,
+                database="postgres",
+                user="postgres",
+                password="postgres",
+                schema="",
+            )
+
+        assert set(schemas.keys()) == {"public.users", "analytics.events"}
+        assert schemas["public.users"].source_schema == "public"
+        assert schemas["public.users"].source_table_name == "users"
+        assert schemas["analytics.events"].source_schema == "analytics"
+        assert schemas["analytics.events"].source_table_name == "events"
+
+    def test_get_foreign_keys_qualifies_target_table_names_when_schema_is_blank(self):
+        connection = self._mock_connection(
+            [("public", "users"), ("analytics", "events")],
+            [("analytics", "events", "user_id", "public", "users", "id")],
+        )
+
+        with mock.patch(
+            "posthog.temporal.data_imports.sources.postgres.postgres._connect_to_postgres",
+            return_value=connection,
+        ):
+            foreign_keys = get_foreign_keys(
+                host="localhost",
+                port=5432,
+                database="postgres",
+                user="postgres",
+                password="postgres",
+                schema="",
+            )
+
+        assert foreign_keys == {"analytics.events": [("user_id", "public.users", "id")]}

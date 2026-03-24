@@ -30,6 +30,7 @@ from products.data_warehouse.backend.data_load.service import (
     unpause_external_data_schedule,
 )
 from products.data_warehouse.backend.direct_postgres import (
+    get_direct_postgres_location,
     hide_direct_postgres_table,
     postgres_schema_metadata_to_dwh_columns,
     upsert_direct_postgres_table,
@@ -229,11 +230,18 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         if source.is_direct_postgres:
             # We use "should_sync" to determine if the table should be exposed or hidden.
             if should_sync is True and instance.should_sync is False:
+                source_schema, source_table_name = get_direct_postgres_location(
+                    schema_name=instance.name,
+                    schema_metadata=instance.schema_metadata,
+                    default_schema=(source.job_inputs or {}).get("schema"),
+                )
                 validated_data["table"] = upsert_direct_postgres_table(
                     instance.table,
                     schema_name=instance.name,
                     source=source,
                     columns=postgres_schema_metadata_to_dwh_columns(instance.schema_metadata),
+                    source_schema=source_schema,
+                    source_table_name=source_table_name,
                 )
 
             if should_sync is False and instance.should_sync is True:
