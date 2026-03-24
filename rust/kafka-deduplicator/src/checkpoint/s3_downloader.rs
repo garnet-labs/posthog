@@ -18,8 +18,7 @@ use crate::metrics_const::{
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use futures::stream::FuturesUnordered;
-use futures::{StreamExt, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use object_store::limit::LimitStore;
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectStore, ObjectStoreExt};
@@ -100,6 +99,7 @@ pub struct S3Downloader {
     s3_bucket: String,
     s3_key_prefix: String,
     checkpoint_import_window_hours: u32,
+    max_concurrent_downloads: usize,
 }
 
 impl S3Downloader {
@@ -117,6 +117,7 @@ impl S3Downloader {
             s3_bucket: config.s3_bucket.clone(),
             s3_key_prefix: config.s3_key_prefix.clone(),
             checkpoint_import_window_hours: config.checkpoint_import_window_hours,
+            max_concurrent_downloads: config.max_concurrent_checkpoint_file_downloads,
         })
     }
 }
@@ -288,9 +289,9 @@ impl CheckpointDownloader for S3Downloader {
             }
         }
 
-        // Build download futures using FuturesUnordered for early exit with sibling cancellation.
-        // LimitStore's semaphore still limits concurrent S3 requests.
-        let mut futures: FuturesUnordered<_> = remote_keys
+        // Collect download tasks as owned data upfront to avoid lifetime issues
+        // with buffer_unordered requiring 'static futures.
+        let download_tasks: Vec<_> = remote_keys
             .iter()
             .map(|remote_key| {
                 let remote_filename = remote_key
@@ -299,23 +300,32 @@ impl CheckpointDownloader for S3Downloader {
                     .unwrap_or(remote_key)
                     .to_string();
                 let local_filepath = local_base_path.join(&remote_filename);
+                (remote_key.clone(), local_filepath)
+            })
+            .collect();
 
+        // Build download stream with bounded concurrency.
+        // buffer_unordered limits how many futures are polled simultaneously,
+        // bounding memory from concurrent S3 streams and open file handles.
+        let max_concurrent = self.max_concurrent_downloads;
+        let mut download_stream =
+            stream::iter(download_tasks.into_iter().map(|(remote_key, local_filepath)| {
                 async move {
                     self.download_and_store_file_cancellable(
-                        remote_key,
+                        &remote_key,
                         &local_filepath,
                         cancel_token,
                     )
                     .await
                     .with_context(|| format!("Failed to download: {remote_key}"))
                 }
-            })
-            .collect();
+            }))
+            .buffer_unordered(max_concurrent);
 
         let mut first_error: Option<anyhow::Error> = None;
 
         // Process completions, cancel siblings on first error
-        while let Some(result) = futures.next().await {
+        while let Some(result) = download_stream.next().await {
             if let Err(e) = result {
                 first_error = Some(e);
                 // Cancel siblings via the attempt token - they'll exit on next chunk iteration
@@ -328,7 +338,7 @@ impl CheckpointDownloader for S3Downloader {
 
         // Drain remaining futures - they'll exit quickly due to cancellation check in their loop
         if first_error.is_some() {
-            while futures.next().await.is_some() {}
+            while download_stream.next().await.is_some() {}
         }
 
         if let Some(e) = first_error {
