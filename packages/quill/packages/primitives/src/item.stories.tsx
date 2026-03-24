@@ -11,7 +11,7 @@ import {
     DropdownMenuItem,
     DropdownMenuCheckboxItem,
 } from './dropdown-menu'
-import { Item, ItemContent, ItemDescription, ItemTitle, ItemActions, ItemMedia, ItemGroup, ItemCheckbox } from './item'
+import { Item, ItemContent, ItemDescription, ItemTitle, ItemActions, ItemMedia, ItemGroup, ItemCheckbox, ItemMenuItem } from './item'
 
 const meta = {
     title: 'Primitives/Item',
@@ -43,10 +43,10 @@ export const Default: Story = {
     ),
 } satisfies Story
 
-export const Link: Story = {
+export const Pressable: Story = {
     render: () => (
         <Item
-            variant="outline"
+            variant="pressable"
             size="sm"
             render={
                 // eslint-disable-next-line react/forbid-elements
@@ -103,6 +103,49 @@ export const Group: Story = {
     ),
 } satisfies Story
 
+export const GroupList: Story = {
+    render: () => (
+        <ItemGroup combined>
+            <Item 
+                variant="pressable" 
+                size="xs"
+                render={
+                    // eslint-disable-next-line react/forbid-elements
+                    <a href="#">
+                        <ItemContent>
+                            <ItemTitle>List link item</ItemTitle>
+                        </ItemContent>
+                    </a>
+                }
+            />
+            <Item 
+                variant="pressable" 
+                size="xs"
+                render={
+                    // eslint-disable-next-line react/forbid-elements
+                    <a href="#">
+                        <ItemContent>
+                            <ItemTitle>List link item</ItemTitle>
+                        </ItemContent>
+                    </a>
+                }
+            />
+            <Item 
+                variant="pressable" 
+                size="xs"
+                render={
+                    // eslint-disable-next-line react/forbid-elements
+                    <a href="#">
+                        <ItemContent>
+                            <ItemTitle>List link item</ItemTitle>
+                        </ItemContent>
+                    </a>
+                }
+            />
+        </ItemGroup>
+    ),
+} satisfies Story
+
 export const ItemInDropdown: Story = {
     render: () => {
         const [open, setOpen] = useState(true)
@@ -124,14 +167,14 @@ export const ItemInDropdown: Story = {
                                     <DropdownMenuItem
                                         key={person.username}
                                         render={
-                                            <Item size="xs" className="w-full">
+                                            <ItemMenuItem size="xs" className="w-full">
                                                 <ItemContent className="gap-0 py-1 px-1.5">
                                                     <ItemTitle>{person.username}</ItemTitle>
                                                     <ItemDescription className="leading-none">
                                                         {person.email}
                                                     </ItemDescription>
                                                 </ItemContent>
-                                            </Item>
+                                            </ItemMenuItem>
                                         }
                                     />
                                 ))}

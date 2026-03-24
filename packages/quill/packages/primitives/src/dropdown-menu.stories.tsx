@@ -39,14 +39,10 @@ export const Default: Story = {
                             <Copy />
                             Copy
                         </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                    <DropdownMenuGroup>
                         <DropdownMenuItem>
                             <Pencil />
                             Rename
                         </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                    <DropdownMenuGroup>
                         <DropdownMenuItem variant="destructive">
                             <TrashIcon />
                             Delete

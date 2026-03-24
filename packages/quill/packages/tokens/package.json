@@ -17,7 +17,8 @@
         "./color-system.css": "./dist/color-system.css"
     },
     "scripts": {
-        "build": "tsx src/build.ts"
+        "build": "tsx src/build.ts",
+        "build:watch": "tsx watch src/build.ts"
     },
     "devDependencies": {
         "tsx": "^4.19.0"

@@ -5,7 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "pnpm --filter @posthog/quill-web dev",
-        "storybook": "pnpm --filter @posthog/quill-storybook storybook",
+        "storybook": "pnpm build && (pnpm --filter @posthog/quill-tokens build:watch & pnpm --filter @posthog/quill-storybook storybook)",
         "build": "pnpm -r --filter '@posthog/quill-*' build",
         "lint": "eslint .",
         "format": "prettier --write \"**/*.{ts,tsx}\"",

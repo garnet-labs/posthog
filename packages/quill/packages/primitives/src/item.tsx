@@ -33,13 +33,15 @@ function ItemSeparator({ className, ...props }: React.ComponentProps<typeof Sepa
 }
 
 const itemVariants = cva(
-    'group/item flex w-full flex-wrap items-center rounded-md border text-xs/relaxed transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 [a]:transition-colors [a]:hover:bg-muted in-data-[combined]:rounded-none in-data-[combined]:first:rounded-t-md in-data-[combined]:last:rounded-b-md in-data-[combined]:not-last:border-b-0 focus-visible:z-1',
+    'group/item flex w-full flex-wrap items-center rounded-md border text-xs/relaxed transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 in-data-[combined]:rounded-none in-data-[combined]:first:rounded-t-md in-data-[combined]:last:rounded-b-md in-data-[combined]:not-last:border-b-0 focus-visible:z-1',
     {
         variants: {
             variant: {
                 default: 'border-card',
                 outline: 'border-border',
+                pressable: 'transition-colors hover:border-secondary/20 hover:shadow hover:z-1 hover:group-data-[combined=true]/item-group:shadow-none hover:group-data-[combined=true]/item-group:border-border',
                 muted: 'border-transparent bg-muted/50',
+                menuItem: 'hover:bg-accent hover:text-foreground border-none'
             },
             size: {
                 default: 'gap-2.5 px-3 py-2.5',
@@ -58,6 +60,7 @@ function Item({
     className,
     variant = 'default',
     size = 'default',
+    role,
     render,
     ...props
 }: useRender.ComponentProps<'div'> & VariantProps<typeof itemVariants>): React.ReactElement {
@@ -66,6 +69,32 @@ function Item({
         props: mergeProps<'div'>(
             {
                 className: cn(itemVariants({ variant, size, className })),
+                'role': variant === 'pressable' ? 'link' : undefined
+            },
+            props
+        ),
+        render,
+        state: {
+            slot: 'item',
+            variant,
+            size,
+        },
+    })
+}
+
+function ItemMenuItem({
+    className,
+    variant = 'default',
+    size = 'default',
+    render,
+    ...props
+}: useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>): React.ReactElement {
+    return useRender({
+        defaultTagName: 'button',
+        props: mergeProps<'button'>(
+            {
+                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                role: 'menuitem',
             },
             props
         ),
@@ -89,7 +118,7 @@ function ItemCheckbox({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant, size, className })),
+                className: cn(itemVariants({ variant: 'menuItem', size, className })),
                 role: 'checkbox',
             },
             props
@@ -130,7 +159,10 @@ function ItemMedia({
         <div
             data-slot="item-media"
             data-variant={variant}
-            className={cn(itemMediaVariants({ variant, className }))}
+            className={cn(
+                itemMediaVariants({ variant, className }),
+                'group-[&[role=link]:hover]/item:text-primary'
+            )}
             {...props}
         />
     )
@@ -155,6 +187,7 @@ function ItemTitle({ className, ...props }: React.ComponentProps<'div'>): React.
             data-slot="item-title"
             className={cn(
                 'line-clamp-1 flex w-fit items-center gap-2 text-xs/relaxed leading-snug font-medium underline-offset-4',
+                'group-[&[role=link]:hover]/item:text-primary',
                 className
             )}
             {...props}
@@ -203,6 +236,7 @@ export {
     Item,
     ItemCheckbox,
     // ItemRadio,
+    ItemMenuItem,
     ItemMedia,
     ItemContent,
     ItemActions,

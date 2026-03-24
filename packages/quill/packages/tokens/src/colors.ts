@@ -22,8 +22,8 @@ export const semanticColors: Record<string, ColorTuple> = {
     primary: ['oklch(0.6514 0.2137 37.89)', 'oklch(0.8325 0.1611 84.54)', 'bg-primary'],
     'primary-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)', 'text-primary-foreground'],
 
-    secondary: ['oklch(0.967 0.001 286.375)', 'oklch(0.274 0.006 286.033)', 'bg-secondary'],
-    'secondary-foreground': ['oklch(0.21 0.006 285.885)', 'oklch(0.985 0 0)', 'text-secondary-foreground'],
+    secondary: ['oklch(0.31 0 0)', 'oklch(0.86 0 0)', 'bg-primary'],
+    'secondary-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)', 'text-primary-foreground'],
 
     muted: ['oklch(0.97 0.006 106)', 'hsl(240 8% 10%)', 'bg-muted'],
     'muted-foreground': ['oklch(0.446 0.03 257)', 'oklch(0.709 0 0)', 'text-muted-foreground'],
@@ -32,25 +32,21 @@ export const semanticColors: Record<string, ColorTuple> = {
     'accent-muted': ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'bg-accent-muted'],
     'accent-foreground': ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)', 'text-accent-foreground'],
 
-    destructive: ['oklch(0.92 0.03 32.22)', 'oklch(0.24 0.03 2.79)', 'bg-destructive'],
-    'destructive-subtle': ['oklch(0.92 0.03 32.22)', 'oklch(0.24 0.03 2.79)', 'bg-destructive-subtle'],
-    'destructive-foreground': ['oklch(0.59 0.2 23.61)', 'oklch(0.76 0.46 76.51)', 'text-destructive-foreground'],
+    'destructive': ['oklch(0.92 0.03 32.22)', 'oklch(0.24 0.03 2.79)', 'bg-destructive'],
+    'destructive-foreground': ['oklch(0.59 0.2 23.61)', 'oklch(0.6316 0.1927 24.53)', 'text-destructive-foreground'],
 
-    success: ['oklch(0.94 0.06 154.03)', 'oklch(0.27 0.04 157.6)', 'bg-success'],
-    'success-subtle': ['oklch(0.94 0.06 154.03)', 'oklch(0.27 0.04 157.6)', 'bg-success-subtle'],
+    'success': ['oklch(0.94 0.06 154.03)', 'oklch(0.27 0.04 157.6)', 'bg-success'],
     'success-foreground': ['oklch(0.448 0.119 151.328)', 'oklch(0.925 0.084 155.995)', 'text-success-foreground'],
 
-    warning: ['oklch(0.93 0.04 74.41)', 'oklab(0.29 0.03 0.05)', 'bg-warning'],
-    'warning-subtle': ['oklch(0.93 0.04 74.41)', 'oklab(0.29 0.03 0.05)', 'bg-warning-subtle'],
+    'warning': ['oklch(0.93 0.04 74.41)', 'oklab(0.29 0.03 0.05)', 'bg-warning'],
     'warning-foreground': ['oklch(0.476 0.114 61.907)', 'oklch(0.77 0.14 99.29)', 'text-warning-foreground'],
 
-    info: ['oklch(0.882 0.059 254.128)', 'oklch(0.4242 0.1982 265.5 / 40%)', 'bg-info'],
-    'info-subtle': ['oklch(0.882 0.059 254.128)', 'oklch(0.4242 0.1982 265.5 / 40%)', 'bg-info-subtle'],
+    'info': ['oklch(0.882 0.059 254.128)', 'oklch(0.4242 0.1982 265.5 / 40%)', 'bg-info'],
     'info-foreground': ['oklab(0.49 -0.02 -0.24)', 'oklch(0.882 0.059 254.128)', 'text-info-foreground'],
 
     border: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-border'],
     input: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-input'],
-    ring: ['hsl(228 100% 56%)', 'oklch(0.707 0.165 255)', 'border-ring'],
+    ring: ['oklch(0.6514 0.2137 37.89)', 'oklch(0.8325 0.1611 84.54)', 'border-ring'],
 } as const
 
 // ── Types ──────────────────────────────────────────────

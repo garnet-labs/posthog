@@ -141,7 +141,7 @@ export const AllColors: Story = {
                         ]}
                         usages={['Main background of the app']}
                     />
-
+                    
                     <ColorSwatch
                         name="Secondary"
                         items={[
@@ -158,7 +158,7 @@ export const AllColors: Story = {
                                 value: semanticColors['secondary-foreground'][0],
                             },
                         ]}
-                        usages={['Secondary background of the app']}
+                        usages={['Main button of the app']}
                     />
 
                     <ColorSwatch
@@ -198,34 +198,83 @@ export const AllColors: Story = {
                         ]}
                         usages={['Accent (used for hover states, etc.)`']}
                     />
+                    
+                    <ColorSwatch
+                        name="Destructive"
+                        items={[
+                            {
+                                className: 'bg-destructive',
+                                name: 'destructive',
+                                tailwindClass: 'bg-destructive',
+                                value: semanticColors.destructive[0],
+                            },
+                            {
+                                className: 'text-destructive-foreground',
+                                name: 'destructive-foreground',
+                                tailwindClass: 'text-destructive-foreground',
+                                value: semanticColors['destructive-foreground'][0],
+                            },
+                        ]}
+                        usages={['Destructive (used for destructive actions, errors, etc.)`']}
+                    />
+                    
+                    <ColorSwatch
+                        name="Success"
+                        items={[
+                            {
+                                className: 'bg-success',
+                                name: 'success',
+                                tailwindClass: 'bg-success',
+                                value: semanticColors.success[0],
+                            },
+                            {
+                                className: 'text-success-foreground',
+                                name: 'success-foreground',
+                                tailwindClass: 'text-success-foreground',
+                                value: semanticColors['success-foreground'][0],
+                            },
+                        ]}
+                        usages={['Success (used for success actions, success, etc.)`']}
+                    />
 
-                    <div className="flex gap-2">
-                        <div className="size-64 text-center border flex flex-col p-8 items-center justify-center rounded-sm" style={{ backgroundColor: semanticColors.destructive[0] }}>
-                            <span className="text-lg font-bold text-destructive-foreground text-shadow-lg">Aa</span>
-                            <span className="text-xs text-foreground font-mono">{semanticColors.destructive[2]}</span>
-                        </div>
-                        <div className="size-64 text-center border flex flex-col p-8 items-center justify-center rounded-sm" style={{ backgroundColor: semanticColors['destructive-subtle'][0] }}>
-                            <span className="text-lg font-bold text-destructive-foreground text-shadow-lg">Aa</span>
-                            <span className="text-xs text-foreground font-mono">{semanticColors['destructive-subtle'][2]}</span>
-                        </div>
-                        <div className="size-64 text-center border flex flex-col p-8 items-center justify-center rounded-sm" style={{ backgroundColor: semanticColors['destructive-foreground'][0] }}>
-                            <span className="text-lg font-bold text-destructive-foreground text-shadow-lg">Aa</span>
-                            <span className="text-xs text-foreground font-mono">{semanticColors['destructive-foreground'][2]}</span>
-                        </div>
-                    </div>
+                    <ColorSwatch
+                        name="Warning"
+                        items={[
+                            {
+                                className: 'bg-warning',
+                                name: 'warning',
+                                tailwindClass: 'bg-warning',
+                                value: semanticColors.warning[0],
+                            },
+                            {
+                                className: 'text-warning-foreground',
+                                name: 'warning-foreground',
+                                tailwindClass: 'text-warning-foreground',
+                                value: semanticColors['warning-foreground'][0],
+                            },
+                        ]}
+                        usages={['Warning (used for warning actions, warnings, etc.)`']}
+                    />
+                    
+                    <ColorSwatch
+                        name="Info"
+                        items={[
+                            {
+                                className: 'bg-info',
+                                name: 'info',
+                                tailwindClass: 'bg-info',
+                                value: semanticColors.info[0],
+                            },
+                            {
+                                className: 'text-info-foreground',
+                                name: 'info-foreground',
+                                tailwindClass: 'text-info-foreground',
+                                value: semanticColors['info-foreground'][0],
+                            },
+                        ]}
+                        usages={['Info (used for info actions, infos, etc.)`']}
+                    />
 
-                    <div className="p-2 font-mono bg-destructive text-destructive-foreground">
-                        destructive/destructive-foreground: {semanticColors.destructive[0]}
-                    </div>
-                    <div className="p-2 font-mono bg-success text-success-foreground">
-                        success/success-foreground: {semanticColors.success[0]}
-                    </div>
-                    <div className="p-2 font-mono bg-warning text-warning-foreground">
-                        warning/warning-foreground: {semanticColors.warning[0]}
-                    </div>
-                    <div className="p-2 font-mono bg-info text-info-foreground">
-                        info/info-foreground: {semanticColors.info[0]}
-                    </div>
                     <div className="p-2 font-mono bg-border text-foreground">
                         border/foreground: {semanticColors.border[0]}
                     </div>
