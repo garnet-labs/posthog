@@ -278,7 +278,7 @@ async def test_handle_subscription_value_change_email(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     previous_value="test_existing@posthog.com",
                     invite_message="My invite message",
                 ),
@@ -343,7 +343,7 @@ async def test_deliver_subscription_report_slack(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                 ),
                 id=str(uuid.uuid4()),
                 task_queue=settings.TEMPORAL_TASK_QUEUE,
@@ -559,13 +559,13 @@ async def test_deliver_subscription_workflow_end_to_end(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     slo=SloConfig(
                         operation=SloOperation.SUBSCRIPTION_DELIVERY,
                         area=SloArea.ANALYTIC_PLATFORM,
                         team_id=subscription.team_id,
                         resource_id=str(subscription.id),
-                        distinct_id=str(subscription.created_by.distinct_id),
+                        distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     ),
                 ),
                 id=str(uuid.uuid4()),
@@ -639,7 +639,7 @@ async def test_new_subscription_sends_invite_email(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     previous_value="",
                     invite_message="Welcome!",
                 ),
@@ -703,13 +703,13 @@ async def test_scheduled_delivery_updates_next_delivery_date(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     slo=SloConfig(
                         operation=SloOperation.SUBSCRIPTION_DELIVERY,
                         area=SloArea.ANALYTIC_PLATFORM,
                         team_id=subscription.team_id,
                         resource_id=str(subscription.id),
-                        distinct_id=str(subscription.created_by.distinct_id),
+                        distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     ),
                 ),
                 id=str(uuid.uuid4()),
@@ -773,13 +773,13 @@ async def test_export_user_error_counts_as_slo_success(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     slo=SloConfig(
                         operation=SloOperation.SUBSCRIPTION_DELIVERY,
                         area=SloArea.ANALYTIC_PLATFORM,
                         team_id=subscription.team_id,
                         resource_id=str(subscription.id),
-                        distinct_id=str(subscription.created_by.distinct_id),
+                        distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     ),
                 ),
                 id=str(uuid.uuid4()),
@@ -849,13 +849,13 @@ async def test_partial_export_failure_delivers_successful_assets(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     slo=SloConfig(
                         operation=SloOperation.SUBSCRIPTION_DELIVERY,
                         area=SloArea.ANALYTIC_PLATFORM,
                         team_id=subscription.team_id,
                         resource_id=str(subscription.id),
-                        distinct_id=str(subscription.created_by.distinct_id),
+                        distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     ),
                 ),
                 id=str(uuid.uuid4()),
@@ -930,13 +930,13 @@ async def test_transient_export_error_retries_and_succeeds(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     slo=SloConfig(
                         operation=SloOperation.SUBSCRIPTION_DELIVERY,
                         area=SloArea.ANALYTIC_PLATFORM,
                         team_id=subscription.team_id,
                         resource_id=str(subscription.id),
-                        distinct_id=str(subscription.created_by.distinct_id),
+                        distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     ),
                 ),
                 id=str(uuid.uuid4()),
@@ -1002,13 +1002,13 @@ async def test_user_query_error_does_not_retry(
                 ProcessSubscriptionWorkflowInputs(
                     subscription_id=subscription.id,
                     team_id=subscription.team_id,
-                    distinct_id=str(subscription.created_by.distinct_id),
+                    distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     slo=SloConfig(
                         operation=SloOperation.SUBSCRIPTION_DELIVERY,
                         area=SloArea.ANALYTIC_PLATFORM,
                         team_id=subscription.team_id,
                         resource_id=str(subscription.id),
-                        distinct_id=str(subscription.created_by.distinct_id),
+                        distinct_id=str(subscription.created_by.distinct_id),  # type: ignore[union-attr]
                     ),
                 ),
                 id=str(uuid.uuid4()),
