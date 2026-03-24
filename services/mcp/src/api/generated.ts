@@ -13458,11 +13458,12 @@ export namespace Schemas {
     * `Postmark` - Postmark
     * `Granola` - Granola
     * `BuildBetter` - BuildBetter
+    * `Convex` - Convex
      */
-    export type SourceTypeE09Enum = typeof SourceTypeE09Enum[keyof typeof SourceTypeE09Enum];
+    export type SourceType432Enum = typeof SourceType432Enum[keyof typeof SourceType432Enum];
 
 
-    export const SourceTypeE09Enum = {
+    export const SourceType432Enum = {
       Ashby: 'Ashby',
       Supabase: 'Supabase',
       CustomerIO: 'CustomerIO',
@@ -13603,6 +13604,7 @@ export namespace Schemas {
       Postmark: 'Postmark',
       Granola: 'Granola',
       BuildBetter: 'BuildBetter',
+      Convex: 'Convex',
     } as const;
 
     /**
@@ -13616,7 +13618,7 @@ export namespace Schemas {
       readonly status: string;
       client_secret: string;
       account_id: string;
-      readonly source_type: SourceTypeE09Enum;
+      readonly source_type: SourceType432Enum;
       readonly latest_error: string;
       /**
        * @maxLength 100
@@ -19172,7 +19174,7 @@ export namespace Schemas {
       /** @nullable */
       readonly created_by: number | null;
       readonly status: string;
-      readonly source_type: SourceTypeE09Enum;
+      readonly source_type: SourceType432Enum;
     }
 
     export type TableOptions = {[key: string]: unknown};
@@ -20800,7 +20802,7 @@ export namespace Schemas {
       readonly status?: string;
       client_secret?: string;
       account_id?: string;
-      readonly source_type?: SourceTypeE09Enum;
+      readonly source_type?: SourceType432Enum;
       readonly latest_error?: string;
       /**
        * @maxLength 100
