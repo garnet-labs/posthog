@@ -1450,7 +1450,7 @@ def _use_error_tracking_issue_id_from_error_tracking_issue_overrides(database: D
     table.fields["assigned_user_id"] = ExpressionField(
         name="assigned_user_id",
         expr=parse_expr(
-            "if(equals(toString(exception_issue_denormalized.assigned_entity_type), 'user'), toInt64OrNull(exception_issue_denormalized.assigned_entity_id), NULL)",
+            "if(equals(toString(exception_issue_denormalized.assigned_entity_type), 'user'), toInt(exception_issue_denormalized.assigned_entity_id), NULL)",
             start=None,
         ),
     )
