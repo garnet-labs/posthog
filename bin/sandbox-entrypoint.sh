@@ -1,6 +1,80 @@
 #!/bin/bash
 set -e
 
+# =============================================================================
+# Root phase — runs as UID 0.
+# Creates the sandbox user, writes system config, starts sshd, then re-execs
+# this script as the sandbox user via gosu.
+# =============================================================================
+if [ "$(id -u)" = "0" ] && [ "${SANDBOX_UID:-1000}" != "0" ]; then
+    SUID="${SANDBOX_UID:-1000}"
+    SGID="${SANDBOX_GID:-1000}"
+    SANDBOX_HOME=/tmp/sandbox-home
+
+    # Create a passwd/group/shadow entry for the sandbox user so tools like
+    # git, whoami, and sshd resolve the UID correctly.
+    if ! getent passwd "$SUID" > /dev/null 2>&1; then
+        echo "sandbox:x:$SUID:$SGID:sandbox:$SANDBOX_HOME:/bin/bash" >> /etc/passwd
+        getent group "$SGID" > /dev/null 2>&1 || echo "sandbox:x:$SGID:" >> /etc/group
+        echo "sandbox:*:19000:0:99999:7:::" >> /etc/shadow
+    fi
+
+    # Create directories owned by the sandbox user.
+    mkdir -p "$SANDBOX_HOME" /tmp/sandbox-cache
+    chown "$SUID:$SGID" "$SANDBOX_HOME" /tmp/sandbox-cache
+
+    # Export the full environment for SSH/IDE sessions.
+    # Docker Compose env vars are only inherited by PID 1's children; SSH
+    # sessions need them via PAM (/etc/environment) and login shells (profile.d).
+    {
+        env | grep -vE '^(HOSTNAME|TERM|SHELL|PWD|SHLVL|_|OLDPWD|HOME|USER|LOGNAME)='
+        echo "HOME=$SANDBOX_HOME"
+        echo "UV_CACHE_DIR=/cache/uv"
+        echo "UV_LINK_MODE=copy"
+        echo "XDG_CACHE_HOME=/tmp/sandbox-cache"
+        echo "CARGO_TARGET_DIR=/cache/cargo-target"
+        echo "npm_config_store_dir=/cache/pnpm"
+        echo "COREPACK_ENABLE_AUTO_PIN=0"
+        echo "COREPACK_ENABLE_DOWNLOAD_PROMPT=0"
+    } | tee /etc/environment | sed 's/^/export /' > /etc/profile.d/sandbox-env.sh
+
+    # Start sshd for IDE remote access (IntelliJ, VSCode Remote-SSH, etc.).
+    if [ -s /tmp/sandbox-authorized-keys ]; then
+        mkdir -p "$SANDBOX_HOME/.ssh"
+        cp /tmp/sandbox-authorized-keys "$SANDBOX_HOME/.ssh/authorized_keys"
+        chmod 700 "$SANDBOX_HOME/.ssh"
+        chmod 600 "$SANDBOX_HOME/.ssh/authorized_keys"
+        chown -R "$SUID:$SGID" "$SANDBOX_HOME/.ssh"
+        /usr/sbin/sshd -p 2222 -o PidFile=/tmp/sshd.pid \
+            -o PasswordAuthentication=no -o PermitRootLogin=no
+        echo "==> sshd listening on port 2222"
+    fi
+
+    # Copy Claude Code auth from read-only mounts so it can write to ~/.claude.
+    mkdir -p "$SANDBOX_HOME/.claude"
+    cp -r /tmp/claude-auth/. "$SANDBOX_HOME/.claude/" 2>/dev/null || true
+    cp /tmp/claude-auth.json "$SANDBOX_HOME/.claude.json" 2>/dev/null || true
+    chown -R "$SUID:$SGID" "$SANDBOX_HOME"
+
+    # Re-exec this script as the sandbox user.
+    exec gosu "$SUID:$SGID" "$0" "$@"
+fi
+
+# =============================================================================
+# User phase — runs as the sandbox UID via gosu.
+# Everything that touches the worktree or caches runs here so files stay
+# owned by the host user.
+# =============================================================================
+export HOME=/tmp/sandbox-home
+export UV_CACHE_DIR=/cache/uv
+export UV_LINK_MODE=copy
+export XDG_CACHE_HOME=/tmp/sandbox-cache
+export COREPACK_ENABLE_AUTO_PIN=0
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+export CARGO_TARGET_DIR=/cache/cargo-target
+export npm_config_store_dir=/cache/pnpm
+mkdir -p "$CARGO_TARGET_DIR"
+
 cd /workspace
 
 # --- PRE-MERGE WORKAROUND (delete this block after merging to master) ---
@@ -25,46 +99,6 @@ sed -i 's/"passThroughEnv": \["SKIP_TYPEGEN", "COREPACK_ENABLE_DOWNLOAD_PROMPT",
 grep -q 'SESSION_COOKIE_NAME.*get_from_env' posthog/settings/web.py || \
     sed -i '/^CSRF_COOKIE_NAME/i SESSION_COOKIE_NAME = get_from_env("SESSION_COOKIE_NAME", "sessionid")' posthog/settings/web.py
 # --- END PRE-MERGE WORKAROUND ---
-
-# When running as a non-root UID (the default — see docker-compose.sandbox.yml),
-# HOME and cache dirs point to unwritable locations. Redirect to /tmp.
-export HOME=/tmp/sandbox-home
-
-# Create a passwd entry for the arbitrary UID so tools like sshd, git, and
-# whoami work correctly. The Dockerfile makes /etc/passwd writable for this.
-if ! getent passwd "$(id -u)" > /dev/null 2>&1; then
-    echo "sandbox:x:$(id -u):$(id -g):sandbox:$HOME:/bin/bash" >> /etc/passwd
-    echo "sandbox:x:$(id -g):" >> /etc/group 2>/dev/null || true
-    echo "sandbox:*:19000:0:99999:7:::" >> /etc/shadow 2>/dev/null || true
-fi
-
-export UV_CACHE_DIR=/cache/uv
-export UV_LINK_MODE=copy
-export XDG_CACHE_HOME=/tmp/sandbox-cache
-export COREPACK_ENABLE_AUTO_PIN=0
-export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-mkdir -p "$HOME" "$UV_CACHE_DIR" "$XDG_CACHE_HOME"
-# Copy Claude Code auth from read-only mounts so it can write to ~/.claude
-mkdir -p "$HOME/.claude"
-cp -r /tmp/claude-auth/. "$HOME/.claude/" 2>/dev/null || true
-cp /tmp/claude-auth.json "$HOME/.claude.json" 2>/dev/null || true
-
-# Point Rust builds at the shared cargo-target volume (native ext4, not host-mounted).
-# This avoids the VirtioFS overhead on macOS for the ~7GB of small-file random I/O
-# that Rust compilation produces, and caches compiled deps across sandboxes.
-export CARGO_TARGET_DIR=/cache/cargo-target
-mkdir -p "$CARGO_TARGET_DIR"
-
-# Point pnpm at the shared store volume (mounted at /cache/pnpm).
-# This is a content-addressable cache — all sandboxes benefit from each other's installs.
-# pnpm reads store-dir from npm_config_store_dir env var.
-export npm_config_store_dir=/cache/pnpm
-
-# Export environment for all new sessions (SSH, IDE remote interpreters, etc.).
-# Docker Compose env vars are only inherited by PID 1's children; new sessions
-# need them available via PAM (/etc/environment) and login shells (profile.d).
-env | grep -vE '^(HOSTNAME|TERM|SHELL|PWD|SHLVL|_|OLDPWD|HOME)=' \
-    | tee /etc/environment | sed 's/^/export /' > /etc/profile.d/sandbox.sh
 
 echo "==> Installing Python dependencies..."
 uv sync --no-editable
@@ -123,17 +157,6 @@ if [ ! -f .posthog/.generated/mprocs.yaml ] || ! grep -q "^_posthog:" .posthog/.
     } > .posthog/.generated/mprocs.yaml
 fi
 hogli dev:generate 2>/dev/null || true
-
-# Start sshd for IDE remote access (IntelliJ, VSCode Remote-SSH, etc.).
-if [ -s /tmp/sandbox-authorized-keys ]; then
-    mkdir -p "$HOME/.ssh"
-    cp /tmp/sandbox-authorized-keys "$HOME/.ssh/authorized_keys"
-    chmod 700 "$HOME/.ssh"
-    chmod 600 "$HOME/.ssh/authorized_keys"
-    /usr/sbin/sshd -p 2222 -o PidFile=/tmp/sshd.pid -o HostKey=/etc/ssh/ssh_host_ed25519_key \
-        -o PasswordAuthentication=no -o PermitRootLogin=no
-    echo "==> sshd listening on port 2222"
-fi
 
 echo "==> Starting PostHog via mprocs in tmux..."
 rm -f /workspace/bin/start.lock
