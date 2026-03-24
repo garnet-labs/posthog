@@ -3,7 +3,7 @@ import { LemonTagType } from '@posthog/lemon-ui'
 import { urls } from 'scenes/urls'
 
 import { DataVisualizationNode, DatabaseSchemaField, NodeKind } from '~/queries/schema/schema-general'
-import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
+import { escapeDottedHogQLIdentifier } from '~/queries/utils'
 import {
     DataWarehouseSyncInterval,
     ExternalDataJobStatus,
@@ -15,7 +15,7 @@ export const DATAWAREHOUSE_EDITOR_ITEM_ID = 'new-SQL'
 
 export const buildSelectAllQuery = (tableName: string, limitOffsetClause?: string | null): string => {
     const limitClause = limitOffsetClause ? ` ${limitOffsetClause}` : ''
-    return `SELECT * FROM ${escapePropertyAsHogQLIdentifier(tableName)}${limitClause}`
+    return `SELECT * FROM ${escapeDottedHogQLIdentifier(tableName)}${limitClause}`
 }
 
 export const buildTableQueryUrl = (

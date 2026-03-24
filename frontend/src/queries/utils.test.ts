@@ -7,7 +7,7 @@ import { teamLogic } from 'scenes/teamLogic'
 import { initKeaTests } from '~/test/init'
 import { AppContext, TeamType } from '~/types'
 
-import { escapeHogQLString, hogql } from './utils'
+import { escapeDottedHogQLIdentifier, escapeHogQLString, hogql } from './utils'
 
 window.POSTHOG_APP_CONTEXT = { current_team: { id: MOCK_TEAM_ID } } as unknown as AppContext
 
@@ -90,5 +90,15 @@ describe('escapeHogQLString', () => {
         ['back\\slash', "'back\\\\slash'"],
     ])('escapes %s to %s', (input, expected) => {
         expect(escapeHogQLString(input)).toEqual(expected)
+    })
+})
+
+describe('escapeDottedHogQLIdentifier', () => {
+    it('leaves simple dotted identifiers unquoted', () => {
+        expect(escapeDottedHogQLIdentifier('demo.orders')).toEqual('demo.orders')
+    })
+
+    it('quotes each dotted segment independently when needed', () => {
+        expect(escapeDottedHogQLIdentifier('demo.order items')).toEqual('demo."order items"')
     })
 })

@@ -1,7 +1,7 @@
-import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
+import { escapeDottedHogQLIdentifier } from '~/queries/utils'
 
 export const normalizeIdentifier = (identifier: string): string => {
-    return identifier.replace(/^[`"']|[`"']$/g, '').toLowerCase()
+    return identifier.replace(/[`"']/g, '').toLowerCase()
 }
 
 const parseSelectedColumns = (selectedColumns: string): string[] => {
@@ -17,7 +17,7 @@ export const buildQueryForColumnClick = (
     columnName: string
 ): string => {
     const limitOffsetClause = currentQuery ? extractLimitOffsetClause(currentQuery) : null
-    const baseQuery = `SELECT ${columnName} FROM ${escapePropertyAsHogQLIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
+    const baseQuery = `SELECT ${escapeDottedHogQLIdentifier(columnName)} FROM ${escapeDottedHogQLIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 
     if (!currentQuery) {
         return baseQuery
@@ -57,7 +57,9 @@ export const buildQueryForColumnClick = (
         columns = ['*']
     }
 
-    return `SELECT ${columns.map(escapePropertyAsHogQLIdentifier).join(', ')} FROM ${escapePropertyAsHogQLIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
+    const selectedColumns = columns.map((column) => (column === '*' ? column : escapeDottedHogQLIdentifier(column)))
+
+    return `SELECT ${selectedColumns.join(', ')} FROM ${escapeDottedHogQLIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 }
 
 const normalizeKeywordSpacing = (query: string): string => {
