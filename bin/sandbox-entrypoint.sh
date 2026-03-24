@@ -59,6 +59,12 @@ mkdir -p "$CARGO_TARGET_DIR"
 # pnpm reads store-dir from npm_config_store_dir env var.
 export npm_config_store_dir=/cache/pnpm
 
+# Export environment for all new sessions (SSH, IDE remote interpreters, etc.).
+# Docker Compose env vars are only inherited by PID 1's children; new sessions
+# need them available via PAM (/etc/environment) and login shells (profile.d).
+env | grep -vE '^(HOSTNAME|TERM|SHELL|PWD|SHLVL|_|OLDPWD|HOME)=' \
+    | tee /etc/environment | sed 's/^/export /' > /etc/profile.d/sandbox.sh
+
 echo "==> Installing Python dependencies..."
 uv sync --no-editable
 
