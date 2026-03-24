@@ -222,9 +222,10 @@ EMBEDDING_MODELS_1 = [
 # - Add the new models to a new list like the one above
 # - Create a new list like EMBEDDING_TABLES_1
 # - Add that new list to EMBEDDING_TABLES full-list, so all the HOGQL modelling is automatically updated
-# And then write a migration (similar to 0187_model_specific_embedding_tables) that:
+# And then write a migration (similar to 0191_model_specific_embedding_tables) that:
 # - Drop the buffer-table-filling MV
 # - Create the new tables and MVs for the new model-specific tables
+# - Add vector indexes (add_vector_index_sql) and full text indexes (add_content_full_text_index_sql)
 # - Re-creates the buffer-table-filling MV
 
 

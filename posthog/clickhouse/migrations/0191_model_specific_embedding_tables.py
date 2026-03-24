@@ -51,17 +51,6 @@ for model_tables in EMBEDDING_TABLES_1:
             )
         )
 
-# Add full text index on the content column for text search
-for model_tables in EMBEDDING_TABLES_1:
-    operations.append(
-        run_sql_with_exceptions(
-            model_tables.add_content_full_text_index_sql(),
-            node_roles=[NodeRole.DATA],
-            sharded=True,
-            is_alter_on_replicated_table=True,
-        )
-    )
-
 # Create distributed read tables
 for model_tables in EMBEDDING_TABLES_1:
     operations.append(
