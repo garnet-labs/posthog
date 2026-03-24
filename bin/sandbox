@@ -214,11 +214,25 @@ def project_name(slug: str) -> str:
     return f"sandbox-{slug}"
 
 
+def _ssh_authorized_keys_path() -> str:
+    """Collect SSH public keys into a file that can be mounted into containers."""
+    keys_file = REGISTRY_DIR / "authorized_keys"
+    ssh_dir = Path.home() / ".ssh"
+    keys = []
+    if ssh_dir.is_dir():
+        for pub in ssh_dir.glob("*.pub"):
+            keys.append(pub.read_text().strip())
+    keys_file.write_text("\n".join(keys) + "\n" if keys else "")
+    return str(keys_file)
+
+
 def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
     """Env vars threaded through every docker compose invocation."""
     return {
         "SANDBOX_PORT": str(port),
         "SANDBOX_VITE_PORT": str(port + 1000),
+        "SANDBOX_SSH_PORT": str(port + 2000),
+        "SANDBOX_SSH_AUTHORIZED_KEYS": _ssh_authorized_keys_path(),
         "SANDBOX_CODE": worktree_path,
         "SANDBOX_UID": str(os.getuid()),
         "SANDBOX_GID": str(os.getgid()),
@@ -646,6 +660,7 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     info(f"Worktree: {worktree_path}")
     info(f"Shell:    sandbox shell {branch}")
     info(f"VSCode:   sandbox code {branch}")
+    info(f"SSH:      ssh -p {port + 2000} sandbox@localhost")
     info(f"Logs:     sandbox logs {branch}")
 
 
@@ -668,6 +683,7 @@ def cmd_start(branch: str) -> None:
 
     success(f"PostHog running at http://localhost:{entry.port}")
     info(f"VSCode:   sandbox code {branch}")
+    info(f"SSH:      ssh -p {entry.port + 2000} sandbox@localhost")
 
 
 def cmd_stop(branch: str) -> None:

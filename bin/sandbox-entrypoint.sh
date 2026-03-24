@@ -35,6 +35,7 @@ export HOME=/tmp/sandbox-home
 if ! getent passwd "$(id -u)" > /dev/null 2>&1; then
     echo "sandbox:x:$(id -u):$(id -g):sandbox:$HOME:/bin/bash" >> /etc/passwd
     echo "sandbox:x:$(id -g):" >> /etc/group 2>/dev/null || true
+    echo "sandbox:*:19000:0:99999:7:::" >> /etc/shadow 2>/dev/null || true
 fi
 
 export UV_CACHE_DIR=/cache/uv
@@ -122,6 +123,17 @@ if [ ! -f .posthog/.generated/mprocs.yaml ] || ! grep -q "^_posthog:" .posthog/.
     } > .posthog/.generated/mprocs.yaml
 fi
 hogli dev:generate 2>/dev/null || true
+
+# Start sshd for IDE remote access (IntelliJ, VSCode Remote-SSH, etc.).
+if [ -s /tmp/sandbox-authorized-keys ]; then
+    mkdir -p "$HOME/.ssh"
+    cp /tmp/sandbox-authorized-keys "$HOME/.ssh/authorized_keys"
+    chmod 700 "$HOME/.ssh"
+    chmod 600 "$HOME/.ssh/authorized_keys"
+    /usr/sbin/sshd -p 2222 -o PidFile=/tmp/sshd.pid -o HostKey=/etc/ssh/ssh_host_ed25519_key \
+        -o PasswordAuthentication=no -o PermitRootLogin=no
+    echo "==> sshd listening on port 2222"
+fi
 
 echo "==> Starting PostHog via mprocs in tmux..."
 rm -f /workspace/bin/start.lock
