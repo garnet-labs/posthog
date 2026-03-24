@@ -614,7 +614,7 @@ describe('variant reordering functionality', () => {
         await expectLogic(logic).toFinishAllListeners()
     })
 
-    const createMultivariateFlag = (variants: any[], payloads: Record<number, any> = {}): void => {
+    const createMultivariateFlag = (variants: any[], payloads: Record<string | number, any> = {}): void => {
         logic.actions.setFeatureFlag({
             ...MOCK_FEATURE_FLAG,
             filters: {

@@ -306,7 +306,7 @@ function reorderVariantState(state: FeatureFlagType, from: number, to: number): 
 
     // Reorder payloads to keep them in sync
     const currentPayloads = { ...state.filters.payloads }
-    const newPayloads: Record<number, any> = {}
+    const newPayloads: Record<string | number, any> = {}
 
     // Create a mapping of old index to new index
     const indexMapping: Record<number, number> = {}
@@ -682,7 +682,7 @@ export const featureFlagLogic = kea<featureFlagLogicType>([
                     variants.splice(index, 1)
 
                     const currentPayloads = { ...state.filters.payloads }
-                    const newPayloads: Record<number, any> = {}
+                    const newPayloads: Record<string | number, any> = {}
 
                     // TRICKY: In addition to modifying the variant array, we also need to shift the payload indices
                     // because the variant array is being modified and we need to make sure that the payloads object
