@@ -90,7 +90,7 @@ services:
             dockerfile: Dockerfile.sandbox
         restart: on-failure
         # Run as the host user so files created in the mounted worktree
-        # (node_modules, .venv) have correct ownership
+        # have correct ownership
         user: '${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000}'
         # mprocs (used by bin/start) requires a TTY
         tty: true
@@ -110,9 +110,11 @@ services:
             - uv-cache:/cache/uv
             - pnpm-store:/cache/pnpm
             - cargo-target:/cache/cargo-target
+            - python-env:/cache/python
         environment:
             # --- Sandbox identity ---
             POSTHOG_SANDBOX: '1'
+            SANDBOX_INTENTS: '${SANDBOX_INTENTS:-product_analytics}'
             DEBUG: '1'
             HOST_BIND: '0.0.0.0'
             SKIP_SERVICE_VERSION_REQUIREMENTS: '1'
@@ -319,6 +321,7 @@ volumes:
     postgres-data:
     redpanda-data:
     clickhouse-data:
+    python-env:
     uv-cache:
         name: sandbox-uv-cache
         external: true

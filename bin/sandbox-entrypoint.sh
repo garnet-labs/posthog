@@ -17,8 +17,10 @@ cp /usr/local/share/sandbox/bin/start-rust-service bin/start-rust-service
 cp /usr/local/share/sandbox/posthog/management/commands/sandbox_migrate.py posthog/management/commands/sandbox_migrate.py
 cp /usr/local/share/sandbox/nodejs/package.json    nodejs/package.json
 cp /usr/local/share/sandbox/rust/cyclotron-node/package.json rust/cyclotron-node/package.json
-# Fix hardcoded Vite dev server port in older branches (no-op after merge).
 sed -i "s|http://localhost:8234|${JS_URL}|g" posthog/utils.py
+sed -i "s|:8234\"|:${JS_URL##*:}\"|g" posthog/utils.py
+sed -i "s|origin: 'http://localhost:8234'|origin: process.env.JS_URL \|\| 'http://localhost:8234',\n            hmr: process.env.JS_URL ? { clientPort: parseInt(process.env.JS_URL.split(':').pop()) } : undefined|g" frontend/vite.config.ts
+sed -i 's/"passThroughEnv": \["SKIP_TYPEGEN", "COREPACK_ENABLE_DOWNLOAD_PROMPT", "SSL_CERT_FILE"\]/"passThroughEnv": ["SKIP_TYPEGEN", "COREPACK_ENABLE_DOWNLOAD_PROMPT", "SSL_CERT_FILE", "JS_URL"]/g' turbo.json
 # Add SESSION_COOKIE_NAME env var support if not present (no-op after merge).
 grep -q 'SESSION_COOKIE_NAME.*get_from_env' posthog/settings/web.py || \
     sed -i '/^CSRF_COOKIE_NAME/i SESSION_COOKIE_NAME = get_from_env("SESSION_COOKIE_NAME", "sessionid")' posthog/settings/web.py
@@ -27,11 +29,8 @@ grep -q 'SESSION_COOKIE_NAME.*get_from_env' posthog/settings/web.py || \
 # When running as a non-root UID (the default — see docker-compose.sandbox.yml),
 # HOME and cache dirs point to unwritable locations. Redirect to /tmp.
 export HOME=/tmp/sandbox-home
-export PATH="/usr/local/cargo/bin:$PATH"
-
 export UV_CACHE_DIR=/cache/uv
 export UV_LINK_MODE=copy
-export UV_PROJECT_ENVIRONMENT=/usr/local/
 export XDG_CACHE_HOME=/tmp/sandbox-cache
 export COREPACK_ENABLE_AUTO_PIN=0
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -56,7 +55,7 @@ echo "==> Installing Python dependencies..."
 uv sync --no-editable
 
 # Make hogli available — normally done by flox on-activate.sh
-ln -sfn /workspace/bin/hogli /usr/local/bin/hogli
+ln -sfn /workspace/bin/hogli /cache/python/bin/hogli
 
 echo "==> Installing Node dependencies..."
 # CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed because
@@ -93,11 +92,15 @@ for topic in clickhouse_events_json exceptions_ingestion; do
         || rpk topic create "$topic" --brokers kafka:9092 -p 1 -r 1
 done
 
+echo "==> Generating mprocs config for intents: ${SANDBOX_INTENTS:-product_analytics}..."
+_hogli_with=""
+IFS=',' read -ra _intents <<< "${SANDBOX_INTENTS:-product_analytics}"
+for _intent in "${_intents[@]}"; do
+    _hogli_with="$_hogli_with --with $_intent"
+done
+hogli dev:generate $_hogli_with 2>/dev/null || true
+
 echo "==> Starting PostHog via mprocs in tmux..."
-# mprocs needs a real TTY, so we wrap bin/start in a tmux session.
-# tmux -L <name> starts a fresh server that inherits our full environment.
-# exec replaces this process so the container stays alive as long as tmux does.
-# Use `sandbox shell <branch>` to attach and see the mprocs UI.
 rm -f /workspace/bin/start.lock
 
 exec tmux -L sandbox new-session -s posthog "bin/start"
