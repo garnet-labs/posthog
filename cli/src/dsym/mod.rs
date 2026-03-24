@@ -116,7 +116,9 @@ fn extract_dsym_uuids(dsym_path: &PathBuf) -> Result<Vec<(String, String)>> {
             let uuid = uuid_part[..uuid_end].to_uppercase();
 
             // Extract the DWARF filename from the path at end of line
-            let dwarf_path = line.rsplit(' ').next()?;
+            // Format: "UUID: <uuid> (<arch>) <full_path>"
+            let path_start = line.rfind(')')? + 2; // Skip ") "
+            let dwarf_path = line.get(path_start..)?;
             let dwarf_filename = Path::new(dwarf_path)
                 .file_name()?
                 .to_str()?

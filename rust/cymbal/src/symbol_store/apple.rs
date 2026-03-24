@@ -63,10 +63,18 @@ impl Parser for AppleProvider {
     type Err = ResolveError;
 
     async fn parse(&self, source: Self::Source) -> Result<ParsedAppleSymbols, ResolveError> {
-        let (dsym, decompressed_bytes) =
-            read_symbol_data_with_byte_count::<AppleDsym>(source)
-                .map_err(|e| AppleError::ParseError(e.to_string()))?;
-        ParsedAppleSymbols::from_dsym_zip(dsym.data, decompressed_bytes)
+        // Try to unwrap symbol_data container first (new format),
+        // fall back to raw ZIP for backward compatibility with existing uploads.
+        // TODO(2026-09-24): Remove raw ZIP fallback once all old uploads have expired.
+        let (zip_data, decompressed_bytes) =
+            match read_symbol_data_with_byte_count::<AppleDsym>(source.clone()) {
+                Ok((dsym, bytes)) => (dsym.data, bytes),
+                Err(_) => {
+                    let len = source.len();
+                    (source, len)
+                }
+            };
+        ParsedAppleSymbols::from_dsym_zip(zip_data, decompressed_bytes)
     }
 }
 
@@ -141,6 +149,23 @@ impl ParsedAppleSymbols {
             file.read_to_end(&mut data)
                 .map_err(|e| AppleError::ParseError(e.to_string()))?;
             return Ok(data);
+        }
+
+        // Old format: full dSYM bundle with Contents/Resources/DWARF/<name>
+        // TODO(2026-09-24): Remove this fallback once all old uploads have expired.
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| AppleError::ParseError(e.to_string()))?;
+
+            let name = file.name().to_string();
+
+            if name.contains("/Contents/Resources/DWARF/") && !name.ends_with('/') {
+                let mut data = Vec::new();
+                file.read_to_end(&mut data)
+                    .map_err(|e| AppleError::ParseError(e.to_string()))?;
+                return Ok(data);
+            }
         }
 
         Err(AppleError::ParseError("No DWARF file found in dSYM bundle".to_string()).into())
