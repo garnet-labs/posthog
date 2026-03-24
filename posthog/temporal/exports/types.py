@@ -1,8 +1,6 @@
 import dataclasses
 from typing import Optional
 
-from posthog.slo.types import SloOutcome
-
 
 @dataclasses.dataclass
 class ExportAssetActivityInputs:
@@ -25,26 +23,3 @@ class ExportAssetResult:
     duration_ms: Optional[float] = None
     export_format: str = ""
     attempts: int = 1
-
-
-@dataclasses.dataclass
-class EmitDeliveryOutcomeInput:
-    subscription_id: int
-    team_id: int
-    distinct_id: str
-    outcome: SloOutcome
-    duration_ms: Optional[float] = None
-    assets_with_content: int = 0
-    total_assets: int = 0
-    errors: list[ExportError] = dataclasses.field(default_factory=list)
-
-
-@dataclasses.dataclass
-class EmitExportOutcomeInput:
-    exported_asset_id: int
-    team_id: int
-    distinct_id: str
-    outcome: SloOutcome
-    duration_ms: Optional[float] = None
-    export_format: str = ""
-    error: Optional[ExportError] = None
