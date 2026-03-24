@@ -29,6 +29,14 @@ grep -q 'SESSION_COOKIE_NAME.*get_from_env' posthog/settings/web.py || \
 # When running as a non-root UID (the default — see docker-compose.sandbox.yml),
 # HOME and cache dirs point to unwritable locations. Redirect to /tmp.
 export HOME=/tmp/sandbox-home
+
+# Create a passwd entry for the arbitrary UID so tools like sshd, git, and
+# whoami work correctly. The Dockerfile makes /etc/passwd writable for this.
+if ! getent passwd "$(id -u)" > /dev/null 2>&1; then
+    echo "sandbox:x:$(id -u):$(id -g):sandbox:$HOME:/bin/bash" >> /etc/passwd
+    echo "sandbox:x:$(id -g):" >> /etc/group 2>/dev/null || true
+fi
+
 export UV_CACHE_DIR=/cache/uv
 export UV_LINK_MODE=copy
 export XDG_CACHE_HOME=/tmp/sandbox-cache

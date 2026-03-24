@@ -645,6 +645,7 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     success(f"PostHog running at http://localhost:{port}")
     info(f"Worktree: {worktree_path}")
     info(f"Shell:    sandbox shell {branch}")
+    info(f"VSCode:   sandbox code {branch}")
     info(f"Logs:     sandbox logs {branch}")
 
 
@@ -666,6 +667,7 @@ def cmd_start(branch: str) -> None:
         sys.exit(1)
 
     success(f"PostHog running at http://localhost:{entry.port}")
+    info(f"VSCode:   sandbox code {branch}")
 
 
 def cmd_stop(branch: str) -> None:
@@ -731,6 +733,26 @@ def cmd_list() -> None:
         status = "running" if running > 0 else "stopped"
         url = f"http://localhost:{entry.port}" if running > 0 else "-"
         print(f"{branch:<40} {entry.port:<8} {status:<10} {url}")
+
+
+def cmd_code(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    container = f"sandbox-{entry.slug}-app-1"
+
+    config_json = json.dumps({"containerName": f"/{container}"})
+    hex_config = config_json.encode().hex()
+    uri = f"vscode-remote://attached-container+{hex_config}/workspace"
+
+    code_cmd = shutil.which("code")
+    if not code_cmd:
+        info("VSCode 'code' CLI not found on PATH.")
+        info("Install it from VSCode: Ctrl+Shift+P → 'Shell Command: Install code command'")
+        info(f"Then run: code --folder-uri \"{uri}\"")
+        return
+
+    info(f"Opening VSCode attached to {container}...")
+    subprocess.Popen([code_cmd, "--folder-uri", uri])
 
 
 def cmd_shell(branch: str) -> None:
@@ -821,6 +843,7 @@ examples:
         ("stop", "Stop a sandbox (preserves state)"),
         ("destroy", "Destroy a sandbox and clean up"),
         ("shell", "Attach to the mprocs UI"),
+        ("code", "Open VSCode attached to the sandbox container"),
         ("logs", "Tail logs from a sandbox"),
     ]:
         p = sub.add_parser(name, help=help_text)
@@ -852,6 +875,7 @@ def main() -> None:
         "list": cmd_list,
         "ls": cmd_list,
         "shell": lambda: cmd_shell(args.branch),
+        "code": lambda: cmd_code(args.branch),
         "logs": lambda: cmd_logs(args.branch),
         "rebuild-cache": cmd_rebuild_cache,
         "nuke": cmd_nuke,
