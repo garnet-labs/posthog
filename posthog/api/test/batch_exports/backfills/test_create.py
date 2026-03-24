@@ -435,3 +435,38 @@ def test_batch_export_earliest_backfill_allowed_with_feature_flag(
         )
         assert response.status_code == status.HTTP_201_CREATED, response.json()
         assert "backfill_id" in response.json()
+
+
+@patch("posthog.batch_exports.http.report_user_action")
+def test_batch_export_backfill_reports_user_action(
+    mock_report_user_action, client: HttpClient, organization, team, user, temporal
+):
+    client.force_login(user)
+
+    batch_export = _create_batch_export_ok(client, team, "events")
+    batch_export_id = batch_export["id"]
+
+    start_at = "2021-01-01T00:00:00+00:00"
+    end_at = "2021-01-01T01:00:00+00:00"
+
+    resp = backfill_batch_export(
+        client=client,
+        team_id=team.pk,
+        batch_export_id=batch_export_id,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    assert resp.status_code == status.HTTP_201_CREATED
+
+    mock_report_user_action.assert_called_once()
+    call_args = mock_report_user_action.call_args
+    assert call_args.args[0] == user
+    assert call_args.args[1] == "batch export backfill created"
+
+    props = call_args.kwargs.get("properties") or call_args.args[2]
+    assert props["batch_export_id"] == batch_export_id
+    assert props["destination_type"] == "S3"
+    assert props["interval"] == "hour"
+    assert props["backfill_id"] == resp.json()["backfill_id"]
+    assert props["start_at"] == start_at
+    assert props["end_at"] == end_at

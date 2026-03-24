@@ -35,6 +35,7 @@ from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.scoped_related_fields import TeamScopedPrimaryKeyRelatedField
 from posthog.api.utils import action
 from posthog.batch_exports.models import BATCH_EXPORT_INTERVALS, TIMEZONES
+from posthog.event_usage import report_user_action
 from posthog.models import BatchExport, BatchExportBackfill, BatchExportDestination, BatchExportRun, Team, User
 from posthog.models.activity_logging.activity_log import ActivityContextBase, Detail, changes_between, log_activity
 from posthog.models.integration import (
@@ -1369,6 +1370,22 @@ class BatchExportBackfillViewSet(
             request.data.get("start_at"),
             request.data.get("end_at"),
         )
+
+        report_user_action(
+            request.user,
+            "batch export backfill created",
+            properties={
+                "batch_export_id": str(batch_export.pk),
+                "batch_export_name": batch_export.name,
+                "destination_type": batch_export.destination.type,
+                "interval": batch_export.interval,
+                "backfill_id": backfill_id,
+                "start_at": request.data.get("start_at"),
+                "end_at": request.data.get("end_at"),
+            },
+            team=self.team,
+        )
+
         return response.Response({"backfill_id": backfill_id}, status=status.HTTP_201_CREATED)
 
     @action(methods=["POST"], detail=True, required_scopes=["batch_export:write"])
