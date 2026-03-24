@@ -158,6 +158,75 @@ if [ ! -f .posthog/.generated/mprocs.yaml ] || ! grep -q "^_posthog:" .posthog/.
 fi
 hogli dev:generate 2>/dev/null || true
 
+# Register IntelliJ IDEA backend for JetBrains Gateway.
+# Java ignores $HOME and reads /etc/passwd, so we pass -Duser.home to ensure
+# registration lands where the SSH user (sandbox) can find it.
+if [ -x /opt/idea/bin/remote-dev-server.sh ]; then
+    echo "==> Registering IntelliJ IDEA for Gateway..."
+    export JAVA_TOOL_OPTIONS="-Duser.home=$HOME"
+    if ! REMOTE_DEV_NON_INTERACTIVE=1 /opt/idea/bin/remote-dev-server.sh registerBackendLocationForGateway; then
+        echo "ERROR: IntelliJ backend registration failed (exit $?). Gateway may not detect the IDE."
+    fi
+    if ! find "$HOME/.local/share/JetBrains" -name "python*" -print -quit 2>/dev/null | grep -q .; then
+        echo "==> Installing Python plugin..."
+        if ! REMOTE_DEV_NON_INTERACTIVE=1 /opt/idea/bin/remote-dev-server.sh installPlugins PythonCore Pythonid intellij.python.dap.plugin com.intellij.python.django; then
+            echo "ERROR: Plugin installation failed (exit $?). Install manually via Gateway."
+        fi
+    fi
+    unset JAVA_TOOL_OPTIONS
+    # Configure the Python SDK so IntelliJ can find the interpreter
+    IDEA_CONFIG_DIR="$HOME/.config/JetBrains/IntelliJIdea2025.3"
+    mkdir -p "$IDEA_CONFIG_DIR/options"
+    if [ ! -f "$IDEA_CONFIG_DIR/options/jdk.table.xml" ]; then
+        cat > "$IDEA_CONFIG_DIR/options/jdk.table.xml" << 'JDKEOF'
+<application>
+  <component name="ProjectJdkTable">
+    <jdk version="2">
+      <name value="Python 3.12 (sandbox)" />
+      <type value="Python SDK" />
+      <homePath value="/cache/python/bin/python3" />
+      <roots>
+        <classPath>
+          <root type="composite" />
+        </classPath>
+        <sourcePath>
+          <root type="composite" />
+        </sourcePath>
+      </roots>
+      <additional />
+    </jdk>
+  </component>
+</application>
+JDKEOF
+    fi
+    # Point IntelliJ at our committed posthog.iml (not its auto-generated workspace.iml)
+    if [ ! -f /workspace/.idea/modules.xml ]; then
+        cat > /workspace/.idea/modules.xml << 'MODEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/posthog.iml" filepath="$PROJECT_DIR$/.idea/posthog.iml" />
+    </modules>
+  </component>
+</project>
+MODEOF
+    fi
+    # Set the project SDK so IntelliJ doesn't prompt "unable to find JDK"
+    if [ ! -f /workspace/.idea/misc.xml ]; then
+        cat > /workspace/.idea/misc.xml << 'MISCEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12 (sandbox)" project-jdk-type="Python SDK" />
+  <component name="TestRunnerService">
+    <option name="PROJECT_TEST_RUNNER" value="py.test" />
+  </component>
+</project>
+MISCEOF
+    fi
+    echo "==> IntelliJ IDEA backend ready"
+fi
+
 echo "==> Starting PostHog via mprocs in tmux..."
 rm -f /workspace/bin/start.lock
 
