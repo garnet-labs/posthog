@@ -63,17 +63,10 @@ impl Parser for AppleProvider {
     type Err = ResolveError;
 
     async fn parse(&self, source: Self::Source) -> Result<ParsedAppleSymbols, ResolveError> {
-        // Try to unwrap symbol_data container first (new format),
-        // fall back to raw ZIP for backward compatibility with existing uploads
-        let (zip_data, decompressed_bytes) =
-            match read_symbol_data_with_byte_count::<AppleDsym>(source.clone()) {
-                Ok((dsym, bytes)) => (dsym.data, bytes),
-                Err(_) => {
-                    let len = source.len();
-                    (source, len)
-                }
-            };
-        ParsedAppleSymbols::from_dsym_zip(zip_data, decompressed_bytes)
+        let (dsym, decompressed_bytes) =
+            read_symbol_data_with_byte_count::<AppleDsym>(source)
+                .map_err(|e| AppleError::ParseError(e.to_string()))?;
+        ParsedAppleSymbols::from_dsym_zip(dsym.data, decompressed_bytes)
     }
 }
 
@@ -142,19 +135,12 @@ impl ParsedAppleSymbols {
     fn extract_dwarf_from_zip(
         archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     ) -> Result<Vec<u8>, ResolveError> {
-        for i in 0..archive.len() {
-            let mut file = archive
-                .by_index(i)
+        // New format: single DWARF binary stored as "dwarf" at root level
+        if let Ok(mut file) = archive.by_name("dwarf") {
+            let mut data = Vec::new();
+            file.read_to_end(&mut data)
                 .map_err(|e| AppleError::ParseError(e.to_string()))?;
-
-            let name = file.name().to_string();
-
-            if name.contains("/Contents/Resources/DWARF/") && !name.ends_with('/') {
-                let mut data = Vec::new();
-                file.read_to_end(&mut data)
-                    .map_err(|e| AppleError::ParseError(e.to_string()))?;
-                return Ok(data);
-            }
+            return Ok(data);
         }
 
         Err(AppleError::ParseError("No DWARF file found in dSYM bundle".to_string()).into())
