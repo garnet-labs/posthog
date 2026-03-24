@@ -83,6 +83,9 @@ export const Checkboxes: Story = {
                         <DropdownMenuCheckboxItem checked={checkedTwo} onCheckedChange={setCheckedTwo}>
                             Checkbox Item 2
                         </DropdownMenuCheckboxItem>
+                        <DropdownMenuCheckboxItem disabled>
+                            Checkbox Item 2
+                        </DropdownMenuCheckboxItem>
                     </DropdownMenuGroup>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -93,14 +96,16 @@ export const Checkboxes: Story = {
 export const Radios: Story = {
     render: () => {
         const [open, setOpen] = useState(true)
+        const [radioValue, setRadioValue] = useState('radioOne')
         return (
             <DropdownMenu open={open} onOpenChange={setOpen}>
                 <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>Click me</DropdownMenuTrigger>
                 <DropdownMenuContent className="w-auto">
                     <DropdownMenuGroup>
-                        <DropdownMenuRadioGroup value="radioOne">
+                        <DropdownMenuRadioGroup value={radioValue} onValueChange={setRadioValue}>
                             <DropdownMenuRadioItem value="radioOne">Radio Item 1</DropdownMenuRadioItem>
                             <DropdownMenuRadioItem value="radioTwo">Radio Item 2</DropdownMenuRadioItem>
+                            <DropdownMenuRadioItem value="radioThree" disabled>Radio Item 3</DropdownMenuRadioItem>
                         </DropdownMenuRadioGroup>
                     </DropdownMenuGroup>
                 </DropdownMenuContent>
