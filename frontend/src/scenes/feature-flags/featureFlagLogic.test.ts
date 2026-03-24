@@ -595,3 +595,252 @@ describe('validateFeatureFlagKey', () => {
         expect(validateFeatureFlagKey('a'.repeat(400))).toBeUndefined()
     })
 })
+
+describe('variant reordering functionality', () => {
+    let logic: ReturnType<typeof featureFlagLogic.build>
+
+    beforeEach(async () => {
+        useMocks({
+            get: {
+                '/api/projects/1/feature_flags/1/': { ...MOCK_FEATURE_FLAG },
+            },
+            patch: {
+                '/api/projects/1/feature_flags/1/': { ...MOCK_FEATURE_FLAG },
+            },
+        })
+        initKeaTests()
+        logic = featureFlagLogic({ id: 1 })
+        logic.mount()
+        await expectLogic(logic).toFinishAllListeners()
+    })
+
+    const createMultivariateFlag = (variants: any[], payloads: Record<number, any> = {}): void => {
+        logic.actions.setFeatureFlag({
+            ...MOCK_FEATURE_FLAG,
+            filters: {
+                groups: [{ properties: [], rollout_percentage: 100, variant: null }],
+                multivariate: { variants },
+                payloads,
+                super_groups: [],
+            },
+        } as FeatureFlagType)
+    }
+
+    describe('moveVariantUp', () => {
+        it('moves variant up and updates payload indices', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 50 },
+                    { key: 'test', name: 'Test', rollout_percentage: 50 },
+                ],
+                { 0: { value: 'control-payload' }, 1: { value: 'test-payload' } }
+            )
+
+            await expectLogic(logic, () => {
+                logic.actions.moveVariantUp(1)
+            }).toMatchValues({
+                featureFlag: partial({
+                    filters: partial({
+                        multivariate: {
+                            variants: [
+                                { key: 'test', name: 'Test', rollout_percentage: 50 },
+                                { key: 'control', name: 'Control', rollout_percentage: 50 },
+                            ],
+                        },
+                        payloads: { 0: { value: 'test-payload' }, 1: { value: 'control-payload' } },
+                    }),
+                }),
+            })
+        })
+
+        it('does nothing when trying to move first variant up', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 50 },
+                    { key: 'test', name: 'Test', rollout_percentage: 50 },
+                ],
+                { 0: { value: 'control-payload' } }
+            )
+
+            const initialState = logic.values.featureFlag
+
+            await expectLogic(logic, () => {
+                logic.actions.moveVariantUp(0)
+            }).toMatchValues({
+                featureFlag: initialState,
+            })
+        })
+    })
+
+    describe('moveVariantDown', () => {
+        it('moves variant down and updates payload indices', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 50 },
+                    { key: 'test', name: 'Test', rollout_percentage: 50 },
+                ],
+                { 0: { value: 'control-payload' }, 1: { value: 'test-payload' } }
+            )
+
+            await expectLogic(logic, () => {
+                logic.actions.moveVariantDown(0)
+            }).toMatchValues({
+                featureFlag: partial({
+                    filters: partial({
+                        multivariate: {
+                            variants: [
+                                { key: 'test', name: 'Test', rollout_percentage: 50 },
+                                { key: 'control', name: 'Control', rollout_percentage: 50 },
+                            ],
+                        },
+                        payloads: { 0: { value: 'test-payload' }, 1: { value: 'control-payload' } },
+                    }),
+                }),
+            })
+        })
+
+        it('does nothing when trying to move last variant down', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 50 },
+                    { key: 'test', name: 'Test', rollout_percentage: 50 },
+                ],
+                { 1: { value: 'test-payload' } }
+            )
+
+            const initialState = logic.values.featureFlag
+
+            await expectLogic(logic, () => {
+                logic.actions.moveVariantDown(1)
+            }).toMatchValues({
+                featureFlag: initialState,
+            })
+        })
+    })
+
+    describe('reorderVariants', () => {
+        it('reorders variants and updates payload indices correctly', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 34 },
+                    { key: 'test1', name: 'Test 1', rollout_percentage: 33 },
+                    { key: 'test2', name: 'Test 2', rollout_percentage: 33 },
+                ],
+                {
+                    0: { value: 'control-payload' },
+                    1: { value: 'test1-payload' },
+                    2: { value: 'test2-payload' },
+                }
+            )
+
+            // Move first variant to last position (0 -> 2)
+            await expectLogic(logic, () => {
+                logic.actions.reorderVariants(0, 2)
+            }).toMatchValues({
+                featureFlag: partial({
+                    filters: partial({
+                        multivariate: {
+                            variants: [
+                                { key: 'test1', name: 'Test 1', rollout_percentage: 33 },
+                                { key: 'test2', name: 'Test 2', rollout_percentage: 33 },
+                                { key: 'control', name: 'Control', rollout_percentage: 34 },
+                            ],
+                        },
+                        payloads: {
+                            0: { value: 'test1-payload' },
+                            1: { value: 'test2-payload' },
+                            2: { value: 'control-payload' },
+                        },
+                    }),
+                }),
+            })
+        })
+
+        it('handles out-of-bounds indices gracefully', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 50 },
+                    { key: 'test', name: 'Test', rollout_percentage: 50 },
+                ],
+                { 0: { value: 'control-payload' } }
+            )
+
+            const initialState = logic.values.featureFlag
+
+            // Test negative indices
+            await expectLogic(logic, () => {
+                logic.actions.reorderVariants(-1, 0)
+            }).toMatchValues({
+                featureFlag: initialState,
+            })
+
+            // Test indices beyond array length
+            await expectLogic(logic, () => {
+                logic.actions.reorderVariants(0, 10)
+            }).toMatchValues({
+                featureFlag: initialState,
+            })
+        })
+
+        it('handles empty variants array gracefully', async () => {
+            createMultivariateFlag([])
+
+            const initialState = logic.values.featureFlag
+
+            await expectLogic(logic, () => {
+                logic.actions.reorderVariants(0, 1)
+            }).toMatchValues({
+                featureFlag: initialState,
+            })
+        })
+
+        it('does nothing when from equals to', async () => {
+            createMultivariateFlag([
+                { key: 'control', name: 'Control', rollout_percentage: 50 },
+                { key: 'test', name: 'Test', rollout_percentage: 50 },
+            ])
+
+            const initialState = logic.values.featureFlag
+
+            await expectLogic(logic, () => {
+                logic.actions.reorderVariants(0, 0)
+            }).toMatchValues({
+                featureFlag: initialState,
+            })
+        })
+
+        it('preserves non-numeric payload keys', async () => {
+            createMultivariateFlag(
+                [
+                    { key: 'control', name: 'Control', rollout_percentage: 50 },
+                    { key: 'test', name: 'Test', rollout_percentage: 50 },
+                ],
+                {
+                    0: { value: 'control-payload' },
+                    1: { value: 'test-payload' },
+                    'non-numeric': { value: 'should-be-preserved' },
+                }
+            )
+
+            await expectLogic(logic, () => {
+                logic.actions.reorderVariants(0, 1)
+            }).toMatchValues({
+                featureFlag: partial({
+                    filters: partial({
+                        multivariate: {
+                            variants: [
+                                { key: 'test', name: 'Test', rollout_percentage: 50 },
+                                { key: 'control', name: 'Control', rollout_percentage: 50 },
+                            ],
+                        },
+                        payloads: {
+                            0: { value: 'test-payload' },
+                            1: { value: 'control-payload' },
+                            'non-numeric': { value: 'should-be-preserved' },
+                        },
+                    }),
+                }),
+            })
+        })
+    })
+})

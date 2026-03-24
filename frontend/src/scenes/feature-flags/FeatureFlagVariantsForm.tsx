@@ -11,8 +11,12 @@ import {
     DragOverlay,
     DragStartEvent,
 } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { useSortable } from '@dnd-kit/sortable'
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useState } from 'react'
 
@@ -45,6 +49,10 @@ export interface FeatureFlagVariantsFormProps {
     onReorderVariants?: (from: number, to: number) => void
     onDistributeEqually?: () => void
     canEditVariant?: (index: number) => boolean
+    hasExperiment?: boolean
+    experimentId?: number
+    experimentName?: string
+    isDraftExperiment?: boolean
     readOnly?: boolean
     flagKey?: string
     hasEnrichedAnalytics?: boolean
@@ -97,7 +105,7 @@ function SortableVariantRow({
     variantConcatWithPunctuation,
 }: SortableVariantRowProps): JSX.Element {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-        id: `variant-${index}`,
+        id: variant.key,
     })
 
     const style = {
@@ -287,7 +295,16 @@ export function FeatureFlagVariantsForm({
     )
 
     const [activeId, setActiveId] = useState<string | null>(null)
-    const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor))
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 8,
+            },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    )
 
     const handleDragStart = (event: DragStartEvent): void => {
         setActiveId(event.active.id.toString())
@@ -296,18 +313,23 @@ export function FeatureFlagVariantsForm({
     const handleDragEnd = (event: DragEndEvent): void => {
         const { active, over } = event
 
-        if (active.id !== over?.id) {
-            const activeIndex = parseInt(active.id.toString().replace('variant-', ''))
-            const overIndex = parseInt(over?.id.toString().replace('variant-', '') || '0')
+        if (!over) {
+            setActiveId(null)
+            return
+        }
 
-            if (onReorderVariants) {
+        if (active.id !== over.id) {
+            const activeIndex = variants.findIndex((v) => v.key === active.id)
+            const overIndex = variants.findIndex((v) => v.key === over.id)
+
+            if (onReorderVariants && activeIndex !== -1 && overIndex !== -1) {
                 onReorderVariants(activeIndex, overIndex)
             }
         }
         setActiveId(null)
     }
 
-    const activeVariantIndex = activeId ? parseInt(activeId.replace('variant-', '')) : -1
+    const activeVariantIndex = activeId ? variants.findIndex((v) => v.key === activeId) : -1
     const activeVariant = activeVariantIndex >= 0 ? variants[activeVariantIndex] : null
 
     const experimentDisabledReason = (action: string, controlOnly = false): React.ReactElement | undefined => {
@@ -447,10 +469,7 @@ export function FeatureFlagVariantsForm({
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
             >
-                <SortableContext
-                    items={variants.map((_, index) => `variant-${index}`)}
-                    strategy={verticalListSortingStrategy}
-                >
+                <SortableContext items={variants.map((v) => v.key)} strategy={verticalListSortingStrategy}>
                     {variants.map((variant: MultivariateFlagVariant, index: number) => (
                         <SortableVariantRow
                             key={`variant-${index}`}
