@@ -40,6 +40,10 @@ pub struct ProcessArgs {
     /// The maximum number of chunks to upload in a single batch
     #[arg(long, default_value = "50")]
     pub batch_size: usize,
+
+    /// Force overwrite existing symbol sets even if they have different content.
+    #[arg(long, default_value = "false")]
+    pub force: bool,
 }
 
 impl ProcessArgs {
@@ -64,6 +68,7 @@ impl From<ProcessArgs> for (InjectArgs, upload::Args) {
             skip_ssl_verification: false,
             batch_size: args.batch_size,
             release: args.release,
+            force: args.force,
         };
 
         (inject_args, upload_args)

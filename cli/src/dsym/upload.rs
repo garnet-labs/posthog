@@ -42,6 +42,10 @@ pub struct Args {
     /// allowing PostHog to display source code context around crash locations.
     #[arg(long, default_value_t = false)]
     pub include_source: bool,
+
+    /// Force overwrite existing symbol sets even if they have different content.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 pub fn upload(args: &Args) -> Result<()> {
@@ -52,6 +56,7 @@ pub fn upload(args: &Args) -> Result<()> {
         build,
         main_dsym,
         include_source,
+        force: _,
     } = args;
 
     let directory = directory.canonicalize().map_err(|e| {
@@ -205,7 +210,7 @@ pub fn upload(args: &Args) -> Result<()> {
     }
 
     info!("Uploading {} dSYM(s)...", uploads.len());
-    api::symbol_sets::upload_with_retry(uploads, 10, true)?;
+    api::symbol_sets::upload_with_retry(uploads, 10, true, args.force)?;
     info!("dSYM upload complete");
 
     Ok(())

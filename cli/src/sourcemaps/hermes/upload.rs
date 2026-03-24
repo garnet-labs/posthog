@@ -23,6 +23,10 @@ pub struct Args {
 
     #[clap(flatten)]
     pub release: ReleaseArgs,
+
+    /// Force overwrite existing symbol sets even if they have different content.
+    #[arg(long, default_value = "false")]
+    pub force: bool,
 }
 
 pub fn upload(args: &Args) -> Result<()> {
@@ -31,6 +35,7 @@ pub fn upload(args: &Args) -> Result<()> {
         directory,
         release,
         batch_size,
+        force: _,
     } = args;
 
     let directory = directory.canonicalize().map_err(|e| {
@@ -78,7 +83,7 @@ pub fn upload(args: &Args) -> Result<()> {
 
     let started_at = Instant::now();
     let upload_result =
-        symbol_sets::upload_with_retry(uploads, *batch_size, release.skip_release_on_fail);
+        symbol_sets::upload_with_retry(uploads, *batch_size, release.skip_release_on_fail, args.force);
     let duration_ms = started_at.elapsed().as_millis();
 
     let mut props = vec![

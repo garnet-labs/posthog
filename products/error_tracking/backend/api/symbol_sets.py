@@ -65,6 +65,15 @@ class ErrorTrackingSymbolSetUploadSerializer(serializers.Serializer):
     content_hash = serializers.CharField(allow_null=True, default=None)
 
 
+class BulkStartUploadSerializer(serializers.Serializer):
+    symbol_sets = ErrorTrackingSymbolSetUploadSerializer(many=True, required=False, default=[])
+    chunk_ids = serializers.ListField(child=serializers.CharField(), required=False, default=[])
+    release_id = serializers.CharField(allow_null=True, default=None)
+    force = serializers.BooleanField(
+        default=False, help_text="Force overwrite existing symbol sets with different content"
+    )
+
+
 @extend_schema(tags=[ProductKey.ERROR_TRACKING])
 class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "error_tracking"
@@ -239,11 +248,14 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSe
     def bulk_start_upload(self, request, **kwargs):
         if request.user.pk:
             posthoganalytics.identify_context(request.user.pk)
-        # Earlier ones send a list of chunk IDs, all associated with one release
-        # Extract a list of chunk IDs from the request json
-        chunk_ids: list[str] = request.data.get("chunk_ids") or []
-        # Grab the release ID from the request json
-        release_id: str | None = request.data.get("release_id", None)
+
+        serializer = BulkStartUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        force: bool = data["force"]
+        chunk_ids: list[str] = data["chunk_ids"]
+        release_id: str | None = data["release_id"]
 
         _ = posthoganalytics.capture(
             "error_tracking_symbol_set_upload_started",
@@ -251,13 +263,7 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSe
             groups=groups(self.team.organization, self.team),
         )
 
-        # Validate symbol_sets using the serializer
-        symbol_sets: list[SymbolSetUpload] = []
-        if "symbol_sets" in request.data:
-            chunk_serializer = ErrorTrackingSymbolSetUploadSerializer(data=request.data["symbol_sets"], many=True)
-            _ = chunk_serializer.is_valid(raise_exception=True)
-            symbol_sets = [SymbolSetUpload(**data) for data in chunk_serializer.validated_data]
-
+        symbol_sets: list[SymbolSetUpload] = [SymbolSetUpload(**ss) for ss in data["symbol_sets"]]
         symbol_sets.extend([SymbolSetUpload(x, release_id, None) for x in chunk_ids])
 
         if not settings.OBJECT_STORAGE_ENABLED:
@@ -267,7 +273,7 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSe
             )
 
         chunk_id_url_map = bulk_create_symbol_sets(
-            symbol_sets, self.team, distinct_id=str(request.user.pk) if request.user.pk else None
+            symbol_sets, self.team, distinct_id=str(request.user.pk) if request.user.pk else None, force=force
         )
         return Response({"id_map": chunk_id_url_map}, status=status.HTTP_201_CREATED)
 
@@ -403,6 +409,7 @@ def bulk_create_symbol_sets(
     new_symbol_sets: list[SymbolSetUpload],
     team: Team,
     distinct_id: str | None = None,
+    force: bool = False,
 ) -> dict[str, dict[str, str]]:
     accelerate = bool(
         distinct_id
@@ -472,28 +479,45 @@ def bulk_create_symbol_sets(
             dirty = False
 
             # Allow adding an "orphan" symbol set to a release, but not
-            # moving symbols sets between releases
+            # moving symbol sets between releases (unless force is set)
             if upload.release_id:
                 if existing.release_id is None:
                     existing.release_id = upload.release_id
                     dirty = True
                 elif str(existing.release_id) != upload.release_id:
-                    raise ValidationError(
-                        code="release_id_mismatch",
-                        detail=f"Symbol set {existing.ref} already has a release ID",
-                    )
+                    if force:
+                        existing.release_id = upload.release_id
+                        dirty = True
+                    else:
+                        raise ValidationError(
+                            code="release_id_mismatch",
+                            detail=f"Symbol set {existing.ref} already has a release ID",
+                        )
 
             if existing.content_hash is not None and existing.content_hash != upload.content_hash:
-                # If this symbol set already has a content hash, and they differ, raise. We do not support changing
-                # the content of a symbol set once it's been uploaded - callers should inject a new chunk_id instead.
-                # Note - this will also return an error if the upload's content hash is None. This is
-                # intentional - we can't tell whether its safe to overwrite the existing content hash
-                # here. This will only be the case for older CLI versions, which we expect to misbehave
-                # in this code path anyway.
-                raise ValidationError(
-                    code="content_hash_mismatch",
-                    detail=f"Symbol set {existing.ref} already exists, with different content.",
-                )
+                if force:
+                    # Force overwrite: set up a new upload for the existing symbol set
+                    storage_ptr = generate_symbol_set_file_key()
+                    presigned_url = generate_symbol_set_upload_presigned_url(storage_ptr, accelerate=accelerate)
+                    id_url_map[existing.ref] = {
+                        "presigned_url": presigned_url,
+                        "symbol_set_id": str(existing.id),
+                    }
+                    existing.storage_ptr = storage_ptr
+                    existing.content_hash = None
+                    existing.failure_reason = None
+                    dirty = True
+                else:
+                    # If this symbol set already has a content hash, and they differ, raise. We do not support changing
+                    # the content of a symbol set once it's been uploaded - callers should inject a new chunk_id instead.
+                    # Note - this will also return an error if the upload's content hash is None. This is
+                    # intentional - we can't tell whether its safe to overwrite the existing content hash
+                    # here. This will only be the case for older CLI versions, which we expect to misbehave
+                    # in this code path anyway.
+                    raise ValidationError(
+                        code="content_hash_mismatch",
+                        detail=f"Symbol set {existing.ref} already exists, with different content.",
+                    )
             elif existing.content_hash is None:
                 # If the existing set doesn't have a content hash, we can set it up for an upload, and return it
                 # so the CLI will send the data to s3

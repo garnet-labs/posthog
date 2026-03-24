@@ -26,6 +26,10 @@ pub struct Args {
 
     #[clap(flatten)]
     pub release: ReleaseArgs,
+
+    /// Force overwrite existing symbol sets even if they have different content.
+    #[arg(long, default_value = "false")]
+    pub force: bool,
 }
 
 pub fn upload(args: &Args) -> Result<()> {
@@ -34,6 +38,7 @@ pub fn upload(args: &Args) -> Result<()> {
         map_id,
         batch_size,
         release,
+        force,
     } = args;
 
     let ReleaseArgs {
@@ -71,7 +76,7 @@ pub fn upload(args: &Args) -> Result<()> {
 
     let to_upload: SymbolSetUpload = file.try_into()?;
 
-    api::symbol_sets::upload_with_retry(vec![to_upload], *batch_size, *skip_release_on_fail)?;
+    api::symbol_sets::upload_with_retry(vec![to_upload], *batch_size, *skip_release_on_fail, *force)?;
 
     Ok(())
 }
