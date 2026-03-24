@@ -231,13 +231,14 @@ export function TaxonomicPropertyFilter({
         />
     )
 
+    const filterLabel = filter && 'label' in filter ? filter.label : undefined
     const filterContent =
         filter?.type === 'cohort'
             ? cohortName || `Cohort #${filter?.value}`
             : filter?.type === PropertyFilterType.EventMetadata && filter?.key?.startsWith('$group_')
-              ? filter.label || `Group ${filter?.value}`
-              : filter?.type === PropertyFilterType.Flag && filter?.label
-                ? filter.label
+              ? filterLabel || `Group ${filter?.value}`
+              : filterLabel
+                ? filterLabel
                 : filter?.key && (
                       <PropertyKeyInfo
                           value={filter.key}
