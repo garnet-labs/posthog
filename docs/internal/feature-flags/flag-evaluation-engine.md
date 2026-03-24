@@ -299,7 +299,8 @@ Django pre-computes all dependency metadata at cache-write time and ships it as 
     "dependency_stages": [[3], [2], [1]],
     "flags_with_missing_deps": [5],
     "transitive_deps": {"1": [2, 3], "2": [3]}
-  }
+  },
+  "cohorts": [...]                       // optional, preloaded cohort definitions
 }
 ```
 
@@ -319,13 +320,11 @@ When `evaluation_metadata` is absent (PG fallback, old cache entries), the servi
 4. Track missing dependencies (flags depending on non-existent flags)
 5. Compute topological evaluation stages using Kahn's algorithm
 
-#### Backwards compatibility
+The two paths are fully compatible via `#[serde(default)]` on `evaluation_metadata` and `cohorts`:
 
-The two paths are fully compatible via `#[serde(default)]` on `evaluation_metadata`:
-
-- **Old Rust + new cache**: `evaluation_metadata` is an unknown field, ignored. Falls back to petgraph.
-- **New Rust + old cache**: `evaluation_metadata` absent → `None` → falls back to petgraph.
-- **New Rust + new cache**: `evaluation_metadata` present → fast pre-computed path.
+- **Old Rust + new cache**: Unknown fields (`evaluation_metadata`, `cohorts`) are ignored. Falls back to petgraph and `CohortCacheManager`.
+- **New Rust + old cache**: Fields absent → `None` → falls back to petgraph and `CohortCacheManager`.
+- **New Rust + new cache**: `evaluation_metadata` present → fast pre-computed dependency path. `cohorts` present → skip `CohortCacheManager` PG query.
 
 ### Evaluation stages
 
@@ -362,11 +361,13 @@ Experience continuity ensures users see the same flag value even when their `dis
 
 ## Cohort matching
 
+Cohort definitions can be preloaded from the HyperCache alongside flags and evaluation metadata, or fetched on demand from PostgreSQL. See [Cohort data source](#cohort-data-source) below.
+
 ### Dynamic cohorts
 
 Dynamic cohorts define membership via property filters. The service resolves them by:
 
-1. Fetching cohort definitions (from moka in-memory cache, backed by PostgreSQL)
+1. Fetching cohort definitions (preloaded from HyperCache when available, otherwise from moka cache backed by PostgreSQL)
 2. Building a dependency graph for nested cohorts (cohorts can reference other cohorts)
 3. Evaluating cohort property filters against person/group properties
 
@@ -385,9 +386,20 @@ WITH cohort_membership AS (
 SELECT cohort_id, is_member FROM cohort_membership
 ```
 
-### Cohort caching
+### Cohort data source
 
-Cohort definitions are cached in-memory using `moka`:
+Cohort definitions are fetched from one of two sources:
+
+| Source                        | When used                                            | Performance             |
+| ----------------------------- | ---------------------------------------------------- | ----------------------- |
+| Preloaded (HyperCache)        | `cohorts` field is present in the cache payload      | No additional queries   |
+| `CohortCacheManager` fallback | `cohorts` is absent (old cache entries, PG fallback) | moka cache → PostgreSQL |
+
+The `FeatureFlagMatcher` consumes preloaded cohorts via `Option::take()`. When preloaded cohorts are present, the service skips the `CohortCacheManager` entirely, eliminating PostgreSQL queries for cohort definitions on cache hits. A `flags_cohort_source_total` counter metric (label `source=preloaded|cache_manager`) tracks adoption.
+
+### Cohort caching (fallback)
+
+When preloaded cohorts are not available (old cache entries or PostgreSQL fallback), cohort definitions are fetched from the moka-backed `CohortCacheManager`:
 
 | Parameter       | Default        | Purpose                                |
 | --------------- | -------------- | -------------------------------------- |
@@ -438,7 +450,7 @@ The evaluation engine follows a lazy-but-batched approach:
 2. **Group type mappings**: Fetched once per request if any flag uses groups
 3. **Person properties**: Fetched once per request from PostgreSQL, merged with request overrides
 4. **Group properties**: Fetched once per request from PostgreSQL, merged with request overrides
-5. **Cohort definitions**: Fetched from moka cache (backed by PostgreSQL)
+5. **Cohort definitions**: Preloaded from HyperCache when available; falls back to moka cache (backed by PostgreSQL)
 6. **Static cohort memberships**: Fetched once per request via batched query
 7. **Hash key overrides**: Fetched once per request if any flag uses experience continuity
 8. **Flag evaluation results**: Accumulated during evaluation, used for flag-on-flag dependencies
