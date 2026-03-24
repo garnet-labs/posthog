@@ -3,10 +3,15 @@ import { loaders } from 'kea-loaders'
 import { router } from 'kea-router'
 
 import api from 'lib/api'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { getRelativeNextPath } from 'lib/utils'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { billingLogic } from 'scenes/billing/billingLogic'
 import { onboardingLogic } from 'scenes/onboarding/onboardingLogic'
+import { sdksLogic } from 'scenes/onboarding/sdks/sdksLogic'
 import { USE_CASE_OPTIONS, UseCaseOption, getRecommendedProducts } from 'scenes/onboarding/productRecommendations'
+import { inviteLogic } from 'scenes/settings/organization/inviteLogic'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
@@ -37,7 +42,7 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
             eventUsageLogic,
             ['reportOnboardingStarted', 'reportOnboardingProductSelectionPath', 'reportOnboardingProductToggled'],
         ],
-        values: [teamLogic, ['currentTeam']],
+        values: [teamLogic, ['currentTeam'], featureFlagLogic, ['featureFlags']],
     })),
 
     actions({
@@ -165,6 +170,10 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
     })),
 
     selectors({
+        isSmartPrefetchEnabled: [
+            (s) => [s.featureFlags],
+            (featureFlags): boolean => featureFlags[FEATURE_FLAGS.ONBOARDING_SMART_PREFETCH] === 'test',
+        ],
         browsingHistoryProducts: [
             (s) => [s.browsingHistory],
             (browsingHistory): ProductKey[] => mapBrowsingHistoryToProducts(browsingHistory),
@@ -322,6 +331,15 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
         },
 
         handleStartOnboarding: () => {
+            if (values.isSmartPrefetchEnabled) {
+                // Warm up any onboarding-time network calls before redirecting into a product flow.
+                // `sdksLogic` triggers `loadSnippetEvents()` on mount.
+                sdksLogic.mount()
+
+                inviteLogic.mount()
+                inviteLogic.actions.loadInvites()
+            }
+
             const nextUrl = getRelativeNextPath(router.values.searchParams['next'], location)
 
             if (nextUrl && nextUrl !== '/') {
@@ -369,7 +387,7 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
         },
     })),
 
-    afterMount(({ actions }) => {
+    afterMount(({ actions, values }) => {
         const browsingHistory = getBrowsingHistoryFromPostHog()
         if (browsingHistory.length > 0) {
             actions.setBrowsingHistory(browsingHistory)
@@ -382,5 +400,10 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
         }
 
         actions.reportOnboardingStarted('product_selection')
+
+        if (values.isSmartPrefetchEnabled) {
+            billingLogic.mount()
+            billingLogic.actions.loadBilling()
+        }
     }),
 ])
