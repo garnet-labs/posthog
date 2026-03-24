@@ -6,10 +6,12 @@ import uuid
 
 from django.db import models
 
+from posthog.models.scoping.product_mixin import ProductTeamModel
+
 from .facade.enums import ReviewDecision, ReviewState, RunPurpose, RunStatus, RunType, SnapshotResult
 
 
-class Repo(models.Model):
+class Repo(ProductTeamModel):
     """
     A visual review repo tied to a GitHub repository.
 
@@ -18,9 +20,6 @@ class Repo(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # References posthog.Team in the main database — no FK constraint because
-    # this model lives in a separate product database.
-    team_id = models.BigIntegerField(db_index=True)
 
     # GitHub identity: numeric ID is stable, full_name is for API calls + display
     repo_external_id = models.BigIntegerField()
@@ -64,7 +63,7 @@ class Repo(models.Model):
         return kid, secret_hex
 
 
-class Artifact(models.Model):
+class Artifact(ProductTeamModel):
     """
     Content-addressed image storage.
 
@@ -73,8 +72,6 @@ class Artifact(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     repo = models.ForeignKey(Repo, on_delete=models.CASCADE, related_name="artifacts")
-    # Denormalized from repo.team_id for direct team scoping.
-    team_id = models.BigIntegerField(db_index=True)
 
     content_hash = models.CharField(max_length=128, db_index=True)
     storage_path = models.CharField(max_length=1024)
@@ -94,7 +91,7 @@ class Artifact(models.Model):
         return f"{self.content_hash[:12]}..."
 
 
-class Run(models.Model):
+class Run(ProductTeamModel):
     """
     A visual test run from CI.
 
@@ -103,8 +100,6 @@ class Run(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     repo = models.ForeignKey(Repo, on_delete=models.CASCADE, related_name="runs")
-    # Denormalized from repo.team_id for direct team scoping.
-    team_id = models.BigIntegerField(db_index=True)
 
     status = models.CharField(max_length=20, choices=[(s.value, s.value) for s in RunStatus], default=RunStatus.PENDING)
     run_type = models.CharField(max_length=20, choices=[(t.value, t.value) for t in RunType], default=RunType.OTHER)
@@ -167,7 +162,7 @@ class Run(models.Model):
         return f"Run {self.id} ({self.status})"
 
 
-class RunSnapshot(models.Model):
+class RunSnapshot(ProductTeamModel):
     """
     A single snapshot within a run.
 
@@ -176,8 +171,6 @@ class RunSnapshot(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="snapshots")
-    # Denormalized from run.team_id for direct team scoping.
-    team_id = models.BigIntegerField(db_index=True)
 
     identifier = models.CharField(max_length=512)
 
