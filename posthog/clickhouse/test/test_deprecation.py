@@ -21,11 +21,16 @@ _stubs_installed = False
 
 
 def _django_is_configured() -> bool:
-    """Return True if Django is already set up (e.g. running inside the full test suite)."""
+    """Return True if Django is already set up (e.g. running inside the full test suite).
+
+    MagicMock objects respond to any attribute access, so we verify USE_I18N
+    is an actual bool — not a mock — to avoid false positives from prior tests.
+    """
     try:
         from django.conf import settings
 
-        return hasattr(settings, "USE_I18N")
+        val = getattr(settings, "USE_I18N", None)
+        return isinstance(val, bool)
     except Exception:
         return False
 

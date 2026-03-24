@@ -101,10 +101,36 @@ class Command(BaseCommand):
             logger.warning("Not running migration-specific checks. See .github/workflows/ci-backend.yml for usage.")
             return
 
-        migrations = [m.strip() for m in sys.stdin.readlines() if m.strip()]
+        raw_paths = [m.strip() for m in sys.stdin.readlines() if m.strip()]
+
+        # Extract unique migration identifiers from file paths.
+        # Paths may be:
+        #   posthog/clickhouse/migrations/0123_name.py          (old-style .py file)
+        #   posthog/clickhouse/migrations/0222_name/up.sql      (new-style directory contents)
+        #   posthog/clickhouse/migrations/runner.py             (library file, not a migration)
+        migration_paths: dict[str, str] = {}  # migration_id -> representative path
+        for path in raw_paths:
+            # Old-style: .py file directly under migrations/
+            m = re.match(r".*/clickhouse/migrations/([0-9]+_[a-zA-Z_0-9]+)\.py$", path)
+            if m:
+                mid = m.group(1)
+                migration_paths.setdefault(mid, path)
+                continue
+            # New-style: file inside a numbered directory
+            m = re.match(r".*/clickhouse/migrations/([0-9]+_[a-zA-Z_0-9]+)/", path)
+            if m:
+                mid = m.group(1)
+                migration_paths.setdefault(mid, path)
+                continue
+            # Library file (runner.py, manifest.py, etc.) — skip silently
+
+        migrations = list(migration_paths.values())
 
         if len(migrations) > 1:
-            logger.error("Multiple migrations in PR. Please limit to one migration per PR.")
+            logger.error(
+                "Multiple migrations in PR (%s). Please limit to one migration per PR.",
+                ", ".join(migration_paths.keys()),
+            )
             sys.exit(1)
 
         if not migrations:
@@ -147,8 +173,8 @@ class Command(BaseCommand):
             # Try .py file pattern first
             matches = re.findall(r"([a-z]+)/clickhouse/migrations/([0-9]+)_([a-zA-Z_0-9]+)\.py", new_migration)
             if not matches:
-                # Try directory pattern (path may end with / or not)
-                matches = re.findall(r"([a-z]+)/clickhouse/migrations/([0-9]+)_([a-zA-Z_0-9]+)/?$", new_migration)
+                # Try directory pattern: path may be the directory itself or a file inside it
+                matches = re.findall(r"([a-z]+)/clickhouse/migrations/([0-9]+)_([a-zA-Z_0-9]+)(?:/|$)", new_migration)
             _, index, name = matches[0]
         except (IndexError, CommandError) as exc:
             logger.warning("Could not parse migration path '%s': %s", new_migration, exc)
