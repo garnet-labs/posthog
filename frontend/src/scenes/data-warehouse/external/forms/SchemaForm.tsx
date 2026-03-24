@@ -12,10 +12,22 @@ import { ExternalDataSourceSyncSchema } from '~/types'
 import { sourceWizardLogic } from '../../new/sourceWizardLogic'
 import { SyncMethodForm } from './SyncMethodForm'
 
+export function getDirectQuerySelectionDescription(schema: unknown): string {
+    const normalizedSchema = typeof schema === 'string' ? schema.trim() : ''
+
+    if (!normalizedSchema) {
+        return 'Choose which tables should be available for querying in PostHog. You are browsing tables across all non-system schemas, so tables from different schemas appear here with schema-prefixed names.'
+    }
+
+    return `Choose which tables should be available for querying in PostHog. You are browsing tables from the "${normalizedSchema}" schema.`
+}
+
 export default function SchemaForm(): JSX.Element {
     const containerRef = useFloatingContainer()
     const { toggleSchemaShouldSync, openSyncMethodModal, toggleAllTables } = useActions(sourceWizardLogic)
-    const { databaseSchema, tablesAllToggledOn, suggestedTablesMap, isDirectQueryMode } = useValues(sourceWizardLogic)
+    const { databaseSchema, tablesAllToggledOn, suggestedTablesMap, isDirectQueryMode, source } =
+        useValues(sourceWizardLogic)
+    const directQuerySelectionDescription = getDirectQuerySelectionDescription(source.payload.schema)
 
     const onClickCheckbox = (schema: ExternalDataSourceSyncSchema, checked: boolean): void => {
         if (!isDirectQueryMode && schema.sync_type === null) {
@@ -35,12 +47,7 @@ export default function SchemaForm(): JSX.Element {
     return (
         <>
             <div className="flex flex-col gap-2">
-                {isDirectQueryMode && (
-                    <p className="text-sm text-muted-alt mb-0">
-                        Choose which tables should be available for querying in PostHog. If you left the schema field
-                        blank, tables from different schemas appear here with schema-prefixed names.
-                    </p>
-                )}
+                {isDirectQueryMode && <p className="text-sm text-muted-alt mb-0">{directQuerySelectionDescription}</p>}
                 <div className="max-h-[60vh] overflow-y-auto">
                     <LemonTable
                         emptyState="No schemas found"

@@ -109,6 +109,14 @@ class TestPostgresSchemaDiscovery:
                 schema="",
             )
 
+        cursor = connection.cursor.return_value.__enter__.return_value
+        first_query = cursor.execute.call_args_list[0].args[0]
+        second_query = cursor.execute.call_args_list[1].args[0]
+
+        assert "NOT IN" in first_query
+        assert "ALL(" not in first_query
+        assert " IN (" in second_query
+        assert "ANY(" not in second_query
         assert set(schemas.keys()) == {"public.users", "analytics.events"}
         assert schemas["public.users"].source_schema == "public"
         assert schemas["public.users"].source_table_name == "users"
@@ -134,4 +142,12 @@ class TestPostgresSchemaDiscovery:
                 schema="",
             )
 
+        cursor = connection.cursor.return_value.__enter__.return_value
+        first_query = cursor.execute.call_args_list[0].args[0]
+        second_query = cursor.execute.call_args_list[1].args[0]
+
+        assert "NOT IN" in first_query
+        assert "ALL(" not in first_query
+        assert " IN (" in second_query
+        assert "ANY(" not in second_query
         assert foreign_keys == {"analytics.events": [("user_id", "public.users", "id")]}

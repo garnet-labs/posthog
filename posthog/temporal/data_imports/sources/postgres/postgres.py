@@ -140,6 +140,18 @@ def _get_display_table_name(schema_name: str, table_name: str, *, qualify_with_s
     return f"{schema_name}.{table_name}" if qualify_with_schema else table_name
 
 
+def _build_named_value_placeholders(prefix: str, values: list[str]) -> tuple[str, dict[str, str]]:
+    placeholders: list[str] = []
+    params: dict[str, str] = {}
+
+    for index, value in enumerate(values):
+        key = f"{prefix}_{index}"
+        placeholders.append(f"%({key})s")
+        params[key] = value
+
+    return ", ".join(placeholders), params
+
+
 def _get_discovered_tables(
     cursor: psycopg.Cursor, schema: str | None, names: list[str] | None = None
 ) -> tuple[dict[str, tuple[str, str]], bool]:
@@ -161,22 +173,25 @@ def _get_discovered_tables(
             {"schema": selected_schema},
         )
     else:
+        system_schema_placeholders, system_schema_params = _build_named_value_placeholders(
+            "system_schema", SYSTEM_POSTGRES_SCHEMAS
+        )
         cursor.execute(
-            """
+            f"""
             SELECT schemaname AS schema_name, tablename AS table_name
             FROM pg_tables
-            WHERE schemaname <> ALL(%(system_schemas)s)
+            WHERE schemaname NOT IN ({system_schema_placeholders})
               AND schemaname NOT LIKE 'pg_temp_%%'
               AND schemaname NOT LIKE 'pg_toast_temp_%%'
             UNION ALL
             SELECT schemaname AS schema_name, matviewname AS table_name
             FROM pg_matviews
-            WHERE schemaname <> ALL(%(system_schemas)s)
+            WHERE schemaname NOT IN ({system_schema_placeholders})
               AND schemaname NOT LIKE 'pg_temp_%%'
               AND schemaname NOT LIKE 'pg_toast_temp_%%'
             ORDER BY schema_name, table_name
             """,
-            {"system_schemas": SYSTEM_POSTGRES_SCHEMAS},
+            system_schema_params,
         )
 
     discovered_rows = cursor.fetchall()
@@ -275,9 +290,10 @@ def get_schemas(
             source_schemas = sorted({schema_name for schema_name, _table_name in discovered_tables.values()})
             table_lookup = {source: display_name for display_name, source in discovered_tables.items()}
             discovered_pairs = set(discovered_tables.values())
+            schema_placeholders, schema_params = _build_named_value_placeholders("schema", source_schemas)
 
             cursor.execute(
-                """
+                f"""
                 SELECT * FROM (
                     SELECT
                         table_schema,
@@ -287,7 +303,7 @@ def get_schemas(
                         is_nullable,
                         ordinal_position
                     FROM information_schema.columns
-                    WHERE table_schema = ANY(%(schemas)s)
+                    WHERE table_schema IN ({schema_placeholders})
                     UNION ALL
                     SELECT
                         n.nspname AS table_schema,
@@ -300,13 +316,13 @@ def get_schemas(
                     JOIN pg_namespace n ON c.relnamespace = n.oid
                     JOIN pg_attribute a ON a.attrelid = c.oid
                     WHERE c.relkind = 'm'
-                      AND n.nspname = ANY(%(schemas)s)
+                      AND n.nspname IN ({schema_placeholders})
                       AND a.attnum > 0
                       AND NOT a.attisdropped
                 ) t
                 ORDER BY table_schema ASC, table_name ASC, ordinal_position ASC
                 """,
-                {"schemas": source_schemas},
+                schema_params,
             )
             result = cursor.fetchall()
 
@@ -361,9 +377,10 @@ def get_foreign_keys(
             source_schemas = sorted({schema_name for schema_name, _table_name in discovered_tables.values()})
             table_lookup = {source: display_name for display_name, source in discovered_tables.items()}
             discovered_pairs = set(discovered_tables.values())
+            schema_placeholders, schema_params = _build_named_value_placeholders("schema", source_schemas)
 
             cursor.execute(
-                """
+                f"""
                 SELECT
                     tc.table_schema AS source_schema_name,
                     tc.table_name AS table_name,
@@ -380,10 +397,10 @@ def get_foreign_keys(
                     ON ccu.constraint_name = tc.constraint_name
                     AND ccu.constraint_schema = tc.constraint_schema
                 WHERE tc.constraint_type = 'FOREIGN KEY'
-                  AND tc.table_schema = ANY(%(schemas)s)
+                  AND tc.table_schema IN ({schema_placeholders})
                 ORDER BY tc.table_schema, tc.table_name, kcu.ordinal_position
                 """,
-                {"schemas": source_schemas},
+                schema_params,
             )
             result = cursor.fetchall()
 

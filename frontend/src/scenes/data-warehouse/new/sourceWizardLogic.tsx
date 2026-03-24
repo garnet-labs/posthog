@@ -1105,9 +1105,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                 actions.setStep(2)
                 // Restore form values saved before an OAuth redirect
                 const savedValues = restoreSourceFormState(source.name.toLowerCase())
-                if (savedValues) {
-                    actions.setSourceConnectionDetailsValues(savedValues)
-                }
+                actions.setSourceConnectionDetailsValues(
+                    getInitialSourceConnectionDetailsValues(savedValues, accessMethod)
+                )
                 return
             }
 
@@ -1226,6 +1226,15 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
         },
     })),
 ])
+
+export const getInitialSourceConnectionDetailsValues = (
+    savedValues: Record<string, unknown> | null | undefined,
+    accessMethod: 'warehouse' | 'direct'
+): Record<string, unknown> => ({
+    ...savedValues,
+    access_method:
+        savedValues && typeof savedValues.access_method === 'string' ? savedValues.access_method : accessMethod,
+})
 
 export const getErrorsForFields = (
     fields: SourceFieldConfig[],

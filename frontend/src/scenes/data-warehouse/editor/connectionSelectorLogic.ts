@@ -4,6 +4,7 @@ import { loaders } from 'kea-loaders'
 import api from 'lib/api'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { externalDataSourcesLogic } from 'scenes/data-warehouse/externalDataSourcesLogic'
 
 import type { ExternalDataSourceConnectionOption } from '~/types'
 
@@ -42,6 +43,7 @@ export const connectionSelectorLogic = kea<connectionSelectorLogicType>([
     props({ selectedConnectionId: undefined } as ConnectionSelectorLogicProps),
     connect(() => ({
         values: [featureFlagLogic, ['featureFlags']],
+        actions: [externalDataSourcesLogic, ['loadSourcesSuccess']],
     })),
     loaders(() => ({
         connectionOptions: [
@@ -131,4 +133,11 @@ export const connectionSelectorLogic = kea<connectionSelectorLogicType>([
             actions.loadConnectionOptions()
         }
     }),
+    listeners(({ actions, values }) => ({
+        loadSourcesSuccess: () => {
+            if (values.isDirectQueryEnabled) {
+                actions.loadConnectionOptions()
+            }
+        },
+    })),
 ])
