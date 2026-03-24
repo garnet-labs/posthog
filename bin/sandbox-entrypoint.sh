@@ -50,9 +50,11 @@ if [ "$(id -u)" = "0" ] && [ "${SANDBOX_UID:-1000}" != "0" ]; then
         echo "==> sshd listening on port 2222"
     fi
 
-    # Copy Claude Code auth from read-only mounts so it can write to ~/.claude.
+    # Copy only Claude Code auth files (not history, sessions, or project data).
     mkdir -p "$SANDBOX_HOME/.claude"
-    cp -r /tmp/claude-auth/. "$SANDBOX_HOME/.claude/" 2>/dev/null || true
+    for f in .credentials.json settings.json settings.local.json; do
+        cp "/tmp/claude-auth/$f" "$SANDBOX_HOME/.claude/$f" 2>/dev/null || true
+    done
     cp /tmp/claude-auth.json "$SANDBOX_HOME/.claude.json" 2>/dev/null || true
     chown -R "$SUID:$SGID" "$SANDBOX_HOME"
 
