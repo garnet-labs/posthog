@@ -600,6 +600,10 @@ impl KafkaDeduplicatorService {
         // Shutdown all stores cleanly
         self.store_manager.shutdown().await;
 
+        if consumer_exited_early {
+            anyhow::bail!("Consumer exited unexpectedly — exiting with non-zero status");
+        }
+
         info!("Kafka Deduplicator service stopped");
         Ok(())
     }
@@ -683,6 +687,10 @@ impl KafkaDeduplicatorService {
 
         // Shutdown all stores cleanly
         self.store_manager.shutdown().await;
+
+        if consumer_exited_early {
+            anyhow::bail!("Consumer exited unexpectedly — exiting with non-zero status");
+        }
 
         Ok(())
     }
