@@ -46,6 +46,61 @@ def RAW_SESSIONS_MV_RECORDINGS_V3():
     return f"{DISTRIBUTED_RAW_SESSIONS_TABLE_V3()}_recordings_mv"
 
 
+def RAW_SESSIONS_INSERT_COLUMNS_V3(include_session_timestamp: bool = True) -> str:
+    columns = [
+        "team_id",
+        "session_id_v7",
+        *(["session_timestamp"] if include_session_timestamp else []),
+        "distinct_id",
+        "distinct_ids",
+        "min_timestamp",
+        "max_timestamp",
+        "max_inserted_at",
+        "urls",
+        "entry_url",
+        "end_url",
+        "last_external_click_url",
+        "browser",
+        "browser_version",
+        "os",
+        "os_version",
+        "device_type",
+        "viewport_width",
+        "viewport_height",
+        "geoip_country_code",
+        "geoip_subdivision_1_code",
+        "geoip_subdivision_1_name",
+        "geoip_subdivision_city_name",
+        "geoip_time_zone",
+        "entry_referring_domain",
+        "entry_utm_source",
+        "entry_utm_campaign",
+        "entry_utm_medium",
+        "entry_utm_term",
+        "entry_utm_content",
+        "entry_gclid",
+        "entry_gad_source",
+        "entry_fbclid",
+        "entry_has_gclid",
+        "entry_has_fbclid",
+        "entry_ad_ids_map",
+        "entry_ad_ids_set",
+        "entry_channel_type_properties",
+        "pageview_uniq",
+        "autocapture_uniq",
+        "screen_uniq",
+        "page_screen_uniq_up_to",
+        "has_autocapture",
+        "flag_values",
+        "flag_keys",
+        "event_names",
+        "hosts",
+        "emails",
+        "has_replay_events",
+    ]
+    return ",\n    ".join(columns)
+
+
 def TRUNCATE_RAW_SESSIONS_TABLE_SQL_V3():
     return f"TRUNCATE TABLE IF EXISTS {SHARDED_RAW_SESSIONS_TABLE_V3()}"
 
@@ -595,10 +650,14 @@ def RAW_SESSION_TABLE_BACKFILL_SQL_V3(
 
     return """
 INSERT INTO {database}.{target_table}
+(
+    {insert_columns}
+)
 {select_sql}
 """.format(
         database=settings.CLICKHOUSE_DATABASE,
         target_table=target_table,
+        insert_columns=RAW_SESSIONS_INSERT_COLUMNS_V3(include_session_timestamp=include_session_timestamp),
         select_sql=RAW_SESSION_TABLE_MV_SELECT_SQL_V3(
             where=combined_where,
             source_table=f"{settings.CLICKHOUSE_DATABASE}.events",
@@ -633,10 +692,14 @@ def RAW_SESSION_TABLE_BACKFILL_RECORDINGS_SQL_V3(
 
     return """
 INSERT INTO {database}.{target_table}
+(
+    {insert_columns}
+)
 {select_sql}
 """.format(
         database=settings.CLICKHOUSE_DATABASE,
         target_table=target_table,
+        insert_columns=RAW_SESSIONS_INSERT_COLUMNS_V3(include_session_timestamp=include_session_timestamp),
         select_sql=RAW_SESSION_TABLE_MV_RECORDINGS_SELECT_SQL_V3(
             where=combined_where,
             source_table=f"{settings.CLICKHOUSE_DATABASE}.session_replay_events",
