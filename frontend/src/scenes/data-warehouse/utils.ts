@@ -1,6 +1,9 @@
 import { LemonTagType } from '@posthog/lemon-ui'
 
+import { urls } from 'scenes/urls'
+
 import { DataVisualizationNode, DatabaseSchemaField, NodeKind } from '~/queries/schema/schema-general'
+import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
 import {
     DataWarehouseSyncInterval,
     ExternalDataJobStatus,
@@ -9,6 +12,21 @@ import {
 } from '~/types'
 
 export const DATAWAREHOUSE_EDITOR_ITEM_ID = 'new-SQL'
+
+export const buildSelectAllQuery = (tableName: string, limitOffsetClause?: string | null): string => {
+    const limitClause = limitOffsetClause ? ` ${limitOffsetClause}` : ''
+    return `SELECT * FROM ${escapePropertyAsHogQLIdentifier(tableName)}${limitClause}`
+}
+
+export const buildTableQueryUrl = (
+    tableName: string,
+    connectionId?: string | null,
+    limitOffsetClause: string | null = 'LIMIT 100'
+): string =>
+    urls.sqlEditor({
+        query: buildSelectAllQuery(tableName, limitOffsetClause),
+        connectionId: connectionId ?? undefined,
+    })
 
 export const defaultQuery = (table: string, columns: DatabaseSchemaField[]): DataVisualizationNode => {
     return {

@@ -4,11 +4,18 @@ import { LemonButton, LemonTable, LemonTableColumns, LemonTag, LemonTagType, Lin
 
 import { sourceWizardLogic } from 'scenes/data-warehouse/new/sourceWizardLogic'
 import { dataWarehouseSettingsLogic } from 'scenes/data-warehouse/settings/dataWarehouseSettingsLogic'
-import { urls } from 'scenes/urls'
+import { buildTableQueryUrl } from 'scenes/data-warehouse/utils'
 
 import { SceneSection } from '~/layout/scenes/components/SceneSection'
-import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
 import { ExternalDataSourceSchema } from '~/types'
+
+export function getPreviewQueryUrl(
+    tableName: string,
+    accessMethod: 'warehouse' | 'direct' | undefined,
+    sourceId?: string | null
+): string {
+    return buildTableQueryUrl(tableName, accessMethod === 'direct' ? (sourceId ?? undefined) : undefined)
+}
 
 export const SyncProgressStep = (): JSX.Element => {
     const { sourceId, isWrapped } = useValues(sourceWizardLogic)
@@ -16,10 +23,8 @@ export const SyncProgressStep = (): JSX.Element => {
     const { dataWarehouseSources, dataWarehouseSourcesLoading } = useValues(dataWarehouseSettingsLogic)
     const source = dataWarehouseSources?.results.find((n) => n.id === sourceId)
     const schemas = source?.schemas ?? []
-    const isDirectQuerySource = source?.access_method === 'direct'
-
-    const getPreviewQuery = (tableName: string): string =>
-        `SELECT * FROM ${escapePropertyAsHogQLIdentifier(tableName)} LIMIT 100`
+    const sourceAccessMethod = source?.access_method
+    const isDirectQuerySource = sourceAccessMethod === 'direct'
 
     const getSyncStatus = (schema: ExternalDataSourceSchema): { status: string; tagType: LemonTagType } => {
         if (isDirectQuerySource) {
@@ -66,7 +71,7 @@ export const SyncProgressStep = (): JSX.Element => {
 
                 return (
                     <Link
-                        to={urls.sqlEditor({ query: getPreviewQuery(schema.table.name) })}
+                        to={getPreviewQueryUrl(schema.table.name, sourceAccessMethod, sourceId)}
                         onClick={() => cancelWizard()}
                     >
                         {schema.name}
@@ -96,7 +101,7 @@ export const SyncProgressStep = (): JSX.Element => {
                             className="my-1"
                             type="primary"
                             onClick={cancelWizard}
-                            to={urls.sqlEditor({ query: getPreviewQuery(schema.table.name) })}
+                            to={getPreviewQueryUrl(schema.table.name, sourceAccessMethod, sourceId)}
                         >
                             Query
                         </LemonButton>

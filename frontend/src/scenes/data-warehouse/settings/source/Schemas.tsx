@@ -26,12 +26,15 @@ import { dayjs } from 'lib/dayjs'
 import { More } from 'lib/lemon-ui/LemonButton/More'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { pluralize } from 'lib/utils'
-import { SyncTypeLabelMap, defaultQuery, syncAnchorIntervalToHumanReadable } from 'scenes/data-warehouse/utils'
+import {
+    SyncTypeLabelMap,
+    buildTableQueryUrl,
+    defaultQuery,
+    syncAnchorIntervalToHumanReadable,
+} from 'scenes/data-warehouse/utils'
 import { teamLogic } from 'scenes/teamLogic'
-import { urls } from 'scenes/urls'
 
 import { ExternalDataSourceType, ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
-import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
 import {
     AccessControlLevel,
     AccessControlResourceType,
@@ -213,9 +216,10 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
         }
     }, [isLoading, initialLoad])
 
-    const getPreviewQuery = useCallback(
-        (tableName: string): string => `SELECT * FROM ${escapePropertyAsHogQLIdentifier(tableName)} LIMIT 100`,
-        []
+    const directConnectionId = isDirectQuerySource ? source?.id : undefined
+    const getPreviewUrl = useCallback(
+        (tableName: string): string => buildTableQueryUrl(tableName, directConnectionId),
+        [directConnectionId]
     )
 
     return (
@@ -231,9 +235,7 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                         render: function RenderName(_, schema) {
                             const nameContent =
                                 isDirectQuerySource && schema.table ? (
-                                    <Link to={urls.sqlEditor({ query: getPreviewQuery(schema.table.name) })}>
-                                        {schema.name}
-                                    </Link>
+                                    <Link to={getPreviewUrl(schema.table.name)}>{schema.name}</Link>
                                 ) : (
                                     <span>{schema.name}</span>
                                 )
@@ -494,9 +496,7 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                                                     type="tertiary"
                                                                     size="xsmall"
                                                                     fullWidth
-                                                                    to={urls.sqlEditor({
-                                                                        query: getPreviewQuery(schema.table.name),
-                                                                    })}
+                                                                    to={getPreviewUrl(schema.table.name)}
                                                                 >
                                                                     Open in SQL editor
                                                                 </LemonButton>

@@ -27,11 +27,11 @@ import { OutputTab } from 'scenes/data-warehouse/editor/outputPaneLogic'
 import { buildQueryForColumnClick } from 'scenes/data-warehouse/editor/sql-utils'
 import { sqlEditorLogic } from 'scenes/data-warehouse/editor/sqlEditorLogic'
 import { dataWarehouseSettingsLogic } from 'scenes/data-warehouse/settings/dataWarehouseSettingsLogic'
+import { buildSelectAllQuery, buildTableQueryUrl } from 'scenes/data-warehouse/utils'
 import { urls } from 'scenes/urls'
 
 import { SearchHighlightMultiple } from '~/layout/navigation-3000/components/SearchHighlight'
 import { DatabaseSerializedFieldType } from '~/queries/schema/schema-general'
-import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
 
 import { draftsLogic } from '../draftsLogic'
 import { renderTableCount } from '../editorSceneLogic'
@@ -355,15 +355,9 @@ export const QueryDatabase = (): JSX.Element => {
                                 asChild
                                 onClick={(e) => {
                                     e.stopPropagation()
-                                    newInternalTab(
-                                        urls.sqlEditor({
-                                            query: `SELECT * FROM ${escapePropertyAsHogQLIdentifier(item.name)}`,
-                                            connectionId:
-                                                connectionId && connectionId !== POSTHOG_WAREHOUSE
-                                                    ? connectionId
-                                                    : undefined,
-                                        })
-                                    )
+                                    const nextConnectionId =
+                                        connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
+                                    newInternalTab(buildTableQueryUrl(item.name, nextConnectionId, null))
                                 }}
                             >
                                 <ButtonPrimitive menuItem>Query</ButtonPrimitive>
@@ -426,7 +420,7 @@ export const QueryDatabase = (): JSX.Element => {
                             ? getEndpointUrl(item)
                             : urls.sqlEditor({ view_id: item.record?.view.id })
                     const table = item.record?.tableName || item.name
-                    const selectAllQuery = `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
+                    const selectAllQuery = buildSelectAllQuery(table, 'LIMIT 100')
                     const nextConnectionId =
                         connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
 

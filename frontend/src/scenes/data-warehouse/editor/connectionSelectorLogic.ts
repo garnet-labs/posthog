@@ -1,4 +1,4 @@
-import { afterMount, connect, kea, path, props, selectors } from 'kea'
+import { afterMount, connect, kea, listeners, path, props, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
 import api from 'lib/api'

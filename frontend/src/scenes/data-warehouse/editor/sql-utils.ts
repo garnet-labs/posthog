@@ -57,7 +57,7 @@ export const buildQueryForColumnClick = (
         columns = ['*']
     }
 
-    return `SELECT ${columns.map(escapePropertyAsHogQLIdentifier).join(', ')} FROM ${tableName} ${limitOffsetClause ?? 'LIMIT 100'}`
+    return `SELECT ${columns.map(escapePropertyAsHogQLIdentifier).join(', ')} FROM ${escapePropertyAsHogQLIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 }
 
 const normalizeKeywordSpacing = (query: string): string => {
