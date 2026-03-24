@@ -213,6 +213,7 @@ export const urls = {
         urls.shared(token, exportOptions).replace('/shared/', '/embedded/'),
     debugQuery: (query?: string | Record<string, any>): string =>
         combineUrl('/debug', {}, query ? { q: typeof query === 'string' ? query : JSON.stringify(query) } : {}).url,
+    animationsSandbox: (): string => '/animations-sandbox',
     debugHog: (): string => '/debug/hog',
 
     moveToPostHogCloud: (): string => '/move-to-cloud',

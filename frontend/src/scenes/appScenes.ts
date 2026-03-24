@@ -31,6 +31,7 @@ export const appScenes: Record<Scene | string, () => any> = {
     [Scene.DataOps]: () => import('./data-warehouse/DataWarehouseScene'),
     [Scene.DeadLetterQueue]: () => import('./instance/DeadLetterQueue/DeadLetterQueue'),
     [Scene.Destinations]: () => import('./data-pipelines/DestinationsScene'),
+    [Scene.AnimationsSandbox]: () => import('../lib/components/ProductAnimations/sandbox/AnimationsSandbox'),
     [Scene.DebugHog]: () => import('./debug/hog/HogRepl'),
     [Scene.DebugQuery]: () => import('./debug/DebugScene'),
 

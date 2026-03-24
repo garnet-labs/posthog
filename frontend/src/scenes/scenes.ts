@@ -180,6 +180,7 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         defaultDocsPath: '/docs/cdp/destinations',
         iconType: 'data_pipeline',
     },
+    [Scene.AnimationsSandbox]: { projectBased: true, name: 'Animations sandbox' },
     [Scene.DebugHog]: { projectBased: true, name: 'Hog Repl' },
     [Scene.DebugQuery]: { projectBased: true },
 
@@ -925,6 +926,7 @@ export const routes: Record<string, [Scene | string, string]> = {
     [urls.integrationsRedirect(':kind')]: [Scene.IntegrationsRedirect, 'integrationsRedirect'],
     [urls.debugQuery()]: [Scene.DebugQuery, 'debugQuery'],
     [urls.debugHog()]: [Scene.DebugHog, 'debugHog'],
+    [urls.animationsSandbox()]: [Scene.AnimationsSandbox, 'animationsSandbox'],
 
     [urls.notebook(':shortId')]: [Scene.Notebook, 'notebook'],
     [urls.notebooks()]: [Scene.Notebooks, 'notebooks'],
