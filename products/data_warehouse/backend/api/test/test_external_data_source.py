@@ -1678,6 +1678,7 @@ class TestExternalDataSource(APIBaseTest):
                 {
                     "table": "table_1",
                     "should_sync": False,
+                    "should_sync_default": True,
                     "description": None,
                     "rows": 42,
                     "incremental_fields": [
@@ -1729,6 +1730,7 @@ class TestExternalDataSource(APIBaseTest):
                 {
                     "table": "table_1",
                     "should_sync": False,
+                    "should_sync_default": True,
                     "description": None,
                     "rows": 42,
                     "incremental_fields": [

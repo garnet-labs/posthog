@@ -16,3 +16,4 @@ class SourceSchema:
     description: str | None = None
     source_schema: str | None = None
     source_table_name: str | None = None
+    should_sync_default: bool = True
