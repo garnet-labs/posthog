@@ -194,11 +194,30 @@ jobs:
             #   run: |
             #       npm run taxonomy:build:json && git diff --exit-code
 
+    flox-activation:
+        needs: changes
+        if: needs.changes.outputs.python == 'true'
+        timeout-minutes: 20
+        name: Flox activation check
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  fetch-depth: 1
+
+            - name: Install Flox
+              uses: flox/install-flox-action@v2
+
+            - name: Verify Flox activation
+              uses: flox/activate-action@v1
+              with:
+                  command: python --version
+
     # Collate job - single required status check for branch protection.
     # The code-quality job skips when no Python changes, but this job always
     # runs and reports success, allowing PRs to merge.
     python_tests:
-        needs: [changes, code-quality]
+        needs: [changes, code-quality, flox-activation]
         name: Python code quality checks
         runs-on: ubuntu-latest
         timeout-minutes: 5
@@ -218,9 +237,14 @@ jobs:
                     exit 0
                   fi
 
-                  # Check actual job result
+                  # Check actual job results
                   if [[ "${{ needs.code-quality.result }}" != "success" && "${{ needs.code-quality.result }}" != "skipped" ]]; then
                     echo "Python code quality checks failed."
+                    exit 1
+                  fi
+
+                  if [[ "${{ needs.flox-activation.result }}" != "success" && "${{ needs.flox-activation.result }}" != "skipped" ]]; then
+                    echo "Flox activation checks failed."
                     exit 1
                   fi
 
