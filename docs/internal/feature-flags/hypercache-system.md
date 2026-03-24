@@ -126,7 +126,10 @@ The `_get_feature_flags_for_service` function fetches all flags for a team (incl
     "dependency_stages": [[1, 5], [3], [7]],
     "flags_with_missing_deps": [9, 12],
     "transitive_deps": { "3": [1, 5], "7": [1, 3, 5] }
-  }
+  },
+  "cohorts": [
+    /* serialized cohort dicts (optional) */
+  ]
 }
 ```
 
@@ -138,6 +141,12 @@ The `evaluation_metadata` fields:
 | `flags_with_missing_deps` | `list[int]`            | Flag IDs whose dependencies are missing, cyclic, or transitively broken. The Rust service treats these as evaluation errors.                                                                |
 | `transitive_deps`         | `dict[str, list[int]]` | Map of stringified flag ID to the sorted list of all its transitive dependency flag IDs.                                                                                                    |
 
+The `cohorts` field:
+
+| Field     | Type                   | Description                                                                                                                                                 |
+| --------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cohorts` | `list[dict]` \| `null` | Serialized cohort definitions referenced by the team's flags, including transitive cohort-on-cohort dependencies. Optional — absent in older cache entries. |
+
 ### Dependency computation
 
 The `_compute_flag_dependencies` function in `flags_cache.py` builds the evaluation metadata using Kahn's algorithm (layered topological sort). The algorithm:
@@ -148,6 +157,20 @@ The `_compute_flag_dependencies` function in `flags_cache.py` builds the evaluat
 4. Detects cycles — any flag still with in-degree > 0 after all layers are peeled is a cycle participant. Cycled flags and any flag that transitively depends on them are added to `flags_with_missing_deps`.
 
 This matches the Rust fallback path's petgraph-based cycle handling, where all cycle participants are excluded from stages (not just back-edge targets).
+
+### Cohort preloading
+
+The `_get_referenced_cohorts` function extracts cohort IDs from active flag filters (`groups` only — `super_groups` and holdouts cannot contain cohort properties) and loads the corresponding cohort definitions into the cache payload.
+
+The loading uses BFS via `_load_cohorts_with_deps` to resolve transitive cohort-on-cohort dependencies (depth limit 20, cycle-safe). This eliminates the need for the Rust service to query PostgreSQL via `CohortCacheManager` on every `/flags` request.
+
+Key details:
+
+- **Extraction:** Scans `filters.groups[*].properties` for `type == "cohort"` on active, non-deleted flags.
+- **BFS loading:** Starting from the seed cohort IDs, loads each layer from PostgreSQL, extracts nested cohort dependencies via `extract_cohort_dependencies`, and continues until no new IDs are found or the depth limit (20) is reached.
+- **Batch path:** `_get_feature_flags_for_teams_batch` collects all cohort IDs across teams and loads them in a single BFS pass, then groups the results by `team_id`.
+- **Rust consumption:** The Rust service uses preloaded cohorts when available (`Option::take()`), falling back to `CohortCacheManager` (PostgreSQL) when the `cohorts` field is absent.
+- **Rolling deploy safety:** Old Rust ignores the unknown `cohorts` key (no `deny_unknown_fields`); new Rust defaults missing `cohorts` to `None` via `#[serde(default)]` and falls back to PostgreSQL.
 
 ## Local evaluation caching
 
@@ -186,7 +209,7 @@ def feature_flag_changed(sender, instance, **kwargs):
 Models that invalidate the flags cache:
 
 - `FeatureFlag` - Flag created, updated, or deleted
-- `Cohort` - Cohort properties changed
+- `Cohort` - Cohort definition changed (recalculation-only saves skipped)
 - `FeatureFlagEvaluationTag` - Evaluation tags changed
 - `Tag` - Tag renamed
 
@@ -416,15 +439,17 @@ Django signals automatically invalidate the cache when models change.
 
 ### Models that trigger cache updates
 
-| Model                      | Signal      | Action                             |
-| -------------------------- | ----------- | ---------------------------------- |
-| `FeatureFlag`              | post_save   | Refresh team's flags cache         |
-| `FeatureFlag`              | post_delete | Refresh team's flags cache         |
-| `Team`                     | post_save   | Warm cache for new team            |
-| `Team`                     | post_delete | Clear team's flags cache           |
-| `FeatureFlagEvaluationTag` | post_save   | Refresh team's flags cache         |
-| `FeatureFlagEvaluationTag` | post_delete | Refresh team's flags cache         |
-| `Tag`                      | post_save   | Refresh caches for teams using tag |
+| Model                      | Signal      | Action                                                      |
+| -------------------------- | ----------- | ----------------------------------------------------------- |
+| `FeatureFlag`              | post_save   | Refresh team's flags cache                                  |
+| `FeatureFlag`              | post_delete | Refresh team's flags cache                                  |
+| `Team`                     | post_save   | Warm cache for new team                                     |
+| `Team`                     | post_delete | Clear team's flags cache                                    |
+| `FeatureFlagEvaluationTag` | post_save   | Refresh team's flags cache                                  |
+| `FeatureFlagEvaluationTag` | post_delete | Refresh team's flags cache                                  |
+| `Tag`                      | post_save   | Refresh caches for teams using tag                          |
+| `Cohort`                   | post_save   | Refresh team's flags cache (skips recalculation-only saves) |
+| `Cohort`                   | post_delete | Refresh team's flags cache                                  |
 
 ### Transaction safety
 
