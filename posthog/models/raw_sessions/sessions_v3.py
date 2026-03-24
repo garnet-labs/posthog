@@ -582,10 +582,8 @@ def RAW_SESSION_TABLE_BACKFILL_SQL_V3(
     Each shard should call this with its own shard_index to only SELECT events
     that will end up on that shard, then INSERT directly to the local sharded table.
 
-    include_session_timestamp should generally be True. Even when inserting into the
-    distributed table (where session_timestamp is MATERIALIZED), the Distributed engine
-    forwards the INSERT to the sharded table where session_timestamp is DEFAULT, so the
-    column must be present.
+    include_session_timestamp must be True when the target table has session_timestamp
+    as DEFAULT (sharded/writable tables), and False when it is MATERIALIZED (distributed).
     """
     if not target_table:
         target_table = SHARDED_RAW_SESSIONS_TABLE_V3()
@@ -622,10 +620,8 @@ def RAW_SESSION_TABLE_BACKFILL_RECORDINGS_SQL_V3(
     Each shard should call this with its own shard_index to only SELECT recordings
     that will end up on that shard, then INSERT directly to the local sharded table.
 
-    include_session_timestamp should generally be True. Even when inserting into the
-    distributed table (where session_timestamp is MATERIALIZED), the Distributed engine
-    forwards the INSERT to the sharded table where session_timestamp is DEFAULT, so the
-    column must be present.
+    include_session_timestamp must be True when the target table has session_timestamp
+    as DEFAULT (sharded/writable tables), and False when it is MATERIALIZED (distributed).
     """
     if not target_table:
         target_table = SHARDED_RAW_SESSIONS_TABLE_V3()
