@@ -1,7 +1,6 @@
 import re
 import json
 import typing
-import asyncio
 import datetime as dt
 import dataclasses
 
@@ -454,9 +453,6 @@ class ExternalDataJobWorkflow(PostHogWorkflow):
                 consumer_manages_job_status and update_inputs.status == ExternalDataJob.Status.COMPLETED
             )
 
-            # Safety net: yield to the event loop so any pending tasks (e.g. aiobotocore
-            # teardown) can complete before the metric call fires.
-            await asyncio.sleep(0)
             get_data_import_finished_metric(source_type=source_type, status=update_inputs.status.lower()).add(1)
 
             if not skip_status_update:
