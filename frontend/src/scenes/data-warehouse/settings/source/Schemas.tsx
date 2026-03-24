@@ -33,6 +33,7 @@ import {
     syncAnchorIntervalToHumanReadable,
 } from 'scenes/data-warehouse/utils'
 import { teamLogic } from 'scenes/teamLogic'
+import { urls } from 'scenes/urls'
 
 import { ExternalDataSourceType, ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
 import {
