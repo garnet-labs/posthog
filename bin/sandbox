@@ -58,6 +58,7 @@ SHARED_VOLUMES = [
     "sandbox-db-cache",
     "sandbox-cargo-target",
     "sandbox-intellij",
+    "sandbox-pycharm",
 ]
 
 # These need 777 so that containers running as different UIDs
@@ -66,6 +67,7 @@ WORLD_WRITABLE_VOLUMES = [
     "sandbox-db-cache",
     "sandbox-cargo-target",
     "sandbox-intellij",
+    "sandbox-pycharm",
 ]
 
 SANDBOX_BACKUP_XML = REPO_ROOT / "docker/clickhouse/config.d/sandbox-backup.xml"
@@ -241,66 +243,90 @@ def _save_config(config: dict) -> None:
     CONFIG_FILE.write_text(json.dumps(config, indent=2) + "\n")
 
 
-def _setup_intellij() -> None:
-    """Download IntelliJ IDEA Ultimate and populate the shared volume."""
+JETBRAINS_PRODUCTS = {
+    "intellij": {"code": "IIU", "key": "IIU", "name": "IntelliJ IDEA Ultimate"},
+    "pycharm": {"code": "PCP", "key": "PCP", "name": "PyCharm Professional"},
+}
+
+
+def _setup_jetbrains(product: str) -> None:
+    """Download a JetBrains IDE and populate the shared volume."""
     import platform
     import urllib.request
 
-    info("Fetching latest IntelliJ IDEA release info...")
-    api_url = "https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=release"
+    meta = JETBRAINS_PRODUCTS[product]
+    info(f"Fetching latest {meta['name']} release info...")
+    api_url = f"https://data.services.jetbrains.com/products/releases?code={meta['code']}&latest=true&type=release"
     with urllib.request.urlopen(api_url) as resp:
         data = json.loads(resp.read())
 
-    release = data["IIU"][0]
+    release = data[meta["key"]][0]
     version = release["version"]
-    arch = "linuxARM64" if platform.machine() == "aarch64" else "linux"
+    # Check Docker's architecture, not the host's — macOS ARM may run amd64 containers
+    docker_arch = run(
+        ["docker", "info", "--format", "{{.Architecture}}"],
+        capture=True,
+    ).stdout.strip()
+    arch = "linuxARM64" if docker_arch == "aarch64" else "linux"
     download = release["downloads"][arch]
     download_url = download["link"]
     size_mb = download["size"] // (1024 * 1024)
 
-    info(f"Downloading IntelliJ IDEA {version} ({size_mb} MB)...")
+    volume = f"sandbox-{product}"
+    info(f"Downloading {meta['name']} {version} ({size_mb} MB)...")
     run([
         "docker", "run", "--rm",
-        "-v", "sandbox-intellij:/opt/idea",
+        "-v", f"{volume}:/opt/idea",
         "alpine", "sh", "-c",
         f"apk add --no-cache curl && "
         f"curl -fSL '{download_url}' | tar -xzf - -C /opt/idea --strip-components=1",
     ])
 
-    success(f"IntelliJ IDEA {version} installed into sandbox-intellij volume")
+    success(f"{meta['name']} {version} installed into sandbox-{product} volume")
 
 
-def _ensure_intellij() -> None:
-    """Prompt for IntelliJ preference on first run and download if needed."""
+def _ensure_jetbrains() -> None:
+    """Prompt for JetBrains IDE preference on first run and download if needed."""
     config = _load_config()
 
-    if "intellij" not in config:
-        answer = input("Do you use IntelliJ IDEA? (y/n): ").strip().lower()
-        config["intellij"] = answer in ("y", "yes")
+    if "jetbrains" not in config:
+        answer = input("Do you use JetBrains for development? (P)yCharm / (I)ntelliJ / (N)o: ").strip().lower()
+        if answer in ("p", "pycharm"):
+            config["jetbrains"] = "pycharm"
+        elif answer in ("i", "intellij"):
+            config["jetbrains"] = "intellij"
+        else:
+            config["jetbrains"] = None
         _save_config(config)
 
-    if not config["intellij"]:
+    if not config.get("jetbrains"):
         return
+
+    wanted = config["jetbrains"]
+    volume = f"sandbox-{wanted}"
 
     # Check if the volume is already populated
     result = run(
-        ["docker", "run", "--rm", "-v", "sandbox-intellij:/opt/idea",
+        ["docker", "run", "--rm", "-v", f"{volume}:/opt/idea",
          "alpine", "sh", "-c", "test -x /opt/idea/bin/remote-dev-server.sh && echo yes"],
         capture=True, check=False,
     )
     if result.stdout.strip() == "yes":
         return
 
-    _setup_intellij()
+    _setup_jetbrains(wanted)
 
 
 def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
     """Env vars threaded through every docker compose invocation."""
+    config = _load_config()
+    ide = config.get("jetbrains")
     return {
         "SANDBOX_PORT": str(port),
         "SANDBOX_VITE_PORT": str(port + 1000),
         "SANDBOX_SSH_PORT": str(port + 2000),
         "SANDBOX_SSH_AUTHORIZED_KEYS": _ssh_authorized_keys_path(),
+        "SANDBOX_IDE_VOLUME": f"sandbox-{ide}" if ide else "sandbox-intellij",
         "SANDBOX_CODE": worktree_path,
         "SANDBOX_UID": str(os.getuid()),
         "SANDBOX_GID": str(os.getgid()),
@@ -693,7 +719,7 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     entry = registry.allocate(branch, slug, worktree_path)
     port = entry.port
     _ensure_cache_volumes()
-    _ensure_intellij()
+    _ensure_jetbrains()
     _copy_sandbox_backup_xml(worktree_path)
 
     # Build or verify the database cache
@@ -729,8 +755,8 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     info(f"Worktree: {worktree_path}")
     info(f"Shell:    sandbox shell {branch}")
     info(f"VSCode:   sandbox code {branch}")
-    if _load_config().get("intellij"):
-        info(f"IntelliJ: sandbox idea {branch}")
+    if _load_config().get("jetbrains"):
+        info(f"JetBrains: sandbox idea {branch}")
     info(f"SSH:      ssh -p {port + 2000} sandbox@localhost")
     info(f"Logs:     sandbox logs {branch}")
 
@@ -754,8 +780,8 @@ def cmd_start(branch: str) -> None:
 
     success(f"PostHog running at http://localhost:{entry.port}")
     info(f"VSCode:   sandbox code {branch}")
-    if _load_config().get("intellij"):
-        info(f"IntelliJ: sandbox idea {branch}")
+    if _load_config().get("jetbrains"):
+        info(f"JetBrains: sandbox idea {branch}")
     info(f"SSH:      ssh -p {entry.port + 2000} sandbox@localhost")
 
 
