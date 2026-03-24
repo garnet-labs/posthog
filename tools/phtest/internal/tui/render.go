@@ -55,8 +55,17 @@ func (m Model) renderSidebar() string {
 	for i := start; i < end; i++ {
 		e := m.entries[i]
 		if e.isCategoryHeader {
-			label := truncate(string(e.category), innerW-2)
-			rows = append(rows, categoryHeaderStyle.Width(innerW).Render("── "+label+" ──"))
+			indicator := "▾"
+			if m.collapsedCategories[e.category] {
+				indicator = "▸"
+			}
+			label := truncate(string(e.category), innerW-4)
+			text := indicator + " " + label
+			if i == m.entryCursor {
+				rows = append(rows, categoryHeaderSelectedStyle.Width(innerW).Render(text))
+			} else {
+				rows = append(rows, categoryHeaderStyle.Width(innerW).Render(text))
+			}
 			continue
 		}
 

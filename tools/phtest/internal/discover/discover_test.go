@@ -3,12 +3,12 @@ package discover
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	// Walk up from this test file to find the repo root
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -37,27 +37,70 @@ func TestDiscover_findsAllCategories(t *testing.T) {
 		cats[s.Category]++
 	}
 
-	if cats[CategoryBackend] == 0 {
-		t.Error("expected backend suites")
-	}
-	if cats[CategoryRust] == 0 {
-		t.Error("expected rust suites")
-	}
-	if cats[CategoryE2E] == 0 {
-		t.Error("expected E2E suite")
+	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryFrontendCore, CategoryRust, CategoryE2E} {
+		if cats[cat] == 0 {
+			t.Errorf("expected suites for category %q", cat)
+		}
 	}
 }
 
-func TestDiscover_backendSkipsNoTests(t *testing.T) {
+func TestDiscover_backendFindsProducts(t *testing.T) {
+	root := repoRoot(t)
+	suites, err := discoverBackend(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var productSuites, coreSuites int
+	for _, s := range suites {
+		if s.Category == CategoryBackend {
+			productSuites++
+		} else {
+			coreSuites++
+		}
+	}
+	if productSuites == 0 {
+		t.Error("expected backend product suites")
+	}
+	if coreSuites == 0 {
+		t.Error("expected backend core suites (posthog/ or ee/)")
+	}
+}
+
+func TestDiscover_backendUsePytest(t *testing.T) {
 	root := repoRoot(t)
 	suites, err := discoverBackend(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range suites {
-		if s.Name == "product_analytics" || s.Name == "managed_migrations" {
-			t.Errorf("should not include %q (has echo stub)", s.Name)
+		if !strings.HasPrefix(s.Cmd, "pytest ") {
+			t.Errorf("suite %q: expected pytest command, got %q", s.Name, s.Cmd)
 		}
+	}
+}
+
+func TestDiscover_frontendFindsProductsAndCore(t *testing.T) {
+	root := repoRoot(t)
+	suites, err := discoverFrontend(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var productSuites, coreSuites int
+	for _, s := range suites {
+		switch s.Category {
+		case CategoryFrontend:
+			productSuites++
+		case CategoryFrontendCore:
+			coreSuites++
+		}
+	}
+	if productSuites == 0 {
+		t.Error("expected frontend product suites")
+	}
+	if coreSuites == 0 {
+		t.Error("expected frontend core suites (frontend/src/)")
 	}
 }
 
@@ -70,7 +113,7 @@ func TestDiscover_rustFindsPackages(t *testing.T) {
 	if len(suites) < 10 {
 		t.Errorf("expected at least 10 rust crates, got %d", len(suites))
 	}
-	// Check a known crate exists
+
 	found := false
 	for _, s := range suites {
 		if s.Name == "feature-flags" {
@@ -80,6 +123,39 @@ func TestDiscover_rustFindsPackages(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected to find feature-flags crate")
+	}
+
+	// common/ crates should be in a subcategory
+	var commonCount int
+	for _, s := range suites {
+		if strings.HasPrefix(string(s.Category), "Rust / ") {
+			commonCount++
+		}
+	}
+	if commonCount == 0 {
+		t.Error("expected rust subcategories for nested crates (e.g. common/)")
+	}
+}
+
+func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
+	root := repoRoot(t)
+	suites, err := discoverE2E(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suites) < 5 {
+		t.Errorf("expected at least 5 E2E spec files, got %d", len(suites))
+	}
+
+	// Should have subcategories for nested directories
+	var subCatCount int
+	for _, s := range suites {
+		if strings.HasPrefix(string(s.Category), "E2E / ") {
+			subCatCount++
+		}
+	}
+	if subCatCount == 0 {
+		t.Error("expected E2E subcategories for nested spec directories")
 	}
 }
 

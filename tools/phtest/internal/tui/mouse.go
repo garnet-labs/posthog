@@ -8,8 +8,11 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) (tea.Mode
 			m.focusedPane = focusSidebar
 			row := msg.Y - headerHeight - 1
 			idx := m.entryOffset + row
-			if idx >= 0 && idx < len(m.entries) && !m.entries[idx].isCategoryHeader {
-				if idx != m.entryCursor {
+			if idx >= 0 && idx < len(m.entries) {
+				if m.entries[idx].isCategoryHeader {
+					m.entryCursor = idx
+					m.toggleCategory(m.entries[idx].category)
+				} else if idx != m.entryCursor {
 					m.entryCursor = idx
 					m.ensureSidebarCursorVisible()
 					m = m.loadActiveSuite()

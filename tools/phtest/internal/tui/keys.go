@@ -63,9 +63,13 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 		m.viewportAtBottom = true
 
 	case key.Matches(msg, m.keys.RunSuite):
-		if s := m.activeSuite(); s != nil {
-			send := m.mgr.Send()
-			go func() { _ = s.Start(send) }()
+		if m.focusedPane == focusSidebar {
+			if e := m.entries[m.entryCursor]; e.isCategoryHeader {
+				m.toggleCategory(e.category)
+			} else if s := m.activeSuite(); s != nil {
+				send := m.mgr.Send()
+				go func() { _ = s.Start(send) }()
+			}
 		}
 
 	case key.Matches(msg, m.keys.RunAll):

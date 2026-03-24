@@ -79,6 +79,12 @@ var (
 				Foreground(colorYellow).
 				Bold(true).
 				PaddingLeft(1)
+
+	categoryHeaderSelectedStyle = lipgloss.NewStyle().
+					Background(colorDarkGrey).
+					Foreground(colorYellow).
+					Bold(true).
+					PaddingLeft(1)
 )
 
 func statusIconChar(s runner.Status) string {

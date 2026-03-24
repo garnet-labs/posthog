@@ -42,9 +42,10 @@ type Model struct {
 	searchCursor  int
 
 	// Sidebar
-	entries       []sidebarEntry
-	entryCursor   int
-	entryOffset   int
+	entries             []sidebarEntry
+	entryCursor         int
+	entryOffset         int
+	collapsedCategories map[discover.Category]bool
 
 	keys     keyMap
 	help     help.Model
@@ -60,31 +61,27 @@ type Model struct {
 
 func New(mgr *runner.SuiteManager, logger *log.Logger) Model {
 	keys := defaultKeyMap()
-	entries := buildSidebarEntries(mgr.Suites())
-
-	// Start cursor on first selectable entry
-	cursor := 0
-	for i, e := range entries {
-		if !e.isCategoryHeader {
-			cursor = i
-			break
-		}
+	collapsed := make(map[discover.Category]bool)
+	for _, s := range mgr.Suites() {
+		collapsed[s.Suite.Category] = true
 	}
+	entries := buildSidebarEntries(mgr.Suites(), collapsed)
 
 	return Model{
-		mgr:              mgr,
-		entries:          entries,
-		entryCursor:      cursor,
-		focusedPane:      focusSidebar,
-		viewportAtBottom: true,
-		keys:             keys,
-		help:             help.New(),
-		spinner:          spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		log:              logger,
+		mgr:                 mgr,
+		entries:              entries,
+		entryCursor:          0,
+		collapsedCategories:  collapsed,
+		focusedPane:          focusSidebar,
+		viewportAtBottom:     true,
+		keys:                 keys,
+		help:                 help.New(),
+		spinner:              spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		log:                  logger,
 	}
 }
 
-func buildSidebarEntries(suites []*runner.TestSuite) []sidebarEntry {
+func buildSidebarEntries(suites []*runner.TestSuite, collapsed map[discover.Category]bool) []sidebarEntry {
 	var entries []sidebarEntry
 	var lastCat discover.Category
 	for _, s := range suites {
@@ -92,7 +89,9 @@ func buildSidebarEntries(suites []*runner.TestSuite) []sidebarEntry {
 			entries = append(entries, sidebarEntry{isCategoryHeader: true, category: s.Suite.Category})
 			lastCat = s.Suite.Category
 		}
-		entries = append(entries, sidebarEntry{suite: s})
+		if !collapsed[s.Suite.Category] {
+			entries = append(entries, sidebarEntry{suite: s})
+		}
 	}
 	return entries
 }
@@ -138,8 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runner.StatusMsg:
 		m.dbg("status: suite=%s status=%s", msg.Name, msg.Status)
-		// Rebuild sidebar entries to pick up status changes
-		m.entries = buildSidebarEntries(m.mgr.Suites())
+		m.rebuildEntries()
 
 	case tea.KeyPressMsg:
 		var handled bool
@@ -253,15 +251,56 @@ func (m Model) buildContent() string {
 	return strings.Join(s.Lines(), "\n")
 }
 
-// Move cursor to the next selectable entry in the given direction, skipping headers.
+// Move cursor to the next entry in the given direction.
 func (m *Model) moveCursor(dir int) bool {
 	next := m.entryCursor + dir
-	for next >= 0 && next < len(m.entries) {
-		if !m.entries[next].isCategoryHeader {
-			m.entryCursor = next
-			return true
-		}
-		next += dir
+	if next >= 0 && next < len(m.entries) {
+		m.entryCursor = next
+		return true
 	}
 	return false
+}
+
+// rebuildEntries reconstructs the sidebar entries preserving the cursor position.
+func (m *Model) rebuildEntries() {
+	var curSuite *runner.TestSuite
+	var curCategory discover.Category
+	var curIsHeader bool
+	if m.entryCursor >= 0 && m.entryCursor < len(m.entries) {
+		e := m.entries[m.entryCursor]
+		curIsHeader = e.isCategoryHeader
+		curCategory = e.category
+		curSuite = e.suite
+	}
+
+	m.entries = buildSidebarEntries(m.mgr.Suites(), m.collapsedCategories)
+
+	found := false
+	if curIsHeader {
+		for i, e := range m.entries {
+			if e.isCategoryHeader && e.category == curCategory {
+				m.entryCursor = i
+				found = true
+				break
+			}
+		}
+	} else if curSuite != nil {
+		for i, e := range m.entries {
+			if !e.isCategoryHeader && e.suite == curSuite {
+				m.entryCursor = i
+				found = true
+				break
+			}
+		}
+	}
+	if !found && len(m.entries) > 0 {
+		m.entryCursor = min(m.entryCursor, len(m.entries)-1)
+	}
+	m.ensureSidebarCursorVisible()
+}
+
+// toggleCategory collapses or expands a category group.
+func (m *Model) toggleCategory(cat discover.Category) {
+	m.collapsedCategories[cat] = !m.collapsedCategories[cat]
+	m.rebuildEntries()
 }

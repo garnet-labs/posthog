@@ -663,8 +663,7 @@ tools:
         hidden: true
     phtest:build:
         cmd: cd tools/phtest && make build && cp dist/phtest ../../bin/phtest
-        description: Build the phtest binary from source (Go required; run once or after
-            changing tools/phtest/)
+        description: Build the phtest binary from source
     ci:wait:for:docker:
         bin_script: ci-wait-for-docker
         description: Launch Docker Compose services in CI and later wait for readiness

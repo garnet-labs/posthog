@@ -19,7 +19,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/posthog/posthog/phtest/internal/discover"
-	"github.com/posthog/posthog/phtest/internal/ipc"
 	"github.com/posthog/posthog/phtest/internal/runner"
 	"github.com/posthog/posthog/phtest/internal/tui"
 )
@@ -69,25 +68,6 @@ func main() {
 	m := tui.New(mgr, logger)
 	p := tea.NewProgram(m)
 	mgr.SetSend(p.Send)
-
-	wd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "phtest: getwd: %v\n", err)
-		os.Exit(1)
-	}
-	socketPath := ipc.SocketPathFor(wd)
-	ln, err := ipc.Listen(socketPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "phtest: ipc: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() {
-		_ = ln.Close()
-		_ = os.Remove(socketPath)
-	}()
-	go func() {
-		_ = ipc.Serve(ln, mgr)
-	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "phtest: %v\n", err)
