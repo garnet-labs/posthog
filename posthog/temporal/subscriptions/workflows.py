@@ -3,23 +3,19 @@ import typing
 import asyncio
 import datetime as dt
 import traceback
+import dataclasses
 
 import temporalio.common
 import temporalio.workflow
 from temporalio.exceptions import ActivityError, ApplicationError
 
 from posthog.event_usage import EventSource
-from posthog.slo.types import SloOutcome
+from posthog.slo.types import SloArea, SloConfig, SloOperation, SloOutcome
 from posthog.tasks.exports.failure_handler import is_user_query_error_type
 from posthog.temporal.common.base import PostHogWorkflow
-from posthog.temporal.exports.activities import emit_delivery_outcome, emit_delivery_started, export_asset_activity
+from posthog.temporal.exports.activities import export_asset_activity
 from posthog.temporal.exports.retry_policy import EXPORT_RETRY_POLICY
-from posthog.temporal.exports.types import (
-    EmitDeliveryOutcomeInput,
-    ExportAssetActivityInputs,
-    ExportAssetResult,
-    ExportError,
-)
+from posthog.temporal.exports.types import ExportAssetActivityInputs, ExportAssetResult, ExportError
 from posthog.temporal.subscriptions.activities import (
     advance_next_delivery_date,
     create_export_assets,
@@ -32,6 +28,7 @@ from posthog.temporal.subscriptions.types import (
     FetchDueSubscriptionsActivityInputs,
     ProcessSubscriptionWorkflowInputs,
     ScheduleAllSubscriptionsWorkflowInputs,
+    SubscriptionInfo,
 )
 
 
@@ -119,7 +116,7 @@ class ScheduleAllSubscriptionsWorkflow(PostHogWorkflow):
     @temporalio.workflow.run
     async def run(self, inputs: ScheduleAllSubscriptionsWorkflowInputs) -> None:
         fetch_inputs = FetchDueSubscriptionsActivityInputs(buffer_minutes=inputs.buffer_minutes)
-        subscription_ids: list[int] = await temporalio.workflow.execute_activity(
+        subscription_infos: list[SubscriptionInfo] = await temporalio.workflow.execute_activity(
             fetch_due_subscriptions_activity,
             fetch_inputs,
             start_to_close_timeout=dt.timedelta(minutes=5),
@@ -136,11 +133,22 @@ class ScheduleAllSubscriptionsWorkflow(PostHogWorkflow):
         # schedule runs overlap: if the previous run's child is still executing,
         # Temporal rejects the duplicate start and we log it below.
         tasks = []
-        for sub_id in subscription_ids:
+        for sub in subscription_infos:
             task = temporalio.workflow.execute_child_workflow(
                 ProcessSubscriptionWorkflow.run,
-                ProcessSubscriptionWorkflowInputs(subscription_id=sub_id),
-                id=f"process-subscription-{sub_id}",
+                ProcessSubscriptionWorkflowInputs(
+                    subscription_id=sub.subscription_id,
+                    team_id=sub.team_id,
+                    distinct_id=sub.distinct_id,
+                    slo=SloConfig(
+                        operation=SloOperation.SUBSCRIPTION_DELIVERY,
+                        area=SloArea.ANALYTIC_PLATFORM,
+                        team_id=sub.team_id,
+                        resource_id=str(sub.subscription_id),
+                        distinct_id=sub.distinct_id,
+                    ),
+                ),
+                id=f"process-subscription-{sub.subscription_id}",
                 parent_close_policy=temporalio.workflow.ParentClosePolicy.ABANDON,
                 execution_timeout=dt.timedelta(hours=2),
             )
@@ -151,12 +159,12 @@ class ScheduleAllSubscriptionsWorkflow(PostHogWorkflow):
             # one failing subscription should not prevent others from being delivered.
             results = await asyncio.gather(*tasks, return_exceptions=True)
             failed_ids = []
-            for sub_id, result in zip(subscription_ids, results):
+            for sub, result in zip(subscription_infos, results):
                 if isinstance(result, BaseException):
-                    failed_ids.append(sub_id)
+                    failed_ids.append(sub.subscription_id)
                     temporalio.workflow.logger.warning(
                         "process_subscription.child_workflow_error",
-                        extra={"subscription_id": sub_id, "error": str(result)},
+                        extra={"subscription_id": sub.subscription_id, "error": str(result)},
                     )
 
             if failed_ids:
@@ -175,8 +183,6 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
 
     @temporalio.workflow.run
     async def run(self, inputs: ProcessSubscriptionWorkflowInputs) -> None:
-        start_time = temporalio.workflow.time()
-        delivery_outcome = SloOutcome.SUCCESS
         assets_with_content = 0
         total_assets = 0
         errors: list[ExportError] = []
@@ -184,18 +190,6 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
         caught_error: BaseException | None = None
 
         try:
-            # SLO started — workflow owns the lifecycle, fires before any work
-            await temporalio.workflow.execute_activity(
-                emit_delivery_started,
-                inputs.subscription_id,
-                start_to_close_timeout=dt.timedelta(minutes=2),
-                retry_policy=temporalio.common.RetryPolicy(
-                    initial_interval=dt.timedelta(seconds=5),
-                    maximum_interval=dt.timedelta(minutes=1),
-                    maximum_attempts=3,
-                ),
-            )
-
             # Phase 1: Prepare — create ExportedAssets
             prepare_result = await temporalio.workflow.execute_activity(
                 create_export_assets,
@@ -243,8 +237,8 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
             errors = [a.error for a in outcome_assets if a.error]
 
             non_user_errors = [e for e in errors if not is_user_query_error_type(e.exception_class)]
-            if non_user_errors:
-                delivery_outcome = SloOutcome.FAILURE
+            if inputs.slo and non_user_errors:
+                inputs.slo.outcome = SloOutcome.FAILURE
 
             # Phase 3: Deliver — send all assets including failed ones (they show
             # a "failed to generate" placeholder in the email/Slack message)
@@ -272,7 +266,6 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
             )
 
         except Exception as e:
-            delivery_outcome = SloOutcome.FAILURE
             errors.append(
                 ExportError(
                     exception_class=type(e).__name__,
@@ -296,27 +289,16 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                     ),
                 )
 
-            # SLO completed — fires last, after all side effects
-            if prepare_result and prepare_result.team_id:
-                duration_ms = (temporalio.workflow.time() - start_time) * 1000
-                await temporalio.workflow.execute_activity(
-                    emit_delivery_outcome,
-                    EmitDeliveryOutcomeInput(
-                        subscription_id=inputs.subscription_id,
-                        team_id=prepare_result.team_id,
-                        distinct_id=prepare_result.distinct_id,
-                        outcome=delivery_outcome,
-                        duration_ms=duration_ms,
-                        assets_with_content=assets_with_content,
-                        total_assets=total_assets,
-                        errors=errors,
-                    ),
-                    start_to_close_timeout=dt.timedelta(minutes=2),
-                    retry_policy=temporalio.common.RetryPolicy(
-                        initial_interval=dt.timedelta(seconds=5),
-                        maximum_interval=dt.timedelta(minutes=1),
-                        maximum_attempts=3,
-                    ),
+            # Enrich SLO completion context
+            if inputs.slo:
+                inputs.slo.completion_context.update(
+                    {
+                        "assets_with_content": assets_with_content,
+                        "total_assets": total_assets,
+                        "errors": [
+                            {"exception_class": e.exception_class, "error_trace": e.error_trace} for e in errors
+                        ],
+                    }
                 )
 
         # Re-raise after cleanup completes. We can't re-raise inside the except
@@ -335,9 +317,19 @@ class HandleSubscriptionValueChangeWorkflow(PostHogWorkflow):
 
     @temporalio.workflow.run
     async def run(self, inputs: ProcessSubscriptionWorkflowInputs) -> None:
+        child_inputs = dataclasses.replace(
+            inputs,
+            slo=SloConfig(
+                operation=SloOperation.SUBSCRIPTION_DELIVERY,
+                area=SloArea.ANALYTIC_PLATFORM,
+                team_id=inputs.team_id,
+                resource_id=str(inputs.subscription_id),
+                distinct_id=inputs.distinct_id,
+            ),
+        )
         await temporalio.workflow.execute_child_workflow(
             ProcessSubscriptionWorkflow.run,
-            inputs,
+            child_inputs,
             id=f"process-subscription-change-{inputs.subscription_id}",
             parent_close_policy=temporalio.workflow.ParentClosePolicy.ABANDON,
             execution_timeout=dt.timedelta(hours=2),
