@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import logging
 
 from django.core.management.base import BaseCommand
@@ -48,6 +49,11 @@ class Command(BaseCommand):
     def handle(self, **options):
         logger.setLevel(logging.INFO)
         asyncio.run(self._run(options))
+        # Force garbage collection to ensure the Temporal SDK's Rust-backed runtime
+        # is fully destroyed before Python finalizes. Without this, background threads
+        # in the Rust runtime can trigger a fatal PyGILState_Release error (exit code 134).
+        # See: https://github.com/temporalio/sdk-python/issues/300
+        gc.collect()
 
     async def _run(self, options):
         namespace = options["namespace"]
