@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use futures::stream::FuturesUnordered;
+use futures::stream;
 use futures::StreamExt;
 use object_store::buffered::BufWriter;
 use object_store::path::Path as ObjectPath;
@@ -214,29 +214,40 @@ impl CheckpointUploader for S3Uploader {
             .map(|parent| parent.child_token())
             .unwrap_or_default();
 
-        // Build upload futures using FuturesUnordered for early exit with sibling cancellation.
-        // LimitStore's semaphore still limits concurrent S3 requests.
-        let mut futures: FuturesUnordered<_> = plan
+        // Collect upload tasks as owned (src, dest) pairs upfront to avoid
+        // lifetime issues with buffer_unordered requiring 'static futures.
+        let upload_tasks: Vec<_> = plan
             .files_to_upload
             .iter()
             .map(|local_file| {
-                let src = local_file.local_path.clone();
-                let dest = plan.info.get_file_key(&local_file.filename);
-                let token = upload_token.clone();
-
-                async move {
-                    self.upload_file_cancellable(&src, &dest, Some(&token))
-                        .await?;
-                    Ok::<String, anyhow::Error>(dest)
-                }
+                (
+                    local_file.local_path.clone(),
+                    plan.info.get_file_key(&local_file.filename),
+                )
             })
             .collect();
+
+        // Build upload stream with bounded concurrency.
+        // buffer_unordered limits how many futures are polled simultaneously,
+        // preventing memory spikes from all upload buffers (8MB each) being
+        // allocated at once when a partition has many SST files.
+        let max_concurrent = self.config.max_concurrent_checkpoint_file_uploads;
+        let mut upload_stream = stream::iter(upload_tasks.into_iter().map(|(src, dest)| {
+            let token = upload_token.clone();
+
+            async move {
+                self.upload_file_cancellable(&src, &dest, Some(&token))
+                    .await?;
+                Ok::<String, anyhow::Error>(dest)
+            }
+        }))
+        .buffer_unordered(max_concurrent);
 
         let mut uploaded_keys = Vec::with_capacity(plan.files_to_upload.len());
         let mut first_error: Option<anyhow::Error> = None;
 
         // Process completions, cancel siblings on first error
-        while let Some(result) = futures.next().await {
+        while let Some(result) = upload_stream.next().await {
             match result {
                 Ok(key) => uploaded_keys.push(key),
                 Err(e) => {
@@ -249,7 +260,7 @@ impl CheckpointUploader for S3Uploader {
         }
 
         // Drain remaining futures - they'll exit quickly due to cancellation
-        while futures.next().await.is_some() {}
+        while upload_stream.next().await.is_some() {}
 
         // Return early on error - DO NOT upload metadata
         if let Some(e) = first_error {
