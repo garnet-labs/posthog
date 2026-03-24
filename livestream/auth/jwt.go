@@ -13,13 +13,6 @@ import (
 
 const ExpectedScope = "posthog:livestream"
 
-type AuthClaims struct {
-	TeamID         int
-	UserID         int
-	OrganizationID string
-	Token          string
-}
-
 func GetAuth(header http.Header) (jwt.MapClaims, error) {
 	authHeader := header.Get("Authorization")
 	if authHeader == "" {
@@ -33,44 +26,27 @@ func GetAuth(header http.Header) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-func ParseAuthClaims(header http.Header) (*AuthClaims, error) {
-	claims, err := GetAuth(header)
-	if err != nil {
-		return nil, err
-	}
-
+func getDataFromClaims(claims jwt.MapClaims) (teamID int, token string, err error) {
 	team, ok := claims["team_id"].(float64)
 	if !ok {
-		return nil, errors.New("invalid team_id")
+		return 0, "", errors.New("invalid team_id")
 	}
-	token, ok := claims["api_token"].(string)
+	token, ok = claims["api_token"].(string)
 	if !ok {
-		return nil, errors.New("invalid api_token")
+		return 0, "", errors.New("invalid api_token")
 	}
-
-	result := &AuthClaims{
-		TeamID: int(team),
-		Token:  token,
-	}
-
-	// user_id and organization_id are optional for backward compatibility.
-	// TODO: make required after rollout (all tokens refreshed within 7-day TTL)
-	if user, ok := claims["user_id"].(float64); ok {
-		result.UserID = int(user)
-	}
-	if orgID, ok := claims["organization_id"].(string); ok {
-		result.OrganizationID = orgID
-	}
-
-	return result, nil
+	teamID = int(team)
+	return teamID, token, nil
 }
 
 func GetAuthClaims(header http.Header) (teamID int, token string, err error) {
-	c, err := ParseAuthClaims(header)
+	claims, err := GetAuth(header)
 	if err != nil {
 		return 0, "", err
 	}
-	return c.TeamID, c.Token, nil
+
+	return getDataFromClaims(claims)
+
 }
 
 func decodeAuthToken(authHeader string) (jwt.MapClaims, error) {
