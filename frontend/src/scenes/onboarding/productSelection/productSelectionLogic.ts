@@ -9,7 +9,6 @@ import { getRelativeNextPath } from 'lib/utils'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { billingLogic } from 'scenes/billing/billingLogic'
 import { onboardingLogic } from 'scenes/onboarding/onboardingLogic'
-import { sdksLogic } from 'scenes/onboarding/sdks/sdksLogic'
 import { USE_CASE_OPTIONS, UseCaseOption, getRecommendedProducts } from 'scenes/onboarding/productRecommendations'
 import { inviteLogic } from 'scenes/settings/organization/inviteLogic'
 import { teamLogic } from 'scenes/teamLogic'
@@ -404,6 +403,8 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
         if (values.isSmartPrefetchEnabled) {
             billingLogic.mount()
             billingLogic.actions.loadBilling()
+            inviteLogic.mount()
+            inviteLogic.actions.loadInvites()
         }
     }),
 ])

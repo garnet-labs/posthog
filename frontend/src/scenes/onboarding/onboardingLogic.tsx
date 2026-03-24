@@ -2,11 +2,14 @@ import { actions, connect, kea, listeners, path, props, reducers, selectors } fr
 import { actionToUrl, router, urlToAction } from 'kea-router'
 
 import { globalSetupLogic } from 'lib/components/ProductSetup/globalSetupLogic'
+import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { isKeyOf } from 'lib/utils'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { billingLogic } from 'scenes/billing/billingLogic'
+import { sdksLogic } from 'scenes/onboarding/sdks/sdksLogic'
 import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
+import { inviteLogic } from 'scenes/settings/organization/inviteLogic'
 import { Scene } from 'scenes/sceneTypes'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
@@ -171,6 +174,10 @@ export const onboardingLogic = kea<onboardingLogicType>([
         ],
     })),
     selectors({
+        isSmartPrefetchEnabled: [
+            (s) => [s.featureFlags],
+            (featureFlags): boolean => featureFlags[FEATURE_FLAGS.ONBOARDING_SMART_PREFETCH] === 'test',
+        ],
         breadcrumbs: [
             (s) => [s.productKey, s.stepKey],
             (productKey, stepKey): Breadcrumb[] => {
@@ -297,6 +304,44 @@ export const onboardingLogic = kea<onboardingLogicType>([
                 return
             }
             actions.setProduct(availableOnboardingProducts[productKey])
+
+            if (!values.isSmartPrefetchEnabled) {
+                return
+            }
+
+            // Start onboarding-time requests immediately after the product is picked.
+            // This reduces the chance of the first step transition blocking on these.
+            billingLogic.mount()
+            billingLogic.actions.loadBilling()
+
+            inviteLogic.mount()
+            inviteLogic.actions.loadInvites()
+
+            // `sdksLogic` triggers `loadSnippetEvents()` on mount.
+            sdksLogic.mount()
+        },
+        setStepKey: ({ stepKey }) => {
+            if (!values.isSmartPrefetchEnabled) {
+                return
+            }
+
+            const currentStepIndex = values.onboardingStepKeys.findIndex((s) => s === stepKey)
+            const nextStepKey = values.onboardingStepKeys[currentStepIndex + 1]
+
+            if (!nextStepKey) {
+                return
+            }
+
+            // Step-ahead prefetching: warm up resources needed for the *next* step.
+            if (nextStepKey === OnboardingStepKey.PLANS) {
+                billingLogic.mount()
+                billingLogic.actions.loadBilling()
+            }
+
+            if (nextStepKey === OnboardingStepKey.INVITE_TEAMMATES) {
+                inviteLogic.mount()
+                inviteLogic.actions.loadInvites()
+            }
         },
         setSubscribedDuringOnboarding: ({ subscribedDuringOnboarding }) => {
             if (subscribedDuringOnboarding) {
