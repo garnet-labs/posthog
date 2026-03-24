@@ -37,6 +37,7 @@ WORKTREE_CMD = REPO_ROOT / "bin" / "posthog-worktree"
 
 REGISTRY_DIR = Path.home() / ".posthog-sandboxes"
 REGISTRY_FILE = REGISTRY_DIR / "registry.json"
+CONFIG_FILE = REGISTRY_DIR / "config.json"
 
 PORT_BASE = 48001
 
@@ -56,6 +57,7 @@ SHARED_VOLUMES = [
     "sandbox-pnpm-store",
     "sandbox-db-cache",
     "sandbox-cargo-target",
+    "sandbox-intellij",
 ]
 
 # These need 777 so that containers running as different UIDs
@@ -63,6 +65,7 @@ SHARED_VOLUMES = [
 WORLD_WRITABLE_VOLUMES = [
     "sandbox-db-cache",
     "sandbox-cargo-target",
+    "sandbox-intellij",
 ]
 
 SANDBOX_BACKUP_XML = REPO_ROOT / "docker/clickhouse/config.d/sandbox-backup.xml"
@@ -224,6 +227,71 @@ def _ssh_authorized_keys_path() -> str:
             keys.append(pub.read_text().strip())
     keys_file.write_text("\n".join(keys) + "\n" if keys else "")
     return str(keys_file)
+
+
+def _load_config() -> dict:
+    """Load persistent user preferences from ~/.posthog-sandboxes/config.json."""
+    try:
+        return json.loads(CONFIG_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_config(config: dict) -> None:
+    CONFIG_FILE.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def _setup_intellij() -> None:
+    """Download IntelliJ IDEA Ultimate and populate the shared volume."""
+    import platform
+    import urllib.request
+
+    info("Fetching latest IntelliJ IDEA release info...")
+    api_url = "https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=release"
+    with urllib.request.urlopen(api_url) as resp:
+        data = json.loads(resp.read())
+
+    release = data["IIU"][0]
+    version = release["version"]
+    arch = "linuxARM64" if platform.machine() == "aarch64" else "linux"
+    download = release["downloads"][arch]
+    download_url = download["link"]
+    size_mb = download["size"] // (1024 * 1024)
+
+    info(f"Downloading IntelliJ IDEA {version} ({size_mb} MB)...")
+    run([
+        "docker", "run", "--rm",
+        "-v", "sandbox-intellij:/opt/idea",
+        "alpine", "sh", "-c",
+        f"apk add --no-cache curl && "
+        f"curl -fSL '{download_url}' | tar -xzf - -C /opt/idea --strip-components=1",
+    ])
+
+    success(f"IntelliJ IDEA {version} installed into sandbox-intellij volume")
+
+
+def _ensure_intellij() -> None:
+    """Prompt for IntelliJ preference on first run and download if needed."""
+    config = _load_config()
+
+    if "intellij" not in config:
+        answer = input("Do you use IntelliJ IDEA? (y/n): ").strip().lower()
+        config["intellij"] = answer in ("y", "yes")
+        _save_config(config)
+
+    if not config["intellij"]:
+        return
+
+    # Check if the volume is already populated
+    result = run(
+        ["docker", "run", "--rm", "-v", "sandbox-intellij:/opt/idea",
+         "alpine", "sh", "-c", "test -x /opt/idea/bin/remote-dev-server.sh && echo yes"],
+        capture=True, check=False,
+    )
+    if result.stdout.strip() == "yes":
+        return
+
+    _setup_intellij()
 
 
 def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
@@ -625,6 +693,7 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     entry = registry.allocate(branch, slug, worktree_path)
     port = entry.port
     _ensure_cache_volumes()
+    _ensure_intellij()
     _copy_sandbox_backup_xml(worktree_path)
 
     # Build or verify the database cache
@@ -660,6 +729,8 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     info(f"Worktree: {worktree_path}")
     info(f"Shell:    sandbox shell {branch}")
     info(f"VSCode:   sandbox code {branch}")
+    if _load_config().get("intellij"):
+        info(f"IntelliJ: sandbox idea {branch}")
     info(f"SSH:      ssh -p {port + 2000} sandbox@localhost")
     info(f"Logs:     sandbox logs {branch}")
 
@@ -683,6 +754,8 @@ def cmd_start(branch: str) -> None:
 
     success(f"PostHog running at http://localhost:{entry.port}")
     info(f"VSCode:   sandbox code {branch}")
+    if _load_config().get("intellij"):
+        info(f"IntelliJ: sandbox idea {branch}")
     info(f"SSH:      ssh -p {entry.port + 2000} sandbox@localhost")
 
 
@@ -769,6 +842,33 @@ def cmd_code(branch: str) -> None:
 
     info(f"Opening VSCode attached to {container}...")
     subprocess.Popen([code_cmd, "--folder-uri", uri])
+
+
+def cmd_idea(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    ssh_port = entry.port + 2000
+
+    from urllib.parse import quote
+    uri = (
+        f"jetbrains-gateway://connect#type=ssh&deploy=false"
+        f"&host=localhost&port={ssh_port}&user=sandbox"
+        f"&projectPath={quote('/workspace')}"
+        f"&idePath={quote('/opt/idea')}"
+    )
+
+    # Try gateway CLI, xdg-open (Linux), or open (macOS) to handle the URI
+    for cmd_name in ["gateway", "jetbrains-gateway", "xdg-open", "open"]:
+        cmd = shutil.which(cmd_name)
+        if cmd:
+            info(f"Opening JetBrains Gateway for sandbox on port {ssh_port}...")
+            subprocess.Popen([cmd, uri])
+            return
+
+    info("Could not auto-open Gateway.")
+    info(f"Connect manually: File → Remote Development → SSH")
+    info(f"  Host: localhost  Port: {ssh_port}  User: sandbox")
+    info(f"  Project: /workspace")
 
 
 def cmd_shell(branch: str) -> None:
@@ -860,6 +960,7 @@ examples:
         ("destroy", "Destroy a sandbox and clean up"),
         ("shell", "Attach to the mprocs UI"),
         ("code", "Open VSCode attached to the sandbox container"),
+        ("idea", "Open JetBrains Gateway for the sandbox"),
         ("logs", "Tail logs from a sandbox"),
     ]:
         p = sub.add_parser(name, help=help_text)
@@ -892,6 +993,7 @@ def main() -> None:
         "ls": cmd_list,
         "shell": lambda: cmd_shell(args.branch),
         "code": lambda: cmd_code(args.branch),
+        "idea": lambda: cmd_idea(args.branch),
         "logs": lambda: cmd_logs(args.branch),
         "rebuild-cache": cmd_rebuild_cache,
         "nuke": cmd_nuke,
