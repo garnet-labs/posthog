@@ -1,3 +1,4 @@
+# ruff: noqa: T201,E402 — standalone test script uses print() and deferred imports
 """E2E local test for the new ClickHouse migration system.
 
 Tests core library functions without requiring Django or Docker.
@@ -53,13 +54,13 @@ sys.modules["django.conf"] = _django_conf
 # ---------------------------------------------------------------------------
 from pathlib import Path
 
-from posthog.clickhouse.migrations.manifest import parse_manifest
-from posthog.clickhouse.migrations.sql_parser import parse_sql_sections, get_sql_for_step
 from posthog.clickhouse.migrations.jinja_env import render_sql
+from posthog.clickhouse.migrations.manifest import parse_manifest
 from posthog.clickhouse.migrations.new_style import NewStyleMigration
-from posthog.clickhouse.migrations.tracking import get_tracking_ddl, TRACKING_TABLE_DDL
+from posthog.clickhouse.migrations.runner import _ROLE_MAP, compute_checksum, discover_migrations
+from posthog.clickhouse.migrations.sql_parser import parse_sql_sections
+from posthog.clickhouse.migrations.tracking import get_tracking_ddl
 from posthog.clickhouse.migrations.validator import validate_migration
-from posthog.clickhouse.migrations.runner import discover_migrations, is_new_style, compute_checksum, _ROLE_MAP
 
 # --------------------------------------------------------------------------
 # Test 1: Parse the test migration manifest

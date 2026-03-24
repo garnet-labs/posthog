@@ -1,3 +1,4 @@
+# ruff: noqa: T201,E402 — standalone test script uses print() and deferred imports
 """Validation rule tests for the new ClickHouse migration system.
 
 Tests each validation rule against crafted bad migrations.
@@ -6,8 +7,8 @@ No Django or Docker required.
 
 import os
 import sys
-import tempfile
 import types
+import tempfile
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -24,8 +25,9 @@ _posthog_celery = types.ModuleType("posthog.celery")
 _posthog_celery.app = None
 sys.modules["posthog.celery"] = _posthog_celery
 
-import yaml
 from pathlib import Path
+
+import yaml
 
 from posthog.clickhouse.migrations.validator import validate_migration
 
