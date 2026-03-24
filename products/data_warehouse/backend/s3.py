@@ -40,9 +40,11 @@ async def aget_s3_client():
     else:
         s3 = s3fs.S3FileSystem(asynchronous=True)
 
-    await s3.set_session()
-
-    yield s3
+    session = await s3.set_session()
+    try:
+        yield s3
+    finally:
+        await session.close()
 
 
 def get_size_of_folder(path: str) -> float:
