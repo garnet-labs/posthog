@@ -219,6 +219,18 @@ def project_name(slug: str) -> str:
     return f"sandbox-{slug}"
 
 
+def _claude_auth_dir() -> str:
+    """Assemble only the Claude Code files needed to authenticate and configure."""
+    auth_dir = REGISTRY_DIR / "claude-auth"
+    auth_dir.mkdir(parents=True, exist_ok=True)
+    claude_dir = Path.home() / ".claude"
+    for filename in (".credentials.json", "settings.json", "settings.local.json"):
+        src = claude_dir / filename
+        if src.exists():
+            shutil.copy2(src, auth_dir / filename)
+    return str(auth_dir)
+
+
 def _ssh_authorized_keys_path() -> str:
     """Collect SSH public keys into a file that can be mounted into containers."""
     keys_file = REGISTRY_DIR / "authorized_keys"
@@ -332,6 +344,7 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
         "SANDBOX_VITE_PORT": str(port + 1000),
         "SANDBOX_SSH_PORT": str(port + 2000),
         "SANDBOX_SSH_AUTHORIZED_KEYS": _ssh_authorized_keys_path(),
+        "SANDBOX_CLAUDE_AUTH": _claude_auth_dir(),
         "SANDBOX_IDE_VOLUME": f"sandbox-{ide}" if ide else "sandbox-intellij",
         "SANDBOX_CODE": worktree_path,
         "SANDBOX_UID": str(os.getuid()),
@@ -393,7 +406,7 @@ def wait_for_health(
             print()
             print("Troubleshooting:")
             print(f"  Full logs:  docker logs {container}")
-            print(f"  Shell:      docker exec -it {container} bash")
+            print(f"  Shell:      docker exec -it -u {os.getuid()}:{os.getgid()} {container} bash")
             return False
         prev_restart_count = restart_count
 
@@ -909,9 +922,9 @@ def cmd_shell(branch: str) -> None:
     container = f"sandbox-{entry.slug}-app-1"
 
     info(f"Attaching to mprocs in {container}... (detach with Ctrl-b d)")
-    # exec replaces this process so the TTY is passed through cleanly
     os.execvp("docker", [
-        "docker", "exec", "-it", container,
+        "docker", "exec", "-it", "-u", f"{os.getuid()}:{os.getgid()}",
+        container,
         "tmux", "-L", "sandbox", "attach-session", "-t", "posthog",
     ])
 
