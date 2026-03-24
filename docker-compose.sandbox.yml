@@ -89,9 +89,6 @@ services:
             context: .
             dockerfile: Dockerfile.sandbox
         restart: on-failure
-        # Run as the host user so files created in the mounted worktree
-        # have correct ownership
-        user: '${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000}'
         # mprocs (used by bin/start) requires a TTY
         tty: true
         stdin_open: true
@@ -121,6 +118,8 @@ services:
             - python-env:/cache/python
         environment:
             # --- Sandbox identity ---
+            SANDBOX_UID: '${SANDBOX_UID:-1000}'
+            SANDBOX_GID: '${SANDBOX_GID:-1000}'
             POSTHOG_SANDBOX: '1'
             SANDBOX_INTENTS: '${SANDBOX_INTENTS:-product_analytics}'
             DEBUG: '1'
