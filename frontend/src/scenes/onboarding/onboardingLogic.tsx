@@ -321,11 +321,20 @@ export const onboardingLogic = kea<onboardingLogicType>([
             sdksLogic.mount()
         },
         setStepKey: ({ stepKey }) => {
+            // This action is also used for validation (e.g. deep-linked steps).
+            if (values.isStepKeyInvalid) {
+                actions.resetStepKey()
+                return
+            }
+
             if (!values.isSmartPrefetchEnabled) {
                 return
             }
 
             const currentStepIndex = values.onboardingStepKeys.findIndex((s) => s === stepKey)
+            if (currentStepIndex === -1) {
+                return
+            }
             const nextStepKey = values.onboardingStepKeys[currentStepIndex + 1]
 
             if (!nextStepKey) {
@@ -377,11 +386,6 @@ export const onboardingLogic = kea<onboardingLogicType>([
             actions.openGlobalSetup()
         },
         setAllOnboardingSteps: () => {
-            if (values.isStepKeyInvalid) {
-                actions.resetStepKey()
-            }
-        },
-        setStepKey: () => {
             if (values.isStepKeyInvalid) {
                 actions.resetStepKey()
             }
