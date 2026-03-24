@@ -290,13 +290,19 @@ def _ensure_jetbrains() -> None:
     config = _load_config()
 
     if "jetbrains" not in config:
-        answer = input("Do you use JetBrains for development? (P)yCharm / (I)ntelliJ / (N)o: ").strip().lower()
-        if answer in ("p", "pycharm"):
-            config["jetbrains"] = "pycharm"
-        elif answer in ("i", "intellij"):
-            config["jetbrains"] = "intellij"
-        else:
-            config["jetbrains"] = None
+        while True:
+            answer = input("Do you use JetBrains for development? (P)yCharm / (I)ntelliJ / (N)o: ").strip().lower()
+            if answer in ("p", "pycharm"):
+                config["jetbrains"] = "pycharm"
+                break
+            elif answer in ("i", "intellij"):
+                config["jetbrains"] = "intellij"
+                break
+            elif answer in ("n", "no"):
+                config["jetbrains"] = None
+                break
+            else:
+                print("Please enter P, I, or N.")
         _save_config(config)
 
     if not config.get("jetbrains"):
@@ -752,13 +758,13 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
 
     print()
     success(f"PostHog running at http://localhost:{port}")
-    info(f"Worktree: {worktree_path}")
-    info(f"Shell:    sandbox shell {branch}")
-    info(f"VSCode:   sandbox code {branch}")
+    info(f"Worktree:  {worktree_path}")
+    info(f"Shell:     sandbox shell {branch}")
+    info(f"VSCode:    sandbox code {branch}")
     if _load_config().get("jetbrains"):
         info(f"JetBrains: sandbox idea {branch}")
-    info(f"SSH:      ssh -p {port + 2000} sandbox@localhost")
-    info(f"Logs:     sandbox logs {branch}")
+    info(f"SSH:       ssh -p {port + 2000} sandbox@localhost")
+    info(f"Logs:      sandbox logs {branch}")
 
 
 def cmd_start(branch: str) -> None:
@@ -779,10 +785,10 @@ def cmd_start(branch: str) -> None:
         sys.exit(1)
 
     success(f"PostHog running at http://localhost:{entry.port}")
-    info(f"VSCode:   sandbox code {branch}")
+    info(f"VSCode:    sandbox code {branch}")
     if _load_config().get("jetbrains"):
         info(f"JetBrains: sandbox idea {branch}")
-    info(f"SSH:      ssh -p {entry.port + 2000} sandbox@localhost")
+    info(f"SSH:       ssh -p {entry.port + 2000} sandbox@localhost")
 
 
 def cmd_stop(branch: str) -> None:
