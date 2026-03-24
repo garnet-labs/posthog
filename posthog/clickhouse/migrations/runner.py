@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import time
+import socket
 import hashlib
 import logging
 from pathlib import Path
@@ -16,6 +18,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("migrations")
 
 MIGRATIONS_DIR = Path("posthog/clickhouse/migrations")
+
+# Concurrent execution guard: sentinel values for the advisory lock row
+LOCK_STEP_INDEX = -999
+LOCK_MIGRATION_NUMBER = 0
+LOCK_RETRY_ATTEMPTS = 3
+LOCK_RETRY_DELAY_SECONDS = 10
 
 # Map manifest uppercase role strings to NodeRole enum value strings (lowercase).
 # We resolve to actual NodeRole at call time to avoid importing Django at module load.
@@ -214,6 +222,106 @@ def _should_execute_step(
     if effective is None:
         return True
     return current_cluster in effective
+
+
+def acquire_migration_lock(client: Any, database: str) -> bool:
+    """Attempt to acquire an advisory lock by inserting a sentinel row.
+
+    Uses step_index=-999 and migration_number=0 as a well-known lock row.
+    If the INSERT succeeds, this runner holds the lock. If a row already
+    exists, another runner is active.
+
+    Returns True if the lock was acquired, False otherwise.
+    """
+    hostname = socket.gethostname()
+    sql = f"""
+        INSERT INTO {database}.clickhouse_schema_migrations
+        (migration_number, migration_name, step_index, host, node_role,
+         direction, checksum, applied_at, success)
+        VALUES
+    """
+    from datetime import UTC, datetime
+
+    params = [
+        (
+            LOCK_MIGRATION_NUMBER,
+            "__migration_lock__",
+            LOCK_STEP_INDEX,
+            hostname,
+            "*",
+            "up",
+            "lock",
+            datetime.now(tz=UTC),
+            False,
+        )
+    ]
+    try:
+        client.execute(sql, params)
+        return True
+    except Exception:
+        return False
+
+
+def release_migration_lock(client: Any, database: str) -> None:
+    """Delete the advisory lock row, allowing other runners to proceed."""
+    sql = (
+        f"DELETE FROM {database}.clickhouse_schema_migrations "
+        f"WHERE migration_number = {LOCK_MIGRATION_NUMBER} "
+        f"AND step_index = {LOCK_STEP_INDEX}"
+    )
+    try:
+        client.execute(sql)
+    except Exception as exc:
+        logger.warning("Failed to release migration lock: %s", exc)
+
+
+def check_migration_lock(client: Any, database: str) -> bool:
+    """Check whether a lock row exists (another runner is active).
+
+    Returns True if a lock row exists, False otherwise.
+    """
+    sql = (
+        f"SELECT count() FROM {database}.clickhouse_schema_migrations "
+        f"WHERE migration_number = {LOCK_MIGRATION_NUMBER} "
+        f"AND step_index = {LOCK_STEP_INDEX}"
+    )
+    try:
+        rows = client.execute(sql)
+        if rows and rows[0]:
+            count = rows[0][0] if isinstance(rows[0], (tuple, list)) else rows[0]
+            return int(count) > 0
+    except Exception:
+        pass
+    return False
+
+
+def acquire_migration_lock_with_retry(
+    client: Any,
+    database: str,
+    max_attempts: int = LOCK_RETRY_ATTEMPTS,
+    retry_delay: float = LOCK_RETRY_DELAY_SECONDS,
+) -> bool:
+    """Try to acquire the migration lock, retrying on contention.
+
+    If another runner holds the lock, waits *retry_delay* seconds between
+    attempts. After *max_attempts* failures, returns False (caller should
+    abort).
+    """
+    for attempt in range(1, max_attempts + 1):
+        if not check_migration_lock(client, database):
+            if acquire_migration_lock(client, database):
+                logger.info("Migration lock acquired (attempt %d)", attempt)
+                return True
+        if attempt < max_attempts:
+            logger.warning(
+                "Migration lock held by another runner, retrying in %ds (attempt %d/%d)",
+                retry_delay,
+                attempt,
+                max_attempts,
+            )
+            time.sleep(retry_delay)
+    logger.error("Failed to acquire migration lock after %d attempts", max_attempts)
+    return False
 
 
 def run_migration_up(

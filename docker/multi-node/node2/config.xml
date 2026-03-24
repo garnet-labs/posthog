@@ -1,0 +1,45 @@
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <console>true</console>
+    </logger>
+
+    <listen_host>0.0.0.0</listen_host>
+
+    <zookeeper>
+        <node>
+            <host>zookeeper</host>
+            <port>2181</port>
+        </node>
+    </zookeeper>
+
+    <macros>
+        <shard>2</shard>
+        <replica>clickhouse-2</replica>
+        <hostClusterType>default</hostClusterType>
+        <hostClusterRole>coordinator</hostClusterRole>
+    </macros>
+
+    <remote_servers>
+        <posthog>
+            <shard>
+                <replica>
+                    <host>clickhouse-1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+            <shard>
+                <replica>
+                    <host>clickhouse-2</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+            <shard>
+                <replica>
+                    <host>clickhouse-3</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </posthog>
+    </remote_servers>
+</clickhouse>

@@ -438,3 +438,147 @@ class TestRoleMap:
         # The manifest currently validates DATA and COORDINATOR
         assert "DATA" in _ROLE_MAP
         assert "COORDINATOR" in _ROLE_MAP
+
+
+# ---------------------------------------------------------------------------
+# Concurrent execution guard (advisory lock)
+# ---------------------------------------------------------------------------
+
+
+class TestAcquireMigrationLock:
+    def test_acquire_lock_succeeds_on_empty_table(self):
+        from posthog.clickhouse.migrations.runner import acquire_migration_lock
+
+        client = MagicMock()
+        client.execute.return_value = None
+
+        assert acquire_migration_lock(client, "test_db") is True
+        client.execute.assert_called_once()
+        call_args = client.execute.call_args
+        assert "INSERT INTO test_db.clickhouse_schema_migrations" in call_args[0][0]
+
+    def test_acquire_lock_fails_when_insert_raises(self):
+        from posthog.clickhouse.migrations.runner import acquire_migration_lock
+
+        client = MagicMock()
+        client.execute.side_effect = Exception("Duplicate row")
+
+        assert acquire_migration_lock(client, "test_db") is False
+
+
+class TestReleaseMigrationLock:
+    def test_release_lock_sends_delete(self):
+        from posthog.clickhouse.migrations.runner import release_migration_lock
+
+        client = MagicMock()
+        release_migration_lock(client, "test_db")
+
+        client.execute.assert_called_once()
+        sql = client.execute.call_args[0][0]
+        assert "DELETE FROM test_db.clickhouse_schema_migrations" in sql
+        assert "step_index = -999" in sql
+
+    def test_release_lock_does_not_raise_on_failure(self):
+        from posthog.clickhouse.migrations.runner import release_migration_lock
+
+        client = MagicMock()
+        client.execute.side_effect = Exception("Network error")
+
+        # Should not raise
+        release_migration_lock(client, "test_db")
+
+
+class TestCheckMigrationLock:
+    def test_check_lock_returns_true_when_lock_exists(self):
+        from posthog.clickhouse.migrations.runner import check_migration_lock
+
+        client = MagicMock()
+        client.execute.return_value = [(1,)]
+
+        assert check_migration_lock(client, "test_db") is True
+
+    def test_check_lock_returns_false_when_no_lock(self):
+        from posthog.clickhouse.migrations.runner import check_migration_lock
+
+        client = MagicMock()
+        client.execute.return_value = [(0,)]
+
+        assert check_migration_lock(client, "test_db") is False
+
+    def test_check_lock_returns_false_on_exception(self):
+        from posthog.clickhouse.migrations.runner import check_migration_lock
+
+        client = MagicMock()
+        client.execute.side_effect = Exception("Table not found")
+
+        assert check_migration_lock(client, "test_db") is False
+
+
+class TestAcquireMigrationLockWithRetry:
+    @patch("posthog.clickhouse.migrations.runner.time.sleep")
+    @patch("posthog.clickhouse.migrations.runner.acquire_migration_lock")
+    @patch("posthog.clickhouse.migrations.runner.check_migration_lock")
+    def test_acquires_on_first_attempt(self, mock_check, mock_acquire, mock_sleep):
+        from posthog.clickhouse.migrations.runner import acquire_migration_lock_with_retry
+
+        mock_check.return_value = False
+        mock_acquire.return_value = True
+
+        client = MagicMock()
+        assert acquire_migration_lock_with_retry(client, "test_db") is True
+        mock_sleep.assert_not_called()
+        mock_acquire.assert_called_once()
+
+    @patch("posthog.clickhouse.migrations.runner.time.sleep")
+    @patch("posthog.clickhouse.migrations.runner.acquire_migration_lock")
+    @patch("posthog.clickhouse.migrations.runner.check_migration_lock")
+    def test_retries_when_lock_held(self, mock_check, mock_acquire, mock_sleep):
+        from posthog.clickhouse.migrations.runner import acquire_migration_lock_with_retry
+
+        # First two checks: lock held; third: lock free
+        mock_check.side_effect = [True, True, False]
+        mock_acquire.return_value = True
+
+        client = MagicMock()
+        assert acquire_migration_lock_with_retry(client, "test_db", max_attempts=3, retry_delay=0.01) is True
+        assert mock_sleep.call_count == 2
+        mock_acquire.assert_called_once()
+
+    @patch("posthog.clickhouse.migrations.runner.time.sleep")
+    @patch("posthog.clickhouse.migrations.runner.acquire_migration_lock")
+    @patch("posthog.clickhouse.migrations.runner.check_migration_lock")
+    def test_aborts_after_max_attempts(self, mock_check, mock_acquire, mock_sleep):
+        from posthog.clickhouse.migrations.runner import acquire_migration_lock_with_retry
+
+        mock_check.return_value = True  # Lock always held
+
+        client = MagicMock()
+        assert acquire_migration_lock_with_retry(client, "test_db", max_attempts=3, retry_delay=0.01) is False
+        mock_acquire.assert_not_called()
+        assert mock_sleep.call_count == 2  # max_attempts - 1
+
+    @patch("posthog.clickhouse.migrations.runner.time.sleep")
+    @patch("posthog.clickhouse.migrations.runner.acquire_migration_lock")
+    @patch("posthog.clickhouse.migrations.runner.check_migration_lock")
+    def test_retries_when_acquire_fails_despite_no_lock(self, mock_check, mock_acquire, mock_sleep):
+        from posthog.clickhouse.migrations.runner import acquire_migration_lock_with_retry
+
+        mock_check.return_value = False
+        # First acquire fails (race condition), second succeeds
+        mock_acquire.side_effect = [False, True]
+
+        client = MagicMock()
+        assert acquire_migration_lock_with_retry(client, "test_db", max_attempts=3, retry_delay=0.01) is True
+        assert mock_acquire.call_count == 2
+
+
+class TestLockConstants:
+    def test_lock_step_index_is_sentinel(self):
+        from posthog.clickhouse.migrations.runner import LOCK_STEP_INDEX
+
+        assert LOCK_STEP_INDEX == -999
+
+    def test_lock_migration_number_is_zero(self):
+        from posthog.clickhouse.migrations.runner import LOCK_MIGRATION_NUMBER
+
+        assert LOCK_MIGRATION_NUMBER == 0

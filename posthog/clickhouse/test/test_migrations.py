@@ -68,24 +68,29 @@ class TestUniqueMigrationPrefixes(TestCase):
 
         max_migration_name = lines[0]
 
-        # Check that the migration file exists
-        max_migration_file = migrations_dir / f"{max_migration_name}.py"
+        # Check that the migration exists as either a .py file or a directory (new-style)
+        max_migration_py = migrations_dir / f"{max_migration_name}.py"
+        max_migration_dir = migrations_dir / max_migration_name
         self.assertTrue(
-            max_migration_file.exists(),
-            f"max_migration.txt points to {max_migration_name!r} but that file doesn't exist. "
+            max_migration_py.exists() or max_migration_dir.is_dir(),
+            f"max_migration.txt points to {max_migration_name!r} but neither "
+            f"{max_migration_name}.py nor {max_migration_name}/ exists. "
             "Update max_migration.txt to point to the latest migration.",
         )
 
-        # Get all migration files
-        migration_files = [
-            f[:-3]  # Remove .py extension
-            for f in os.listdir(migrations_dir)
-            if f.endswith(".py") and f != "__init__.py" and re.match(r"^\d+_", f)
-        ]
+        # Get all migrations: .py files (minus extension) and directories with numeric prefix
+        migration_names: list[str] = []
+        for entry in os.listdir(migrations_dir):
+            if entry == "__init__.py" or entry.startswith("_"):
+                continue
+            if entry.endswith(".py") and re.match(r"^\d+_", entry):
+                migration_names.append(entry[:-3])
+            elif (migrations_dir / entry).is_dir() and re.match(r"^\d+_", entry):
+                migration_names.append(entry)
 
         # Find the actual latest migration by numeric prefix
         latest_migration = max(
-            migration_files,
+            migration_names,
             key=lambda f: int(re.match(r"^(\d+)_", f).group(1)),  # type: ignore
         )
 
