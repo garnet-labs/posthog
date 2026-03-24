@@ -116,8 +116,8 @@ services:
             - pnpm-store:/cache/pnpm
             - cargo-target:/cache/cargo-target
             - python-env:/cache/python
-            # IntelliJ IDEA backend for JetBrains Gateway (populated by bin/sandbox)
-            - intellij:/opt/idea
+            # JetBrains IDE backend for Gateway (populated by bin/sandbox)
+            - jetbrains:/opt/idea
         environment:
             # --- Sandbox identity ---
             SANDBOX_UID: '${SANDBOX_UID:-1000}'
@@ -343,6 +343,6 @@ volumes:
     cargo-target:
         name: sandbox-cargo-target
         external: true
-    intellij:
-        name: sandbox-intellij
+    jetbrains:
+        name: ${SANDBOX_IDE_VOLUME:-sandbox-intellij}
         external: true
