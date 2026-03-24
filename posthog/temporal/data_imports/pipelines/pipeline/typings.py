@@ -38,6 +38,10 @@ class SourceResponse:
     rows_to_sync: Optional[int] = None
     has_duplicate_primary_keys: Optional[bool] = None
     """Whether incremental tables have non-unique primary keys"""
+    override_incremental_field_last_value: Optional[Any] = None
+    """When set by the source after iteration, the pipeline persists this as the incremental cursor
+    instead of deriving it from record fields. This ensures the cursor advances even when no
+    records are returned (e.g. Convex API cursor on quiet tables)."""
 
 
 @dataclasses.dataclass

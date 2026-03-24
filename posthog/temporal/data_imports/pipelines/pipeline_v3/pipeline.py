@@ -8,6 +8,7 @@ from structlog.types import FilteringBoundLogger
 from temporalio import activity
 
 from posthog.models import DataWarehouseTable
+from posthog.sync import database_sync_to_async_pool
 from posthog.temporal.common.shutdown import ShutdownMonitor
 from posthog.temporal.data_imports.pipelines.common.extract import (
     cdp_producer_clear_chunks,
@@ -241,6 +242,17 @@ class PipelineV3(Generic[ResumableData]):
                 if activity.in_activity():
                     get_rows_extracted_metric(team_id_str, schema_id_str, source_type).add(py_table.num_rows)
                     get_batches_produced_metric(team_id_str, schema_id_str).add(1)
+
+            # Apply source-provided cursor override (e.g. Convex API cursor that advances
+            # even when no records are returned).
+            if self._resource.override_incremental_field_last_value is not None:
+                override = self._resource.override_incremental_field_last_value
+                if self._last_incremental_field_value is None or override > self._last_incremental_field_value:
+                    await self._logger.adebug(
+                        f"V3 Pipeline: Applying source override for incremental_field_last_value: {override}"
+                    )
+                    await database_sync_to_async_pool(self._schema.refresh_from_db)()
+                    await database_sync_to_async_pool(self._schema.update_incremental_field_value)(override)
 
             await self._finalize(row_count=row_count)
 

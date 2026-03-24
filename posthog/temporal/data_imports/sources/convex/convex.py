@@ -139,16 +139,9 @@ def convex_source(
     should_use_incremental_field: bool,
     db_incremental_field_last_value: Any | None,
 ) -> SourceResponse:
-    def items_generator():
-        if should_use_incremental_field and db_incremental_field_last_value is not None:
-            cursor = int(db_incremental_field_last_value)
-            yield from document_deltas(deploy_url, deploy_key, table_name, cursor)
-        else:
-            yield from list_snapshot(deploy_url, deploy_key, table_name)
-
-    return SourceResponse(
+    response = SourceResponse(
         name=table_name,
-        items=items_generator,
+        items=lambda: iter([]),
         primary_keys=["_id"],
         partition_count=1,
         partition_size=1,
@@ -156,3 +149,17 @@ def convex_source(
         partition_format="month",
         partition_keys=["_creationTime"],
     )
+
+    def items_generator():
+        if should_use_incremental_field and db_incremental_field_last_value is not None:
+            cursor = int(db_incremental_field_last_value)
+            gen = document_deltas(deploy_url, deploy_key, table_name, cursor)
+        else:
+            gen = list_snapshot(deploy_url, deploy_key, table_name)
+
+        new_cursor: int = yield from gen
+        if new_cursor is not None:
+            response.override_incremental_field_last_value = new_cursor
+
+    response.items = items_generator
+    return response

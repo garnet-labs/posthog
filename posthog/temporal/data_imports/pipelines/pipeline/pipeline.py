@@ -235,6 +235,16 @@ class PipelineNonDLT(Generic[ResumableData]):
                     is_first_ever_sync=is_first_ever_sync,
                 )
 
+            # Apply source-provided cursor override (e.g. Convex API cursor that advances
+            # even when no records are returned). Must run before _post_run_operations which
+            # early-returns when there's no delta table (i.e. zero records).
+            if self._resource.override_incremental_field_last_value is not None:
+                override = self._resource.override_incremental_field_last_value
+                if self._last_incremental_field_value is None or override > self._last_incremental_field_value:
+                    await self._logger.adebug(f"Applying source override for incremental_field_last_value: {override}")
+                    await database_sync_to_async_pool(self._schema.refresh_from_db)()
+                    await database_sync_to_async_pool(self._schema.update_incremental_field_value)(override)
+
             await self._post_run_operations(row_count=row_count)
 
             return {"should_trigger_cdp_producer": await self._cdp_producer.should_produce_table()}
