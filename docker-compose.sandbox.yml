@@ -95,6 +95,10 @@ services:
         # mprocs (used by bin/start) requires a TTY
         tty: true
         stdin_open: true
+        # VSCode reads this label when attaching to configure extensions and settings
+        labels:
+            devcontainer.metadata: >-
+                [{"customizations":{"vscode":{"extensions":["ms-python.python","ms-python.vscode-pylance","charliermarsh.ruff","oxc.oxc-vscode","bradlc.vscode-tailwindcss"],"settings":{"python.defaultInterpreterPath":"/cache/python/bin/python"}}}}]
         ports:
             # Vite dev server exposed directly (not proxied)
             - '${SANDBOX_VITE_PORT:-49001}:8234'

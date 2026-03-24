@@ -81,7 +81,8 @@ RUN npm install -g @anthropic-ai/claude-code
 RUN echo 'export PATH="/cache/python/bin:/usr/local/cargo/bin:$PATH"' > /etc/profile.d/sandbox.sh
 RUN printf 'set -g default-terminal "xterm-256color"\nset -g extended-keys on\nset -as terminal-features "xterm*:extkeys"\nset -g allow-passthrough on\n' > /etc/tmux.conf
 RUN mkdir -p /cache/uv /cache/pnpm /cache/python \
-    && chmod 777 /cache/uv /cache/pnpm /cache/python
+    && chmod 777 /cache/uv /cache/pnpm /cache/python \
+    && chmod 666 /etc/passwd /etc/group
 
 WORKDIR /workspace
 
