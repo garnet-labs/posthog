@@ -3,7 +3,12 @@ from datetime import date
 import pytest
 from unittest import mock
 
-from posthog.temporal.data_imports.sources.postgres.postgres import SafeDateLoader, get_foreign_keys, get_schemas
+from posthog.temporal.data_imports.sources.postgres.postgres import (
+    SafeDateLoader,
+    get_foreign_keys,
+    get_postgres_row_count,
+    get_schemas,
+)
 from posthog.temporal.data_imports.sources.postgres.source import PostgresSource
 
 
@@ -151,3 +156,19 @@ class TestPostgresSchemaDiscovery:
         assert " IN (" in second_query
         assert "ANY(" not in second_query
         assert foreign_keys == {"analytics.events": [("user_id", "public.users", "id")]}
+
+    def test_get_postgres_row_count_skips_blank_schema_browse(self):
+        with mock.patch(
+            "posthog.temporal.data_imports.sources.postgres.postgres._connect_to_postgres"
+        ) as patch_connect_to_postgres:
+            row_counts = get_postgres_row_count(
+                host="localhost",
+                port=5432,
+                database="postgres",
+                user="postgres",
+                password="postgres",
+                schema="   ",
+            )
+
+        assert row_counts == {}
+        patch_connect_to_postgres.assert_not_called()

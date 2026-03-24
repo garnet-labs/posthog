@@ -1315,6 +1315,77 @@ class TestDatabase(BaseTest, QueryMatchingTest):
         assert isinstance(orders.fields.get("customer"), LazyJoin)
         assert isinstance(customers.fields.get("orders"), LazyJoin)
 
+    def test_direct_postgres_inferred_foreign_key_uses_matching_column_and_skips_self_reference(self):
+        credentials = DataWarehouseCredential.objects.create(
+            access_key="test_key", access_secret="test_secret", team=self.team
+        )
+        source = ExternalDataSource.objects.create(
+            team=self.team,
+            source_id="source_id",
+            connection_id="connection_id",
+            source_type=ExternalDataSourceType.POSTGRES,
+            access_method=ExternalDataSource.AccessMethod.DIRECT,
+            prefix="ducklake_demo_finance",
+        )
+        invoice_table = DataWarehouseTable.objects.create(
+            name="ducklake_demo_finance.invoices",
+            format="Parquet",
+            team=self.team,
+            credential=credentials,
+            external_data_source=source,
+            url_pattern="direct://postgres",
+            columns={
+                "invoice_id": {"hogql": "integer", "clickhouse": "Int64", "schema_valid": True},
+                "customer_id": {"hogql": "integer", "clickhouse": "Int64", "schema_valid": True},
+                "invoice_date": {"hogql": "date", "clickhouse": "Date", "schema_valid": True},
+            },
+        )
+        payment_table = DataWarehouseTable.objects.create(
+            name="ducklake_demo_finance.payments",
+            format="Parquet",
+            team=self.team,
+            credential=credentials,
+            external_data_source=source,
+            url_pattern="direct://postgres",
+            columns={
+                "payment_id": {"hogql": "integer", "clickhouse": "Int64", "schema_valid": True},
+                "invoice_id": {"hogql": "integer", "clickhouse": "Int64", "schema_valid": True},
+                "paid_at": {"hogql": "datetime", "clickhouse": "DateTime", "schema_valid": True},
+            },
+        )
+
+        ExternalDataSchema.objects.create(
+            name="ducklake_demo_finance.invoices", team=self.team, source=source, table=invoice_table
+        )
+        ExternalDataSchema.objects.create(
+            name="ducklake_demo_finance.payments", team=self.team, source=source, table=payment_table
+        )
+
+        database = Database.create_for(team=self.team, connection_id=str(source.id))
+        payments = database.get_table("ducklake_demo_finance.payments")
+        invoices = database.get_table("ducklake_demo_finance.invoices")
+
+        invoice_join = cast(LazyJoin, payments.fields.get("invoice"))
+
+        assert invoice_join.from_field == ["invoice_id"]
+        assert invoice_join.to_field == ["invoice_id"]
+        assert invoices.fields.get("invoice") is None
+
+        context = HogQLContext(team_id=self.team.pk, enable_select_queries=True, database=database)
+
+        prepare_and_print_ast(
+            parse_select("SELECT invoice.invoice_id FROM ducklake_demo_finance.payments"),
+            context,
+            dialect="postgres",
+        )
+
+        with pytest.raises(ExposedHogQLError):
+            prepare_and_print_ast(
+                parse_select("SELECT invoice.invoice_id FROM ducklake_demo_finance.invoices"),
+                context,
+                dialect="postgres",
+            )
+
     def test_direct_postgres_foreign_key_join_allows_user_traversal(self):
         credentials = DataWarehouseCredential.objects.create(
             access_key="test_key", access_secret="test_secret", team=self.team

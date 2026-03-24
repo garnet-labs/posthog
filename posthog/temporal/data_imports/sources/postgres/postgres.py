@@ -219,6 +219,9 @@ def get_postgres_row_count(
     require_ssl: bool = False,
     names: list[str] | None = None,
 ) -> dict[str, int]:
+    if _normalize_selected_schema(schema) is None and not names:
+        return {}
+
     connection = _connect_to_postgres(
         host=host,
         port=port,

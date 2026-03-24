@@ -14,6 +14,7 @@ from posthog.temporal.data_imports.sources.generated_configs import (
     ShopifySourceConfig,
     SnowflakeSourceConfig,
     StripeSourceConfig,
+    SupabaseSourceConfig,
     TemporalIOSourceConfig,
     VitallySourceConfig,
     ZendeskSourceConfig,
@@ -234,6 +235,26 @@ def test_postgres_config_without_schema():
     )
 
     assert config.schema is None
+
+
+def test_supabase_config():
+    config = SupabaseSourceConfig.from_dict(
+        {
+            "host": "host",
+            "port": 1433,
+            "database": "database",
+            "user": "user",
+            "password": "password",
+            "schema": "public",
+        }
+    )
+
+    assert config.host == "host"
+    assert config.port == 1433
+    assert config.database == "database"
+    assert config.user == "user"
+    assert config.password == "password"
+    assert config.schema == "public"
 
 
 def test_salesforce_config():

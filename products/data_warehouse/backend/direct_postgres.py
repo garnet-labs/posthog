@@ -19,6 +19,14 @@ DIRECT_POSTGRES_TABLE_OPTION = "direct_postgres_table"
 type DirectPostgresColumns = dict[str, dict[str, Any]]
 
 
+def _normalize_default_schema(default_schema: str | None) -> str | None:
+    if not isinstance(default_schema, str):
+        return None
+
+    normalized_default_schema = default_schema.strip()
+    return normalized_default_schema or None
+
+
 def postgres_schema_metadata_to_dwh_columns(schema_metadata: dict[str, Any] | None) -> DirectPostgresColumns:
     resolved_columns: DirectPostgresColumns = {}
     if not schema_metadata:
@@ -72,15 +80,16 @@ def get_direct_postgres_location(
 ) -> tuple[str, str]:
     source_schema = schema_metadata.get("source_schema") if isinstance(schema_metadata, dict) else None
     source_table_name = schema_metadata.get("source_table_name") if isinstance(schema_metadata, dict) else None
+    normalized_default_schema = _normalize_default_schema(default_schema)
 
     if isinstance(source_schema, str) and isinstance(source_table_name, str):
         return source_schema, source_table_name
 
-    if (default_schema is None or default_schema == "") and "." in schema_name:
+    if normalized_default_schema is None and "." in schema_name:
         inferred_schema, inferred_table_name = schema_name.split(".", 1)
         return inferred_schema, inferred_table_name
 
-    return default_schema or "public", schema_name
+    return normalized_default_schema or "public", schema_name
 
 
 def get_direct_postgres_table_options(*, source_schema: str, source_table_name: str) -> dict[str, str]:
