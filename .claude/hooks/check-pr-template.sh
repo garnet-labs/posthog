@@ -6,48 +6,70 @@
 set -euo pipefail
 
 INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null || echo "")
 
-# Only check gh pr create commands
-if ! echo "$COMMAND" | grep -q "gh pr create"; then
+# Fast path: skip Python entirely if "gh pr create" doesn't appear anywhere in the input
+if ! echo "$INPUT" | grep -qF "gh pr create"; then
     exit 0
 fi
 
-TEMPLATE="$CLAUDE_PROJECT_DIR/.github/pull_request_template.md"
-if [ ! -f "$TEMPLATE" ]; then
-    exit 0
-fi
+# Use Python for all parsing to handle heredocs, --body-file, and edge cases correctly
+echo "$INPUT" | python3 -c "
+import sys, json, re, os
 
-# Extract all ## headings from the template, including commented-out ones (<!-- ## ... -->)
-# Strip HTML comment markers so we get the raw heading text
-REQUIRED_SECTIONS=()
-while IFS= read -r line; do
-    # Match lines like "## Foo" or "<!-- ## Foo -->" (with optional leading whitespace)
-    cleaned=$(echo "$line" | sed -E 's/^[[:space:]]*<!-- *//; s/ *-->.*$//; s/^[[:space:]]*//')
-    if echo "$cleaned" | grep -qE '^## '; then
-        REQUIRED_SECTIONS+=("$cleaned")
-    fi
-done < "$TEMPLATE"
+raw = sys.stdin.read()
+try:
+    command = json.loads(raw).get('tool_input', {}).get('command', '')
+except (json.JSONDecodeError, AttributeError):
+    sys.exit(0)
 
-if [ ${#REQUIRED_SECTIONS[@]} -eq 0 ]; then
-    exit 0
-fi
+# Strip heredoc bodies and quoted strings to check if 'gh pr create' is
+# the actual command being run (not just mentioned in a commit message, etc.)
+stripped = re.sub(r\"<<'?\\\"?EOF\\\"?'?.*?^EOF$\", '', command, flags=re.DOTALL | re.MULTILINE)
+stripped = re.sub(r'\"[^\"]*\"', '', stripped)
+stripped = re.sub(r\"'[^']*'\", '', stripped)
 
-MISSING=()
-for section in "${REQUIRED_SECTIONS[@]}"; do
-    if ! echo "$COMMAND" | grep -qF "$section"; then
-        MISSING+=("$section")
-    fi
-done
+if 'gh pr create' not in stripped:
+    sys.exit(0)
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "BLOCKED: PR body is missing required template sections from .github/pull_request_template.md:"
-    for section in "${MISSING[@]}"; do
-        echo "  - $section"
-    done
-    echo ""
-    echo "Commented-out sections (like <!-- ## 🤖 LLM context -->) should be uncommented since this PR is authored/co-authored by an LLM agent."
-    exit 2
-fi
+# Load the PR template
+template_path = os.path.join(os.environ.get('CLAUDE_PROJECT_DIR', '.'), '.github', 'pull_request_template.md')
+if not os.path.isfile(template_path):
+    sys.exit(0)
 
-exit 0
+with open(template_path) as f:
+    template = f.read()
+
+# Extract all ## headings (including commented-out ones like <!-- ## ... -->)
+required = []
+for line in template.splitlines():
+    cleaned = re.sub(r'^\\s*<!--\\s*', '', line)
+    cleaned = re.sub(r'\\s*-->.*$', '', cleaned).strip()
+    if cleaned.startswith('## '):
+        required.append(cleaned)
+
+if not required:
+    sys.exit(0)
+
+# Resolve body content: handle --body-file or use the full command (which includes inline --body / heredoc)
+body = command
+body_file_match = re.search(r'--body-file[= ]*[\\'\"]?([^\\'\"\\ ]+)', command)
+if body_file_match:
+    path = body_file_match.group(1)
+    if os.path.isfile(path):
+        with open(path) as f:
+            body = f.read()
+    else:
+        print('BLOCKED: --body-file target not readable. Use inline --body with a heredoc instead.')
+        sys.exit(2)
+
+# Check for missing sections
+missing = [s for s in required if s not in body]
+if missing:
+    print('BLOCKED: PR body is missing required template sections from .github/pull_request_template.md:')
+    for s in missing:
+        print(f'  - {s}')
+    print()
+    print('All sections from the template must be present, including any commented-out ones')
+    print('(uncomment them since this PR is authored/co-authored by an LLM agent).')
+    sys.exit(2)
+"
