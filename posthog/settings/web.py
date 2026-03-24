@@ -104,7 +104,7 @@ MIDDLEWARE = [
     "django_structlog.middlewares.RequestMiddleware",
     "posthog.middleware.Fix204Middleware",
     "django.middleware.security.SecurityMiddleware",
-    "posthog.middleware.ToolbarOAuthCoopMiddleware",
+    "posthog.middleware.OAuthCoopMiddleware",
     # NOTE: we need healthcheck high up to avoid hitting middlewares that may be
     # using dependencies that the healthcheck should be checking. It should be
     # ok below the above middlewares however.
@@ -369,7 +369,7 @@ SPECTACULAR_SETTINGS = {
         "PropertyGroupOperator": ["AND", "OR"],
         "OrganizationMembershipLevel": "posthog.models.organization.OrganizationMembership.Level",
         "SetupTaskId": "posthog.models.team.setup_tasks.SetupTaskId",
-        "SurveyType": "posthog.models.surveys.survey.Survey.SurveyType",
+        "SurveyType": "products.surveys.backend.models.Survey.SurveyType",
     },
 }
 
