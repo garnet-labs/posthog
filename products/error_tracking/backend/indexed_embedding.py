@@ -367,6 +367,10 @@ class ModelTableDefinitions:
             f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS embedding_idx_cosine embedding TYPE vector_similarity('hnsw', 'cosineDistance', {self.dimension})",
         ]
 
+    def add_content_full_text_index_sql(self) -> str:
+        """SQL to add a full text index on the content column using ngram tokenizer."""
+        return f"ALTER TABLE {self.sharded_table_name()} ADD INDEX IF NOT EXISTS content_full_text content TYPE full_text(tokenizer = ngrams(3)) GRANULARITY 1"
+
 
 # Create table definition objects for each model
 EMBEDDING_TABLES_1 = [ModelTableDefinitions(model_name) for model_name in EMBEDDING_MODELS_1]
