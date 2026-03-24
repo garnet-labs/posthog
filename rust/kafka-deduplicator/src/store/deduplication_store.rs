@@ -320,13 +320,14 @@ impl DeduplicationStore {
         };
         drop(first_iter);
 
-        // Calculate age using wall clock
-        let now = std::time::SystemTime::now()
+        // Timestamps in keys are stored as milliseconds since epoch
+        let oldest_secs = oldest_timestamp / 1000;
+        let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        Ok(Some(now.saturating_sub(oldest_timestamp)))
+        Ok(Some(now_secs.saturating_sub(oldest_secs)))
     }
 
     /// Flush the store to disk
@@ -472,5 +473,81 @@ mod tests {
 
         // Test getting total size (should not error)
         let _size = store.get_total_size().unwrap();
+    }
+
+    #[test]
+    fn test_oldest_data_age_empty_store() {
+        let (store, _temp_dir) = create_test_store();
+        assert_eq!(store.get_oldest_data_age_seconds().unwrap(), None);
+    }
+
+    #[test]
+    fn test_oldest_data_age_with_ingestion_event_timestamp() {
+        // Ingestion events: parse_timestamp("2021-01-01T00:00:00Z") returns milliseconds
+        let (store, _temp_dir) = create_test_store();
+
+        let event = create_test_raw_event(); // timestamp: "2021-01-01T00:00:00Z"
+        let key = TimestampKey::from(&event);
+
+        // Verify the key timestamp is in milliseconds (1609459200000 for 2021-01-01)
+        assert_eq!(key.timestamp, 1609459200000);
+
+        let metadata = TimestampMetadata::new(&event);
+        store.put_timestamp_record(&key, &metadata).unwrap();
+
+        let age = store.get_oldest_data_age_seconds().unwrap().unwrap();
+
+        // Data from 2021 should be ~4-5 years old, i.e. roughly 126_230_400..189_345_600 seconds
+        // With the millis→seconds bug, saturating_sub(now_secs, timestamp_millis) returns 0
+        // because timestamp_millis (1.6 trillion) > now_secs (1.7 billion)
+        assert!(
+            age > 100_000_000,
+            "Age should be > ~3 years in seconds, got {age}. \
+             If age is 0, the millis vs seconds bug is present."
+        );
+        assert!(
+            age < 200_000_000,
+            "Age should be < ~6 years in seconds, got {age}. \
+             If age is ~1.7 billion, timestamps are not being converted to seconds."
+        );
+    }
+
+    #[test]
+    fn test_oldest_data_age_with_clickhouse_event_timestamp() {
+        // ClickHouse events: parse_clickhouse_timestamp("2024-01-01 12:00:00.000000")
+        // returns milliseconds (1704110400000)
+        use crate::utils::timestamp::parse_clickhouse_timestamp;
+
+        let (store, _temp_dir) = create_test_store();
+
+        let timestamp_millis =
+            parse_clickhouse_timestamp("2024-01-01 12:00:00.000000").unwrap();
+        assert_eq!(timestamp_millis, 1704110400000);
+
+        let key = TimestampKey::new(
+            timestamp_millis,
+            "user1".to_string(),
+            "123".to_string(),
+            "test_event".to_string(),
+        );
+        let key_bytes: Vec<u8> = (&key).into();
+        store
+            .store
+            .put(DeduplicationStore::TIMESTAMP_CF, &key_bytes, b"v")
+            .unwrap();
+
+        let age = store.get_oldest_data_age_seconds().unwrap().unwrap();
+
+        // Data from Jan 2024 should be ~1-2 years old, i.e. roughly 31_536_000..94_608_000 seconds
+        assert!(
+            age > 30_000_000,
+            "Age should be > ~1 year in seconds, got {age}. \
+             If age is 0, the millis vs seconds bug is present."
+        );
+        assert!(
+            age < 100_000_000,
+            "Age should be < ~3 years in seconds, got {age}. \
+             If age is ~1.7 billion, timestamps are not being converted to seconds."
+        );
     }
 }
