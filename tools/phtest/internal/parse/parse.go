@@ -36,6 +36,8 @@ func Parse(category discover.Category, lines []string) *TestResult {
 		return parseJest(tail)
 	case discover.CategoryRust:
 		return parseCargo(tail)
+	case discover.CategoryGo:
+		return parseGoTest(tail)
 	case discover.CategoryE2E:
 		return parsePlaywright(tail)
 	default:
@@ -179,6 +181,54 @@ var (
 	playwrightCountRe = regexp.MustCompile(`(\d+)\s+(passed|failed|skipped)`)
 	playwrightTimeRe  = regexp.MustCompile(`\(([\d.]+)([ms]+)\)`)
 )
+
+// ── go test ─────────────────────────────────────────────────────────────────────
+// --- PASS: TestFoo (0.00s)
+// --- FAIL: TestBar (0.01s)
+// --- SKIP: TestBaz (0.00s)
+// ok      github.com/pkg   0.123s
+// FAIL    github.com/pkg   0.456s
+
+var (
+	goTestResultRe = regexp.MustCompile(`^---\s+(PASS|FAIL|SKIP):\s+\S+\s+\(([\d.]+)s\)`)
+	goPkgOkRe      = regexp.MustCompile(`^ok\s+\S+\s+([\d.]+)s`)
+	goPkgFailRe    = regexp.MustCompile(`^FAIL\s+\S+\s+([\d.]+)s`)
+)
+
+func parseGoTest(lines []string) *TestResult {
+	r := &TestResult{}
+	found := false
+	for _, line := range lines {
+		if m := goTestResultRe.FindStringSubmatch(line); m != nil {
+			found = true
+			switch m[1] {
+			case "PASS":
+				r.Passed++
+			case "FAIL":
+				r.Failed++
+			case "SKIP":
+				r.Skipped++
+			}
+		}
+		// Accumulate duration from package summary lines
+		if m := goPkgOkRe.FindStringSubmatch(line); m != nil {
+			found = true
+			if secs, err := strconv.ParseFloat(m[1], 64); err == nil {
+				r.Duration += time.Duration(secs * float64(time.Second))
+			}
+		}
+		if m := goPkgFailRe.FindStringSubmatch(line); m != nil {
+			found = true
+			if secs, err := strconv.ParseFloat(m[1], 64); err == nil {
+				r.Duration += time.Duration(secs * float64(time.Second))
+			}
+		}
+	}
+	if !found {
+		return nil
+	}
+	return r
+}
 
 func parsePlaywright(lines []string) *TestResult {
 	r := &TestResult{}

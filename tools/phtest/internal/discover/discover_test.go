@@ -37,7 +37,7 @@ func TestDiscover_findsAllCategories(t *testing.T) {
 		cats[s.Category]++
 	}
 
-	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryFrontendCore, CategoryRust, CategoryE2E} {
+	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryFrontendCore, CategoryRust, CategoryGo, CategoryE2E} {
 		if cats[cat] == 0 {
 			t.Errorf("expected suites for category %q", cat)
 		}
@@ -156,6 +156,33 @@ func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
 	}
 	if subCatCount == 0 {
 		t.Error("expected E2E subcategories for nested spec directories")
+	}
+}
+
+func TestDiscover_goFindsModules(t *testing.T) {
+	root := repoRoot(t)
+	suites, err := discoverGo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suites) < 2 {
+		t.Errorf("expected at least 2 Go modules with tests, got %d", len(suites))
+	}
+
+	names := make(map[string]bool)
+	for _, s := range suites {
+		names[s.Name] = true
+		if s.Category != CategoryGo {
+			t.Errorf("suite %q: expected category %q, got %q", s.Name, CategoryGo, s.Category)
+		}
+		if s.Cmd != "go test ./..." {
+			t.Errorf("suite %q: expected 'go test ./...', got %q", s.Name, s.Cmd)
+		}
+	}
+	for _, expected := range []string{"livestream", "phrocs"} {
+		if !names[expected] {
+			t.Errorf("expected to find Go module %q", expected)
+		}
 	}
 }
 

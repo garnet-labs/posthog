@@ -14,6 +14,7 @@ const (
 	CategoryFrontend     Category = "Frontend / products"
 	CategoryFrontendCore Category = "Frontend"
 	CategoryRust         Category = "Rust"
+	CategoryGo           Category = "Go"
 	CategoryE2E          Category = "E2E"
 )
 
@@ -45,6 +46,12 @@ func Discover(repoRoot string) ([]Suite, error) {
 		return nil, err
 	}
 	suites = append(suites, rust...)
+
+	goSuites, err := discoverGo(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	suites = append(suites, goSuites...)
 
 	e2e, err := discoverE2E(repoRoot)
 	if err != nil {
@@ -299,6 +306,81 @@ func discoverE2E(repoRoot string) ([]Suite, error) {
 	})
 
 	return suites, nil
+}
+
+// discoverGo finds Go modules (go.mod files) that contain _test.go files,
+// excluding the phtest module itself.
+func discoverGo(repoRoot string) ([]Suite, error) {
+	var suites []Suite
+
+	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "node_modules" || name == ".venv" || name == "__pycache__" || name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		rel, _ := filepath.Rel(repoRoot, dir)
+
+		// Skip phtest itself
+		if rel == filepath.Join("tools", "phtest") {
+			return nil
+		}
+
+		if !hasGoTestFiles(dir) {
+			return nil
+		}
+
+		// Use the last path segment as the suite name
+		name := filepath.Base(dir)
+
+		suites = append(suites, Suite{
+			Name:     name,
+			Category: CategoryGo,
+			Dir:      dir,
+			Cmd:      "go test ./...",
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(suites, func(i, j int) bool {
+		return suites[i].Name < suites[j].Name
+	})
+	return suites, nil
+}
+
+// hasGoTestFiles returns true if dir contains any _test.go files.
+func hasGoTestFiles(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "vendor" || name == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), "_test.go") {
+			found = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return found
 }
 
 // hasPythonTestFiles returns true if dir contains any .py files referencing APIBaseTest.

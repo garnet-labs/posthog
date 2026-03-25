@@ -114,6 +114,81 @@ func TestParseJest_mixed(t *testing.T) {
 	}
 }
 
+func TestParseGoTest_passed(t *testing.T) {
+	lines := []string{
+		"=== RUN   TestFoo",
+		"--- PASS: TestFoo (0.00s)",
+		"=== RUN   TestBar",
+		"--- PASS: TestBar (0.01s)",
+		"PASS",
+		"ok  	github.com/posthog/posthog/livestream/auth	0.123s",
+	}
+	r := Parse(discover.CategoryGo, lines)
+	if r == nil {
+		t.Fatal("expected result")
+	}
+	if r.Passed != 2 {
+		t.Errorf("Passed: got %d, want 2", r.Passed)
+	}
+	if r.Failed != 0 {
+		t.Errorf("Failed: got %d, want 0", r.Failed)
+	}
+	if !r.IsPass() {
+		t.Error("expected IsPass() == true")
+	}
+}
+
+func TestParseGoTest_mixed(t *testing.T) {
+	lines := []string{
+		"--- PASS: TestFoo (0.00s)",
+		"--- FAIL: TestBar (0.01s)",
+		"--- SKIP: TestBaz (0.00s)",
+		"FAIL",
+		"FAIL	github.com/posthog/posthog/livestream/events	0.456s",
+	}
+	r := Parse(discover.CategoryGo, lines)
+	if r == nil {
+		t.Fatal("expected result")
+	}
+	if r.Passed != 1 || r.Failed != 1 || r.Skipped != 1 {
+		t.Errorf("got passed=%d failed=%d skipped=%d", r.Passed, r.Failed, r.Skipped)
+	}
+	if r.IsPass() {
+		t.Error("expected IsPass() == false")
+	}
+}
+
+func TestParseGoTest_multiplePackages(t *testing.T) {
+	lines := []string{
+		"--- PASS: TestA (0.00s)",
+		"ok  	github.com/posthog/posthog/livestream/auth	0.100s",
+		"--- PASS: TestB (0.00s)",
+		"--- PASS: TestC (0.00s)",
+		"--- FAIL: TestD (0.01s)",
+		"FAIL	github.com/posthog/posthog/livestream/events	0.200s",
+	}
+	r := Parse(discover.CategoryGo, lines)
+	if r == nil {
+		t.Fatal("expected result")
+	}
+	if r.Passed != 3 || r.Failed != 1 {
+		t.Errorf("got passed=%d failed=%d", r.Passed, r.Failed)
+	}
+	// Duration should aggregate both package times
+	expectedDuration := time.Duration(0.3 * float64(time.Second))
+	if r.Duration != expectedDuration {
+		t.Errorf("Duration: got %v, want %v", r.Duration, expectedDuration)
+	}
+}
+
+func TestParseGoTest_noOutput(t *testing.T) {
+	lines := []string{"some random output", "no test results"}
+	r := Parse(discover.CategoryGo, lines)
+	if r != nil {
+		t.Error("expected nil for no test output")
+	}
+}
+
 func TestParseCargo_single(t *testing.T) {
 	lines := []string{
 		"running 15 tests",
