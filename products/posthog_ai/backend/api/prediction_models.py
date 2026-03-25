@@ -27,7 +27,7 @@ class ActionPredictionModelRunSerializer(serializers.ModelSerializer):
             "model_url",
             "metrics",
             "feature_importance",
-            "artifact_script",
+            "artifact_scripts",
             "created_by",
             "created_at",
             "updated_at",

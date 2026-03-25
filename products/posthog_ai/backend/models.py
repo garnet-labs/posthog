@@ -124,10 +124,10 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         blank=True,
         help_text="Feature importance scores from model training.",
     )
-    artifact_script = models.TextField(
+    artifact_scripts = models.JSONField(
+        default=dict,
         blank=True,
-        default="",
-        help_text="The Python script used to train and produce the model artifact.",
+        help_text="Python scripts used in this run. Keys: data, preprocess, train, predict.",
     )
 
     class Meta:
