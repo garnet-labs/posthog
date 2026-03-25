@@ -55,22 +55,6 @@ def get_or_start_hogbot(
     )
 
 
-def start_or_restart_hogbot(
-    team_id: int,
-    server_command: str,
-    repository: str | None = None,
-    github_integration_id: int | None = None,
-    branch: str | None = None,
-) -> HogbotConnectionInfo:
-    return get_or_start_hogbot(
-        team_id=team_id,
-        server_command=server_command,
-        repository=repository,
-        github_integration_id=github_integration_id,
-        branch=branch,
-    )
-
-
 async def _get_or_start_hogbot(
     *,
     team_id: int,
