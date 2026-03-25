@@ -73,6 +73,10 @@ export const voiceLogic = kea<voiceLogicType>([
         disableVoiceMode: true,
         enterVoiceMode: (tabId: string) => ({ tabId }),
         exitVoiceMode: true,
+        /** While true, VAD debounce will not auto-stop; release pointer to send (ChatGPT-style hold-to-talk). */
+        setOrbPointerDown: (down: boolean) => ({ down }),
+        /** True while downloading/decoding TTS before playback starts (voice UI should not pretend the mic is live). */
+        setTtsLoading: (loading: boolean) => ({ loading }),
     }),
 
     reducers({
@@ -103,6 +107,28 @@ export const voiceLogic = kea<voiceLogicType>([
         ],
         micPermissionDenied: [false, { setMicPermissionDenied: (_, { denied }) => denied }],
         activeTabId: [null as string | null, { setActiveTabId: (_, { tabId }) => tabId }],
+        orbPointerDown: [
+            false,
+            {
+                setOrbPointerDown: (_, { down }) => down,
+                stopRecording: () => false,
+                // startRecording does not clear — user may press the orb to interrupt TTS while still holding.
+                exitVoiceMode: () => false,
+                disableVoiceMode: () => false,
+                enterVoiceMode: () => false,
+            },
+        ],
+        ttsLoading: [
+            false,
+            {
+                setTtsLoading: (_, { loading }) => loading,
+                stopRecording: () => false,
+                stopPlayback: () => false,
+                exitVoiceMode: () => false,
+                disableVoiceMode: () => false,
+                enterVoiceMode: () => false,
+            },
+        ],
     }),
 
     listeners(({ actions, values, cache }) => ({
@@ -311,11 +337,16 @@ export const voiceLogic = kea<voiceLogicType>([
 
                 // Turn detection: restart timer on every transcript that carries text.
                 // When no new transcript arrives for TURN_COMPLETE_DEBOUNCE_MS, auto-send.
+                // Hold-to-talk on the orb sets cache.orbPointerDown — no auto-send until release.
                 if (values.voiceModeEnabled && fullText) {
                     clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
                     cache.turnTimer = setTimeout(() => {
                         cache.turnTimer = null
-                        if (values.recording && values.voiceModeEnabled) {
+                        if (
+                            values.recording &&
+                            values.voiceModeEnabled &&
+                            !(cache.orbPointerDown as boolean | undefined)
+                        ) {
                             actions.stopRecording()
                         }
                     }, TURN_COMPLETE_DEBOUNCE_MS)
@@ -337,7 +368,16 @@ export const voiceLogic = kea<voiceLogicType>([
             }
         },
 
+        setOrbPointerDown: ({ down }) => {
+            cache.orbPointerDown = down
+            if (down) {
+                clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
+                cache.turnTimer = null
+            }
+        },
+
         stopRecording: () => {
+            cache.orbPointerDown = false
             // Clear any pending turn detection timer
             clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
             cache.turnTimer = null
@@ -457,6 +497,7 @@ export const voiceLogic = kea<voiceLogicType>([
                 return
             }
 
+            actions.setTtsLoading(true)
             try {
                 const response = await api.conversations.tts(plainText)
                 const arrayBuffer = await response.arrayBuffer()
@@ -536,6 +577,11 @@ export const voiceLogic = kea<voiceLogicType>([
                 }
 
                 cache.currentSource = source
+                actions.setTtsLoading(false)
+                if (!voiceLogic.findMounted()?.values.voiceModeEnabled) {
+                    cache.currentSource = null
+                    return
+                }
                 actions.setPlaybackActive(true)
                 cache.playbackVisualActive = true
                 cache.playbackAmplitudeRafId = requestAnimationFrame(playbackAmplitudeLoop)
@@ -548,6 +594,7 @@ export const voiceLogic = kea<voiceLogicType>([
 
                 source.start()
             } catch {
+                actions.setTtsLoading(false)
                 teardownPlaybackVisuals(cache, actions)
                 actions.setPlaybackActive(false)
             }
@@ -569,7 +616,7 @@ export const voiceLogic = kea<voiceLogicType>([
 
         setPlaybackActive: ({ active }) => {
             // Auto-resume mic recording after TTS finishes in voice mode
-            if (!active && values.voiceModeEnabled && !values.recording && !values.connecting) {
+            if (!active && values.voiceModeEnabled && !values.recording && !values.connecting && !values.ttsLoading) {
                 const tabId = values.activeTabId
                 if (tabId) {
                     actions.startRecording(tabId)
