@@ -252,14 +252,16 @@ runcmd:
         # Fallback candidates: try larger sizes first (PostHog needs ≥16 GB RAM),
         # then fall back across regions. sfo3 has had capacity issues since ~Mar 17 2026.
         fallback_candidates = list(
-            dict.fromkeys([
-                (self.region, self.size),
-                (self.region, FALLBACK_SIZE),
-                ("nyc3", self.size),
-                ("nyc3", FALLBACK_SIZE),
-                ("ams3", self.size),
-                ("ams3", FALLBACK_SIZE),
-            ])
+            dict.fromkeys(
+                [
+                    (self.region, self.size),
+                    (self.region, FALLBACK_SIZE),
+                    ("nyc3", self.size),
+                    ("nyc3", FALLBACK_SIZE),
+                    ("ams3", self.size),
+                    ("ams3", FALLBACK_SIZE),
+                ]
+            )
         )
 
         last_error = None
@@ -289,9 +291,7 @@ runcmd:
                 print(f"Droplet creation failed (region={region}, size={size}): {e}")
                 last_error = e
 
-        raise RuntimeError(
-            f"Droplet creation failed for all region/size combinations. Last error: {last_error}"
-        )
+        raise RuntimeError(f"Droplet creation failed for all region/size combinations. Last error: {last_error}")
 
     def get_droplet_info(self):
         """Fetch droplet information from DigitalOcean API for debugging"""
