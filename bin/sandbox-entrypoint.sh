@@ -107,6 +107,7 @@ uv sync --no-editable
 
 # Make hogli available — normally done by flox on-activate.sh
 ln -sfn /workspace/bin/hogli /cache/python/bin/hogli
+ln -sfn /usr/local/bin/phrocs /workspace/bin/phrocs
 
 echo "==> Installing Node dependencies..."
 # CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed because
@@ -232,4 +233,4 @@ fi
 echo "==> Starting PostHog via mprocs in tmux..."
 rm -f /workspace/bin/start.lock
 
-exec tmux -L sandbox new-session -s posthog "bin/start"
+exec tmux -L sandbox new-session -s posthog "bin/start --phrocs"
