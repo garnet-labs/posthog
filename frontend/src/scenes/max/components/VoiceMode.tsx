@@ -7,16 +7,16 @@ import { LemonButton } from '@posthog/lemon-ui'
 
 import { cn } from 'lib/utils/css-classes'
 
-import voiceClosed from 'public/hedgehog/voice/closed.gif'
+import voiceListening from 'public/hedgehog/voice/listening.png'
 import voiceTalking from 'public/hedgehog/voice/talking.gif'
-import voiceZen from 'public/hedgehog/voice/zen.svg'
+import voiceThinking from 'public/hedgehog/voice/thinking.gif'
 
 import { maxLogic } from '../maxLogic'
 import { maxThreadLogic } from '../maxThreadLogic'
 import { voiceLogic } from '../voiceLogic'
 
 export function VoiceMode(): JSX.Element {
-    const { recording, connecting, playbackActive, isMouthOpen } = useValues(voiceLogic)
+    const { recording, connecting, playbackActive } = useValues(voiceLogic)
     const { stopRecording, exitVoiceMode } = useActions(voiceLogic)
     const { question } = useValues(maxLogic)
     const { threadLoading } = useValues(maxThreadLogic)
@@ -25,8 +25,6 @@ export function VoiceMode(): JSX.Element {
     const isAiSpeaking = playbackActive
     const isUserSpeaking = recording
     const isThinking = threadLoading && !isAiSpeaking && !isUserSpeaking
-    // Zen for listening, connecting, recording, and thinking — only swap to gifs during TTS.
-    const showZenInOrb = !isAiSpeaking
 
     let statusText = 'Listening…'
     if (connecting) {
@@ -69,22 +67,31 @@ export function VoiceMode(): JSX.Element {
                             !isUserSpeaking && !isAiSpeaking && !isThinking && 'VoiceMode__orb--idle'
                         )}
                     >
-                        {showZenInOrb ? (
+                        {isAiSpeaking ? (
                             <img
-                                src={voiceZen}
+                                src={voiceTalking}
+                                alt="Speaking"
+                                className="relative z-[1] max-w-[78%] max-h-[78%] w-auto h-auto object-contain pointer-events-none select-none"
+                                draggable={false}
+                                key="voice-mode-ai-talking"
+                            />
+                        ) : isThinking ? (
+                            <img
+                                src={voiceThinking}
                                 alt=""
                                 className="relative z-[1] max-w-[78%] max-h-[78%] w-auto h-auto object-contain pointer-events-none select-none"
                                 draggable={false}
+                                key="voice-mode-thinking"
                             />
-                        ) : isAiSpeaking ? (
+                        ) : (
                             <img
-                                src={isMouthOpen ? voiceTalking : voiceClosed}
-                                alt={isMouthOpen ? 'Speaking' : 'Idle'}
+                                src={voiceListening}
+                                alt=""
                                 className="relative z-[1] max-w-[78%] max-h-[78%] w-auto h-auto object-contain pointer-events-none select-none"
                                 draggable={false}
-                                key={isMouthOpen ? 'voice-mode-ai-talking' : 'voice-mode-ai-closed'}
+                                key="voice-mode-listening"
                             />
-                        ) : null}
+                        )}
                     </div>
                 </div>
 
