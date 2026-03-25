@@ -17,11 +17,16 @@ if ! mkdir "$LOCKFILE" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCKFILE" 2>/dev/null' EXIT
 
+
+export SETTINGS_PATH="$SETTINGS"
+export LOCAL_PATH="$LOCAL"
+
 python3 -c "
 import json, sys, os, tempfile
 
-settings_path = '$SETTINGS'
-local_path = '$LOCAL'
+settings_path = os.environ['SETTINGS_PATH']
+local_path = os.environ['LOCAL_PATH']
+
 
 # Read settings.json
 try:
