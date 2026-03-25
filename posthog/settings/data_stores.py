@@ -295,6 +295,10 @@ with suppress(Exception):
     as_json = json.loads(os.getenv("CLICKHOUSE_USE_HTTP_PER_TEAM", "[]"))
     CLICKHOUSE_USE_HTTP_PER_TEAM = {int(v) for v in as_json}
 
+# Shadow mode: execute every SELECT query on both TCP and HTTP, compare results,
+# log discrepancies. TCP result is always returned. Enable in dev/staging first.
+CLICKHOUSE_HTTP_SHADOW_MODE: bool = get_from_env("CLICKHOUSE_HTTP_SHADOW_MODE", False, type_cast=str_to_bool)
+
 QUERYSERVICE_HOST: str = get_from_env("QUERYSERVICE_HOST", CLICKHOUSE_HOST)
 QUERYSERVICE_SECURE: bool = get_from_env("QUERYSERVICE_SECURE", CLICKHOUSE_SECURE, type_cast=str_to_bool)
 QUERYSERVICE_VERIFY: bool = get_from_env("QUERYSERVICE_VERIFY", CLICKHOUSE_VERIFY, type_cast=str_to_bool)
