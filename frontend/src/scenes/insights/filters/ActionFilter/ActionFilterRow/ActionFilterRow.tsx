@@ -27,10 +27,12 @@ import {
     TaxonomicPopoverProps,
     TaxonomicStringPopover,
 } from 'lib/components/TaxonomicPopover/TaxonomicPopover'
+import { FEATURE_FLAGS } from 'lib/constants'
 import { IconWithCount, SortableDragIcon } from 'lib/lemon-ui/icons'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonDropdown } from 'lib/lemon-ui/LemonDropdown'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { getEventNamesForAction } from 'lib/utils'
 import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import { funnelDataLogic } from 'scenes/funnels/funnelDataLogic'
@@ -52,6 +54,7 @@ import {
 } from '~/types'
 
 import { getValue, taxonomicFilterGroupTypeToEntityType } from './actionFilterRowUtils'
+import { FunnelStepAggregationTargetSelect } from './FunnelStepAggregationTargetSelect'
 import { MathSelector } from './MathSelector'
 import type { ActionFilterRowProps } from './types'
 import { MathAvailability } from './types'
@@ -61,6 +64,15 @@ export { MathAvailability } from './types'
 export type { ActionFilterRowProps, MathSelectorProps } from './types'
 export { taxonomicFilterGroupTypeToEntityType } from './actionFilterRowUtils'
 export { MathSelector } from './MathSelector'
+
+function FunnelStepMenuField({ label, children }: { label: string; children: JSX.Element }): JSX.Element {
+    return (
+        <div className="mb-2.5 mx-2">
+            <h5 className="mx-0 my-1">{label}</h5>
+            {children}
+        </div>
+    )
+}
 
 interface DragHandleProps {
     listeners: DraggableSyntheticListeners | undefined
@@ -117,6 +129,7 @@ export function ActionFilterRow({
         ...actionsTaxonomicGroupTypes,
     ]
 
+    const { featureFlags } = useValues(featureFlagLogic)
     const { currentTeamId } = useValues(teamLogic)
     const { entityFilterVisible } = useValues(logic)
     const {
@@ -139,6 +152,8 @@ export function ActionFilterRow({
 
     const isFunnelContext = mathAvailability === MathAvailability.FunnelsOnly
     const isTrendsContext = trendsDisplayCategory != null
+    const hasFunnelCustomStepAggregationFlag =
+        featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_FUNNEL_CUSTOM_STEP_AGGREGATION]
 
     // Always call hooks for React compliance - provide safe defaults for non-funnel contexts
     // dashboardItemId should be the insight's id, but the typeKey might contain a /on-dashboard- suffix
@@ -239,6 +254,13 @@ export function ActionFilterRow({
             index,
         })
     }
+
+    const funnelStepAggregationEventNames =
+        filter.type === EntityTypes.EVENTS && filter.id
+            ? [String(filter.id)]
+            : filter.type === EntityTypes.ACTIONS && filter.id
+              ? getEventNamesForAction(parseInt(String(filter.id)), actions)
+              : []
 
     if (filter.type === EntityTypes.ACTIONS) {
         const action = actions.find((action) => action.id === filter.id)
@@ -704,7 +726,7 @@ export function ActionFilterRow({
                                                         ? [
                                                               {
                                                                   label: () => (
-                                                                      <>
+                                                                      <FunnelStepMenuField label="Event matching">
                                                                           <MathSelector
                                                                               math={math}
                                                                               mathGroupTypeIndex={mathGroupTypeIndex}
@@ -721,8 +743,38 @@ export function ActionFilterRow({
                                                                               }
                                                                               query={query || {}}
                                                                           />
-                                                                          <LemonDivider />
-                                                                      </>
+                                                                      </FunnelStepMenuField>
+                                                                  ),
+                                                              },
+                                                          ]
+                                                        : []),
+                                                    // Custom aggregation target for funnels only
+                                                    ...(isFunnelContext &&
+                                                    hasFunnelCustomStepAggregationFlag &&
+                                                    (filter.type === EntityTypes.EVENTS ||
+                                                        filter.type === EntityTypes.ACTIONS)
+                                                        ? [
+                                                              {
+                                                                  label: () => (
+                                                                      <FunnelStepMenuField label="Aggregating by">
+                                                                          <FunnelStepAggregationTargetSelect
+                                                                              filter={filter}
+                                                                              eventNames={
+                                                                                  funnelStepAggregationEventNames
+                                                                              }
+                                                                              onChange={(
+                                                                                  funnelAggregationTarget,
+                                                                                  funnelAggregationTargetType
+                                                                              ) =>
+                                                                                  updateFilter({
+                                                                                      ...filter,
+                                                                                      index,
+                                                                                      funnelAggregationTarget,
+                                                                                      funnelAggregationTargetType,
+                                                                                  })
+                                                                              }
+                                                                          />
+                                                                      </FunnelStepMenuField>
                                                                   ),
                                                               },
                                                           ]
@@ -750,12 +802,13 @@ export function ActionFilterRow({
                                                                                   />
                                                                               </div>
                                                                           </Tooltip>
-                                                                          <LemonDivider />
                                                                       </>
                                                                   ),
                                                               },
                                                           ]
                                                         : []),
+                                                    // Separator for funnels only
+                                                    ...(isFunnelContext ? [{ label: () => <LemonDivider /> }] : []),
                                                     ...(!hideRename
                                                         ? [
                                                               {
