@@ -28,7 +28,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.pipeline import Pipeline
-from utils import fetch_features
+from utils import create_model_run, fetch_features
 from xgboost import XGBClassifier
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -36,6 +36,9 @@ from xgboost import XGBClassifier
 MODEL_PATH = os.environ.get("MODEL_PATH", "/tmp/model.pkl")
 METRICS_PATH = os.environ.get("METRICS_PATH", "/tmp/metrics.json")
 DATA_PATH = "/tmp/train_data.parquet"
+
+# IMPORTANT: The agent MUST set this to the ActionPredictionModel UUID.
+PREDICTION_MODEL_ID = os.environ.get("PREDICTION_MODEL_ID", "")
 
 SEED = 42
 TEST_FRACTION = 0.25
@@ -222,6 +225,29 @@ def main() -> None:
     print(f"Metrics saved to {METRICS_PATH}")
     print(f"\nSignal quality: {signal_quality}")
     print(f"Top features: {list(feature_importance.items())[:5]}")
+
+    # ── Record model run ─────────────────────────────────────────────────
+    if PREDICTION_MODEL_ID:
+        # Read script sources for artifact_scripts
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        artifact_scripts = {}
+        for name in ("utils", "train", "predict"):
+            path = os.path.join(scripts_dir, f"{name}.py")
+            if os.path.exists(path):
+                with open(path) as f:
+                    artifact_scripts[name] = f.read()
+        artifact_scripts["query"] = TRAINING_QUERY
+
+        run = create_model_run(
+            PREDICTION_MODEL_ID,
+            is_winning=True,  # agent sets this based on comparison with previous best
+            metrics=metrics,
+            feature_importance=feature_importance,
+            artifact_scripts=artifact_scripts,
+        )
+        print(f"Model run recorded: {run['id']}")
+    else:
+        print("\nPREDICTION_MODEL_ID not set — skipping model run recording.")
 
 
 if __name__ == "__main__":

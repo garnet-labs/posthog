@@ -1,17 +1,22 @@
 """
-predict.py — Fetch fresh data and score users with a trained pipeline.
+predict.py — Fetch fresh data, score users, and write results back to PostHog.
 
 Runs the scoring query via PostHog API (same features as training, but
-T=now() and no label), loads the trained pipeline, and outputs scores.
+T=now() and no label), loads the trained pipeline, scores users, then:
+  1. Saves scores locally (parquet + JSON)
+  2. Sends $ai_prediction events to PostHog (ClickHouse) for audit trail
+  3. Sets person properties ($set) for cohorts/flags/targeting
 
 Inputs:
-    POSTHOG_HOST, POSTHOG_API_KEY, POSTHOG_PROJECT_ID (env vars)
+    POSTHOG_HOST, POSTHOG_API_KEY, POSTHOG_PROJECT_ID, POSTHOG_PROJECT_TOKEN (env vars)
     model.pkl    — trained pipeline from train.py
     SCORING_QUERY (inline — same features as training, different time window)
 
 Outputs:
-    scores.parquet — person_id, probability, bucket
-    scores.json    — summary with distribution and top 20
+    scores.parquet — person_id, probability, bucket (local)
+    scores.json    — summary with distribution and top 20 (local)
+    $ai_prediction events in ClickHouse (remote)
+    p_action_{name} person properties (remote)
 """
 
 import os
@@ -20,7 +25,7 @@ import pickle
 from collections import Counter
 
 import pandas as pd
-from utils import fetch_features
+from utils import capture_batch, fetch_features
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -29,10 +34,14 @@ DATA_PATH = "/tmp/scoring_data.parquet"
 SCORES_PARQUET_PATH = os.environ.get("SCORES_PATH", "/tmp/scores.parquet")
 SCORES_JSON_PATH = os.environ.get("SCORES_JSON_PATH", "/tmp/scores.json")
 
+# IMPORTANT: The agent MUST set these per experiment.
+TARGET_EVENT = "downloaded_file"  # replace with actual target
+MODEL_ID = ""  # set to the ActionPredictionModel UUID
+RUN_ID = ""  # set to the ActionPredictionModelRun UUID
+
 # Bucket thresholds — the agent should adjust these based on the base rate.
 # For rare actions (base rate < 5%), lower thresholds may be more useful.
 # For common actions (base rate > 20%), higher thresholds avoid noise.
-# These defaults suit a moderate base rate (~5-15%).
 BUCKET_THRESHOLDS = {"very_likely": 0.7, "likely": 0.4, "neutral": 0.15}
 
 # ── Scoring query ────────────────────────────────────────────────────────────
@@ -83,6 +92,11 @@ def assign_bucket(prob: float) -> str:
         return "unlikely"
 
 
+def property_name(target: str) -> str:
+    """Generate the person property name from the target event."""
+    return f"p_action_{target.replace(' ', '_').lower()}"
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -115,7 +129,7 @@ def main() -> None:
     probs = pipeline.predict_proba(X)[:, 1]
     buckets = [assign_bucket(float(p)) for p in probs]
 
-    # ── Output ───────────────────────────────────────────────────────────
+    # ── Save locally ─────────────────────────────────────────────────────
     scores = pd.DataFrame(
         {
             "person_id": [str(p) for p in person_ids],
@@ -145,6 +159,36 @@ def main() -> None:
     with open(SCORES_JSON_PATH, "w") as f:
         json.dump(summary, f, indent=2)
 
+    # ── Write to PostHog ─────────────────────────────────────────────────
+    prop_name = property_name(TARGET_EVENT)
+    bucket_prop_name = f"{prop_name}_bucket"
+
+    print(f"\nSending {total} prediction events to PostHog...")
+    events = []
+    for i in range(len(person_ids)):
+        prob = round(float(probs[i]), 4)
+        bucket = buckets[i]
+        events.append(
+            {
+                "event": "$ai_prediction",
+                "distinct_id": str(person_ids[i]),
+                "properties": {
+                    "$ai_prediction_model_id": MODEL_ID,
+                    "$ai_prediction_run_id": RUN_ID,
+                    "$ai_prediction_target_event": TARGET_EVENT,
+                    "$ai_prediction_probability": prob,
+                    "$ai_prediction_bucket": bucket,
+                    "$set": {
+                        prop_name: prob,
+                        bucket_prop_name: bucket,
+                    },
+                },
+            }
+        )
+
+    capture_batch(events)
+
+    # ── Report ───────────────────────────────────────────────────────────
     print(f"\nScore Distribution:")
     for bucket in ["very_likely", "likely", "neutral", "unlikely"]:
         d = distribution[bucket]
@@ -155,7 +199,8 @@ def main() -> None:
     for _, row in scores.head(10).iterrows():
         print(f"  {str(row['person_id'])[:20]:20s}  p={row['probability']:.4f}  ({row['bucket']})")
 
-    print(f"\nSaved to {SCORES_PARQUET_PATH}")
+    print(f"\nLocal: {SCORES_PARQUET_PATH}")
+    print(f"Person properties: {prop_name}, {bucket_prop_name}")
 
 
 if __name__ == "__main__":
