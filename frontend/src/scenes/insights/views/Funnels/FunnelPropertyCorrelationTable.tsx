@@ -151,7 +151,10 @@ export function FunnelPropertyCorrelationTable(): JSX.Element | null {
                                 overlay={
                                     <div className="p-4">
                                         <PropertySelect
-                                            taxonomicFilterGroup={TaxonomicFilterGroupType.PersonProperties}
+                                            taxonomicFilterGroups={[
+                                                TaxonomicFilterGroupType.PersonProperties,
+                                                TaxonomicFilterGroupType.DataWarehousePersonProperties,
+                                            ]}
                                             onChange={setPropertyNames}
                                             selectedProperties={
                                                 propertyNames.length === 1 && propertyNames[0] === '$all'

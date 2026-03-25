@@ -18,7 +18,8 @@ export interface PropertySelectProps {
     onChange: (names: string[]) => void
     selectedProperties: string[]
     sortable?: boolean
-    taxonomicFilterGroup: TaxonomicFilterGroupType.PersonProperties | TaxonomicFilterGroupType.EventProperties
+    taxonomicFilterGroup?: TaxonomicFilterGroupType.PersonProperties | TaxonomicFilterGroupType.EventProperties
+    taxonomicFilterGroups?: TaxonomicFilterGroupType[]
     disabledReason?: string | null
 }
 
@@ -56,10 +57,12 @@ export const PropertySelect = ({
     addText,
     sortable = false,
     taxonomicFilterGroup,
+    taxonomicFilterGroups,
     disabledReason,
 }: PropertySelectProps): JSX.Element => {
     const [open, setOpen] = useState<boolean>(false)
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 1 } }))
+    const resolvedTaxonomicFilterGroups = taxonomicFilterGroups ?? (taxonomicFilterGroup ? [taxonomicFilterGroup] : [])
 
     const handleChange = (name: string): void => {
         onChange(Array.from(new Set(selectedProperties.concat([name]))))
@@ -121,7 +124,7 @@ export const PropertySelect = ({
                                 handleChange(value as string)
                                 setOpen(false)
                             }}
-                            taxonomicGroupTypes={[taxonomicFilterGroup]}
+                            taxonomicGroupTypes={resolvedTaxonomicFilterGroups}
                         />
                     }
                 >

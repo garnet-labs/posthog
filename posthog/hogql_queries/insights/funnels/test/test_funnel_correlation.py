@@ -661,6 +661,81 @@ class TestClickhouseFunnelCorrelation(ClickhouseTestMixin, APIBaseTest):
             10,
         )
 
+    @freeze_time("2019-12-31")
+    def test_funnel_correlation_with_extended_person_property_name(self):
+        filters = {
+            "events": [
+                {"id": "user signed up", "type": "events", "order": 0},
+                {"id": "paid", "type": "events", "order": 1},
+            ],
+            "insight": INSIGHT_FUNNELS,
+            "date_from": "2020-01-01",
+            "date_to": "2020-01-14",
+            "funnel_correlation_type": "properties",
+        }
+
+        for i in range(3):
+            _create_person(
+                distinct_ids=[f"dw_user_success_{i}"],
+                team_id=self.team.pk,
+                properties={"customer_profile.plan": "enterprise"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id=f"dw_user_success_{i}",
+                timestamp="2020-01-02T14:00:00Z",
+            )
+            _create_event(
+                team=self.team,
+                event="paid",
+                distinct_id=f"dw_user_success_{i}",
+                timestamp="2020-01-04T14:00:00Z",
+            )
+
+        for i in range(3):
+            _create_person(
+                distinct_ids=[f"dw_user_dropoff_{i}"],
+                team_id=self.team.pk,
+                properties={"customer_profile.plan": "free"},
+            )
+            _create_event(
+                team=self.team,
+                event="user signed up",
+                distinct_id=f"dw_user_dropoff_{i}",
+                timestamp="2020-01-02T14:00:00Z",
+            )
+
+        result, _ = self._get_events_for_filters(
+            filters,
+            funnelCorrelationType=FunnelCorrelationResultsType.PROPERTIES,
+            funnelCorrelationNames=["customer_profile.plan"],
+        )
+
+        correlation_rows = {
+            row["event"]: {k: v for k, v in row.items() if k != "odds_ratio"}
+            for row in result
+            if row["event"] != "$overall"
+        }
+
+        self.assertEqual(
+            correlation_rows,
+            {
+                "customer_profile.plan::enterprise": {
+                    "event": "customer_profile.plan::enterprise",
+                    "success_count": 3,
+                    "failure_count": 0,
+                    "correlation_type": "success",
+                },
+                "customer_profile.plan::free": {
+                    "event": "customer_profile.plan::free",
+                    "success_count": 0,
+                    "failure_count": 3,
+                    "correlation_type": "failure",
+                },
+            },
+        )
+
     # TODO: Delete this test when moved to person-on-events
     @also_test_with_materialized_columns(
         event_properties=[], person_properties=["$browser"], verify_no_jsonextract=False
