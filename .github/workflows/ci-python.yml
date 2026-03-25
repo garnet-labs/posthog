@@ -214,9 +214,17 @@ jobs:
               shell: bash
               run: flox list -c > /dev/null
 
-            - name: Check Flox catalog lookup
+            - name: Check Flox catalog lookup for manifest uv version
               shell: bash
-              run: flox show uv > /dev/null
+              run: |
+                  UV_VERSION=$(python - <<'PY'
+                  import tomllib
+                  with open(".flox/env/manifest.toml", "rb") as f:
+                      manifest = tomllib.load(f)
+                  print(manifest["install"]["uv"]["version"].lstrip("^"))
+                  PY
+                  )
+                  flox show uv | grep -Eq "uv@${UV_VERSION}(\\b|$)"
 
     # Collate job - single required status check for branch protection.
     # The code-quality job skips when no Python changes, but this job always
