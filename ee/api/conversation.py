@@ -65,6 +65,7 @@ from ee.hogai.utils.sse import AssistantSSESerializer
 from ee.hogai.utils.tts_text import prepare_text_for_elevenlabs_tts
 from ee.hogai.utils.types import PartialAssistantState
 from ee.hogai.utils.voice_tool_narration import generate_tool_call_narration_sentence
+from ee.hogai.utils.voice_wait_fill_tts import generate_wait_fill_tts_lines
 from ee.models.assistant import Conversation
 
 logger = structlog.get_logger(__name__)
@@ -219,6 +220,22 @@ class ToolCallNarrationRequestSerializer(serializers.Serializer):
 
 class ToolCallNarrationResponseSerializer(serializers.Serializer):
     sentence = serializers.CharField(help_text="Single spoken line for text-to-speech")
+
+
+class WaitFillTtsRequestSerializer(serializers.Serializer):
+    tweets = serializers.ListField(
+        child=serializers.CharField(max_length=2000),
+        min_length=1,
+        max_length=5,
+        help_text="Tweet bodies (verbatim) to wrap with spoken transitions for wait-fill TTS",
+    )
+
+
+class WaitFillTtsResponseSerializer(serializers.Serializer):
+    lines = serializers.ListField(
+        child=serializers.CharField(max_length=2000),
+        help_text="Full spoken line per tweet, in the same order as tweets",
+    )
 
 
 @extend_schema(tags=["max"])
@@ -684,6 +701,28 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             logger.exception("tool_call_narration LLM failed")
             return Response({"error": "Narration generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"sentence": sentence})
+
+    @validated_request(
+        request_serializer=WaitFillTtsRequestSerializer,
+        responses={200: OpenApiResponse(response=WaitFillTtsResponseSerializer)},
+        summary="Generate wait-fill TTS lines (transitions around interstitial tweets)",
+        tags=["max"],
+    )
+    @action(detail=False, methods=["POST"])
+    def wait_fill_tts(self, request: Request, *args, **kwargs):
+        """Short LLM lines for voice mode while tools run (natural transitions + verbatim tweet text)."""
+        vreq = cast(ValidatedRequest, request)
+        data = vreq.validated_data
+        user = cast(User, request.user)
+        tweets = [str(t).strip() for t in data["tweets"] if str(t).strip()]
+        if not tweets:
+            return Response({"error": "No tweets provided"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            lines = generate_wait_fill_tts_lines(user=user, team=self.team, tweets=tweets)
+        except Exception:
+            logger.exception("wait_fill_tts LLM failed")
+            return Response({"error": "Wait-fill line generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"lines": lines})
 
     @action(detail=False, methods=["POST"])
     def tts(self, request: Request, *args, **kwargs):

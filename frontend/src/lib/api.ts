@@ -5608,6 +5608,10 @@ const api = {
             return new ApiRequest().conversations().withAction('tool_call_narration').create({ data })
         },
 
+        async waitFillTtsLines(data: { tweets: string[] }): Promise<{ lines: string[] }> {
+            return new ApiRequest().conversations().withAction('wait_fill_tts').create({ data })
+        },
+
         queue: {
             list(conversationId: string): Promise<ConversationQueueResponse> {
                 return new ApiRequest().conversation(conversationId).withAction('queue').get()

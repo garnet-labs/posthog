@@ -5,16 +5,24 @@ import { lemonToast } from 'lib/lemon-ui/LemonToast'
 
 import { stripMarkdown } from '~/lib/utils/stripMarkdown'
 
+import { pickRandomWaitFillTweets, waitFillClipTtsText } from './ceoToolWaitTweets'
 import { maxLogic } from './maxLogic'
 import { maxThreadLogic } from './maxThreadLogic'
 import { commonPrefixLength, consumeSpeakableSegmentsFromDelta, streamingTtsKey } from './streamingVoiceTts'
 import type { voiceLogicType } from './voiceLogicType'
 
+type TtsQueueKind = 'main' | 'waitFill'
+
+interface TtsQueueItem {
+    kind: TtsQueueKind
+    text: string
+}
+
 const ELEVENLABS_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 const STT_SAMPLE_RATE = 16000
 const STT_BUFFER_SIZE = 4096
 // How long to wait after the last transcript (partial or committed) before auto-sending
-const TURN_COMPLETE_DEBOUNCE_MS = 1600
+const TURN_COMPLETE_DEBOUNCE_MS = 1000
 
 /** ElevenLabs `pcm_44100`: mono int16 little-endian */
 const TTS_PCM_SAMPLE_RATE = 44100
@@ -70,8 +78,89 @@ function teardownPlaybackVisuals(cache: any, actions: any): void {
 
 function ensureTtsQueueState(cache: any): void {
     if (!cache.ttsQueue) {
-        cache.ttsQueue = [] as string[]
+        cache.ttsQueue = [] as TtsQueueItem[]
     }
+    if (!cache.ttsWaitFillQueue) {
+        cache.ttsWaitFillQueue = [] as TtsQueueItem[]
+    }
+    if (!cache.ttsDeferredQueue) {
+        cache.ttsDeferredQueue = [] as TtsQueueItem[]
+    }
+}
+
+/** Assistant TTS waits here while wait-fill clips (tweets) are still queued, playing, or a second clip may follow. */
+function shouldDeferMainForWaitFill(cache: any): boolean {
+    if (!cache.toolWaitFillEnabled) {
+        return false
+    }
+    if ((cache.ttsWaitFillQueue as TtsQueueItem[]).length > 0) {
+        return true
+    }
+    if (cache.playingTtsKind === 'waitFill') {
+        return true
+    }
+    // Between first and optional second clip — still holding the phase open
+    if (cache.waitFillOptionalSecondLine) {
+        return true
+    }
+    return false
+}
+
+/**
+ * After each wait-fill clip: optionally queue a second tweet only if assistant TTS isn't ready yet;
+ * otherwise end the wait-fill phase and merge deferred assistant audio.
+ */
+function maybeContinueAfterWaitFillClip(cache: any): void {
+    if (!cache.toolWaitFillEnabled) {
+        return
+    }
+
+    const deferredLen = (cache.ttsDeferredQueue as TtsQueueItem[] | undefined)?.length ?? 0
+    const second = cache.waitFillOptionalSecondLine as string | undefined
+
+    if (second && deferredLen === 0) {
+        ;(cache.ttsWaitFillQueue as TtsQueueItem[]).push({ kind: 'waitFill', text: second })
+        cache.waitFillOptionalSecondLine = undefined
+        // Caller drain loop continues — do not call drainTtsQueue (re-entrant guard)
+        return
+    }
+
+    cache.waitFillOptionalSecondLine = undefined
+
+    if ((cache.ttsWaitFillQueue as TtsQueueItem[]).length > 0) {
+        return
+    }
+    if (cache.playingTtsKind === 'waitFill') {
+        return
+    }
+
+    cache.toolWaitFillEnabled = false
+    const def = cache.ttsDeferredQueue as TtsQueueItem[] | undefined
+    if (def?.length) {
+        const main = cache.ttsQueue as TtsQueueItem[]
+        main.unshift(...def)
+        def.length = 0
+    }
+}
+
+function hasQueuedTts(cache: any): boolean {
+    ensureTtsQueueState(cache)
+    const mainLen = (cache.ttsQueue as TtsQueueItem[]).length
+    const waitLen =
+        cache.toolWaitFillEnabled && cache.ttsWaitFillQueue ? (cache.ttsWaitFillQueue as TtsQueueItem[]).length : 0
+    return mainLen + waitLen > 0
+}
+
+function dequeueNextTts(cache: any): TtsQueueItem | null {
+    ensureTtsQueueState(cache)
+    const main = cache.ttsQueue as TtsQueueItem[]
+    if (main.length > 0) {
+        return main.shift() ?? null
+    }
+    if (cache.toolWaitFillEnabled && (cache.ttsWaitFillQueue as TtsQueueItem[]).length > 0) {
+        return (cache.ttsWaitFillQueue as TtsQueueItem[]).shift() ?? null
+    }
+    return null
 }
 
 function concatUint8(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -96,248 +185,259 @@ function stopAllTtsSources(cache: any): void {
     cache.currentSource = null
 }
 
-async function playTtsClip(cache: any, actions: any, plainText: string, generationAtStart: number): Promise<void> {
-    const response = await api.conversations.tts(plainText)
+async function playTtsClip(
+    cache: any,
+    actions: any,
+    plainText: string,
+    generationAtStart: number,
+    kind: TtsQueueKind = 'main'
+): Promise<void> {
+    cache.playingTtsKind = kind
+    try {
+        const response = await api.conversations.tts(plainText)
 
-    if (cache.ttsDrainGeneration !== generationAtStart) {
-        return
-    }
-
-    if (!response.ok) {
-        const errBody = await response.text().catch(() => '')
-        throw new Error(errBody || `TTS request failed (${response.status})`)
-    }
-
-    const reader = response.body?.getReader()
-    if (!reader) {
-        throw new Error('TTS response has no body')
-    }
-
-    if (!cache.audioContext) {
-        cache.audioContext = new AudioContext()
-    }
-    const audioCtx = cache.audioContext as AudioContext
-    if (audioCtx.state === 'suspended') {
-        await audioCtx.resume()
-    }
-
-    if (cache.ttsDrainGeneration !== generationAtStart) {
-        void reader.cancel()
-        return
-    }
-
-    cache.playbackScheduleTime = undefined
-    cache.ttsPlaybackSources = [] as AudioBufferSourceNode[]
-
-    const gain = audioCtx.createGain()
-    gain.gain.value = 1
-    cache.playbackGainNode = gain
-
-    const analyser = audioCtx.createAnalyser()
-    analyser.fftSize = 2048
-    analyser.smoothingTimeConstant = 0.2
-    gain.connect(analyser)
-    analyser.connect(audioCtx.destination)
-
-    cache.playbackAnalyser = analyser
-    cache.playbackAnalyserData = new Uint8Array(analyser.fftSize)
-    cache.playbackLastAmplitudeUpdateAt = null
-    cache.playbackSmoothedMouthOpenness = 0
-    cache.playbackMouthOpenHysteresis = false
-
-    actions.setMouthOpenness(0)
-    actions.setIsMouthOpen(false)
-
-    const playbackAmplitudeLoop = (): void => {
-        if (!cache.playbackVisualActive) {
-            cache.playbackAmplitudeRafId = null
-            return
-        }
-        const analyserNode = cache.playbackAnalyser as AnalyserNode | undefined
-        const data = cache.playbackAnalyserData as Uint8Array | undefined
-        if (!analyserNode || !data) {
-            cache.playbackAmplitudeRafId = null
+        if (cache.ttsDrainGeneration !== generationAtStart) {
             return
         }
 
-        analyserNode.getByteTimeDomainData(data as unknown as Uint8Array<ArrayBuffer>)
-
-        let sumSquares = 0
-        for (let i = 0; i < data.length; i++) {
-            const x = (data[i] - 128) / 128
-            sumSquares += x * x
+        if (!response.ok) {
+            const errBody = await response.text().catch(() => '')
+            throw new Error(errBody || `TTS request failed (${response.status})`)
         }
-        const rms = Math.sqrt(sumSquares / data.length)
 
-        const noiseFloor = 0.015
-        const maxLevel = 0.12
-        const normalized = Math.max(0, Math.min(1, (rms - noiseFloor) / (maxLevel - noiseFloor)))
+        const reader = response.body?.getReader()
+        if (!reader) {
+            throw new Error('TTS response has no body')
+        }
 
-        const now = performance.now()
-        const previousNow = cache.playbackLastAmplitudeUpdateAt as number | null
-        const dtMs = previousNow ? now - previousNow : 16
-        cache.playbackLastAmplitudeUpdateAt = now
+        if (!cache.audioContext) {
+            cache.audioContext = new AudioContext()
+        }
+        const audioCtx = cache.audioContext as AudioContext
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume()
+        }
 
-        const alpha = Math.max(0.05, Math.min(0.35, dtMs / 60))
-        const previousSmoothed = cache.playbackSmoothedMouthOpenness as number
-        const smoothed = previousSmoothed + alpha * (normalized - previousSmoothed)
-        cache.playbackSmoothedMouthOpenness = smoothed
+        if (cache.ttsDrainGeneration !== generationAtStart) {
+            void reader.cancel()
+            return
+        }
 
-        const openThreshold = 0.18
-        const closeThreshold = 0.1
-        const prevIsMouthOpen = cache.playbackMouthOpenHysteresis as boolean
-        const nextIsMouthOpen = prevIsMouthOpen ? smoothed >= closeThreshold : smoothed >= openThreshold
-        cache.playbackMouthOpenHysteresis = nextIsMouthOpen
+        cache.playbackScheduleTime = undefined
+        cache.ttsPlaybackSources = [] as AudioBufferSourceNode[]
 
-        actions.setMouthOpenness(smoothed)
-        actions.setIsMouthOpen(nextIsMouthOpen)
+        const gain = audioCtx.createGain()
+        gain.gain.value = 1
+        cache.playbackGainNode = gain
 
-        cache.playbackAmplitudeRafId = requestAnimationFrame(playbackAmplitudeLoop)
-    }
+        const analyser = audioCtx.createAnalyser()
+        analyser.fftSize = 2048
+        analyser.smoothingTimeConstant = 0.2
+        gain.connect(analyser)
+        analyser.connect(audioCtx.destination)
 
-    let pcmBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0)
-    let streamEnded = false
-    let pendingSources = 0
-    let startedPlayback = false
-    let firstChunk = true
-    let firstSourceInClip = true
+        cache.playbackAnalyser = analyser
+        cache.playbackAnalyserData = new Uint8Array(analyser.fftSize)
+        cache.playbackLastAmplitudeUpdateAt = null
+        cache.playbackSmoothedMouthOpenness = 0
+        cache.playbackMouthOpenHysteresis = false
 
-    await new Promise<void>((resolve) => {
-        const tryResolve = (): void => {
-            if (streamEnded && pendingSources === 0) {
-                cache.currentSource = null
-                stopAllTtsSources(cache)
-                teardownPlaybackVisuals(cache, actions)
-                resolve()
+        actions.setMouthOpenness(0)
+        actions.setIsMouthOpen(false)
+
+        const playbackAmplitudeLoop = (): void => {
+            if (!cache.playbackVisualActive) {
+                cache.playbackAmplitudeRafId = null
+                return
             }
-        }
-
-        const schedulePcm = (pcm: Uint8Array): void => {
-            const audioBuffer = pcmS16leToAudioBuffer(audioCtx, pcm)
-            if (audioBuffer.length === 0) {
+            const analyserNode = cache.playbackAnalyser as AnalyserNode | undefined
+            const data = cache.playbackAnalyserData as Uint8Array | undefined
+            if (!analyserNode || !data) {
+                cache.playbackAmplitudeRafId = null
                 return
             }
 
-            const source = audioCtx.createBufferSource()
-            source.buffer = audioBuffer
-            source.connect(gain)
+            analyserNode.getByteTimeDomainData(data as unknown as Uint8Array<ArrayBuffer>)
 
-            let nextT = cache.playbackScheduleTime as number | undefined
-            if (nextT === undefined || nextT < audioCtx.currentTime) {
-                nextT = audioCtx.currentTime
+            let sumSquares = 0
+            for (let i = 0; i < data.length; i++) {
+                const x = (data[i] - 128) / 128
+                sumSquares += x * x
             }
-            if (firstSourceInClip) {
-                nextT += TTS_FIRST_SOURCE_SCHEDULE_LOOKAHEAD_SEC
-                firstSourceInClip = false
-            }
-            cache.playbackScheduleTime = nextT + audioBuffer.duration
+            const rms = Math.sqrt(sumSquares / data.length)
 
-            pendingSources++
-            ;(cache.ttsPlaybackSources as AudioBufferSourceNode[]).push(source)
-            source.onended = () => {
-                const list = cache.ttsPlaybackSources as AudioBufferSourceNode[]
-                const idx = list.indexOf(source)
-                if (idx >= 0) {
-                    list.splice(idx, 1)
-                }
-                pendingSources--
-                tryResolve()
-            }
+            const noiseFloor = 0.015
+            const maxLevel = 0.12
+            const normalized = Math.max(0, Math.min(1, (rms - noiseFloor) / (maxLevel - noiseFloor)))
 
-            try {
-                source.start(nextT)
-            } catch {
-                const list = cache.ttsPlaybackSources as AudioBufferSourceNode[]
-                const idx = list.indexOf(source)
-                if (idx >= 0) {
-                    list.splice(idx, 1)
-                }
-                pendingSources--
-                tryResolve()
-            }
+            const now = performance.now()
+            const previousNow = cache.playbackLastAmplitudeUpdateAt as number | null
+            const dtMs = previousNow ? now - previousNow : 16
+            cache.playbackLastAmplitudeUpdateAt = now
 
-            if (!startedPlayback) {
-                startedPlayback = true
-                actions.setPlaybackActive(true)
-                cache.playbackVisualActive = true
-                cache.playbackAmplitudeRafId = requestAnimationFrame(playbackAmplitudeLoop)
-            }
+            const alpha = Math.max(0.05, Math.min(0.35, dtMs / 60))
+            const previousSmoothed = cache.playbackSmoothedMouthOpenness as number
+            const smoothed = previousSmoothed + alpha * (normalized - previousSmoothed)
+            cache.playbackSmoothedMouthOpenness = smoothed
+
+            const openThreshold = 0.18
+            const closeThreshold = 0.1
+            const prevIsMouthOpen = cache.playbackMouthOpenHysteresis as boolean
+            const nextIsMouthOpen = prevIsMouthOpen ? smoothed >= closeThreshold : smoothed >= openThreshold
+            cache.playbackMouthOpenHysteresis = nextIsMouthOpen
+
+            actions.setMouthOpenness(smoothed)
+            actions.setIsMouthOpen(nextIsMouthOpen)
+
+            cache.playbackAmplitudeRafId = requestAnimationFrame(playbackAmplitudeLoop)
         }
 
-        const drainPcmBuffer = (): void => {
-            while (true) {
-                const minBytes = firstChunk ? TTS_FIRST_PLAY_MIN_BYTES : TTS_STREAM_CHUNK_BYTES
-                if (!streamEnded && pcmBuffer.length < minBytes) {
-                    break
-                }
-                if (pcmBuffer.length < TTS_PCM_BYTES_PER_FRAME) {
-                    break
-                }
+        let pcmBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0)
+        let streamEnded = false
+        let pendingSources = 0
+        let startedPlayback = false
+        let firstChunk = true
+        let firstSourceInClip = true
 
-                let takeLen: number
-                if (streamEnded && pcmBuffer.length < minBytes) {
-                    takeLen = pcmBuffer.length - (pcmBuffer.length % TTS_PCM_BYTES_PER_FRAME)
-                } else {
-                    takeLen = Math.min(minBytes, pcmBuffer.length)
-                    takeLen -= takeLen % TTS_PCM_BYTES_PER_FRAME
-                }
-                if (takeLen < TTS_PCM_BYTES_PER_FRAME) {
-                    break
-                }
-
-                const chunk = pcmBuffer.subarray(0, takeLen)
-                pcmBuffer = pcmBuffer.slice(takeLen)
-                schedulePcm(chunk)
-                if (firstChunk) {
-                    firstChunk = false
+        await new Promise<void>((resolve) => {
+            const tryResolve = (): void => {
+                if (streamEnded && pendingSources === 0) {
+                    cache.currentSource = null
+                    stopAllTtsSources(cache)
+                    teardownPlaybackVisuals(cache, actions)
+                    resolve()
                 }
             }
-        }
 
-        const pump = async (): Promise<void> => {
-            try {
-                for (;;) {
-                    if (cache.ttsDrainGeneration !== generationAtStart) {
-                        void reader.cancel()
-                        stopAllTtsSources(cache)
-                        teardownPlaybackVisuals(cache, actions)
-                        resolve()
-                        return
+            const schedulePcm = (pcm: Uint8Array): void => {
+                const audioBuffer = pcmS16leToAudioBuffer(audioCtx, pcm)
+                if (audioBuffer.length === 0) {
+                    return
+                }
+
+                const source = audioCtx.createBufferSource()
+                source.buffer = audioBuffer
+                source.connect(gain)
+
+                let nextT = cache.playbackScheduleTime as number | undefined
+                if (nextT === undefined || nextT < audioCtx.currentTime) {
+                    nextT = audioCtx.currentTime
+                }
+                if (firstSourceInClip) {
+                    nextT += TTS_FIRST_SOURCE_SCHEDULE_LOOKAHEAD_SEC
+                    firstSourceInClip = false
+                }
+                cache.playbackScheduleTime = nextT + audioBuffer.duration
+
+                pendingSources++
+                ;(cache.ttsPlaybackSources as AudioBufferSourceNode[]).push(source)
+                source.onended = () => {
+                    const list = cache.ttsPlaybackSources as AudioBufferSourceNode[]
+                    const idx = list.indexOf(source)
+                    if (idx >= 0) {
+                        list.splice(idx, 1)
+                    }
+                    pendingSources--
+                    tryResolve()
+                }
+
+                try {
+                    source.start(nextT)
+                } catch {
+                    const list = cache.ttsPlaybackSources as AudioBufferSourceNode[]
+                    const idx = list.indexOf(source)
+                    if (idx >= 0) {
+                        list.splice(idx, 1)
+                    }
+                    pendingSources--
+                    tryResolve()
+                }
+
+                if (!startedPlayback) {
+                    startedPlayback = true
+                    actions.setPlaybackActive(true)
+                    cache.playbackVisualActive = true
+                    cache.playbackAmplitudeRafId = requestAnimationFrame(playbackAmplitudeLoop)
+                }
+            }
+
+            const drainPcmBuffer = (): void => {
+                while (true) {
+                    const minBytes = firstChunk ? TTS_FIRST_PLAY_MIN_BYTES : TTS_STREAM_CHUNK_BYTES
+                    if (!streamEnded && pcmBuffer.length < minBytes) {
+                        break
+                    }
+                    if (pcmBuffer.length < TTS_PCM_BYTES_PER_FRAME) {
+                        break
                     }
 
-                    const { done, value } = await reader.read()
-                    if (cache.ttsDrainGeneration !== generationAtStart) {
-                        void reader.cancel()
-                        stopAllTtsSources(cache)
-                        teardownPlaybackVisuals(cache, actions)
-                        resolve()
-                        return
+                    let takeLen: number
+                    if (streamEnded && pcmBuffer.length < minBytes) {
+                        takeLen = pcmBuffer.length - (pcmBuffer.length % TTS_PCM_BYTES_PER_FRAME)
+                    } else {
+                        takeLen = Math.min(minBytes, pcmBuffer.length)
+                        takeLen -= takeLen % TTS_PCM_BYTES_PER_FRAME
+                    }
+                    if (takeLen < TTS_PCM_BYTES_PER_FRAME) {
+                        break
                     }
 
-                    if (value?.byteLength) {
-                        const buf = new ArrayBuffer(value.byteLength)
-                        const chunk = new Uint8Array(buf)
-                        chunk.set(value)
-                        pcmBuffer = pcmBuffer.length ? concatUint8(pcmBuffer, chunk) : chunk
-                        drainPcmBuffer()
-                    }
-
-                    if (done) {
-                        streamEnded = true
-                        drainPcmBuffer()
-                        tryResolve()
-                        return
+                    const chunk = pcmBuffer.subarray(0, takeLen)
+                    pcmBuffer = pcmBuffer.slice(takeLen)
+                    schedulePcm(chunk)
+                    if (firstChunk) {
+                        firstChunk = false
                     }
                 }
-            } catch {
-                stopAllTtsSources(cache)
-                teardownPlaybackVisuals(cache, actions)
-                resolve()
             }
-        }
 
-        void pump()
-    })
+            const pump = async (): Promise<void> => {
+                try {
+                    for (;;) {
+                        if (cache.ttsDrainGeneration !== generationAtStart) {
+                            void reader.cancel()
+                            stopAllTtsSources(cache)
+                            teardownPlaybackVisuals(cache, actions)
+                            resolve()
+                            return
+                        }
+
+                        const { done, value } = await reader.read()
+                        if (cache.ttsDrainGeneration !== generationAtStart) {
+                            void reader.cancel()
+                            stopAllTtsSources(cache)
+                            teardownPlaybackVisuals(cache, actions)
+                            resolve()
+                            return
+                        }
+
+                        if (value?.byteLength) {
+                            const buf = new ArrayBuffer(value.byteLength)
+                            const chunk = new Uint8Array(buf)
+                            chunk.set(value)
+                            pcmBuffer = pcmBuffer.length ? concatUint8(pcmBuffer, chunk) : chunk
+                            drainPcmBuffer()
+                        }
+
+                        if (done) {
+                            streamEnded = true
+                            drainPcmBuffer()
+                            tryResolve()
+                            return
+                        }
+                    }
+                } catch {
+                    stopAllTtsSources(cache)
+                    teardownPlaybackVisuals(cache, actions)
+                    resolve()
+                }
+            }
+
+            void pump()
+        })
+    } finally {
+        cache.playingTtsKind = undefined
+    }
 }
 
 async function drainTtsQueue(cache: any, actions: any): Promise<void> {
@@ -347,36 +447,34 @@ async function drainTtsQueue(cache: any, actions: any): Promise<void> {
     }
     cache.ttsDrainRunning = true
     try {
-        const queue = cache.ttsQueue as string[]
-        while (queue.length > 0) {
-            const generationAtStart = cache.ttsDrainGeneration as number
-            const plainText = queue[0]
-            if (!plainText) {
+        while (true) {
+            const item = dequeueNextTts(cache)
+            if (!item) {
                 break
             }
+            const generationAtStart = cache.ttsDrainGeneration as number
             try {
-                await playTtsClip(cache, actions, plainText, generationAtStart)
+                await playTtsClip(cache, actions, item.text, generationAtStart, item.kind)
             } catch {
                 teardownPlaybackVisuals(cache, actions)
             }
             if (cache.ttsDrainGeneration !== generationAtStart) {
                 break
             }
-            if (queue[0] === plainText) {
-                queue.shift()
+            if (item.kind === 'waitFill') {
+                maybeContinueAfterWaitFillClip(cache)
             }
         }
     } finally {
         cache.ttsDrainRunning = false
         ensureTtsQueueState(cache)
-        if ((cache.ttsQueue as string[]).length > 0) {
+        if (hasQueuedTts(cache)) {
             void drainTtsQueue(cache, actions)
         }
     }
     ensureTtsQueueState(cache)
-    const queue = cache.ttsQueue as string[]
     const pendingTtsSources = (cache.ttsPlaybackSources as AudioBufferSourceNode[] | undefined)?.length ?? 0
-    if (queue.length === 0 && pendingTtsSources === 0) {
+    if (!hasQueuedTts(cache) && pendingTtsSources === 0) {
         actions.setPlaybackActive(false)
     }
 }
@@ -430,6 +528,8 @@ export const voiceLogic = kea<voiceLogicType>([
             isFinal: boolean
         }) => payload,
         playToolCallNarration: (payload: { dedupeKey: string; sentence: string }) => payload,
+        /** Queue interstitial TTS while tools run (after tool-call narration). */
+        enqueueToolWaitFill: true,
     }),
 
     reducers({
@@ -533,9 +633,9 @@ export const voiceLogic = kea<voiceLogicType>([
                 model_id: 'scribe_v2_realtime',
                 commit_strategy: 'vad',
                 audio_format: `pcm_${STT_SAMPLE_RATE}`,
-                // VAD tuning: higher threshold rejects background noise; longer silence avoids cutting off mid-thought
+                // VAD tuning: higher threshold rejects background noise; silence length trades latency vs mid-utterance splits
                 vad_threshold: '0.7',
-                vad_silence_threshold_secs: '1.0',
+                vad_silence_threshold_secs: '0.65',
                 min_speech_duration_ms: '200',
             })
             const ws = new WebSocket(`${ELEVENLABS_WSS}?${params.toString()}`)
@@ -828,7 +928,12 @@ export const voiceLogic = kea<voiceLogicType>([
             if (cache.ttsDrainGeneration === undefined) {
                 cache.ttsDrainGeneration = 0
             }
-            ;(cache.ttsQueue as string[]).push(plainText)
+            const item: TtsQueueItem = { kind: 'main', text: plainText }
+            if (shouldDeferMainForWaitFill(cache)) {
+                ;(cache.ttsDeferredQueue as TtsQueueItem[]).push(item)
+            } else {
+                ;(cache.ttsQueue as TtsQueueItem[]).push(item)
+            }
             void drainTtsQueue(cache, actions)
         },
 
@@ -838,6 +943,42 @@ export const voiceLogic = kea<voiceLogicType>([
             cache.ttsStreamingLastMessageIdByTrace = {} as Record<string, string | undefined>
             cache.toolNarrationSpoken = new Set<string>()
             cache.toolCallNarrationRecent = [] as string[]
+            cache.toolWaitFillEnabled = false
+            cache.waitFillOptionalSecondLine = undefined
+            ensureTtsQueueState(cache)
+            ;(cache.ttsWaitFillQueue as TtsQueueItem[]).length = 0
+            ;(cache.ttsDeferredQueue as TtsQueueItem[]).length = 0
+        },
+
+        enqueueToolWaitFill: async () => {
+            if (!values.voiceModeEnabled) {
+                return
+            }
+            ensureTtsQueueState(cache)
+            if (cache.ttsDrainGeneration === undefined) {
+                cache.ttsDrainGeneration = 0
+            }
+            const waitTweets = pickRandomWaitFillTweets(2)
+            const waitTotal = waitTweets.length
+            let lines: string[]
+            try {
+                const res = await api.conversations.waitFillTtsLines({ tweets: waitTweets })
+                if (!res.lines?.length || res.lines.length !== waitTweets.length) {
+                    throw new Error('wait_fill_tts bad response shape')
+                }
+                lines = res.lines
+            } catch {
+                lines = waitTweets.map((tweet, i) => waitFillClipTtsText(tweet, i, waitTotal))
+            }
+            cache.waitFillOptionalSecondLine = undefined
+            if (lines.length >= 1) {
+                ;(cache.ttsWaitFillQueue as TtsQueueItem[]).push({ kind: 'waitFill', text: lines[0] })
+                if (lines.length >= 2) {
+                    cache.waitFillOptionalSecondLine = lines[1]
+                }
+            }
+            cache.toolWaitFillEnabled = true
+            void drainTtsQueue(cache, actions)
         },
 
         playToolCallNarration: ({ dedupeKey, sentence }) => {
@@ -860,6 +1001,7 @@ export const voiceLogic = kea<voiceLogicType>([
                 recent.shift()
             }
             actions.playResponse(sentence.trim())
+            actions.enqueueToolWaitFill()
         },
 
         syncAssistantStreamingTts: ({ traceId, messageId, content, isFinal }) => {
@@ -958,7 +1100,11 @@ export const voiceLogic = kea<voiceLogicType>([
         stopPlayback: () => {
             cache.ttsDrainGeneration = (cache.ttsDrainGeneration ?? 0) + 1
             ensureTtsQueueState(cache)
-            ;(cache.ttsQueue as string[]).length = 0
+            ;(cache.ttsQueue as TtsQueueItem[]).length = 0
+            cache.toolWaitFillEnabled = false
+            cache.waitFillOptionalSecondLine = undefined
+            ;(cache.ttsWaitFillQueue as TtsQueueItem[]).length = 0
+            ;(cache.ttsDeferredQueue as TtsQueueItem[]).length = 0
             cache.playbackScheduleTime = undefined
 
             stopAllTtsSources(cache)
