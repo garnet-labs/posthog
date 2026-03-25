@@ -7,10 +7,9 @@ import { createTestEventHeaders } from '~/tests/helpers/event-headers'
 import { createOrganization, createTeam, getTeam } from '~/tests/helpers/sql'
 
 import { cookielessRedisErrorCounter } from '../../common/metrics'
-import { CookielessServerHashMode, Hub, PipelineEvent, Team } from '../../types'
+import { Hub, PipelineEvent, Team } from '../../types'
 import { RedisOperationError } from '../../utils/db/error'
 import { closeHub, createHub } from '../../utils/db/hub'
-import { PostgresUse } from '../../utils/db/postgres'
 import { parseJSON } from '../../utils/json-parse'
 import { UUID7 } from '../../utils/utils'
 import { PipelineResultType, isOkResult } from '../pipelines/results'
@@ -209,16 +208,6 @@ describe('CookielessManager', () => {
             jest.clearAllTimers()
         })
 
-        const setModeForTeam = async (mode: CookielessServerHashMode) => {
-            await hub.postgres.query(
-                PostgresUse.COMMON_WRITE,
-                `UPDATE posthog_team SET cookieless_server_hash_mode = $1 WHERE id = $2`,
-                [mode, teamId],
-                'set team to cookieless'
-            )
-            team = (await getTeam(hub.postgres, teamId))!
-        }
-
         const clearRedis = async () => {
             const client = await hub.redisPool.acquire()
             await client.flushall()
@@ -381,10 +370,6 @@ describe('CookielessManager', () => {
         // NOTE: cookieless_server_hash_mode team setting has been deprecated.
         // All cookieless events are now processed as STATEFUL.
         describe('common behavior', () => {
-            beforeEach(async () => {
-                // Team setting is ignored now, but we still set it to verify it doesn't affect behavior
-                await setModeForTeam(CookielessServerHashMode.Stateful)
-            })
             it('should give an event a distinct id and session id ', async () => {
                 const actual = await processEvent(event)
 
@@ -479,9 +464,6 @@ describe('CookielessManager', () => {
         })
 
         describe('stateful behavior', () => {
-            beforeEach(async () => {
-                await setModeForTeam(CookielessServerHashMode.Stateful)
-            })
             it('should provide a different session ID after session timeout', async () => {
                 const actual1 = await processEvent(event)
                 const actual2 = await processEvent(eventMuchLater)
@@ -725,10 +707,6 @@ describe('CookielessManager', () => {
             })
         })
         describe('timestamp out of range', () => {
-            beforeEach(async () => {
-                await setModeForTeam(CookielessServerHashMode.Stateful)
-            })
-
             it('should drop only the event with out-of-range timestamp, not other events in batch', async () => {
                 // Create an event with a timestamp that's too old (more than 72h + timezone buffer in the past)
                 const oldTimestamp = new Date('2025-01-05T11:00:00Z') // 5 days before "now" (2025-01-10)
@@ -832,34 +810,7 @@ describe('CookielessManager', () => {
                 }
             })
         })
-        describe('team setting is ignored (deprecated)', () => {
-            it('should process cookieless events even when team setting is DISABLED', async () => {
-                // NOTE: cookieless_server_hash_mode team setting has been deprecated.
-                // Events should be processed regardless of the team setting.
-                await setModeForTeam(CookielessServerHashMode.Disabled)
-
-                const actual = await processEvent(event)
-
-                if (!actual?.properties) {
-                    throw new Error('no event or properties')
-                }
-                expect(actual.distinct_id).not.toEqual(COOKIELESS_SENTINEL_VALUE)
-                expect(actual.distinct_id.startsWith('cookieless_')).toBe(true)
-                expect(actual.properties.$session_id).toBeTruthy()
-            })
-
-            it('should pass through non-cookieless events when team setting is DISABLED', async () => {
-                await setModeForTeam(CookielessServerHashMode.Disabled)
-                const actual1 = await processEvent(nonCookielessEvent)
-                expect(actual1).toBe(nonCookielessEvent)
-            })
-        })
-
         describe('ingestion warnings', () => {
-            beforeEach(async () => {
-                await setModeForTeam(CookielessServerHashMode.Stateful)
-            })
-
             it('should emit warning when timestamp is missing', async () => {
                 const eventWithoutTimestamp = deepFreeze({
                     ...event,
