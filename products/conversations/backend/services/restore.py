@@ -6,13 +6,10 @@ from typing import Literal
 from django.db import transaction
 from django.utils import timezone
 
-from posthog.schema import ProductKey
-
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_select
 from posthog.hogql.query import execute_hogql_query
 
-from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.models import Team
 
 from products.conversations.backend.models import ConversationRestoreToken, Ticket
@@ -38,7 +35,6 @@ class RestoreService:
         Find distinct_ids of persons whose email matches via HogQL (ClickHouse).
         Uses the persons table's built-in pdi lazy join to person_distinct_ids.
         """
-        tag_queries(product=ProductKey.CONVERSATIONS, feature=Feature.QUERY)
         query = parse_select(
             "SELECT DISTINCT pdi.distinct_id FROM persons WHERE lower(properties.email) = {email} LIMIT 1000",
             placeholders={"email": ast.Constant(value=email_lower)},
