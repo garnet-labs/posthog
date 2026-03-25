@@ -12,6 +12,8 @@ import type { voiceLogicType } from './voiceLogicType'
 const ELEVENLABS_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 const STT_SAMPLE_RATE = 16000
 const STT_BUFFER_SIZE = 4096
+// How long to wait after the last committed transcript before auto-sending in voice mode
+const TURN_COMPLETE_DEBOUNCE_MS = 1500
 
 function float32ToInt16Base64(float32: Float32Array): string {
     const int16 = new Int16Array(float32.length)
@@ -170,11 +172,27 @@ export const voiceLogic = kea<voiceLogicType>([
 
                 if (data.message_type === 'partial_transcript') {
                     cache.currentPartial = data.text || ''
+                    // Reset turn timer — user is still speaking
+                    if (data.text && cache.turnTimer) {
+                        clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout>)
+                        cache.turnTimer = null
+                    }
                 } else if (data.message_type === 'committed_transcript') {
                     if (data.text) {
                         cache.committedParts.push(data.text)
                     }
                     cache.currentPartial = ''
+
+                    // Turn detection: in voice mode, auto-send after silence
+                    if (values.voiceModeEnabled && cache.committedParts.length > 0) {
+                        clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
+                        cache.turnTimer = setTimeout(() => {
+                            cache.turnTimer = null
+                            if (values.recording && values.voiceModeEnabled) {
+                                actions.stopRecording()
+                            }
+                        }, TURN_COMPLETE_DEBOUNCE_MS)
+                    }
                 } else if (data.error) {
                     // ElevenLabs error events (auth_error, quota_exceeded, etc.) arrive as messages, not WS errors
                     lemonToast.error(`Voice transcription error: ${data.error}`)
@@ -205,6 +223,10 @@ export const voiceLogic = kea<voiceLogicType>([
         },
 
         stopRecording: () => {
+            // Clear any pending turn detection timer
+            clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
+            cache.turnTimer = null
+
             // Close WebSocket
             const ws = cache.sttWebSocket as WebSocket | undefined
             if (ws) {
