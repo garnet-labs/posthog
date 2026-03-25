@@ -12,8 +12,8 @@ import type { voiceLogicType } from './voiceLogicType'
 const ELEVENLABS_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 const STT_SAMPLE_RATE = 16000
 const STT_BUFFER_SIZE = 4096
-// How long to wait after the last committed transcript before auto-sending in voice mode
-const TURN_COMPLETE_DEBOUNCE_MS = 1500
+// How long to wait after the last transcript (partial or committed) before auto-sending
+const TURN_COMPLETE_DEBOUNCE_MS = 1600
 
 function teardownPlaybackVisuals(cache: any, actions: any): void {
     cache.playbackVisualActive = false
@@ -154,6 +154,10 @@ export const voiceLogic = kea<voiceLogicType>([
                 model_id: 'scribe_v2_realtime',
                 commit_strategy: 'vad',
                 audio_format: `pcm_${STT_SAMPLE_RATE}`,
+                // VAD tuning: higher threshold rejects background noise; longer silence avoids cutting off mid-thought
+                vad_threshold: '0.7',
+                vad_silence_threshold_secs: '1.0',
+                min_speech_duration_ms: '200',
             })
             const ws = new WebSocket(`${ELEVENLABS_WSS}?${params.toString()}`)
             cache.sttWebSocket = ws
@@ -287,27 +291,11 @@ export const voiceLogic = kea<voiceLogicType>([
 
                 if (data.message_type === 'partial_transcript') {
                     cache.currentPartial = data.text || ''
-                    // Reset turn timer — user is still speaking
-                    if (data.text && cache.turnTimer) {
-                        clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout>)
-                        cache.turnTimer = null
-                    }
                 } else if (data.message_type === 'committed_transcript') {
                     if (data.text) {
                         cache.committedParts.push(data.text)
                     }
                     cache.currentPartial = ''
-
-                    // Turn detection: in voice mode, auto-send after silence
-                    if (values.voiceModeEnabled && cache.committedParts.length > 0) {
-                        clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
-                        cache.turnTimer = setTimeout(() => {
-                            cache.turnTimer = null
-                            if (values.recording && values.voiceModeEnabled) {
-                                actions.stopRecording()
-                            }
-                        }, TURN_COMPLETE_DEBOUNCE_MS)
-                    }
                 } else if (data.error) {
                     // ElevenLabs error events (auth_error, quota_exceeded, etc.) arrive as messages, not WS errors
                     lemonToast.error(`Voice transcription error: ${data.error}`)
@@ -320,6 +308,18 @@ export const voiceLogic = kea<voiceLogicType>([
                 const partial = cache.currentPartial as string
                 const fullText = [...parts, partial].filter(Boolean).join(' ')
                 mounted?.actions.setQuestion(fullText)
+
+                // Turn detection: restart timer on every transcript that carries text.
+                // When no new transcript arrives for TURN_COMPLETE_DEBOUNCE_MS, auto-send.
+                if (values.voiceModeEnabled && fullText) {
+                    clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
+                    cache.turnTimer = setTimeout(() => {
+                        cache.turnTimer = null
+                        if (values.recording && values.voiceModeEnabled) {
+                            actions.stopRecording()
+                        }
+                    }, TURN_COMPLETE_DEBOUNCE_MS)
+                }
             }
 
             ws.onerror = () => {
@@ -407,7 +407,10 @@ export const voiceLogic = kea<voiceLogicType>([
                 const mountedMaxLogic = maxLogic.findMounted({ tabId })
                 mountedMaxLogic?.actions.setQuestion(finalText)
 
-                const mountedThreadLogic = maxThreadLogic.findMounted()
+                // maxThreadLogic is keyed as `${conversationId}-${tabId}`; findMounted() without props never matches.
+                const conversationId = mountedMaxLogic?.values.threadLogicKey
+                const mountedThreadLogic =
+                    conversationId != null ? maxThreadLogic.findMounted({ tabId, conversationId }) : undefined
                 mountedThreadLogic?.actions.askMax(finalText)
             } else if (!finalText && wasRecording) {
                 lemonToast.warning('No speech detected. Try again.')
