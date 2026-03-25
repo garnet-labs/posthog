@@ -30,7 +30,13 @@ PROGRESS_FILE = Path("/tmp/sandbox-progress")
 # ---------------------------------------------------------------------------
 
 
+def log(msg: str) -> None:
+    """Print to container stdout only (root phase)."""
+    print(f"==> {msg}", flush=True)  # noqa: T201
+
+
 def info(msg: str) -> None:
+    """Log to stdout and write to progress file for the host script."""
     print(f"==> {msg}", flush=True)  # noqa: T201
     with PROGRESS_FILE.open("a") as f:
         f.write(f"==> {msg}\n")
@@ -127,7 +133,7 @@ def start_sshd(uid: int, gid: int) -> None:
             "PermitRootLogin=no",
         ]
     )
-    info("sshd listening on port 2222")
+    log("sshd listening on port 2222")
 
 
 def copy_claude_auth(uid: int, gid: int) -> None:
@@ -153,7 +159,7 @@ def bind_mount_node_modules(uid: int, gid: int) -> None:
     This redirects pnpm I/O from the slow VirtioFS bind mount to fast ext4
     storage inside the Docker VM.
     """
-    info("Bind-mounting node_modules onto cache volume...")
+    log("Bind-mounting node_modules onto cache volume...")
     cache_root = Path("/cache/node-modules")
 
     for pkg_json in WORKSPACE.rglob("package.json"):
@@ -181,8 +187,7 @@ def root_phase() -> None:
 
     SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
     Path("/tmp/sandbox-cache").mkdir(parents=True, exist_ok=True)
-    PROGRESS_FILE.touch()
-    run(["chown", f"{uid}:{gid}", str(SANDBOX_HOME), "/tmp/sandbox-cache", str(PROGRESS_FILE)])
+    run(["chown", f"{uid}:{gid}", str(SANDBOX_HOME), "/tmp/sandbox-cache"])
 
     create_sandbox_user(uid, gid)
     export_environment(uid, gid)
@@ -452,6 +457,8 @@ def setup_intellij_background() -> None:
 
 
 def user_phase() -> None:
+    PROGRESS_FILE.touch()
+
     os.environ.update(
         {
             "HOME": str(SANDBOX_HOME),
