@@ -12,6 +12,7 @@ from posthog.hogql.database.models import (
     LazyTableToAdd,
     StringDatabaseField,
     Table,
+    UUIDDatabaseField,
 )
 from posthog.hogql.errors import ResolutionError
 
@@ -22,8 +23,8 @@ ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED_FIELDS: dict[str, FieldOrTable] = 
     "issue_name": StringDatabaseField(name="issue_name", nullable=True),
     "issue_description": StringDatabaseField(name="issue_description", nullable=True),
     "issue_status": StringDatabaseField(name="issue_status", nullable=False),
-    "assigned_entity_type": StringDatabaseField(name="assigned_entity_type", nullable=True),
-    "assigned_entity_id": StringDatabaseField(name="assigned_entity_id", nullable=True),
+    "assigned_user_id": IntegerDatabaseField(name="assigned_user_id", nullable=True),
+    "assigned_role_id": UUIDDatabaseField(name="assigned_role_id", nullable=True),
     "first_seen": DateTimeDatabaseField(name="first_seen", nullable=True),
 }
 
