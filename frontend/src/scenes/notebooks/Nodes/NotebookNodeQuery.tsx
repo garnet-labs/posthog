@@ -1,3 +1,5 @@
+import './NotebookNodeQuery.scss'
+
 import { JSONContent } from '@tiptap/core'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useMemo } from 'react'
@@ -143,9 +145,10 @@ const Component = ({
         <div className="flex flex-1 flex-col h-full" data-attr="notebook-node-query">
             <BindLogic logic={insightLogic} props={insightLogicProps}>
                 {isInsightViz ? (
-                    <div className="flex flex-1 flex-col overflow-hidden">{queryComponent}</div>
+                    // ScrollArea content is content-sized; skip it so chart heights resolve in the node.
+                    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">{queryComponent}</div>
                 ) : (
-                    <ScrollableShadows direction="vertical" className="flex-1">
+                    <ScrollableShadows direction="vertical" className="flex-1 min-h-0">
                         {queryComponent}
                     </ScrollableShadows>
                 )}
