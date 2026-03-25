@@ -13,6 +13,8 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from loginas.utils import is_impersonated_session
 from rest_framework import mixins, request, response, serializers, status, viewsets
 
+from posthog.schema import ProductKey
+
 from posthog.api.event_definition_generators.base import EventDefinitionGenerator
 from posthog.api.event_definition_generators.golang import GolangGenerator
 from posthog.api.event_definition_generators.python import PythonGenerator
@@ -22,6 +24,7 @@ from posthog.api.shared import UserBasicSerializer
 from posthog.api.tagged_item import TaggedItemSerializerMixin, TaggedItemViewSetMixin
 from posthog.api.utils import action
 from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.constants import EventDefinitionType
 from posthog.event_usage import report_user_action
 from posthog.filters import TermSearchFilterBackend, term_search_filter_sql
@@ -562,6 +565,7 @@ def fetch_30day_event_queries(
         AND metric_name = %(metric_name)s
     """
 
+    tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
     results = sync_execute(clickhouse_query, clickhouse_kwargs)
 
     if not isinstance(results, list):

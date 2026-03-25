@@ -14,8 +14,11 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from posthog.schema import ProductKey
+
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.client.connection import Workload, get_client_from_pool
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.cloud_utils import is_cloud
 from posthog.settings.base_variables import DEBUG
 from posthog.settings.data_stores import CLICKHOUSE_CLUSTER
@@ -76,6 +79,7 @@ class DebugCHQueries(viewsets.ViewSet):
             ORDER BY hour
         """
 
+        tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
         response = sync_execute(sql_query, params)
         return [
             {
@@ -115,6 +119,7 @@ class DebugCHQueries(viewsets.ViewSet):
             )
         """
 
+        tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
         response = sync_execute(sql_query, params)
         return {
             "total_queries": response[0][0],
@@ -141,6 +146,7 @@ class DebugCHQueries(viewsets.ViewSet):
             params["start_time"] = (now() - relativedelta(minutes=10)).timestamp()
 
         # nosemgrep: clickhouse-fstring-param-audit - where_clause/limit_clause from internal builder
+        tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
         response = sync_execute(
             f"""
             SELECT
@@ -246,6 +252,7 @@ class DebugCHQueries(viewsets.ViewSet):
             raise exceptions.ValidationError("No profile_query_id provided.")
 
         try:
+            tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
             trace_results = sync_execute(
                 """
                 SELECT

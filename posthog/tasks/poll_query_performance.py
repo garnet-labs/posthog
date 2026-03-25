@@ -5,9 +5,12 @@ from typing import Any, Optional
 
 from structlog import get_logger
 
+from posthog.schema import ProductKey
+
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.client.connection import ClickHouseUser, Workload
 from posthog.clickhouse.client.execute_async import QueryStatusManager
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.settings import CLICKHOUSE_CLUSTER
 from posthog.utils import UUID_REGEX
 
@@ -51,6 +54,7 @@ def get_query_results() -> list[Any]:
         SETTINGS skip_unavailable_shards=1
         """
 
+    tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.HEALTH_CHECK)
     raw_results = sync_execute(
         SYSTEM_PROCESSES_SQL, {"cluster": CLICKHOUSE_CLUSTER}, workload=Workload.ONLINE, ch_user=ClickHouseUser.OPS
     )

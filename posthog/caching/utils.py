@@ -5,7 +5,10 @@ from typing import Any, Optional, Union
 import posthoganalytics
 from dateutil.parser import isoparse, parser
 
+from posthog.schema import ProductKey
+
 from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.cloud_utils import is_cloud
 from posthog.models.filters.filter import Filter
 from posthog.models.filters.path_filter import PathFilter
@@ -28,6 +31,7 @@ def ensure_is_date(candidate: Optional[Union[str, datetime]]) -> Optional[dateti
 
 
 def largest_teams(limit: int) -> set[int]:
+    tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.CACHE_WARMUP)
     teams_by_event_count = sync_execute(
         """
             SELECT team_id, COUNT(*) AS event_count
@@ -57,6 +61,7 @@ def active_teams() -> set[int]:
     if not all_teams:
         # NOTE: `active_teams()` doesn't cooperate with freezegun (aka `freeze_time()`), because of
         # the ClickHouse `now()` function being used below
+        tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.CACHE_WARMUP)
         teams_by_recency = sync_execute(
             """
             SELECT team_id, date_diff('second', max(timestamp), now()) AS age
