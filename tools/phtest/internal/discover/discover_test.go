@@ -46,7 +46,8 @@ func TestDiscover_findsAllCategories(t *testing.T) {
 
 func TestDiscover_backendFindsProducts(t *testing.T) {
 	root := repoRoot(t)
-	suites, err := discoverBackend(root)
+	ig := newIgnoreMatcher(root)
+	suites, err := discoverBackend(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,8 @@ func TestDiscover_backendFindsProducts(t *testing.T) {
 
 func TestDiscover_backendUsePytest(t *testing.T) {
 	root := repoRoot(t)
-	suites, err := discoverBackend(root)
+	ig := newIgnoreMatcher(root)
+	suites, err := discoverBackend(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +84,8 @@ func TestDiscover_backendUsePytest(t *testing.T) {
 
 func TestDiscover_frontendFindsProductsAndCore(t *testing.T) {
 	root := repoRoot(t)
-	suites, err := discoverFrontend(root)
+	ig := newIgnoreMatcher(root)
+	suites, err := discoverFrontend(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +142,8 @@ func TestDiscover_rustFindsPackages(t *testing.T) {
 
 func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
 	root := repoRoot(t)
-	suites, err := discoverE2E(root)
+	ig := newIgnoreMatcher(root)
+	suites, err := discoverE2E(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +165,8 @@ func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
 
 func TestDiscover_goFindsModules(t *testing.T) {
 	root := repoRoot(t)
-	suites, err := discoverGo(root)
+	ig := newIgnoreMatcher(root)
+	suites, err := discoverGo(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
