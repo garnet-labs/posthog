@@ -265,7 +265,7 @@ def ingestion_lag() -> None:
     team_ids = settings.INGESTION_LAG_METRIC_TEAM_IDS
 
     try:
-        tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY, name="ingestion_lag")
+        tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.HEALTH_CHECK, name="ingestion_lag")
         results = sync_execute(
             query,
             {
@@ -376,7 +376,7 @@ def clickhouse_row_count() -> None:
             labelnames=["table_name"],
             registry=registry,
         )
-        tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
+        tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.HEALTH_CHECK)
         for table in CLICKHOUSE_TABLES:
             try:
                 QUERY = """SELECT sum(rows) rows from system.parts
@@ -418,7 +418,7 @@ def clickhouse_errors_count() -> None:
     params = {
         "cluster": CLICKHOUSE_CLUSTER,
     }
-    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.HEALTH_CHECK)
     rows = sync_execute(QUERY, params)
     with pushed_metrics_registry("celery_clickhouse_errors") as registry:
         errors_gauge = Gauge(
@@ -445,7 +445,7 @@ def clickhouse_part_count() -> None:
         GROUP BY table
         ORDER BY freq DESC;
     """
-    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.HEALTH_CHECK)
     rows = sync_execute(QUERY)
 
     with pushed_metrics_registry("celery_clickhouse_part_count") as registry:
@@ -479,7 +479,7 @@ def clickhouse_mutation_count() -> None:
         GROUP BY table
         ORDER BY freq DESC
     """
-    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.HEALTH_CHECK)
     rows = sync_execute(QUERY)
 
     with pushed_metrics_registry("celery_clickhouse_mutation_count") as registry:
