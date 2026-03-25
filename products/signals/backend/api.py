@@ -3,10 +3,13 @@ from datetime import timedelta
 from django.conf import settings
 
 import tiktoken
+import structlog
 import temporalio
 
 from posthog.schema import SignalInput
 
+from posthog.kafka_client.client import KafkaProducer
+from posthog.kafka_client.topics import KAFKA_HOGBOT_SIGNALS_TOPIC
 from posthog.models import Team
 from posthog.sync import database_sync_to_async
 from posthog.temporal.common.client import async_connect
@@ -15,6 +18,8 @@ from products.signals.backend.models import SignalSourceConfig
 from products.signals.backend.temporal.buffer import BufferSignalsWorkflow
 from products.signals.backend.temporal.emitter import SignalEmitterInput, SignalEmitterWorkflow
 from products.signals.backend.temporal.types import BufferSignalsInput, EmitSignalInputs
+
+logger = structlog.get_logger(__name__)
 
 MAX_SIGNAL_DESCRIPTION_TOKENS = 8000
 _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
@@ -119,3 +124,27 @@ async def emit_signal(
         task_queue=settings.VIDEO_EXPORT_TASK_QUEUE,
         run_timeout=timedelta(minutes=10),
     )
+
+    _emit_signal_to_kafka(signal_input)
+
+
+def _emit_signal_to_kafka(signal: EmitSignalInputs) -> None:
+    """Send a copy of the signal to Kafka for downstream consumers."""
+    try:
+        producer = KafkaProducer()
+        producer.produce(
+            topic=KAFKA_HOGBOT_SIGNALS_TOPIC,
+            data={
+                "team_id": signal.team_id,
+                "source_product": signal.source_product,
+                "source_type": signal.source_type,
+                "source_id": signal.source_id,
+                "description": signal.description,
+                "weight": signal.weight,
+                "extra": signal.extra,
+            },
+            key=str(signal.team_id),
+        )
+        producer.flush()
+    except Exception:
+        logger.exception("Failed to emit signal to Kafka", team_id=signal.team_id)
