@@ -83,49 +83,75 @@ async def _discover_product_urls(
     return result.urls
 
 
+def _url_to_filename(url: str) -> str:
+    slug = url.replace("https://", "").replace("http://", "").replace("/", "_").rstrip("_")
+    return f"{slug[:300]}.json"
+
+
+def _get_page_url(metadata: dict) -> str:
+    """Extract the page URL from metadata, trying all known key variants."""
+    return metadata.get("url", metadata.get("sourceURL", metadata.get("source_url", "")))
+
+
 def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
     from firecrawl import FirecrawlApp
 
-    cached = list(CACHE_DIR.glob("[0-9]*.json"))
-    if cached:
+    # Load already-cached pages, determine which URLs still need scraping
+    cached_pages: dict[str, dict] = {}
+    for filepath in CACHE_DIR.glob("*.json"):
+        if filepath.name.startswith("_"):
+            continue
+        page = json.loads(filepath.read_text())
+        source_url = _get_page_url(page.get("metadata", {}))
+        if source_url:
+            cached_pages[source_url] = page
+
+    uncached_urls = [u for u in urls if u not in cached_pages]
+
+    if output_fn:
+        output_fn(f"{len(cached_pages)} cached, {len(uncached_urls)} to scrape")
+
+    if uncached_urls:
+        firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+        assert firecrawl_api_key, "FIRECRAWL_API_KEY must be set in environment variables"
+        app = FirecrawlApp(api_key=firecrawl_api_key)
+
         if output_fn:
-            output_fn(f"Using {len(cached)} cached pages from {CACHE_DIR}")
-        return [json.loads(f.read_text()) for f in sorted(cached)]
+            output_fn(f"Batch scraping {len(uncached_urls)} URLs...")
 
-    firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
-    assert firecrawl_api_key, "FIRECRAWL_API_KEY must be set in environment variables"
-    app = FirecrawlApp(api_key=firecrawl_api_key)
+        scrape_result = app.batch_scrape(
+            uncached_urls,
+            formats=["markdown", {"type": "screenshot", "fullPage": True}],
+        )
 
-    if output_fn:
-        output_fn(f"Batch scraping {len(urls)} URLs...")
-
-    scrape_result = app.batch_scrape(
-        urls,
-        formats=["markdown", {"type": "screenshot", "fullPage": True}],
-    )
-
-    if output_fn:
-        output_fn(f"Scrape status: {scrape_result.status}, completed: {scrape_result.completed}/{scrape_result.total}")
-
-    pages = []
-    for i, doc in enumerate(scrape_result.data):
-        page = {
-            "markdown": doc.markdown,
-            "screenshot": doc.screenshot if hasattr(doc, "screenshot") else None,
-            "metadata": doc.metadata if isinstance(doc.metadata, dict) else vars(doc.metadata) if doc.metadata else {},
-        }
-        source_url = page["metadata"].get("sourceURL", page["metadata"].get("source_url", f"page_{i}"))
-        slug = source_url.replace("https://", "").replace("http://", "").replace("/", "_").rstrip("_")
-        filename = f"{i:03d}_{slug[:80]}.json"
-
-        filepath = CACHE_DIR / filename
-        filepath.write_text(json.dumps(page, indent=2, default=str))
-        pages.append(page)
         if output_fn:
-            output_fn(f"  Saved {filepath.name}")
+            output_fn(
+                f"Scrape status: {scrape_result.status}, completed: {scrape_result.completed}/{scrape_result.total}"
+            )
 
+        for doc in scrape_result.data:
+            page = {
+                "markdown": doc.markdown,
+                "screenshot": doc.screenshot if hasattr(doc, "screenshot") else None,
+                "metadata": doc.metadata
+                if isinstance(doc.metadata, dict)
+                else vars(doc.metadata)
+                if doc.metadata
+                else {},
+            }
+            source_url = _get_page_url(page["metadata"])
+            filename = _url_to_filename(source_url) if source_url else _url_to_filename(f"unknown_{len(cached_pages)}")
+
+            filepath = CACHE_DIR / filename
+            filepath.write_text(json.dumps(page, indent=2, default=str))
+            cached_pages[source_url] = page
+            if output_fn:
+                output_fn(f"  Saved {filepath.name}")
+
+    # Return pages in the order of the input URLs
+    pages = [cached_pages[u] for u in urls if u in cached_pages]
     if output_fn:
-        output_fn(f"Scraped and cached {len(pages)} pages")
+        output_fn(f"{len(pages)} pages available")
     return pages
 
 
