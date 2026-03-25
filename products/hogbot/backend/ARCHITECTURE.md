@@ -19,7 +19,7 @@ The current design is built around a small set of explicit goals:
   - Sandbox filesystem state should survive across sessions by creating snapshots at the end of successful runs and restoring from the latest snapshot on the next run.
 - **Keep Temporal history small**
   - Temporal should orchestrate lifecycle, not every application-level interaction.
-  - Only lightweight lifecycle signals flow through the workflow.
+  - Only lightweight lifecycle operations flow through the workflow.
 - **Allow direct communication with the sandbox HTTP server**
   - External systems should be able to talk directly to the hogbot HTTP server running in the sandbox instead of proxying all traffic through Temporal.
 
@@ -29,16 +29,16 @@ The current implementation is composed of a few primary pieces:
 
 - **`HogbotRuntime` model**
   - Located in `products.hogbot.backend.models`
-  - Stores durable per-team runtime state and links one workflow execution to the next.
+  - Minimal per-team persistence: stores only the latest snapshot external ID for session continuity.
 - **Gateway helpers**
   - Located in `products.hogbot.backend.gateway`
-  - Provide the main control entrypoints for starting a session and sending lifecycle signals.
+  - Provide the main control entrypoint for starting a session and waiting for it to become ready.
 - **Temporal workflow**
   - Located in `products.hogbot.backend.temporal.workflow`
   - Owns the lifecycle of a single hogbot session.
 - **Temporal activities**
   - Located in `products.hogbot.backend.temporal.activities`
-  - Encapsulate the concrete side effects: sandbox creation, server start, snapshotting, runtime state updates, log reading, and cleanup.
+  - Encapsulate the concrete side effects: sandbox creation, server start, server exit waiting, snapshotting, log reading, and cleanup.
 - **Shared sandbox abstraction**
   - Located in `products.tasks.backend.services.sandbox`
   - Provides the provider-agnostic interface for creating and operating sandboxes.
@@ -67,7 +67,7 @@ These provider-specific ports are part of the current server start contract.
 
 The current workflow is named:
 
-- **`hogbot-session`**
+- **`hogbot`**
 
 Each session is keyed by the workflow id:
 
@@ -77,28 +77,22 @@ This gives hogbot a stable team-scoped identity while still allowing a new one-s
 
 ### Current lifecycle
 
-A hogbot session currently flows through these steps:
+A hogbot session currently flows through these phases:
 
-1. **Load latest snapshot id from runtime state before start**
-   - The gateway reads the current `HogbotRuntime` row for the team and passes the latest snapshot id into workflow input.
-2. **Create sandbox from snapshot or fresh base image**
-   - The workflow calls the sandbox creation activity, which restores from snapshot when possible and otherwise creates a fresh sandbox.
-3. **Start HTTP server inside sandbox**
-   - The workflow starts the hogbot server process inside the sandbox and waits for its health check to pass.
-4. **Persist runtime state as running**
-   - Runtime state is updated with sandbox identity, server URL, workflow metadata, and the `running` status.
-5. **Wait on `heartbeat()` and `complete(...)`**
-   - The workflow then idles in a lifecycle loop.
-   - Heartbeats reset the inactivity timer.
-   - Completion ends the session.
-6. **On successful completion create snapshot**
-   - If the workflow is completed with a success status, it creates a new filesystem snapshot.
-7. **Persist new snapshot id to runtime model**
-   - The latest snapshot id is written into `HogbotRuntime` so the next run can resume from it.
-8. **Always read logs and cleanup sandbox**
-   - Whether the run succeeds or fails, the workflow reads sandbox logs and destroys the sandbox.
-9. **Mark final runtime status**
-   - The runtime row is updated with the final session state and any final error context.
+1. **`pending`** — workflow initialized, nothing started yet
+2. **`starting`** — sandbox creation and server start in progress
+   - The workflow calls `create_hogbot_sandbox` to provision the sandbox (restoring from snapshot when available)
+   - Then calls `start_hogbot_server` to start the HTTP server and wait for its health check
+3. **`running`** — server is live and accepting traffic
+   - The workflow marks `ready=True` and enters a long-running `wait_for_hogbot_server_exit` activity (up to 8 days, with 1-minute heartbeat timeout)
+   - External systems talk directly to the sandbox server URL
+4. **`snapshotting`** — server has exited cleanly, creating a filesystem snapshot
+   - Only runs if the server exited with `completed` status
+   - Creates a snapshot via `create_resume_snapshot` and persists the snapshot ID via `persist_hogbot_snapshot`
+5. **`cleaning_up`** — reading logs and destroying the sandbox
+   - Always runs in the `finally` block regardless of success or failure
+   - Reads server logs via `read_sandbox_logs`, then destroys the sandbox via `cleanup_sandbox`
+6. **`completed`** or **`failed`** — final terminal state
 
 This lifecycle keeps Temporal responsible for orchestration while leaving ongoing application traffic outside the workflow.
 
@@ -111,13 +105,11 @@ The workflow is intentionally small because most concrete work lives in activiti
 Responsibility:
 
 - Create a sandbox for a team using the shared sandbox abstraction
-- Restore from `snapshot_external_id` when available
-- Return:
-  - sandbox id
-  - externally reachable sandbox URL
-  - connect token when the backend requires one
+- Optionally clone a repository and check out a branch (via GitHub integration)
+- Restore from snapshot when available
+- Return sandbox ID, externally reachable URL, and connect token
 
-Architecturally, this is the entrypoint into the sandbox layer. It translates high-level session intent into a concrete sandbox instance.
+This is the entrypoint into the sandbox layer. It translates high-level session intent into a concrete sandbox instance.
 
 ### `start_hogbot_server`
 
@@ -128,25 +120,34 @@ Responsibility:
 - Wait for the sandbox-local health endpoint to become ready
 - Return the externally reachable server URL and any connect token
 
-This activity is the boundary between “sandbox exists” and “usable hogbot server is live.” It is also where provider-specific health check port assumptions are currently enforced.
+This activity is the boundary between "sandbox exists" and "usable hogbot server is live." It is also where provider-specific health check port assumptions are currently enforced.
 
-### `update_hogbot_runtime_state`
+### `wait_for_hogbot_server_exit`
 
 Responsibility:
 
-- Create or load the `HogbotRuntime` row for a team
-- Persist status and any supplied runtime metadata
+- Monitor the sandbox process until the hogbot server exits
+- Run as a long-lived activity (up to 8 days) with a 1-minute heartbeat timeout
+- Return the exit status, exit code, and any error message
 
-This activity exists so the workflow can update durable runtime state without embedding ORM logic directly into workflow code. It is the persistence bridge between Temporal orchestration and database state.
+This is the main "idle" phase of the workflow. While this activity is running, the sandbox server is live and accepting direct HTTP traffic. The activity simply waits for the server process to terminate.
 
 ### `create_resume_snapshot`
 
 Responsibility:
 
 - Create a filesystem snapshot from the running sandbox
-- Return the resulting external snapshot id or an error
+- Return the resulting external snapshot ID or an error
 
-This activity is intentionally narrow. It no longer persists anything task-specific and does not depend on task models. Its only job is to convert a live sandbox into a resumable snapshot artifact.
+This activity is intentionally narrow. It does not persist anything — its only job is to convert a live sandbox into a resumable snapshot artifact.
+
+### `persist_hogbot_snapshot`
+
+Responsibility:
+
+- Write the snapshot external ID to the `HogbotRuntime` model for the team
+
+This is the persistence bridge that links one workflow execution to the next. The next session can read the latest snapshot ID from the runtime model and restore from it.
 
 ### `read_sandbox_logs`
 
@@ -155,7 +156,7 @@ Responsibility:
 - Read the hogbot server log file from the sandbox before destruction
 - Return the captured log text
 
-This gives the workflow a last chance to retrieve server-side context before cleanup. It is primarily useful for debugging, postmortem visibility, and eventually operator tooling.
+This gives the workflow a last chance to retrieve server-side context before cleanup. Logs are recorded to the Temporal workflow logger for observability.
 
 ### `cleanup_sandbox`
 
@@ -171,103 +172,58 @@ Responsibility:
 
 - Emit workflow-level analytics events
 
-This is currently a lightweight helper for recording lifecycle events. It is not central to the orchestration design, but it provides a hook for observability without pushing those concerns directly into the workflow core.
+This is a lightweight helper for recording lifecycle events. It provides a hook for observability without pushing those concerns directly into the workflow core.
 
 ## Runtime state model
 
-The `HogbotRuntime` model exists to store durable, per-team session state across one-shot workflow executions.
+The `HogbotRuntime` model is minimal. It stores only:
 
-Today it stores fields such as:
+- `team` (OneToOne primary key to Team)
+- `latest_snapshot_external_id` — the snapshot to restore from on the next session
+- `created_at` / `updated_at` timestamps
 
-- latest snapshot external id
-- active workflow id
-- active run id
-- sandbox id
-- server URL
-- status
-- last error
+All transient session state (workflow ID, run ID, sandbox ID, server URL, connect token, phase, readiness, errors) lives in the **workflow itself** and is accessed via Temporal queries. This keeps the database model thin and avoids stale state problems from dual-writing.
 
-Its architectural role is important: it is the **bridge between one-shot workflow executions**.
+## Workflow queries
 
-A session workflow eventually ends. The runtime row is what lets the next session know:
+The workflow exposes two Temporal queries for inspecting live session state:
 
-- which snapshot to restore from
-- what the most recent state was
-- what workflow currently owns the team session
-- whether there is any recent failure context to inspect
+### `get_connection_info`
 
-Without this model, each session would be isolated and the system would lose the continuity required for resumable sandbox state.
+Returns a dict with: `workflow_id`, `run_id`, `phase`, `ready`, `sandbox_id`, `server_url`, `connect_token`, `error`.
 
-## Signaling model
+This is the primary query used by the gateway to poll for readiness after starting a workflow.
 
-The workflow receives only **lightweight lifecycle signals**.
+### `get_status`
 
-### `heartbeat()`
-
-- Signals that the session is still alive and in use
-- Resets the inactivity timeout window
-- Prevents the workflow from timing out while the external system is still using the sandbox server
-
-### `complete(...)`
-
-- Ends the session
-- Carries the final completion status
-- Determines whether the success path, including snapshot creation, should run
-
-This signaling model is intentionally narrow. The workflow is **not** the message bus for all hogbot interaction or chat traffic. That traffic is expected to flow directly to the HTTP server inside the sandbox.
-
-This keeps Temporal focused on what it is best at:
-
-- lifecycle orchestration
-- durability
-- retries
-- cleanup
-- finalization
-
-It avoids turning Temporal into a transport for high-volume or conversational application traffic.
+Returns the same fields as `get_connection_info` — an alias for convenience.
 
 ## Gateway and control flow
 
-The current gateway layer exposes the main synchronous control helpers:
+The current gateway layer exposes the main synchronous control helper:
 
-- `start_or_restart_hogbot`
-- `heartbeat_hogbot`
-- `complete_hogbot`
+### `get_or_start_hogbot`
+
+This is the primary entrypoint for obtaining a running hogbot session. It:
+
+1. Starts the `hogbot` workflow (or attaches to an existing one via `USE_EXISTING` conflict policy)
+2. Polls the workflow's `get_connection_info` query until `ready=True` or a terminal phase is reached
+3. If the workflow is in a closing phase, waits for it to finish and retries (up to 3 attempts)
+4. Returns a `HogbotConnectionInfo` dataclass with the sandbox URL, connect token, and readiness state
+
+The polling uses a 0.5-second interval with a 120-second timeout.
 
 ### `start_or_restart_hogbot`
 
-This helper:
-
-- loads or creates the `HogbotRuntime` row
-- reads the latest snapshot id from the runtime row
-- starts the `hogbot-session` workflow
-- refreshes runtime state from the database before returning it
-
-The workflow itself is treated as authoritative for workflow/run metadata persistence once it starts.
-
-### `heartbeat_hogbot`
-
-This helper:
-
-- resolves the workflow handle from `hogbot_workflow_id(team_id)`
-- signals the workflow heartbeat method
-
-### `complete_hogbot`
-
-This helper:
-
-- resolves the workflow handle from `hogbot_workflow_id(team_id)`
-- signals workflow completion with status and optional error message
+An alias for `get_or_start_hogbot` — provided for semantic clarity at call sites.
 
 ### Start semantics
 
-Session start currently uses Temporal workflow start behavior that supports:
+Session start uses Temporal's `WorkflowIDConflictPolicy.USE_EXISTING` combined with `WorkflowIDReusePolicy.ALLOW_DUPLICATE`. This means:
 
-- **one workflow id per team**
-- reuse of that workflow id across completed runs
-- coexistence of team-scoped identity with one-shot execution semantics
-
-That combination is what allows the design to be both team-scoped and session-oriented.
+- If a workflow is already running for the team, the gateway attaches to it
+- If no workflow exists (or the previous one completed), a new one is started
+- The same workflow ID is reused across sessions
 
 ## Worker registration and discoverability
 
@@ -291,31 +247,16 @@ This means:
 
 ## Current limitations and rough edges
 
-The current implementation is intentionally minimal and has a few known rough edges:
+The current implementation has a few known rough edges:
 
 - **Server start assumes a health endpoint exists**
   - The start activity assumes the process exposes a health endpoint on the expected port.
-- **Gateway returns runtime state from the database**
-  - It does not yet query live workflow state or live connection info directly from Temporal queries.
-- **Snapshotting currently runs only on `complete(status="completed")`**
-  - Other completion statuses do not take the snapshot success path.
-- **Transient runtime fields are cleared with empty strings rather than nulls**
-  - This works, but the clearing semantics are not yet ideal.
-- **API and presentation layers are not yet built around these helpers**
-  - The architecture exists, but a full external control surface is still missing.
-
-## Next likely steps
-
-The most likely next steps in this architecture are:
-
-- **Expose API endpoints or service methods**
-  - Add supported entrypoints for session start, heartbeat, completion, and status.
-- **Tighten runtime clearing semantics**
-  - Move transient runtime fields to cleaner null-based clearing behavior.
-- **Make health checks more configurable**
-  - Allow health path and maybe health port assumptions to be configured more explicitly.
-- **Enrich tests**
-  - Expand workflow coverage around success, timeout, failure, and signaling behavior.
+- **No signal-based interaction**
+  - The workflow does not currently accept heartbeat or completion signals. Session lifetime is determined by the server process exit.
+- **Snapshotting only runs on clean server exit**
+  - If the server exits with a non-completed status, no snapshot is created.
+- **API and presentation layers are partially built**
+  - The hogbot viewset exists with stub endpoints for logs, send-message, and file access, but is not yet wired to the gateway or live sandbox.
 
 ## Summary
 
@@ -323,12 +264,12 @@ The current hogbot architecture is a team-scoped, snapshot-backed sandbox sessio
 
 Temporal is responsible for:
 
-- starting a session
-- keeping it alive through heartbeats
-- completing it
-- snapshotting it
-- cleaning it up
+- provisioning the sandbox (optionally from a snapshot)
+- starting the HTTP server
+- waiting for the server to exit
+- snapshotting on success
+- cleaning up the sandbox
 
 The sandbox HTTP server is responsible for the direct runtime interaction surface.
 
-`HogbotRuntime` provides the durable continuity between otherwise separate workflow executions, and the shared sandbox abstraction provides the provider-neutral execution environment that hogbot builds on today.
+`HogbotRuntime` provides minimal cross-session continuity (snapshot IDs), while all live session state is held in the Temporal workflow and accessed via queries. The gateway layer bridges synchronous Django code to the async Temporal world, polling queries until the session is ready.

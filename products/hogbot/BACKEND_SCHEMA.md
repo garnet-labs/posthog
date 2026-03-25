@@ -1,15 +1,31 @@
 # Hogbot Backend Schema
 
-This document describes the expected API endpoints
-and agent architecture for the Hogbot backend.
+This document describes the API endpoints
+and how they connect to the sandbox session managed by Temporal.
 
-There are no Django models for sessions or documents —
-the sandbox filesystem and S3 logs are the source of truth.
+For the full Temporal workflow architecture, see `backend/ARCHITECTURE.md`.
+
+## Session Lifecycle
+
+There are no Django models for sessions or documents.
+The sandbox filesystem and S3 logs are the source of truth.
+The only persisted model is `HogbotRuntime` (one row per team)
+which stores the latest snapshot external ID for session continuity.
+
+When a message is sent, the API viewset calls `get_or_start_hogbot()`
+from `products.hogbot.backend.gateway`. This either:
+
+- attaches to the already-running Temporal workflow for the team, or
+- starts a new `hogbot` workflow that provisions a sandbox and starts the HTTP server
+
+The gateway polls the workflow's `get_connection_info` query until `ready=True`,
+then returns a `HogbotConnectionInfo` with the `server_url` and `connect_token`.
+The API viewset uses these to forward messages directly to the sandbox HTTP server.
 
 ## Log Format
 
 Hogbot uses the same log format as the Tasks product.
-Logs are stored as JSONL in S3, with each line being a JSON object
+Logs are stored as JSONL in S3, one JSON object per line,
 following the ACP (Agent Communication Protocol) notification format.
 
 The frontend reuses `parseLogs`
@@ -17,85 +33,86 @@ from `products/tasks/frontend/lib/parse-logs.ts`.
 
 ### Two Log Files
 
-| Agent | S3 key pattern | API path |
-|-------|---------------|----------|
-| Admin | `hogbot/{team_id}/admin.jsonl` | `/hogbot/admin/logs/` |
+| Agent    | S3 key pattern                                  | API path                               |
+| -------- | ----------------------------------------------- | -------------------------------------- |
+| Admin    | `hogbot/{team_id}/admin.jsonl`                  | `/hogbot/admin/logs/`                  |
 | Research | `hogbot/{team_id}/research/{research_id}.jsonl` | `/hogbot/research/{research_id}/logs/` |
-
-The admin agent writes to a single known S3 file per team.
-The research agent writes one log file per research task.
 
 ### Frontend Polling
 
 The frontend polls the admin agent's S3 log endpoint every 2 seconds.
-Each poll fetches the full JSONL file, parses it with `parseLogs()`,
-and re-derives the chat blocks. No SSE or Redis is involved —
-the S3 file is the single source of truth.
-
-When a user sends a message, the frontend POSTs to the message endpoint
-and immediately triggers a poll to pick up the response faster.
+Each poll fetches the full JSONL file and re-parses with `parseLogs()`.
+State only updates when the content changes (string equality check)
+so polling doesn't cause UI flicker.
 
 ### Log Entry Types
 
-| Type | Rendered As |
-|------|-------------|
-| `agent` | Chat message bubble (left-aligned, from Hogbot) |
-| `user` | Chat message bubble (right-aligned, from user) |
-| `tool` | Collapsible tool call (inside "Thinking" section) |
+| Type      | Rendered As                                              |
+| --------- | -------------------------------------------------------- |
+| `agent`   | Chat message bubble (left-aligned, from Hogbot)          |
+| `user`    | Chat message bubble (right-aligned, from user)           |
+| `tool`    | Collapsible tool call (inside "Thinking" section)        |
 | `console` | Console log with level badge (inside "Thinking" section) |
-| `system` | Italic system text (inside "Thinking" section) |
-| `raw` | Monospace raw text (inside "Thinking" section) |
-
-The frontend groups consecutive non-message entries (tool, console, system, raw)
-into collapsible "Thinking" sections between chat messages.
-These are collapsed by default.
+| `system`  | Italic system text (inside "Thinking" section)           |
+| `raw`     | Monospace raw text (inside "Thinking" section)           |
 
 ## API Endpoints
 
-### Admin Agent
+### Admin Agent Logs
 
 **`GET /api/projects/:team_id/hogbot/admin/logs/`**
 
 Returns raw JSONL log text from S3 for the admin agent.
 Proxies S3 to avoid CORS (same pattern as Tasks `runs/{id}/logs/`).
 
-Response: plain text (JSONL format, one JSON object per line).
+Response: plain text (JSONL format).
+
+### Send Message
 
 **`POST /api/projects/:team_id/hogbot/send-message/`**
 
-Send a message to Hogbot. Supports two types with different routing:
+Sends a message to Hogbot. The endpoint:
 
-**User message** — routes to the admin agent via Temporal:
+1. Calls `get_or_start_hogbot()` to ensure the sandbox session is running
+2. Forwards the message to the sandbox HTTP server at the appropriate route
+
+Both message types are delivered to the agents inside the sandbox — the
+sandbox server is responsible for routing to the correct agent loop.
+
+**User message** — forwarded to `POST {sandbox_url}/admin/message`,
+routed to the admin agent:
+
 ```json
 {
-    "type": "user_message",
-    "content": "Can you analyze our funnel?"
+  "type": "user_message",
+  "content": "Can you analyze our funnel?"
 }
 ```
 
-**Signal** — publishes a document_embeddings signal to Kafka:
+**Signal** — forwarded to `POST {sandbox_url}/research/signal`,
+routed to the research agent:
+
 ```json
 {
-    "type": "signal",
-    "signal": {
-        "product": "signals",
-        "document_type": "issue_fingerprint",
-        "model_name": "text-embedding-3-small-1536",
-        "rendering": "plain",
-        "document_id": "abc-123",
-        "timestamp": "2026-03-25T10:00:00Z",
-        "content": "The text content that was embedded",
-        "metadata": "{}"
-    }
+  "type": "signal",
+  "signal": {
+    "product": "signals",
+    "document_type": "issue_fingerprint",
+    "model_name": "text-embedding-3-small-1536",
+    "rendering": "plain",
+    "document_id": "abc-123",
+    "timestamp": "2026-03-25T10:00:00Z",
+    "content": "The text content that was embedded",
+    "metadata": "{}"
+  }
 }
 ```
 
 Signals match the `document_embeddings` table shape
 (`SELECT * FROM document_embeddings WHERE model_name = 'text-embedding-3-small-1536' AND product = 'signals' ORDER BY timestamp DESC`).
 
-Response: `202 Accepted`.
-For user messages, the agent response appears in subsequent log polls.
-For signals, the research agent picks them up from the Kafka topic.
+Response: `202 Accepted` on success, `503 Service Unavailable` if the
+sandbox session is not ready or the forward fails.
 
 ### Sandbox Filesystem
 
@@ -105,16 +122,17 @@ List files on the sandbox filesystem.
 Accepts an optional `glob` query parameter to filter (e.g. `/research/*.md`).
 
 Response:
+
 ```json
 {
-    "results": [
-        {
-            "path": "/research/mobile-retention-drop.md",
-            "filename": "mobile-retention-drop.md",
-            "size": 1240,
-            "modified_at": "2026-03-25T10:30:00Z"
-        }
-    ]
+  "results": [
+    {
+      "path": "/research/mobile-retention-drop.md",
+      "filename": "mobile-retention-drop.md",
+      "size": 1240,
+      "modified_at": "2026-03-25T10:30:00Z"
+    }
+  ]
 }
 ```
 
@@ -143,66 +161,32 @@ Uses the existing `TaskViewSet` — no new endpoint needed.
 Requires adding `HOGBOT = "hogbot"` to `Task.OriginProduct` choices
 in `products/tasks/backend/models.py`.
 
-## Agent Architecture
+## Sandbox HTTP Server Contract
 
-Hogbot runs two concurrent Claude SDK agent loops inside a cloud sandbox.
-Both agents append their logs to S3 as JSONL.
+The sandbox runs an HTTP server started by the Temporal workflow.
+The API viewset forwards messages to it using the `server_url` and
+`connect_token` from `HogbotConnectionInfo`.
 
-### 1. Admin Agent
+### Expected sandbox endpoints
 
-- Handles user chat interactions
-- Receives user messages and generates responses
-- Can delegate work to the research agent
-- Appends logs to `hogbot/{team_id}/admin.jsonl`
+| Method | Path               | Agent    | Purpose                                   |
+| ------ | ------------------ | -------- | ----------------------------------------- |
+| POST   | `/admin/message`   | Admin    | Deliver a user chat message               |
+| POST   | `/research/signal` | Research | Deliver a document_embeddings signal      |
+| GET    | `/health`          | —        | Health check (used during server startup) |
 
-### 2. Research Agent
-
-- Runs continuously in the background
-- Analyzes product data using PostHog MCP tools
-- Creates and updates markdown files on the sandbox filesystem
-  (e.g. `/research/mobile-retention-drop.md`)
-- Creates Tasks (via the Tasks product API) with `origin_product="hogbot"`
-- Appends per-research logs to `hogbot/{team_id}/research/{research_id}.jsonl`
-- Can send proactive messages via the admin agent
-
-### Sandbox Provisioning
-
-Follow the existing Tasks product pattern:
-
-1. **Temporal workflow** orchestrates the sandbox lifecycle
-   (reference: `products/tasks/backend/temporal/process_task/workflow.py`)
-2. **Sandbox provider** (Docker for local, Modal for production)
-   creates an isolated environment
-   (reference: `products/tasks/backend/services/sandbox.py`)
-3. **Connection token** (JWT RS256, 24h expiry)
-   authenticates sandbox-to-API communication
-   (reference: `products/tasks/backend/services/connection_token.py`)
-4. The sandbox runs an agent server (`npx agent-server`)
-   that hosts both agent loops
-
-### Log Persistence
-
-1. Agent activity inside the sandbox produces ACP notifications
-2. The agent server appends each event as a JSON line to the S3 log file
-3. The frontend polls the S3 log proxy endpoint every 2 seconds
-4. Each poll re-parses the full file and updates the UI
-
-### OAuth & MCP Access
-
-The sandbox receives a scoped OAuth token
-(reference: `products/tasks/backend/temporal/oauth.py`)
-that grants access to PostHog MCP tools.
-The research agent uses these tools to query insights, funnels,
-retention data, and other PostHog product data.
+Authentication: `Authorization: Bearer {connect_token}` when the
+sandbox backend requires it (Modal). Docker sandboxes may not need it.
 
 ## Backend Implementation Checklist
 
+- [x] Create viewset with admin/logs, send-message, files, files/read endpoints
+- [x] Register viewset in `posthog/api/__init__.py`
+- [x] Wire send-message to `get_or_start_hogbot()` gateway
+- [x] Forward user_message to sandbox `/admin/message`
+- [x] Forward signal to sandbox `/research/signal`
 - [ ] Add `HOGBOT = "hogbot"` to `Task.OriginProduct` in `products/tasks/backend/models.py`
-- [ ] Create sandbox filesystem proxy endpoints (list files, read file)
-- [ ] Create admin agent S3 log proxy endpoint
-- [ ] Create admin agent message endpoint (POST)
-- [ ] Create research agent S3 log proxy endpoint (per research ID)
-- [ ] Register URLs in `products/hogbot/backend/presentation/urls.py`
-- [ ] Create Temporal workflow for sandbox provisioning
-- [ ] Create agent server entrypoint with admin + research loops
-- [ ] Add `hogbot` to `INSTALLED_APPS` in settings
+- [ ] Replace stub log data with S3 reads (`object_storage.read`)
+- [ ] Replace stub file listing with sandbox filesystem proxy
+- [ ] Implement research agent log endpoint (per research ID)
+- [ ] Implement sandbox server endpoints (`/admin/message`, `/research/signal`, `/health`)
