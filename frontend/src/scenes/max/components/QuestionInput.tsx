@@ -6,7 +6,7 @@ import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
 import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
-import { IconArrowRight, IconCheck, IconPencil, IconStopFilled, IconTrash, IconX } from '@posthog/icons'
+import { IconArrowRight, IconCheck, IconMicrophone, IconPencil, IconStopFilled, IconTrash, IconX } from '@posthog/icons'
 import { LemonButton, LemonSwitch, LemonTextArea, Spinner } from '@posthog/lemon-ui'
 
 import { AIConsentPopoverWrapper } from 'scenes/settings/organization/AIConsentPopoverWrapper'
@@ -21,6 +21,7 @@ import { maxGlobalLogic } from '../maxGlobalLogic'
 import { maxLogic } from '../maxLogic'
 import { maxThreadLogic } from '../maxThreadLogic'
 import { MAX_SLASH_COMMANDS } from '../slash-commands'
+import { voiceLogic } from '../voiceLogic'
 import { SlashCommandAutocomplete } from './SlashCommandAutocomplete'
 
 interface QuestionInputProps {
@@ -140,8 +141,10 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
     ref
 ) {
     const { dataProcessingAccepted, dataProcessingApprovalDisabledReason } = useValues(maxGlobalLogic)
-    const { question } = useValues(maxLogic)
+    const { question, tabId } = useValues(maxLogic)
     const { setQuestion } = useActions(maxLogic)
+    const { recording, transcribing, micPermissionDenied } = useValues(voiceLogic)
+    const { startRecording, stopRecording, disableVoiceMode } = useActions(voiceLogic)
     const { user } = useValues(userLogic)
     const {
         conversation,
@@ -269,7 +272,11 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                         id="textarea-hint"
                                         className="text-secondary absolute top-4 left-4 text-sm pointer-events-none"
                                     >
-                                        {conversation && isSharedThread ? (
+                                        {recording ? (
+                                            <span className="text-danger">Recording… click mic to stop</span>
+                                        ) : transcribing ? (
+                                            'Transcribing…'
+                                        ) : conversation && isSharedThread ? (
                                             `This thread was shared with you by ${conversation.user.first_name} ${conversation.user.last_name}`
                                         ) : threadLoading ? (
                                             'Thinking…'
@@ -298,7 +305,12 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                     data-attr="max-chat-input"
                                     ref={textAreaRef}
                                     value={isSharedThread ? '' : question}
-                                    onChange={(value) => setQuestion(value)}
+                                    onChange={(value) => {
+                                        setQuestion(value)
+                                        if (value) {
+                                            disableVoiceMode()
+                                        }
+                                    }}
                                     onPressEnter={() => {
                                         if (
                                             hasQuestion &&
@@ -355,11 +367,42 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                     </label>
                     <div
                         className={clsx(
-                            'absolute flex items-center',
+                            'absolute flex items-center gap-1',
                             isSharedThread && 'hidden',
                             isThreadVisible ? 'bottom-[9px] right-[9px]' : 'bottom-[7px] right-[7px]'
                         )}
                     >
+                        {!showStopButton && (
+                            <LemonButton
+                                data-attr="max-voice-input"
+                                type="tertiary"
+                                size="small"
+                                icon={
+                                    transcribing ? (
+                                        <Spinner className="text-muted" />
+                                    ) : (
+                                        <IconMicrophone
+                                            className={recording ? 'text-danger animate-pulse' : undefined}
+                                        />
+                                    )
+                                }
+                                onClick={() => {
+                                    if (recording) {
+                                        stopRecording()
+                                    } else {
+                                        startRecording(tabId)
+                                    }
+                                }}
+                                tooltip={
+                                    micPermissionDenied
+                                        ? 'Microphone access denied — check browser settings'
+                                        : recording
+                                          ? 'Stop recording'
+                                          : 'Voice input'
+                                }
+                                disabled={transcribing || inputDisabled}
+                            />
+                        )}
                         <AIConsentPopoverWrapper
                             placement="bottom-end"
                             showArrow

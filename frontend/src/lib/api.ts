@@ -5583,6 +5583,17 @@ const api = {
                 .create({ data: { content } })
         },
 
+        async transcribe(audioBlob: Blob): Promise<{ text: string }> {
+            const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'wav'
+            const formData = new FormData()
+            formData.append('audio', audioBlob, `recording.${ext}`)
+            return api.create(new ApiRequest().conversations().withAction('transcribe').assembleFullUrl(), formData)
+        },
+
+        async tts(text: string): Promise<Response> {
+            return api.createResponse(new ApiRequest().conversations().withAction('tts').assembleFullUrl(), { text })
+        },
+
         queue: {
             list(conversationId: string): Promise<ConversationQueueResponse> {
                 return new ApiRequest().conversation(conversationId).withAction('queue').get()

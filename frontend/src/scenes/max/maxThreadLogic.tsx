@@ -83,6 +83,7 @@ import {
     threadEndsWithMultiQuestionForm,
 } from './utils'
 import { getRandomThinkingMessage } from './utils/thinkingMessages'
+import { voiceLogic } from './voiceLogic'
 
 /** Key for persisting pending AI prompts across page reloads (e.g., OAuth redirects) */
 export const PENDING_AI_PROMPT_KEY = 'posthog_ai_pending_prompt'
@@ -1124,6 +1125,17 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
                 const nextMessage = values.queuedMessages[0]
                 actions.consumeQueuedMessage(nextMessage)
                 actions.askMax(nextMessage.content)
+            }
+
+            // Auto-play TTS when voice mode is active (skip if queue is being consumed — TTS will fire on the final completion)
+            if (!shouldConsumeSandboxQueue) {
+                const voice = voiceLogic.findMounted()
+                if (voice?.values.voiceModeEnabled) {
+                    const lastAssistantMsg = [...values.threadRaw].reverse().find((m) => isAssistantMessage(m))
+                    if (lastAssistantMsg?.content) {
+                        voice.actions.playResponse(lastAssistantMsg.content)
+                    }
+                }
             }
 
             // Must go last. Otherwise, the logic will be unmounted before the lifecycle finishes.

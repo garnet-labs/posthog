@@ -5,18 +5,20 @@ from typing import cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.http import StreamingHttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 
 import pydantic
 import structlog
 from asgiref.sync import async_to_sync as asgi_async_to_sync
 from drf_spectacular.utils import extend_schema
+from elevenlabs import ElevenLabs
 from loginas.utils import is_impersonated_session
 from prometheus_client import Histogram
 from rest_framework import exceptions, serializers, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import Throttled
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
+from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
@@ -60,6 +62,7 @@ from ee.hogai.utils.types import PartialAssistantState
 from ee.models.assistant import Conversation
 
 logger = structlog.get_logger(__name__)
+elevenlabs_client = ElevenLabs()
 
 RESEARCH_RATE_LIMIT_MESSAGE = (
     "You've reached the usage limit for Research mode, which is currently in beta "
@@ -573,3 +576,40 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             return Response({"error": "Failed to append message"}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         return Response({"id": message.id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["POST"], parser_classes=[MultiPartParser])
+    def transcribe(self, request: Request, *args, **kwargs):
+        audio = request.FILES.get("audio")
+        if not audio:
+            return Response({"error": "No audio file provided"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            transcript = elevenlabs_client.speech_to_text.convert(
+                model_id="scribe_v1",
+                file=audio,
+                tag_audio_events=False,
+            )
+        except Exception:
+            logger.exception("ElevenLabs STT failed")
+            return Response({"error": "Transcription failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"text": transcript.text})
+
+    @action(detail=False, methods=["POST"])
+    def tts(self, request: Request, *args, **kwargs):
+        text = (request.data.get("text") or "")[:5000]
+        if not text:
+            return Response({"error": "No text provided"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            audio = elevenlabs_client.text_to_speech.convert(
+                voice_id="JBFqnCBsd6RMkjVDRZzb",
+                model_id="eleven_flash_v2_5",
+                text=text,
+                output_format="mp3_44100_128",
+            )
+        except Exception:
+            logger.exception("ElevenLabs TTS failed")
+            return Response({"error": "Text-to-speech failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        response = HttpResponse(content_type="audio/mpeg")
+        for chunk in audio:
+            if chunk:
+                response.write(chunk)
+        return response

@@ -18,6 +18,8 @@ import {
     IconThumbsDownFilled,
     IconThumbsUp,
     IconThumbsUpFilled,
+    IconPlay,
+    IconStopFilled,
     IconWarning,
     IconWrench,
     IconX,
@@ -108,6 +110,7 @@ import {
     visualizationTypeToQuery,
 } from './utils'
 import { getThinkingMessageFromResponse } from './utils/thinkingMessages'
+import { voiceLogic } from './voiceLogic'
 
 // Helper function to check if a message is an error or failure
 function isErrorMessage(message: ThreadMessage): boolean {
@@ -1522,6 +1525,8 @@ function SuccessActions({
     const { ratingForTraceId } = useValues(maxMessageRatingsLogic)
     const { setRatingForTraceId } = useActions(maxMessageRatingsLogic)
     const { retryLastMessage } = useActions(maxThreadLogic)
+    const { playbackActive } = useValues(voiceLogic)
+    const { playResponse, stopPlayback } = useActions(voiceLogic)
     const { user } = useValues(userLogic)
     const { isDev, preflight } = useValues(preflightLogic)
     const contextTraceId = useTraceId()
@@ -1562,6 +1567,21 @@ function SuccessActions({
                         size="xsmall"
                         tooltip="Copy answer"
                         onClick={() => copyToClipboard(stripMarkdown(content))}
+                    />
+                )}
+                {content && (
+                    <LemonButton
+                        icon={playbackActive ? <IconStopFilled /> : <IconPlay />}
+                        type="tertiary"
+                        size="xsmall"
+                        tooltip={playbackActive ? 'Stop playback' : 'Read aloud'}
+                        onClick={() => {
+                            if (playbackActive) {
+                                stopPlayback()
+                            } else {
+                                playResponse(content)
+                            }
+                        }}
                     />
                 )}
                 {!hideRatingAndRetry && rating !== 'bad' && (
