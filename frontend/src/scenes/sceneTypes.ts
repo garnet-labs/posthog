@@ -188,6 +188,7 @@ export enum Scene {
     NewAction = 'NewAction',
     TaskDetail = 'TaskDetail',
     TaskTracker = 'TaskTracker',
+    HogbotScene = 'HogbotScene',
     OrganizationDeactivated = 'OrganizationDeactivated',
     CustomerJourneyTemplates = 'CustomerJourneyTemplates',
 }

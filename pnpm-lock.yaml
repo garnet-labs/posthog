@@ -634,6 +634,9 @@ importers:
       '@posthog/products-groups':
         specifier: workspace:*
         version: link:../products/groups
+      '@posthog/products-hogbot':
+        specifier: workspace:*
+        version: link:../products/hogbot
       '@posthog/products-links':
         specifier: workspace:*
         version: link:../products/links
@@ -2253,6 +2256,8 @@ importers:
         version: 18.3.1
 
   products/growth: {}
+
+  products/hogbot: {}
 
   products/links:
     dependencies:
