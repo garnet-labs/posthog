@@ -23,7 +23,7 @@ class ActionPredictionModelRunSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "prediction_model",
-            "is_winning",
+            "experiment_id",
             "model_url",
             "metrics",
             "feature_importance",
@@ -43,7 +43,19 @@ class ActionPredictionModelRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelView
     http_method_names = ["get", "post", "patch", "head", "options"]
 
     def safely_get_queryset(self, queryset: QuerySet) -> QuerySet:
-        return queryset.filter(team_id=self.team_id).select_related("created_by").order_by("-created_at")
+        qs = queryset.filter(team_id=self.team_id).select_related("created_by").order_by("-created_at")
+
+        # Filter by prediction model
+        prediction_model = self.request.query_params.get("prediction_model")
+        if prediction_model:
+            qs = qs.filter(prediction_model_id=prediction_model)
+
+        # Filter by experiment_id
+        experiment_id = self.request.query_params.get("experiment_id")
+        if experiment_id:
+            qs = qs.filter(experiment_id=experiment_id)
+
+        return qs
 
     def perform_create(self, serializer: ActionPredictionModelRunSerializer) -> None:
         serializer.save(team_id=self.team_id, created_by=self.request.user)

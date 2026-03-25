@@ -28,7 +28,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.pipeline import Pipeline
-from utils import create_model_run, fetch_features
+from utils import create_model_run, fetch_features, set_winning_run
 from xgboost import XGBClassifier
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -37,8 +37,9 @@ MODEL_PATH = os.environ.get("MODEL_PATH", "/tmp/model.pkl")
 METRICS_PATH = os.environ.get("METRICS_PATH", "/tmp/metrics.json")
 DATA_PATH = "/tmp/train_data.parquet"
 
-# IMPORTANT: The agent MUST set this to the ActionPredictionModel UUID.
+# IMPORTANT: The agent MUST set these.
 PREDICTION_MODEL_ID = os.environ.get("PREDICTION_MODEL_ID", "")
+EXPERIMENT_ID = os.environ.get("EXPERIMENT_ID", "")  # UUID grouping runs in the same agent session
 
 SEED = 42
 TEST_FRACTION = 0.25
@@ -240,12 +241,15 @@ def main() -> None:
 
         run = create_model_run(
             PREDICTION_MODEL_ID,
-            is_winning=True,  # agent sets this based on comparison with previous best
+            experiment_id=EXPERIMENT_ID or None,
             metrics=metrics,
             feature_importance=feature_importance,
             artifact_scripts=artifact_scripts,
         )
         print(f"Model run recorded: {run['id']}")
+
+        # Set as winning run on the model (agent decides this based on comparison)
+        set_winning_run(PREDICTION_MODEL_ID, run["id"])
     else:
         print("\nPREDICTION_MODEL_ID not set — skipping model run recording.")
 

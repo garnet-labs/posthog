@@ -79,6 +79,14 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     )
     event_name = models.CharField(max_length=400, null=True, blank=True)
     lookback_days = models.PositiveIntegerField()
+    winning_run = models.ForeignKey(
+        "ActionPredictionModelRun",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="The current winning run for this model. Set by the agent after the experiment loop.",
+    )
 
     class Meta:
         indexes = [
@@ -106,9 +114,10 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         on_delete=models.CASCADE,
         related_name="action_prediction_model_runs",
     )
-    is_winning = models.BooleanField(
-        default=False,
-        help_text="Whether this run produced a winning prediction model.",
+    experiment_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text="Groups runs from the same agent experiment session.",
     )
     model_url = models.URLField(
         max_length=2000,

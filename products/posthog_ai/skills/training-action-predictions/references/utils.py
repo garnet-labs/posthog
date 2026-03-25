@@ -59,7 +59,7 @@ def fetch_features(query: str, output_path: str) -> pd.DataFrame:
 def create_model_run(
     prediction_model_id: str,
     *,
-    is_winning: bool = False,
+    experiment_id: str | None = None,
     metrics: dict | None = None,
     feature_importance: dict | None = None,
     artifact_scripts: dict | None = None,
@@ -73,17 +73,55 @@ def create_model_run(
     headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
     payload = {
         "prediction_model": prediction_model_id,
-        "is_winning": is_winning,
         "model_url": model_url,
         "metrics": metrics or {},
         "feature_importance": feature_importance or {},
         "artifact_scripts": artifact_scripts or {},
     }
+    if experiment_id:
+        payload["experiment_id"] = experiment_id
 
     resp = requests.post(url, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
     run = resp.json()
-    print(f"Recorded model run: {run['id']} (is_winning={is_winning})")
+    print(f"Recorded model run: {run['id']}")
+    return run
+
+
+def set_winning_run(prediction_model_id: str, run_id: str) -> dict:
+    """Set the winning run on a prediction model via PATCH."""
+    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_models/{prediction_model_id}/"
+    headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
+    payload = {"winning_run": run_id}
+
+    resp = requests.patch(url, json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+    model = resp.json()
+    print(f"Set winning run on model {prediction_model_id} → {run_id}")
+    return model
+
+
+def get_winning_run(prediction_model_id: str) -> dict | None:
+    """Fetch the winning run for a prediction model. Returns None if no winning run."""
+    # First get the model to find the winning_run ID
+    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_models/{prediction_model_id}/"
+    headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
+
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    model = resp.json()
+
+    winning_run_id = model.get("winning_run")
+    if not winning_run_id:
+        print(f"No winning run set for model {prediction_model_id}")
+        return None
+
+    # Fetch the full run
+    run_url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_model_runs/{winning_run_id}/"
+    resp = requests.get(run_url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    run = resp.json()
+    print(f"Winning run: {run['id']} (AUC-ROC: {run.get('metrics', {}).get('auc_roc', '?')})")
     return run
 
 

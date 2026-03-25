@@ -42,6 +42,7 @@ class ActionPredictionModelSerializer(serializers.ModelSerializer):
             "action",
             "event_name",
             "lookback_days",
+            "winning_run",
             "created_by",
             "created_at",
             "updated_at",
