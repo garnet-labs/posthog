@@ -83,7 +83,7 @@ prediction-model-run-create(
   model_url="https://placeholder.s3.amazonaws.com/models/<run_id>.pkl",
   metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
   feature_importance={"days_since_last_event": 0.15, ...},
-  artifact_scripts={"query": "<HogQL query>", "train": "<train.py source>", "predict": "<predict.py source>"}
+  artifact_scripts={"query": "<HogQL query>", "utils": "<utils.py source>", "train": "<train.py source>", "predict": "<predict.py source>"}
 )
 ```
 
@@ -133,7 +133,7 @@ After the loop, produce a summary:
 - **Calibration**: always isotonic via sklearn Pipeline
 - **Features**: aim for 15-40. More than 50 risks overfitting
 - **Imbalance**: always use `scale_pos_weight`, never downsample
-- **Reproducibility**: seed=42, every experiment recorded with query + train + predict scripts in `artifact_scripts`
+- **Reproducibility**: seed=42, every experiment recorded with query + utils + train + predict scripts in `artifact_scripts`. Artifacts must be fully self-contained — the sandbox writes each key to a file and runs them.
 - **Winning runs**: set `is_winning=true` at creation time — compare metrics locally
 - **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
 - **model_url**: must be a valid `https://` URL, not `s3://`

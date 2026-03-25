@@ -127,7 +127,7 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     artifact_scripts = models.JSONField(
         default=dict,
         blank=True,
-        help_text="Python scripts used in this run. Keys: data, preprocess, train, predict.",
+        help_text="Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script).",
     )
 
     class Meta:

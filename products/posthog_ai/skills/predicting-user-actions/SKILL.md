@@ -28,6 +28,7 @@ The prediction script is in `training-action-predictions/references/`:
 2. List runs via `prediction-model-run-list` and find the run where `is_winning: true`
 3. Extract from the run:
    - `artifact_scripts.query` — the HogQL training query (adapt for scoring)
+   - `artifact_scripts.utils` — the shared utils.py (execute_hogql, fetch_features)
    - `artifact_scripts.predict` — the predict.py script
    - `metrics` — to report model quality alongside predictions
    - `feature_importance` — to explain which features drive predictions
@@ -38,9 +39,10 @@ If no winning run exists, pick the one with the highest `metrics.auc_roc`.
 
 The `predict.py` script is self-contained — it fetches its own data and scores users:
 
-1. Adapt the training query for scoring: set `T = now()`, remove the label column
-2. Write the adapted `predict.py` script
-3. Execute it — produces `scores.parquet` and `scores.json`
+1. Write `utils.py` from `artifact_scripts.utils`
+2. Adapt the training query for scoring: set `T = now()`, remove the label column
+3. Write the adapted `predict.py` script from `artifact_scripts.predict`
+4. Execute it — produces `scores.parquet` and `scores.json`
 
 The sklearn Pipeline in `model.pkl` handles all preprocessing internally, so feature alignment is guaranteed as long as the scoring query produces the same column names as training.
 
