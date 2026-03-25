@@ -10,17 +10,17 @@ import (
 type Category string
 
 const (
-	CategoryBackend      Category = "Backend / products"
-	CategoryFrontend     Category = "Frontend / products"
-	CategoryFrontendCore Category = "Frontend"
-	CategoryRust         Category = "Rust"
-	CategoryGo           Category = "Go"
-	CategoryE2E          Category = "E2E"
+	CategoryBackend  Category = "Backend"
+	CategoryFrontend Category = "Frontend"
+	CategoryRust     Category = "Rust"
+	CategoryGo       Category = "Go"
+	CategoryE2E      Category = "E2E"
 )
 
 type Suite struct {
 	Name     string
 	Category Category
+	RelPath  string // path relative to repo root (used for tree layout)
 	Dir      string // working directory for the command
 	Cmd      string // shell command to run
 }
@@ -60,134 +60,93 @@ func Discover(repoRoot string) ([]Suite, error) {
 	}
 	suites = append(suites, e2e...)
 
+	// Sort by RelPath so the tree follows filesystem order
+	sort.Slice(suites, func(i, j int) bool {
+		return suites[i].RelPath < suites[j].RelPath
+	})
+
 	return suites, nil
 }
 
-// discoverBackend finds Python test directories containing APIBaseTest usages.
-// It scans products/*/, posthog/, and ee/ and groups by product or subdirectory.
+// discoverBackend finds individual Python test files (test_*.py)
+// under products/*/, posthog/, and ee/.
 func discoverBackend(repoRoot string, ig *ignoreMatcher) ([]Suite, error) {
 	var suites []Suite
 
-	// Products — one suite per product that has APIBaseTest tests
-	productsDir := filepath.Join(repoRoot, "products")
-	if entries, err := os.ReadDir(productsDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
+	for _, searchRoot := range []string{"products", "posthog", "ee"} {
+		dir := filepath.Join(repoRoot, searchRoot)
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		_ = ig.Walk(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
 			}
-			dir := filepath.Join(productsDir, e.Name())
-			if !hasPythonTestFiles(dir, ig) {
-				continue
+			if d.IsDir() {
+				// Skip frontend subdirs — no Python tests there
+				if d.Name() == "frontend" {
+					return filepath.SkipDir
+				}
+				return nil
 			}
-			rel, _ := filepath.Rel(repoRoot, dir)
+			if !isPythonTestFile(d.Name()) {
+				return nil
+			}
+			rel, _ := filepath.Rel(repoRoot, path)
 			suites = append(suites, Suite{
-				Name:     e.Name(),
+				Name:     d.Name(),
 				Category: CategoryBackend,
+				RelPath:  rel,
 				Dir:      repoRoot,
-				Cmd:      "pytest " + rel + "/",
+				Cmd:      "pytest " + rel,
 			})
-		}
-	}
-
-	// Core dirs — one suite per top-level subdirectory of posthog/ and ee/
-	for _, root := range []string{"posthog", "ee"} {
-		rootDir := filepath.Join(repoRoot, root)
-		entries, err := os.ReadDir(rootDir)
-		if err != nil {
-			continue
-		}
-		cat := Category("Backend / " + root)
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			dir := filepath.Join(rootDir, e.Name())
-			if !hasPythonTestFiles(dir, ig) {
-				continue
-			}
-			rel, _ := filepath.Rel(repoRoot, dir)
-			suites = append(suites, Suite{
-				Name:     e.Name(),
-				Category: cat,
-				Dir:      repoRoot,
-				Cmd:      "pytest " + rel + "/",
-			})
-		}
-	}
-
-	sort.Slice(suites, func(i, j int) bool {
-		if suites[i].Category != suites[j].Category {
-			return suites[i].Category < suites[j].Category
-		}
-		return suites[i].Name < suites[j].Name
-	})
-	return suites, nil
-}
-
-// discoverFrontend finds products with *.test.ts(x) files under products/*/frontend/
-// and top-level directories under frontend/src/ that contain test files.
-func discoverFrontend(repoRoot string, ig *ignoreMatcher) ([]Suite, error) {
-	var suites []Suite
-
-	// Products
-	productsDir := filepath.Join(repoRoot, "products")
-	entries, err := os.ReadDir(productsDir)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		frontendDir := filepath.Join(productsDir, e.Name(), "frontend")
-		if !hasTSTestFiles(frontendDir, ig) {
-			continue
-		}
-		suites = append(suites, Suite{
-			Name:     e.Name(),
-			Category: CategoryFrontend,
-			Dir:      repoRoot,
-			Cmd:      "pnpm --filter=@posthog/frontend jest products/" + e.Name() + "/",
+			return nil
 		})
 	}
 
-	// Top-level frontend/src/ directories
-	srcDir := filepath.Join(repoRoot, "frontend", "src")
-	srcEntries, err := os.ReadDir(srcDir)
-	if err == nil {
-		var hasRootTests bool
-		for _, e := range srcEntries {
-			if e.IsDir() {
-				dir := filepath.Join(srcDir, e.Name())
-				if !hasTSTestFiles(dir, ig) {
-					continue
-				}
-				suites = append(suites, Suite{
-					Name:     e.Name(),
-					Category: CategoryFrontendCore,
-					Dir:      repoRoot,
-					Cmd:      "pnpm --filter=@posthog/frontend jest frontend/src/" + e.Name() + "/",
-				})
-			} else if isTSTestFile(e.Name()) {
-				hasRootTests = true
+	return suites, nil
+}
+
+func isPythonTestFile(name string) bool {
+	return strings.HasSuffix(name, ".py") &&
+		(strings.HasPrefix(name, "test_") || strings.HasSuffix(name, "_test.py"))
+}
+
+// discoverFrontend finds individual *.test.ts(x) files under products/*/frontend/
+// and frontend/src/.
+func discoverFrontend(repoRoot string, ig *ignoreMatcher) ([]Suite, error) {
+	var suites []Suite
+
+	for _, searchRoot := range []string{
+		filepath.Join("products"),
+		filepath.Join("frontend", "src"),
+	} {
+		dir := filepath.Join(repoRoot, searchRoot)
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		_ = ig.Walk(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
 			}
-		}
-		if hasRootTests {
+			if d.IsDir() {
+				return nil
+			}
+			if !isTSTestFile(d.Name()) {
+				return nil
+			}
+			rel, _ := filepath.Rel(repoRoot, path)
 			suites = append(suites, Suite{
-				Name:     "src",
-				Category: CategoryFrontendCore,
+				Name:     d.Name(),
+				Category: CategoryFrontend,
+				RelPath:  rel,
 				Dir:      repoRoot,
-				Cmd:      "pnpm --filter=@posthog/frontend jest --testPathPattern='frontend/src/[^/]+\\.test\\.tsx?$'",
+				Cmd:      "pnpm --filter=@posthog/frontend jest " + rel,
 			})
-		}
+			return nil
+		})
 	}
 
-	sort.Slice(suites, func(i, j int) bool {
-		if suites[i].Category != suites[j].Category {
-			return suites[i].Category < suites[j].Category
-		}
-		return suites[i].Name < suites[j].Name
-	})
 	return suites, nil
 }
 
@@ -218,6 +177,7 @@ func discoverRust(repoRoot string) ([]Suite, error) {
 		suites = append(suites, Suite{
 			Name:     name,
 			Category: cat,
+			RelPath:  filepath.Join("rust", member),
 			Dir:      rustDir,
 			Cmd:      "cargo test -p " + name,
 		})
@@ -291,6 +251,7 @@ func discoverE2E(repoRoot string, ig *ignoreMatcher) ([]Suite, error) {
 		suites = append(suites, Suite{
 			Name:     name,
 			Category: cat,
+			RelPath:  filepath.Join("playwright", "e2e", s.relPath),
 			Dir:      playwrightDir,
 			Cmd:      "npx playwright test e2e/" + s.relPath,
 		})
@@ -306,127 +267,77 @@ func discoverE2E(repoRoot string, ig *ignoreMatcher) ([]Suite, error) {
 	return suites, nil
 }
 
-// discoverGo finds Go modules (go.mod files) that contain _test.go files,
-// excluding the phtest module itself.
+// discoverGo finds Go test packages within Go modules,
+// excluding the phtest module itself. One suite per package with _test.go files.
 func discoverGo(repoRoot string, ig *ignoreMatcher) ([]Suite, error) {
 	var suites []Suite
 
-	err := ig.Walk(repoRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || d.Name() != "go.mod" {
+	// First find all go.mod files to identify module roots
+	var modules []struct {
+		dir    string // absolute path
+		rel    string // relative to repoRoot
+	}
+	_ = ig.Walk(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "go.mod" {
 			return nil
 		}
 		dir := filepath.Dir(path)
 		rel, _ := filepath.Rel(repoRoot, dir)
-
-		// Skip phtest itself
 		if rel == filepath.Join("tools", "phtest") {
 			return nil
 		}
-
-		if !hasGoTestFiles(dir, ig) {
-			return nil
-		}
-
-		// Use the last path segment as the suite name
-		name := filepath.Base(dir)
-
-		suites = append(suites, Suite{
-			Name:     name,
-			Category: CategoryGo,
-			Dir:      dir,
-			Cmd:      "go test ./...",
-		})
+		modules = append(modules, struct {
+			dir string
+			rel string
+		}{dir, rel})
 		return nil
 	})
-	if err != nil {
-		return nil, err
+
+	// For each module, find packages with test files
+	for _, mod := range modules {
+		_ = ig.Walk(mod.dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || !d.IsDir() {
+				return nil
+			}
+			if !dirHasGoTests(path) {
+				return nil
+			}
+			rel, _ := filepath.Rel(repoRoot, path)
+			pkgRel, _ := filepath.Rel(mod.dir, path)
+			pkg := "./" + filepath.ToSlash(pkgRel)
+			if pkgRel == "." {
+				pkg = "."
+			}
+			suites = append(suites, Suite{
+				Name:     filepath.Base(path),
+				Category: CategoryGo,
+				RelPath:  rel,
+				Dir:      mod.dir,
+				Cmd:      "go test " + pkg,
+			})
+			return nil
+		})
 	}
 
-	sort.Slice(suites, func(i, j int) bool {
-		return suites[i].Name < suites[j].Name
-	})
 	return suites, nil
 }
 
-// hasGoTestFiles returns true if dir contains any _test.go files.
-func hasGoTestFiles(dir string, ig *ignoreMatcher) bool {
-	found := false
-	_ = ig.Walk(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || found {
-			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if strings.HasSuffix(d.Name(), "_test.go") {
-			found = true
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return found
-}
-
-// hasPythonTestFiles returns true if dir contains any .py files referencing APIBaseTest.
-func hasPythonTestFiles(dir string, ig *ignoreMatcher) bool {
-	if _, err := os.Stat(dir); err != nil {
+// dirHasGoTests returns true if the directory directly contains _test.go files (non-recursive).
+func dirHasGoTests(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
 		return false
 	}
-	found := false
-	_ = ig.Walk(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || found {
-			return filepath.SkipDir
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), "_test.go") {
+			return true
 		}
-		if d.IsDir() {
-			// Skip frontend subdirs — no Python tests there
-			if d.Name() == "frontend" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".py") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		if strings.Contains(string(data), "APIBaseTest") {
-			found = true
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return found
+	}
+	return false
 }
 
 func isTSTestFile(name string) bool {
 	return strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, ".test.tsx")
-}
-
-// hasTSTestFiles returns true if dir contains any *.test.ts or *.test.tsx files.
-func hasTSTestFiles(dir string, ig *ignoreMatcher) bool {
-	if _, err := os.Stat(dir); err != nil {
-		return false
-	}
-	found := false
-	_ = ig.Walk(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || found {
-			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if isTSTestFile(d.Name()) {
-			found = true
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return found
 }
 
 // parseCargoMembers extracts workspace member paths from Cargo.toml content.

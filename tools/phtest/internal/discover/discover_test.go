@@ -37,73 +37,103 @@ func TestDiscover_findsAllCategories(t *testing.T) {
 		cats[s.Category]++
 	}
 
-	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryFrontendCore, CategoryRust, CategoryGo, CategoryE2E} {
+	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryRust, CategoryGo, CategoryE2E} {
 		if cats[cat] == 0 {
 			t.Errorf("expected suites for category %q", cat)
 		}
 	}
 }
 
-func TestDiscover_backendFindsProducts(t *testing.T) {
+func TestDiscover_sortedByRelPath(t *testing.T) {
 	root := repoRoot(t)
-	ig := newIgnoreMatcher(root)
-	suites, err := discoverBackend(root, ig)
+	suites, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	var productSuites, coreSuites int
-	for _, s := range suites {
-		if s.Category == CategoryBackend {
-			productSuites++
-		} else {
-			coreSuites++
+	for i := 1; i < len(suites); i++ {
+		if suites[i].RelPath < suites[i-1].RelPath {
+			t.Errorf("suites not sorted: %q before %q", suites[i-1].RelPath, suites[i].RelPath)
+			break
 		}
-	}
-	if productSuites == 0 {
-		t.Error("expected backend product suites")
-	}
-	if coreSuites == 0 {
-		t.Error("expected backend core suites (posthog/ or ee/)")
 	}
 }
 
-func TestDiscover_backendUsePytest(t *testing.T) {
+func TestDiscover_backendFindsTestFiles(t *testing.T) {
 	root := repoRoot(t)
 	ig := newIgnoreMatcher(root)
 	suites, err := discoverBackend(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(suites) < 10 {
+		t.Errorf("expected at least 10 backend test files, got %d", len(suites))
+	}
+
+	// All should be individual .py files
 	for _, s := range suites {
+		if !strings.HasSuffix(s.RelPath, ".py") {
+			t.Errorf("expected .py RelPath, got %q", s.RelPath)
+		}
 		if !strings.HasPrefix(s.Cmd, "pytest ") {
-			t.Errorf("suite %q: expected pytest command, got %q", s.Name, s.Cmd)
+			t.Errorf("expected pytest command, got %q", s.Cmd)
 		}
+	}
+
+	// Should find files under products/, posthog/, and ee/
+	var hasProducts, hasPosthog, hasEE bool
+	for _, s := range suites {
+		switch {
+		case strings.HasPrefix(s.RelPath, "products/"):
+			hasProducts = true
+		case strings.HasPrefix(s.RelPath, "posthog/"):
+			hasPosthog = true
+		case strings.HasPrefix(s.RelPath, "ee/"):
+			hasEE = true
+		}
+	}
+	if !hasProducts {
+		t.Error("expected test files under products/")
+	}
+	if !hasPosthog {
+		t.Error("expected test files under posthog/")
+	}
+	if !hasEE {
+		t.Error("expected test files under ee/")
 	}
 }
 
-func TestDiscover_frontendFindsProductsAndCore(t *testing.T) {
+func TestDiscover_frontendFindsTestFiles(t *testing.T) {
 	root := repoRoot(t)
 	ig := newIgnoreMatcher(root)
 	suites, err := discoverFrontend(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(suites) < 10 {
+		t.Errorf("expected at least 10 frontend test files, got %d", len(suites))
+	}
 
-	var productSuites, coreSuites int
 	for _, s := range suites {
-		switch s.Category {
-		case CategoryFrontend:
-			productSuites++
-		case CategoryFrontendCore:
-			coreSuites++
+		if !isTSTestFile(filepath.Base(s.RelPath)) {
+			t.Errorf("expected .test.ts(x) RelPath, got %q", s.RelPath)
 		}
 	}
-	if productSuites == 0 {
-		t.Error("expected frontend product suites")
+
+	// Should find files under both products/ and frontend/src/
+	var hasProducts, hasFrontendSrc bool
+	for _, s := range suites {
+		switch {
+		case strings.HasPrefix(s.RelPath, "products/"):
+			hasProducts = true
+		case strings.HasPrefix(s.RelPath, "frontend/src/"):
+			hasFrontendSrc = true
+		}
 	}
-	if coreSuites == 0 {
-		t.Error("expected frontend core suites (frontend/src/)")
+	if !hasProducts {
+		t.Error("expected test files under products/")
+	}
+	if !hasFrontendSrc {
+		t.Error("expected test files under frontend/src/")
 	}
 }
 
@@ -127,17 +157,6 @@ func TestDiscover_rustFindsPackages(t *testing.T) {
 	if !found {
 		t.Error("expected to find feature-flags crate")
 	}
-
-	// common/ crates should be in a subcategory
-	var commonCount int
-	for _, s := range suites {
-		if strings.HasPrefix(string(s.Category), "Rust / ") {
-			commonCount++
-		}
-	}
-	if commonCount == 0 {
-		t.Error("expected rust subcategories for nested crates (e.g. common/)")
-	}
 }
 
 func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
@@ -150,43 +169,45 @@ func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
 	if len(suites) < 5 {
 		t.Errorf("expected at least 5 E2E spec files, got %d", len(suites))
 	}
-
-	// Should have subcategories for nested directories
-	var subCatCount int
 	for _, s := range suites {
-		if strings.HasPrefix(string(s.Category), "E2E / ") {
-			subCatCount++
+		if !strings.HasSuffix(s.RelPath, ".spec.ts") {
+			t.Errorf("expected .spec.ts RelPath, got %q", s.RelPath)
 		}
-	}
-	if subCatCount == 0 {
-		t.Error("expected E2E subcategories for nested spec directories")
 	}
 }
 
-func TestDiscover_goFindsModules(t *testing.T) {
+func TestDiscover_goFindsPackages(t *testing.T) {
 	root := repoRoot(t)
 	ig := newIgnoreMatcher(root)
 	suites, err := discoverGo(root, ig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(suites) < 2 {
-		t.Errorf("expected at least 2 Go modules with tests, got %d", len(suites))
+	if len(suites) < 5 {
+		t.Errorf("expected at least 5 Go test packages, got %d", len(suites))
 	}
 
-	names := make(map[string]bool)
+	// Should find packages within livestream and phrocs modules
+	var hasLivestream, hasPhrocs bool
 	for _, s := range suites {
-		names[s.Name] = true
-		if s.Category != CategoryGo {
-			t.Errorf("suite %q: expected category %q, got %q", s.Name, CategoryGo, s.Category)
-		}
-		if s.Cmd != "go test ./..." {
-			t.Errorf("suite %q: expected 'go test ./...', got %q", s.Name, s.Cmd)
+		switch {
+		case strings.HasPrefix(s.RelPath, "livestream"):
+			hasLivestream = true
+		case strings.HasPrefix(s.RelPath, "tools/phrocs"):
+			hasPhrocs = true
 		}
 	}
-	for _, expected := range []string{"livestream", "phrocs"} {
-		if !names[expected] {
-			t.Errorf("expected to find Go module %q", expected)
+	if !hasLivestream {
+		t.Error("expected Go packages under livestream/")
+	}
+	if !hasPhrocs {
+		t.Error("expected Go packages under tools/phrocs/")
+	}
+
+	// Commands should target specific packages, not ./...
+	for _, s := range suites {
+		if strings.Contains(s.Cmd, "./...") {
+			t.Errorf("expected per-package command, got %q", s.Cmd)
 		}
 	}
 }

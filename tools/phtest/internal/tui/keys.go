@@ -69,18 +69,22 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 		m.viewport.GotoBottom()
 		m.viewportAtBottom = true
 
-	case key.Matches(msg, m.keys.RunSuite):
+	case key.Matches(msg, m.keys.Toggle):
 		if m.focusedPane == focusSidebar {
 			if e := m.entries[m.entryCursor]; e.isNode {
 				m.toggleNode(e.path)
+			}
+		}
+
+	case key.Matches(msg, m.keys.RunSuite):
+		if m.focusedPane == focusSidebar {
+			if e := m.entries[m.entryCursor]; e.isNode {
+				go m.mgr.RunPath(e.path)
 			} else if s := m.activeSuite(); s != nil {
 				send := m.mgr.Send()
 				go func() { _ = s.Start(send) }()
 			}
 		}
-
-	case key.Matches(msg, m.keys.RunAll):
-		go m.mgr.RunAll()
 
 	case key.Matches(msg, m.keys.RunFailed):
 		go m.mgr.RunFailed()

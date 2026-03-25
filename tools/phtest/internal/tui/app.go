@@ -2,6 +2,7 @@ package tui
 
 import (
 	"log"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -9,7 +10,6 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/posthog/posthog/phtest/internal/discover"
 	"github.com/posthog/posthog/phtest/internal/runner"
 )
 
@@ -65,8 +65,9 @@ func New(mgr *runner.SuiteManager, logger *log.Logger) Model {
 	keys := defaultKeyMap()
 	collapsed := make(map[string]bool)
 	for _, s := range mgr.Suites() {
-		parts := strings.Split(string(s.Suite.Category), " / ")
-		for i := range parts {
+		parts := strings.Split(s.Suite.RelPath, string(filepath.Separator))
+		// Collapse all intermediate directories (not the leaf)
+		for i := range parts[:len(parts)-1] {
 			collapsed[strings.Join(parts[:i+1], "/")] = true
 		}
 	}
@@ -91,11 +92,13 @@ func buildSidebarEntries(suites []*runner.TestSuite, collapsed map[string]bool) 
 	emitted := make(map[string]bool)
 
 	for _, s := range suites {
-		parts := strings.Split(string(s.Suite.Category), " / ")
+		parts := strings.Split(s.Suite.RelPath, string(filepath.Separator))
 
-		// Emit tree nodes for each depth level, stopping if an ancestor is collapsed.
+		// Intermediate segments become tree nodes; the leaf is the suite itself.
+		dirParts := parts[:len(parts)-1]
+
 		visible := true
-		for i, part := range parts {
+		for i, part := range dirParts {
 			path := strings.Join(parts[:i+1], "/")
 			if !visible {
 				break
@@ -116,8 +119,8 @@ func buildSidebarEntries(suites []*runner.TestSuite, collapsed map[string]bool) 
 
 		if visible {
 			entries = append(entries, sidebarEntry{
-				label: s.Suite.Name,
-				depth: len(parts),
+				label: parts[len(parts)-1],
+				depth: len(dirParts),
 				suite: s,
 			})
 		}
@@ -331,17 +334,13 @@ func (m *Model) toggleNode(path string) {
 	m.rebuildEntries()
 }
 
-// categoryToPath converts a Category like "Backend / products" to "Backend/products".
-func categoryToPath(cat discover.Category) string {
-	return strings.Join(strings.Split(string(cat), " / "), "/")
-}
-
 // nodeStatus returns the aggregate status of all suites under a tree node path.
 func (m Model) nodeStatus(path string) runner.Status {
+	prefix := path + "/"
 	var hasRunning, hasFailed, hasPassed bool
 	for _, s := range m.mgr.Suites() {
-		catPath := categoryToPath(s.Suite.Category)
-		if catPath != path && !strings.HasPrefix(catPath, path+"/") {
+		rp := strings.ReplaceAll(s.Suite.RelPath, string(filepath.Separator), "/")
+		if rp != path && !strings.HasPrefix(rp, prefix) {
 			continue
 		}
 		switch s.Status() {

@@ -64,7 +64,7 @@ func TestParsePytest_bareFormat(t *testing.T) {
 		"!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!",
 		"1 failed, 416 passed in 63.97s (0:01:03)",
 	}
-	r := Parse("Backend / ee", lines)
+	r := Parse(discover.CategoryBackend, lines)
 	if r == nil {
 		t.Fatal("expected result")
 	}

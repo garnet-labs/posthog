@@ -11,8 +11,8 @@ type keyMap struct {
 	GotoBottom key.Binding
 	NextPane   key.Binding
 	PrevPane   key.Binding
+	Toggle     key.Binding
 	RunSuite   key.Binding
-	RunAll     key.Binding
 	RunFailed  key.Binding
 	StopSuite  key.Binding
 	Search     key.Binding
@@ -57,13 +57,13 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("⇧↹:", "prev pane"),
 		),
+		Toggle: key.NewBinding(
+			key.WithKeys("space", "l", "h"),
+			key.WithHelp("␣:", "expand/collapse"),
+		),
 		RunSuite: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("↵:", "run"),
-		),
-		RunAll: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a:", "run all"),
 		),
 		RunFailed: key.NewBinding(
 			key.WithKeys("f"),
@@ -101,7 +101,7 @@ func defaultKeyMap() keyMap {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.NextSuite, k.RunSuite, k.RunAll, k.RunFailed, k.StopSuite, k.Search, k.Quit, k.Help}
+	return []key.Binding{k.NextSuite, k.Toggle, k.RunSuite, k.RunFailed, k.StopSuite, k.Search, k.Quit, k.Help}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
@@ -109,7 +109,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.NextSuite, k.PrevSuite},
 		{k.ScrollUp, k.ScrollDown},
 		{k.GotoTop, k.GotoBottom, k.StopSuite},
-		{k.RunSuite, k.RunAll, k.RunFailed},
+		{k.Toggle, k.RunSuite, k.RunFailed},
 		{k.Search, k.SearchNext, k.SearchPrev},
 		{k.NextPane, k.PrevPane, k.Quit, k.Help},
 	}

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -20,7 +21,7 @@ func NewManager(discovered []discover.Suite) *SuiteManager {
 	for _, d := range discovered {
 		s := NewTestSuite(d)
 		suites = append(suites, s)
-		byName[d.Name] = s
+		byName[d.RelPath] = s
 	}
 	return &SuiteManager{
 		suites: suites,
@@ -32,18 +33,6 @@ func (m *SuiteManager) SetSend(send func(tea.Msg)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.send = send
-}
-
-func (m *SuiteManager) RunAll() {
-	m.mu.Lock()
-	send := m.send
-	suites := m.suites
-	m.mu.Unlock()
-
-	for _, s := range suites {
-		s := s
-		go func() { _ = s.Start(send) }()
-	}
 }
 
 func (m *SuiteManager) RunFailed() {
@@ -68,6 +57,22 @@ func (m *SuiteManager) RunCategory(cat discover.Category) {
 
 	for _, s := range suites {
 		if s.Suite.Category == cat {
+			s := s
+			go func() { _ = s.Start(send) }()
+		}
+	}
+}
+
+// RunPath runs all suites whose RelPath starts with the given prefix.
+func (m *SuiteManager) RunPath(prefix string) {
+	m.mu.Lock()
+	send := m.send
+	suites := m.suites
+	m.mu.Unlock()
+
+	pfx := prefix + "/"
+	for _, s := range suites {
+		if s.Suite.RelPath == prefix || strings.HasPrefix(s.Suite.RelPath, pfx) {
 			s := s
 			go func() { _ = s.Start(send) }()
 		}
