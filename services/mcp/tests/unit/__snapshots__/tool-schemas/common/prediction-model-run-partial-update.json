@@ -1,0 +1,31 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "artifact_script": {
+            "description": "The Python script used to train and produce the model artifact.",
+            "type": "string"
+        },
+        "feature_importance": {
+            "description": "Feature importance scores from model training."
+        },
+        "id": {
+            "description": "A UUID string identifying this action prediction model run.",
+            "type": "string"
+        },
+        "is_winning": {
+            "description": "Whether this run produced a winning prediction model.",
+            "type": "boolean"
+        },
+        "metrics": {
+            "description": "Model evaluation metrics (e.g. accuracy, AUC, F1)."
+        },
+        "model_url": {
+            "description": "S3 URL to the serialized model artifact.",
+            "format": "uri",
+            "maxLength": 2000,
+            "type": "string"
+        }
+    },
+    "required": ["id"],
+    "type": "object"
+}
