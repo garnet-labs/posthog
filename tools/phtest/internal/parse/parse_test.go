@@ -58,6 +58,21 @@ func TestParsePytest_errors(t *testing.T) {
 	}
 }
 
+func TestParsePytest_bareFormat(t *testing.T) {
+	lines := []string{
+		"FAILED ee/api/test/test_billing.py::TestBillingAPI::test_something",
+		"!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!",
+		"1 failed, 416 passed in 63.97s (0:01:03)",
+	}
+	r := Parse("Backend / ee", lines)
+	if r == nil {
+		t.Fatal("expected result")
+	}
+	if r.Passed != 416 || r.Failed != 1 {
+		t.Errorf("got passed=%d failed=%d, want 416/1", r.Passed, r.Failed)
+	}
+}
+
 func TestParsePytest_noSummary(t *testing.T) {
 	lines := []string{"some random output", "no summary here"}
 	r := Parse(discover.CategoryBackend, lines)

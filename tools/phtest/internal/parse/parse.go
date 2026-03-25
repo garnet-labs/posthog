@@ -47,20 +47,31 @@ func Parse(category discover.Category, lines []string) *TestResult {
 // ===== 5 passed, 2 failed in 3.21s =====
 
 var (
-	pytestSummaryRe = regexp.MustCompile(`={3,}\s*(.*?)\s*={3,}\s*$`)
-	pytestCountRe   = regexp.MustCompile(`(\d+)\s+(passed|failed|skipped|errors?|warnings?|deselected)`)
-	pytestTimeRe    = regexp.MustCompile(`in\s+([\d.]+)s`)
+	pytestCountRe = regexp.MustCompile(`(\d+)\s+(passed|failed|skipped|errors?|warnings?|deselected)`)
+	pytestTimeRe  = regexp.MustCompile(`in\s+([\d.]+)s`)
 )
 
 func parsePytest(lines []string) *TestResult {
+	// Scan from the bottom for any line containing pytest result counts
 	for i := len(lines) - 1; i >= 0; i-- {
-		m := pytestSummaryRe.FindStringSubmatch(lines[i])
-		if m == nil {
+		line := lines[i]
+		counts := pytestCountRe.FindAllStringSubmatch(line, -1)
+		if len(counts) == 0 {
 			continue
 		}
-		inner := m[1]
+		// Must contain at least one of passed/failed/error to be a summary line
+		isSummary := false
+		for _, cm := range counts {
+			if cm[2] == "passed" || cm[2] == "failed" || strings.HasPrefix(cm[2], "error") {
+				isSummary = true
+				break
+			}
+		}
+		if !isSummary {
+			continue
+		}
 		r := &TestResult{}
-		for _, cm := range pytestCountRe.FindAllStringSubmatch(inner, -1) {
+		for _, cm := range counts {
 			n, _ := strconv.Atoi(cm[1])
 			switch {
 			case cm[2] == "passed":
@@ -73,7 +84,7 @@ func parsePytest(lines []string) *TestResult {
 				r.Errors = n
 			}
 		}
-		if tm := pytestTimeRe.FindStringSubmatch(inner); tm != nil {
+		if tm := pytestTimeRe.FindStringSubmatch(line); tm != nil {
 			if secs, err := strconv.ParseFloat(tm[1], 64); err == nil {
 				r.Duration = time.Duration(secs * float64(time.Second))
 			}
