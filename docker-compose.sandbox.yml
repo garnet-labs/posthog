@@ -89,6 +89,7 @@ services:
             context: .
             dockerfile: Dockerfile.sandbox
         restart: on-failure
+        init: true
         # mprocs (used by bin/start) requires a TTY
         tty: true
         stdin_open: true
