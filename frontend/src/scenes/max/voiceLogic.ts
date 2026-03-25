@@ -453,7 +453,11 @@ export const voiceLogic = kea<voiceLogicType>([
                     conversationId != null ? maxThreadLogic.findMounted({ tabId, conversationId }) : undefined
                 mountedThreadLogic?.actions.askMax(finalText)
             } else if (!finalText && wasRecording) {
-                lemonToast.warning('No speech detected. Try again.')
+                if (values.voiceModeEnabled && values.activeTabId) {
+                    actions.startRecording(values.activeTabId)
+                } else {
+                    lemonToast.warning('No speech detected. Try again.')
+                }
             }
         },
 
