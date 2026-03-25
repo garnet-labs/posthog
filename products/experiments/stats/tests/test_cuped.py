@@ -5,7 +5,13 @@ from parameterized import parameterized
 
 from products.experiments.stats.bayesian.method import BayesianConfig, BayesianMethod
 from products.experiments.stats.frequentist.method import FrequentistConfig, FrequentistMethod
-from products.experiments.stats.shared.cuped import CupedData, compute_theta, cuped_adjust
+from products.experiments.stats.shared.cuped import (
+    CupedData,
+    _adjust_group,
+    _compute_covariance,
+    compute_theta,
+    cuped_adjust,
+)
 from products.experiments.stats.shared.enums import DifferenceType
 from products.experiments.stats.shared.statistics import (
     ProportionStatistic,
@@ -359,3 +365,222 @@ class TestCupedIntegration(TestCase):
         self.assertGreaterEqual(result.chance_to_win, 0)
         self.assertLessEqual(result.chance_to_win, 1)
         self.assertLess(result.credible_interval[0], result.credible_interval[1])
+
+
+class TestCupedReferenceData(TestCase):
+    """Tests verifying CUPED math against known expected values.
+
+    These tests use deterministic inputs with pre-computed expected outputs
+    to verify theta computation, per-group adjustment, covariance, and
+    end-to-end frequentist analysis.
+    """
+
+    # --- Per-group adjustment with known theta ---
+
+    def test_adjust_group_theta_zero(self):
+        """theta=0 gives unadjusted mean and variance."""
+        post = SampleMeanStatistic(n=5, sum=14, sum_squares=48)
+        cuped_data = CupedData(
+            pre_statistic=SampleMeanStatistic(n=5, sum=28.5, sum_squares=520.3),
+            sum_of_cross_products=85.2,
+        )
+        adjusted, vr = _adjust_group(post, cuped_data, theta=0)
+
+        self.assertAlmostEqual(adjusted.mean, 2.8, places=9)
+        self.assertAlmostEqual(adjusted.variance, 2.2, places=9)
+        self.assertAlmostEqual(vr, 0.0, places=9)
+
+    def test_adjust_group_nonzero_theta(self):
+        """Nonzero theta adjusts mean and variance."""
+        post = SampleMeanStatistic(n=5, sum=14, sum_squares=48)
+        cuped_data = CupedData(
+            pre_statistic=SampleMeanStatistic(n=5, sum=28.5, sum_squares=520.3),
+            sum_of_cross_products=85.2,
+        )
+        adjusted, _ = _adjust_group(post, cuped_data, theta=0.31)
+
+        self.assertAlmostEqual(adjusted.mean, 1.033, places=5)
+        self.assertAlmostEqual(adjusted.variance, 9.960346, places=4)
+
+    def test_covariance_computation(self):
+        """Sample covariance: (85.2 - 14*28.5/5) / 4 = 1.35."""
+        cov = _compute_covariance(n=5, post_sum=14, pre_sum=28.5, sum_of_cross_products=85.2)
+        self.assertAlmostEqual(cov, 1.35, places=9)
+
+    def test_adjust_group_single_observation(self):
+        """n=1 gives variance=0 regardless of theta."""
+        post = SampleMeanStatistic(n=1, sum=8.0, sum_squares=64.0)
+        cuped_data = CupedData(
+            pre_statistic=SampleMeanStatistic(n=1, sum=15.3, sum_squares=15.3**2),
+            sum_of_cross_products=50.0,
+        )
+        adjusted, _ = _adjust_group(post, cuped_data, theta=0.4)
+
+        self.assertAlmostEqual(adjusted.variance, 0.0, places=9)
+
+    # --- Theta computation ---
+
+    def test_theta_pooled_identical_groups(self):
+        """Theta from pooling identical control and treatment."""
+        post = SampleMeanStatistic(n=5, sum=14, sum_squares=48)
+        cuped_data = CupedData(
+            pre_statistic=SampleMeanStatistic(n=5, sum=28.5, sum_squares=520.3),
+            sum_of_cross_products=85.2,
+        )
+
+        theta = compute_theta(post, post, cuped_data, cuped_data)
+
+        self.assertAlmostEqual(theta, 0.015090122, places=7)
+
+    # --- End-to-end mean metric, frequentist ---
+
+    def test_mean_metric_theta_and_adjusted_stats(self):
+        """Verify theta, adjusted means, and adjusted variances for mean metric."""
+        control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
+        treatment_post = SampleMeanStatistic(n=2800, sum=205, sum_squares=510)
+        control_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2801, sum=195, sum_squares=390),
+            sum_of_cross_products=-18,
+        )
+        treatment_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2800, sum=110, sum_squares=380),
+            sum_of_cross_products=-8,
+        )
+
+        result = cuped_adjust(treatment_post, control_post, treatment_cuped, control_cuped)
+
+        self.assertAlmostEqual(result.control_unadjusted_mean, 0.099964299, places=7)
+        self.assertAlmostEqual(result.treatment_unadjusted_mean, 0.073214286, places=7)
+        self.assertAlmostEqual(result.theta, -0.069566052, places=7)
+        self.assertAlmostEqual(result.control_adjusted.mean, 0.104807347, places=7)
+        self.assertAlmostEqual(result.treatment_adjusted.mean, 0.075947238, places=7)
+        self.assertLess(result.control_adjusted.variance, control_post.variance)
+        self.assertLess(result.treatment_adjusted.variance, treatment_post.variance)
+
+    def test_mean_metric_relative_effect(self):
+        """Verify relative effect for mean metric.
+
+        The reference-style relative effect uses the unadjusted control mean as
+        denominator, while our frequentist method uses the adjusted control mean.
+        Both detect a significant negative treatment effect.
+        """
+        control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
+        treatment_post = SampleMeanStatistic(n=2800, sum=205, sum_squares=510)
+        control_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2801, sum=195, sum_squares=390),
+            sum_of_cross_products=-18,
+        )
+        treatment_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2800, sum=110, sum_squares=380),
+            sum_of_cross_products=-8,
+        )
+
+        result = cuped_adjust(treatment_post, control_post, treatment_cuped, control_cuped)
+
+        # Reference-style relative effect: numerator / unadjusted control mean
+        ref_relative = (result.treatment_adjusted.mean - result.control_adjusted.mean) / result.control_unadjusted_mean
+        self.assertAlmostEqual(ref_relative, -0.288704169, places=5)
+
+        method = FrequentistMethod(FrequentistConfig(difference_type=DifferenceType.RELATIVE))
+        test_result = method.run_test(result.treatment_adjusted, result.control_adjusted)
+        self.assertTrue(test_result.is_significant)
+        self.assertLess(test_result.point_estimate, 0)
+
+    # --- Binomial metric ---
+
+    def test_binomial_metric(self):
+        """Binomial metric with CUPED: ProportionStatistic post, binary pre (ss=sum)."""
+        control_post = ProportionStatistic(n=2801, sum=280)
+        treatment_post = ProportionStatistic(n=2800, sum=205)
+        control_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2801, sum=195, sum_squares=195),
+            sum_of_cross_products=-18,
+        )
+        treatment_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2800, sum=110, sum_squares=110),
+            sum_of_cross_products=-8,
+        )
+
+        result = cuped_adjust(treatment_post, control_post, treatment_cuped, control_cuped)
+
+        self.assertIsInstance(result.treatment_adjusted, SampleMeanStatistic)
+        self.assertIsInstance(result.control_adjusted, SampleMeanStatistic)
+        self.assertAlmostEqual(result.control_unadjusted_mean, 280 / 2801, places=9)
+        self.assertAlmostEqual(result.treatment_unadjusted_mean, 205 / 2800, places=9)
+        self.assertGreater(result.variance_reduction_treatment, 0)
+        self.assertGreater(result.variance_reduction_control, 0)
+
+        method = FrequentistMethod(FrequentistConfig(difference_type=DifferenceType.RELATIVE))
+        test_result = method.run_test(result.treatment_adjusted, result.control_adjusted)
+        self.assertTrue(test_result.is_significant)
+        self.assertLess(test_result.point_estimate, 0)
+
+    # --- 3-armed test adjusted standard deviations ---
+
+    @parameterized.expand(
+        [
+            (
+                "control_with_theta_from_treatment2",
+                SampleMeanStatistic(n=2801, sum=280, sum_squares=560),
+                CupedData(
+                    pre_statistic=SampleMeanStatistic(n=2801, sum=195, sum_squares=390), sum_of_cross_products=-18
+                ),
+                # theta computed from control + treatment2
+                SampleMeanStatistic(n=3500, sum=420, sum_squares=840),
+                CupedData(
+                    pre_statistic=SampleMeanStatistic(n=3500, sum=280, sum_squares=560), sum_of_cross_products=-25
+                ),
+                0.434365539,
+            ),
+            (
+                "treatment1_with_theta_from_treatment1",
+                SampleMeanStatistic(n=2800, sum=205, sum_squares=510),
+                CupedData(
+                    pre_statistic=SampleMeanStatistic(n=2800, sum=110, sum_squares=380), sum_of_cross_products=-8
+                ),
+                # theta computed from control + treatment1
+                SampleMeanStatistic(n=2800, sum=205, sum_squares=510),
+                CupedData(
+                    pre_statistic=SampleMeanStatistic(n=2800, sum=110, sum_squares=380), sum_of_cross_products=-8
+                ),
+                0.420353709,
+            ),
+            (
+                "treatment2_with_theta_from_treatment2",
+                SampleMeanStatistic(n=3500, sum=420, sum_squares=840),
+                CupedData(
+                    pre_statistic=SampleMeanStatistic(n=3500, sum=280, sum_squares=560), sum_of_cross_products=-25
+                ),
+                # theta computed from control + treatment2
+                SampleMeanStatistic(n=3500, sum=420, sum_squares=840),
+                CupedData(
+                    pre_statistic=SampleMeanStatistic(n=3500, sum=280, sum_squares=560), sum_of_cross_products=-25
+                ),
+                0.473119119,
+            ),
+        ]
+    )
+    def test_three_armed_adjusted_stddev(
+        self,
+        _name,
+        target_post,
+        target_cuped,
+        theta_partner_post,
+        theta_partner_cuped,
+        expected_stddev,
+    ):
+        """Verify per-group adjusted standard deviations in a 3-armed test.
+
+        Each treatment's theta is computed from its pair with control.
+        The control's stats use the last treatment pair's theta.
+        """
+        control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
+        control_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2801, sum=195, sum_squares=390),
+            sum_of_cross_products=-18,
+        )
+
+        theta = compute_theta(theta_partner_post, control_post, theta_partner_cuped, control_cuped)
+        adjusted, _ = _adjust_group(target_post, target_cuped, theta)
+
+        self.assertAlmostEqual(np.sqrt(adjusted.variance), expected_stddev, places=5)
