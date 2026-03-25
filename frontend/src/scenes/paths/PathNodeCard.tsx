@@ -82,7 +82,7 @@ export function PathNodeCard({ insightProps, node, canvasHeight }: PathNodeCardP
                     openPersonsModal={openPersonsModal}
                     setFilter={updateInsightFilter}
                     filter={pathsFilter}
-                    showFullUrls={pathsFilter.showFullUrls !== false}
+                    showFullUrls={pathsFilter.showFullUrls}
                     tooltipContent={pageUrl(node, true, true)}
                 />
             </div>
