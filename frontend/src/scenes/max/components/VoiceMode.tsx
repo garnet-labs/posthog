@@ -1,7 +1,7 @@
 import './VoiceMode.scss'
 
 import { useActions, useValues } from 'kea'
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { IconArrowRight, IconX } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
@@ -16,6 +16,92 @@ import { maxLogic } from '../maxLogic'
 import { maxThreadLogic } from '../maxThreadLogic'
 import { voiceLogic } from '../voiceLogic'
 
+/** Animated sinusoid whose amplitude follows the voice input level. */
+function SinusoidWave({ amplitude }: { amplitude: number }): JSX.Element {
+    const canvasRef = useRef<HTMLCanvasElement>(null)
+    const animRef = useRef<number>(0)
+    const phaseRef = useRef(0)
+    const smoothedRef = useRef(0)
+    const amplitudeRef = useRef(amplitude)
+
+    // Keep ref in sync so the animation loop always sees the latest value
+    amplitudeRef.current = amplitude
+
+    useEffect(() => {
+        const canvas = canvasRef.current
+        if (!canvas) {
+            return
+        }
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+            return
+        }
+
+        let lastTime = performance.now()
+
+        const draw = (now: number): void => {
+            const dt = (now - lastTime) / 1000
+            lastTime = now
+
+            const target = amplitudeRef.current
+            const alpha = Math.min(1, dt * 8)
+            smoothedRef.current += alpha * (target - smoothedRef.current)
+
+            phaseRef.current += dt * 2
+
+            const dpr = window.devicePixelRatio || 1
+            const rect = canvas.getBoundingClientRect()
+            const w = rect.width * dpr
+            const h = rect.height * dpr
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w
+                canvas.height = h
+            }
+
+            ctx.clearRect(0, 0, w, h)
+
+            const midY = h / 2
+            const totalAmp = h * 0.4 * smoothedRef.current
+
+            const waves = [
+                { freq: 1.5, speed: 1.0, opacity: 0.6, color: 'var(--color-ai)' },
+                { freq: 2.2, speed: -0.7, opacity: 0.3, color: '#38bdf8' },
+                { freq: 3.0, speed: 1.3, opacity: 0.2, color: '#6c47ff' },
+            ]
+
+            for (const wave of waves) {
+                ctx.beginPath()
+                ctx.globalAlpha = wave.opacity
+                if (wave.color.startsWith('var(')) {
+                    ctx.strokeStyle = getComputedStyle(canvas).getPropertyValue('--color-ai').trim() || '#a855f7'
+                } else {
+                    ctx.strokeStyle = wave.color
+                }
+                ctx.lineWidth = 2 * dpr
+
+                for (let x = 0; x <= w; x++) {
+                    const t = x / w
+                    const y = midY + Math.sin(t * Math.PI * 2 * wave.freq + phaseRef.current * wave.speed) * totalAmp
+                    if (x === 0) {
+                        ctx.moveTo(x, y)
+                    } else {
+                        ctx.lineTo(x, y)
+                    }
+                }
+                ctx.stroke()
+            }
+            ctx.globalAlpha = 1
+
+            animRef.current = requestAnimationFrame(draw)
+        }
+
+        animRef.current = requestAnimationFrame(draw)
+        return () => cancelAnimationFrame(animRef.current)
+    }, []) // Run once — reads amplitude via ref
+
+    return <canvas ref={canvasRef} className="w-full h-16" />
+}
+
 export function VoiceMode(): JSX.Element {
     const {
         recording,
@@ -28,7 +114,9 @@ export function VoiceMode(): JSX.Element {
         voiceModeFullscreen,
         voiceModeEnabled,
         micPermissionDenied,
-    } = useValues(voiceLogic)
+        mouthOpenness,
+    } =
+        useValues(voiceLogic)
     const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown } = useActions(voiceLogic)
     /** Sync immediately so pointerup in the same frame still submits (React state may not have re-rendered). */
     const orbPressActiveRef = useRef(false)
@@ -196,6 +284,11 @@ export function VoiceMode(): JSX.Element {
                 </div>
 
                 <p className="text-sm text-secondary">{statusText}</p>
+            </div>
+
+            {/* Sinusoid wave driven by voice amplitude */}
+            <div className="w-full px-8">
+                <SinusoidWave amplitude={mouthOpenness} />
             </div>
 
             {/* Controls */}
