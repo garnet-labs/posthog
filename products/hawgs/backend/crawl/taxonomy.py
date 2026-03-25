@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
@@ -145,10 +146,10 @@ class EnrichedFeature(BaseModel):
     source_urls: list[str] = Field(description="Website page URLs that describe this feature")
     code_paths: list[str] = Field(
         description=(
-            "Directory or file glob patterns in the codebase that implement this feature. "
-            "Prefer directories over individual files (e.g. 'products/experiments/backend/*' "
-            "rather than listing every file). Use glob patterns like 'some/path/*' to cover "
-            "a directory and its contents."
+            "Durable directory or file glob patterns in the codebase that implement this feature. "
+            "Prefer semantically meaningful directories over individual files (e.g. "
+            "'products/experiments/backend/*' rather than listing every file). Use glob patterns "
+            "like 'some/path/*' to cover a directory and its contents."
         ),
     )
 
@@ -159,7 +160,7 @@ class EnrichedProduct(BaseModel):
     source_urls: list[str] = Field(description="Website page URLs that describe this product")
     code_paths: list[str] = Field(
         description=(
-            "Top-level directory or file glob patterns for this product. "
+            "Durable top-level directory or file glob patterns for this product. "
             "These are the root code paths — feature-level paths provide more specificity."
         ),
     )
@@ -170,8 +171,9 @@ class EnrichedProductTurnOutput(BaseModel):
     products: list[EnrichedProduct] = Field(
         description=(
             "One or more enriched products. Usually one (the input product enriched with code paths). "
-            "Return multiple if a nested feature should be promoted to a separate product based on "
-            "how the code is organized."
+            "Return multiple if a nested feature should be promoted to a separate product, or if this "
+            "turn reveals other clearly related products/features that should be added based on the "
+            "codebase structure."
         ),
     )
 
@@ -180,28 +182,153 @@ class EnrichedTaxonomy(BaseModel):
     products: list[EnrichedProduct] = Field(description="All products with code paths")
 
 
+@dataclass
+class EnrichedTaxonomyAccumulator:
+    products: list[EnrichedProduct] = field(default_factory=list)
+
+    def add_products(self, products: list[EnrichedProduct]) -> None:
+        product_indices = {self._normalize_name(product.name): index for index, product in enumerate(self.products)}
+
+        for product in products:
+            normalized_product = self._normalize_product(product)
+            key = self._normalize_name(normalized_product.name)
+
+            if key not in product_indices:
+                product_indices[key] = len(self.products)
+                self.products.append(normalized_product)
+                continue
+
+            existing = self.products[product_indices[key]]
+            self.products[product_indices[key]] = EnrichedProduct(
+                name=existing.name or normalized_product.name,
+                description=self._pick_richer_description(existing.description, normalized_product.description),
+                source_urls=self._dedupe_strings([*existing.source_urls, *normalized_product.source_urls]),
+                code_paths=self._dedupe_strings([*existing.code_paths, *normalized_product.code_paths]),
+                features=self._merge_features([*existing.features, *normalized_product.features]),
+            )
+
+    def format_existing_products(self) -> str:
+        if not self.products:
+            return "- None yet"
+
+        lines: list[str] = []
+        for product in self.products:
+            feature_names = [feature.name for feature in product.features[:6]]
+            features_summary = ", ".join(feature_names) if feature_names else "no features yet"
+            if len(product.features) > 6:
+                features_summary += ", ..."
+
+            lines.append(f"- {product.name}: {features_summary}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        return " ".join(name.casefold().split())
+
+    @staticmethod
+    def _dedupe_strings(values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+
+        for value in values:
+            normalized = value.strip()
+            if not normalized or normalized in seen:
+                continue
+
+            deduped.append(normalized)
+            seen.add(normalized)
+
+        return deduped
+
+    @staticmethod
+    def _pick_richer_description(*descriptions: str) -> str:
+        cleaned = [description.strip() for description in descriptions if description.strip()]
+        if not cleaned:
+            return ""
+
+        return max(cleaned, key=len)
+
+    @classmethod
+    def _normalize_feature(cls, feature: EnrichedFeature) -> EnrichedFeature:
+        return EnrichedFeature(
+            name=feature.name.strip(),
+            description=feature.description.strip(),
+            source_urls=cls._dedupe_strings(feature.source_urls),
+            code_paths=cls._dedupe_strings(feature.code_paths),
+        )
+
+    @classmethod
+    def _merge_features(cls, features: list[EnrichedFeature]) -> list[EnrichedFeature]:
+        merged: list[EnrichedFeature] = []
+        feature_indices: dict[str, int] = {}
+
+        for feature in features:
+            normalized_feature = cls._normalize_feature(feature)
+            key = cls._normalize_name(normalized_feature.name)
+
+            if key not in feature_indices:
+                feature_indices[key] = len(merged)
+                merged.append(normalized_feature)
+                continue
+
+            existing = merged[feature_indices[key]]
+            merged[feature_indices[key]] = EnrichedFeature(
+                name=existing.name or normalized_feature.name,
+                description=cls._pick_richer_description(existing.description, normalized_feature.description),
+                source_urls=cls._dedupe_strings([*existing.source_urls, *normalized_feature.source_urls]),
+                code_paths=cls._dedupe_strings([*existing.code_paths, *normalized_feature.code_paths]),
+            )
+
+        return merged
+
+    @classmethod
+    def _normalize_product(cls, product: EnrichedProduct) -> EnrichedProduct:
+        return EnrichedProduct(
+            name=product.name.strip(),
+            description=product.description.strip(),
+            source_urls=cls._dedupe_strings(product.source_urls),
+            code_paths=cls._dedupe_strings(product.code_paths),
+            features=cls._merge_features(product.features),
+        )
+
+
 _ENRICHMENT_PREAMBLE = """\
 You are enriching a product feature taxonomy with code paths from the PostHog codebase.
+
+You will receive products one at a time in the same conversation.
+Keep track of what products and features you already returned.
+It is fine to return an already-seen product again with extra features or code paths if later turns reveal them.
 
 The codebase is available on disk. Use file search, grep, and code reading to find where each
 product and feature is implemented.
 
 ## Rules
 
-1. For each product and feature, find the code directories/files that implement it.
-2. Prefer **directory-level glob patterns** over individual files:
+1. For each input product, decide whether it should stay one product, expand with additional
+   features, or split into multiple products based on the codebase structure.
+2. Prefer **durable, semantically meaningful glob patterns** over individual files or overly
+   generic shared folders:
    - Good: `products/experiments/backend/*`, `frontend/src/scenes/experiments/*`
    - Bad: `products/experiments/backend/models.py`, `products/experiments/backend/api.py`, ...
-3. Include both backend and frontend paths when they exist.
-4. Look at `products/` directory first — most products have a dedicated directory there.
+3. Product `code_paths` should capture stable roots for the area. Feature `code_paths` should be
+   narrower and product-specific when distinct ownership exists.
+4. Include both backend and frontend paths when they exist.
+5. Look at `products/` directory first — most products have a dedicated directory there.
    Also check `posthog/` for older code, `frontend/src/scenes/` for frontend scenes,
    and `frontend/src/queries/` for query-related code.
-5. If a feature listed under a product is actually implemented as a **separate product**
+6. If a feature listed under a product is actually implemented as a **separate product**
    in the codebase (has its own `products/` directory), promote it: return it as a separate
-   product entry in the output list.
-6. If a feature has no distinct code path (it's part of the parent product's code), set its
+   product entry in the output list, and do not keep it nested under the parent in this turn.
+7. If the code clearly shows missing features or nearby products that belong with this area,
+   it is okay to add them now. Only add them when the code ownership is clear and the concept is
+   genuinely product-facing.
+8. Keep names consistent with products already returned earlier in the conversation.
+   If this turn reveals more detail for an already-returned product, return that product again
+   with the additions.
+9. If a feature has no distinct code path (it's part of the parent product's code), set its
    code_paths to an empty list.
-7. Do NOT guess paths — verify they exist by listing or searching the filesystem."""
+10. Do NOT guess paths — verify them by listing or searching the filesystem."""
 
 _ENRICHMENT_INITIAL_PROMPT = """\
 {preamble}
@@ -227,6 +354,14 @@ Respond with a JSON object inside a ```json``` code block matching this schema:
 
 _ENRICHMENT_FOLLOWUP_PROMPT = """\
 ## Product {index} of {total_products}
+
+## Already returned in this session
+
+{existing_products}
+
+Keep names consistent with the products above.
+If this turn reveals more code paths or missing features for an already-returned product,
+return that product again with the additions.
 
 <product>
 {product_json}
@@ -272,6 +407,7 @@ async def enrich_taxonomy(
 
     context = await sync_to_async(resolve_sandbox_context_for_local_dev)("PostHog/posthog")
     output_schema = json.dumps(EnrichedProductTurnOutput.model_json_schema(), indent=2)
+    accumulator = EnrichedTaxonomyAccumulator()
 
     # Turn 1: first product
     first_product = taxonomy.products[0]
@@ -291,9 +427,12 @@ async def enrich_taxonomy(
         output_fn=output_fn,
     )
 
-    all_enriched: list[EnrichedProduct] = list(first_result.products)
+    accumulator.add_products(list(first_result.products))
     if output_fn:
-        output_fn(f"Product 1/{total} done: {first_product.name} -> {len(first_result.products)} product(s)")
+        output_fn(
+            f"Product 1/{total} done: {first_product.name} -> {len(first_result.products)} "
+            f"product(s), {len(accumulator.products)} canonical so far"
+        )
 
     # Turns 2..N
     for i, product in enumerate(taxonomy.products[1:], start=2):
@@ -303,6 +442,7 @@ async def enrich_taxonomy(
         followup_prompt = _ENRICHMENT_FOLLOWUP_PROMPT.format(
             index=i,
             total_products=total,
+            existing_products=accumulator.format_existing_products(),
             product_json=product.model_dump_json(indent=2),
             output_schema=output_schema,
         )
@@ -314,13 +454,16 @@ async def enrich_taxonomy(
             label=f"product_{i}_of_{total}",
         )
 
-        all_enriched.extend(result.products)
+        accumulator.add_products(result.products)
         if output_fn:
-            output_fn(f"Product {i}/{total} done: {product.name} -> {len(result.products)} product(s)")
+            output_fn(
+                f"Product {i}/{total} done: {product.name} -> {len(result.products)} "
+                f"product(s), {len(accumulator.products)} canonical so far"
+            )
 
     await end_session(session)
 
-    enriched_taxonomy = EnrichedTaxonomy(products=all_enriched)
+    enriched_taxonomy = EnrichedTaxonomy(products=accumulator.products)
     ENRICHED_TAXONOMY_FILE.write_text(enriched_taxonomy.model_dump_json(indent=2))
 
     if output_fn:
