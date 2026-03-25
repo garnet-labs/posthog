@@ -432,7 +432,7 @@ class TestInsightCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
         from posthog.models.insight_variable import InsightVariable
 
         viewset = InsightViewSet()
-        viewset.team = self.team  # type: ignore[assignment]
+        viewset.team = self.team
         drf_request = self._make_drf_request()
         insight_variables = list(InsightVariable.objects.filter(team=self.team).all())
         key, _mode = viewset._compute_insight_coalescing_key(

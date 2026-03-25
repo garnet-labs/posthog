@@ -1482,6 +1482,7 @@ When set, the specified dashboard's filters and date range override will be appl
             instance, dashboard, dashboard_tile, request, list(serializer_context["insight_variables"])
         )
         if coalescing_key is not None:
+            assert execution_mode is not None
             error, execution_mode = self._try_coalesce(
                 coalescing_key, execution_mode, request.query_params.get("client_query_id")
             )

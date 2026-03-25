@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import orjson
 import structlog
@@ -11,6 +11,11 @@ from posthog import settings
 from posthog.api.query_coalescer import CoalesceSignal, QueryCoalescer
 from posthog.hogql_queries.query_runner import ExecutionMode
 
+if TYPE_CHECKING:
+    from rest_framework.request import Request
+
+    from posthog.models import Team
+
 logger = structlog.get_logger(__name__)
 
 
@@ -22,9 +27,10 @@ class QueryCoalescingMixin:
     to provide ``self.team`` (e.g. via ``TeamAndOrgViewSetMixin``).
     """
 
+    team: "Team"
     _coalescer: Optional[QueryCoalescer]
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._coalescer = None
 
@@ -111,7 +117,7 @@ class QueryCoalescingMixin:
         log.info("query_coalescing_follower_fallthrough", signal=signal)
         return None, execution_mode
 
-    def finalize_response(self, request, response, *args, **kwargs):
+    def finalize_response(self, request: "Request", response: Response, *args: Any, **kwargs: Any) -> Response:
         try:
             response = super().finalize_response(request, response, *args, **kwargs)
         finally:
