@@ -837,6 +837,7 @@ export const voiceLogic = kea<voiceLogicType>([
             cache.ttsStreamPendingPlainByKey = new Map<string, string>()
             cache.ttsStreamingLastMessageIdByTrace = {} as Record<string, string | undefined>
             cache.toolNarrationSpoken = new Set<string>()
+            cache.toolCallNarrationRecent = [] as string[]
         },
 
         playToolCallNarration: ({ dedupeKey, sentence }) => {
@@ -850,6 +851,14 @@ export const voiceLogic = kea<voiceLogicType>([
                 return
             }
             cache.toolNarrationSpoken.add(dedupeKey)
+            if (!cache.toolCallNarrationRecent) {
+                cache.toolCallNarrationRecent = [] as string[]
+            }
+            const recent = cache.toolCallNarrationRecent as string[]
+            recent.push(sentence.trim())
+            while (recent.length > 10) {
+                recent.shift()
+            }
             actions.playResponse(sentence.trim())
         },
 

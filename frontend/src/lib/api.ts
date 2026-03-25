@@ -5598,6 +5598,16 @@ const api = {
             return api.createResponse(new ApiRequest().conversations().withAction('tts').assembleFullUrl(), { text })
         },
 
+        async toolCallNarration(data: {
+            tool_names: string[]
+            assistant_content?: string | null
+            tool_args_by_name?: Record<string, Record<string, unknown>> | null
+            ui_payload?: Record<string, unknown> | null
+            recent_narrations?: string[]
+        }): Promise<{ sentence: string }> {
+            return new ApiRequest().conversations().withAction('tool_call_narration').create({ data })
+        },
+
         queue: {
             list(conversationId: string): Promise<ConversationQueueResponse> {
                 return new ApiRequest().conversation(conversationId).withAction('queue').get()

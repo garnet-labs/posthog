@@ -74,7 +74,7 @@ import type { maxThreadLogicType } from './maxThreadLogicType'
 import { MaxUIContext } from './maxTypes'
 import { MAX_SLASH_COMMANDS, SlashCommand } from './slash-commands'
 import { EnhancedToolCall, getToolCallDescriptionAndWidget } from './Thread'
-import { sentenceForToolNames } from './toolCallSpeech'
+import { fetchLlmToolCallNarrationSentence, sentenceForToolCalls } from './toolCallSpeech'
 import {
     getAgentModeForScene,
     isAssistantMessage,
@@ -1973,12 +1973,24 @@ export async function onEventImplementation(
                 const names = Object.keys(parsedResponse.ui_payload ?? {}).filter(
                     (toolName) => !values.availableStaticTools.some((tool) => tool.identifier === toolName)
                 )
-                const sentence = sentenceForToolNames(names)
-                if (sentence) {
-                    voiceForToolCall.actions.playToolCallNarration({
-                        dedupeKey: `${values.traceId}:${parsedResponse.tool_call_id}`,
-                        sentence,
+                if (names.length > 0) {
+                    const recent = (voiceForToolCall.cache?.toolCallNarrationRecent as string[] | undefined) ?? []
+                    const llmSentence = await fetchLlmToolCallNarrationSentence({
+                        toolNames: names,
+                        uiPayload: parsedResponse.ui_payload ?? undefined,
+                        recentNarrations: recent,
                     })
+                    const sentence =
+                        llmSentence ??
+                        sentenceForToolCalls(names, {
+                            uiPayload: parsedResponse.ui_payload ?? undefined,
+                        })
+                    if (sentence) {
+                        voiceForToolCall.actions.playToolCallNarration({
+                            dedupeKey: `${values.traceId}:${parsedResponse.tool_call_id}`,
+                            sentence,
+                        })
+                    }
                 }
             }
         } else {
@@ -1993,20 +2005,40 @@ export async function onEventImplementation(
             if (isAssistantMessage(parsedResponse) && parsedResponse.tool_calls?.length) {
                 const voiceForAssistantTools = voiceLogic.findMounted()
                 if (voiceForAssistantTools?.values.voiceModeEnabled) {
-                    const names = parsedResponse.tool_calls
-                        .filter((tc) => !values.availableStaticTools.some((tool) => tool.identifier === tc.name))
-                        .map((tc) => tc.name)
-                    const sentence = sentenceForToolNames(names)
-                    if (sentence) {
-                        const ids = parsedResponse.tool_calls
-                            .map((tc) => tc.id)
-                            .filter(Boolean)
-                            .sort()
-                            .join('|')
-                        voiceForAssistantTools.actions.playToolCallNarration({
-                            dedupeKey: `${values.traceId}:${ids || names.join(',')}`,
-                            sentence,
+                    const nonStaticToolCalls = parsedResponse.tool_calls.filter(
+                        (tc) => !values.availableStaticTools.some((tool) => tool.identifier === tc.name)
+                    )
+                    const names = nonStaticToolCalls.map((tc) => tc.name)
+                    if (names.length > 0) {
+                        const recent =
+                            (voiceForAssistantTools.cache?.toolCallNarrationRecent as string[] | undefined) ?? []
+                        const toolArgsPayload = nonStaticToolCalls.map((tc) => ({
+                            name: tc.name,
+                            args: tc.args,
+                        }))
+                        const llmSentence = await fetchLlmToolCallNarrationSentence({
+                            toolNames: names,
+                            assistantContent: parsedResponse.content,
+                            toolCalls: toolArgsPayload,
+                            recentNarrations: recent,
                         })
+                        const sentence =
+                            llmSentence ??
+                            sentenceForToolCalls(names, {
+                                assistantContent: parsedResponse.content,
+                                toolCalls: toolArgsPayload,
+                            })
+                        if (sentence) {
+                            const ids = parsedResponse.tool_calls
+                                .map((tc) => tc.id)
+                                .filter(Boolean)
+                                .sort()
+                                .join('|')
+                            voiceForAssistantTools.actions.playToolCallNarration({
+                                dedupeKey: `${values.traceId}:${ids || names.join(',')}`,
+                                sentence,
+                            })
+                        }
                     }
                 }
             }

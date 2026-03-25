@@ -2,7 +2,7 @@ import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from typing import cast
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -12,7 +12,7 @@ import httpx
 import pydantic
 import structlog
 from asgiref.sync import async_to_sync as asgi_async_to_sync
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from elevenlabs import ElevenLabs
 from elevenlabs.types.voice_settings import VoiceSettings
 from loginas.utils import is_impersonated_session
@@ -28,6 +28,7 @@ from rest_framework.viewsets import GenericViewSet
 
 from posthog.schema import AgentMode, AssistantMessage, HumanMessage, MaxBillingContext
 
+from posthog.api.mixins import ValidatedRequest, validated_request
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.exceptions import Conflict, QuotaLimitExceeded
 from posthog.exceptions_capture import capture_exception
@@ -63,6 +64,7 @@ from ee.hogai.utils.aio import async_to_sync
 from ee.hogai.utils.sse import AssistantSSESerializer
 from ee.hogai.utils.tts_text import prepare_text_for_elevenlabs_tts
 from ee.hogai.utils.types import PartialAssistantState
+from ee.hogai.utils.voice_tool_narration import generate_tool_call_narration_sentence
 from ee.models.assistant import Conversation
 
 logger = structlog.get_logger(__name__)
@@ -181,6 +183,42 @@ class QueueMessageSerializer(serializers.Serializer):
 
 class QueueMessageUpdateSerializer(serializers.Serializer):
     content = serializers.CharField(required=True, allow_blank=False, max_length=40000)
+
+
+class ToolCallNarrationRequestSerializer(serializers.Serializer):
+    tool_names = serializers.ListField(
+        child=serializers.CharField(max_length=128),
+        min_length=1,
+        max_length=32,
+        help_text="Tool identifiers being invoked (snake_case names)",
+    )
+    assistant_content = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=8000,
+        help_text="Assistant message text before the tool call, if any",
+    )
+    tool_args_by_name = serializers.JSONField(
+        required=False,
+        allow_null=True,
+        help_text="Map of tool name to arguments object (truncated server-side)",
+    )
+    ui_payload = serializers.JSONField(
+        required=False,
+        allow_null=True,
+        help_text="Contextual ui_payload for contextual tools, if any",
+    )
+    recent_narrations = serializers.ListField(
+        child=serializers.CharField(max_length=500),
+        required=False,
+        max_length=12,
+        help_text="Recent spoken narration lines to avoid repeating phrasing",
+    )
+
+
+class ToolCallNarrationResponseSerializer(serializers.Serializer):
+    sentence = serializers.CharField(help_text="Single spoken line for text-to-speech")
 
 
 @extend_schema(tags=["max"])
@@ -613,6 +651,39 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             logger.exception("ElevenLabs STT failed")
             return Response({"error": "Transcription failed"}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"text": transcript.text})
+
+    @validated_request(
+        request_serializer=ToolCallNarrationRequestSerializer,
+        responses={200: OpenApiResponse(response=ToolCallNarrationResponseSerializer)},
+        summary="Generate voice narration for tool calls",
+        tags=["max"],
+    )
+    @action(detail=False, methods=["POST"])
+    def tool_call_narration(self, request: Request, *args, **kwargs):
+        """One short LLM line for voice mode when tools run (natural wording + brief why)."""
+        vreq = cast(ValidatedRequest, request)
+        data = vreq.validated_data
+        user = cast(User, request.user)
+        tool_args = data.get("tool_args_by_name")
+        if tool_args is not None and not isinstance(tool_args, dict):
+            return Response({"error": "tool_args_by_name must be an object"}, status=status.HTTP_400_BAD_REQUEST)
+        ui_pl = data.get("ui_payload")
+        if ui_pl is not None and not isinstance(ui_pl, dict):
+            return Response({"error": "ui_payload must be an object"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            sentence = generate_tool_call_narration_sentence(
+                user=user,
+                team=self.team,
+                tool_names=list(data["tool_names"]),
+                assistant_content=data.get("assistant_content"),
+                tool_args_by_name=cast(dict[str, Any], tool_args) if tool_args else None,
+                ui_payload=cast(dict[str, Any], ui_pl) if ui_pl else None,
+                recent_narrations=list(data.get("recent_narrations") or []),
+            )
+        except Exception:
+            logger.exception("tool_call_narration LLM failed")
+            return Response({"error": "Narration generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"sentence": sentence})
 
     @action(detail=False, methods=["POST"])
     def tts(self, request: Request, *args, **kwargs):

@@ -1087,3 +1087,20 @@ class TestConversation(APIBaseTest):
 
                 # Verify agent_mode is passed for chat mode
                 self.assertEqual(workflow_inputs.agent_mode, AgentMode.SQL)
+
+    @patch("ee.api.conversation.generate_tool_call_narration_sentence")
+    def test_tool_call_narration_returns_llm_sentence(self, mock_gen):
+        mock_gen.return_value = "I'm running that query now to surface your signups trend."
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/conversations/tool_call_narration/",
+            {
+                "tool_names": ["execute_sql"],
+                "assistant_content": "Let me check the data.",
+                "recent_narrations": [],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["sentence"], mock_gen.return_value)
+        mock_gen.assert_called_once()
