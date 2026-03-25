@@ -61,20 +61,41 @@ Proxies S3 to avoid CORS (same pattern as Tasks `runs/{id}/logs/`).
 
 Response: plain text (JSONL format, one JSON object per line).
 
-**`POST /api/projects/:team_id/hogbot/admin/messages/`**
+**`POST /api/projects/:team_id/hogbot/send-message/`**
 
-Send a user message to the admin agent.
+Send a message to Hogbot. Supports two types with different routing:
 
-Request:
+**User message** — routes to the admin agent via Temporal:
 ```json
 {
-    "content": "string"
+    "type": "user_message",
+    "content": "Can you analyze our funnel?"
 }
 ```
 
+**Signal** — publishes a document_embeddings signal to Kafka:
+```json
+{
+    "type": "signal",
+    "signal": {
+        "product": "signals",
+        "document_type": "issue_fingerprint",
+        "model_name": "text-embedding-3-small-1536",
+        "rendering": "plain",
+        "document_id": "abc-123",
+        "timestamp": "2026-03-25T10:00:00Z",
+        "content": "The text content that was embedded",
+        "metadata": "{}"
+    }
+}
+```
+
+Signals match the `document_embeddings` table shape
+(`SELECT * FROM document_embeddings WHERE model_name = 'text-embedding-3-small-1536' AND product = 'signals' ORDER BY timestamp DESC`).
+
 Response: `202 Accepted`.
-The agent appends its response to the S3 log file.
-The frontend picks it up on the next poll.
+For user messages, the agent response appears in subsequent log polls.
+For signals, the research agent picks them up from the Kafka topic.
 
 ### Sandbox Filesystem
 

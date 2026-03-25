@@ -120,7 +120,10 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
             }
         },
         sendMessage: async ({ content }) => {
-            await api.create(`api/projects/@current/hogbot/admin/messages/`, { content })
+            await api.create(`api/projects/@current/hogbot/send-message/`, {
+                type: 'user_message',
+                content,
+            })
             // Trigger an immediate poll to pick up the response faster
             try {
                 const response = await api.getResponse(`api/projects/@current/hogbot/admin/logs/`)

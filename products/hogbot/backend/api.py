@@ -152,8 +152,46 @@ STUB_FILE_CONTENTS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+class SignalPayloadSerializer(serializers.Serializer):
+    """Matches the shape of a document_embeddings row for product='signals'."""
+
+    product = serializers.CharField(help_text="Source product, e.g. 'signals'.")
+    document_type = serializers.CharField(help_text="Type of document, e.g. 'issue_fingerprint'.")
+    model_name = serializers.CharField(help_text="Embedding model name, e.g. 'text-embedding-3-small-1536'.")
+    rendering = serializers.CharField(help_text="How the document was rendered, e.g. 'plain'.")
+    document_id = serializers.CharField(help_text="Unique document identifier.")
+    timestamp = serializers.DateTimeField(help_text="Document creation time.")
+    inserted_at = serializers.DateTimeField(help_text="When the embedding was inserted.", required=False)
+    content = serializers.CharField(help_text="The text content that was embedded.")
+    metadata = serializers.CharField(help_text="JSON metadata string.", required=False, default="{}")
+
+
 class SendMessageSerializer(serializers.Serializer):
-    content = serializers.CharField(help_text="Message text to send to the admin agent.")
+    MESSAGE_TYPE_CHOICES = [
+        ("user_message", "User message"),
+        ("signal", "Signal from document_embeddings"),
+    ]
+
+    type = serializers.ChoiceField(
+        choices=MESSAGE_TYPE_CHOICES,
+        help_text="Message type: 'user_message' for chat input, 'signal' for a document_embeddings signal.",
+    )
+    content = serializers.CharField(
+        help_text="Message text. Required for user_message, optional for signal.",
+        required=False,
+        default="",
+    )
+    signal = SignalPayloadSerializer(
+        help_text="Signal payload from document_embeddings. Required when type='signal'.",
+        required=False,
+    )
+
+    def validate(self, data: dict) -> dict:
+        if data["type"] == "user_message" and not data.get("content"):
+            raise serializers.ValidationError({"content": "Content is required for user_message type."})
+        if data["type"] == "signal" and not data.get("signal"):
+            raise serializers.ValidationError({"signal": "Signal payload is required for signal type."})
+        return data
 
 
 class SandboxFileSerializer(serializers.Serializer):
@@ -201,24 +239,51 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
         response["Cache-Control"] = "no-cache"
         return response
 
-    # ── Send message (POST /api/projects/:team_id/hogbot/admin/messages/) ──
+    # ── Send message (POST /api/projects/:team_id/hogbot/send-message/) ──
 
     @extend_schema(
         request=SendMessageSerializer,
         responses={202: OpenApiResponse(description="Message accepted")},
-        summary="Send message to admin agent",
-        description="Sends a user message to the admin agent. The agent response will appear in subsequent log polls.",
+        summary="Send message to Hogbot",
+        description=(
+            "Sends a message to Hogbot. "
+            "type='user_message' routes to the admin agent via Temporal. "
+            "type='signal' publishes a document_embeddings signal to Kafka."
+        ),
     )
-    @action(detail=False, methods=["post"], url_path="admin/messages")
-    def admin_messages(self, request: Request, **kwargs: Any) -> Response:
+    @action(detail=False, methods=["post"], url_path="send-message")
+    def send_message(self, request: Request, **kwargs: Any) -> Response:
         serializer = SendMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # TODO: Forward message to the sandbox admin agent
-        # content = serializer.validated_data["content"]
-        # sandbox.send_message(team_id=self.team_id, content=content)
+        message_type = serializer.validated_data["type"]
+
+        if message_type == "user_message":
+            self._handle_user_message(serializer.validated_data)
+        elif message_type == "signal":
+            self._handle_signal(serializer.validated_data)
 
         return Response(status=status.HTTP_202_ACCEPTED)
+
+    def _handle_user_message(self, data: dict) -> None:
+        """Route a user chat message to the admin agent via Temporal."""
+        # TODO: Trigger Temporal workflow to deliver message to sandbox
+        # content = data["content"]
+        # from products.hogbot.backend.temporal.client import send_user_message
+        # send_user_message(team_id=self.team_id, content=content)
+        pass
+
+    def _handle_signal(self, data: dict) -> None:
+        """Publish a document_embeddings signal to a Kafka topic."""
+        # TODO: Publish to Kafka topic for the research agent to consume
+        # signal_payload = data["signal"]
+        # from posthog.kafka_client.client import KafkaProducer
+        # producer = KafkaProducer()
+        # producer.produce(
+        #     topic="hogbot_signals",
+        #     data=json.dumps(signal_payload),
+        # )
+        pass
 
     # ── List sandbox files (GET /api/projects/:team_id/hogbot/files/) ──
 
