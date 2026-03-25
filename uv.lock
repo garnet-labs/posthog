@@ -2225,6 +2225,24 @@ wheels = [
 ]
 
 [[package]]
+name = "firecrawl"
+version = "4.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "httpx" },
+    { name = "nest-asyncio" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/89/ca/1a7488e942508c1468f7beb9a0a153ed732127d1fa931f1bd61382c75462/firecrawl-4.20.0.tar.gz", hash = "sha256:dabe45956c4a8830f9069f61e0cc837a1add63dbc7489abf63e956ad75dfb1e2", size = 174328, upload-time = "2026-03-23T19:24:52.504Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/4b/1c467b64b8a1f896d22ea0100d16636bbd5221ecc801e92a33caf68000c0/firecrawl-4.20.0-py3-none-any.whl", hash = "sha256:7e49bade67a17e1b6d918c905afe264495df72928fb7dea576c168b3e3ac947b", size = 217568, upload-time = "2026-03-23T19:24:50.637Z" },
+]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -4028,6 +4046,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nest-asyncio"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/f8/51569ac65d696c8ecbee95938f89d4abf00f47d58d48f6fbabfe8f0baefe/nest_asyncio-1.6.0.tar.gz", hash = "sha256:6f172d5449aca15afd6c646851f4e31e02c598d553a667e38cafa997cfec55fe", size = 7418, upload-time = "2024-01-21T14:25:19.227Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/c4/c2971a3ba4c6103a3d10c4b0f24f461ddc027f0f09763220cf35ca1401b3/nest_asyncio-1.6.0-py3-none-any.whl", hash = "sha256:87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c", size = 5195, upload-time = "2024-01-21T14:25:17.223Z" },
+]
+
+[[package]]
 name = "networkx"
 version = "3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -5000,6 +5027,7 @@ dependencies = [
     { name = "duckdb" },
     { name = "elevenlabs" },
     { name = "fastavro" },
+    { name = "firecrawl" },
     { name = "free-email-domains" },
     { name = "geoip2" },
     { name = "gitpython" },
@@ -5255,6 +5283,7 @@ requires-dist = [
     { name = "duckdb", specifier = "~=1.4.2" },
     { name = "elevenlabs", specifier = "~=2.1.0" },
     { name = "fastavro", specifier = "~=1.12.0" },
+    { name = "firecrawl", specifier = ">=4.20.0" },
     { name = "free-email-domains", specifier = "~=1.0.1" },
     { name = "geoip2", specifier = "==4.6.0" },
     { name = "gitpython", specifier = "~=3.1.44" },
