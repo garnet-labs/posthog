@@ -89,19 +89,25 @@ prediction-model-run-create(
 
 ### Phase 5: Experiment loop (autonomous)
 
-Once the baseline is established, loop autonomously:
+Once the baseline is established, loop autonomously. The single metric is **AUC-ROC on the held-out test set** — higher is better.
 
 ```text
-LOOP (max 10 experiments or 3 consecutive non-improvements):
-  1. Review previous runs — what features/params helped, what didn't
-  2. Formulate hypothesis: new features, hyperparameter change, feature selection
+LOOP (until stopped or diminishing returns):
+  1. Review previous runs — read notes, check what helped, what didn't
+  2. Formulate hypothesis: what change might improve AUC-ROC?
   3. Modify the HogQL query and/or training script
-  4. Execute train.py (it fetches its own data)
-  5. Record run via prediction-model-run-create
-  6. Compare AUC-ROC to current best:
-     → Improved: set is_winning=true on this run
-     → Equal or worse: set is_winning=false
+  4. Execute train.py (it fetches its own data, records the run)
+  5. Compare AUC-ROC to current best:
+     → Improved: PATCH model → winning_run = this run
+     → Equal or worse: keep the run recorded but don't update winning_run
+     → Crash: log in notes, fix if easy, skip if fundamental
+  6. Write notes on what you tried and observed
+  7. Continue to next experiment
 ```
+
+**Keep going.** Don't stop after the first improvement. Try to get even better, or see if you can simplify the model without sacrificing performance. If you're stuck, think harder — try combining near-misses, try more radical feature changes, re-examine the data.
+
+**Simplicity criterion**: all else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Removing a feature and getting equal AUC is a win — that's a simpler model. An improvement of ~0 but much simpler code? Keep.
 
 **Experiment ideas** (after baseline):
 
@@ -110,6 +116,8 @@ LOOP (max 10 experiments or 3 consecutive non-improvements):
 - Feature selection: drop features with importance < 0.01
 - Add person properties as features
 - Extend observation window from 90d to 180d
+- Try different time windows for frequency features (3d, 14d, 60d)
+- Interaction features in the query (e.g. downloads per session)
 
 ### Phase 6: Model card
 
@@ -133,13 +141,16 @@ Once a winning model exists, suggest the `predicting-user-actions` skill to scor
 
 ## Guardrails
 
-- **No hardcoding**: the reference scripts use `downloaded_file` / 28 days as an example. The agent MUST replace these with the actual target event and lookback_days from the `ActionPredictionModel`. The HogQL query, bucket thresholds, and all config should be adapted to the specific action being predicted.
+- **Single metric**: AUC-ROC on the held-out test set. Higher is better. This is the only number that decides keep vs discard.
+- **Simplicity**: all else being equal, simpler is better. Fewer features that achieve the same AUC = better model. Removing complexity for equal performance is a win.
+- **No hardcoding**: reference scripts use `downloaded_file` / 28 days as an example — replace with actual target event and lookback_days.
 - **Leakage prevention**: features from observation window only; target event excluded from feature columns
 - **Calibration**: always isotonic via sklearn Pipeline
 - **Features**: aim for 15-40. More than 50 risks overfitting
 - **Imbalance**: always use `scale_pos_weight`, never downsample
-- **Base rate awareness**: base rate varies wildly by action. A 1% action needs different thresholds and evaluation criteria than a 30% action. Always report base rate alongside metrics.
-- **Reproducibility**: seed=42, every experiment recorded with query + utils + train + predict scripts in `artifact_scripts`. Artifacts must be fully self-contained — the sandbox writes each key to a file and runs them.
-- **Winning runs**: set `is_winning=true` at creation time — compare metrics locally
+- **Base rate awareness**: base rate varies by action. Adjust bucket thresholds accordingly. Always report base rate.
+- **Lab notebook**: every run must include notes — what was tried, what was observed, what to try next. This is the experiment log.
+- **Reproducibility**: seed=42, every run stores query + utils + train + predict in `artifact_scripts`. Fully self-contained.
+- **Crash handling**: if sandbox fails, log in notes, try to fix if it's simple (typo, import), skip if the idea is fundamentally broken.
 - **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
 - **model_url**: must be a valid `https://` URL, not `s3://`

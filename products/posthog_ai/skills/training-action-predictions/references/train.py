@@ -239,12 +239,22 @@ def main() -> None:
                     artifact_scripts[name] = f.read()
         artifact_scripts["query"] = TRAINING_QUERY
 
+        # The agent writes notes about what was tried and observed.
+        # This is the "lab notebook" — useful for reviewing experiment history.
+        notes = f"""Baseline run.
+Features: {feature_cols}
+AUC-ROC: {metrics["auc_roc"]}, AUC-PR: {metrics["auc_pr"]}, Brier: {metrics["brier"]}
+Signal quality: {signal_quality}
+Top features: {list(feature_importance.items())[:5]}
+"""
+
         run = create_model_run(
             PREDICTION_MODEL_ID,
             experiment_id=EXPERIMENT_ID or None,
             metrics=metrics,
             feature_importance=feature_importance,
             artifact_scripts=artifact_scripts,
+            notes=notes,
         )
         print(f"Model run recorded: {run['id']}")
 

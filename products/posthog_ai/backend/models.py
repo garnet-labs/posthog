@@ -138,6 +138,11 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         blank=True,
         help_text="Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script).",
     )
+    notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Agent lab notebook: what was tried, what was observed, what to try next.",
+    )
 
     class Meta:
         indexes = [

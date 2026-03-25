@@ -63,6 +63,7 @@ def create_model_run(
     metrics: dict | None = None,
     feature_importance: dict | None = None,
     artifact_scripts: dict | None = None,
+    notes: str = "",
     model_url: str = "https://placeholder.s3.amazonaws.com/models/latest.pkl",
 ) -> dict:
     """Record a training run via the PostHog API.
@@ -77,6 +78,7 @@ def create_model_run(
         "metrics": metrics or {},
         "feature_importance": feature_importance or {},
         "artifact_scripts": artifact_scripts or {},
+        "notes": notes,
     }
     if experiment_id:
         payload["experiment_id"] = experiment_id
