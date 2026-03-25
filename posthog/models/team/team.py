@@ -234,6 +234,8 @@ class WeekStartDay(models.IntegerChoices):
 
 
 class CookielessServerHashMode(models.IntegerChoices):
+    DISABLED = 0, "Disabled"
+    STATELESS = 1, "Stateless"
     STATEFUL = 2, "Stateful"
 
 
@@ -525,7 +527,7 @@ class Team(UUIDTClassicModel):
     # Keeping for rollback safety. Will be removed in a future migration.
     cookieless_server_hash_mode = field_access_control(
         models.SmallIntegerField(
-            default=CookielessServerHashMode.STATEFUL,
+            default=CookielessServerHashMode.DISABLED,
             choices=CookielessServerHashMode.choices,
             null=True,
         ),
