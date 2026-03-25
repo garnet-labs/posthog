@@ -1169,6 +1169,141 @@
             "readOnlyHint": true
         }
     },
+    "action-prediction-model-list": {
+        "description": "List all action prediction models in the current project. Returns name, description, action or event reference, lookback period, and creation metadata for each model.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "List action prediction models",
+        "title": "List action prediction models",
+        "required_scopes": ["action_prediction_model:read"],
+        "new_mcp": false,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "action-prediction-model-retrieve": {
+        "description": "Get a single action prediction model by ID. Returns full details including the referenced action or event name.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Get action prediction model",
+        "title": "Get action prediction model",
+        "required_scopes": ["action_prediction_model:read"],
+        "new_mcp": false,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "action-prediction-model-create": {
+        "description": "Create a new action prediction model. Specify either an action ID or an event name (not both), and a lookback period in days.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Create action prediction model",
+        "title": "Create action prediction model",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "action-prediction-model-partial-update": {
+        "description": "Update an action prediction model by ID. Can modify name, description, the action or event reference, and lookback period.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Update action prediction model",
+        "title": "Update action prediction model",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "action-prediction-model-destroy": {
+        "description": "Permanently delete an action prediction model by ID.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Delete action prediction model",
+        "title": "Delete action prediction model",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "prediction-model-run-list": {
+        "description": "List training runs for action prediction models, newest first. Returns winning status, S3 model URL, evaluation metrics, feature importance, and the training artifact script.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "List prediction model runs",
+        "title": "List prediction model runs",
+        "required_scopes": ["action_prediction_model:read"],
+        "new_mcp": false,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "prediction-model-run-retrieve": {
+        "description": "Get a single prediction model run by ID with full details including metrics, feature importance, and artifact script.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Get prediction model run",
+        "title": "Get prediction model run",
+        "required_scopes": ["action_prediction_model:read"],
+        "new_mcp": false,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "prediction-model-run-create": {
+        "description": "Record a new training run for a prediction model. Provide the parent prediction model ID, S3 model URL, evaluation metrics, feature importance scores, and the artifact script.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Create prediction model run",
+        "title": "Create prediction model run",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "prediction-model-run-partial-update": {
+        "description": "Update a prediction model run by ID. Can change winning status, metrics, feature importance, or artifact script.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Update prediction model run",
+        "title": "Update prediction model run",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
     "prompt-list": {
         "description": "List all LLM prompts stored for the current team. Optionally filter by name. Returns paginated prompt summaries.",
         "category": "Prompts",

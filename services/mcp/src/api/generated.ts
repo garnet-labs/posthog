@@ -587,6 +587,60 @@ export namespace Schemas {
       actionId: number;
     }
 
+    export interface ActionPredictionModel {
+      readonly id: string;
+      /**
+       * Human-readable name for the prediction model.
+       * @maxLength 400
+       */
+      name?: string;
+      /** Longer description of the prediction model's purpose. */
+      description?: string;
+      /**
+       * ID of the PostHog action to predict. Mutually exclusive with event_name.
+       * @nullable
+       */
+      action?: number | null;
+      /**
+       * Name of the raw event to predict. Mutually exclusive with action.
+       * @maxLength 400
+       * @nullable
+       */
+      event_name?: string | null;
+      /**
+       * Number of days to look back for prediction data.
+       * @minimum 1
+       */
+      lookback_days: number;
+      readonly created_by: UserBasic;
+      readonly created_at: string;
+      /** @nullable */
+      readonly updated_at: string | null;
+    }
+
+    export interface ActionPredictionModelRun {
+      readonly id: string;
+      prediction_model: string;
+      /** Whether this run produced a winning prediction model. */
+      is_winning?: boolean;
+      /**
+       * S3 URL to the serialized model artifact.
+       * @maxLength 2000
+       */
+      model_url: string;
+      /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
+      metrics?: unknown;
+      /** Feature importance scores from model training. */
+      feature_importance?: unknown;
+      /** The Python script used to train and produce the model artifact. */
+      artifact_script?: string;
+      /** User who created this run. */
+      readonly created_by: UserBasic | null;
+      readonly created_at: string;
+      /** @nullable */
+      readonly updated_at: string | null;
+    }
+
     export type ActionsNodeKind = typeof ActionsNodeKind[keyof typeof ActionsNodeKind];
 
 
@@ -18600,6 +18654,24 @@ export namespace Schemas {
       results: Action[];
     }
 
+    export interface PaginatedActionPredictionModelList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: ActionPredictionModel[];
+    }
+
+    export interface PaginatedActionPredictionModelRunList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: ActionPredictionModelRun[];
+    }
+
     export type PaginatedActivityLogList = ActivityLog[];
 
     export interface PaginatedAlertList {
@@ -21114,6 +21186,60 @@ export namespace Schemas {
        * @nullable
        */
       readonly user_access_level?: string | null;
+    }
+
+    export interface PatchedActionPredictionModel {
+      readonly id?: string;
+      /**
+       * Human-readable name for the prediction model.
+       * @maxLength 400
+       */
+      name?: string;
+      /** Longer description of the prediction model's purpose. */
+      description?: string;
+      /**
+       * ID of the PostHog action to predict. Mutually exclusive with event_name.
+       * @nullable
+       */
+      action?: number | null;
+      /**
+       * Name of the raw event to predict. Mutually exclusive with action.
+       * @maxLength 400
+       * @nullable
+       */
+      event_name?: string | null;
+      /**
+       * Number of days to look back for prediction data.
+       * @minimum 1
+       */
+      lookback_days?: number;
+      readonly created_by?: UserBasic;
+      readonly created_at?: string;
+      /** @nullable */
+      readonly updated_at?: string | null;
+    }
+
+    export interface PatchedActionPredictionModelRun {
+      readonly id?: string;
+      prediction_model?: string;
+      /** Whether this run produced a winning prediction model. */
+      is_winning?: boolean;
+      /**
+       * S3 URL to the serialized model artifact.
+       * @maxLength 2000
+       */
+      model_url?: string;
+      /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
+      metrics?: unknown;
+      /** Feature importance scores from model training. */
+      feature_importance?: unknown;
+      /** The Python script used to train and produce the model artifact. */
+      artifact_script?: string;
+      /** User who created this run. */
+      readonly created_by?: UserBasic | null;
+      readonly created_at?: string;
+      /** @nullable */
+      readonly updated_at?: string | null;
     }
 
     export interface PatchedAddPersonsToStaticCohortRequest {
@@ -30738,6 +30864,28 @@ export namespace Schemas {
      * A search term.
      */
     search?: string;
+    };
+
+    export type ActionPredictionModelRunsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type ActionPredictionModelsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
     };
 
     export type ApprovalPoliciesListParams = {
