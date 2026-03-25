@@ -95,6 +95,7 @@ WHERE person_id IS NOT NULL
   AND timestamp >= now() - interval {OBSERVATION_DAYS} day
 GROUP BY person_id
 HAVING events_total_{OBSERVATION_DAYS}d >= {MIN_EVENTS}
+LIMIT 50000
 """
 
 
