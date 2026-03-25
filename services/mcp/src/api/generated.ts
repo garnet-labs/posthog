@@ -29275,6 +29275,35 @@ export namespace Schemas {
       metadata: TextReprMetadata;
     }
 
+    export interface ToolCallNarrationRequest {
+      /**
+       * Tool identifiers being invoked (snake_case names)
+       * @minItems 1
+       * @maxItems 32
+       */
+      tool_names: string[];
+      /**
+       * Assistant message text before the tool call, if any
+       * @maxLength 8000
+       * @nullable
+       */
+      assistant_content?: string | null;
+      /** Map of tool name to arguments object (truncated server-side) */
+      tool_args_by_name?: unknown | null;
+      /** Contextual ui_payload for contextual tools, if any */
+      ui_payload?: unknown | null;
+      /**
+       * Recent spoken narration lines to avoid repeating phrasing
+       * @maxItems 12
+       */
+      recent_narrations?: string[];
+    }
+
+    export interface ToolCallNarrationResponse {
+      /** Single spoken line for text-to-speech */
+      sentence: string;
+    }
+
     export interface TraceReviewCreate {
       /**
        * Trace ID for the review. Only one active review can exist per trace and team.

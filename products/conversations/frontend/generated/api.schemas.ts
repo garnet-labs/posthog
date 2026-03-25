@@ -252,6 +252,35 @@ interrupts (single source of truth for payload data). */
     readonly pending_approvals?: readonly PatchedConversationApiPendingApprovalsItem[]
 }
 
+export interface ToolCallNarrationRequestApi {
+    /**
+     * Tool identifiers being invoked (snake_case names)
+     * @minItems 1
+     * @maxItems 32
+     */
+    tool_names: string[]
+    /**
+     * Assistant message text before the tool call, if any
+     * @maxLength 8000
+     * @nullable
+     */
+    assistant_content?: string | null
+    /** Map of tool name to arguments object (truncated server-side) */
+    tool_args_by_name?: unknown | null
+    /** Contextual ui_payload for contextual tools, if any */
+    ui_payload?: unknown | null
+    /**
+     * Recent spoken narration lines to avoid repeating phrasing
+     * @maxItems 12
+     */
+    recent_narrations?: string[]
+}
+
+export interface ToolCallNarrationResponseApi {
+    /** Single spoken line for text-to-speech */
+    sentence: string
+}
+
 /**
  * * `widget` - Widget
  * `email` - Email

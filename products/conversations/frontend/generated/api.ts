@@ -20,6 +20,8 @@ import type {
     PatchedTicketApi,
     SuggestReplyResponseApi,
     TicketApi,
+    ToolCallNarrationRequestApi,
+    ToolCallNarrationResponseApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -245,6 +247,27 @@ export const conversationsSttTokenCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(conversationApi),
+    })
+}
+
+/**
+ * One short LLM line for voice mode when tools run (natural wording + brief why).
+ * @summary Generate voice narration for tool calls
+ */
+export const getConversationsToolCallNarrationCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/conversations/tool_call_narration/`
+}
+
+export const conversationsToolCallNarrationCreate = async (
+    projectId: string,
+    toolCallNarrationRequestApi: ToolCallNarrationRequestApi,
+    options?: RequestInit
+): Promise<ToolCallNarrationResponseApi> => {
+    return apiMutator<ToolCallNarrationResponseApi>(getConversationsToolCallNarrationCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(toolCallNarrationRequestApi),
     })
 }
 
