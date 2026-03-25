@@ -305,7 +305,7 @@ mod tests {
                 aggregation_group_type_index: None,
                 payloads: None,
                 super_groups: None,
-                holdout_groups: None,
+
                 holdout: None,
             },
             deleted: false,
@@ -335,6 +335,7 @@ mod tests {
                         prop_type: PropertyType::Flag,
                         group_type_index: None,
                         negation: None,
+                        compiled_regex: None,
                     }]),
                     rollout_percentage: Some(100.0),
                     variant: None,
@@ -344,7 +345,7 @@ mod tests {
                 aggregation_group_type_index: None,
                 payloads: None,
                 super_groups: None,
-                holdout_groups: None,
+
                 holdout: None,
             },
             deleted: false,
@@ -375,6 +376,7 @@ mod tests {
                             prop_type: PropertyType::Flag,
                             group_type_index: None,
                             negation: None,
+                            compiled_regex: None,
                         }]),
                         rollout_percentage: Some(50.0),
                         variant: None,
@@ -388,6 +390,7 @@ mod tests {
                             prop_type: PropertyType::Flag,
                             group_type_index: None,
                             negation: None,
+                            compiled_regex: None,
                         }]),
                         rollout_percentage: Some(50.0),
                         variant: None,
@@ -398,7 +401,7 @@ mod tests {
                 aggregation_group_type_index: None,
                 payloads: None,
                 super_groups: None,
-                holdout_groups: None,
+
                 holdout: None,
             },
             deleted: false,
@@ -429,6 +432,7 @@ mod tests {
                             prop_type: PropertyType::Flag,
                             group_type_index: None,
                             negation: None,
+                            compiled_regex: None,
                         },
                         PropertyFilter {
                             key: "regular_property".to_string(),
@@ -437,6 +441,7 @@ mod tests {
                             prop_type: PropertyType::Person,
                             group_type_index: None,
                             negation: None,
+                            compiled_regex: None,
                         },
                     ]),
                     rollout_percentage: Some(100.0),
@@ -447,7 +452,7 @@ mod tests {
                 aggregation_group_type_index: None,
                 payloads: None,
                 super_groups: None,
-                holdout_groups: None,
+
                 holdout: None,
             },
             deleted: false,
@@ -506,6 +511,7 @@ mod tests {
                     prop_type: PropertyType::Flag,
                     group_type_index: None,
                     negation: None,
+                    compiled_regex: None,
                 }]),
                 rollout_percentage: Some(100.0),
                 variant: None,
@@ -1558,7 +1564,7 @@ mod tests {
         assert!(flag.filters.aggregation_group_type_index.is_none());
         assert!(flag.filters.payloads.is_none());
         assert!(flag.filters.super_groups.is_none());
-        assert!(flag.filters.holdout_groups.is_none());
+        assert!(flag.filters.holdout.is_none());
     }
 
     #[test]
@@ -1651,27 +1657,13 @@ mod tests {
     }
 
     #[test]
-    fn test_does_not_require_db_preparation_if_holdout_groups_set() {
+    fn test_does_not_require_db_preparation_if_holdout_set() {
+        use crate::flags::flag_models::Holdout;
         let mut flag = create_simple_flag(vec![], 100.0);
-        flag.filters.holdout_groups = Some(vec![
-            FlagPropertyGroup {
-                properties: Some(vec![]),
-                variant: Some("holdout-1".to_string()),
-                rollout_percentage: Some(10.0),
-                ..Default::default()
-            },
-            // Ignored, but here for testing.
-            FlagPropertyGroup {
-                properties: Some(vec![create_simple_property_filter(
-                    "some_property",
-                    PropertyType::Person,
-                    OperatorType::Exact,
-                )]),
-                rollout_percentage: Some(100.0),
-                variant: Some("holdout-2".to_string()),
-                ..Default::default()
-            },
-        ]);
+        flag.filters.holdout = Some(Holdout {
+            id: 1,
+            exclusion_percentage: 10.0,
+        });
 
         assert!(!flag.requires_db_preparation(&HashMap::new()));
     }
