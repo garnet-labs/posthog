@@ -9,7 +9,10 @@ from django.utils.timezone import now
 import structlog
 from celery import shared_task
 
+from posthog.schema import ProductKey
+
 from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.models.person import Person, PersonDistinctId
 
 logger = structlog.get_logger(__name__)
@@ -82,6 +85,7 @@ def verify_persons_data_in_sync(
 
 
 def _team_integrity_statistics(person_data: list[Any]) -> Counter:
+    tag_queries(product=ProductKey.PERSONS, feature=Feature.QUERY)
     person_ids = [id for id, _, _ in person_data]
     person_uuids = [uuid for _, uuid, _ in person_data]
     team_ids = list({team_id for _, _, team_id in person_data})

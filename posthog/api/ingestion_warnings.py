@@ -7,8 +7,11 @@ from rest_framework import viewsets
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from posthog.schema import ProductKey
+
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 
 
 class IngestionWarningsViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
@@ -45,6 +48,7 @@ class IngestionWarningsViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             GROUP BY
                 type
         """
+        tag_queries(product=ProductKey.INGESTION_WARNINGS, feature=Feature.QUERY)
         warning_events = sync_execute(
             query,
             {

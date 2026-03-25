@@ -5,7 +5,10 @@ from django.db import router, transaction
 import structlog
 from rest_framework.exceptions import NotFound
 
+from posthog.schema import ProductKey
+
 from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.models.person import Person, PersonDistinctId
 from posthog.models.person.util import create_person, create_person_distinct_id
 
@@ -29,6 +32,7 @@ def reset_deleted_person_distinct_ids(team_id: int, distinct_id: str):
 
 def _get_distinct_ids_tied_to_deleted_persons(team_id: int) -> list[str]:
     # find distinct_ids where the person is set to be deleted
+    tag_queries(product=ProductKey.PERSONS, feature=Feature.QUERY)
     rows = sync_execute(
         """
             SELECT distinct_id FROM (
@@ -46,6 +50,7 @@ def _get_distinct_ids_tied_to_deleted_persons(team_id: int) -> list[str]:
 
 
 def _get_version_for_distinct_id(team_id: int, distinct_id: str) -> int:
+    tag_queries(product=ProductKey.PERSONS, feature=Feature.QUERY)
     rows = sync_execute(
         """
             SELECT max(version) as version FROM person_distinct_id2 WHERE team_id = %(team)s AND distinct_id = %(distinct_id)s
@@ -109,6 +114,7 @@ def _update_distinct_id_in_postgres(distinct_id: str, version: int, team_id: int
 
 def _get_person_version_if_deleted(team_id: int, person_uuid: str) -> Optional[int]:
     """Returns the max version if the person is soft-deleted in ClickHouse, None otherwise."""
+    tag_queries(product=ProductKey.PERSONS, feature=Feature.QUERY)
     rows = sync_execute(
         """
             SELECT max(version), argMax(is_deleted, version)
