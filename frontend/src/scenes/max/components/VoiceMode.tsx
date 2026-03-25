@@ -1,19 +1,24 @@
 import './VoiceMode.scss'
 
 import { useActions, useValues } from 'kea'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconArrowRight, IconX } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { cn } from 'lib/utils/css-classes'
 
+import { Query } from '~/queries/Query/Query'
+import { ArtifactContentType } from '~/queries/schema/schema-assistant-messages'
+import { isFunnelsQuery } from '~/queries/utils'
+
 import voiceListening from 'public/hedgehog/voice/listening.png'
 import voiceTalking from 'public/hedgehog/voice/talking.gif'
 import voiceThinking from 'public/hedgehog/voice/thinking.gif'
 
 import { maxLogic } from '../maxLogic'
-import { maxThreadLogic } from '../maxThreadLogic'
+import { maxThreadLogic, ThreadMessage } from '../maxThreadLogic'
+import { isArtifactMessage, isMultiVisualizationMessage, visualizationTypeToQuery } from '../utils'
 import { voiceLogic } from '../voiceLogic'
 
 /** Animated sinusoid whose amplitude follows the voice input level. */
@@ -102,6 +107,125 @@ function SinusoidWave({ amplitude }: { amplitude: number }): JSX.Element {
     return <canvas ref={canvasRef} className="w-full h-16" />
 }
 
+/** Find the last visualization artifact or multi-viz message in the thread. */
+function useLatestArtifact(thread: ThreadMessage[]): {
+    query: ReturnType<typeof visualizationTypeToQuery>
+    isFunnel: boolean
+    key: string
+} | null {
+    return useMemo(() => {
+        for (let i = thread.length - 1; i >= 0; i--) {
+            const msg = thread[i]
+            if (
+                isArtifactMessage(msg) &&
+                msg.content.content_type === ArtifactContentType.Visualization &&
+                msg.status === 'completed'
+            ) {
+                const q = visualizationTypeToQuery(msg.content)
+                if (q) {
+                    return { query: q, isFunnel: isFunnelsQuery(msg.content.query), key: msg.id ?? `art-${i}` }
+                }
+            }
+            if (isMultiVisualizationMessage(msg) && msg.visualizations.length > 0) {
+                const viz = msg.visualizations[0]
+                const q = visualizationTypeToQuery(viz)
+                if (q) {
+                    return { query: q, isFunnel: false, key: msg.id ?? `mviz-${i}` }
+                }
+            }
+        }
+        return null
+    }, [thread])
+}
+
+/** Hedgehog orb — reused in both centered and corner positions. */
+function HedgehogOrb({
+    isAiSpeaking,
+    isThinking,
+    isMouthOpen,
+    statusText,
+    orbInteractable,
+    orbPointerDown,
+    imgClassName,
+    onPointerDown,
+    onPointerUp,
+    onPointerCancel,
+}: {
+    isAiSpeaking: boolean
+    isThinking: boolean
+    isMouthOpen: boolean
+    statusText: string
+    orbInteractable: boolean
+    orbPointerDown: boolean
+    imgClassName: string
+    onPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void
+    onPointerUp?: (e: React.PointerEvent<HTMLDivElement>) => void
+    onPointerCancel?: (e: React.PointerEvent<HTMLDivElement>) => void
+}): JSX.Element {
+    return (
+        <div
+            data-attr="max-voice-mode-orb"
+            className={cn(
+                'relative flex items-center justify-center transition-transform duration-150 ease-out',
+                orbInteractable && 'cursor-grab active:cursor-grabbing touch-none select-none',
+                orbPointerDown && orbInteractable && 'scale-[0.96]',
+                !orbInteractable && 'pointer-events-none'
+            )}
+            role={orbInteractable ? 'button' : undefined}
+            tabIndex={orbInteractable ? 0 : undefined}
+            aria-label={
+                orbInteractable
+                    ? 'Hold on the hedgehog to keep talking. While Max is speaking, hold to interrupt and speak. Release to send.'
+                    : undefined
+            }
+            onPointerDown={orbInteractable ? onPointerDown : undefined}
+            onPointerUp={orbInteractable ? onPointerUp : undefined}
+            onPointerCancel={orbInteractable ? onPointerCancel : undefined}
+        >
+            <div className="absolute inset-[-12%] rounded-full pointer-events-none VoiceMode__glow" />
+
+            {/* Speech bubble */}
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+                <div className="relative bg-bg-light border border-border rounded-full px-5 py-2 text-sm font-semibold text-primary whitespace-nowrap shadow-md">
+                    {statusText}
+                    <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-bg-light border-r border-b border-border" />
+                </div>
+            </div>
+
+            {/* Hedgehog image */}
+            <div className="relative z-[10] flex items-center justify-center pointer-events-none">
+                {isAiSpeaking ? (
+                    <img
+                        src={voiceTalking}
+                        alt="Speaking"
+                        className={cn(imgClassName, 'object-contain pointer-events-none select-none')}
+                        draggable={false}
+                        key="voice-mode-ai-talking"
+                    />
+                ) : isThinking ? (
+                    <img
+                        src={voiceThinking}
+                        alt=""
+                        className={cn(imgClassName, 'object-contain pointer-events-none select-none')}
+                        draggable={false}
+                        key="voice-mode-thinking"
+                    />
+                ) : (
+                    <img
+                        src={isMouthOpen ? voiceTalking : voiceListening}
+                        alt={isMouthOpen ? 'Speaking' : 'Idle'}
+                        className={cn(imgClassName, 'object-contain pointer-events-none select-none')}
+                        draggable={false}
+                        key="voice-mode-listening"
+                    />
+                )}
+            </div>
+        </div>
+    )
+}
+
+const QUERY_CONTEXT_VOICE = { limitContext: 'posthog_ai' } as const
+
 export function VoiceMode(): JSX.Element {
     const {
         recording,
@@ -117,19 +241,29 @@ export function VoiceMode(): JSX.Element {
         mouthOpenness,
     } = useValues(voiceLogic)
     const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown } = useActions(voiceLogic)
-    /** Sync immediately so pointerup in the same frame still submits (React state may not have re-rendered). */
     const orbPressActiveRef = useRef(false)
     const { question } = useValues(maxLogic)
-    const { threadLoading } = useValues(maxThreadLogic)
+    const { threadLoading, threadGrouped } = useValues(maxThreadLogic)
     const { askMax } = useActions(maxThreadLogic)
 
+    const latestArtifact = useLatestArtifact(threadGrouped)
+    // Track the key so we re-trigger the entrance animation when the artifact changes
+    const prevArtifactKeyRef = useRef<string | null>(null)
+    const [animKey, setAnimKey] = useState(0)
+
+    useEffect(() => {
+        if (latestArtifact && latestArtifact.key !== prevArtifactKeyRef.current) {
+            prevArtifactKeyRef.current = latestArtifact.key
+            setAnimKey((k) => k + 1)
+        }
+    }, [latestArtifact])
+
+    const hasArtifact = !!latestArtifact
+
     const isAiSpeaking = playbackActive
-    const isUserSpeaking = recording
-    const isThinking = threadLoading && !isAiSpeaking && !isUserSpeaking
-    /** Hedgehog accepts input while listening, while Max is speaking (to interrupt), or while reconnecting the mic after interrupt if you're still holding. */
+    const isThinking = threadLoading && !isAiSpeaking && !recording
     const orbInteractable = playbackActive || recording || (connecting && orbPointerDown)
 
-    // "Listening" only when the STT session is actually recording — otherwise we lie and Send looks broken.
     let statusText = 'Waiting…'
     if (connecting && !orbPointerDown) {
         statusText = 'Connecting…'
@@ -175,7 +309,6 @@ export function VoiceMode(): JSX.Element {
         }
     }
 
-    /** Mic failed to come back after a reply (or similar) — Send restarts STT instead of doing nothing. */
     const canResumeMic =
         !!voiceModeFullscreen &&
         voiceModeEnabled &&
@@ -199,70 +332,54 @@ export function VoiceMode(): JSX.Element {
 
     const canSend = recording || question.trim().length > 0 || canResumeMic
 
-    return (
-        <div className="flex flex-col flex-1 items-center justify-between overflow-hidden bg-bg-primary">
-            {/* Orb area */}
-            <div className="flex flex-col flex-1 items-center justify-center gap-2">
-                <div
-                    data-attr="max-voice-mode-orb"
-                    className={cn(
-                        'relative flex items-center justify-center w-68 h-68 transition-transform duration-150 ease-out',
-                        orbInteractable && 'cursor-grab active:cursor-grabbing touch-none select-none',
-                        orbPointerDown && orbInteractable && 'scale-[0.96]',
-                        !orbInteractable && 'pointer-events-none'
-                    )}
-                    role={orbInteractable ? 'button' : undefined}
-                    tabIndex={orbInteractable ? 0 : undefined}
-                    aria-label={
-                        orbInteractable
-                            ? 'Hold on the hedgehog to keep talking. While Max is speaking, hold to interrupt and speak. Release to send.'
-                            : undefined
-                    }
-                    onPointerDown={orbInteractable ? handleOrbPointerDown : undefined}
-                    onPointerUp={orbInteractable ? handleOrbPointerEnd : undefined}
-                    onPointerCancel={orbInteractable ? handleOrbPointerEnd : undefined}
-                >
-                    <div className="absolute inset-[-12%] rounded-full pointer-events-none VoiceMode__glow" />
+    const orbProps = {
+        isAiSpeaking,
+        isThinking,
+        isMouthOpen,
+        statusText,
+        orbInteractable,
+        orbPointerDown,
+        onPointerDown: handleOrbPointerDown,
+        onPointerUp: handleOrbPointerEnd,
+        onPointerCancel: handleOrbPointerEnd,
+    }
 
-                    {/* Speech bubble */}
-                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-                        <div className="relative bg-bg-light border border-border rounded-full px-5 py-2 text-sm font-semibold text-primary whitespace-nowrap shadow-md">
-                            {statusText}
-                            {/* Tail — rotated square clipped to a triangle, same border as the bubble */}
-                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-bg-light border-r border-b border-border" />
+    return (
+        <div className="relative flex flex-col flex-1 items-center justify-between overflow-hidden bg-bg-primary">
+            {hasArtifact ? (
+                <>
+                    {/* Hedgehog in top-right corner with speech bubble */}
+                    <div className="absolute top-14 right-4 z-30 VoiceMode__hedgehog-corner">
+                        <div className="w-44 h-44">
+                            <HedgehogOrb {...orbProps} imgClassName="w-40 h-40" />
                         </div>
                     </div>
 
-                    {/* Hedgehog */}
-                    <div className="relative z-[10] flex items-center justify-center pointer-events-none">
-                        {isAiSpeaking ? (
-                            <img
-                                src={voiceTalking}
-                                alt="Speaking"
-                                className="w-64 h-64 object-contain pointer-events-none select-none"
-                                draggable={false}
-                                key="voice-mode-ai-talking"
-                            />
-                        ) : isThinking ? (
-                            <img
-                                src={voiceThinking}
-                                alt=""
-                                className="w-64 h-64 object-contain pointer-events-none select-none"
-                                draggable={false}
-                                key="voice-mode-thinking"
-                            />
-                        ) : (
-                            <img
-                                src={isMouthOpen ? voiceTalking : voiceListening}
-                                alt={isMouthOpen ? 'Speaking' : 'Idle'}
-                                className="w-64 h-64 object-contain pointer-events-none select-none"
-                                draggable={false}
-                                key="voice-mode-listening"
-                            />
-                        )}
+                    {/* Artifact in the center */}
+                    <div
+                        key={animKey}
+                        className="flex flex-col flex-1 items-center justify-center w-full px-6 VoiceMode__artifact-enter"
+                    >
+                        <div
+                            className={cn(
+                                'w-full max-w-3xl rounded-lg border border-border bg-bg-light shadow-lg overflow-hidden',
+                                latestArtifact.isFunnel ? 'h-[580px]' : 'h-96'
+                            )}
+                        >
+                            <Query query={latestArtifact.query!} readOnly embedded context={QUERY_CONTEXT_VOICE} />
+                        </div>
                     </div>
-                </div>
-            </div>
+                </>
+            ) : (
+                <>
+                    {/* Centered hedgehog orb (default — no artifact) */}
+                    <div className="flex flex-col flex-1 items-center justify-center gap-2">
+                        <div className="w-68 h-68">
+                            <HedgehogOrb {...orbProps} imgClassName="w-64 h-64" />
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* Sinusoid wave driven by voice amplitude */}
             <div className="w-full px-8 mb-8">
