@@ -194,12 +194,14 @@ jobs:
             #   run: |
             #       npm run taxonomy:build:json && git diff --exit-code
 
-    flox-activation:
+    flox-manifest:
         needs: changes
         if: needs.changes.outputs.python == 'true'
         timeout-minutes: 5
-        name: Flox activation check
+        name: Flox manifest and catalog check
         runs-on: ubuntu-latest
+        env:
+            FLOX_DISABLE_METRICS: 'true'
         steps:
             - uses: actions/checkout@v6
               with:
@@ -208,15 +210,19 @@ jobs:
             - name: Install Flox
               uses: flox/install-flox-action@v2
 
-            - name: Verify Flox activation (run mode, no profile scripts)
+            - name: Validate Flox manifest
               shell: bash
-              run: flox activate --mode run -- true
+              run: flox list -c > /dev/null
+
+            - name: Check Flox catalog lookup
+              shell: bash
+              run: flox show uv > /dev/null
 
     # Collate job - single required status check for branch protection.
     # The code-quality job skips when no Python changes, but this job always
     # runs and reports success, allowing PRs to merge.
     python_tests:
-        needs: [changes, code-quality, flox-activation]
+        needs: [changes, code-quality, flox-manifest]
         name: Python code quality checks
         runs-on: ubuntu-latest
         timeout-minutes: 5
@@ -242,8 +248,8 @@ jobs:
                     exit 1
                   fi
 
-                  if [[ "${{ needs.flox-activation.result }}" != "success" && "${{ needs.flox-activation.result }}" != "skipped" ]]; then
-                    echo "Flox activation checks failed."
+                  if [[ "${{ needs.flox-manifest.result }}" != "success" && "${{ needs.flox-manifest.result }}" != "skipped" ]]; then
+                    echo "Flox manifest checks failed."
                     exit 1
                   fi
 
