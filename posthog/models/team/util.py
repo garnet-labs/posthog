@@ -2,6 +2,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
+from django.db import transaction
 from django.db.utils import ProgrammingError
 
 import structlog
@@ -54,7 +55,8 @@ def delete_bulky_postgres_data(team_ids: list[int]):
     _raw_delete(CohortPeople.objects.filter(cohort_id__in=cohort_ids))
 
     try:
-        _raw_delete(FeatureFlagHashKeyOverride.objects.filter(team_id__in=team_ids))
+        with transaction.atomic():
+            _raw_delete(FeatureFlagHashKeyOverride.objects.filter(team_id__in=team_ids))
     except ProgrammingError:
         # FeatureFlagHashKeyOverride is managed=False — table may not exist in test DBs
         pass

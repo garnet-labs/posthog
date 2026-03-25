@@ -1668,7 +1668,7 @@ class TestManagementCommands(BaseTest):
         self.assertIn("flags", result["db_data"])
 
     def test_verify_detects_missing_evaluation_metadata(self):
-        from posthog.models.feature_flag.flags_cache import update_flags_cache, verify_team_flags
+        from products.feature_flags.backend.flags_cache import update_flags_cache, verify_team_flags
 
         FeatureFlag.objects.create(
             team=self.team,
