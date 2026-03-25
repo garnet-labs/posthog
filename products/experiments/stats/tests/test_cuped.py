@@ -479,6 +479,8 @@ class TestCupedReferenceData(TestCase):
         )
 
         self.assertAlmostEqual(test_result.point_estimate, -0.288704169, places=5)
+        self.assertAlmostEqual(test_result.confidence_interval[0], -0.486775, places=5)
+        self.assertAlmostEqual(test_result.confidence_interval[1], -0.090633, places=5)
         self.assertTrue(test_result.is_significant)
 
     def test_mean_metric_relative_effect_bayesian(self):
@@ -502,7 +504,8 @@ class TestCupedReferenceData(TestCase):
         )
 
         self.assertAlmostEqual(test_result.effect_size, -0.288704169, places=4)
-        self.assertLess(test_result.credible_interval[0], test_result.credible_interval[1])
+        self.assertAlmostEqual(test_result.credible_interval[0], -0.486732, places=5)
+        self.assertAlmostEqual(test_result.credible_interval[1], -0.090676, places=5)
 
     # --- Binomial metric ---
 
