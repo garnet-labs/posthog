@@ -231,6 +231,41 @@ export const conversationsQueueClearCreate = async (
     })
 }
 
+export const getConversationsTranscribeCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/conversations/transcribe/`
+}
+
+export const conversationsTranscribeCreate = async (
+    projectId: string,
+    conversationApi: NonReadonly<ConversationApi>,
+    options?: RequestInit
+): Promise<ConversationApi> => {
+    const formData = new FormData()
+
+    return apiMutator<ConversationApi>(getConversationsTranscribeCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        body: formData,
+    })
+}
+
+export const getConversationsTtsCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/conversations/tts/`
+}
+
+export const conversationsTtsCreate = async (
+    projectId: string,
+    conversationApi: NonReadonly<ConversationApi>,
+    options?: RequestInit
+): Promise<ConversationApi> => {
+    return apiMutator<ConversationApi>(getConversationsTtsCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(conversationApi),
+    })
+}
+
 /**
  * List tickets with person data attached.
  */
