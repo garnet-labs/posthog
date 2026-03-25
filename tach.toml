@@ -442,3 +442,12 @@ interfaces = [
 path = "products.messaging"
 depends_on = ["posthog"]
 layer = "non_isolated"
+
+[[modules]]
+path = "products.hogbot"
+depends_on = ["posthog"]
+layer = "products"
+interfaces = [
+    "products.hogbot.backend.facade",
+    "products.hogbot.backend.presentation.views",
+]
