@@ -1,1 +1,1 @@
-0222_add_session_id_uuid_minmax_index
+0223_add_error_tracking_issue_fingerprint_denormalized
