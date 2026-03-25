@@ -165,6 +165,7 @@ export const BackfillsEmpty: Story = {
     },
 }
 
+// Snapshot regeneration: trigger bot to update outdated visual regression snapshot
 export const Configuration: Story = {
     parameters: {
         pageUrl: urls.hogFunction(MOCK_HOG_FUNCTION_ID),
