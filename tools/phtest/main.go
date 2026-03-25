@@ -1,5 +1,5 @@
 // phtest is a TUI dashboard for running PostHog's test suites across
-// backend (pytest), frontend (jest), Rust (cargo test), and E2E (playwright).
+// backend (pytest), frontend (jest), Rust (cargo test), Go, and Playwright.
 //
 // Usage:
 //

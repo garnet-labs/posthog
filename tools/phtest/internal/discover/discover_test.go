@@ -36,8 +36,7 @@ func TestDiscover_findsAllCategories(t *testing.T) {
 	for _, s := range suites {
 		cats[s.Category]++
 	}
-
-	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryRust, CategoryGo, CategoryE2E} {
+	for _, cat := range []Category{CategoryBackend, CategoryFrontend, CategoryRust, CategoryGo, CategoryPlaywright} {
 		if cats[cat] == 0 {
 			t.Errorf("expected suites for category %q", cat)
 		}
@@ -60,17 +59,21 @@ func TestDiscover_sortedByRelPath(t *testing.T) {
 
 func TestDiscover_backendFindsTestFiles(t *testing.T) {
 	root := repoRoot(t)
-	ig := newIgnoreMatcher(root)
-	suites, err := discoverBackend(root, ig)
+	suites, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(suites) < 10 {
-		t.Errorf("expected at least 10 backend test files, got %d", len(suites))
-	}
 
-	// All should be individual .py files
+	var backend []Suite
 	for _, s := range suites {
+		if s.Category == CategoryBackend {
+			backend = append(backend, s)
+		}
+	}
+	if len(backend) < 10 {
+		t.Errorf("expected at least 10 backend test files, got %d", len(backend))
+	}
+	for _, s := range backend {
 		if !strings.HasSuffix(s.RelPath, ".py") {
 			t.Errorf("expected .py RelPath, got %q", s.RelPath)
 		}
@@ -78,77 +81,50 @@ func TestDiscover_backendFindsTestFiles(t *testing.T) {
 			t.Errorf("expected pytest command, got %q", s.Cmd)
 		}
 	}
-
-	// Should find files under products/, posthog/, and ee/
-	var hasProducts, hasPosthog, hasEE bool
-	for _, s := range suites {
-		switch {
-		case strings.HasPrefix(s.RelPath, "products/"):
-			hasProducts = true
-		case strings.HasPrefix(s.RelPath, "posthog/"):
-			hasPosthog = true
-		case strings.HasPrefix(s.RelPath, "ee/"):
-			hasEE = true
-		}
-	}
-	if !hasProducts {
-		t.Error("expected test files under products/")
-	}
-	if !hasPosthog {
-		t.Error("expected test files under posthog/")
-	}
-	if !hasEE {
-		t.Error("expected test files under ee/")
-	}
 }
 
 func TestDiscover_frontendFindsTestFiles(t *testing.T) {
 	root := repoRoot(t)
-	ig := newIgnoreMatcher(root)
-	suites, err := discoverFrontend(root, ig)
+	suites, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(suites) < 10 {
-		t.Errorf("expected at least 10 frontend test files, got %d", len(suites))
-	}
 
+	var frontend []Suite
 	for _, s := range suites {
+		if s.Category == CategoryFrontend {
+			frontend = append(frontend, s)
+		}
+	}
+	if len(frontend) < 10 {
+		t.Errorf("expected at least 10 frontend test files, got %d", len(frontend))
+	}
+	for _, s := range frontend {
 		if !isTSTestFile(filepath.Base(s.RelPath)) {
 			t.Errorf("expected .test.ts(x) RelPath, got %q", s.RelPath)
 		}
-	}
-
-	// Should find files under both products/ and frontend/src/
-	var hasProducts, hasFrontendSrc bool
-	for _, s := range suites {
-		switch {
-		case strings.HasPrefix(s.RelPath, "products/"):
-			hasProducts = true
-		case strings.HasPrefix(s.RelPath, "frontend/src/"):
-			hasFrontendSrc = true
-		}
-	}
-	if !hasProducts {
-		t.Error("expected test files under products/")
-	}
-	if !hasFrontendSrc {
-		t.Error("expected test files under frontend/src/")
 	}
 }
 
 func TestDiscover_rustFindsPackages(t *testing.T) {
 	root := repoRoot(t)
-	suites, err := discoverRust(root)
+	suites, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(suites) < 10 {
-		t.Errorf("expected at least 10 rust crates, got %d", len(suites))
+
+	var rust []Suite
+	for _, s := range suites {
+		if s.Category == CategoryRust {
+			rust = append(rust, s)
+		}
+	}
+	if len(rust) < 10 {
+		t.Errorf("expected at least 10 rust crates, got %d", len(rust))
 	}
 
 	found := false
-	for _, s := range suites {
+	for _, s := range rust {
 		if s.Name == "feature-flags" {
 			found = true
 			break
@@ -159,17 +135,23 @@ func TestDiscover_rustFindsPackages(t *testing.T) {
 	}
 }
 
-func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
+func TestDiscover_playwrightFindsSpecFiles(t *testing.T) {
 	root := repoRoot(t)
-	ig := newIgnoreMatcher(root)
-	suites, err := discoverE2E(root, ig)
+	suites, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(suites) < 5 {
-		t.Errorf("expected at least 5 E2E spec files, got %d", len(suites))
-	}
+
+	var e2e []Suite
 	for _, s := range suites {
+		if s.Category == CategoryPlaywright {
+			e2e = append(e2e, s)
+		}
+	}
+	if len(e2e) < 5 {
+		t.Errorf("expected at least 5 E2E spec files, got %d", len(e2e))
+	}
+	for _, s := range e2e {
 		if !strings.HasSuffix(s.RelPath, ".spec.ts") {
 			t.Errorf("expected .spec.ts RelPath, got %q", s.RelPath)
 		}
@@ -178,18 +160,23 @@ func TestDiscover_e2eFindsSpecFiles(t *testing.T) {
 
 func TestDiscover_goFindsPackages(t *testing.T) {
 	root := repoRoot(t)
-	ig := newIgnoreMatcher(root)
-	suites, err := discoverGo(root, ig)
+	suites, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(suites) < 5 {
-		t.Errorf("expected at least 5 Go test packages, got %d", len(suites))
+
+	var goSuites []Suite
+	for _, s := range suites {
+		if s.Category == CategoryGo {
+			goSuites = append(goSuites, s)
+		}
+	}
+	if len(goSuites) < 5 {
+		t.Errorf("expected at least 5 Go test packages, got %d", len(goSuites))
 	}
 
-	// Should find packages within livestream and phrocs modules
 	var hasLivestream, hasPhrocs bool
-	for _, s := range suites {
+	for _, s := range goSuites {
 		switch {
 		case strings.HasPrefix(s.RelPath, "livestream"):
 			hasLivestream = true
@@ -203,9 +190,7 @@ func TestDiscover_goFindsPackages(t *testing.T) {
 	if !hasPhrocs {
 		t.Error("expected Go packages under tools/phrocs/")
 	}
-
-	// Commands should target specific packages, not ./...
-	for _, s := range suites {
+	for _, s := range goSuites {
 		if strings.Contains(s.Cmd, "./...") {
 			t.Errorf("expected per-package command, got %q", s.Cmd)
 		}

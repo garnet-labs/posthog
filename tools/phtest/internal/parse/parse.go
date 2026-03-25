@@ -38,7 +38,7 @@ func Parse(category discover.Category, lines []string) *TestResult {
 		return parseCargo(tail)
 	case discover.CategoryGo:
 		return parseGoTest(tail)
-	case discover.CategoryE2E:
+	case discover.CategoryPlaywright:
 		return parsePlaywright(tail)
 	default:
 		return nil

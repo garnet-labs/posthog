@@ -221,7 +221,7 @@ func TestParsePlaywright_passed(t *testing.T) {
 	lines := []string{
 		"  42 passed (1.5m)",
 	}
-	r := Parse(discover.CategoryE2E, lines)
+	r := Parse(discover.CategoryPlaywright, lines)
 	if r == nil {
 		t.Fatal("expected result")
 	}
@@ -236,7 +236,7 @@ func TestParsePlaywright_mixed(t *testing.T) {
 		"  2 failed",
 		"  3 skipped",
 	}
-	r := Parse(discover.CategoryE2E, lines)
+	r := Parse(discover.CategoryPlaywright, lines)
 	if r == nil {
 		t.Fatal("expected result")
 	}
