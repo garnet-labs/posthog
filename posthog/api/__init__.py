@@ -13,6 +13,7 @@ from posthog.settings import EE_AVAILABLE
 import products.logs.backend.api as logs
 import products.links.backend.api as link
 import products.tasks.backend.api as tasks
+import products.hogbot.backend.api as hogbot
 import products.endpoints.backend.api as endpoints
 import products.mcp_store.backend.api as mcp_store
 import products.signals.backend.views as signals
@@ -282,6 +283,9 @@ project_features_router = projects_router.register(
     "project_early_access_feature",
     ["project_id"],
 )
+
+# Hogbot endpoints
+projects_router.register(r"hogbot", hogbot.HogbotViewSet, "project_hogbot", ["team_id"])
 
 # Tasks endpoints
 project_tasks_router = projects_router.register(r"tasks", tasks.TaskViewSet, "project_tasks", ["team_id"])

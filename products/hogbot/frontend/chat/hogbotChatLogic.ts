@@ -1,12 +1,12 @@
-import { actions, kea, listeners, path, reducers, selectors } from 'kea'
-import { loaders } from 'kea-loaders'
+import { actions, afterMount, beforeUnmount, kea, listeners, path, reducers, selectors } from 'kea'
 
-// import api from 'lib/api'
+import api from 'lib/api'
 
 import { LogEntry, parseLogs } from 'products/tasks/frontend/lib/parse-logs'
 
-import { MOCK_CHAT_LOG_ENTRIES } from '../__mocks__/chatMocks'
 import type { hogbotChatLogicType } from './hogbotChatLogicType'
+
+const POLL_INTERVAL_MS = 2000
 
 /** Groups consecutive log entries into chat blocks for rendering. */
 export interface ChatBlock {
@@ -51,37 +51,23 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
     path(['products', 'hogbot', 'frontend', 'chat', 'hogbotChatLogic']),
     actions({
         sendMessage: (content: string) => ({ content }),
-        appendEntry: (entry: LogEntry) => ({ entry }),
         setInputValue: (inputValue: string) => ({ inputValue }),
         setLogs: (logs: string) => ({ logs }),
-        setStreamEntries: (entries: LogEntry[]) => ({ entries }),
+        startPolling: true,
+        stopPolling: true,
     }),
-    loaders({
+    reducers({
         logs: [
             '' as string,
             {
-                loadLogs: async (): Promise<string> => {
-                    // TODO: Replace with API call when backend is ready
-                    // Admin agent logs live at a known URL — no session/run ID needed
-                    // const response = await api.get(
-                    //     `api/projects/@current/hogbot/admin/logs/`,
-                    //     { responseType: 'text' }
-                    // )
-                    // return response
-                    return ''
-                },
+                // Only update when content actually changes
+                setLogs: (state, { logs }) => (logs === state ? state : logs),
             },
         ],
-    }),
-    reducers({
-        logs: {
-            setLogs: (_, { logs }) => logs,
-        },
-        streamEntries: [
-            [] as LogEntry[],
+        logsLoading: [
+            true as boolean,
             {
-                setStreamEntries: (_, { entries }) => entries,
-                appendEntry: (state, { entry }) => [...state, entry],
+                setLogs: () => false,
             },
         ],
         inputValue: [
@@ -95,23 +81,18 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
             false,
             {
                 sendMessage: () => true,
-                appendEntry: () => false,
+                setLogs: () => false,
             },
         ],
     }),
     selectors({
         entries: [
-            (s) => [s.logs, s.streamEntries],
-            (logs, streamEntries): LogEntry[] => {
-                // Use stream entries when available, otherwise fall back to parsed S3 logs
-                if (streamEntries.length > 0) {
-                    return streamEntries
-                }
+            (s) => [s.logs],
+            (logs): LogEntry[] => {
                 if (logs) {
                     return parseLogs(logs)
                 }
-                // Mock data while backend isn't ready
-                return MOCK_CHAT_LOG_ENTRIES
+                return []
             },
         ],
         chatBlocks: [
@@ -119,31 +100,52 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
             (entries): ChatBlock[] => groupIntoChatBlocks(entries),
         ],
     }),
-    listeners(({ actions }) => ({
+    listeners(({ actions, cache, values }) => ({
+        startPolling: () => {
+            const poll = async (): Promise<void> => {
+                try {
+                    const response = await api.getResponse(`api/projects/@current/hogbot/admin/logs/`)
+                    const text = await response.text()
+                    actions.setLogs(text)
+                } catch {
+                    // Silently ignore poll errors
+                }
+            }
+            cache.pollingInterval = setInterval(poll, POLL_INTERVAL_MS)
+        },
+        stopPolling: () => {
+            if (cache.pollingInterval) {
+                clearInterval(cache.pollingInterval)
+                cache.pollingInterval = null
+            }
+        },
         sendMessage: async ({ content }) => {
-            const userEntry: LogEntry = {
-                id: `log-user-${Date.now()}`,
-                type: 'user',
-                timestamp: new Date().toISOString(),
-                message: content,
+            await api.create(`api/projects/@current/hogbot/admin/messages/`, { content })
+            // Trigger an immediate poll to pick up the response faster
+            try {
+                const response = await api.getResponse(`api/projects/@current/hogbot/admin/logs/`)
+                const text = await response.text()
+                actions.setLogs(text)
+            } catch {
+                // ignore
             }
-            actions.appendEntry(userEntry)
-
-            // TODO: Replace with API call when backend is ready
-            // Posts to the admin agent's message endpoint
-            // await api.create(`api/projects/@current/hogbot/admin/messages/`, { content })
-            // Agent response will arrive via SSE stream at /hogbot/admin/stream/
-
-            // Simulate agent response for now
-            await new Promise((resolve) => setTimeout(resolve, 1000))
-            const agentEntry: LogEntry = {
-                id: `log-agent-${Date.now()}`,
-                type: 'agent',
-                timestamp: new Date().toISOString(),
-                message:
-                    "I've received your message and I'm working on it. This is a mock response — the backend isn't connected yet.",
-            }
-            actions.appendEntry(agentEntry)
         },
     })),
+    afterMount(({ actions }) => {
+        // Initial load
+        const load = async (): Promise<void> => {
+            try {
+                const response = await api.getResponse(`api/projects/@current/hogbot/admin/logs/`)
+                const text = await response.text()
+                actions.setLogs(text)
+            } catch {
+                actions.setLogs('')
+            }
+        }
+        void load()
+        actions.startPolling()
+    }),
+    beforeUnmount(({ actions }) => {
+        actions.stopPolling()
+    }),
 ])

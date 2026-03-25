@@ -11,12 +11,8 @@ import { ThinkingSection } from './ThinkingSection'
 
 export function HogbotChat(): JSX.Element {
     const { chatBlocks, logsLoading, inputValue, sending } = useValues(hogbotChatLogic)
-    const { loadLogs, sendMessage, setInputValue } = useActions(hogbotChatLogic)
+    const { sendMessage, setInputValue } = useActions(hogbotChatLogic)
     const messagesEndRef = useRef<HTMLDivElement>(null)
-
-    useEffect(() => {
-        loadLogs()
-    }, [])
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

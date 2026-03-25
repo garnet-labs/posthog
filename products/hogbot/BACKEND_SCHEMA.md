@@ -12,10 +12,10 @@ Hogbot uses the same log format as the Tasks product.
 Logs are stored as JSONL in S3, with each line being a JSON object
 following the ACP (Agent Communication Protocol) notification format.
 
-The frontend reuses `parseLogs` and `parseLogEvent`
+The frontend reuses `parseLogs`
 from `products/tasks/frontend/lib/parse-logs.ts`.
 
-### Two Log Streams
+### Two Log Files
 
 | Agent | S3 key pattern | API path |
 |-------|---------------|----------|
@@ -24,6 +24,16 @@ from `products/tasks/frontend/lib/parse-logs.ts`.
 
 The admin agent writes to a single known S3 file per team.
 The research agent writes one log file per research task.
+
+### Frontend Polling
+
+The frontend polls the admin agent's S3 log endpoint every 2 seconds.
+Each poll fetches the full JSONL file, parses it with `parseLogs()`,
+and re-derives the chat blocks. No SSE or Redis is involved —
+the S3 file is the single source of truth.
+
+When a user sends a message, the frontend POSTs to the message endpoint
+and immediately triggers a poll to pick up the response faster.
 
 ### Log Entry Types
 
@@ -51,11 +61,6 @@ Proxies S3 to avoid CORS (same pattern as Tasks `runs/{id}/logs/`).
 
 Response: plain text (JSONL format, one JSON object per line).
 
-**`GET /api/projects/:team_id/hogbot/admin/stream/`**
-
-SSE endpoint for real-time admin agent log streaming.
-Relays events from Redis stream (written by the sandbox event relay).
-
 **`POST /api/projects/:team_id/hogbot/admin/messages/`**
 
 Send a user message to the admin agent.
@@ -68,7 +73,8 @@ Request:
 ```
 
 Response: `202 Accepted`.
-The agent response arrives via the SSE stream.
+The agent appends its response to the S3 log file.
+The frontend picks it up on the next poll.
 
 ### Sandbox Filesystem
 
@@ -119,15 +125,14 @@ in `products/tasks/backend/models.py`.
 ## Agent Architecture
 
 Hogbot runs two concurrent Claude SDK agent loops inside a cloud sandbox.
-Both agents write their logs to S3 as JSONL.
+Both agents append their logs to S3 as JSONL.
 
 ### 1. Admin Agent
 
 - Handles user chat interactions
 - Receives user messages and generates responses
 - Can delegate work to the research agent
-- Writes logs to `hogbot/{team_id}/admin.jsonl`
-- SSE stream relays events to the frontend in real-time
+- Appends logs to `hogbot/{team_id}/admin.jsonl`
 
 ### 2. Research Agent
 
@@ -136,7 +141,7 @@ Both agents write their logs to S3 as JSONL.
 - Creates and updates markdown files on the sandbox filesystem
   (e.g. `/research/mobile-retention-drop.md`)
 - Creates Tasks (via the Tasks product API) with `origin_product="hogbot"`
-- Writes per-research logs to `hogbot/{team_id}/research/{research_id}.jsonl`
+- Appends per-research logs to `hogbot/{team_id}/research/{research_id}.jsonl`
 - Can send proactive messages via the admin agent
 
 ### Sandbox Provisioning
@@ -154,16 +159,12 @@ Follow the existing Tasks product pattern:
 4. The sandbox runs an agent server (`npx agent-server`)
    that hosts both agent loops
 
-### Log Streaming
+### Log Persistence
 
 1. Agent activity inside the sandbox produces ACP notifications
-2. Sandbox posts events to the relevant stream endpoint
-   (authenticated via connection token)
-3. Backend writes events to a Redis stream
-   (reference: `products/tasks/backend/temporal/process_task/activities/relay_sandbox_events.py`)
-4. Django SSE endpoint reads from Redis stream
-   and pushes to the connected frontend client
-5. Logs are also appended to S3 as JSONL for historical access
+2. The agent server appends each event as a JSON line to the S3 log file
+3. The frontend polls the S3 log proxy endpoint every 2 seconds
+4. Each poll re-parses the full file and updates the UI
 
 ### OAuth & MCP Access
 
@@ -177,10 +178,9 @@ retention data, and other PostHog product data.
 
 - [ ] Add `HOGBOT = "hogbot"` to `Task.OriginProduct` in `products/tasks/backend/models.py`
 - [ ] Create sandbox filesystem proxy endpoints (list files, read file)
-- [ ] Create admin agent log proxy endpoint (S3 → response)
-- [ ] Create admin agent SSE stream endpoint (Redis → SSE)
+- [ ] Create admin agent S3 log proxy endpoint
 - [ ] Create admin agent message endpoint (POST)
-- [ ] Create research agent log proxy endpoint (per research ID)
+- [ ] Create research agent S3 log proxy endpoint (per research ID)
 - [ ] Register URLs in `products/hogbot/backend/presentation/urls.py`
 - [ ] Create Temporal workflow for sandbox provisioning
 - [ ] Create agent server entrypoint with admin + research loops
