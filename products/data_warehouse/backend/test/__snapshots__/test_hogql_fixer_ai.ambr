@@ -48,8 +48,8 @@
   - issue_name (string)
   - issue_description (string)
   - issue_status (string)
-  - assigned_user_id (expression)
-  - assigned_role_id (expression)
+  - assigned_user_id (integer)
+  - assigned_role_id (string)
   - issue_first_seen (datetime)
   '''
 # ---
@@ -169,8 +169,8 @@
   - issue_name (string)
   - issue_description (string)
   - issue_status (string)
-  - assigned_user_id (expression)
-  - assigned_role_id (expression)
+  - assigned_user_id (integer)
+  - assigned_role_id (string)
   - issue_first_seen (datetime)
   
   Below is the current HogQL query and the error message
