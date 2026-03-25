@@ -1,52 +1,19 @@
-/* Halo behind the orb — donut shape so the ring interior stays dark */
+/* Soft halo behind the hedgehog */
 .VoiceMode__glow {
     background: radial-gradient(
         circle at 50% 50%,
-        transparent 0%,
-        transparent 40%,
-        color-mix(in sRGB, var(--color-ai) 25%, transparent) 46%,
-        color-mix(in sRGB, #38bdf8 20%, transparent) 52%,
-        transparent 66%
+        rgb(255 255 255 / 30%) 0%,
+        rgb(255 255 255 / 10%) 35%,
+        transparent 65%
     );
-    filter: blur(22px);
+    filter: blur(28px);
     animation: VoiceMode__GlowPulse 3.5s ease-in-out infinite;
-}
-
-/* Ring state animations — applied to the SVG wrapper */
-.VoiceMode__ring--idle {
-    animation: VoiceMode__Breathe 4s ease-in-out infinite;
-}
-
-.VoiceMode__ring--user {
-    filter: drop-shadow(0 0 18px #38bdf888);
-    animation: VoiceMode__Breathe 1s ease-in-out infinite;
-}
-
-.VoiceMode__ring--ai {
-    filter: drop-shadow(0 0 22px color-mix(in sRGB, var(--color-ai) 55%, transparent));
-    animation: VoiceMode__Breathe 1.4s ease-in-out infinite;
-}
-
-.VoiceMode__ring--thinking {
-    opacity: 0.72;
-    animation: VoiceMode__Breathe 2s ease-in-out infinite;
-}
-
-@keyframes VoiceMode__Breathe {
-    0%,
-    100% {
-        transform: scale(1);
-    }
-
-    50% {
-        transform: scale(1.06);
-    }
 }
 
 @keyframes VoiceMode__GlowPulse {
     0%,
     100% {
-        opacity: 0.82;
+        opacity: 0.7;
     }
 
     50% {

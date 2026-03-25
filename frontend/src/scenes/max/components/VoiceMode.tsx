@@ -115,8 +115,7 @@ export function VoiceMode(): JSX.Element {
         voiceModeEnabled,
         micPermissionDenied,
         mouthOpenness,
-    } =
-        useValues(voiceLogic)
+    } = useValues(voiceLogic)
     const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown } = useActions(voiceLogic)
     /** Sync immediately so pointerup in the same frame still submits (React state may not have re-rendered). */
     const orbPressActiveRef = useRef(false)
@@ -129,8 +128,6 @@ export function VoiceMode(): JSX.Element {
     const isThinking = threadLoading && !isAiSpeaking && !isUserSpeaking
     /** Hedgehog accepts input while listening, while Max is speaking (to interrupt), or while reconnecting the mic after interrupt if you're still holding. */
     const orbInteractable = playbackActive || recording || (connecting && orbPointerDown)
-    // Zen for listening, connecting, recording, and thinking — only swap to gifs during TTS.
-    const showZenInOrb = !isAiSpeaking
 
     // "Listening" only when the STT session is actually recording — otherwise we lie and Send looks broken.
     let statusText = 'Waiting…'
@@ -205,11 +202,11 @@ export function VoiceMode(): JSX.Element {
     return (
         <div className="flex flex-col flex-1 items-center justify-between overflow-hidden bg-bg-primary">
             {/* Orb area */}
-            <div className="flex flex-col flex-1 items-center justify-center gap-6">
+            <div className="flex flex-col flex-1 items-center justify-center gap-2">
                 <div
                     data-attr="max-voice-mode-orb"
                     className={cn(
-                        'relative flex items-center justify-center w-72 h-72 transition-transform duration-150 ease-out',
+                        'relative flex items-center justify-center w-68 h-68 transition-transform duration-150 ease-out',
                         orbInteractable && 'cursor-grab active:cursor-grabbing touch-none select-none',
                         orbPointerDown && orbInteractable && 'scale-[0.96]',
                         !orbInteractable && 'pointer-events-none'
@@ -226,40 +223,23 @@ export function VoiceMode(): JSX.Element {
                     onPointerCancel={orbInteractable ? handleOrbPointerEnd : undefined}
                 >
                     <div className="absolute inset-[-12%] rounded-full pointer-events-none VoiceMode__glow" />
-                    {/* SVG gradient stroke ring — no fill */}
-                    <svg
-                        className={cn(
-                            'absolute inset-0 w-full h-full pointer-events-none z-[1]',
-                            isUserSpeaking && 'VoiceMode__ring--user',
-                            isAiSpeaking && 'VoiceMode__ring--ai',
-                            isThinking && 'VoiceMode__ring--thinking',
-                            !isUserSpeaking && !isAiSpeaking && !isThinking && 'VoiceMode__ring--idle'
-                        )}
-                        viewBox="0 0 288 288"
-                    >
-                        <defs>
-                            <linearGradient id="voice-ring-gradient" x1="0" y1="0" x2="1" y2="1">
-                                <stop offset="0%" stopColor="var(--color-ai)" />
-                                <stop offset="55%" stopColor="#6c47ff" />
-                                <stop offset="100%" stopColor="#38bdf8" />
-                            </linearGradient>
-                        </defs>
-                        <circle
-                            cx="144"
-                            cy="144"
-                            r="140"
-                            fill="none"
-                            stroke="url(#voice-ring-gradient)"
-                            strokeWidth="3"
-                        />
-                    </svg>
+
+                    {/* Speech bubble */}
+                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+                        <div className="relative bg-bg-light border border-border rounded-full px-5 py-2 text-sm font-semibold text-primary whitespace-nowrap shadow-md">
+                            {statusText}
+                            {/* Tail — rotated square clipped to a triangle, same border as the bubble */}
+                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-bg-light border-r border-b border-border" />
+                        </div>
+                    </div>
+
                     {/* Hedgehog */}
                     <div className="relative z-[10] flex items-center justify-center pointer-events-none">
                         {isAiSpeaking ? (
                             <img
                                 src={voiceTalking}
                                 alt="Speaking"
-                                className="w-52 h-52 object-contain pointer-events-none select-none"
+                                className="w-64 h-64 object-contain pointer-events-none select-none"
                                 draggable={false}
                                 key="voice-mode-ai-talking"
                             />
@@ -267,7 +247,7 @@ export function VoiceMode(): JSX.Element {
                             <img
                                 src={voiceThinking}
                                 alt=""
-                                className="w-52 h-52 object-contain pointer-events-none select-none"
+                                className="w-64 h-64 object-contain pointer-events-none select-none"
                                 draggable={false}
                                 key="voice-mode-thinking"
                             />
@@ -275,19 +255,17 @@ export function VoiceMode(): JSX.Element {
                             <img
                                 src={isMouthOpen ? voiceTalking : voiceListening}
                                 alt={isMouthOpen ? 'Speaking' : 'Idle'}
-                                className="w-52 h-52 object-contain pointer-events-none select-none"
+                                className="w-64 h-64 object-contain pointer-events-none select-none"
                                 draggable={false}
                                 key="voice-mode-listening"
                             />
                         )}
                     </div>
                 </div>
-
-                <p className="text-sm text-secondary">{statusText}</p>
             </div>
 
             {/* Sinusoid wave driven by voice amplitude */}
-            <div className="w-full px-8">
+            <div className="w-full px-8 mb-8">
                 <SinusoidWave amplitude={mouthOpenness} />
             </div>
 
