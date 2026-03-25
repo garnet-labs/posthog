@@ -178,9 +178,9 @@ class BayesianGaussianTest(BayesianTest):
 
         try:
             # Calculate effect size and variance
-            baseline_mean = kwargs.get("baseline_mean")
+            unadjusted_mean = kwargs.get("unadjusted_mean")
             effect_size, effect_variance = calculate_effect_size_and_variance(
-                treatment_stat, control_stat, difference_type, baseline_mean
+                treatment_stat, control_stat, difference_type, unadjusted_mean
             )
 
             # Bayesian posterior update

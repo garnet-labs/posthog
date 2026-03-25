@@ -11,7 +11,7 @@ def calculate_point_estimate(
     treatment_stat: AnyStatistic,
     control_stat: AnyStatistic,
     difference_type: DifferenceType,
-    baseline_mean: float | None = None,
+    unadjusted_mean: float | None = None,
 ) -> float:
     """
     Calculate point estimate for treatment vs control comparison.
@@ -20,9 +20,9 @@ def calculate_point_estimate(
         treatment_stat: Treatment group statistic
         control_stat: Control group statistic
         difference_type: Type of difference to calculate
-        baseline_mean: Optional override for the denominator in relative calculations.
+        unadjusted_mean: Optional override for the denominator in relative calculations.
             When provided, used instead of the control mean. This is useful for CUPED
-            where the adjusted control mean differs from the original baseline.
+            where the adjusted control mean differs from the original control mean.
 
     Returns:
         Point estimate value
@@ -37,7 +37,7 @@ def calculate_point_estimate(
         return treatment_mean - control_mean
 
     elif difference_type == DifferenceType.RELATIVE:
-        denominator = baseline_mean if baseline_mean is not None else control_mean
+        denominator = unadjusted_mean if unadjusted_mean is not None else control_mean
         if abs(denominator) < 1e-10:
             raise StatisticError("Control mean cannot be zero for relative difference calculation")
         return (treatment_mean - control_mean) / denominator
@@ -50,7 +50,7 @@ def calculate_variance_pooled(
     treatment_stat: AnyStatistic,
     control_stat: AnyStatistic,
     difference_type: DifferenceType,
-    baseline_mean: float | None = None,
+    unadjusted_mean: float | None = None,
 ) -> float:
     """
     Calculate pooled variance for treatment vs control comparison.
@@ -62,9 +62,9 @@ def calculate_variance_pooled(
         treatment_stat: Treatment group statistic
         control_stat: Control group statistic
         difference_type: Type of difference calculation
-        baseline_mean: Optional override for the denominator in relative calculations.
+        unadjusted_mean: Optional override for the denominator in relative calculations.
             When provided, used instead of the control mean. This is useful for CUPED
-            where the adjusted control mean differs from the original baseline.
+            where the adjusted control mean differs from the original control mean.
 
     Returns:
         Pooled variance estimate
@@ -81,7 +81,7 @@ def calculate_variance_pooled(
         # Delta method for relative differences
         treatment_mean = get_mean(treatment_stat)
         control_mean = get_mean(control_stat)
-        denominator = baseline_mean if baseline_mean is not None else control_mean
+        denominator = unadjusted_mean if unadjusted_mean is not None else control_mean
 
         if abs(denominator) < 1e-10:
             raise StatisticError("Control mean cannot be zero for relative variance calculation")

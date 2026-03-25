@@ -111,11 +111,11 @@ class TwoSidedTTest(StatisticalTest):
         """Run two-sided t-test."""
         validate_sample_sizes(treatment_stat, control_stat)
 
-        baseline_mean = kwargs.get("baseline_mean")
-        point_estimate = calculate_point_estimate(treatment_stat, control_stat, difference_type, baseline_mean)
+        unadjusted_mean = kwargs.get("unadjusted_mean")
+        point_estimate = calculate_point_estimate(treatment_stat, control_stat, difference_type, unadjusted_mean)
 
         # Calculate variance and degrees of freedom
-        pooled_variance = calculate_variance_pooled(treatment_stat, control_stat, difference_type, baseline_mean)
+        pooled_variance = calculate_variance_pooled(treatment_stat, control_stat, difference_type, unadjusted_mean)
         degrees_of_freedom = calculate_welch_satterthwaite_df(treatment_stat, control_stat)
 
         # Calculate test statistic and p-value

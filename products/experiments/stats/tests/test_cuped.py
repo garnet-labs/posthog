@@ -458,7 +458,7 @@ class TestCupedReferenceData(TestCase):
         self.assertLess(result.treatment_adjusted.variance, treatment_post.variance)
 
     def test_mean_metric_relative_effect(self):
-        """Verify relative effect for mean metric with baseline_mean override."""
+        """Verify relative effect for mean metric with unadjusted_mean override."""
         control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
         treatment_post = SampleMeanStatistic(n=2800, sum=205, sum_squares=510)
         control_cuped = CupedData(
@@ -472,17 +472,17 @@ class TestCupedReferenceData(TestCase):
 
         result = cuped_adjust(treatment_post, control_post, treatment_cuped, control_cuped)
 
-        # Pass unadjusted control mean as baseline_mean for correct CUPED relative effect
+        # Pass unadjusted control mean as unadjusted_mean for correct CUPED relative effect
         method = FrequentistMethod(FrequentistConfig(difference_type=DifferenceType.RELATIVE))
         test_result = method.run_test(
-            result.treatment_adjusted, result.control_adjusted, baseline_mean=result.control_unadjusted_mean
+            result.treatment_adjusted, result.control_adjusted, unadjusted_mean=result.control_unadjusted_mean
         )
 
         self.assertAlmostEqual(test_result.point_estimate, -0.288704169, places=5)
         self.assertTrue(test_result.is_significant)
 
     def test_mean_metric_relative_effect_bayesian(self):
-        """Verify baseline_mean works with Bayesian method too."""
+        """Verify unadjusted_mean works with Bayesian method too."""
         control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
         treatment_post = SampleMeanStatistic(n=2800, sum=205, sum_squares=510)
         control_cuped = CupedData(
@@ -498,7 +498,7 @@ class TestCupedReferenceData(TestCase):
 
         method = BayesianMethod(BayesianConfig(difference_type=DifferenceType.RELATIVE))
         test_result = method.run_test(
-            result.treatment_adjusted, result.control_adjusted, baseline_mean=result.control_unadjusted_mean
+            result.treatment_adjusted, result.control_adjusted, unadjusted_mean=result.control_unadjusted_mean
         )
 
         self.assertAlmostEqual(test_result.effect_size, -0.288704169, places=4)
@@ -530,7 +530,7 @@ class TestCupedReferenceData(TestCase):
 
         method = FrequentistMethod(FrequentistConfig(difference_type=DifferenceType.RELATIVE))
         test_result = method.run_test(
-            result.treatment_adjusted, result.control_adjusted, baseline_mean=result.control_unadjusted_mean
+            result.treatment_adjusted, result.control_adjusted, unadjusted_mean=result.control_unadjusted_mean
         )
         self.assertTrue(test_result.is_significant)
         self.assertLess(test_result.point_estimate, 0)
