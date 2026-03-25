@@ -3,7 +3,7 @@
  * MCP service uses these Zod schemas for generated tool handlers.
  * To regenerate: hogli build:openapi
  *
- * PostHog API - MCP 10 enabled ops
+ * PostHog API - MCP 8 enabled ops
  * OpenAPI spec version: 1.0.0
  */
 import * as zod from 'zod'
@@ -45,15 +45,6 @@ export const ActionPredictionModelRunsCreateBody = /* @__PURE__ */ zod.object({
         .string()
         .optional()
         .describe('The Python script used to train and produce the model artifact.'),
-})
-
-export const ActionPredictionModelRunsRetrieveParams = /* @__PURE__ */ zod.object({
-    id: zod.string().describe('A UUID string identifying this action prediction model run.'),
-    project_id: zod
-        .string()
-        .describe(
-            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
-        ),
 })
 
 export const ActionPredictionModelRunsPartialUpdateParams = /* @__PURE__ */ zod.object({
@@ -125,15 +116,6 @@ export const ActionPredictionModelsCreateBody = /* @__PURE__ */ zod.object({
     lookback_days: zod.number().min(1).describe('Number of days to look back for prediction data.'),
 })
 
-export const ActionPredictionModelsRetrieveParams = /* @__PURE__ */ zod.object({
-    id: zod.string().describe('A UUID string identifying this action prediction model.'),
-    project_id: zod
-        .string()
-        .describe(
-            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
-        ),
-})
-
 export const ActionPredictionModelsPartialUpdateParams = /* @__PURE__ */ zod.object({
     id: zod.string().describe('A UUID string identifying this action prediction model.'),
     project_id: zod
@@ -183,13 +165,4 @@ export const ActionPredictionModelsUploadUrlCreateParams = /* @__PURE__ */ zod.o
         .describe(
             "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
         ),
-})
-
-export const actionPredictionModelsUploadUrlCreateBodyFilenameMax = 255
-
-export const ActionPredictionModelsUploadUrlCreateBody = /* @__PURE__ */ zod.object({
-    filename: zod
-        .string()
-        .max(actionPredictionModelsUploadUrlCreateBodyFilenameMax)
-        .describe('Name of the file to upload (e.g. model.pkl).'),
 })

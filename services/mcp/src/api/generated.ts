@@ -29451,14 +29451,6 @@ export namespace Schemas {
       queue_id?: string | null;
     }
 
-    export interface UploadURLRequest {
-      /**
-       * Name of the file to upload (e.g. model.pkl).
-       * @maxLength 255
-       */
-      filename: string;
-    }
-
     /**
      * Form fields to include with the POST request.
      */

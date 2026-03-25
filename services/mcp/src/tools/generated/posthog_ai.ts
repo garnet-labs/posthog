@@ -7,14 +7,11 @@ import {
     ActionPredictionModelRunsListQueryParams,
     ActionPredictionModelRunsPartialUpdateBody,
     ActionPredictionModelRunsPartialUpdateParams,
-    ActionPredictionModelRunsRetrieveParams,
     ActionPredictionModelsCreateBody,
     ActionPredictionModelsDestroyParams,
     ActionPredictionModelsListQueryParams,
     ActionPredictionModelsPartialUpdateBody,
     ActionPredictionModelsPartialUpdateParams,
-    ActionPredictionModelsRetrieveParams,
-    ActionPredictionModelsUploadUrlCreateBody,
     ActionPredictionModelsUploadUrlCreateParams,
 } from '@/generated/posthog_ai/api'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
@@ -40,27 +37,6 @@ const actionPredictionModelList = (): ToolBase<
         return {
             ...(result as any),
             _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models`,
-        }
-    },
-})
-
-const ActionPredictionModelRetrieveSchema = ActionPredictionModelsRetrieveParams.omit({ project_id: true })
-
-const actionPredictionModelRetrieve = (): ToolBase<
-    typeof ActionPredictionModelRetrieveSchema,
-    Schemas.ActionPredictionModel & { _posthogUrl: string }
-> => ({
-    name: 'action-prediction-model-retrieve',
-    schema: ActionPredictionModelRetrieveSchema,
-    handler: async (context: Context, params: z.infer<typeof ActionPredictionModelRetrieveSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.ActionPredictionModel>({
-            method: 'GET',
-            path: `/api/environments/${projectId}/action_prediction_models/${params.id}/`,
-        })
-        return {
-            ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models/${(result as any).id}`,
         }
     },
 })
@@ -158,9 +134,7 @@ const actionPredictionModelDestroy = (): ToolBase<typeof ActionPredictionModelDe
     },
 })
 
-const ActionPredictionModelUploadUrlSchema = ActionPredictionModelsUploadUrlCreateParams.omit({
-    project_id: true,
-}).extend(ActionPredictionModelsUploadUrlCreateBody.shape)
+const ActionPredictionModelUploadUrlSchema = ActionPredictionModelsUploadUrlCreateParams.omit({ project_id: true })
 
 const actionPredictionModelUploadUrl = (): ToolBase<
     typeof ActionPredictionModelUploadUrlSchema,
@@ -170,14 +144,9 @@ const actionPredictionModelUploadUrl = (): ToolBase<
     schema: ActionPredictionModelUploadUrlSchema,
     handler: async (context: Context, params: z.infer<typeof ActionPredictionModelUploadUrlSchema>) => {
         const projectId = await context.stateManager.getProjectId()
-        const body: Record<string, unknown> = {}
-        if (params.filename !== undefined) {
-            body['filename'] = params.filename
-        }
         const result = await context.api.request<Schemas.UploadURLResponse>({
             method: 'POST',
             path: `/api/environments/${projectId}/action_prediction_models/${params.id}/upload_url/`,
-            body,
         })
         return result
     },
@@ -204,27 +173,6 @@ const predictionModelRunList = (): ToolBase<
         return {
             ...(result as any),
             _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models`,
-        }
-    },
-})
-
-const PredictionModelRunRetrieveSchema = ActionPredictionModelRunsRetrieveParams.omit({ project_id: true })
-
-const predictionModelRunRetrieve = (): ToolBase<
-    typeof PredictionModelRunRetrieveSchema,
-    Schemas.ActionPredictionModelRun & { _posthogUrl: string }
-> => ({
-    name: 'prediction-model-run-retrieve',
-    schema: PredictionModelRunRetrieveSchema,
-    handler: async (context: Context, params: z.infer<typeof PredictionModelRunRetrieveSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.ActionPredictionModelRun>({
-            method: 'GET',
-            path: `/api/environments/${projectId}/action_prediction_model_runs/${params.id}/`,
-        })
-        return {
-            ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models/${(result as any).id}`,
         }
     },
 })
@@ -318,13 +266,11 @@ const predictionModelRunPartialUpdate = (): ToolBase<
 
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'action-prediction-model-list': actionPredictionModelList,
-    'action-prediction-model-retrieve': actionPredictionModelRetrieve,
     'action-prediction-model-create': actionPredictionModelCreate,
     'action-prediction-model-partial-update': actionPredictionModelPartialUpdate,
     'action-prediction-model-destroy': actionPredictionModelDestroy,
     'action-prediction-model-upload-url': actionPredictionModelUploadUrl,
     'prediction-model-run-list': predictionModelRunList,
-    'prediction-model-run-retrieve': predictionModelRunRetrieve,
     'prediction-model-run-create': predictionModelRunCreate,
     'prediction-model-run-partial-update': predictionModelRunPartialUpdate,
 }
