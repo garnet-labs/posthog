@@ -44,7 +44,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
             r.delete(key)
         return super().setUp()
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_increment_request_count_adds_requests_to_appropriate_buckets(self):
         team_id = 3
         other_team_id = 1243
@@ -79,7 +79,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
             )
             self.assertEqual(client.hgetall(f"posthog:decide_requests:other"), {})
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_capture_team_decide_usage(self):
         mock_capture = MagicMock()
         team_id = 3
@@ -163,7 +163,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
                 },
             )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_no_token_loses_capture_team_decide_usage_data(self):
         mock_capture = MagicMock()
         team_id = 3
@@ -226,7 +226,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
                     },
                 )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_efficient_querying_of_team_decide_usage_data(self):
         mock_capture = MagicMock()
         team_id = 3901
@@ -299,7 +299,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
     @pytest.mark.skip(
         reason="This works locally, but causes issues in CI because the freeze_time applies to threads as well in unrelated tests, causing timeouts."
     )
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_no_interference_between_different_types_of_new_incoming_increments(self):
         # we want freezetime to apply to threads too.
         # However, the list can't be empty, so we need to add something.
@@ -400,7 +400,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
     @pytest.mark.skip(
         reason="This works locally, but causes issues in CI because the freeze_time applies to threads as well in unrelated tests, causing timeouts."
     )
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_locking_works_for_capture_team_decide_usage(self):
         # we want freezetime to apply to threads too.
         # However, the list can't be empty, so we need to add something.
@@ -491,7 +491,7 @@ class TestFeatureFlagAnalytics(BaseTest, QueryMatchingTest):
     @pytest.mark.skip(
         reason="This works locally, but causes issues in CI because the freeze_time applies to threads as well in unrelated tests, causing timeouts."
     )
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_locking_in_redis_doesnt_block_new_incoming_increments(self):
         # we want freezetime to apply to threads too.
         # However, the list can't be empty, so we need to add something.
@@ -612,7 +612,7 @@ class TestSdkBreakdown(BaseTest):
         ]
         self.assertEqual(SDK_LIBRARIES, expected_libraries)
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_extract_sdk_breakdown_from_redis_empty(self):
         client = redis.get_client()
         team_id = 999
@@ -621,7 +621,7 @@ class TestSdkBreakdown(BaseTest):
             result = _extract_sdk_breakdown_from_redis(client, team_id, FlagRequestType.DECIDE)
             self.assertEqual(result, {})
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_extract_sdk_breakdown_from_redis_with_data(self):
         client = redis.get_client()
         team_id = 888
@@ -655,7 +655,7 @@ class TestSdkBreakdown(BaseTest):
                 {b"165192619": b"5"},
             )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_capture_team_decide_usage_includes_sdk_breakdown(self):
         mock_capture = MagicMock()
         team_id = 777
@@ -701,7 +701,7 @@ class TestSdkBreakdown(BaseTest):
                 },
             )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_capture_team_decide_usage_without_sdk_breakdown(self):
         mock_capture = MagicMock()
         team_id = 666
@@ -740,7 +740,7 @@ class TestSdkBreakdown(BaseTest):
                 },
             )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_capture_local_evaluation_usage_includes_sdk_breakdown(self):
         mock_capture = MagicMock()
         team_id = 555
@@ -783,7 +783,7 @@ class TestSdkBreakdown(BaseTest):
                 },
             )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_extract_sdk_breakdown_uses_pipelining_for_all_sdks(self):
         """
         Verify that SDK breakdown extraction works correctly with many SDKs.
@@ -830,7 +830,7 @@ class TestSdkBreakdown(BaseTest):
                 remaining = client.hgetall(f"posthog:decide_requests:sdk:{team_id}:{sdk}")
                 self.assertEqual(remaining, {b"165192619": b"1"}, f"SDK {sdk} should only have bucket 2 remaining")
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_extract_sdk_breakdown_handles_single_bucket_gracefully(self):
         """
         Verify that SDKs with only one bucket (still being filled) are not extracted.

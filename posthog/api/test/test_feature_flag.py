@@ -4339,7 +4339,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
             sorted_flags[1].items(),
         )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_local_evaluation_billing_analytics(self):
         FeatureFlag.objects.all().delete()
 
@@ -4403,7 +4403,7 @@ class TestFeatureFlag(APIBaseTest, ClickhouseTestMixin):
                 {b"165192618": b"6"},
             )
 
-    @patch("posthog.models.feature_flag.flag_analytics.CACHE_BUCKET_SIZE", 10)
+    @patch("products.feature_flags.backend.flag_analytics.CACHE_BUCKET_SIZE", 10)
     def test_local_evaluation_billing_analytics_for_regular_feature_flag_list(self):
         FeatureFlag.objects.all().delete()
 
@@ -10998,7 +10998,9 @@ class TestFeatureFlagBulkDelete(APIBaseTest):
         # Mock on_commit to execute callbacks immediately (Django test transactions don't commit)
         # Patch at source module since the import happens inside the function
         with patch("posthog.api.feature_flag.transaction.on_commit", side_effect=lambda fn: fn()):
-            with patch("posthog.models.feature_flag.feature_flag.set_feature_flags_for_team_in_cache") as mock_cache:
+            with patch(
+                "products.feature_flags.backend.models.feature_flag.set_feature_flags_for_team_in_cache"
+            ) as mock_cache:
                 response = self.client.post(
                     f"/api/projects/{self.team.id}/feature_flags/bulk_delete/",
                     {"ids": [f.id for f in flags]},

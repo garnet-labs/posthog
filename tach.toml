@@ -221,6 +221,7 @@ path = "products.feature_flags"
 depends_on = [
     "ee",
     "posthog",
+    "products.surveys",
 ]
 layer = "non_isolated"
 
