@@ -64,6 +64,7 @@ PRODUCTS_APPS = [
     "products.metrics.backend.apps.MetricsConfig",
     "products.notifications.backend.apps.NotificationsConfig",
     "products.messaging.backend.apps.MessagingConfig",
+    "products.hawgs.backend.apps.HawgsConfig",
 ]
 
 INSTALLED_APPS = [
