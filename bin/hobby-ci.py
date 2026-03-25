@@ -21,6 +21,7 @@ import requests
 import digitalocean  # type: ignore
 
 DOMAIN = os.getenv("HOBBY_DOMAIN", "posthog.cc")
+FALLBACK_SIZE = "s-8vcpu-32gb"
 
 
 class HobbyTester:
@@ -250,14 +251,16 @@ runcmd:
 
         # Fallback candidates: try larger sizes first (PostHog needs ≥16 GB RAM),
         # then fall back across regions. sfo3 has had capacity issues since ~Mar 17 2026.
-        fallback_candidates = [
-            (self.region, self.size),
-            (self.region, "s-8vcpu-32gb"),
-            ("nyc3", self.size),
-            ("nyc3", "s-8vcpu-32gb"),
-            ("ams3", self.size),
-            ("ams3", "s-8vcpu-32gb"),
-        ]
+        fallback_candidates = list(
+            dict.fromkeys([
+                (self.region, self.size),
+                (self.region, FALLBACK_SIZE),
+                ("nyc3", self.size),
+                ("nyc3", FALLBACK_SIZE),
+                ("ams3", self.size),
+                ("ams3", FALLBACK_SIZE),
+            ])
+        )
 
         last_error = None
         for region, size in fallback_candidates:
@@ -281,6 +284,8 @@ runcmd:
                 self.droplet = droplet
                 return self.droplet
             except digitalocean.DataReadError as e:
+                if "not available in this region" not in str(e).lower():
+                    raise
                 print(f"Droplet creation failed (region={region}, size={size}): {e}")
                 last_error = e
 
