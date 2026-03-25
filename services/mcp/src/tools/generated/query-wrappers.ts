@@ -330,6 +330,60 @@ const AssistantPropertyFilter = z.union([
     AssistantFlagPropertyFilter,
 ])
 
+const TaxonomicFilterGroupType = z.enum([
+    'metadata',
+    'actions',
+    'cohorts',
+    'cohorts_with_all',
+    'data_warehouse',
+    'data_warehouse_properties',
+    'data_warehouse_person_properties',
+    'elements',
+    'events',
+    'internal_events',
+    'internal_event_properties',
+    'event_properties',
+    'event_feature_flags',
+    'event_metadata',
+    'numerical_event_properties',
+    'person_properties',
+    'pageview_urls',
+    'pageview_events',
+    'screens',
+    'screen_events',
+    'email_addresses',
+    'autocapture_events',
+    'custom_events',
+    'wildcard',
+    'groups',
+    'persons',
+    'feature_flags',
+    'insights',
+    'experiments',
+    'plugins',
+    'dashboards',
+    'name_groups',
+    'session_properties',
+    'hogql_expression',
+    'notebooks',
+    'log_entries',
+    'error_tracking_issues',
+    'logs',
+    'log_attributes',
+    'log_resource_attributes',
+    'replay',
+    'replay_saved_filters',
+    'revenue_analytics_properties',
+    'resources',
+    'error_tracking_properties',
+    'activity_log_properties',
+    'max_ai_context',
+    'workflow_variables',
+    'suggested_filters',
+    'recent_filters',
+    'empty',
+])
+
 const BaseMathType = z.enum([
     'total',
     'dau',
@@ -387,6 +441,13 @@ const MathType = z.union([
 const AssistantTrendsEventsNode = z.object({
     custom_name: z.string().optional(),
     event: z.string().nullable().describe('The event or `null` for all events.').optional(),
+    funnelAggregationTarget: z
+        .string()
+        .describe('Funnels only: overrides the insight level aggregation target for this step.')
+        .optional(),
+    funnelAggregationTargetType: TaxonomicFilterGroupType.describe(
+        'Funnels only: type of the custom aggregation target for this step.'
+    ).optional(),
     kind: z.literal('EventsNode').default('EventsNode'),
     math: MathType.optional(),
     math_group_type_index: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
@@ -400,13 +461,20 @@ const AssistantTrendsEventsNode = z.object({
     math_property: z.string().optional(),
     math_property_type: z.string().optional(),
     name: z.string().optional(),
-    optionalInFunnel: z.coerce.boolean().optional(),
+    optionalInFunnel: z.coerce.boolean().describe('Funnels only: whether this is an optional step.').optional(),
     properties: z.array(AssistantPropertyFilter).optional(),
     version: z.coerce.number().describe('version of the node, used for schema migrations').optional(),
 })
 
 const AssistantTrendsActionsNode = z.object({
     custom_name: z.string().optional(),
+    funnelAggregationTarget: z
+        .string()
+        .describe('Funnels only: overrides the insight level aggregation target for this step.')
+        .optional(),
+    funnelAggregationTargetType: TaxonomicFilterGroupType.describe(
+        'Funnels only: type of the custom aggregation target for this step.'
+    ).optional(),
     id: integer,
     kind: z.literal('ActionsNode').default('ActionsNode'),
     math: MathType.optional(),
@@ -421,7 +489,7 @@ const AssistantTrendsActionsNode = z.object({
     math_property: z.string().optional(),
     math_property_type: z.string().optional(),
     name: z.string().describe('Action name from the plan.'),
-    optionalInFunnel: z.coerce.boolean().optional(),
+    optionalInFunnel: z.coerce.boolean().describe('Funnels only: whether this is an optional step.').optional(),
     properties: z.array(AssistantPropertyFilter).optional(),
     version: z.coerce.number().describe('version of the node, used for schema migrations').optional(),
 })

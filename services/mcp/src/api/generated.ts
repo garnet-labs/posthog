@@ -1066,6 +1066,63 @@ export namespace Schemas {
       value?: (string | number | boolean)[] | string | number | boolean | null;
     }
 
+    export type TaxonomicFilterGroupType = typeof TaxonomicFilterGroupType[keyof typeof TaxonomicFilterGroupType];
+
+
+    export const TaxonomicFilterGroupType = {
+      Metadata: 'metadata',
+      Actions: 'actions',
+      Cohorts: 'cohorts',
+      CohortsWithAll: 'cohorts_with_all',
+      DataWarehouse: 'data_warehouse',
+      DataWarehouseProperties: 'data_warehouse_properties',
+      DataWarehousePersonProperties: 'data_warehouse_person_properties',
+      Elements: 'elements',
+      Events: 'events',
+      InternalEvents: 'internal_events',
+      InternalEventProperties: 'internal_event_properties',
+      EventProperties: 'event_properties',
+      EventFeatureFlags: 'event_feature_flags',
+      EventMetadata: 'event_metadata',
+      NumericalEventProperties: 'numerical_event_properties',
+      PersonProperties: 'person_properties',
+      PageviewUrls: 'pageview_urls',
+      PageviewEvents: 'pageview_events',
+      Screens: 'screens',
+      ScreenEvents: 'screen_events',
+      EmailAddresses: 'email_addresses',
+      AutocaptureEvents: 'autocapture_events',
+      CustomEvents: 'custom_events',
+      Wildcard: 'wildcard',
+      Groups: 'groups',
+      Persons: 'persons',
+      FeatureFlags: 'feature_flags',
+      Insights: 'insights',
+      Experiments: 'experiments',
+      Plugins: 'plugins',
+      Dashboards: 'dashboards',
+      NameGroups: 'name_groups',
+      SessionProperties: 'session_properties',
+      HogqlExpression: 'hogql_expression',
+      Notebooks: 'notebooks',
+      LogEntries: 'log_entries',
+      ErrorTrackingIssues: 'error_tracking_issues',
+      Logs: 'logs',
+      LogAttributes: 'log_attributes',
+      LogResourceAttributes: 'log_resource_attributes',
+      Replay: 'replay',
+      ReplaySavedFilters: 'replay_saved_filters',
+      RevenueAnalyticsProperties: 'revenue_analytics_properties',
+      Resources: 'resources',
+      ErrorTrackingProperties: 'error_tracking_properties',
+      ActivityLogProperties: 'activity_log_properties',
+      MaxAiContext: 'max_ai_context',
+      WorkflowVariables: 'workflow_variables',
+      SuggestedFilters: 'suggested_filters',
+      RecentFilters: 'recent_filters',
+      Empty: 'empty',
+    } as const;
+
     export type MathGroupTypeIndex = typeof MathGroupTypeIndex[keyof typeof MathGroupTypeIndex];
 
 
@@ -1249,6 +1306,13 @@ export namespace Schemas {
        * @nullable
        */
       fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /**
+       * Funnels only: overrides the insight level aggregation target for this step.
+       * @nullable
+       */
+      funnelAggregationTarget?: string | null;
+      /** Funnels only: type of the custom aggregation target for this step. */
+      funnelAggregationTargetType?: TaxonomicFilterGroupType | null;
       id: number;
       kind?: ActionsNodeKind;
       math?: typeof ActionsNodeMath[keyof typeof ActionsNodeMath]  | null;
@@ -1264,7 +1328,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
@@ -2007,6 +2074,13 @@ export namespace Schemas {
        * @nullable
        */
       fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /**
+       * Funnels only: overrides the insight level aggregation target for this step.
+       * @nullable
+       */
+      funnelAggregationTarget?: string | null;
+      /** Funnels only: type of the custom aggregation target for this step. */
+      funnelAggregationTargetType?: TaxonomicFilterGroupType | null;
       kind?: EventsNodeKind;
       /** @nullable */
       limit?: number | null;
@@ -2023,7 +2097,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Columns to order by
@@ -2086,7 +2163,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
@@ -2140,7 +2220,10 @@ export namespace Schemas {
       nodes: (EventsNode | ActionsNode | DataWarehouseNode)[];
       /** Group of entities combined with AND/OR operator */
       operator: FilterLogicalOperator;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Columns to order by
@@ -2455,6 +2538,13 @@ export namespace Schemas {
        * @nullable
        */
       fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /**
+       * Funnels only: overrides the insight level aggregation target for this step.
+       * @nullable
+       */
+      funnelAggregationTarget?: string | null;
+      /** Funnels only: type of the custom aggregation target for this step. */
+      funnelAggregationTargetType?: TaxonomicFilterGroupType | null;
       funnelFromStep: number;
       funnelToStep: number;
       kind?: FunnelExclusionEventsNodeKind;
@@ -2473,7 +2563,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Columns to order by
@@ -2517,6 +2610,13 @@ export namespace Schemas {
        * @nullable
        */
       fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /**
+       * Funnels only: overrides the insight level aggregation target for this step.
+       * @nullable
+       */
+      funnelAggregationTarget?: string | null;
+      /** Funnels only: type of the custom aggregation target for this step. */
+      funnelAggregationTargetType?: TaxonomicFilterGroupType | null;
       funnelFromStep: number;
       funnelToStep: number;
       id: number;
@@ -2534,7 +2634,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
@@ -3420,7 +3523,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
@@ -7138,6 +7244,13 @@ export namespace Schemas {
        * @nullable
        */
       fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /**
+       * Funnels only: overrides the insight level aggregation target for this step.
+       * @nullable
+       */
+      funnelAggregationTarget?: string | null;
+      /** Funnels only: type of the custom aggregation target for this step. */
+      funnelAggregationTargetType?: TaxonomicFilterGroupType | null;
       kind?: ConversionGoalFilter1Kind;
       /** @nullable */
       limit?: number | null;
@@ -7154,7 +7267,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Columns to order by
@@ -7203,6 +7319,13 @@ export namespace Schemas {
        * @nullable
        */
       fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /**
+       * Funnels only: overrides the insight level aggregation target for this step.
+       * @nullable
+       */
+      funnelAggregationTarget?: string | null;
+      /** Funnels only: type of the custom aggregation target for this step. */
+      funnelAggregationTargetType?: TaxonomicFilterGroupType | null;
       id: number;
       kind?: ConversionGoalFilter2Kind;
       math?: typeof ConversionGoalFilter2Math[keyof typeof ConversionGoalFilter2Math]  | null;
@@ -7218,7 +7341,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
@@ -7281,7 +7407,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
@@ -9063,63 +9192,6 @@ export namespace Schemas {
       eventDefinitionId?: string | null;
       type: DataTableNodeViewPropsContextType;
     }
-
-    export type TaxonomicFilterGroupType = typeof TaxonomicFilterGroupType[keyof typeof TaxonomicFilterGroupType];
-
-
-    export const TaxonomicFilterGroupType = {
-      Metadata: 'metadata',
-      Actions: 'actions',
-      Cohorts: 'cohorts',
-      CohortsWithAll: 'cohorts_with_all',
-      DataWarehouse: 'data_warehouse',
-      DataWarehouseProperties: 'data_warehouse_properties',
-      DataWarehousePersonProperties: 'data_warehouse_person_properties',
-      Elements: 'elements',
-      Events: 'events',
-      InternalEvents: 'internal_events',
-      InternalEventProperties: 'internal_event_properties',
-      EventProperties: 'event_properties',
-      EventFeatureFlags: 'event_feature_flags',
-      EventMetadata: 'event_metadata',
-      NumericalEventProperties: 'numerical_event_properties',
-      PersonProperties: 'person_properties',
-      PageviewUrls: 'pageview_urls',
-      PageviewEvents: 'pageview_events',
-      Screens: 'screens',
-      ScreenEvents: 'screen_events',
-      EmailAddresses: 'email_addresses',
-      AutocaptureEvents: 'autocapture_events',
-      CustomEvents: 'custom_events',
-      Wildcard: 'wildcard',
-      Groups: 'groups',
-      Persons: 'persons',
-      FeatureFlags: 'feature_flags',
-      Insights: 'insights',
-      Experiments: 'experiments',
-      Plugins: 'plugins',
-      Dashboards: 'dashboards',
-      NameGroups: 'name_groups',
-      SessionProperties: 'session_properties',
-      HogqlExpression: 'hogql_expression',
-      Notebooks: 'notebooks',
-      LogEntries: 'log_entries',
-      ErrorTrackingIssues: 'error_tracking_issues',
-      Logs: 'logs',
-      LogAttributes: 'log_attributes',
-      LogResourceAttributes: 'log_resource_attributes',
-      Replay: 'replay',
-      ReplaySavedFilters: 'replay_saved_filters',
-      RevenueAnalyticsProperties: 'revenue_analytics_properties',
-      Resources: 'resources',
-      ErrorTrackingProperties: 'error_tracking_properties',
-      ActivityLogProperties: 'activity_log_properties',
-      MaxAiContext: 'max_ai_context',
-      WorkflowVariables: 'workflow_variables',
-      SuggestedFilters: 'suggested_filters',
-      RecentFilters: 'recent_filters',
-      Empty: 'empty',
-    } as const;
 
     export type EventsQueryKind = typeof EventsQueryKind[keyof typeof EventsQueryKind];
 
@@ -13673,7 +13745,10 @@ export namespace Schemas {
       math_property_type?: string | null;
       /** @nullable */
       name?: string | null;
-      /** @nullable */
+      /**
+       * Funnels only: whether this is an optional step.
+       * @nullable
+       */
       optionalInFunnel?: boolean | null;
       /**
        * Properties configurable in the interface
