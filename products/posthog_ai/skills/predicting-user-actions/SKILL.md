@@ -10,9 +10,15 @@ Given a trained `ActionPredictionModel` with a winning `ActionPredictionModelRun
 ## Prerequisites
 
 - A trained model must exist — check via `action-prediction-model-list` and `prediction-model-run-list`
-- At least one run should have `is_winning: true` with valid `artifact_script` and `metrics`
+- At least one run should have `is_winning: true` with valid `artifact_scripts` and `metrics`
 - If no trained model exists, suggest running the `training-action-predictions` skill first
-- The trained model pickle file must be available locally (produced by the training skill)
+
+## Reference scripts
+
+The prediction script is in `training-action-predictions/references/`:
+
+- **`predict.py`** — fetches scoring data via PostHog API, loads pipeline, scores users
+- **`utils.py`** — shared `execute_hogql()` and `fetch_features()` helpers
 
 ## Workflow
 
@@ -20,63 +26,27 @@ Given a trained `ActionPredictionModel` with a winning `ActionPredictionModelRun
 
 1. List models via `action-prediction-model-list` to find the target model
 2. List runs via `prediction-model-run-list` and find the run where `is_winning: true`
-3. Extract:
-   - The `artifact_script` (the training script — contains the feature columns and model params)
-   - The `metrics` (to report model quality alongside predictions)
-   - The `feature_importance` (to explain which features drive predictions)
+3. Extract from the run:
+   - `artifact_scripts.query` — the HogQL training query (adapt for scoring)
+   - `artifact_scripts.predict` — the predict.py script
+   - `metrics` — to report model quality alongside predictions
+   - `feature_importance` — to explain which features drive predictions
 
-If no winning run exists, list all runs and pick the one with the highest `metrics.auc_roc`.
+If no winning run exists, pick the one with the highest `metrics.auc_roc`.
 
-### Step 2: Extract features for scoring
+### Step 2: Run the prediction script
 
-Run the same feature extraction query used during training, but with `T = now()` (no label window needed for scoring). Use `execute-sql` to run the query.
+The `predict.py` script is self-contained — it fetches its own data and scores users:
 
-Adapt the query from the winning run's training context:
+1. Adapt the training query for scoring: set `T = now()`, remove the label column
+2. Write the adapted `predict.py` script
+3. Execute it — produces `scores.parquet` and `scores.json`
 
-```sql
-SELECT
-    person_id,
-    -- Same features as training, but observation window is [now()-90d, now()]
-    -- No label column needed
-    dateDiff('day', max(timestamp), now()) AS days_since_last_event,
-    count() AS events_total_90d,
-    countIf(timestamp > now() - interval 30 day) AS events_30d,
-    countIf(timestamp > now() - interval 7 day) AS events_7d,
-    -- ... all other features from the training query
-    ...
-FROM events
-WHERE person_id IS NOT NULL
-  AND timestamp >= now() - interval 90 day
-GROUP BY person_id
-HAVING events_total_90d >= 5
-```
+The sklearn Pipeline in `model.pkl` handles all preprocessing internally, so feature alignment is guaranteed as long as the scoring query produces the same column names as training.
 
-The feature columns **must match** the training features exactly (same names, same order). Check the winning run's `feature_importance` keys to verify alignment.
+### Step 3: Write person properties
 
-Save the results to a parquet file for scoring:
-
-```python
-import pandas as pd
-
-df = pd.DataFrame(results["results"], columns=results["columns"])
-df.to_parquet("/tmp/scoring_features.parquet", index=False)
-```
-
-### Step 3: Score users
-
-Write and execute a scoring script that:
-
-1. Loads the trained model from the pickle file (produced by the training skill)
-2. Reads the scoring feature matrix from the parquet file
-3. Generates calibrated probabilities for each user
-4. Assigns bucket labels based on probability thresholds
-5. Outputs scored users as JSON and saves to parquet
-
-See [scoring script template](./references/scoring-script-template.md) for the baseline.
-
-### Step 4: Write person properties
-
-For each scored user, set two person properties:
+For each scored user, set two person properties via `persons-property-set`:
 
 | Property                 | Type   | Value                                                  |
 | ------------------------ | ------ | ------------------------------------------------------ |
@@ -90,9 +60,7 @@ Bucket thresholds:
 - `neutral`: 0.15 <= probability < 0.4
 - `unlikely`: probability < 0.15
 
-Write properties via `persons-property-set` for each scored user.
-
-### Step 5: Create cohorts
+### Step 4: Create cohorts
 
 Create dynamic cohorts using the person properties:
 
@@ -109,7 +77,7 @@ Standard cohorts to create:
 - **Unlikely to {action}**: `p_action_{name} < 0.2`
 - **On the fence for {action}**: `0.2 <= p_action_{name} < 0.5`
 
-### Step 6: Report
+### Step 5: Report
 
 Produce a summary for the user:
 
@@ -145,7 +113,7 @@ Produce a summary for the user:
 
 ## Free surfaces
 
-Once predictions are person properties, these work automatically with zero extra code:
+Once predictions are person properties, these work automatically:
 
 - **Persons list**: filter and sort by prediction score
 - **Cohorts**: dynamic cohorts on the person property
@@ -155,8 +123,8 @@ Once predictions are person properties, these work automatically with zero extra
 
 ## Guardrails
 
-- **Feature alignment**: scoring features must exactly match training features — mismatches cause silent errors
-- **Stale scores**: predictions degrade over time as user behavior changes. Note the scoring date in the report
-- **Model quality**: always report the model's AUC-ROC alongside predictions. If signal quality is "red" (<0.65), warn the user that predictions are low-confidence
-- **Property naming**: always use the `p_action_` prefix for prediction properties to avoid conflicts
-- **HogQL via MCP**: do not use `currentTeamId()` — MCP scopes queries to the correct team automatically
+- **Feature alignment**: scoring query must produce the same column names as training — the sklearn Pipeline handles the rest
+- **Stale scores**: predictions degrade over time. Note the scoring date in the report
+- **Model quality**: always report AUC-ROC alongside predictions. If signal quality is "red" (<0.65), warn the user
+- **Property naming**: always use the `p_action_` prefix for prediction properties
+- **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
