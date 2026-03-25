@@ -19,6 +19,7 @@ from posthog.schema import (
 
 from posthog.hogql_queries.experiments.breakdown_injector import BREAKDOWN_NULL_STRING_LABEL
 from posthog.hogql_queries.experiments.utils import (
+    _build_cuped_data,
     aggregate_variants_across_breakdowns,
     get_variant_result,
     get_variant_results,
@@ -994,3 +995,173 @@ class TestValidateVariantResult:
         # Should have NOT_ENOUGH_EXPOSURES validation failure
         assert result.validation_failures is not None
         assert ExperimentStatsValidationFailure.NOT_ENOUGH_EXPOSURES in result.validation_failures
+
+
+class TestCupedResultParsing:
+    """Tests for CUPED covariate field parsing in get_variant_result()."""
+
+    @staticmethod
+    def create_mean_metric():
+        return ExperimentMeanMetric(
+            source=EventsNode(event="$pageview", math=ExperimentMetricMathType.TOTAL),
+        )
+
+    @staticmethod
+    def create_funnel_metric():
+        return ExperimentFunnelMetric(
+            series=[
+                EventsNode(event="$pageview", name="$pageview"),
+                EventsNode(event="purchase", name="purchase"),
+            ],
+        )
+
+    @staticmethod
+    def create_ratio_metric():
+        return ExperimentRatioMetric(
+            numerator=EventsNode(event="purchase"),
+            denominator=EventsNode(event="$pageview"),
+        )
+
+    def test_mean_metric_with_cuped_columns(self):
+        metric = self.create_mean_metric()
+        result = ("control", 100, 250.5, 750.25, 180.0, 400.0, 55.0)
+
+        _, stats = get_variant_result(result, metric)
+
+        assert stats.sum == 250.5
+        assert stats.sum_squares == 750.25
+        assert stats.covariate_sum == 180.0
+        assert stats.covariate_sum_squares == 400.0
+        assert stats.main_covariate_sum_product == 55.0
+
+    def test_mean_metric_without_cuped_columns(self):
+        metric = self.create_mean_metric()
+        result = ("control", 100, 250.5, 750.25)
+
+        _, stats = get_variant_result(result, metric)
+
+        assert stats.covariate_sum is None
+        assert stats.covariate_sum_squares is None
+        assert stats.main_covariate_sum_product is None
+
+    def test_funnel_metric_with_cuped_columns_no_sessions(self):
+        metric = self.create_funnel_metric()
+        result = ("control", 100, 80.0, 80.0, [100, 80], 25.0, 25.0, 20.0)
+
+        _, stats = get_variant_result(result, metric)
+
+        assert stats.step_counts == [100, 80]
+        assert stats.step_sessions is None
+        assert stats.covariate_sum == 25.0
+        assert stats.covariate_sum_squares == 25.0
+        assert stats.main_covariate_sum_product == 20.0
+
+    def test_funnel_metric_with_cuped_columns_and_sessions(self):
+        metric = self.create_funnel_metric()
+        sessions_data = [
+            [("user1", "s1", "u1", "2024-01-01T00:00:00Z")],
+            [("user2", "s2", "u2", "2024-01-01T00:00:01Z")],
+        ]
+        result = ("control", 100, 80.0, 80.0, [100, 80], sessions_data, 25.0, 25.0, 20.0)
+
+        _, stats = get_variant_result(result, metric)
+
+        assert stats.step_counts == [100, 80]
+        assert stats.step_sessions is not None
+        assert stats.covariate_sum == 25.0
+        assert stats.main_covariate_sum_product == 20.0
+
+    def test_ratio_metric_with_cuped_columns(self):
+        metric = self.create_ratio_metric()
+        result = ("control", 100, 50.0, 75.0, 200.0, 500.0, 120.0, 30.0, 30.0, 15.0)
+
+        _, stats = get_variant_result(result, metric)
+
+        assert stats.denominator_sum == 200.0
+        assert stats.numerator_denominator_sum_product == 120.0
+        assert stats.covariate_sum == 30.0
+        assert stats.covariate_sum_squares == 30.0
+        assert stats.main_covariate_sum_product == 15.0
+
+    def test_aggregate_cuped_fields_across_breakdowns(self):
+        variants = [
+            (
+                ("Chrome",),
+                ExperimentStatsBase(
+                    key="control",
+                    number_of_samples=100,
+                    sum=250.0,
+                    sum_squares=750.0,
+                    covariate_sum=180.0,
+                    covariate_sum_squares=400.0,
+                    main_covariate_sum_product=55.0,
+                ),
+            ),
+            (
+                ("Safari",),
+                ExperimentStatsBase(
+                    key="control",
+                    number_of_samples=80,
+                    sum=200.0,
+                    sum_squares=600.0,
+                    covariate_sum=140.0,
+                    covariate_sum_squares=300.0,
+                    main_covariate_sum_product=40.0,
+                ),
+            ),
+        ]
+
+        aggregated = aggregate_variants_across_breakdowns(
+            cast(list[tuple[tuple[str, ...] | None, ExperimentStatsBase]], variants)
+        )
+
+        control = aggregated[0]
+        assert control.covariate_sum == 320.0
+        assert control.covariate_sum_squares == 700.0
+        assert control.main_covariate_sum_product == 95.0
+
+    def test_aggregate_without_cuped_fields(self):
+        variants = [
+            (("Chrome",), ExperimentStatsBase(key="control", number_of_samples=100, sum=250.0, sum_squares=750.0)),
+            (("Safari",), ExperimentStatsBase(key="control", number_of_samples=80, sum=200.0, sum_squares=600.0)),
+        ]
+
+        aggregated = aggregate_variants_across_breakdowns(
+            cast(list[tuple[tuple[str, ...] | None, ExperimentStatsBase]], variants)
+        )
+
+        control = aggregated[0]
+        assert control.covariate_sum is None
+
+    def test_build_cuped_data_with_fields(self):
+        variant = ExperimentStatsBase(
+            key="control",
+            number_of_samples=100,
+            sum=250.0,
+            sum_squares=750.0,
+            covariate_sum=180.0,
+            covariate_sum_squares=400.0,
+            main_covariate_sum_product=55.0,
+        )
+        validated = validate_variant_result(variant, self.create_mean_metric(), is_baseline=True)
+
+        cuped_data = _build_cuped_data(validated)
+
+        assert cuped_data is not None
+        assert cuped_data.pre_statistic.n == 100
+        assert cuped_data.pre_statistic.sum == 180.0
+        assert cuped_data.pre_statistic.sum_squares == 400.0
+        assert cuped_data.sum_of_cross_products == 55.0
+
+    def test_build_cuped_data_without_fields(self):
+        variant = ExperimentStatsBase(
+            key="control",
+            number_of_samples=100,
+            sum=250.0,
+            sum_squares=750.0,
+        )
+        validated = validate_variant_result(variant, self.create_mean_metric(), is_baseline=True)
+
+        cuped_data = _build_cuped_data(validated)
+
+        assert cuped_data is None

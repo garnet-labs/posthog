@@ -397,6 +397,12 @@ def validate_variant_result(
         validated_result.denominator_sum_squares = variant_result.denominator_sum_squares
         validated_result.numerator_denominator_sum_product = variant_result.numerator_denominator_sum_product
 
+    # Include CUPED covariate fields if present
+    if hasattr(variant_result, "covariate_sum") and variant_result.covariate_sum is not None:
+        validated_result.covariate_sum = variant_result.covariate_sum
+        validated_result.covariate_sum_squares = variant_result.covariate_sum_squares
+        validated_result.main_covariate_sum_product = variant_result.main_covariate_sum_product
+
     return validated_result
 
 
