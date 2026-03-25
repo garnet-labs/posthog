@@ -1,9 +1,16 @@
 """Django models for hogbot."""
 
+from django.db import models
 
-# Define your models here
-# Important:
-# - Keep models thin, no business logic, use logic.py instead
-# - Use types from facade/contracts.py or facade/enums.py where applicable
-# - Do not use ForeignKeys to models outside this app unless allowed, as you will make implicit dependencies.
-# - If you make a ForeignKey to a common model, disallow reverse relations with related_name='+'
+from posthog.models import Team
+
+
+class HogbotRuntime(models.Model):
+    team = models.OneToOneField(Team, on_delete=models.CASCADE, primary_key=True)
+
+    latest_snapshot_external_id = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "posthog_hogbotruntime"

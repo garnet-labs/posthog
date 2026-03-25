@@ -142,6 +142,10 @@ from products.batch_exports.backend.temporal import (
     ACTIVITIES as BATCH_EXPORTS_ACTIVITIES,
     WORKFLOWS as BATCH_EXPORTS_WORKFLOWS,
 )
+from products.hogbot.backend.temporal import (
+    ACTIVITIES as HOGBOT_ACTIVITIES,
+    WORKFLOWS as HOGBOT_WORKFLOWS,
+)
 from products.signals.backend.temporal import (
     ACTIVITIES as SIGNALS_PRODUCT_ACTIVITIES,
     WORKFLOWS as SIGNALS_PRODUCT_WORKFLOWS,
@@ -222,8 +226,8 @@ _task_queue_specs = [
     ),
     (
         settings.TASKS_TASK_QUEUE,
-        TASKS_WORKFLOWS,
-        TASKS_ACTIVITIES,
+        TASKS_WORKFLOWS + HOGBOT_WORKFLOWS,
+        TASKS_ACTIVITIES + HOGBOT_ACTIVITIES,
     ),
     (
         settings.MAX_AI_TASK_QUEUE,

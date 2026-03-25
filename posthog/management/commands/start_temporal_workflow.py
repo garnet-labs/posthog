@@ -28,6 +28,7 @@ from posthog.temporal.usage_reports import WORKFLOWS as USAGE_REPORTS_WORKFLOWS
 from posthog.temporal.weekly_digest import WORKFLOWS as WEEKLY_DIGEST_WORKFLOWS
 
 from products.batch_exports.backend.temporal import WORKFLOWS as BATCH_EXPORT_WORKFLOWS
+from products.hogbot.backend.temporal import WORKFLOWS as HOGBOT_WORKFLOWS
 
 
 class Command(BaseCommand):
@@ -150,6 +151,7 @@ class Command(BaseCommand):
             + EVENT_SCREENSHOTS_WORKFLOWS
             + HEALTH_CHECK_WORKFLOWS
             + RASTERIZE_RECORDING_WORKFLOWS
+            + HOGBOT_WORKFLOWS
         )
         try:
             workflow = next(workflow for workflow in WORKFLOWS if workflow.is_named(workflow_name))

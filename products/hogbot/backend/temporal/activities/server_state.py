@@ -1,0 +1,5 @@
+HOGBOT_STATE_DIR = "/tmp/hogbot"
+HOGBOT_SERVER_LOG_PATH = "/tmp/hogbot-server.log"
+HOGBOT_LAUNCHER_LOG_PATH = f"{HOGBOT_STATE_DIR}/launcher.log"
+HOGBOT_SERVER_PID_PATH = f"{HOGBOT_STATE_DIR}/server.pid"
+HOGBOT_SERVER_EXIT_CODE_PATH = f"{HOGBOT_STATE_DIR}/server.exit_code"
