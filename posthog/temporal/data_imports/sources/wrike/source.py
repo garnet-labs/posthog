@@ -22,6 +22,7 @@ class WrikeSource(SimpleSource[WrikeSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.WRIKE,
+            docsUrl="https://posthog.com/docs/cdp/sources/wrike",
             label="Wrike",
             iconPath="/static/services/wrike.png",
             fields=cast(list[FieldType], []),

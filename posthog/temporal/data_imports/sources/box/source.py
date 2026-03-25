@@ -22,6 +22,7 @@ class BoxSource(SimpleSource[BoxSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BOX,
+            docsUrl="https://posthog.com/docs/cdp/sources/box",
             label="Box",
             iconPath="/static/services/box.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class XeroSource(SimpleSource[XeroSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.XERO,
+            docsUrl="https://posthog.com/docs/cdp/sources/xero",
             label="Xero",
             iconPath="/static/services/xero.png",
             fields=cast(list[FieldType], []),

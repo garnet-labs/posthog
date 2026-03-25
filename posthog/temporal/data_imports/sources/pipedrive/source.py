@@ -22,6 +22,7 @@ class PipedriveSource(SimpleSource[PipedriveSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PIPEDRIVE,
+            docsUrl="https://posthog.com/docs/cdp/sources/pipedrive",
             label="Pipedrive",
             iconPath="/static/services/pipedrive.png",
             fields=cast(list[FieldType], []),

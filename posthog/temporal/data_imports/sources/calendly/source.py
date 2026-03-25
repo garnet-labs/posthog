@@ -22,6 +22,7 @@ class CalendlySource(SimpleSource[CalendlySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CALENDLY,
+            docsUrl="https://posthog.com/docs/cdp/sources/calendly",
             label="Calendly",
             iconPath="/static/services/calendly.png",
             fields=cast(list[FieldType], []),

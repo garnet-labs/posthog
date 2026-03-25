@@ -22,6 +22,7 @@ class DynamoDBSource(SimpleSource[DynamoDBSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.DYNAMO_DB,
+            docsUrl="https://posthog.com/docs/cdp/sources/dynamodb",
             label="DynamoDB",
             iconPath="/static/services/dynamodb.png",
             fields=cast(list[FieldType], []),

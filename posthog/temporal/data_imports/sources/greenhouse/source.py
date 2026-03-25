@@ -22,6 +22,7 @@ class GreenhouseSource(SimpleSource[GreenhouseSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GREENHOUSE,
+            docsUrl="https://posthog.com/docs/cdp/sources/greenhouse",
             label="Greenhouse",
             iconPath="/static/services/greenhouse.png",
             fields=cast(list[FieldType], []),

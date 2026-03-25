@@ -22,6 +22,7 @@ class CopperSource(SimpleSource[CopperSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.COPPER,
+            docsUrl="https://posthog.com/docs/cdp/sources/copper",
             label="Copper",
             iconPath="/static/services/copper.png",
             fields=cast(list[FieldType], []),

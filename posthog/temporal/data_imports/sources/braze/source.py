@@ -22,6 +22,7 @@ class BrazeSource(SimpleSource[BrazeSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BRAZE,
+            docsUrl="https://posthog.com/docs/cdp/sources/braze",
             iconPath="/static/services/braze.png",
             fields=cast(list[FieldType], []),
             unreleasedSource=True,

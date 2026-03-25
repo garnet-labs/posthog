@@ -22,6 +22,7 @@ class Auth0Source(SimpleSource[Auth0SourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.AUTH0,
+            docsUrl="https://posthog.com/docs/cdp/sources/auth0",
             label="Auth0",
             iconPath="/static/services/auth0.png",
             fields=cast(list[FieldType], []),

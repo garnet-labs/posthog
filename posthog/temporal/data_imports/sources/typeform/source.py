@@ -38,6 +38,7 @@ class TypeformSource(SimpleSource[TypeformSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.TYPEFORM,
+            docsUrl="https://posthog.com/docs/cdp/sources/typeform",
             label="Typeform",
             iconPath="/static/services/typeform.png",
             caption="""Enter a Typeform personal access token to sync forms and responses.

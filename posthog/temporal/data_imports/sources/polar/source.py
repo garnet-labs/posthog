@@ -22,6 +22,7 @@ class PolarSource(SimpleSource[PolarSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.POLAR,
+            docsUrl="https://posthog.com/docs/cdp/sources/polar",
             label="Polar",
             iconPath="/static/services/polar.png",
             iconClassName="rounded dark:bg-white p-[2px]",

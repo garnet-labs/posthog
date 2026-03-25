@@ -22,6 +22,7 @@ class PagerDutySource(SimpleSource[PagerDutySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PAGER_DUTY,
+            docsUrl="https://posthog.com/docs/cdp/sources/pagerduty",
             label="PagerDuty",
             iconPath="/static/services/pagerduty.png",
             fields=cast(list[FieldType], []),

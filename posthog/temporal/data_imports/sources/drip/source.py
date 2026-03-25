@@ -22,6 +22,7 @@ class DripSource(SimpleSource[DripSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.DRIP,
+            docsUrl="https://posthog.com/docs/cdp/sources/drip",
             label="Drip",
             iconPath="/static/services/drip.png",
             fields=cast(list[FieldType], []),

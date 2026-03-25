@@ -22,6 +22,7 @@ class PardotSource(SimpleSource[PardotSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PARDOT,
+            docsUrl="https://posthog.com/docs/cdp/sources/pardot",
             label="Pardot",
             iconPath="/static/services/pardot.png",
             fields=cast(list[FieldType], []),

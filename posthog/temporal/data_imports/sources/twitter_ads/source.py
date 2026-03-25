@@ -22,6 +22,7 @@ class TwitterAdsSource(SimpleSource[TwitterAdsSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.TWITTER_ADS,
+            docsUrl="https://posthog.com/docs/cdp/sources/twitter-ads",
             label="Twitter Ads",
             iconPath="/static/services/twitter_ads.png",
             fields=cast(list[FieldType], []),

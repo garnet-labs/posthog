@@ -22,6 +22,7 @@ class DatadogSource(SimpleSource[DatadogSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.DATADOG,
+            docsUrl="https://posthog.com/docs/cdp/sources/datadog",
             label="Datadog",
             iconPath="/static/services/datadog.png",
             fields=cast(list[FieldType], []),

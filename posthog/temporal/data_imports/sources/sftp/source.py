@@ -22,6 +22,7 @@ class SFTPSource(SimpleSource[SFTPSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SFTP,
+            docsUrl="https://posthog.com/docs/cdp/sources/sftp",
             label="SFTP",
             iconPath="/static/services/sftp.png",
             fields=cast(list[FieldType], []),

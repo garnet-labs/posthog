@@ -29,7 +29,7 @@ class AshbySource(SimpleSource[AshbySourceConfig]):
             iconPath="/static/services/ashby.png",
             label="Ashby",  # only needed if the readable name is complex. delete otherwise
             caption=None,  # only needed if you want to inline docs
-            docsUrl=None,  # TODO(Andrew J. McGehee): link to the docs in the website, full path including https://
+            docsUrl="https://posthog.com/docs/cdp/sources/ashby",
             fields=cast(list[FieldType], []),  # TODO(Andrew J. McGehee): add source config fields here
             unreleasedSource=True,
         )

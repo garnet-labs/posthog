@@ -22,6 +22,7 @@ class RechargeSource(SimpleSource[RechargeSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.RECHARGE,
+            docsUrl="https://posthog.com/docs/cdp/sources/recharge",
             label="Recharge",
             iconPath="/static/services/recharge.png",
             fields=cast(list[FieldType], []),

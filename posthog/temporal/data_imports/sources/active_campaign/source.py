@@ -22,6 +22,7 @@ class ActiveCampaignSource(SimpleSource[ActiveCampaignSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ACTIVE_CAMPAIGN,
+            docsUrl="https://posthog.com/docs/cdp/sources/activecampaign",
             label="ActiveCampaign",
             iconPath="/static/services/activecampaign.png",
             fields=cast(list[FieldType], []),

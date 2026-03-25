@@ -22,6 +22,7 @@ class GongSource(SimpleSource[GongSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GONG,
+            docsUrl="https://posthog.com/docs/cdp/sources/gong",
             label="Gong",
             iconPath="/static/services/gong.png",
             fields=cast(list[FieldType], []),

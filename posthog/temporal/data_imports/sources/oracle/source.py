@@ -22,6 +22,7 @@ class OracleSource(SimpleSource[OracleSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ORACLE,
+            docsUrl="https://posthog.com/docs/cdp/sources/oracle",
             label="Oracle",
             iconPath="/static/services/oracle.png",
             fields=cast(list[FieldType], []),

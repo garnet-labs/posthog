@@ -73,6 +73,7 @@ class BuildBetterSource(SimpleSource[BuildBetterSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BUILD_BETTER,
+            docsUrl="https://posthog.com/docs/cdp/sources/buildbetter",
             label="BuildBetter",
             betaSource=True,
             caption="Connect your BuildBetter workspace to sync interviews, extractions, persons, and companies.",

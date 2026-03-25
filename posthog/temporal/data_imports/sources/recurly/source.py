@@ -22,6 +22,7 @@ class RecurlySource(SimpleSource[RecurlySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.RECURLY,
+            docsUrl="https://posthog.com/docs/cdp/sources/recurly",
             label="Recurly",
             iconPath="/static/services/recurly.png",
             fields=cast(list[FieldType], []),

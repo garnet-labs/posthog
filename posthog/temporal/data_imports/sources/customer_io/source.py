@@ -29,7 +29,7 @@ class CustomerIOSource(SimpleSource[CustomerIOSourceConfig]):
             iconPath="/static/services/customer-io.png",
             label="Customer.io",
             caption=None,  # only needed if you want to inline docs
-            docsUrl=None,  # TODO(Andrew J. McGehee): link to the docs in the website, full path including https://
+            docsUrl="https://posthog.com/docs/cdp/sources/customerio",
             fields=cast(list[FieldType], []),  # TODO(Andrew J. McGehee): add source config fields here
             unreleasedSource=True,
         )

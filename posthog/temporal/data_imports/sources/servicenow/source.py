@@ -22,6 +22,7 @@ class ServiceNowSource(SimpleSource[ServiceNowSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SERVICE_NOW,
+            docsUrl="https://posthog.com/docs/cdp/sources/servicenow",
             label="ServiceNow",
             iconPath="/static/services/servicenow.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class MailerLiteSource(SimpleSource[MailerLiteSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.MAILER_LITE,
+            docsUrl="https://posthog.com/docs/cdp/sources/mailerlite",
             label="MailerLite",
             iconPath="/static/services/mailerlite.png",
             fields=cast(list[FieldType], []),

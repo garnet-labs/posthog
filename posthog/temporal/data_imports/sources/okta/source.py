@@ -22,6 +22,7 @@ class OktaSource(SimpleSource[OktaSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.OKTA,
+            docsUrl="https://posthog.com/docs/cdp/sources/okta",
             label="Okta",
             iconPath="/static/services/okta.png",
             fields=cast(list[FieldType], []),

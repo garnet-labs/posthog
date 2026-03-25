@@ -22,6 +22,7 @@ class FullStorySource(SimpleSource[FullStorySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.FULL_STORY,
+            docsUrl="https://posthog.com/docs/cdp/sources/fullstory",
             label="FullStory",
             iconPath="/static/services/fullstory.png",
             fields=cast(list[FieldType], []),

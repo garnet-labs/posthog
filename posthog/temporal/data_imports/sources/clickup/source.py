@@ -22,6 +22,7 @@ class ClickUpSource(SimpleSource[ClickUpSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CLICK_UP,
+            docsUrl="https://posthog.com/docs/cdp/sources/clickup",
             label="ClickUp",
             iconPath="/static/services/clickup.png",
             fields=cast(list[FieldType], []),

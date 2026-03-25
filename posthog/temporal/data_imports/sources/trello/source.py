@@ -22,6 +22,7 @@ class TrelloSource(SimpleSource[TrelloSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.TRELLO,
+            docsUrl="https://posthog.com/docs/cdp/sources/trello",
             label="Trello",
             iconPath="/static/services/trello.png",
             fields=cast(list[FieldType], []),

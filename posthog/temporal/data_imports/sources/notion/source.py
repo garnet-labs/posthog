@@ -22,6 +22,7 @@ class NotionSource(SimpleSource[NotionSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.NOTION,
+            docsUrl="https://posthog.com/docs/cdp/sources/notion",
             label="Notion",
             iconPath="/static/services/notion.png",
             fields=cast(list[FieldType], []),

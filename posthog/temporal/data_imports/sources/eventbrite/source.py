@@ -22,6 +22,7 @@ class EventbriteSource(SimpleSource[EventbriteSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.EVENTBRITE,
+            docsUrl="https://posthog.com/docs/cdp/sources/eventbrite",
             label="Eventbrite",
             iconPath="/static/services/eventbrite.png",
             fields=cast(list[FieldType], []),

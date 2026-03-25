@@ -22,6 +22,7 @@ class CockroachDBSource(SimpleSource[CockroachDBSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.COCKROACH_DB,
+            docsUrl="https://posthog.com/docs/cdp/sources/cockroachdb",
             label="CockroachDB",
             iconPath="/static/services/cockroachdb.png",
             fields=cast(list[FieldType], []),

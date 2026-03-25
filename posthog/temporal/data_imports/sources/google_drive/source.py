@@ -22,6 +22,7 @@ class GoogleDriveSource(SimpleSource[GoogleDriveSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GOOGLE_DRIVE,
+            docsUrl="https://posthog.com/docs/cdp/sources/google-drive",
             label="Google Drive",
             iconPath="/static/services/google_drive.png",
             fields=cast(list[FieldType], []),

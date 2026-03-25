@@ -22,6 +22,7 @@ class WorkdaySource(SimpleSource[WorkdaySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.WORKDAY,
+            docsUrl="https://posthog.com/docs/cdp/sources/workday",
             label="Workday",
             iconPath="/static/services/workday.png",
             fields=cast(list[FieldType], []),

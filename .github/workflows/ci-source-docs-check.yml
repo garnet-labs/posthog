@@ -1,0 +1,68 @@
+name: Data warehouse source docs check
+
+on:
+    pull_request:
+        paths:
+            - 'products/data_warehouse/backend/types.py'
+            - 'posthog/temporal/data_imports/sources/**/source.py'
+            - 'docs/published/docs/cdp/sources/**'
+            - 'bin/check_source_docs.py'
+
+permissions:
+    contents: read
+    pull-requests: write
+
+jobs:
+    check-source-docs:
+        name: Check all sources have docs
+        runs-on: ubuntu-24.04
+        timeout-minutes: 5
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Check for missing source docs
+              id: check
+              run: |
+                  output=$(python bin/check_source_docs.py 2>&1) || true
+                  echo "$output"
+                  if echo "$output" | grep -q "sources are missing docs"; then
+                      missing_count=$(echo "$output" | grep "sources are missing docs" | grep -oP '\d+')
+                      if [ "$missing_count" -gt 0 ]; then
+                          echo "has_missing=true" >> $GITHUB_OUTPUT
+                          # Save the missing list for the comment
+                          {
+                              echo 'missing_list<<EOF'
+                              echo "$output" | sed -n '/^Missing docs:/,$ p'
+                              echo 'EOF'
+                          } >> $GITHUB_OUTPUT
+                      fi
+                  fi
+
+            - name: Comment on PR about missing docs
+              if: steps.check.outputs.has_missing == 'true'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  # Check if comment already exists
+                  if gh pr view ${{ github.event.pull_request.number }} --json comments \
+                      --jq '.comments[].body' | grep -q 'Source Docs Check'; then
+                      echo "Comment already exists, skipping"
+                      exit 0
+                  fi
+
+                  gh pr comment ${{ github.event.pull_request.number }} --body "### Source Docs Check
+
+                  This PR adds or modifies data warehouse sources but some sources are missing documentation.
+
+                  ${{ steps.check.outputs.missing_list }}
+
+                  **To fix:** Run \`python bin/check_source_docs.py --generate\` to create stub pages, then flesh out the docs for released sources.
+
+                  See \`docs/published/docs/cdp/sources/\` for the expected structure."
+
+            - name: Fail if sources missing docs
+              if: steps.check.outputs.has_missing == 'true'
+              run: |
+                  echo "::error::Some data warehouse sources are missing documentation. Run 'python bin/check_source_docs.py' to see which ones."
+                  exit 1

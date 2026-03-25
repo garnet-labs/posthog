@@ -22,6 +22,7 @@ class FreshsalesSource(SimpleSource[FreshsalesSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.FRESHSALES,
+            docsUrl="https://posthog.com/docs/cdp/sources/freshsales",
             label="Freshsales",
             iconPath="/static/services/freshsales.png",
             fields=cast(list[FieldType], []),

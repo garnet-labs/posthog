@@ -22,6 +22,7 @@ class FrontSource(SimpleSource[FrontSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.FRONT,
+            docsUrl="https://posthog.com/docs/cdp/sources/front",
             label="Front",
             iconPath="/static/services/front.png",
             fields=cast(list[FieldType], []),

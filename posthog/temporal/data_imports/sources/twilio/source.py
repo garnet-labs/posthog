@@ -22,6 +22,7 @@ class TwilioSource(SimpleSource[TwilioSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.TWILIO,
+            docsUrl="https://posthog.com/docs/cdp/sources/twilio",
             label="Twilio",
             iconPath="/static/services/twilio.png",
             fields=cast(list[FieldType], []),

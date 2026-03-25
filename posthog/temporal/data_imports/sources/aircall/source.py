@@ -22,6 +22,7 @@ class AircallSource(SimpleSource[AircallSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.AIRCALL,
+            docsUrl="https://posthog.com/docs/cdp/sources/aircall",
             label="Aircall",
             iconPath="/static/services/aircall.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class LeverSource(SimpleSource[LeverSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.LEVER,
+            docsUrl="https://posthog.com/docs/cdp/sources/lever",
             label="Lever",
             iconPath="/static/services/lever.png",
             fields=cast(list[FieldType], []),

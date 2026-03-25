@@ -22,6 +22,7 @@ class ZoomSource(SimpleSource[ZoomSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ZOOM,
+            docsUrl="https://posthog.com/docs/cdp/sources/zoom",
             label="Zoom",
             iconPath="/static/services/zoom.png",
             fields=cast(list[FieldType], []),

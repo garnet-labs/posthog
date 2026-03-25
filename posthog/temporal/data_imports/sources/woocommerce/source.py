@@ -22,6 +22,7 @@ class WooCommerceSource(SimpleSource[WooCommerceSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.WOO_COMMERCE,
+            docsUrl="https://posthog.com/docs/cdp/sources/woocommerce",
             label="WooCommerce",
             iconPath="/static/services/woocommerce.png",
             fields=cast(list[FieldType], []),

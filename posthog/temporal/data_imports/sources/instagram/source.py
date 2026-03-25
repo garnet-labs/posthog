@@ -22,6 +22,7 @@ class InstagramSource(SimpleSource[InstagramSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.INSTAGRAM,
+            docsUrl="https://posthog.com/docs/cdp/sources/instagram",
             label="Instagram",
             iconPath="/static/services/instagram.png",
             fields=cast(list[FieldType], []),

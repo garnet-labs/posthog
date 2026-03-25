@@ -22,6 +22,7 @@ class ZuoraSource(SimpleSource[ZuoraSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ZUORA,
+            docsUrl="https://posthog.com/docs/cdp/sources/zuora",
             label="Zuora",
             iconPath="/static/services/zuora.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class ElasticsearchSource(SimpleSource[ElasticsearchSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ELASTICSEARCH,
+            docsUrl="https://posthog.com/docs/cdp/sources/elasticsearch",
             label="Elasticsearch",
             iconPath="/static/services/elasticsearch.png",
             fields=cast(list[FieldType], []),

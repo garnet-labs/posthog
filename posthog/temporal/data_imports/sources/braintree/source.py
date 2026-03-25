@@ -22,6 +22,7 @@ class BraintreeSource(SimpleSource[BraintreeSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BRAINTREE,
+            docsUrl="https://posthog.com/docs/cdp/sources/braintree",
             label="Braintree",
             iconPath="/static/services/braintree.png",
             fields=cast(list[FieldType], []),

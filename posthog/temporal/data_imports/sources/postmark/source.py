@@ -22,6 +22,7 @@ class PostmarkSource(SimpleSource[PostmarkSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.POSTMARK,
+            docsUrl="https://posthog.com/docs/cdp/sources/postmark",
             label="Postmark",
             iconPath="/static/services/postmark.png",
             fields=cast(list[FieldType], []),

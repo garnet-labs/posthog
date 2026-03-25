@@ -22,6 +22,7 @@ class SmartsheetSource(SimpleSource[SmartsheetSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SMARTSHEET,
+            docsUrl="https://posthog.com/docs/cdp/sources/smartsheet",
             label="Smartsheet",
             iconPath="/static/services/smartsheet.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class CircleCISource(SimpleSource[CircleCISourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CIRCLE_CI,
+            docsUrl="https://posthog.com/docs/cdp/sources/circleci",
             label="CircleCI",
             iconPath="/static/services/circleci.png",
             fields=cast(list[FieldType], []),

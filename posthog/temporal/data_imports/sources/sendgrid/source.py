@@ -22,6 +22,7 @@ class SendGridSource(SimpleSource[SendGridSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SEND_GRID,
+            docsUrl="https://posthog.com/docs/cdp/sources/sendgrid",
             label="SendGrid",
             iconPath="/static/services/sendgrid.png",
             fields=cast(list[FieldType], []),

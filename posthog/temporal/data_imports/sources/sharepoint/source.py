@@ -22,6 +22,7 @@ class SharePointSource(SimpleSource[SharePointSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SHARE_POINT,
+            docsUrl="https://posthog.com/docs/cdp/sources/sharepoint",
             label="SharePoint",
             iconPath="/static/services/sharepoint.png",
             fields=cast(list[FieldType], []),

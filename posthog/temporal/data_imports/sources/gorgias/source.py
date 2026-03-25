@@ -22,6 +22,7 @@ class GorgiasSource(SimpleSource[GorgiasSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GORGIAS,
+            docsUrl="https://posthog.com/docs/cdp/sources/gorgias",
             label="Gorgias",
             iconPath="/static/services/gorgias.png",
             fields=cast(list[FieldType], []),

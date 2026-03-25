@@ -22,6 +22,7 @@ class AzureBlobSource(SimpleSource[AzureBlobSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.AZURE_BLOB,
+            docsUrl="https://posthog.com/docs/cdp/sources/azure-blob",
             label="Azure Blob",
             iconPath="/static/services/azure_blob.png",
             fields=cast(list[FieldType], []),

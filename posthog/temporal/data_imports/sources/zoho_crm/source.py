@@ -22,6 +22,7 @@ class ZohoCRMSource(SimpleSource[ZohoCRMSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ZOHO_CRM,
+            docsUrl="https://posthog.com/docs/cdp/sources/zoho-crm",
             label="Zoho CRM",
             iconPath="/static/services/zoho_crm.png",
             fields=cast(list[FieldType], []),

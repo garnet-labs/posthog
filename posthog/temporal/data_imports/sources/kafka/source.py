@@ -22,6 +22,7 @@ class KafkaSource(SimpleSource[KafkaSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.KAFKA,
+            docsUrl="https://posthog.com/docs/cdp/sources/kafka",
             label="Kafka",
             iconPath="/static/services/kafka.png",
             fields=cast(list[FieldType], []),

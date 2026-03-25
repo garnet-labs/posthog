@@ -22,6 +22,7 @@ class WebflowSource(SimpleSource[WebflowSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.WEBFLOW,
+            docsUrl="https://posthog.com/docs/cdp/sources/webflow",
             label="Webflow",
             iconPath="/static/services/webflow.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class MarketoSource(SimpleSource[MarketoSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.MARKETO,
+            docsUrl="https://posthog.com/docs/cdp/sources/marketo",
             label="Marketo",
             iconPath="/static/services/marketo.png",
             fields=cast(list[FieldType], []),

@@ -31,6 +31,7 @@ class ClerkSource(SimpleSource[ClerkSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CLERK,
+            docsUrl="https://posthog.com/docs/cdp/sources/clerk",
             label="Clerk",
             betaSource=True,
             caption="""Enter your Clerk secret key to automatically pull your Clerk data into the PostHog Data warehouse.

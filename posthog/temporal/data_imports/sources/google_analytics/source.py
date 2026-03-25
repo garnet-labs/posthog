@@ -22,6 +22,7 @@ class GoogleAnalyticsSource(SimpleSource[GoogleAnalyticsSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GOOGLE_ANALYTICS,
+            docsUrl="https://posthog.com/docs/cdp/sources/google-analytics",
             label="Google Analytics",
             iconPath="/static/services/google_analytics.png",
             fields=cast(list[FieldType], []),

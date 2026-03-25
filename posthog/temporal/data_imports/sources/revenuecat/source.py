@@ -22,6 +22,7 @@ class RevenueCatSource(SimpleSource[RevenueCatSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.REVENUE_CAT,
+            docsUrl="https://posthog.com/docs/cdp/sources/revenuecat",
             label="RevenueCat",
             iconPath="/static/services/revenuecat.png",
             fields=cast(list[FieldType], []),

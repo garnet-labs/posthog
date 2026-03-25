@@ -22,6 +22,7 @@ class MixpanelSource(SimpleSource[MixpanelSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.MIXPANEL,
+            docsUrl="https://posthog.com/docs/cdp/sources/mixpanel",
             label="Mixpanel",
             iconPath="/static/services/mixpanel.png",
             fields=cast(list[FieldType], []),

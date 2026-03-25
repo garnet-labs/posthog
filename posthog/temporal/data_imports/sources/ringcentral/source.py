@@ -22,6 +22,7 @@ class RingCentralSource(SimpleSource[RingCentralSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.RING_CENTRAL,
+            docsUrl="https://posthog.com/docs/cdp/sources/ringcentral",
             label="RingCentral",
             iconPath="/static/services/ringcentral.png",
             fields=cast(list[FieldType], []),

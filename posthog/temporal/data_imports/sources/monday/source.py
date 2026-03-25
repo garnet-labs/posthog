@@ -22,6 +22,7 @@ class MondaySource(SimpleSource[MondaySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.MONDAY,
+            docsUrl="https://posthog.com/docs/cdp/sources/monday",
             label="Monday",
             iconPath="/static/services/monday.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class JiraSource(SimpleSource[JiraSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.JIRA,
+            docsUrl="https://posthog.com/docs/cdp/sources/jira",
             label="Jira",
             iconPath="/static/services/jira.png",
             fields=cast(list[FieldType], []),

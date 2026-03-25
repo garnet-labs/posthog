@@ -22,6 +22,7 @@ class BigCommerceSource(SimpleSource[BigCommerceSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BIG_COMMERCE,
+            docsUrl="https://posthog.com/docs/cdp/sources/bigcommerce",
             label="BigCommerce",
             iconPath="/static/services/bigcommerce.png",
             fields=cast(list[FieldType], []),

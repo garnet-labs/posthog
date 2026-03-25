@@ -22,6 +22,7 @@ class OmnisendSource(SimpleSource[OmnisendSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.OMNISEND,
+            docsUrl="https://posthog.com/docs/cdp/sources/omnisend",
             label="Omnisend",
             iconPath="/static/services/omnisend.png",
             fields=cast(list[FieldType], []),

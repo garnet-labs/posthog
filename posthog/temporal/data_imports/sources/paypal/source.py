@@ -22,6 +22,7 @@ class PayPalSource(SimpleSource[PayPalSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PAY_PAL,
+            docsUrl="https://posthog.com/docs/cdp/sources/paypal",
             label="PayPal",
             iconPath="/static/services/paypal.png",
             fields=cast(list[FieldType], []),

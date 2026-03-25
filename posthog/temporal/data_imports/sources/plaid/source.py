@@ -22,6 +22,7 @@ class PlaidSource(SimpleSource[PlaidSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PLAID,
+            docsUrl="https://posthog.com/docs/cdp/sources/plaid",
             label="Plaid",
             iconPath="/static/services/plaid.png",
             fields=cast(list[FieldType], []),

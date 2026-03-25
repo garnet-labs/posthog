@@ -22,6 +22,7 @@ class YouTubeAnalyticsSource(SimpleSource[YouTubeAnalyticsSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.YOU_TUBE_ANALYTICS,
+            docsUrl="https://posthog.com/docs/cdp/sources/youtube-analytics",
             label="YouTube Analytics",
             iconPath="/static/services/youtube_analytics.png",
             fields=cast(list[FieldType], []),

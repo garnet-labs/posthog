@@ -22,6 +22,7 @@ class AsanaSource(SimpleSource[AsanaSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ASANA,
+            docsUrl="https://posthog.com/docs/cdp/sources/asana",
             label="Asana",
             iconPath="/static/services/asana.png",
             fields=cast(list[FieldType], []),

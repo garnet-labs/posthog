@@ -22,6 +22,7 @@ class ShortcutSource(SimpleSource[ShortcutSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SHORTCUT,
+            docsUrl="https://posthog.com/docs/cdp/sources/shortcut",
             label="Shortcut",
             iconPath="/static/services/shortcut.png",
             fields=cast(list[FieldType], []),

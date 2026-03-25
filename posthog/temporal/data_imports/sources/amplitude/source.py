@@ -22,6 +22,7 @@ class AmplitudeSource(SimpleSource[AmplitudeSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.AMPLITUDE,
+            docsUrl="https://posthog.com/docs/cdp/sources/amplitude",
             label="Amplitude",
             iconPath="/static/services/amplitude.png",
             fields=cast(list[FieldType], []),

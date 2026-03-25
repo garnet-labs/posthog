@@ -32,6 +32,7 @@ class LinearSource(SimpleSource[LinearSourceConfig], OAuthMixin):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.LINEAR,
+            docsUrl="https://posthog.com/docs/cdp/sources/linear",
             label="Linear",
             betaSource=True,
             caption="Connect your Linear workspace to sync issues, projects, teams, and more.",

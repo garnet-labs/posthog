@@ -22,6 +22,7 @@ class CampaignMonitorSource(SimpleSource[CampaignMonitorSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CAMPAIGN_MONITOR,
+            docsUrl="https://posthog.com/docs/cdp/sources/campaignmonitor",
             label="Campaign Monitor",
             iconPath="/static/services/campaign_monitor.png",
             fields=cast(list[FieldType], []),

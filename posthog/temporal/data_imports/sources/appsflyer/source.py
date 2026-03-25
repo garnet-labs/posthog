@@ -22,6 +22,7 @@ class AppsFlyerSource(SimpleSource[AppsFlyerSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.APPS_FLYER,
+            docsUrl="https://posthog.com/docs/cdp/sources/appsflyer",
             label="AppsFlyer",
             iconPath="/static/services/appsflyer.png",
             fields=cast(list[FieldType], []),

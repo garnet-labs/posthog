@@ -22,6 +22,7 @@ class ProductboardSource(SimpleSource[ProductboardSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PRODUCTBOARD,
+            docsUrl="https://posthog.com/docs/cdp/sources/productboard",
             label="Productboard",
             iconPath="/static/services/productboard.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class BrevoSource(SimpleSource[BrevoSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BREVO,
+            docsUrl="https://posthog.com/docs/cdp/sources/brevo",
             label="Brevo",
             iconPath="/static/services/brevo.png",
             fields=cast(list[FieldType], []),

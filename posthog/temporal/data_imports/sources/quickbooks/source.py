@@ -22,6 +22,7 @@ class QuickBooksSource(SimpleSource[QuickBooksSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.QUICK_BOOKS,
+            docsUrl="https://posthog.com/docs/cdp/sources/quickbooks",
             label="QuickBooks",
             iconPath="/static/services/quickbooks.png",
             fields=cast(list[FieldType], []),

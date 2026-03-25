@@ -22,6 +22,7 @@ class SquareSource(SimpleSource[SquareSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SQUARE,
+            docsUrl="https://posthog.com/docs/cdp/sources/square",
             label="Square",
             iconPath="/static/services/square.png",
             fields=cast(list[FieldType], []),

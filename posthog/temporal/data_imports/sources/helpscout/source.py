@@ -22,6 +22,7 @@ class HelpScoutSource(SimpleSource[HelpScoutSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.HELP_SCOUT,
+            docsUrl="https://posthog.com/docs/cdp/sources/helpscout",
             label="Help Scout",
             iconPath="/static/services/helpscout.png",
             fields=cast(list[FieldType], []),

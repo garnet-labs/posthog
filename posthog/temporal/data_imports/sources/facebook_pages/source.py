@@ -22,6 +22,7 @@ class FacebookPagesSource(SimpleSource[FacebookPagesSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.FACEBOOK_PAGES,
+            docsUrl="https://posthog.com/docs/cdp/sources/facebook-pages",
             label="Facebook Pages",
             iconPath="/static/services/facebook_pages.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class MicrosoftTeamsSource(SimpleSource[MicrosoftTeamsSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.MICROSOFT_TEAMS,
+            docsUrl="https://posthog.com/docs/cdp/sources/microsoft-teams",
             label="Microsoft Teams",
             iconPath="/static/services/microsoft_teams.png",
             fields=cast(list[FieldType], []),

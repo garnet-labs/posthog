@@ -22,6 +22,7 @@ class BambooHRSource(SimpleSource[BambooHRSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.BAMBOO_HR,
+            docsUrl="https://posthog.com/docs/cdp/sources/bamboo-hr",
             label="BambooHR",
             iconPath="/static/services/bamboohr.png",
             fields=cast(list[FieldType], []),

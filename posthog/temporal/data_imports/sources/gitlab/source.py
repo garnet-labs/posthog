@@ -22,6 +22,7 @@ class GitLabSource(SimpleSource[GitLabSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GIT_LAB,
+            docsUrl="https://posthog.com/docs/cdp/sources/gitlab",
             label="GitLab",
             iconPath="/static/services/gitlab.png",
             fields=cast(list[FieldType], []),

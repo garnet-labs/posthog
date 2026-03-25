@@ -22,6 +22,7 @@ class FirebaseSource(SimpleSource[FirebaseSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.FIREBASE,
+            docsUrl="https://posthog.com/docs/cdp/sources/firebase",
             label="Firebase",
             iconPath="/static/services/firebase.png",
             fields=cast(list[FieldType], []),

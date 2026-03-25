@@ -22,6 +22,7 @@ class LaunchDarklySource(SimpleSource[LaunchDarklySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.LAUNCH_DARKLY,
+            docsUrl="https://posthog.com/docs/cdp/sources/launchdarkly",
             label="LaunchDarkly",
             iconPath="/static/services/launchdarkly.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class NetSuiteSource(SimpleSource[NetSuiteSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.NET_SUITE,
+            docsUrl="https://posthog.com/docs/cdp/sources/netsuite",
             label="NetSuite",
             iconPath="/static/services/netsuite.png",
             fields=cast(list[FieldType], []),

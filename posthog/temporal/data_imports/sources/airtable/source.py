@@ -22,6 +22,7 @@ class AirtableSource(SimpleSource[AirtableSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.AIRTABLE,
+            docsUrl="https://posthog.com/docs/cdp/sources/airtable",
             label="Airtable",
             iconPath="/static/services/airtable.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class FreshdeskSource(SimpleSource[FreshdeskSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.FRESHDESK,
+            docsUrl="https://posthog.com/docs/cdp/sources/freshdesk",
             label="Freshdesk",
             iconPath="/static/services/freshdesk.png",
             fields=cast(list[FieldType], []),

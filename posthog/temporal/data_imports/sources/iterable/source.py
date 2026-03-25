@@ -22,6 +22,7 @@ class IterableSource(SimpleSource[IterableSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ITERABLE,
+            docsUrl="https://posthog.com/docs/cdp/sources/iterable",
             label="Iterable",
             iconPath="/static/services/iterable.png",
             fields=cast(list[FieldType], []),

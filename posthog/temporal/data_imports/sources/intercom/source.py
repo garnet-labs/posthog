@@ -22,6 +22,7 @@ class IntercomSource(SimpleSource[IntercomSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.INTERCOM,
+            docsUrl="https://posthog.com/docs/cdp/sources/intercom",
             label="Intercom",
             iconPath="/static/services/intercom.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class ConvertKitSource(SimpleSource[ConvertKitSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CONVERT_KIT,
+            docsUrl="https://posthog.com/docs/cdp/sources/convertkit",
             label="ConvertKit",
             iconPath="/static/services/convertkit.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class SalesLoftSource(SimpleSource[SalesLoftSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SALES_LOFT,
+            docsUrl="https://posthog.com/docs/cdp/sources/salesloft",
             label="SalesLoft",
             iconPath="/static/services/salesloft.png",
             fields=cast(list[FieldType], []),

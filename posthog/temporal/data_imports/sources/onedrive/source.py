@@ -22,6 +22,7 @@ class OneDriveSource(SimpleSource[OneDriveSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ONE_DRIVE,
+            docsUrl="https://posthog.com/docs/cdp/sources/onedrive",
             label="OneDrive",
             iconPath="/static/services/onedrive.png",
             fields=cast(list[FieldType], []),

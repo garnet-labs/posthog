@@ -73,6 +73,7 @@ class MetaAdsSource(SimpleSource[MetaAdsSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.META_ADS,
+            docsUrl="https://posthog.com/docs/cdp/sources/meta-ads",
             label="Meta Ads",
             caption="Ensure you have granted PostHog access to your Meta Ads account, learn how to do this in the [documentation](https://posthog.com/docs/cdp/sources/meta-ads).",
             iconPath="/static/services/meta-ads.png",

@@ -22,6 +22,7 @@ class PaddleSource(SimpleSource[PaddleSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PADDLE,
+            docsUrl="https://posthog.com/docs/cdp/sources/paddle",
             label="Paddle",
             iconPath="/static/services/paddle.png",
             fields=cast(list[FieldType], []),

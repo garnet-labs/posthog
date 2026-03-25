@@ -22,6 +22,7 @@ class OutreachSource(SimpleSource[OutreachSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.OUTREACH,
+            docsUrl="https://posthog.com/docs/cdp/sources/outreach",
             label="Outreach",
             iconPath="/static/services/outreach.png",
             fields=cast(list[FieldType], []),

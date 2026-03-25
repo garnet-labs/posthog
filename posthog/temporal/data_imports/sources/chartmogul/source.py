@@ -22,6 +22,7 @@ class ChartMogulSource(SimpleSource[ChartMogulSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CHART_MOGUL,
+            docsUrl="https://posthog.com/docs/cdp/sources/chartmogul",
             label="ChartMogul",
             iconPath="/static/services/chartmogul.png",
             fields=cast(list[FieldType], []),

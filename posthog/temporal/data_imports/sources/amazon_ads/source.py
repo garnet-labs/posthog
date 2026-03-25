@@ -22,6 +22,7 @@ class AmazonAdsSource(SimpleSource[AmazonAdsSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.AMAZON_ADS,
+            docsUrl="https://posthog.com/docs/cdp/sources/amazon-ads",
             label="Amazon Ads",
             iconPath="/static/services/amazon_ads.png",
             fields=cast(list[FieldType], []),

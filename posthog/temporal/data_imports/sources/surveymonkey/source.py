@@ -22,6 +22,7 @@ class SurveyMonkeySource(SimpleSource[SurveyMonkeySourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SURVEY_MONKEY,
+            docsUrl="https://posthog.com/docs/cdp/sources/surveymonkey",
             label="SurveyMonkey",
             iconPath="/static/services/surveymonkey.png",
             fields=cast(list[FieldType], []),

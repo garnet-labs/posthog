@@ -36,6 +36,7 @@ class GithubSource(SimpleSource[GithubSourceConfig], OAuthMixin):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GITHUB,
+            docsUrl="https://posthog.com/docs/cdp/sources/github",
             label="GitHub",
             betaSource=True,
             caption="Connect your GitHub repository to sync issues, pull requests, commits, and more.",

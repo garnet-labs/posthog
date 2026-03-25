@@ -22,6 +22,7 @@ class SlackSource(SimpleSource[SlackSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.SLACK,
+            docsUrl="https://posthog.com/docs/cdp/sources/slack",
             label="Slack",
             iconPath="/static/services/slack.png",
             fields=cast(list[FieldType], []),

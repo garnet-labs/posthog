@@ -22,6 +22,7 @@ class ConfluenceSource(SimpleSource[ConfluenceSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.CONFLUENCE,
+            docsUrl="https://posthog.com/docs/cdp/sources/confluence",
             label="Confluence",
             iconPath="/static/services/confluence.png",
             fields=cast(list[FieldType], []),

@@ -22,6 +22,7 @@ class AdjustSource(SimpleSource[AdjustSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.ADJUST,
+            docsUrl="https://posthog.com/docs/cdp/sources/adjust",
             label="Adjust",
             iconPath="/static/services/adjust.png",
             fields=cast(list[FieldType], []),

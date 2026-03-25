@@ -22,6 +22,7 @@ class PendoSource(SimpleSource[PendoSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.PENDO,
+            docsUrl="https://posthog.com/docs/cdp/sources/pendo",
             label="Pendo",
             iconPath="/static/services/pendo.png",
             fields=cast(list[FieldType], []),

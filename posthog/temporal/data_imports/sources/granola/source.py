@@ -22,6 +22,7 @@ class GranolaSource(SimpleSource[GranolaSourceConfig]):
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
             name=SchemaExternalDataSourceType.GRANOLA,
+            docsUrl="https://posthog.com/docs/cdp/sources/granola",
             label="Granola",
             iconPath="/static/services/granola.png",
             fields=cast(list[FieldType], []),
