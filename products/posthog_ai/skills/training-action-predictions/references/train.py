@@ -41,8 +41,13 @@ SEED = 42
 TEST_FRACTION = 0.25
 MAX_USERS = int(os.environ.get("MAX_USERS", "10000"))
 
-# The agent writes/adapts this query per experiment.
-# Training mode: T = now() - interval {W} day, includes label.
+# ── Training query ────────────────────────────────────────────────────────────
+# IMPORTANT: The agent MUST adapt this query per experiment:
+# - Replace 'downloaded_file' with the actual target event name
+# - Replace '28' with the actual lookback_days from the ActionPredictionModel
+# - Replace '118' in the WHERE clause with lookback + observation (e.g. 28 + 90)
+# - Add/remove feature columns as the experiment evolves
+# The query below is a REFERENCE for the 'downloaded_file' / 28-day example.
 TRAINING_QUERY = """
 SELECT
     person_id,

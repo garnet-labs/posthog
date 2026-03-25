@@ -29,10 +29,18 @@ DATA_PATH = "/tmp/scoring_data.parquet"
 SCORES_PARQUET_PATH = os.environ.get("SCORES_PATH", "/tmp/scores.parquet")
 SCORES_JSON_PATH = os.environ.get("SCORES_JSON_PATH", "/tmp/scores.json")
 
+# Bucket thresholds — the agent should adjust these based on the base rate.
+# For rare actions (base rate < 5%), lower thresholds may be more useful.
+# For common actions (base rate > 20%), higher thresholds avoid noise.
+# These defaults suit a moderate base rate (~5-15%).
 BUCKET_THRESHOLDS = {"very_likely": 0.7, "likely": 0.4, "neutral": 0.15}
 
-# The scoring query mirrors the training query but with T=now() and no label.
-# The agent adapts this to match whatever query was used in training.
+# ── Scoring query ────────────────────────────────────────────────────────────
+# IMPORTANT: The agent MUST adapt this query to match the training query.
+# - Replace 'downloaded_file' with the actual target event name
+# - Same feature columns as training (same names, same order)
+# - T = now() instead of now() - interval W day
+# - No label column
 SCORING_QUERY = """
 SELECT
     person_id,

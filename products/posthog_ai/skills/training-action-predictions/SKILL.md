@@ -129,10 +129,12 @@ After the loop, produce a summary:
 
 ## Guardrails
 
+- **No hardcoding**: the reference scripts use `downloaded_file` / 28 days as an example. The agent MUST replace these with the actual target event and lookback_days from the `ActionPredictionModel`. The HogQL query, bucket thresholds, and all config should be adapted to the specific action being predicted.
 - **Leakage prevention**: features from observation window only; target event excluded from feature columns
 - **Calibration**: always isotonic via sklearn Pipeline
 - **Features**: aim for 15-40. More than 50 risks overfitting
 - **Imbalance**: always use `scale_pos_weight`, never downsample
+- **Base rate awareness**: base rate varies wildly by action. A 1% action needs different thresholds and evaluation criteria than a 30% action. Always report base rate alongside metrics.
 - **Reproducibility**: seed=42, every experiment recorded with query + utils + train + predict scripts in `artifact_scripts`. Artifacts must be fully self-contained — the sandbox writes each key to a file and runs them.
 - **Winning runs**: set `is_winning=true` at creation time — compare metrics locally
 - **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`

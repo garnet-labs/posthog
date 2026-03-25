@@ -55,12 +55,14 @@ For each scored user, set two person properties via `persons-property-set`:
 | `p_action_{name}`        | float  | Calibrated probability 0.0–1.0                         |
 | `p_action_{name}_bucket` | string | One of: `very_likely`, `likely`, `neutral`, `unlikely` |
 
-Bucket thresholds:
+Default bucket thresholds (adjust based on the action's base rate):
 
 - `very_likely`: probability >= 0.7
 - `likely`: 0.4 <= probability < 0.7
 - `neutral`: 0.15 <= probability < 0.4
 - `unlikely`: probability < 0.15
+
+**Important**: For rare actions (base rate < 5%), these defaults may put almost everyone in `unlikely`. Adjust thresholds down — e.g. very_likely >= 0.3, likely >= 0.15, neutral >= 0.05. Use the training metrics base rate and score distribution to calibrate sensible buckets.
 
 ### Step 4: Create cohorts
 
