@@ -5,6 +5,7 @@ from typing import Any, Optional, cast
 
 from posthog.schema import (
     CachedPropertyValuesQueryResponse,
+    ProductKey,
     PropertyType,
     PropertyValueItem,
     PropertyValuesQuery,
@@ -18,6 +19,7 @@ from posthog.caching.utils import (
     ThresholdMode,
     cache_target_age as _cache_target_age,
 )
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.utils import convert_property_value, flatten, relative_date_parse
 
@@ -42,6 +44,7 @@ class PropertyValuesQueryRunner(AnalyticsQueryRunner[PropertyValuesQueryResponse
         raise NotImplementedError("Person property values use raw SQL via _calculate_person()")
 
     def _calculate(self) -> PropertyValuesQueryResponse:
+        tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
         if self.query.property_type == PropertyType.PERSON:
             return self._calculate_person()
         return self._calculate_event()

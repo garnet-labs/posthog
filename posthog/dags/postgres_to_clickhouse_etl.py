@@ -25,8 +25,11 @@ from dagster import (
 )
 from dagster._core.definitions.backfill_policy import BackfillPolicy
 
+from posthog.schema import ProductKey
+
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.cluster import Query, get_cluster
+from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.dags.common import JobOwners
 
 
@@ -605,6 +608,8 @@ def insert_organizations_to_clickhouse(organizations: list[dict], batch_size: in
     if not organizations:
         return 0
 
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
+
     # Transform the data
     transformed = [transform_organization_row(org) for org in organizations]
 
@@ -631,6 +636,8 @@ def insert_teams_to_clickhouse(teams: list[dict], batch_size: int = 10000) -> in
     """Insert teams into ClickHouse."""
     if not teams:
         return 0
+
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
 
     # Transform the data
     transformed = [transform_team_row(team) for team in teams]
@@ -660,6 +667,7 @@ def sync_organizations(
     config: PostgresToClickHouseETLConfig,
 ) -> ETLState:
     """Sync organizations from Postgres to ClickHouse."""
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
     state = ETLState()
 
     context.log.info(f"Starting organization sync (full_refresh={config.full_refresh})")
@@ -740,6 +748,7 @@ def sync_teams(
     config: PostgresToClickHouseETLConfig,
 ) -> ETLState:
     """Sync teams from Postgres to ClickHouse."""
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
     state = ETLState()
 
     context.log.info(f"Starting team sync (full_refresh={config.full_refresh})")
@@ -821,6 +830,7 @@ def verify_sync(
     team_state: ETLState,
 ) -> dict[str, Any]:
     """Verify the sync was successful by checking row counts."""
+    tag_queries(product=ProductKey.PLATFORM_AND_SUPPORT, feature=Feature.QUERY)
     # Get counts from ClickHouse
     org_count_result = sync_execute("SELECT count(*) FROM models.posthog_organization")
     team_count_result = sync_execute("SELECT count(*) FROM models.posthog_team")
