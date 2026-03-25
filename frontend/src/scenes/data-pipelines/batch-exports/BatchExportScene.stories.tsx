@@ -194,6 +194,13 @@ export const Logs: Story = {
     parameters: {
         pageUrl: `${urls.batchExport(EXISTING_EXPORT.id)}?tab=logs`,
     },
+    decorators: [
+        mswDecorator({
+            post: {
+                '/api/environments/:team_id/query/': { results: [], columns: [], types: [] },
+            },
+        }),
+    ],
 }
 
 export const Metrics: Story = {
