@@ -207,11 +207,24 @@ pub struct IssueFingerprintDenormalized {
     pub issue_name: Option<String>,
     pub issue_description: Option<String>,
     pub issue_status: String,
-    pub assigned_user_id: Option<i64>,
-    pub assigned_role_id: Option<Uuid>,
+    pub assigned_entity_type: Option<String>,
+    pub assigned_entity_id: Option<String>,
     pub first_seen: String,
     pub is_deleted: i8,
     pub version: i64,
+}
+
+fn assigned_entity_fields_from_assignment(assignment: Option<&Assignment>) -> (Option<String>, Option<String>) {
+    let Some(a) = assignment else {
+        return (None, None);
+    };
+    if let Some(uid) = a.user_id {
+        return (Some("user".into()), Some(uid.to_string()));
+    }
+    if let Some(rid) = a.role_id {
+        return (Some("role".into()), Some(rid.to_string()));
+    }
+    (None, None)
 }
 
 impl IssueFingerprintDenormalized {
@@ -222,6 +235,7 @@ impl IssueFingerprintDenormalized {
         first_seen: DateTime<Utc>,
     ) -> Self {
         let now = Utc::now().timestamp_millis();
+        let (assigned_entity_type, assigned_entity_id) = assigned_entity_fields_from_assignment(assignment);
         Self {
             team_id: issue.team_id,
             fingerprint: fingerprint.to_string(),
@@ -229,8 +243,8 @@ impl IssueFingerprintDenormalized {
             issue_name: issue.name.clone(),
             issue_description: issue.description.clone(),
             issue_status: issue.status.to_string(),
-            assigned_user_id: assignment.and_then(|a| a.user_id.map(i64::from)),
-            assigned_role_id: assignment.and_then(|a| a.role_id),
+            assigned_entity_type,
+            assigned_entity_id,
             first_seen: first_seen.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
             is_deleted: 0,
             version: now,

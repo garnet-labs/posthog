@@ -91,12 +91,12 @@ class ErrorTrackingQueryV3Builder:
                 alias="description", expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_description"])])
             ),
             ast.Alias(
-                alias="assignee_user_id",
-                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_user_id"])]),
+                alias="assignee_entity_type",
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_entity_type"])]),
             ),
             ast.Alias(
-                alias="assignee_role_id",
-                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_role_id"])]),
+                alias="assignee_entity_id",
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_entity_id"])]),
             ),
             # timestamps
             ast.Alias(alias="last_seen", expr=ast.Call(name="max", args=[ast.Field(chain=["e", "timestamp"])])),
@@ -317,22 +317,24 @@ class ErrorTrackingQueryV3Builder:
             )
 
         if self.query.assignee:
-            if self.query.assignee.type == "user":
-                exprs.append(
-                    ast.CompareOperation(
-                        op=ast.CompareOperationOp.Eq,
-                        left=ast.Field(chain=["e", "assigned_user_id"]),
-                        right=ast.Constant(value=self.query.assignee.id),
-                    )
+            assignee_type = "user" if self.query.assignee.type == "user" else "role"
+            assignee_id = str(self.query.assignee.id)
+            exprs.append(
+                ast.And(
+                    exprs=[
+                        ast.CompareOperation(
+                            op=ast.CompareOperationOp.Eq,
+                            left=ast.Field(chain=["e", "assigned_entity_type"]),
+                            right=ast.Constant(value=assignee_type),
+                        ),
+                        ast.CompareOperation(
+                            op=ast.CompareOperationOp.Eq,
+                            left=ast.Field(chain=["e", "assigned_entity_id"]),
+                            right=ast.Constant(value=assignee_id),
+                        ),
+                    ]
                 )
-            else:
-                exprs.append(
-                    ast.CompareOperation(
-                        op=ast.CompareOperationOp.Eq,
-                        left=ast.Field(chain=["e", "assigned_role_id"]),
-                        right=ast.Constant(value=str(self.query.assignee.id)),
-                    )
-                )
+            )
 
         for prop in self._issue_properties:
             expr = self._issue_property_to_ast(prop)
@@ -342,12 +344,15 @@ class ErrorTrackingQueryV3Builder:
         return exprs
 
     def _extract_assignee(self, row: dict) -> dict | None:
-        user_id = row.get("assignee_user_id")
-        role_id = row.get("assignee_role_id")
-        if user_id:
-            return {"id": user_id, "type": "user"}
-        if role_id:
-            return {"id": str(role_id), "type": "role"}
+        entity_type = row.get("assignee_entity_type")
+        entity_id = row.get("assignee_entity_id")
+        if entity_type == "user" and entity_id not in (None, ""):
+            try:
+                return {"id": int(entity_id), "type": "user"}
+            except (ValueError, TypeError):
+                return None
+        if entity_type == "role" and entity_id:
+            return {"id": str(entity_id), "type": "role"}
         return None
 
     @cached_property

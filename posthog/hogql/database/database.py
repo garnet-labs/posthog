@@ -1447,6 +1447,17 @@ def _use_error_tracking_issue_id_from_error_tracking_issue_overrides(database: D
         name="issue_status",
         expr=parse_expr("exception_issue_denormalized.issue_status"),
     )
+    table.fields["assigned_entity_type"] = ExpressionField(
+        name="assigned_entity_type",
+        expr=parse_expr(
+            "toString(exception_issue_denormalized.assigned_entity_type)",
+            start=None,
+        ),
+    )
+    table.fields["assigned_entity_id"] = ExpressionField(
+        name="assigned_entity_id",
+        expr=parse_expr("exception_issue_denormalized.assigned_entity_id", start=None),
+    )
     table.fields["assigned_user_id"] = ExpressionField(
         name="assigned_user_id",
         expr=parse_expr(
