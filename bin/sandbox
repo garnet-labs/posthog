@@ -87,20 +87,24 @@ def _colored(color: str, text: str, *, stream: object = sys.stdout) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
+def _ts() -> str:
+    return time.strftime("%H:%M:%S")
+
+
 def info(msg: str) -> None:
-    print(_colored("blue", msg))
+    print(f"[{_ts()}] {_colored('blue', msg)}")
 
 
 def success(msg: str) -> None:
-    print(_colored("green", f"\u2713 {msg}"))
+    print(f"[{_ts()}] {_colored('green', f'✓ {msg}')}")
 
 
 def warn(msg: str) -> None:
-    print(_colored("yellow", f"Warning: {msg}", stream=sys.stderr), file=sys.stderr)
+    print(f"[{_ts()}] {_colored('yellow', f'Warning: {msg}', stream=sys.stderr)}", file=sys.stderr)
 
 
 def error(msg: str) -> None:
-    print(_colored("red", f"Error: {msg}", stream=sys.stderr), file=sys.stderr)
+    print(f"[{_ts()}] {_colored('red', f'Error: {msg}', stream=sys.stderr)}", file=sys.stderr)
 
 
 def fatal(msg: str) -> NoReturn:

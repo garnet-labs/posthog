@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,16 +31,20 @@ PROGRESS_FILE = Path("/tmp/sandbox-progress")
 # ---------------------------------------------------------------------------
 
 
+def _ts() -> str:
+    return time.strftime("%H:%M:%S")
+
+
 def log(msg: str) -> None:
     """Print to container stdout only (root phase)."""
-    print(f"==> {msg}", flush=True)  # noqa: T201
+    print(f"[{_ts()}] ==> {msg}", flush=True)  # noqa: T201
 
 
 def info(msg: str) -> None:
     """Log to stdout and write to progress file for the host script."""
-    print(f"==> {msg}", flush=True)  # noqa: T201
+    print(f"[{_ts()}] ==> {msg}", flush=True)  # noqa: T201
     with PROGRESS_FILE.open("a") as f:
-        f.write(f"==> {msg}\n")
+        f.write(f"[{_ts()}] ==> {msg}\n")
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -381,7 +386,7 @@ def setup_intellij_background() -> None:
         env={**os.environ, "REMOTE_DEV_NON_INTERACTIVE": "1"},
     )
     if result.returncode != 0:
-        print(f"ERROR: IntelliJ backend registration failed (exit {result.returncode}).")  # noqa: T201
+        print(f"[{_ts()}] ERROR: IntelliJ backend registration failed (exit {result.returncode}).")  # noqa: T201
 
     # Install Python plugin if not already present
     jetbrains_dir = SANDBOX_HOME / ".local/share/JetBrains"
@@ -401,7 +406,7 @@ def setup_intellij_background() -> None:
             env={**os.environ, "REMOTE_DEV_NON_INTERACTIVE": "1"},
         )
         if result.returncode != 0:
-            print(f"ERROR: Plugin installation failed (exit {result.returncode}).")  # noqa: T201
+            print(f"[{_ts()}] ERROR: Plugin installation failed (exit {result.returncode}).")  # noqa: T201
 
     # Configure Python SDK
     idea_config = SANDBOX_HOME / ".config/JetBrains/IntelliJIdea2025.3"
@@ -503,7 +508,7 @@ def user_phase() -> None:
             try:
                 future.result()
             except Exception as e:
-                print(f"ERROR: {name} failed: {e}", flush=True)  # noqa: T201
+                print(f"[{_ts()}] ERROR: {name} failed: {e}", flush=True)  # noqa: T201
                 raise
 
     # generate_mprocs_config needs the hogli symlink created by install_python_deps.

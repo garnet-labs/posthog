@@ -10,6 +10,7 @@ in series (used on branch sandboxes where migrations are incremental and
 fast relative to Django startup).
 """
 
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -25,10 +26,11 @@ class Command(BaseCommand):
         parser.add_argument("--progress-file", type=str, help="File to write progress updates to")
 
     def _progress(self, msg: str) -> None:
-        self.stdout.write(msg)
+        ts = time.strftime("%H:%M:%S")
+        self.stdout.write(f"[{ts}] {msg}")
         if self._progress_file:
             with open(self._progress_file, "a") as f:
-                f.write(f"==> {msg}\n")
+                f.write(f"[{ts}] ==> {msg}\n")
 
     def handle(self, *args, **options):
         self._progress_file: Path | None = Path(options["progress_file"]) if options.get("progress_file") else None
@@ -55,11 +57,13 @@ class Command(BaseCommand):
                     try:
                         future.result()
                     except Exception as e:
-                        self.stderr.write(self.style.ERROR(f"{name} migrations failed: {e}"))
+                        self.stderr.write(
+                            self.style.ERROR(f"[{time.strftime('%H:%M:%S')}] {name} migrations failed: {e}")
+                        )
                         raise
         else:
             for name, fn in tasks.items():
-                self.stdout.write(f"Running {name} migrations...")
+                self.stdout.write(f"[{time.strftime('%H:%M:%S')}] Running {name} migrations...")
                 fn()
 
         self._progress("All migrations complete.")
