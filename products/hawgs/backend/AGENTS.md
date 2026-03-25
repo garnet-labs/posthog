@@ -19,6 +19,11 @@ and which neighboring features are likely affected.
    - Reuses or builds the taxonomy, then runs a multi-turn agent over each product in the same conversation
    - Writes `crawl/crawl_cache/_enriched_taxonomy.json`
    - Adds `code_paths` to products and features, may promote a feature into its own product, and may add clearly missing nearby products/features when the code structure is more explicit than the website taxonomy
+4. `python manage.py contextualize_taxonomy`
+   - Reads `crawl/crawl_cache/_enriched_taxonomy.json` and `crawl/crawl_cache/_product-context-index.json`
+   - Writes `crawl/crawl_cache/_contextualized_taxonomy.json`
+   - Attaches safe runtime/frontend context to products and features: route patterns, API endpoints, and PostHog events
+   - Matching is conservative: prefer `page_component`, then widen to `key_files`; attach at feature level only for unique feature matches, otherwise fall back to unique product matches
 
 ## Artifacts
 
@@ -26,6 +31,8 @@ and which neighboring features are likely affected.
 - `crawl/crawl_cache/<url-slug>.json`: scraped page cache with `markdown`, `screenshot`, and `metadata`
 - `crawl/crawl_cache/_taxonomy.json`: website-grounded product/feature taxonomy
 - `crawl/crawl_cache/_enriched_taxonomy.json`: taxonomy plus verified code paths
+- `crawl/crawl_cache/_product-context-index.json`: scene-level runtime/frontend index from the separate context-indexing tool
+- `crawl/crawl_cache/_contextualized_taxonomy.json`: enriched taxonomy plus matched routes, API endpoints, and PostHog events
 
 ## Working rules
 
@@ -33,6 +40,8 @@ and which neighboring features are likely affected.
 - Use the website's own product and feature names; do not invent a new taxonomy unless the implementation clearly forces a promotion during enrichment.
 - Enrichment is multi-turn in one sandbox conversation. Reuse product names consistently across turns and prefer expanding/splitting an existing area over inventing duplicate labels.
 - `code_paths` should be verified on disk and should prefer durable, product-specific directory globs over long file lists.
+- Treat `_product-context-index.json` as a route/scene index, not as a source of truth for product hierarchy. Use it to attach operational context onto the taxonomy, not to replace the taxonomy.
+- Contextualization should stay conservative. Only attach feature-level context on unique matches; if the scene spans multiple features but clearly belongs to one product, attach it at product level instead.
 - The pipeline is cache-first. If you change discovery rules, prompt logic, schemas, or enrichment heuristics, delete the affected cache files before rerunning or you will get stale results.
 - This directory does not yet contain the final "code path -> product/feature" API. `_enriched_taxonomy.json` is the current handoff artifact for that future lookup layer.
 - `crawl_website` requires `FIRECRAWL_API_KEY`. Discovery, taxonomy, and enrichment also depend on the sandbox agent helpers in `products.tasks.backend.services.custom_prompt_*`.
