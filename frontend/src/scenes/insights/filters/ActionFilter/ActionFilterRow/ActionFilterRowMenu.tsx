@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 
 import { IconEllipsis } from '@posthog/icons'
 import { LemonBadge, LemonCheckbox, LemonDivider, LemonMenu } from '@posthog/lemon-ui'
@@ -67,7 +67,7 @@ export function ActionFilterRowMenu({
     // MathSelector for funnels only (trends shows it inline)
     if (isFunnelContext) {
         menuItems.push(
-            <>
+            <React.Fragment key="math-selector">
                 <MathSelector
                     math={math}
                     mathGroupTypeIndex={mathGroupTypeIndex}
@@ -80,14 +80,14 @@ export function ActionFilterRowMenu({
                     query={query}
                 />
                 <LemonDivider />
-            </>
+            </React.Fragment>
         )
     }
 
     // Optional step checkbox for funnels only
     if (isFunnelContext && index > 0) {
         menuItems.push(
-            <>
+            <React.Fragment key="optional-step">
                 <Tooltip title="Optional steps show conversion rates from the last mandatory step, but are not necessary to move to the next step in the funnel">
                     <div className="px-2 py-1">
                         <LemonCheckbox
@@ -98,7 +98,7 @@ export function ActionFilterRowMenu({
                     </div>
                 </Tooltip>
                 <LemonDivider />
-            </>
+            </React.Fragment>
         )
     }
 
