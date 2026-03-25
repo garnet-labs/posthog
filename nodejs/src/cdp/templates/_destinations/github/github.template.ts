@@ -12,6 +12,12 @@ export const template: HogFunctionTemplate = {
     code_language: 'hog',
     code: `let owner := inputs.github_installation.account.name
 let repo := inputs.repository
+let repositoryParts := splitByString('/', inputs.repository, 2)
+
+if (length(repositoryParts) = 2) {
+    owner := repositoryParts[1]
+    repo := repositoryParts[2]
+}
 
 if (not owner) {
     throw Error('Owner is required')

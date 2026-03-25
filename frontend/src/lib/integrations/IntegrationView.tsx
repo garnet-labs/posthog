@@ -15,6 +15,7 @@ import { IconBranch } from 'lib/lemon-ui/icons'
 
 import { CyclotronJobInputSchemaType, IntegrationType } from '~/types'
 
+import { getGitHubInstallationSettingsUrl } from './githubUtils'
 import { integrationsLogic } from './integrationsLogic'
 
 export function IntegrationView({
@@ -39,6 +40,7 @@ export function IntegrationView({
     const isGitHub = integration.kind === 'github'
     const repositories = isGitHub ? getGitHubRepositories(integration.id) : []
     const refreshedAtTimestamp = integration.config?.refreshed_at || null
+    const githubInstallationUrl = isGitHub ? getGitHubInstallationSettingsUrl(integration.config) : null
 
     useEffect(() => {
         if (isGitHub) {
@@ -116,12 +118,8 @@ export function IntegrationView({
                                         type="secondary"
                                         icon={<IconGear />}
                                         onClick={() => {
-                                            const installationId = integration.config?.installation_id
-                                            if (installationId) {
-                                                window.open(
-                                                    `https://github.com/settings/installations/${installationId}`,
-                                                    '_blank'
-                                                )
+                                            if (githubInstallationUrl) {
+                                                window.open(githubInstallationUrl, '_blank')
                                             }
                                         }}
                                         tooltip="Manage repository access on GitHub"
@@ -138,12 +136,8 @@ export function IntegrationView({
                                         type="secondary"
                                         icon={<IconGear />}
                                         onClick={() => {
-                                            const installationId = integration.config?.installation_id
-                                            if (installationId) {
-                                                window.open(
-                                                    `https://github.com/settings/installations/${installationId}`,
-                                                    '_blank'
-                                                )
+                                            if (githubInstallationUrl) {
+                                                window.open(githubInstallationUrl, '_blank')
                                             }
                                         }}
                                         tooltip="Configure repository access"

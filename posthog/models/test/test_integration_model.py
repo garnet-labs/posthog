@@ -788,6 +788,44 @@ class TestGitHubIntegrationModel(BaseTest):
         assert repos == []
         assert mock_get.call_count == 2
 
+    @patch("posthog.models.integration.requests.post")
+    def test_create_issue_accepts_plain_repository_name(self, mock_post):
+        integration = self.create_integration(
+            {"installation_id": "INSTALL", "account": {"name": "PostHog"}},
+            {"access_token": "ACCESS_TOKEN"},
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"number": 123}
+        mock_post.return_value = mock_response
+
+        response = GitHubIntegration(integration).create_issue(
+            {"title": "Issue title", "body": "Issue body", "repository": "posthog"}
+        )
+
+        assert response == {"number": 123, "repository": "posthog"}
+        mock_post.assert_called_once()
+        assert mock_post.call_args.args[0] == "https://api.github.com/repos/PostHog/posthog/issues"
+
+    @patch("posthog.models.integration.requests.post")
+    def test_create_issue_accepts_legacy_owner_repo_repository_value(self, mock_post):
+        integration = self.create_integration(
+            {"installation_id": "INSTALL", "account": {"name": "PostHog"}},
+            {"access_token": "ACCESS_TOKEN"},
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"number": 123}
+        mock_post.return_value = mock_response
+
+        response = GitHubIntegration(integration).create_issue(
+            {"title": "Issue title", "body": "Issue body", "repository": "peakcloudoy/varaus"}
+        )
+
+        assert response == {"number": 123, "repository": "peakcloudoy/varaus"}
+        mock_post.assert_called_once()
+        assert mock_post.call_args.args[0] == "https://api.github.com/repos/peakcloudoy/varaus/issues"
+
 
 class TestDatabricksIntegrationModel(BaseTest):
     @patch("posthog.models.integration.socket.socket")
