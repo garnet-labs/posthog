@@ -139,7 +139,7 @@ CLAUDE.local.md
 # Ignore file for clearing demo data on local
 posthog/management/commands/clear_demo_data.py
 
-# Ignore Claude Code settings
+.claude/tmp*.json
 .claude/settings.local.json
 .claude/settings.local.json.tmp
 .claude/.migrate-permissions.lock
