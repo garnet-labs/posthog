@@ -2008,6 +2008,11 @@ export type PropertyDefinitionsListParams = {
      */
     search?: string
     /**
+     * JSON-encoded list of tag names to filter by
+     * @minLength 1
+     */
+    tags?: string
+    /**
  * What property definitions to return
 
 * `event` - event
@@ -2017,6 +2022,11 @@ export type PropertyDefinitionsListParams = {
  * @minLength 1
  */
     type?: PropertyDefinitionsListType
+    /**
+     * Whether to return only verified (true) or unverified (false) property definitions
+     * @nullable
+     */
+    verified?: boolean | null
 }
 
 export type PropertyDefinitionsListType = (typeof PropertyDefinitionsListType)[keyof typeof PropertyDefinitionsListType]
