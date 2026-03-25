@@ -275,21 +275,26 @@ class ExperimentQueryBuilder:
         cuped_cte = ""
         if self.cuped_enabled:
             cuped_cte = """
-            , pre_entity_metrics AS (
+            , pre_funnel_events AS (
+                SELECT
+                    {entity_key} AS entity_id,
+                    timestamp
+                FROM events
+                WHERE {last_funnel_step_filter}
+                    AND timestamp >= {cuped_date_from}
+                    AND timestamp < {date_to}
+            ),
+
+            pre_entity_metrics AS (
                 SELECT
                     exposures.entity_id AS entity_id,
                     exposures.variant AS variant,
-                    if(count(pre_events.entity_id) > 0, 1, 0) AS pre_value
+                    if(countIf(
+                        pre_funnel_events.timestamp >= exposures.first_exposure_time - toIntervalDay({cuped_lookback_days})
+                        AND pre_funnel_events.timestamp < exposures.first_exposure_time
+                    ) > 0, 1, 0) AS pre_value
                 FROM exposures
-                LEFT JOIN (
-                    SELECT {entity_key} AS entity_id, timestamp
-                    FROM events
-                    WHERE {last_funnel_step_filter}
-                        AND timestamp >= {cuped_date_from}
-                        AND timestamp < {date_to}
-                ) AS pre_events ON exposures.entity_id = pre_events.entity_id
-                    AND pre_events.timestamp >= exposures.first_exposure_time - toIntervalDay({cuped_lookback_days})
-                    AND pre_events.timestamp < exposures.first_exposure_time
+                LEFT JOIN pre_funnel_events ON exposures.entity_id = pre_funnel_events.entity_id
                 GROUP BY exposures.entity_id, exposures.variant
             )
             """
@@ -353,20 +358,11 @@ class ExperimentQueryBuilder:
             placeholders["cuped_lookback_days"] = ast.Constant(value=self.cuped_lookback_days)
 
         cuped_join = ""
-        cuped_columns = ""
         if self.cuped_enabled:
             cuped_join = """
                 LEFT JOIN pre_entity_metrics
                     ON entity_metrics.entity_id = pre_entity_metrics.entity_id
                     AND entity_metrics.variant = pre_entity_metrics.variant
-            """
-            cuped_columns = """,
-                sum(coalesce(pre_entity_metrics.pre_value, 0)) AS covariate_sum,
-                sum(coalesce(pre_entity_metrics.pre_value, 0)) AS covariate_sum_squares,
-                sum(
-                    if(entity_metrics.value.1 = {num_steps_minus_1}, 1, 0)
-                    * coalesce(pre_entity_metrics.pre_value, 0)
-                ) AS main_covariate_sum_product
             """
 
         query = parse_select(
@@ -382,9 +378,9 @@ class ExperimentQueryBuilder:
                 -- num_steps - 1
                 countIf(entity_metrics.value.1 = {{num_steps_minus_1}}) AS total_sum,
                 countIf(entity_metrics.value.1 = {{num_steps_minus_1}}) AS total_sum_of_squares
-                {cuped_columns}
                 -- step_counts added programmatically below
                 -- steps_event_data added programmatically below
+                -- cuped columns added programmatically below
                 -- breakdown columns added programmatically below
             FROM entity_metrics
             {cuped_join}
@@ -436,6 +432,18 @@ class ExperimentQueryBuilder:
         event_uuids_exprs_sql = f"tuple({', '.join(event_uuids_exprs)}) as steps_event_data"
 
         query.select.extend([parse_expr(step_counts_expr), parse_expr(event_uuids_exprs_sql)])
+
+        # CUPED columns must go after step_counts and steps_event_data
+        if self.cuped_enabled:
+            query.select.extend(
+                [
+                    parse_expr("sum(coalesce(pre_entity_metrics.pre_value, 0))"),
+                    parse_expr("sum(coalesce(pre_entity_metrics.pre_value, 0))"),
+                    parse_expr(
+                        f"sum(if(entity_metrics.value.1 = {num_steps - 1}, 1, 0) * coalesce(pre_entity_metrics.pre_value, 0))"
+                    ),
+                ]
+            )
 
         return query
 

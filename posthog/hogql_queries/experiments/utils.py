@@ -536,6 +536,12 @@ def get_frequentist_experiment_result(
                 test_variant_validated.numerator_denominator_sum_product
             )
 
+        # Include CUPED covariate fields if present
+        if hasattr(test_variant_validated, "covariate_sum") and test_variant_validated.covariate_sum is not None:
+            experiment_variant_result.covariate_sum = test_variant_validated.covariate_sum
+            experiment_variant_result.covariate_sum_squares = test_variant_validated.covariate_sum_squares
+            experiment_variant_result.main_covariate_sum_product = test_variant_validated.main_covariate_sum_product
+
         # Check if we can perform statistical analysis
         if control_stat and not test_variant_validated.validation_failures:
             try:
@@ -640,6 +646,12 @@ def get_bayesian_experiment_result(
             experiment_variant_result.numerator_denominator_sum_product = (
                 test_variant_validated.numerator_denominator_sum_product
             )
+
+        # Include CUPED covariate fields if present
+        if hasattr(test_variant_validated, "covariate_sum") and test_variant_validated.covariate_sum is not None:
+            experiment_variant_result.covariate_sum = test_variant_validated.covariate_sum
+            experiment_variant_result.covariate_sum_squares = test_variant_validated.covariate_sum_squares
+            experiment_variant_result.main_covariate_sum_product = test_variant_validated.main_covariate_sum_product
 
         # Check if we can perform statistical analysis
         if control_stat and not test_variant_validated.validation_failures:
