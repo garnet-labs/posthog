@@ -198,22 +198,8 @@ def cuped_adjust(
     theta = compute_theta(treatment_post, control_post, treatment_cuped, control_cuped)
 
     if theta == 0.0:
-        # No adjustment — wrap originals as SampleMeanStatistic
-        treatment_adjusted = SampleMeanStatistic(
-            n=treatment_post.n,
-            sum=_get_post_sum(treatment_post),
-            sum_squares=treatment_post.variance * (treatment_post.n - 1)
-            + _get_post_sum(treatment_post) ** 2 / treatment_post.n
-            if treatment_post.n > 1
-            else _get_post_sum(treatment_post) ** 2,
-        )
-        control_adjusted = SampleMeanStatistic(
-            n=control_post.n,
-            sum=_get_post_sum(control_post),
-            sum_squares=control_post.variance * (control_post.n - 1) + _get_post_sum(control_post) ** 2 / control_post.n
-            if control_post.n > 1
-            else _get_post_sum(control_post) ** 2,
-        )
+        treatment_adjusted, _ = _adjust_group(treatment_post, treatment_cuped, 0.0)
+        control_adjusted, _ = _adjust_group(control_post, control_cuped, 0.0)
         return CupedResult(
             treatment_adjusted=treatment_adjusted,
             control_adjusted=control_adjusted,
