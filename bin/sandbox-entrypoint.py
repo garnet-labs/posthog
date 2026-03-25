@@ -166,6 +166,7 @@ def bind_mount_node_modules(uid: int, gid: int) -> None:
 
         nm.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
+        run(["chown", f"{uid}:{gid}", str(nm)])
         run(["mount", "--bind", str(cache_dir), str(nm)])
 
     run(["chown", "-R", f"{uid}:{gid}", str(cache_root)])
@@ -470,10 +471,17 @@ def user_phase() -> None:
     install_geoip()
     create_kafka_topics()
 
-    # Run heavy dependency installs in parallel.
+    def install_python_and_migrate() -> None:
+        install_python_deps()
+        info("Running database migrations...")
+        run(["python", "manage.py", "sandbox_migrate"])
+        ensure_demo_data()
+
+    # Run dependency installs in parallel. Migrations and demo data are chained
+    # after Python deps (uv ~1.5s) so they overlap with the slower pnpm/cargo.
     with ThreadPoolExecutor() as pool:
         futures = {
-            pool.submit(install_python_deps): "python deps",
+            pool.submit(install_python_and_migrate): "python deps + migrations",
             pool.submit(install_node_deps): "node deps",
             pool.submit(fetch_rust_crates): "rust crates",
         }
@@ -484,11 +492,6 @@ def user_phase() -> None:
             except Exception as e:
                 print(f"ERROR: {name} failed: {e}", flush=True)  # noqa: T201
                 raise
-
-    # These need Django installed (from install_python_deps above).
-    info("Running database migrations...")
-    run(["python", "manage.py", "sandbox_migrate"])
-    ensure_demo_data()
 
     # generate_mprocs_config needs the hogli symlink created by install_python_deps.
     generate_mprocs_config()
