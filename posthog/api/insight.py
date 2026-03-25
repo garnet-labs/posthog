@@ -1,4 +1,5 @@
 import json
+import hashlib
 import logging
 from datetime import timedelta
 from functools import lru_cache
@@ -31,7 +32,7 @@ from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework_csv import renderers as csvrenderers
 
-from posthog.schema import DashboardFilter, HogQLVariable, QueryStatus
+from posthog.schema import QueryStatus
 
 from posthog.hogql.constants import BREAKDOWN_VALUES_LIMIT
 from posthog.hogql.errors import ExposedHogQLError
@@ -70,7 +71,6 @@ from posthog.hogql_queries.query_runner import (
     ExecutionMode,
     execution_mode_from_refresh,
     get_query_runner,
-    get_query_runner_or_none,
     shared_insights_execution_mode,
 )
 from posthog.kafka_client.topics import KAFKA_METRICS_TIME_TO_SEE_DATA
@@ -1084,78 +1084,45 @@ class InsightViewSet(
 
         return context
 
+    # Query params that are per-request/per-session and don't affect query results.
+    _COALESCING_EXCLUDED_PARAMS = frozenset({"client_query_id", "session_id"})
+
     def _compute_insight_coalescing_key(
         self,
         insight: Insight,
-        dashboard: Dashboard | None,
-        dashboard_tile: DashboardTile | None,
         request: Request,
-        insight_variables: list[InsightVariable],
     ) -> tuple[str | None, ExecutionMode | None]:
-        """Compute a coalescing key for the insight, or return None if coalescing is not applicable."""
+        """Compute a coalescing key for the insight, or return None if coalescing is not applicable.
+
+        Uses request parameters (insight ID + all query-affecting params) rather than
+        reconstructing the query runner's cache key. This avoids duplicating filter/variable
+        resolution logic and automatically includes any new params that affect results.
+        """
         if not insight.query:
             return None, None
 
-        with upgrade_query(insight):
-            # Unwrap wrapper nodes (InsightVizNode, DataTableNode, etc.) to get the runnable source
-            query_dict = insight.query
-            if isinstance(query_dict, dict) and query_dict.get("kind") in [k.value for k in WRAPPER_NODE_KINDS]:
-                query_dict = query_dict.get("source", query_dict)
+        refresh_requested = refresh_requested_by_client(request)
+        execution_mode = execution_mode_from_refresh(refresh_requested)
 
-            query_runner = get_query_runner_or_none(query_dict, insight.team)
-            if query_runner is None:
-                return None, None
+        is_shared = isinstance(
+            request.successful_authenticator,
+            SharingAccessTokenAuthentication | SharingPasswordProtectedAuthentication,
+        )
+        if is_shared:
+            execution_mode = shared_insights_execution_mode(execution_mode)
 
-            refresh_requested = refresh_requested_by_client(request)
-            execution_mode = execution_mode_from_refresh(refresh_requested)
+        # Only coalesce blocking modes
+        if execution_mode not in (
+            ExecutionMode.RECENT_CACHE_CALCULATE_BLOCKING_IF_STALE,
+            ExecutionMode.CALCULATE_BLOCKING_ALWAYS,
+        ):
+            return None, None
 
-            is_shared = isinstance(
-                request.successful_authenticator,
-                SharingAccessTokenAuthentication | SharingPasswordProtectedAuthentication,
-            )
-            if is_shared:
-                execution_mode = shared_insights_execution_mode(execution_mode)
-
-            # Only coalesce blocking modes
-            if execution_mode not in (
-                ExecutionMode.RECENT_CACHE_CALCULATE_BLOCKING_IF_STALE,
-                ExecutionMode.CALCULATE_BLOCKING_ALWAYS,
-            ):
-                return None, None
-
-            filters_override = filters_override_requested_by_client(request, dashboard)
-            variables_override = variables_override_requested_by_client(request, dashboard, list(insight_variables))
-            tile_filters_override = tile_filters_override_requested_by_client(request, dashboard_tile)
-
-            # Resolve override priority: tile_filters_override trumps all
-            dashboard_filters_json = (
-                filters_override
-                if filters_override is not None
-                else dashboard.filters
-                if dashboard is not None
-                else None
-            )
-            variables_override_json = (
-                variables_override
-                if variables_override is not None
-                else dashboard.variables
-                if dashboard is not None
-                else None
-            )
-
-            if tile_filters_override is not None and tile_filters_override != {}:
-                dashboard_filters_json = tile_filters_override
-                variables_override_json = None
-
-            if dashboard_filters_json:
-                dashboard_filter = DashboardFilter.model_validate(dashboard_filters_json)
-                query_runner.apply_dashboard_filters(dashboard_filter)
-
-            if variables_override_json:
-                hogql_variables = [HogQLVariable.model_validate(v) for v in variables_override_json.values()]
-                query_runner.apply_variable_overrides(hogql_variables)
-
-            return query_runner.get_cache_key(), execution_mode
+        relevant_params = sorted(
+            (k, v) for k, v in request.query_params.items() if k not in self._COALESCING_EXCLUDED_PARAMS
+        )
+        raw = f"{self.team.pk}:{insight.pk}:{relevant_params}"
+        return hashlib.sha256(raw.encode()).hexdigest(), execution_mode
 
     def dangerously_get_queryset(self):
         # Insights are retrieved under /environments/ because they include team-specific query results,
@@ -1478,9 +1445,7 @@ When set, the specified dashboard's filters and date range override will be appl
             # context is used in the to_representation method to report filters used
             serializer_context.update({"dashboard": dashboard})
 
-        coalescing_key, execution_mode = self._compute_insight_coalescing_key(
-            instance, dashboard, dashboard_tile, request, list(serializer_context["insight_variables"])
-        )
+        coalescing_key, execution_mode = self._compute_insight_coalescing_key(instance, request)
         if coalescing_key is not None:
             assert execution_mode is not None
             error, execution_mode = self._try_coalesce(

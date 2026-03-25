@@ -29,7 +29,7 @@ from posthog.api.query_coalescer import (
 )
 from posthog.api.services.query import process_query_model  # used in wraps= mock
 from posthog.hogql_queries.query_runner import ExecutionMode
-from posthog.models import Dashboard, DashboardTile, Insight
+from posthog.models import Dashboard, Insight
 
 
 def _fake_clock(step: float):
@@ -427,17 +427,13 @@ class TestInsightCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
         wsgi_request.user = self.user
         return Request(wsgi_request)
 
-    def _get_coalescing_key(self, insight: Insight, dashboard=None, dashboard_tile=None) -> str | None:
+    def _get_coalescing_key(self, insight: Insight, query_params: dict | None = None) -> str | None:
         from posthog.api.insight import InsightViewSet
-        from posthog.models.insight_variable import InsightVariable
 
         viewset = InsightViewSet()
         viewset.team = self.team
-        drf_request = self._make_drf_request()
-        insight_variables = list(InsightVariable.objects.filter(team=self.team).all())
-        key, _mode = viewset._compute_insight_coalescing_key(
-            insight, dashboard, dashboard_tile, drf_request, insight_variables
-        )
+        drf_request = self._make_drf_request(query_params)
+        key, _mode = viewset._compute_insight_coalescing_key(insight, drf_request)
         return key
 
     def test_insight_dry_run_follower_executes_normally(self):
@@ -534,18 +530,13 @@ class TestInsightCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
             redis.delete(f"{LOCK_KEY_PREFIX}:{key}")
             redis.delete(f"{ERROR_KEY_PREFIX}:{key}")
 
-    def test_insight_dashboard_filters_produce_different_keys(self):
+    def test_insight_different_dashboards_produce_different_keys(self):
         insight = self._create_query_insight()
-        dashboard_a = Dashboard.objects.create(team=self.team, name="Dashboard A", filters={"date_from": "-7d"})
-        dashboard_b = Dashboard.objects.create(team=self.team, name="Dashboard B", filters={"date_from": "-30d"})
-        DashboardTile.objects.create(dashboard=dashboard_a, insight=insight)
-        DashboardTile.objects.create(dashboard=dashboard_b, insight=insight)
+        dashboard_a = Dashboard.objects.create(team=self.team, name="Dashboard A")
+        dashboard_b = Dashboard.objects.create(team=self.team, name="Dashboard B")
 
-        tile_a = DashboardTile.objects.get(dashboard=dashboard_a, insight=insight)
-        tile_b = DashboardTile.objects.get(dashboard=dashboard_b, insight=insight)
-
-        key_a = self._get_coalescing_key(insight, dashboard=dashboard_a, dashboard_tile=tile_a)
-        key_b = self._get_coalescing_key(insight, dashboard=dashboard_b, dashboard_tile=tile_b)
+        key_a = self._get_coalescing_key(insight, query_params={"from_dashboard": str(dashboard_a.pk)})
+        key_b = self._get_coalescing_key(insight, query_params={"from_dashboard": str(dashboard_b.pk)})
 
         self.assertIsNotNone(key_a)
         self.assertIsNotNone(key_b)
