@@ -12,6 +12,8 @@ from django.test import TestCase
 from parameterized import parameterized
 from redis.exceptions import RedisError
 
+from posthog.schema import EventsNode, InsightVizNode, TrendsQuery
+
 from posthog import redis as posthog_redis
 from posthog.api.query_coalescer import (
     _EXTEND_LOCK_SCRIPT,
@@ -27,6 +29,7 @@ from posthog.api.query_coalescer import (
 )
 from posthog.api.services.query import process_query_model  # used in wraps= mock
 from posthog.hogql_queries.query_runner import ExecutionMode
+from posthog.models import Dashboard, DashboardTile, Insight
 
 
 def _fake_clock(step: float):
@@ -337,7 +340,7 @@ class TestQueryCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
 
         try:
             with (
-                mock.patch("posthog.api.query.posthoganalytics.feature_enabled", return_value=False),
+                mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=False),
                 mock.patch.object(QueryCoalescer, "wait_for_signal") as mock_wait,
             ):
                 response = self.client.post(
@@ -367,7 +370,7 @@ class TestQueryCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
         query, key = self._query_and_key()
 
         # First request populates the cache (as leader, no lock held)
-        with mock.patch("posthog.api.query.posthoganalytics.feature_enabled", return_value=True):
+        with mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True):
             first = self.client.post(
                 f"/api/environments/{self.team.id}/query/",
                 {"query": query.model_dump()},
@@ -381,7 +384,7 @@ class TestQueryCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
 
         try:
             with (
-                mock.patch("posthog.api.query.posthoganalytics.feature_enabled", return_value=True),
+                mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True),
                 mock.patch("posthog.api.query.process_query_model", wraps=process_query_model) as mock_pqm,
                 mock.patch.object(QueryCoalescer, "wait_for_signal", return_value=CoalesceSignal.DONE) as mock_wait,
             ):
@@ -403,3 +406,182 @@ class TestQueryCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
         finally:
             redis.delete(f"{LOCK_KEY_PREFIX}:{key}")
             redis.delete(f"{DONE_KEY_PREFIX}:{key}")
+
+
+class TestInsightCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
+    def _create_query_insight(self) -> Insight:
+        query = InsightVizNode(source=TrendsQuery(series=[EventsNode(event="$pageview")])).model_dump()
+        insight = Insight.objects.create(team=self.team, query=query, name="test insight")
+        return insight
+
+    def _make_drf_request(self, query_params: dict | None = None):
+        from django.test import RequestFactory
+
+        from rest_framework.request import Request
+
+        factory = RequestFactory()
+        params = {"refresh": "blocking"}
+        if query_params:
+            params.update(query_params)
+        wsgi_request = factory.get("/fake/", params)
+        wsgi_request.user = self.user
+        return Request(wsgi_request)
+
+    def _get_coalescing_key(self, insight: Insight, dashboard=None, dashboard_tile=None) -> str | None:
+        from posthog.api.insight import InsightViewSet
+        from posthog.models.insight_variable import InsightVariable
+
+        viewset = InsightViewSet()
+        viewset.team = self.team  # type: ignore[assignment]
+        drf_request = self._make_drf_request()
+        insight_variables = list(InsightVariable.objects.filter(team=self.team).all())
+        key, _mode = viewset._compute_insight_coalescing_key(
+            insight, dashboard, dashboard_tile, drf_request, insight_variables
+        )
+        return key
+
+    def test_insight_dry_run_follower_executes_normally(self):
+        _create_event(team=self.team, event="$pageview", distinct_id="user1")
+        flush_persons_and_events()
+
+        insight = self._create_query_insight()
+        key = self._get_coalescing_key(insight)
+        assert key is not None
+
+        redis = posthog_redis.get_client()
+        redis.set(f"{LOCK_KEY_PREFIX}:{key}", "other_leader", ex=60)
+
+        before = query_coalesce_counter.labels(outcome="follower_dry_run")._value.get()
+
+        try:
+            with (
+                mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=False),
+                mock.patch.object(QueryCoalescer, "wait_for_signal") as mock_wait,
+            ):
+                response = self.client.get(
+                    f"/api/environments/{self.team.id}/insights/{insight.id}/?refresh=blocking",
+                )
+
+            self.assertEqual(response.status_code, 200)
+            after = query_coalesce_counter.labels(outcome="follower_dry_run")._value.get()
+            self.assertEqual(after, before + 1)
+            mock_wait.assert_not_called()
+        finally:
+            redis.delete(f"{LOCK_KEY_PREFIX}:{key}")
+
+    def test_insight_follower_waits_for_leader_done_and_hits_cache(self):
+        _create_event(team=self.team, event="$pageview", distinct_id="user1")
+        flush_persons_and_events()
+
+        insight = self._create_query_insight()
+        key = self._get_coalescing_key(insight)
+        assert key is not None
+
+        # First request populates the cache (as leader, no lock held)
+        with mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True):
+            first = self.client.get(
+                f"/api/environments/{self.team.id}/insights/{insight.id}/?refresh=blocking",
+            )
+        self.assertEqual(first.status_code, 200)
+
+        # Now simulate a leader holding the lock with done signal
+        redis = posthog_redis.get_client()
+        redis.set(f"{LOCK_KEY_PREFIX}:{key}", "other_leader", ex=60)
+        redis.set(f"{DONE_KEY_PREFIX}:{key}", "1", ex=60)
+
+        try:
+            with (
+                mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True),
+                mock.patch.object(QueryCoalescer, "wait_for_signal", return_value=CoalesceSignal.DONE) as mock_wait,
+            ):
+                response = self.client.get(
+                    f"/api/environments/{self.team.id}/insights/{insight.id}/?refresh=blocking",
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json().get("is_cached"))
+            mock_wait.assert_called_once()
+        finally:
+            redis.delete(f"{LOCK_KEY_PREFIX}:{key}")
+            redis.delete(f"{DONE_KEY_PREFIX}:{key}")
+
+    def test_insight_follower_replays_error_response(self):
+        insight = self._create_query_insight()
+        key = self._get_coalescing_key(insight)
+        assert key is not None
+
+        redis = posthog_redis.get_client()
+        redis.set(f"{LOCK_KEY_PREFIX}:{key}", "other_leader", ex=60)
+        error_body = json.dumps({"type": "validation_error", "detail": "bad query"})
+        redis.set(
+            f"{ERROR_KEY_PREFIX}:{key}",
+            json.dumps({"status": 400, "body": error_body}),
+            ex=60,
+        )
+
+        try:
+            with (
+                mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True),
+                mock.patch.object(QueryCoalescer, "wait_for_signal", return_value=CoalesceSignal.ERROR),
+            ):
+                response = self.client.get(
+                    f"/api/environments/{self.team.id}/insights/{insight.id}/?refresh=blocking",
+                )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["detail"], "bad query")
+        finally:
+            redis.delete(f"{LOCK_KEY_PREFIX}:{key}")
+            redis.delete(f"{ERROR_KEY_PREFIX}:{key}")
+
+    def test_insight_dashboard_filters_produce_different_keys(self):
+        insight = self._create_query_insight()
+        dashboard_a = Dashboard.objects.create(team=self.team, name="Dashboard A", filters={"date_from": "-7d"})
+        dashboard_b = Dashboard.objects.create(team=self.team, name="Dashboard B", filters={"date_from": "-30d"})
+        DashboardTile.objects.create(dashboard=dashboard_a, insight=insight)
+        DashboardTile.objects.create(dashboard=dashboard_b, insight=insight)
+
+        tile_a = DashboardTile.objects.get(dashboard=dashboard_a, insight=insight)
+        tile_b = DashboardTile.objects.get(dashboard=dashboard_b, insight=insight)
+
+        key_a = self._get_coalescing_key(insight, dashboard=dashboard_a, dashboard_tile=tile_a)
+        key_b = self._get_coalescing_key(insight, dashboard=dashboard_b, dashboard_tile=tile_b)
+
+        self.assertIsNotNone(key_a)
+        self.assertIsNotNone(key_b)
+        self.assertNotEqual(key_a, key_b)
+
+    def test_insight_non_blocking_mode_skips_coalescing(self):
+        insight = self._create_query_insight()
+
+        before = query_coalesce_counter.labels(outcome="leader")._value.get()
+
+        with mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True):
+            response = self.client.get(
+                f"/api/environments/{self.team.id}/insights/{insight.id}/?refresh=async",
+            )
+
+        # async mode should skip coalescing entirely
+        self.assertEqual(response.status_code, 200)
+        after = query_coalesce_counter.labels(outcome="leader")._value.get()
+        self.assertEqual(after, before)
+
+    def test_insight_without_query_skips_coalescing(self):
+        from posthog.models.filters import Filter
+
+        insight = Insight.objects.create(
+            team=self.team,
+            filters=Filter(data={"events": [{"id": "$pageview"}]}).to_dict(),
+            name="legacy insight",
+        )
+
+        before = query_coalesce_counter.labels(outcome="leader")._value.get()
+
+        with mock.patch("posthog.api.query_coalescing_mixin.posthoganalytics.feature_enabled", return_value=True):
+            response = self.client.get(
+                f"/api/environments/{self.team.id}/insights/{insight.id}/?refresh=blocking",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        after = query_coalesce_counter.labels(outcome="leader")._value.get()
+        self.assertEqual(after, before)
