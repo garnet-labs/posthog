@@ -214,7 +214,9 @@ pub struct IssueFingerprintDenormalized {
     pub version: i64,
 }
 
-fn assignment_user_role_from_assignment(assignment: Option<&Assignment>) -> (Option<i64>, Option<String>) {
+fn assignment_user_role_from_assignment(
+    assignment: Option<&Assignment>,
+) -> (Option<i64>, Option<String>) {
     let Some(a) = assignment else {
         return (None, None);
     };

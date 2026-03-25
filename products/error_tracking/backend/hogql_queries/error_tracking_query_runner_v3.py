@@ -288,14 +288,14 @@ class ErrorTrackingQueryV3Builder:
                     ("e", "person", "properties"): ["email"],
                 }
                 for chain_prefix, properties in props_to_search.items():
-                    for prop in properties:
+                    for property_name in properties:
                         or_exprs.append(
                             ast.CompareOperation(
                                 op=ast.CompareOperationOp.Gt,
                                 left=ast.Call(
                                     name="position",
                                     args=[
-                                        ast.Call(name="lower", args=[ast.Field(chain=[*chain_prefix, prop])]),
+                                        ast.Call(name="lower", args=[ast.Field(chain=[*chain_prefix, property_name])]),
                                         ast.Call(name="lower", args=[ast.Constant(value=token)]),
                                     ],
                                 ),
@@ -387,7 +387,10 @@ class ErrorTrackingQueryV3Builder:
 
         if operator == PropertyOperator.EXACT:
             raw = value if isinstance(value, list) else [value]
-            values: list[str | float | bool] = [v for v in raw if v is not None]
+            values = cast(
+                list[str | float | bool],
+                [v for v in raw if v is not None],
+            )
             if not values:
                 return None
             if len(values) == 1:
@@ -400,7 +403,10 @@ class ErrorTrackingQueryV3Builder:
 
         if operator == PropertyOperator.IS_NOT:
             raw = value if isinstance(value, list) else [value]
-            values = [v for v in raw if v is not None]
+            values = cast(
+                list[str | float | bool],
+                [v for v in raw if v is not None],
+            )
             if not values:
                 return None
             if len(values) == 1:
