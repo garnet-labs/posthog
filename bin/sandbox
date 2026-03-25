@@ -407,14 +407,17 @@ def wait_for_health(
             return False
         prev_restart_count = restart_count
 
-        # Print new entrypoint steps as they appear.
-        logs = run(["docker", "logs", container], check=False, capture=True)
-        for line in (logs.stdout or "").splitlines():
-            if "==>" in line:
-                step = line.strip()
-                if step not in seen_steps:
-                    seen_steps.add(step)
-                    print(f"  {step}")
+        # Read entrypoint progress from a dedicated file (not docker logs,
+        # which contains the raw PTY stream including phrocs TUI output).
+        progress = run(
+            ["docker", "exec", container, "cat", "/tmp/sandbox-progress"],
+            check=False, capture=True,
+        )
+        for line in (progress.stdout or "").splitlines():
+            step = line.strip()
+            if step and step not in seen_steps:
+                seen_steps.add(step)
+                print(f"  {step}")
 
         time.sleep(interval)
         elapsed += interval
@@ -830,7 +833,7 @@ def cmd_destroy(branch: str) -> None:
         run(
             ["docker", "run", "--rm", "-v", f"{entry.worktree}:/cleanup",
              "alpine", "sh", "-c", "find /cleanup -mindepth 1 -delete"],
-            check=False,
+            check=False, capture=True,
         )
         try:
             Path(entry.worktree).rmdir()
@@ -939,7 +942,7 @@ def cmd_rebuild_cache() -> None:
     run([
         "docker", "run", "--rm", "-v", "sandbox-db-cache:/cache",
         "alpine", "sh", "-c", "find /cache -mindepth 1 -delete",
-    ])
+    ], capture=True)
     docker_volume_run("sandbox-db-cache", "chmod 777 /data")
     init_cache_from_master()
 

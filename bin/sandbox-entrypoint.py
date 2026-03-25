@@ -23,6 +23,7 @@ from textwrap import dedent
 WORKSPACE = Path("/workspace")
 SANDBOX_HOME = Path("/tmp/sandbox-home")
 OVERLAY_DIR = Path("/usr/local/share/sandbox")
+PROGRESS_FILE = Path("/tmp/sandbox-progress")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,6 +32,8 @@ OVERLAY_DIR = Path("/usr/local/share/sandbox")
 
 def info(msg: str) -> None:
     print(f"==> {msg}", flush=True)  # noqa: T201
+    with PROGRESS_FILE.open("a") as f:
+        f.write(f"==> {msg}\n")
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -178,7 +181,8 @@ def root_phase() -> None:
 
     SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
     Path("/tmp/sandbox-cache").mkdir(parents=True, exist_ok=True)
-    run(["chown", f"{uid}:{gid}", str(SANDBOX_HOME), "/tmp/sandbox-cache"])
+    PROGRESS_FILE.touch()
+    run(["chown", f"{uid}:{gid}", str(SANDBOX_HOME), "/tmp/sandbox-cache", str(PROGRESS_FILE)])
 
     create_sandbox_user(uid, gid)
     export_environment(uid, gid)
