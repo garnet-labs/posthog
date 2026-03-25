@@ -1091,32 +1091,21 @@ class InsightViewSet(
         self,
         insight: Insight,
         request: Request,
-    ) -> tuple[str | None, ExecutionMode | None]:
-        """Compute a coalescing key for the insight, or return None if coalescing is not applicable.
+    ) -> tuple[str | None, ExecutionMode]:
+        """Compute a coalescing key and execution mode for the insight.
+
+        Returns (None, mode) if coalescing is not applicable (no query).
+        The mixin's _try_coalesce handles execution mode filtering (skips non-blocking modes).
 
         Uses request parameters (insight ID + all query-affecting params) rather than
         reconstructing the query runner's cache key. This avoids duplicating filter/variable
         resolution logic and automatically includes any new params that affect results.
         """
-        if not insight.query:
-            return None, None
-
         refresh_requested = refresh_requested_by_client(request)
         execution_mode = execution_mode_from_refresh(refresh_requested)
 
-        is_shared = isinstance(
-            request.successful_authenticator,
-            SharingAccessTokenAuthentication | SharingPasswordProtectedAuthentication,
-        )
-        if is_shared:
-            execution_mode = shared_insights_execution_mode(execution_mode)
-
-        # Only coalesce blocking modes
-        if execution_mode not in (
-            ExecutionMode.RECENT_CACHE_CALCULATE_BLOCKING_IF_STALE,
-            ExecutionMode.CALCULATE_BLOCKING_ALWAYS,
-        ):
-            return None, None
+        if not insight.query:
+            return None, execution_mode
 
         relevant_params = sorted(
             (k, v) for k, v in request.query_params.items() if k not in self._COALESCING_EXCLUDED_PARAMS
@@ -1447,7 +1436,6 @@ When set, the specified dashboard's filters and date range override will be appl
 
         coalescing_key, execution_mode = self._compute_insight_coalescing_key(instance, request)
         if coalescing_key is not None:
-            assert execution_mode is not None
             error, execution_mode = self._try_coalesce(
                 coalescing_key, execution_mode, request.query_params.get("client_query_id")
             )
