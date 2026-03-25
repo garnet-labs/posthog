@@ -652,19 +652,16 @@ def _prompt_migration_choice(stale_info: str) -> str:
 def _wait_for_clickhouse(project: str, timeout: int = 120) -> None:
     info("Waiting for ClickHouse to be ready...")
     container = f"{project}-clickhouse-1"
-    elapsed = 0
-    while elapsed < timeout:
-        result = run(
-            # nosemgrep: wget-unencrypted-url — localhost-only health check inside the container, no network exposure
-            ["docker", "exec", container, "wget", "-qO-", "http://localhost:8123/ping"],
-            capture=True,
-            check=False,
-        )
-        if "Ok" in (result.stdout or ""):
-            return
-        time.sleep(2)
-        elapsed += 2
-    warn("ClickHouse did not become ready within timeout -- continuing anyway.")
+    attempts = timeout // 2
+    result = run(
+        ["docker", "exec", container, "sh", "-c",
+         f"for i in $(seq 1 {attempts}); do "
+         "clickhouse-client --query 'SELECT 1' 2>/dev/null && exit 0; "
+         "sleep 2; done; exit 1"],
+        check=False,
+    )
+    if result.returncode != 0:
+        warn("ClickHouse did not become ready within timeout -- continuing anyway.")
 
 
 def _restore_and_start(
