@@ -1,0 +1,7 @@
+FROM posthog-sandbox-base
+
+COPY products/hogbot /local-hogbot
+
+RUN cd /local-hogbot && pnpm pack && \
+    cd /scripts && pnpm install /local-hogbot/*.tgz && \
+    rm -rf /local-hogbot
