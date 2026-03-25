@@ -52,6 +52,43 @@ fi
 if run_scope "clickhouse"; then RUN_CLICKHOUSE=1; else RUN_CLICKHOUSE=0; fi
 if run_scope "postgres"; then RUN_POSTGRES=1; else RUN_POSTGRES=0; fi
 
+# ClickHouse migration feature flags (operator escape hatches):
+#
+#   SKIP_CH_MIGRATE=1
+#     Skip new-style declarative ClickHouse migrations (ch_migrate up).
+#     Legacy migrate_clickhouse still runs. Use as emergency escape if the
+#     new migration system breaks in prod without requiring a code deploy.
+#
+#   CLICKHOUSE_HTTP_VALIDATION=1
+#     Run a quick HTTP connectivity check (curl CLICKHOUSE_HOST:8123/ping)
+#     before ClickHouse migrations. Validates HTTP transport is reachable
+#     without changing the default protocol. Non-blocking: logs a warning
+#     on failure but does not abort migrations.
+#
+#   CLICKHOUSE_USE_HTTP=true          (Django setting, not used here)
+#     Switch Django ClickHouse client from TCP to HTTP protocol.
+#
+#   CLICKHOUSE_USE_HTTP_PER_TEAM=[1,2,3]  (Django setting, not used here)
+#     Enable HTTP protocol for specific team IDs only (gradual rollout).
+#
+#   CLICKHOUSE_GATEWAY_ENABLED=true   (Django setting, not used here)
+#     Route ClickHouse queries through the gateway service.
+
+# Optional: validate ClickHouse HTTP connectivity before running migrations.
+# This is a non-blocking check — it logs a warning on failure but does not
+# prevent migrations from running (they use TCP by default).
+if [ "$RUN_CLICKHOUSE" = "1" ] && [ "${CLICKHOUSE_HTTP_VALIDATION:-0}" = "1" ]; then
+    CH_HTTP_HOST="${CLICKHOUSE_HOST:-localhost}"
+    CH_HTTP_PORT="${CLICKHOUSE_HTTP_PORT:-8123}"
+    echo "[migrate] Validating ClickHouse HTTP connectivity at ${CH_HTTP_HOST}:${CH_HTTP_PORT}..."
+    if curl -sf --max-time 5 "http://${CH_HTTP_HOST}:${CH_HTTP_PORT}/ping" > /dev/null 2>&1; then
+        echo "[migrate] ClickHouse HTTP check passed."
+    else
+        echo "[WARNING] ClickHouse HTTP check failed (http://${CH_HTTP_HOST}:${CH_HTTP_PORT}/ping)."
+        echo "[WARNING] Migrations will proceed using the default protocol (TCP)."
+    fi
+fi
+
 # Run ClickHouse in background only when both CH and Postgres run (original parallel behavior)
 if [ "$RUN_CLICKHOUSE" = "1" ] && [ "$RUN_POSTGRES" = "1" ]; then
     trap 'rm -f "$CLICKHOUSE_STATUS" 2>/dev/null' EXIT
@@ -76,7 +113,7 @@ if [ "$RUN_CLICKHOUSE" = "1" ] && [ "$RUN_POSTGRES" = "1" ]; then
         fi
 
         if [ "${SKIP_CH_MIGRATE:-0}" = "1" ]; then
-            echo "SKIP_CH_MIGRATE=1, skipping new-style ClickHouse migrations."
+            echo "[WARNING] SKIP_CH_MIGRATE=1, skipping new-style ClickHouse migrations (ch_migrate up)."
         else
             echo "Running new-style ClickHouse migrations..."
             python manage.py ch_migrate up
@@ -94,7 +131,7 @@ if [ "$RUN_CLICKHOUSE" = "1" ] && [ "$RUN_POSTGRES" = "1" ]; then
     python manage.py migrate_clickhouse || { echo "Error in migrate_clickhouse, exiting."; exit 1; }
     python manage.py sync_replicated_schema || { echo "Error in sync_replicated_schema, exiting."; exit 1; }
     if [ "${SKIP_CH_MIGRATE:-0}" = "1" ]; then
-        echo "SKIP_CH_MIGRATE=1, skipping new-style ClickHouse migrations."
+        echo "[WARNING] SKIP_CH_MIGRATE=1, skipping new-style ClickHouse migrations (ch_migrate up)."
     else
         echo "Running new-style ClickHouse migrations..."
         python manage.py ch_migrate up || { echo "Error in ch_migrate up, exiting."; exit 1; }
