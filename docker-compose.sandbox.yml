@@ -132,6 +132,7 @@ services:
             # don't overwrite each other's login sessions.
             # (CSRF cookie is NOT varied — frontend hardcodes 'posthog_csrftoken'.)
             SESSION_COOKIE_NAME: 'sessionid_${SANDBOX_PORT:-48001}'
+            AUTO_LOGIN: '1'
 
             # --- Core datastores (point at compose services, not localhost) ---
             DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog'
