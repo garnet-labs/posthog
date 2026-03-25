@@ -80,7 +80,7 @@ async def _get_or_start_hogbot(
                 HogbotWorkflow.run,
                 workflow_input,
                 id=hogbot_workflow_id(team_id),
-                task_queue=settings.TASKS_TASK_QUEUE,
+                task_queue=settings.VIDEO_EXPORT_TASK_QUEUE,
                 id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
                 retry_policy=RetryPolicy(maximum_attempts=3),
