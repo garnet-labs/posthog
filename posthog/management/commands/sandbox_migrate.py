@@ -58,12 +58,14 @@ class Command(BaseCommand):
                         future.result()
                     except Exception as e:
                         self.stderr.write(
-                            self.style.ERROR(f"[{time.strftime('%H:%M:%S')}] {name} migrations failed: {e}")
+                            self.style.ERROR(
+                                f"[{time.strftime('%H:%M:%S', time.gmtime())}] {name} migrations failed: {e}"
+                            )
                         )
                         raise
         else:
             for name, fn in tasks.items():
-                self.stdout.write(f"[{time.strftime('%H:%M:%S')}] Running {name} migrations...")
+                self.stdout.write(f"[{time.strftime('%H:%M:%S', time.gmtime())}] Running {name} migrations...")
                 fn()
 
         self._progress("All migrations complete.")

@@ -88,7 +88,7 @@ def _colored(color: str, text: str, *, stream: object = sys.stdout) -> str:
 
 
 def _ts() -> str:
-    return time.strftime("%H:%M:%S")
+    return time.strftime("%H:%M:%S", time.gmtime())
 
 
 def info(msg: str) -> None:
@@ -380,7 +380,7 @@ def wait_for_health(
     container: str,
     *,
     timeout: int = 1800,
-    interval: int = 10,
+    interval: int = 2,
 ) -> bool:
     """Poll a URL until HTTP 200, showing entrypoint progress and detecting crash loops."""
     elapsed = 0

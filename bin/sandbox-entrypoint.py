@@ -32,7 +32,7 @@ PROGRESS_FILE = Path("/tmp/sandbox-progress")
 
 
 def _ts() -> str:
-    return time.strftime("%H:%M:%S")
+    return time.strftime("%H:%M:%S", time.gmtime())
 
 
 def log(msg: str) -> None:
@@ -278,8 +278,9 @@ def apply_overlays() -> None:
 
 
 def install_python_deps() -> None:
-    info("Installing Python dependencies...")
+    info("Started: uv sync...")
     run(["uv", "sync", "--no-editable"])
+    info("Finished: uv sync.")
     # Make hogli available — normally done by flox on-activate.sh.
     hogli_link = Path("/cache/python/bin/hogli")
     hogli_link.unlink(missing_ok=True)
@@ -290,19 +291,21 @@ def install_python_deps() -> None:
 
 
 def install_node_deps() -> None:
-    info("Installing Node dependencies...")
+    info("Started: pnpm install...")
     # CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed
     # because the pre-merge overlay may update package.json files.
     run(
         ["pnpm", "install", "--no-frozen-lockfile"],
         env={**os.environ, "CI": "1"},
     )
+    info("Finished: pnpm install.")
 
 
 def fetch_rust_crates() -> None:
     """Pre-fetch Rust crate sources so concurrent cargo builds don't race."""
-    info("Fetching Rust crate sources...")
+    info("Started: cargo fetch...")
     run(["cargo", "fetch"], cwd=str(WORKSPACE / "rust"))
+    info("Finished: cargo fetch.")
 
 
 def install_geoip() -> None:
