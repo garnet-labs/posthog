@@ -458,12 +458,7 @@ class TestCupedReferenceData(TestCase):
         self.assertLess(result.treatment_adjusted.variance, treatment_post.variance)
 
     def test_mean_metric_relative_effect(self):
-        """Verify relative effect for mean metric.
-
-        The reference-style relative effect uses the unadjusted control mean as
-        denominator, while our frequentist method uses the adjusted control mean.
-        Both detect a significant negative treatment effect.
-        """
+        """Verify relative effect for mean metric with baseline_mean override."""
         control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
         treatment_post = SampleMeanStatistic(n=2800, sum=205, sum_squares=510)
         control_cuped = CupedData(
@@ -477,14 +472,37 @@ class TestCupedReferenceData(TestCase):
 
         result = cuped_adjust(treatment_post, control_post, treatment_cuped, control_cuped)
 
-        # Reference-style relative effect: numerator / unadjusted control mean
-        ref_relative = (result.treatment_adjusted.mean - result.control_adjusted.mean) / result.control_unadjusted_mean
-        self.assertAlmostEqual(ref_relative, -0.288704169, places=5)
-
+        # Pass unadjusted control mean as baseline_mean for correct CUPED relative effect
         method = FrequentistMethod(FrequentistConfig(difference_type=DifferenceType.RELATIVE))
-        test_result = method.run_test(result.treatment_adjusted, result.control_adjusted)
+        test_result = method.run_test(
+            result.treatment_adjusted, result.control_adjusted, baseline_mean=result.control_unadjusted_mean
+        )
+
+        self.assertAlmostEqual(test_result.point_estimate, -0.288704169, places=5)
         self.assertTrue(test_result.is_significant)
-        self.assertLess(test_result.point_estimate, 0)
+
+    def test_mean_metric_relative_effect_bayesian(self):
+        """Verify baseline_mean works with Bayesian method too."""
+        control_post = SampleMeanStatistic(n=2801, sum=280, sum_squares=560)
+        treatment_post = SampleMeanStatistic(n=2800, sum=205, sum_squares=510)
+        control_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2801, sum=195, sum_squares=390),
+            sum_of_cross_products=-18,
+        )
+        treatment_cuped = CupedData(
+            pre_statistic=SampleMeanStatistic(n=2800, sum=110, sum_squares=380),
+            sum_of_cross_products=-8,
+        )
+
+        result = cuped_adjust(treatment_post, control_post, treatment_cuped, control_cuped)
+
+        method = BayesianMethod(BayesianConfig(difference_type=DifferenceType.RELATIVE))
+        test_result = method.run_test(
+            result.treatment_adjusted, result.control_adjusted, baseline_mean=result.control_unadjusted_mean
+        )
+
+        self.assertAlmostEqual(test_result.effect_size, -0.288704169, places=4)
+        self.assertLess(test_result.credible_interval[0], test_result.credible_interval[1])
 
     # --- Binomial metric ---
 
@@ -511,7 +529,9 @@ class TestCupedReferenceData(TestCase):
         self.assertGreater(result.variance_reduction_control, 0)
 
         method = FrequentistMethod(FrequentistConfig(difference_type=DifferenceType.RELATIVE))
-        test_result = method.run_test(result.treatment_adjusted, result.control_adjusted)
+        test_result = method.run_test(
+            result.treatment_adjusted, result.control_adjusted, baseline_mean=result.control_unadjusted_mean
+        )
         self.assertTrue(test_result.is_significant)
         self.assertLess(test_result.point_estimate, 0)
 
