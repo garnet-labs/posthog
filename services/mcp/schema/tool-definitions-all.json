@@ -1903,12 +1903,12 @@
             "readOnlyHint": true
         }
     },
-    "action-prediction-model-list": {
-        "description": "List all action prediction models in the current project. Returns name, description, action or event reference, lookback period, and creation metadata for each model.",
+    "action-prediction-config-list": {
+        "description": "List all action prediction configs in the current project. Returns name, description, action or event reference, lookback period, and creation metadata for each config.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "List action prediction models",
-        "title": "List action prediction models",
+        "summary": "List action prediction configs",
+        "title": "List action prediction configs",
         "required_scopes": ["action_prediction_model:read"],
         "new_mcp": false,
         "annotations": {
@@ -1918,12 +1918,27 @@
             "readOnlyHint": true
         }
     },
-    "action-prediction-model-create": {
-        "description": "Create a new action prediction model. Specify either an action ID or an event name (not both), and a lookback period in days.",
+    "action-prediction-config-retrieve": {
+        "description": "Retrieve a single action prediction config by ID. Returns name, description, action or event reference, lookback period, training status, and creation metadata.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "Create action prediction model",
-        "title": "Create action prediction model",
+        "summary": "Get action prediction config",
+        "title": "Get action prediction config",
+        "required_scopes": ["action_prediction_model:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "action-prediction-config-create": {
+        "description": "Create a new action prediction config. Specify either an action ID or an event name (not both), and a lookback period in days.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Create action prediction config",
+        "title": "Create action prediction config",
         "required_scopes": ["action_prediction_model:write"],
         "new_mcp": true,
         "annotations": {
@@ -1933,12 +1948,12 @@
             "readOnlyHint": false
         }
     },
-    "action-prediction-model-partial-update": {
-        "description": "Update an action prediction model by ID. Can modify name, description, the action or event reference, and lookback period.",
+    "action-prediction-config-partial-update": {
+        "description": "Update an action prediction config by ID. Can modify name, description, the action or event reference, and lookback period.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "Update action prediction model",
-        "title": "Update action prediction model",
+        "summary": "Update action prediction config",
+        "title": "Update action prediction config",
         "required_scopes": ["action_prediction_model:write"],
         "new_mcp": true,
         "annotations": {
@@ -1948,12 +1963,12 @@
             "readOnlyHint": false
         }
     },
-    "action-prediction-model-destroy": {
-        "description": "Permanently delete an action prediction model by ID.",
+    "action-prediction-config-destroy": {
+        "description": "Permanently delete an action prediction config by ID.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "Delete action prediction model",
-        "title": "Delete action prediction model",
+        "summary": "Delete action prediction config",
+        "title": "Delete action prediction config",
         "required_scopes": ["action_prediction_model:write"],
         "new_mcp": true,
         "annotations": {
@@ -1963,8 +1978,8 @@
             "readOnlyHint": false
         }
     },
-    "action-prediction-model-upload-url": {
-        "description": "Generate a presigned S3 upload URL for a model artifact. Returns a URL and form fields for direct upload to S3, plus a storage_path to use as model_url when creating an ActionPredictionModelRun. Each call produces a unique storage path, so call once per artifact.",
+    "action-prediction-config-upload-url": {
+        "description": "Generate a presigned S3 upload URL for a model artifact. Returns a URL and form fields for direct upload to S3, plus a storage_path to use as model_url when creating an ActionPredictionModel. Each call produces a unique storage path, so call once per artifact.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "Generate model artifact upload URL",
@@ -1978,12 +1993,12 @@
             "readOnlyHint": false
         }
     },
-    "prediction-model-run-list": {
-        "description": "List training runs for action prediction models, newest first. Returns winning status, S3 model URL, evaluation metrics, feature importance, and the training artifact script.",
+    "action-prediction-model-list": {
+        "description": "List trained prediction models, newest first. Returns winning status, S3 model URL, evaluation metrics, feature importance, and the training artifact script.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "List prediction model runs",
-        "title": "List prediction model runs",
+        "summary": "List prediction models",
+        "title": "List prediction models",
         "required_scopes": ["action_prediction_model:read"],
         "new_mcp": false,
         "annotations": {
@@ -1993,12 +2008,27 @@
             "readOnlyHint": true
         }
     },
-    "prediction-model-run-create": {
-        "description": "Record a new training run for a prediction model. Provide the parent prediction model ID, S3 model URL, evaluation metrics, feature importance scores, and the artifact script.",
+    "action-prediction-model-retrieve": {
+        "description": "Retrieve a single trained prediction model by ID. Returns config reference, winning status, S3 model URL, evaluation metrics, feature importance, task references, and the training artifact script.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "Create prediction model run",
-        "title": "Create prediction model run",
+        "summary": "Get prediction model",
+        "title": "Get prediction model",
+        "required_scopes": ["action_prediction_model:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "action-prediction-model-create": {
+        "description": "Record a new trained prediction model. Provide the parent config ID, S3 model URL, evaluation metrics, feature importance scores, and the artifact script.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Create prediction model",
+        "title": "Create prediction model",
         "required_scopes": ["action_prediction_model:write"],
         "new_mcp": true,
         "annotations": {
@@ -2008,12 +2038,12 @@
             "readOnlyHint": false
         }
     },
-    "prediction-model-run-partial-update": {
-        "description": "Update a prediction model run by ID. Can change winning status, metrics, feature importance, or artifact script.",
+    "action-prediction-model-partial-update": {
+        "description": "Update a prediction model by ID. Can change winning status, metrics, feature importance, or artifact script.",
         "category": "AI",
         "feature": "action_prediction_models",
-        "summary": "Update prediction model run",
-        "title": "Update prediction model run",
+        "summary": "Update prediction model",
+        "title": "Update prediction model",
         "required_scopes": ["action_prediction_model:write"],
         "new_mcp": true,
         "annotations": {

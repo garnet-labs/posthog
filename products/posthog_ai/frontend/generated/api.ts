@@ -9,12 +9,12 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * OpenAPI spec version: 1.0.0
  */
 import type {
+    ActionPredictionConfigApi,
+    ActionPredictionConfigsListParams,
     ActionPredictionModelApi,
-    ActionPredictionModelRunApi,
-    ActionPredictionModelRunsListParams,
     ActionPredictionModelsListParams,
+    PaginatedActionPredictionConfigListApi,
     PaginatedActionPredictionModelListApi,
-    PaginatedActionPredictionModelRunListApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -34,10 +34,7 @@ type NonReadonly<T> = [T] extends [UnionToIntersection<T>]
       }
     : DistributeReadOnlyOverUnions<T>
 
-export const getActionPredictionModelRunsListUrl = (
-    projectId: string,
-    params?: ActionPredictionModelRunsListParams
-) => {
+export const getActionPredictionConfigsListUrl = (projectId: string, params?: ActionPredictionConfigsListParams) => {
     const normalizedParams = new URLSearchParams()
 
     Object.entries(params || {}).forEach(([key, value]) => {
@@ -49,38 +46,35 @@ export const getActionPredictionModelRunsListUrl = (
     const stringifiedParams = normalizedParams.toString()
 
     return stringifiedParams.length > 0
-        ? `/api/environments/${projectId}/action_prediction_model_runs/?${stringifiedParams}`
-        : `/api/environments/${projectId}/action_prediction_model_runs/`
+        ? `/api/environments/${projectId}/action_prediction_configs/?${stringifiedParams}`
+        : `/api/environments/${projectId}/action_prediction_configs/`
 }
 
-export const actionPredictionModelRunsList = async (
+export const actionPredictionConfigsList = async (
     projectId: string,
-    params?: ActionPredictionModelRunsListParams,
+    params?: ActionPredictionConfigsListParams,
     options?: RequestInit
-): Promise<PaginatedActionPredictionModelRunListApi> => {
-    return apiMutator<PaginatedActionPredictionModelRunListApi>(
-        getActionPredictionModelRunsListUrl(projectId, params),
-        {
-            ...options,
-            method: 'GET',
-        }
-    )
+): Promise<PaginatedActionPredictionConfigListApi> => {
+    return apiMutator<PaginatedActionPredictionConfigListApi>(getActionPredictionConfigsListUrl(projectId, params), {
+        ...options,
+        method: 'GET',
+    })
 }
 
-export const getActionPredictionModelRunsCreateUrl = (projectId: string) => {
-    return `/api/environments/${projectId}/action_prediction_model_runs/`
+export const getActionPredictionConfigsCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/action_prediction_configs/`
 }
 
-export const actionPredictionModelRunsCreate = async (
+export const actionPredictionConfigsCreate = async (
     projectId: string,
-    actionPredictionModelRunApi: NonReadonly<ActionPredictionModelRunApi>,
+    actionPredictionConfigApi: NonReadonly<ActionPredictionConfigApi>,
     options?: RequestInit
-): Promise<ActionPredictionModelRunApi> => {
-    return apiMutator<ActionPredictionModelRunApi>(getActionPredictionModelRunsCreateUrl(projectId), {
+): Promise<ActionPredictionConfigApi> => {
+    return apiMutator<ActionPredictionConfigApi>(getActionPredictionConfigsCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(actionPredictionModelRunApi),
+        body: JSON.stringify(actionPredictionConfigApi),
     })
 }
 

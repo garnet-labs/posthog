@@ -6,10 +6,10 @@
 # All other fields (title, description, enrich_url, etc.) are yours to configure.
 category: AI
 feature: action_prediction_models
-url_prefix: /action_prediction_models
+url_prefix: /action_prediction_configs
 tools:
-    action-prediction-model-list:
-        operation: action_prediction_models_list
+    action-prediction-config-list:
+        operation: action_prediction_configs_list
         enabled: true
         scopes:
             - action_prediction_model:read
@@ -18,13 +18,26 @@ tools:
             destructive: false
             idempotent: true
         list: true
-        title: List action prediction models
+        title: List action prediction configs
         description: >
-            List all action prediction models in the current project. Returns name, description, action or event
-            reference, lookback period, and creation metadata for each model.
+            List all action prediction configs in the current project. Returns name, description, action or event
+            reference, lookback period, and creation metadata for each config.
         mcp_version: 1
-    action-prediction-model-create:
-        operation: action_prediction_models_create
+    action-prediction-config-retrieve:
+        operation: action_prediction_configs_retrieve
+        enabled: true
+        scopes:
+            - action_prediction_model:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        title: Get action prediction config
+        description: >
+            Retrieve a single action prediction config by ID. Returns name, description, action or event
+            reference, lookback period, training status, and creation metadata.
+    action-prediction-config-create:
+        operation: action_prediction_configs_create
         enabled: true
         scopes:
             - action_prediction_model:write
@@ -33,9 +46,9 @@ tools:
             destructive: false
             idempotent: false
         enrich_url: '{id}'
-        title: Create action prediction model
+        title: Create action prediction config
         description: >
-            Create a new action prediction model. Specify either an action ID or an event name (not both), and a
+            Create a new action prediction config. Specify either an action ID or an event name (not both), and a
             lookback period in days.
         include_params:
             - name
@@ -43,8 +56,8 @@ tools:
             - action
             - event_name
             - lookback_days
-    action-prediction-model-partial-update:
-        operation: action_prediction_models_partial_update
+    action-prediction-config-partial-update:
+        operation: action_prediction_configs_partial_update
         enabled: true
         scopes:
             - action_prediction_model:write
@@ -53,9 +66,9 @@ tools:
             destructive: false
             idempotent: true
         enrich_url: '{id}'
-        title: Update action prediction model
+        title: Update action prediction config
         description: >
-            Update an action prediction model by ID. Can modify name,
+            Update an action prediction config by ID. Can modify name,
             description, the action or event reference, and lookback period.
         include_params:
             - name
@@ -63,11 +76,11 @@ tools:
             - action
             - event_name
             - lookback_days
-    action-prediction-model-update:
-        operation: action_prediction_models_update
+    action-prediction-config-update:
+        operation: action_prediction_configs_update
         enabled: false
-    action-prediction-model-destroy:
-        operation: action_prediction_models_destroy
+    action-prediction-config-destroy:
+        operation: action_prediction_configs_destroy
         enabled: true
         scopes:
             - action_prediction_model:write
@@ -75,11 +88,11 @@ tools:
             readOnly: false
             destructive: true
             idempotent: true
-        title: Delete action prediction model
+        title: Delete action prediction config
         description: >
-            Permanently delete an action prediction model by ID.
-    action-prediction-model-upload-url:
-        operation: action_prediction_models_upload_url_create
+            Permanently delete an action prediction config by ID.
+    action-prediction-config-upload-url:
+        operation: action_prediction_configs_upload_url_create
         enabled: true
         scopes:
             - action_prediction_model:write
@@ -91,14 +104,14 @@ tools:
         description: >
             Generate a presigned S3 upload URL for a model artifact. Returns a
             URL and form fields for direct upload to S3, plus a storage_path to
-            use as model_url when creating an ActionPredictionModelRun. Each
+            use as model_url when creating an ActionPredictionModel. Each
             call produces a unique storage path, so call once per artifact.
         param_overrides:
             filename:
                 description: >
                     Name of the file to upload, e.g. "xgboost_v1.pkl".
-    prediction-model-run-list:
-        operation: action_prediction_model_runs_list
+    action-prediction-model-list:
+        operation: action_prediction_models_list
         enabled: true
         scopes:
             - action_prediction_model:read
@@ -107,13 +120,26 @@ tools:
             destructive: false
             idempotent: true
         list: true
-        title: List prediction model runs
+        title: List prediction models
         description: >
-            List training runs for action prediction models, newest first. Returns winning status, S3 model URL,
+            List trained prediction models, newest first. Returns winning status, S3 model URL,
             evaluation metrics, feature importance, and the training artifact script.
         mcp_version: 1
-    prediction-model-run-create:
-        operation: action_prediction_model_runs_create
+    action-prediction-model-retrieve:
+        operation: action_prediction_models_retrieve
+        enabled: true
+        scopes:
+            - action_prediction_model:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        title: Get prediction model
+        description: >
+            Retrieve a single trained prediction model by ID. Returns config reference, winning status,
+            S3 model URL, evaluation metrics, feature importance, task references, and the training artifact script.
+    action-prediction-model-create:
+        operation: action_prediction_models_create
         enabled: true
         scopes:
             - action_prediction_model:write
@@ -122,20 +148,21 @@ tools:
             destructive: false
             idempotent: false
         enrich_url: '{id}'
-        title: Create prediction model run
+        title: Create prediction model
         description: >
-            Record a new training run for a prediction model. Provide the parent prediction model ID, S3 model URL,
+            Record a new trained prediction model. Provide the parent config ID, S3 model URL,
             evaluation metrics, feature importance scores, and the artifact script.
         include_params:
-            - prediction_model
+            - config
+            - task
             - task_run
             - is_winning
             - model_url
             - metrics
             - feature_importance
             - artifact_script
-    prediction-model-run-partial-update:
-        operation: action_prediction_model_runs_partial_update
+    action-prediction-model-partial-update:
+        operation: action_prediction_models_partial_update
         enabled: true
         scopes:
             - action_prediction_model:write
@@ -144,22 +171,23 @@ tools:
             destructive: false
             idempotent: true
         enrich_url: '{id}'
-        title: Update prediction model run
+        title: Update prediction model
         description: >
-            Update a prediction model run by ID. Can change winning status,
+            Update a prediction model by ID. Can change winning status,
             metrics, feature importance, or artifact script.
         include_params:
+            - task
             - task_run
             - is_winning
             - model_url
             - metrics
             - feature_importance
             - artifact_script
-    prediction-model-run-update:
-        operation: action_prediction_model_runs_update
+    action-prediction-model-update:
+        operation: action_prediction_models_update
         enabled: false
-    prediction-model-run-destroy:
-        operation: action_prediction_model_runs_destroy
+    action-prediction-model-destroy:
+        operation: action_prediction_models_destroy
         enabled: false
     mcp-tools-create:
         operation: mcp_tools_create

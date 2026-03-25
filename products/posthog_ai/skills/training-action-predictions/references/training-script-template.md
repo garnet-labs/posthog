@@ -1,6 +1,6 @@
 # Training script template
 
-This is the baseline Python training script. The agent writes and iterates on this script across experiments. Each version is stored in the `artifact_script` field of `ActionPredictionModelRun`.
+This is the baseline Python training script. The agent writes and iterates on this script across experiments. Each version is stored in the `artifact_script` field of `ActionPredictionModel`.
 
 The script expects the feature matrix as a CSV string (from the HogQL feature extraction query) passed via stdin or as a variable.
 
@@ -144,11 +144,11 @@ if __name__ == "__main__":
 
 1. Run the feature extraction query via `execute-sql` to get a CSV feature matrix.
 2. Adapt this script (add/remove features, tweak hyperparameters).
-3. Record each experiment as a `prediction-model-run-create` call with:
+3. Record each experiment as an `action-prediction-model-create` call with:
    - `artifact_script`: the full Python script text
    - `metrics`: the `metrics` dict from the output
    - `feature_importance`: the `feature_importance` dict from the output
-   - `is_winning`: `false` initially — set to `true` via `prediction-model-run-partial-update` if it beats the current best
+   - `is_winning`: `false` initially — set to `true` via `action-prediction-model-partial-update` if it beats the current best
 
 ## Iteration targets
 

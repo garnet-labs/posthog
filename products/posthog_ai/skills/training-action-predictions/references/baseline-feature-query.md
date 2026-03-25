@@ -4,7 +4,7 @@ This HogQL query produces a feature matrix for training. It enforces **temporal 
 
 Set `T = now() - interval {W} day` so that labels are fully observed at query time.
 
-Replace `{target}` with the target event name (from `ActionPredictionModel.event_name`) and `{W}` with the lookback window (from `ActionPredictionModel.lookback_days`).
+Replace `{target}` with the target event name (from `ActionPredictionConfig.event_name`) and `{W}` with the lookback window (from `ActionPredictionConfig.lookback_days`).
 
 ```sql
 SELECT

@@ -1,5 +1,5 @@
+from .action_prediction_config import ActionPredictionConfigViewSet
 from .action_prediction_model import ActionPredictionModelViewSet
 from .mcp_tools import MCPToolsViewSet
-from .prediction_models import ActionPredictionModelRunViewSet
 
-__all__ = ["ActionPredictionModelViewSet", "ActionPredictionModelRunViewSet", "MCPToolsViewSet"]
+__all__ = ["ActionPredictionConfigViewSet", "ActionPredictionModelViewSet", "MCPToolsViewSet"]

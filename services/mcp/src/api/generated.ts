@@ -587,14 +587,14 @@ export namespace Schemas {
       actionId: number;
     }
 
-    export interface ActionPredictionModel {
+    export interface ActionPredictionConfig {
       readonly id: string;
       /**
-       * Human-readable name for the prediction model.
+       * Human-readable name for the prediction config.
        * @maxLength 400
        */
       name?: string;
-      /** Longer description of the prediction model's purpose. */
+      /** Longer description of the prediction config's purpose. */
       description?: string;
       /**
        * ID of the PostHog action to predict. Mutually exclusive with event_name.
@@ -613,7 +613,7 @@ export namespace Schemas {
        */
       lookback_days: number;
       /**
-       * Sandbox task run that trains this prediction model.
+       * Sandbox task run that trains this prediction config.
        * @nullable
        */
       readonly task_run: string | null;
@@ -628,15 +628,20 @@ export namespace Schemas {
       readonly updated_at: string | null;
     }
 
-    export interface ActionPredictionModelRun {
+    export interface ActionPredictionModel {
       readonly id: string;
-      prediction_model: string;
+      config: string;
       /**
-       * Optional sandboxed agent task run that produced this model.
+       * Task containing all training runs and snapshots for this model.
+       * @nullable
+       */
+      task?: string | null;
+      /**
+       * Specific task run that produced this model.
        * @nullable
        */
       task_run?: string | null;
-      /** Whether this run produced a winning prediction model. */
+      /** Whether this is the winning prediction model. */
       is_winning?: boolean;
       /**
        * S3 storage path to the serialized model artifact.
@@ -649,7 +654,7 @@ export namespace Schemas {
       feature_importance?: unknown;
       /** The Python script used to train and produce the model artifact. */
       artifact_script?: string;
-      /** User who created this run. */
+      /** User who created this model. */
       readonly created_by: UserBasic | null;
       readonly created_at: string;
       /** @nullable */
@@ -18669,6 +18674,15 @@ export namespace Schemas {
       results: Action[];
     }
 
+    export interface PaginatedActionPredictionConfigList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: ActionPredictionConfig[];
+    }
+
     export interface PaginatedActionPredictionModelList {
       count: number;
       /** @nullable */
@@ -18676,15 +18690,6 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: ActionPredictionModel[];
-    }
-
-    export interface PaginatedActionPredictionModelRunList {
-      count: number;
-      /** @nullable */
-      next?: string | null;
-      /** @nullable */
-      previous?: string | null;
-      results: ActionPredictionModelRun[];
     }
 
     export type PaginatedActivityLogList = ActivityLog[];
@@ -21203,14 +21208,14 @@ export namespace Schemas {
       readonly user_access_level?: string | null;
     }
 
-    export interface PatchedActionPredictionModel {
+    export interface PatchedActionPredictionConfig {
       readonly id?: string;
       /**
-       * Human-readable name for the prediction model.
+       * Human-readable name for the prediction config.
        * @maxLength 400
        */
       name?: string;
-      /** Longer description of the prediction model's purpose. */
+      /** Longer description of the prediction config's purpose. */
       description?: string;
       /**
        * ID of the PostHog action to predict. Mutually exclusive with event_name.
@@ -21229,7 +21234,7 @@ export namespace Schemas {
        */
       lookback_days?: number;
       /**
-       * Sandbox task run that trains this prediction model.
+       * Sandbox task run that trains this prediction config.
        * @nullable
        */
       readonly task_run?: string | null;
@@ -21244,15 +21249,20 @@ export namespace Schemas {
       readonly updated_at?: string | null;
     }
 
-    export interface PatchedActionPredictionModelRun {
+    export interface PatchedActionPredictionModel {
       readonly id?: string;
-      prediction_model?: string;
+      config?: string;
       /**
-       * Optional sandboxed agent task run that produced this model.
+       * Task containing all training runs and snapshots for this model.
+       * @nullable
+       */
+      task?: string | null;
+      /**
+       * Specific task run that produced this model.
        * @nullable
        */
       task_run?: string | null;
-      /** Whether this run produced a winning prediction model. */
+      /** Whether this is the winning prediction model. */
       is_winning?: boolean;
       /**
        * S3 storage path to the serialized model artifact.
@@ -21265,7 +21275,7 @@ export namespace Schemas {
       feature_importance?: unknown;
       /** The Python script used to train and produce the model artifact. */
       artifact_script?: string;
-      /** User who created this run. */
+      /** User who created this model. */
       readonly created_by?: UserBasic | null;
       readonly created_at?: string;
       /** @nullable */
@@ -29461,7 +29471,7 @@ export namespace Schemas {
       url: string;
       /** Form fields to include with the POST request. */
       fields: UploadURLResponseFields;
-      /** S3 storage path to use as model_url when creating a run. */
+      /** S3 storage path to use as model_url when creating a model. */
       storage_path: string;
     }
 
@@ -30910,7 +30920,7 @@ export namespace Schemas {
     search?: string;
     };
 
-    export type ActionPredictionModelRunsListParams = {
+    export type ActionPredictionConfigsListParams = {
     /**
      * Number of results to return per page.
      */

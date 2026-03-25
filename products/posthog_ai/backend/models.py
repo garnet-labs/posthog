@@ -62,11 +62,11 @@ class AgentMemory(UUIDModel):
         )
 
 
-class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
+class ActionPredictionConfig(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     team = models.ForeignKey(
         "posthog.Team",
         on_delete=models.CASCADE,
-        related_name="action_prediction_models",
+        related_name="action_prediction_configs",
     )
     name = models.CharField(max_length=400, blank=True, default="")
     description = models.TextField(blank=True, default="")
@@ -84,8 +84,8 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="action_prediction_models",
-        help_text="Sandbox task run that trains this prediction model.",
+        related_name="action_prediction_configs",
+        help_text="Sandbox task run that trains this prediction config.",
     )
 
     class Meta:
@@ -103,28 +103,36 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         ]
 
 
-class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
-    prediction_model = models.ForeignKey(
-        ActionPredictionModel,
+class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
+    config = models.ForeignKey(
+        ActionPredictionConfig,
         on_delete=models.CASCADE,
-        related_name="runs",
+        related_name="models",
     )
     team = models.ForeignKey(
         "posthog.Team",
         on_delete=models.CASCADE,
-        related_name="action_prediction_model_runs",
+        related_name="action_prediction_models",
+    )
+    task = models.ForeignKey(
+        "tasks.Task",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_prediction_models",
+        help_text="Task containing all training runs and snapshots for this model.",
     )
     task_run = models.ForeignKey(
         "tasks.TaskRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="prediction_model_runs",
-        help_text="Optional sandboxed agent task run that produced this model.",
+        related_name="action_prediction_models",
+        help_text="Specific task run that produced this model.",
     )
     is_winning = models.BooleanField(
         default=False,
-        help_text="Whether this run produced a winning prediction model.",
+        help_text="Whether this is the winning prediction model.",
     )
     model_url = models.CharField(
         max_length=2000,
@@ -149,5 +157,5 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     class Meta:
         indexes = [
             models.Index(fields=["team", "id"]),
-            models.Index(fields=["prediction_model", "-created_at"]),
+            models.Index(fields=["config", "-created_at"]),
         ]

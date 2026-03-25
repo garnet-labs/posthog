@@ -3,12 +3,12 @@
  * MCP service uses these Zod schemas for generated tool handlers.
  * To regenerate: hogli build:openapi
  *
- * PostHog API - MCP 8 enabled ops
+ * PostHog API - MCP 10 enabled ops
  * OpenAPI spec version: 1.0.0
  */
 import * as zod from 'zod'
 
-export const ActionPredictionModelRunsListParams = /* @__PURE__ */ zod.object({
+export const ActionPredictionConfigsListParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -16,12 +16,12 @@ export const ActionPredictionModelRunsListParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const ActionPredictionModelRunsListQueryParams = /* @__PURE__ */ zod.object({
+export const ActionPredictionConfigsListQueryParams = /* @__PURE__ */ zod.object({
     limit: zod.number().optional().describe('Number of results to return per page.'),
     offset: zod.number().optional().describe('The initial index from which to return the results.'),
 })
 
-export const ActionPredictionModelRunsCreateParams = /* @__PURE__ */ zod.object({
+export const ActionPredictionConfigsCreateParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -29,26 +29,28 @@ export const ActionPredictionModelRunsCreateParams = /* @__PURE__ */ zod.object(
         ),
 })
 
-export const actionPredictionModelRunsCreateBodyModelUrlMax = 2000
+export const actionPredictionConfigsCreateBodyNameMax = 400
 
-export const ActionPredictionModelRunsCreateBody = /* @__PURE__ */ zod.object({
-    prediction_model: zod.string(),
-    task_run: zod.string().nullish().describe('Optional sandboxed agent task run that produced this model.'),
-    is_winning: zod.boolean().optional().describe('Whether this run produced a winning prediction model.'),
-    model_url: zod
+export const actionPredictionConfigsCreateBodyEventNameMax = 400
+
+export const ActionPredictionConfigsCreateBody = /* @__PURE__ */ zod.object({
+    name: zod
         .string()
-        .max(actionPredictionModelRunsCreateBodyModelUrlMax)
-        .describe('S3 storage path to the serialized model artifact.'),
-    metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
-    feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
-    artifact_script: zod
-        .string()
+        .max(actionPredictionConfigsCreateBodyNameMax)
         .optional()
-        .describe('The Python script used to train and produce the model artifact.'),
+        .describe('Human-readable name for the prediction config.'),
+    description: zod.string().optional().describe("Longer description of the prediction config's purpose."),
+    action: zod.number().nullish().describe('ID of the PostHog action to predict. Mutually exclusive with event_name.'),
+    event_name: zod
+        .string()
+        .max(actionPredictionConfigsCreateBodyEventNameMax)
+        .nullish()
+        .describe('Name of the raw event to predict. Mutually exclusive with action.'),
+    lookback_days: zod.number().min(1).describe('Number of days to look back for prediction data.'),
 })
 
-export const ActionPredictionModelRunsPartialUpdateParams = /* @__PURE__ */ zod.object({
-    id: zod.string().describe('A UUID string identifying this action prediction model run.'),
+export const ActionPredictionConfigsRetrieveParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction config.'),
     project_id: zod
         .string()
         .describe(
@@ -56,23 +58,55 @@ export const ActionPredictionModelRunsPartialUpdateParams = /* @__PURE__ */ zod.
         ),
 })
 
-export const actionPredictionModelRunsPartialUpdateBodyModelUrlMax = 2000
+export const ActionPredictionConfigsPartialUpdateParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction config.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
+})
 
-export const ActionPredictionModelRunsPartialUpdateBody = /* @__PURE__ */ zod.object({
-    prediction_model: zod.string().optional(),
-    task_run: zod.string().nullish().describe('Optional sandboxed agent task run that produced this model.'),
-    is_winning: zod.boolean().optional().describe('Whether this run produced a winning prediction model.'),
-    model_url: zod
+export const actionPredictionConfigsPartialUpdateBodyNameMax = 400
+
+export const actionPredictionConfigsPartialUpdateBodyEventNameMax = 400
+
+export const ActionPredictionConfigsPartialUpdateBody = /* @__PURE__ */ zod.object({
+    name: zod
         .string()
-        .max(actionPredictionModelRunsPartialUpdateBodyModelUrlMax)
+        .max(actionPredictionConfigsPartialUpdateBodyNameMax)
         .optional()
-        .describe('S3 storage path to the serialized model artifact.'),
-    metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
-    feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
-    artifact_script: zod
+        .describe('Human-readable name for the prediction config.'),
+    description: zod.string().optional().describe("Longer description of the prediction config's purpose."),
+    action: zod.number().nullish().describe('ID of the PostHog action to predict. Mutually exclusive with event_name.'),
+    event_name: zod
         .string()
-        .optional()
-        .describe('The Python script used to train and produce the model artifact.'),
+        .max(actionPredictionConfigsPartialUpdateBodyEventNameMax)
+        .nullish()
+        .describe('Name of the raw event to predict. Mutually exclusive with action.'),
+    lookback_days: zod.number().min(1).optional().describe('Number of days to look back for prediction data.'),
+})
+
+export const ActionPredictionConfigsDestroyParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction config.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
+})
+
+/**
+ * Returns a presigned POST URL that can be used to upload a model artifact directly to S3. Use the returned storage_path as model_url when creating an ActionPredictionModel.
+ * @summary Generate a presigned S3 upload URL for a model artifact
+ */
+export const ActionPredictionConfigsUploadUrlCreateParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction config.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
 })
 
 export const ActionPredictionModelsListParams = /* @__PURE__ */ zod.object({
@@ -96,24 +130,32 @@ export const ActionPredictionModelsCreateParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const actionPredictionModelsCreateBodyNameMax = 400
-
-export const actionPredictionModelsCreateBodyEventNameMax = 400
+export const actionPredictionModelsCreateBodyModelUrlMax = 2000
 
 export const ActionPredictionModelsCreateBody = /* @__PURE__ */ zod.object({
-    name: zod
+    config: zod.string(),
+    task: zod.string().nullish().describe('Task containing all training runs and snapshots for this model.'),
+    task_run: zod.string().nullish().describe('Specific task run that produced this model.'),
+    is_winning: zod.boolean().optional().describe('Whether this is the winning prediction model.'),
+    model_url: zod
         .string()
-        .max(actionPredictionModelsCreateBodyNameMax)
+        .max(actionPredictionModelsCreateBodyModelUrlMax)
+        .describe('S3 storage path to the serialized model artifact.'),
+    metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
+    feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
+    artifact_script: zod
+        .string()
         .optional()
-        .describe('Human-readable name for the prediction model.'),
-    description: zod.string().optional().describe("Longer description of the prediction model's purpose."),
-    action: zod.number().nullish().describe('ID of the PostHog action to predict. Mutually exclusive with event_name.'),
-    event_name: zod
+        .describe('The Python script used to train and produce the model artifact.'),
+})
+
+export const ActionPredictionModelsRetrieveParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction model.'),
+    project_id: zod
         .string()
-        .max(actionPredictionModelsCreateBodyEventNameMax)
-        .nullish()
-        .describe('Name of the raw event to predict. Mutually exclusive with action.'),
-    lookback_days: zod.number().min(1).describe('Number of days to look back for prediction data.'),
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
 })
 
 export const ActionPredictionModelsPartialUpdateParams = /* @__PURE__ */ zod.object({
@@ -125,44 +167,22 @@ export const ActionPredictionModelsPartialUpdateParams = /* @__PURE__ */ zod.obj
         ),
 })
 
-export const actionPredictionModelsPartialUpdateBodyNameMax = 400
-
-export const actionPredictionModelsPartialUpdateBodyEventNameMax = 400
+export const actionPredictionModelsPartialUpdateBodyModelUrlMax = 2000
 
 export const ActionPredictionModelsPartialUpdateBody = /* @__PURE__ */ zod.object({
-    name: zod
+    config: zod.string().optional(),
+    task: zod.string().nullish().describe('Task containing all training runs and snapshots for this model.'),
+    task_run: zod.string().nullish().describe('Specific task run that produced this model.'),
+    is_winning: zod.boolean().optional().describe('Whether this is the winning prediction model.'),
+    model_url: zod
         .string()
-        .max(actionPredictionModelsPartialUpdateBodyNameMax)
+        .max(actionPredictionModelsPartialUpdateBodyModelUrlMax)
         .optional()
-        .describe('Human-readable name for the prediction model.'),
-    description: zod.string().optional().describe("Longer description of the prediction model's purpose."),
-    action: zod.number().nullish().describe('ID of the PostHog action to predict. Mutually exclusive with event_name.'),
-    event_name: zod
+        .describe('S3 storage path to the serialized model artifact.'),
+    metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
+    feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
+    artifact_script: zod
         .string()
-        .max(actionPredictionModelsPartialUpdateBodyEventNameMax)
-        .nullish()
-        .describe('Name of the raw event to predict. Mutually exclusive with action.'),
-    lookback_days: zod.number().min(1).optional().describe('Number of days to look back for prediction data.'),
-})
-
-export const ActionPredictionModelsDestroyParams = /* @__PURE__ */ zod.object({
-    id: zod.string().describe('A UUID string identifying this action prediction model.'),
-    project_id: zod
-        .string()
-        .describe(
-            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
-        ),
-})
-
-/**
- * Returns a presigned POST URL that can be used to upload a model artifact directly to S3. Use the returned storage_path as model_url when creating an ActionPredictionModelRun.
- * @summary Generate a presigned S3 upload URL for a model artifact
- */
-export const ActionPredictionModelsUploadUrlCreateParams = /* @__PURE__ */ zod.object({
-    id: zod.string().describe('A UUID string identifying this action prediction model.'),
-    project_id: zod
-        .string()
-        .describe(
-            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
-        ),
+        .optional()
+        .describe('The Python script used to train and produce the model artifact.'),
 })

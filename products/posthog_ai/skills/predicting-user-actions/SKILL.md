@@ -5,20 +5,20 @@ description: 'Score users with a trained action prediction model and make predic
 
 # Predicting user actions
 
-Given a trained `ActionPredictionModel` with a winning `ActionPredictionModelRun`, score all eligible users and make predictions actionable through person properties and cohorts.
+Given an `ActionPredictionConfig` with a winning `ActionPredictionModel`, score all eligible users and make predictions actionable through person properties and cohorts.
 
 ## Prerequisites
 
-- A trained model must exist — check via `action-prediction-model-list` and `prediction-model-run-list`
-- At least one run should have `is_winning: true` with valid `artifact_script` and `metrics`
+- A trained model must exist — check via `action-prediction-config-list` and `action-prediction-model-list`
+- At least one model should have `is_winning: true` with valid `artifact_script` and `metrics`
 - If no trained model exists, suggest running the `training-action-predictions` skill first
 
 ## Workflow
 
 ### Step 1: Load the winning model
 
-1. List models via `action-prediction-model-list` to find the target model
-2. List runs via `prediction-model-run-list` and find the run where `is_winning: true`
+1. List configs via `action-prediction-config-list` to find the target config
+2. List models via `action-prediction-model-list` and find the model where `is_winning: true`
 3. Extract:
    - The `artifact_script` (the training script — contains the feature extraction logic)
    - The `metrics` (to report model quality alongside predictions)

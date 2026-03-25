@@ -5,11 +5,20 @@ from rest_framework import status
 from posthog.models import Team
 from posthog.models.action import Action
 
+from products.posthog_ai.backend.models import ActionPredictionConfig
+
 
 class TestActionPredictionModelAPI(APIBaseTest):
     def setUp(self):
         super().setUp()
         self.action = Action.objects.create(team=self.team, name="Test Action")
+        self.config = ActionPredictionConfig.objects.create(
+            team=self.team,
+            action=self.action,
+            lookback_days=30,
+            name="Churn predictor",
+            created_by=self.user,
+        )
 
     def _url(self, pk=None):
         base = f"/api/environments/{self.team.id}/action_prediction_models"
@@ -17,82 +26,49 @@ class TestActionPredictionModelAPI(APIBaseTest):
             return f"{base}/{pk}/"
         return f"{base}/"
 
-    def test_create_with_action(self):
-        response = self.client.post(
-            self._url(),
-            {"name": "Churn predictor", "action": self.action.id, "lookback_days": 30},
-            format="json",
-        )
+    def _create_model(self, **overrides):
+        defaults = {
+            "config": str(self.config.id),
+            "is_winning": False,
+            "model_url": "https://s3.amazonaws.com/bucket/model.pkl",
+            "metrics": {"accuracy": 0.95, "auc": 0.87},
+            "feature_importance": {"feature_a": 0.8, "feature_b": 0.2},
+            "artifact_script": "import sklearn\n# training script",
+        }
+        defaults.update(overrides)
+        return self.client.post(self._url(), defaults, format="json")
+
+    def test_create(self):
+        response = self._create_model()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         data = response.json()
-        self.assertEqual(data["action"], self.action.id)
-        self.assertIsNone(data["event_name"])
-        self.assertEqual(data["lookback_days"], 30)
-        self.assertEqual(data["name"], "Churn predictor")
+        self.assertFalse(data["is_winning"])
+        self.assertEqual(data["model_url"], "https://s3.amazonaws.com/bucket/model.pkl")
+        self.assertEqual(data["metrics"]["accuracy"], 0.95)
+        self.assertEqual(data["feature_importance"]["feature_a"], 0.8)
+        self.assertEqual(data["artifact_script"], "import sklearn\n# training script")
+        self.assertEqual(data["config"], str(self.config.id))
         self.assertEqual(data["created_by"]["id"], self.user.id)
 
-    def test_create_with_event_name(self):
-        response = self.client.post(
-            self._url(),
-            {"event_name": "$pageview", "lookback_days": 7},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        data = response.json()
-        self.assertIsNone(data["action"])
-        self.assertEqual(data["event_name"], "$pageview")
-        self.assertEqual(data["lookback_days"], 7)
-
-    def test_create_rejects_both_action_and_event_name(self):
-        response = self.client.post(
-            self._url(),
-            {"action": self.action.id, "event_name": "$pageview", "lookback_days": 30},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_create_rejects_neither_action_nor_event_name(self):
-        response = self.client.post(
-            self._url(),
-            {"lookback_days": 30},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_create_rejects_lookback_days_zero(self):
-        response = self.client.post(
-            self._url(),
-            {"event_name": "$pageview", "lookback_days": 0},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_create_rejects_negative_lookback_days(self):
-        response = self.client.post(
-            self._url(),
-            {"event_name": "$pageview", "lookback_days": -5},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_create_rejects_nonexistent_action(self):
-        response = self.client.post(
-            self._url(),
-            {"action": 999999, "lookback_days": 30},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
     def test_list(self):
-        self.client.post(self._url(), {"event_name": "$pageview", "lookback_days": 7}, format="json")
-        self.client.post(self._url(), {"action": self.action.id, "lookback_days": 14}, format="json")
+        self._create_model()
+        self._create_model(is_winning=True, model_url="https://s3.amazonaws.com/bucket/model2.pkl")
 
         response = self.client.get(self._url())
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["count"], 2)
 
+    def test_list_ordered_by_newest_first(self):
+        resp1 = self._create_model(model_url="https://s3.amazonaws.com/bucket/first.pkl")
+        resp2 = self._create_model(model_url="https://s3.amazonaws.com/bucket/second.pkl")
+
+        response = self.client.get(self._url())
+        results = response.json()["results"]
+        self.assertEqual(results[0]["id"], resp2.json()["id"])
+        self.assertEqual(results[1]["id"], resp1.json()["id"])
+
     def test_list_scoped_to_team(self):
-        self.client.post(self._url(), {"event_name": "$pageview", "lookback_days": 7}, format="json")
+        self._create_model()
 
         other_team = Team.objects.create(organization=self.organization, name="Other Team")
         response = self.client.get(f"/api/environments/{other_team.id}/action_prediction_models/")
@@ -100,60 +76,36 @@ class TestActionPredictionModelAPI(APIBaseTest):
         self.assertEqual(response.json()["count"], 0)
 
     def test_retrieve(self):
-        create_response = self.client.post(
-            self._url(),
-            {"name": "My model", "event_name": "$pageview", "lookback_days": 7},
-            format="json",
-        )
+        create_response = self._create_model()
         pk = create_response.json()["id"]
 
         response = self.client.get(self._url(pk))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.json()["name"], "My model")
+        self.assertEqual(response.json()["id"], pk)
 
     def test_partial_update(self):
-        create_response = self.client.post(
-            self._url(),
-            {"event_name": "$pageview", "lookback_days": 7},
-            format="json",
-        )
+        create_response = self._create_model()
         pk = create_response.json()["id"]
 
-        response = self.client.patch(self._url(pk), {"lookback_days": 14}, format="json")
+        response = self.client.patch(self._url(pk), {"is_winning": True}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.json()["lookback_days"], 14)
+        self.assertTrue(response.json()["is_winning"])
 
-    def test_partial_update_switch_event_to_action(self):
-        create_response = self.client.post(
-            self._url(),
-            {"event_name": "$pageview", "lookback_days": 7},
-            format="json",
-        )
+    def test_partial_update_metrics(self):
+        create_response = self._create_model()
         pk = create_response.json()["id"]
 
-        response = self.client.patch(
-            self._url(pk),
-            {"action": self.action.id, "event_name": None},
-            format="json",
-        )
+        new_metrics = {"accuracy": 0.99, "auc": 0.95, "f1": 0.92}
+        response = self.client.patch(self._url(pk), {"metrics": new_metrics}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        data = response.json()
-        self.assertEqual(data["action"], self.action.id)
-        self.assertIsNone(data["event_name"])
+        self.assertEqual(response.json()["metrics"], new_metrics)
 
-    def test_delete(self):
-        create_response = self.client.post(
-            self._url(),
-            {"event_name": "$pageview", "lookback_days": 7},
-            format="json",
-        )
+    def test_delete_not_allowed(self):
+        create_response = self._create_model()
         pk = create_response.json()["id"]
 
         response = self.client.delete(self._url(pk))
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-
-        response = self.client.get(self._url(pk))
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def test_unauthenticated(self):
         self.client.logout()

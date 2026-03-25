@@ -66,51 +66,14 @@ export interface UserBasicApi {
     role_at_organization?: RoleAtOrganizationEnumApi | BlankEnumApi | NullEnumApi | null
 }
 
-export interface ActionPredictionModelRunApi {
-    readonly id: string
-    prediction_model: string
-    /**
-     * Optional sandboxed agent task run that produced this model.
-     * @nullable
-     */
-    task_run?: string | null
-    /** Whether this run produced a winning prediction model. */
-    is_winning?: boolean
-    /**
-     * S3 storage path to the serialized model artifact.
-     * @maxLength 2000
-     */
-    model_url: string
-    /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
-    metrics?: unknown
-    /** Feature importance scores from model training. */
-    feature_importance?: unknown
-    /** The Python script used to train and produce the model artifact. */
-    artifact_script?: string
-    /** User who created this run. */
-    readonly created_by: UserBasicApi | null
-    readonly created_at: string
-    /** @nullable */
-    readonly updated_at: string | null
-}
-
-export interface PaginatedActionPredictionModelRunListApi {
-    count: number
-    /** @nullable */
-    next?: string | null
-    /** @nullable */
-    previous?: string | null
-    results: ActionPredictionModelRunApi[]
-}
-
-export interface ActionPredictionModelApi {
+export interface ActionPredictionConfigApi {
     readonly id: string
     /**
-     * Human-readable name for the prediction model.
+     * Human-readable name for the prediction config.
      * @maxLength 400
      */
     name?: string
-    /** Longer description of the prediction model's purpose. */
+    /** Longer description of the prediction config's purpose. */
     description?: string
     /**
      * ID of the PostHog action to predict. Mutually exclusive with event_name.
@@ -129,7 +92,7 @@ export interface ActionPredictionModelApi {
      */
     lookback_days: number
     /**
-     * Sandbox task run that trains this prediction model.
+     * Sandbox task run that trains this prediction config.
      * @nullable
      */
     readonly task_run: string | null
@@ -144,6 +107,48 @@ export interface ActionPredictionModelApi {
     readonly updated_at: string | null
 }
 
+export interface PaginatedActionPredictionConfigListApi {
+    count: number
+    /** @nullable */
+    next?: string | null
+    /** @nullable */
+    previous?: string | null
+    results: ActionPredictionConfigApi[]
+}
+
+export interface ActionPredictionModelApi {
+    readonly id: string
+    config: string
+    /**
+     * Task containing all training runs and snapshots for this model.
+     * @nullable
+     */
+    task?: string | null
+    /**
+     * Specific task run that produced this model.
+     * @nullable
+     */
+    task_run?: string | null
+    /** Whether this is the winning prediction model. */
+    is_winning?: boolean
+    /**
+     * S3 storage path to the serialized model artifact.
+     * @maxLength 2000
+     */
+    model_url: string
+    /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
+    metrics?: unknown
+    /** Feature importance scores from model training. */
+    feature_importance?: unknown
+    /** The Python script used to train and produce the model artifact. */
+    artifact_script?: string
+    /** User who created this model. */
+    readonly created_by: UserBasicApi | null
+    readonly created_at: string
+    /** @nullable */
+    readonly updated_at: string | null
+}
+
 export interface PaginatedActionPredictionModelListApi {
     count: number
     /** @nullable */
@@ -153,7 +158,7 @@ export interface PaginatedActionPredictionModelListApi {
     results: ActionPredictionModelApi[]
 }
 
-export type ActionPredictionModelRunsListParams = {
+export type ActionPredictionConfigsListParams = {
     /**
      * Number of results to return per page.
      */

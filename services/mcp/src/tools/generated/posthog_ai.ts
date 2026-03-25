@@ -3,18 +3,174 @@ import { z } from 'zod'
 
 import type { Schemas } from '@/api/generated'
 import {
-    ActionPredictionModelRunsCreateBody,
-    ActionPredictionModelRunsListQueryParams,
-    ActionPredictionModelRunsPartialUpdateBody,
-    ActionPredictionModelRunsPartialUpdateParams,
+    ActionPredictionConfigsCreateBody,
+    ActionPredictionConfigsDestroyParams,
+    ActionPredictionConfigsListQueryParams,
+    ActionPredictionConfigsPartialUpdateBody,
+    ActionPredictionConfigsPartialUpdateParams,
+    ActionPredictionConfigsRetrieveParams,
+    ActionPredictionConfigsUploadUrlCreateParams,
     ActionPredictionModelsCreateBody,
-    ActionPredictionModelsDestroyParams,
     ActionPredictionModelsListQueryParams,
     ActionPredictionModelsPartialUpdateBody,
     ActionPredictionModelsPartialUpdateParams,
-    ActionPredictionModelsUploadUrlCreateParams,
+    ActionPredictionModelsRetrieveParams,
 } from '@/generated/posthog_ai/api'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
+
+const ActionPredictionConfigListSchema = ActionPredictionConfigsListQueryParams
+
+const actionPredictionConfigList = (): ToolBase<
+    typeof ActionPredictionConfigListSchema,
+    Schemas.PaginatedActionPredictionConfigList & { _posthogUrl: string }
+> => ({
+    name: 'action-prediction-config-list',
+    schema: ActionPredictionConfigListSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigListSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.PaginatedActionPredictionConfigList>({
+            method: 'GET',
+            path: `/api/environments/${projectId}/action_prediction_configs/`,
+            query: {
+                limit: params.limit,
+                offset: params.offset,
+            },
+        })
+        return {
+            ...(result as any),
+            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_configs`,
+        }
+    },
+})
+
+const ActionPredictionConfigRetrieveSchema = ActionPredictionConfigsRetrieveParams.omit({ project_id: true })
+
+const actionPredictionConfigRetrieve = (): ToolBase<
+    typeof ActionPredictionConfigRetrieveSchema,
+    Schemas.ActionPredictionConfig
+> => ({
+    name: 'action-prediction-config-retrieve',
+    schema: ActionPredictionConfigRetrieveSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigRetrieveSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.ActionPredictionConfig>({
+            method: 'GET',
+            path: `/api/environments/${projectId}/action_prediction_configs/${params.id}/`,
+        })
+        return result
+    },
+})
+
+const ActionPredictionConfigCreateSchema = ActionPredictionConfigsCreateBody
+
+const actionPredictionConfigCreate = (): ToolBase<
+    typeof ActionPredictionConfigCreateSchema,
+    Schemas.ActionPredictionConfig & { _posthogUrl: string }
+> => ({
+    name: 'action-prediction-config-create',
+    schema: ActionPredictionConfigCreateSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigCreateSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const body: Record<string, unknown> = {}
+        if (params.name !== undefined) {
+            body['name'] = params.name
+        }
+        if (params.description !== undefined) {
+            body['description'] = params.description
+        }
+        if (params.action !== undefined) {
+            body['action'] = params.action
+        }
+        if (params.event_name !== undefined) {
+            body['event_name'] = params.event_name
+        }
+        if (params.lookback_days !== undefined) {
+            body['lookback_days'] = params.lookback_days
+        }
+        const result = await context.api.request<Schemas.ActionPredictionConfig>({
+            method: 'POST',
+            path: `/api/environments/${projectId}/action_prediction_configs/`,
+            body,
+        })
+        return {
+            ...(result as any),
+            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_configs/${(result as any).id}`,
+        }
+    },
+})
+
+const ActionPredictionConfigPartialUpdateSchema = ActionPredictionConfigsPartialUpdateParams.omit({
+    project_id: true,
+}).extend(ActionPredictionConfigsPartialUpdateBody.shape)
+
+const actionPredictionConfigPartialUpdate = (): ToolBase<
+    typeof ActionPredictionConfigPartialUpdateSchema,
+    Schemas.ActionPredictionConfig & { _posthogUrl: string }
+> => ({
+    name: 'action-prediction-config-partial-update',
+    schema: ActionPredictionConfigPartialUpdateSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigPartialUpdateSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const body: Record<string, unknown> = {}
+        if (params.name !== undefined) {
+            body['name'] = params.name
+        }
+        if (params.description !== undefined) {
+            body['description'] = params.description
+        }
+        if (params.action !== undefined) {
+            body['action'] = params.action
+        }
+        if (params.event_name !== undefined) {
+            body['event_name'] = params.event_name
+        }
+        if (params.lookback_days !== undefined) {
+            body['lookback_days'] = params.lookback_days
+        }
+        const result = await context.api.request<Schemas.ActionPredictionConfig>({
+            method: 'PATCH',
+            path: `/api/environments/${projectId}/action_prediction_configs/${params.id}/`,
+            body,
+        })
+        return {
+            ...(result as any),
+            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_configs/${(result as any).id}`,
+        }
+    },
+})
+
+const ActionPredictionConfigDestroySchema = ActionPredictionConfigsDestroyParams.omit({ project_id: true })
+
+const actionPredictionConfigDestroy = (): ToolBase<typeof ActionPredictionConfigDestroySchema, unknown> => ({
+    name: 'action-prediction-config-destroy',
+    schema: ActionPredictionConfigDestroySchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigDestroySchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<unknown>({
+            method: 'DELETE',
+            path: `/api/environments/${projectId}/action_prediction_configs/${params.id}/`,
+        })
+        return result
+    },
+})
+
+const ActionPredictionConfigUploadUrlSchema = ActionPredictionConfigsUploadUrlCreateParams.omit({ project_id: true })
+
+const actionPredictionConfigUploadUrl = (): ToolBase<
+    typeof ActionPredictionConfigUploadUrlSchema,
+    Schemas.UploadURLResponse
+> => ({
+    name: 'action-prediction-config-upload-url',
+    schema: ActionPredictionConfigUploadUrlSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigUploadUrlSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.UploadURLResponse>({
+            method: 'POST',
+            path: `/api/environments/${projectId}/action_prediction_configs/${params.id}/upload_url/`,
+        })
+        return result
+    },
+})
 
 const ActionPredictionModelListSchema = ActionPredictionModelsListQueryParams
 
@@ -36,8 +192,26 @@ const actionPredictionModelList = (): ToolBase<
         })
         return {
             ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models`,
+            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_configs`,
         }
+    },
+})
+
+const ActionPredictionModelRetrieveSchema = ActionPredictionModelsRetrieveParams.omit({ project_id: true })
+
+const actionPredictionModelRetrieve = (): ToolBase<
+    typeof ActionPredictionModelRetrieveSchema,
+    Schemas.ActionPredictionModel
+> => ({
+    name: 'action-prediction-model-retrieve',
+    schema: ActionPredictionModelRetrieveSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionModelRetrieveSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.ActionPredictionModel>({
+            method: 'GET',
+            path: `/api/environments/${projectId}/action_prediction_models/${params.id}/`,
+        })
+        return result
     },
 })
 
@@ -52,20 +226,29 @@ const actionPredictionModelCreate = (): ToolBase<
     handler: async (context: Context, params: z.infer<typeof ActionPredictionModelCreateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.name !== undefined) {
-            body['name'] = params.name
+        if (params.config !== undefined) {
+            body['config'] = params.config
         }
-        if (params.description !== undefined) {
-            body['description'] = params.description
+        if (params.task !== undefined) {
+            body['task'] = params.task
         }
-        if (params.action !== undefined) {
-            body['action'] = params.action
+        if (params.task_run !== undefined) {
+            body['task_run'] = params.task_run
         }
-        if (params.event_name !== undefined) {
-            body['event_name'] = params.event_name
+        if (params.is_winning !== undefined) {
+            body['is_winning'] = params.is_winning
         }
-        if (params.lookback_days !== undefined) {
-            body['lookback_days'] = params.lookback_days
+        if (params.model_url !== undefined) {
+            body['model_url'] = params.model_url
+        }
+        if (params.metrics !== undefined) {
+            body['metrics'] = params.metrics
+        }
+        if (params.feature_importance !== undefined) {
+            body['feature_importance'] = params.feature_importance
+        }
+        if (params.artifact_script !== undefined) {
+            body['artifact_script'] = params.artifact_script
         }
         const result = await context.api.request<Schemas.ActionPredictionModel>({
             method: 'POST',
@@ -74,14 +257,14 @@ const actionPredictionModelCreate = (): ToolBase<
         })
         return {
             ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models/${(result as any).id}`,
+            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_configs/${(result as any).id}`,
         }
     },
 })
 
 const ActionPredictionModelPartialUpdateSchema = ActionPredictionModelsPartialUpdateParams.omit({
     project_id: true,
-}).extend(ActionPredictionModelsPartialUpdateBody.shape)
+}).extend(ActionPredictionModelsPartialUpdateBody.omit({ config: true }).shape)
 
 const actionPredictionModelPartialUpdate = (): ToolBase<
     typeof ActionPredictionModelPartialUpdateSchema,
@@ -92,20 +275,26 @@ const actionPredictionModelPartialUpdate = (): ToolBase<
     handler: async (context: Context, params: z.infer<typeof ActionPredictionModelPartialUpdateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.name !== undefined) {
-            body['name'] = params.name
+        if (params.task !== undefined) {
+            body['task'] = params.task
         }
-        if (params.description !== undefined) {
-            body['description'] = params.description
+        if (params.task_run !== undefined) {
+            body['task_run'] = params.task_run
         }
-        if (params.action !== undefined) {
-            body['action'] = params.action
+        if (params.is_winning !== undefined) {
+            body['is_winning'] = params.is_winning
         }
-        if (params.event_name !== undefined) {
-            body['event_name'] = params.event_name
+        if (params.model_url !== undefined) {
+            body['model_url'] = params.model_url
         }
-        if (params.lookback_days !== undefined) {
-            body['lookback_days'] = params.lookback_days
+        if (params.metrics !== undefined) {
+            body['metrics'] = params.metrics
+        }
+        if (params.feature_importance !== undefined) {
+            body['feature_importance'] = params.feature_importance
+        }
+        if (params.artifact_script !== undefined) {
+            body['artifact_script'] = params.artifact_script
         }
         const result = await context.api.request<Schemas.ActionPredictionModel>({
             method: 'PATCH',
@@ -114,163 +303,20 @@ const actionPredictionModelPartialUpdate = (): ToolBase<
         })
         return {
             ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models/${(result as any).id}`,
-        }
-    },
-})
-
-const ActionPredictionModelDestroySchema = ActionPredictionModelsDestroyParams.omit({ project_id: true })
-
-const actionPredictionModelDestroy = (): ToolBase<typeof ActionPredictionModelDestroySchema, unknown> => ({
-    name: 'action-prediction-model-destroy',
-    schema: ActionPredictionModelDestroySchema,
-    handler: async (context: Context, params: z.infer<typeof ActionPredictionModelDestroySchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<unknown>({
-            method: 'DELETE',
-            path: `/api/environments/${projectId}/action_prediction_models/${params.id}/`,
-        })
-        return result
-    },
-})
-
-const ActionPredictionModelUploadUrlSchema = ActionPredictionModelsUploadUrlCreateParams.omit({ project_id: true })
-
-const actionPredictionModelUploadUrl = (): ToolBase<
-    typeof ActionPredictionModelUploadUrlSchema,
-    Schemas.UploadURLResponse
-> => ({
-    name: 'action-prediction-model-upload-url',
-    schema: ActionPredictionModelUploadUrlSchema,
-    handler: async (context: Context, params: z.infer<typeof ActionPredictionModelUploadUrlSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.UploadURLResponse>({
-            method: 'POST',
-            path: `/api/environments/${projectId}/action_prediction_models/${params.id}/upload_url/`,
-        })
-        return result
-    },
-})
-
-const PredictionModelRunListSchema = ActionPredictionModelRunsListQueryParams
-
-const predictionModelRunList = (): ToolBase<
-    typeof PredictionModelRunListSchema,
-    Schemas.PaginatedActionPredictionModelRunList & { _posthogUrl: string }
-> => ({
-    name: 'prediction-model-run-list',
-    schema: PredictionModelRunListSchema,
-    handler: async (context: Context, params: z.infer<typeof PredictionModelRunListSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.PaginatedActionPredictionModelRunList>({
-            method: 'GET',
-            path: `/api/environments/${projectId}/action_prediction_model_runs/`,
-            query: {
-                limit: params.limit,
-                offset: params.offset,
-            },
-        })
-        return {
-            ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models`,
-        }
-    },
-})
-
-const PredictionModelRunCreateSchema = ActionPredictionModelRunsCreateBody
-
-const predictionModelRunCreate = (): ToolBase<
-    typeof PredictionModelRunCreateSchema,
-    Schemas.ActionPredictionModelRun & { _posthogUrl: string }
-> => ({
-    name: 'prediction-model-run-create',
-    schema: PredictionModelRunCreateSchema,
-    handler: async (context: Context, params: z.infer<typeof PredictionModelRunCreateSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const body: Record<string, unknown> = {}
-        if (params.prediction_model !== undefined) {
-            body['prediction_model'] = params.prediction_model
-        }
-        if (params.task_run !== undefined) {
-            body['task_run'] = params.task_run
-        }
-        if (params.is_winning !== undefined) {
-            body['is_winning'] = params.is_winning
-        }
-        if (params.model_url !== undefined) {
-            body['model_url'] = params.model_url
-        }
-        if (params.metrics !== undefined) {
-            body['metrics'] = params.metrics
-        }
-        if (params.feature_importance !== undefined) {
-            body['feature_importance'] = params.feature_importance
-        }
-        if (params.artifact_script !== undefined) {
-            body['artifact_script'] = params.artifact_script
-        }
-        const result = await context.api.request<Schemas.ActionPredictionModelRun>({
-            method: 'POST',
-            path: `/api/environments/${projectId}/action_prediction_model_runs/`,
-            body,
-        })
-        return {
-            ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models/${(result as any).id}`,
-        }
-    },
-})
-
-const PredictionModelRunPartialUpdateSchema = ActionPredictionModelRunsPartialUpdateParams.omit({
-    project_id: true,
-}).extend(ActionPredictionModelRunsPartialUpdateBody.omit({ prediction_model: true }).shape)
-
-const predictionModelRunPartialUpdate = (): ToolBase<
-    typeof PredictionModelRunPartialUpdateSchema,
-    Schemas.ActionPredictionModelRun & { _posthogUrl: string }
-> => ({
-    name: 'prediction-model-run-partial-update',
-    schema: PredictionModelRunPartialUpdateSchema,
-    handler: async (context: Context, params: z.infer<typeof PredictionModelRunPartialUpdateSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const body: Record<string, unknown> = {}
-        if (params.task_run !== undefined) {
-            body['task_run'] = params.task_run
-        }
-        if (params.is_winning !== undefined) {
-            body['is_winning'] = params.is_winning
-        }
-        if (params.model_url !== undefined) {
-            body['model_url'] = params.model_url
-        }
-        if (params.metrics !== undefined) {
-            body['metrics'] = params.metrics
-        }
-        if (params.feature_importance !== undefined) {
-            body['feature_importance'] = params.feature_importance
-        }
-        if (params.artifact_script !== undefined) {
-            body['artifact_script'] = params.artifact_script
-        }
-        const result = await context.api.request<Schemas.ActionPredictionModelRun>({
-            method: 'PATCH',
-            path: `/api/environments/${projectId}/action_prediction_model_runs/${params.id}/`,
-            body,
-        })
-        return {
-            ...(result as any),
-            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_models/${(result as any).id}`,
+            _posthogUrl: `${context.api.getProjectBaseUrl(projectId)}/action_prediction_configs/${(result as any).id}`,
         }
     },
 })
 
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
+    'action-prediction-config-list': actionPredictionConfigList,
+    'action-prediction-config-retrieve': actionPredictionConfigRetrieve,
+    'action-prediction-config-create': actionPredictionConfigCreate,
+    'action-prediction-config-partial-update': actionPredictionConfigPartialUpdate,
+    'action-prediction-config-destroy': actionPredictionConfigDestroy,
+    'action-prediction-config-upload-url': actionPredictionConfigUploadUrl,
     'action-prediction-model-list': actionPredictionModelList,
+    'action-prediction-model-retrieve': actionPredictionModelRetrieve,
     'action-prediction-model-create': actionPredictionModelCreate,
     'action-prediction-model-partial-update': actionPredictionModelPartialUpdate,
-    'action-prediction-model-destroy': actionPredictionModelDestroy,
-    'action-prediction-model-upload-url': actionPredictionModelUploadUrl,
-    'prediction-model-run-list': predictionModelRunList,
-    'prediction-model-run-create': predictionModelRunCreate,
-    'prediction-model-run-partial-update': predictionModelRunPartialUpdate,
 }
