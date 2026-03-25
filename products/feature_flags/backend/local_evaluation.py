@@ -36,7 +36,7 @@ import structlog
 from posthoganalytics import capture_exception
 from prometheus_client import Counter
 
-from posthog.models.cohort.cohort import Cohort, CohortOrEmpty
+from posthog.models.cohort.cohort import Cohort, CohortOrEmpty, is_cohort_recalculation_only_save
 from posthog.models.cohort.util import get_nested_cohort_ids
 from posthog.models.group_type_mapping import GroupTypeMapping
 from posthog.models.team import Team
@@ -862,6 +862,9 @@ def feature_flag_changed(sender, instance: "FeatureFlag", **kwargs):
 @receiver(post_save, sender=Cohort)
 @receiver(post_delete, sender=Cohort)
 def cohort_changed(sender, instance: "Cohort", **kwargs):
+    if is_cohort_recalculation_only_save(kwargs):
+        return
+
     from posthog.tasks.feature_flags import update_team_flags_cache
 
     transaction.on_commit(lambda: update_team_flags_cache.delay(instance.team_id))
