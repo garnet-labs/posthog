@@ -214,7 +214,9 @@ pub struct IssueFingerprintDenormalized {
     pub version: i64,
 }
 
-fn assigned_entity_fields_from_assignment(assignment: Option<&Assignment>) -> (Option<String>, Option<String>) {
+fn assigned_entity_fields_from_assignment(
+    assignment: Option<&Assignment>,
+) -> (Option<String>, Option<String>) {
     let Some(a) = assignment else {
         return (None, None);
     };
@@ -235,7 +237,8 @@ impl IssueFingerprintDenormalized {
         first_seen: DateTime<Utc>,
     ) -> Self {
         let now = Utc::now().timestamp_millis();
-        let (assigned_entity_type, assigned_entity_id) = assigned_entity_fields_from_assignment(assignment);
+        let (assigned_entity_type, assigned_entity_id) =
+            assigned_entity_fields_from_assignment(assignment);
         Self {
             team_id: issue.team_id,
             fingerprint: fingerprint.to_string(),
