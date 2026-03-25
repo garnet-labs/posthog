@@ -1,76 +1,114 @@
-import json
 import os
+import json
+import asyncio
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
-from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
 
 load_dotenv()
-from firecrawl.v2.types import ScrapeOptions
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent / "crawl_cache"
+URLS_FILE = CACHE_DIR / "_selected_urls.json"
+
+DISCOVER_PROMPT = """\
+Your goal is to find all product/feature pages for the website at {url}.
+
+Steps:
+1. Fetch {url}/robots.txt — look for Sitemap: entries
+2. Fetch each sitemap XML. If it's a sitemap index, fetch the child sitemaps too.
+3. From ALL URLs in the sitemaps, select only pages that describe product features,
+   capabilities, integrations, platform overview, or use cases.
+4. EXCLUDE: blog posts, changelog, careers, team/about, docs/tutorials, guides,
+   pricing, legal, community, newsletter, handbook, case studies, customer stories,
+   content marketing, thought leadership, API reference, and support/help pages.
+5. Aim for 20-100 URLs. Include both top-level product pages and their sub-pages
+   that describe specific features or capabilities.
+
+IMPORTANT:
+- Do NOT visit or fetch the actual pages. Only analyze URLs from sitemaps.
+- If robots.txt has no sitemap, try {url}/sitemap.xml directly.
+
+Respond with a JSON object inside a ```json``` code block matching this schema:
+
+{output_schema}
+"""
 
 
-def crawl_website(url: str) -> list[dict]:
-    if not url.startswith("http"):
-        url = f"https://{url}"
+class DiscoveredUrls(BaseModel):
+    urls: list[str] = Field(description="List of discovered product/feature page URLs for the target website")
+
+
+async def _discover_product_urls(
+    url: str,
+    *,
+    verbose: bool = False,
+    output_fn=None,
+) -> list[str]:
+    from asgiref.sync import sync_to_async
+
+    from products.tasks.backend.services.custom_prompt_executor import run_sandbox_agent_get_structured_output
+    from products.tasks.backend.services.custom_prompt_runner import resolve_sandbox_context_for_local_dev
 
     CACHE_DIR.mkdir(exist_ok=True)
 
-    cached = list(CACHE_DIR.glob("*.json"))
+    if URLS_FILE.exists():
+        cached = DiscoveredUrls.model_validate_json(URLS_FILE.read_text())
+        if output_fn:
+            output_fn(f"Using {len(cached.urls)} cached URLs from {URLS_FILE}")
+        return cached.urls
+
+    context = await sync_to_async(resolve_sandbox_context_for_local_dev)("PostHog/.github")
+    output_schema = json.dumps(DiscoveredUrls.model_json_schema(), indent=2)
+    prompt = DISCOVER_PROMPT.format(url=url, output_schema=output_schema)
+
+    if output_fn:
+        output_fn(f"Asking agent to discover product pages for {url}...")
+
+    result = await run_sandbox_agent_get_structured_output(
+        prompt=prompt,
+        context=context,
+        model_to_validate=DiscoveredUrls,
+        step_name="discover_product_urls",
+        verbose=verbose,
+        output_fn=output_fn,
+    )
+
+    URLS_FILE.write_text(result.model_dump_json(indent=2))
+    if output_fn:
+        output_fn(f"Discovered {len(result.urls)} product URLs")
+    return result.urls
+
+
+def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
+    from firecrawl import FirecrawlApp
+
+    cached = list(CACHE_DIR.glob("[0-9]*.json"))
     if cached:
-        print(f"Using {len(cached)} cached pages from {CACHE_DIR}")
+        if output_fn:
+            output_fn(f"Using {len(cached)} cached pages from {CACHE_DIR}")
         return [json.loads(f.read_text()) for f in sorted(cached)]
 
     firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
     assert firecrawl_api_key, "FIRECRAWL_API_KEY must be set in environment variables"
     app = FirecrawlApp(api_key=firecrawl_api_key)
 
-    scrape_opts = ScrapeOptions(
-        only_main_content=False,
-        max_age=172800000,
+    if output_fn:
+        output_fn(f"Batch scraping {len(urls)} URLs...")
+
+    scrape_result = app.batch_scrape(
+        urls,
         formats=["markdown", {"type": "screenshot", "fullPage": True}],
     )
-    print(f"Starting crawl of {url} (limit=35, max_depth=2)...")
-    crawl_result = app.crawl(
-        url,
-        sitemap="include",
-        crawl_entire_domain=False,
-        limit=35,
-        exclude_paths=[
-            r"blog.*",
-            r"changelog.*",
-            r"careers.*",
-            r"team.*",
-            r"about.*",
-            r"docs.*",
-            r"tutorials.*",
-            r"pricing.*",
-            r"legal.*",
-            r"terms.*",
-            r"privacy.*",
-            r"community.*",
-            r"newsletter.*",
-            r"handbook.*",
-        ],
-        prompt="Prioritize pages that describe product capabilities, features, integrations, and use cases. Follow links to individual product/feature pages, solution pages, and 'how it works' sections. Don't crawl documentation, handbooks, blog posts, news, careers, team, about, legal pages.",
-        max_discovery_depth=2,
-        scrape_options=scrape_opts,
-    )
 
-    print(f"Crawl result status: {crawl_result.status}")
-    print(f"Total pages discovered: {crawl_result.total}")
-    print(f"Pages completed: {crawl_result.completed}")
-    print(f"Credits used: {crawl_result.credits_used}")
-    print(f"Data length: {len(crawl_result.data) if crawl_result.data else 0}")
-
-    if not crawl_result.data:
-        print("No data returned. Full result:")
-        print(vars(crawl_result))
-        return []
+    if output_fn:
+        output_fn(f"Scrape status: {scrape_result.status}, completed: {scrape_result.completed}/{scrape_result.total}")
 
     pages = []
-    for i, doc in enumerate(crawl_result.data):
+    for i, doc in enumerate(scrape_result.data):
         page = {
             "markdown": doc.markdown,
             "screenshot": doc.screenshot if hasattr(doc, "screenshot") else None,
@@ -83,7 +121,22 @@ def crawl_website(url: str) -> list[dict]:
         filepath = CACHE_DIR / filename
         filepath.write_text(json.dumps(page, indent=2, default=str))
         pages.append(page)
-        print(f"Saved {filepath.name}")
+        if output_fn:
+            output_fn(f"  Saved {filepath.name}")
 
-    print(f"Crawled and cached {len(pages)} pages")
+    if output_fn:
+        output_fn(f"Scraped and cached {len(pages)} pages")
     return pages
+
+
+def crawl_website(url: str, *, verbose: bool = False, output_fn=None) -> list[dict]:
+    if not url.startswith("http"):
+        url = f"https://{url}"
+
+    urls = asyncio.run(_discover_product_urls(url, verbose=verbose, output_fn=output_fn))
+    if not urls:
+        if output_fn:
+            output_fn("No product URLs discovered")
+        return []
+
+    return _scrape_pages(urls, output_fn=output_fn)
