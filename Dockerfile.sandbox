@@ -74,6 +74,11 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # --- Changes occasionally: npm global packages ---
 RUN npm install -g @anthropic-ai/claude-code
 
+# --- Rarely changes: GeoIP database (pre-decompressed, read directly at runtime) ---
+RUN mkdir -p /share && \
+    curl -L "https://mmdbcdn.posthog.net/" --http1.1 --fail --retry 3 --retry-max-time 60 | \
+    brotli --decompress --output=/share/GeoLite2-City.mmdb
+
 # --- Static config ---
 RUN echo 'export PATH="/cache/python/bin:/usr/local/cargo/bin:$PATH"' > /etc/profile.d/sandbox.sh
 RUN printf 'set -g default-terminal "xterm-256color"\nset -g extended-keys on\nset -as terminal-features "xterm*:extkeys"\nset -g allow-passthrough on\n' > /etc/tmux.conf
@@ -84,10 +89,10 @@ RUN mkdir -p /cache/uv /cache/pnpm /cache/python /run/sshd \
 WORKDIR /workspace
 
 # --- Changes often: entrypoint and overlay files ---
-COPY --chmod=755 bin/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+COPY --chmod=755 bin/sandbox-entrypoint.py /usr/local/bin/sandbox-entrypoint.py
 
 # --- PRE-MERGE WORKAROUND (delete this block after merging to master) ---
-# See sandbox-entrypoint.sh for details.
+# See sandbox-entrypoint.py for details.
 COPY bin/wait-for-docker     /usr/local/share/sandbox/bin/wait-for-docker
 COPY bin/mprocs.yaml         /usr/local/share/sandbox/bin/mprocs.yaml
 COPY bin/start-backend       /usr/local/share/sandbox/bin/start-backend
@@ -97,4 +102,4 @@ COPY nodejs/package.json     /usr/local/share/sandbox/nodejs/package.json
 COPY rust/cyclotron-node/package.json /usr/local/share/sandbox/rust/cyclotron-node/package.json
 # --- END PRE-MERGE WORKAROUND ---
 
-ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint.sh"]
+ENTRYPOINT ["python3", "/usr/local/bin/sandbox-entrypoint.py"]
