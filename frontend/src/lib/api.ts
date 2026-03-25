@@ -5583,6 +5583,10 @@ const api = {
                 .create({ data: { content } })
         },
 
+        async sttToken(): Promise<{ token: string }> {
+            return api.create(new ApiRequest().conversations().withAction('stt_token').assembleFullUrl())
+        },
+
         async transcribe(audioBlob: Blob): Promise<{ text: string }> {
             const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'wav'
             const formData = new FormData()

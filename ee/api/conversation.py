@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -7,6 +8,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, StreamingHttpResponse
 
+import httpx
 import pydantic
 import structlog
 from asgiref.sync import async_to_sync as asgi_async_to_sync
@@ -577,6 +579,23 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
 
         return Response({"id": message.id}, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["POST"])
+    def stt_token(self, request: Request, *args, **kwargs):
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            return Response({"error": "ElevenLabs API key not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        try:
+            resp = httpx.post(
+                "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
+                headers={"xi-api-key": api_key},
+                timeout=10,
+            )
+            resp.raise_for_status()
+        except Exception:
+            logger.exception("ElevenLabs token generation failed")
+            return Response({"error": "Token generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"token": resp.json()["token"]})
+
     @action(detail=False, methods=["POST"], parser_classes=[MultiPartParser])
     def transcribe(self, request: Request, *args, **kwargs):
         audio = request.FILES.get("audio")
@@ -584,7 +603,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             return Response({"error": "No audio file provided"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             transcript = elevenlabs_client.speech_to_text.convert(
-                model_id="scribe_v1",
+                model_id="scribe_v2_realtime",
                 file=audio,
                 tag_audio_events=False,
             )
@@ -600,7 +619,7 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             return Response({"error": "No text provided"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             audio = elevenlabs_client.text_to_speech.convert(
-                voice_id="JBFqnCBsd6RMkjVDRZzb",
+                voice_id="SNQH49XmxHOJ7Xc0YHNb",
                 model_id="eleven_flash_v2_5",
                 text=text,
                 output_format="mp3_44100_128",

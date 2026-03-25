@@ -1,4 +1,4 @@
-import { actions, kea, listeners, path, reducers } from 'kea'
+import { actions, events, kea, listeners, path, reducers } from 'kea'
 
 import api from 'lib/api'
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
@@ -9,6 +9,24 @@ import { maxLogic } from './maxLogic'
 import { maxThreadLogic } from './maxThreadLogic'
 import type { voiceLogicType } from './voiceLogicType'
 
+const ELEVENLABS_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
+const STT_SAMPLE_RATE = 16000
+const STT_BUFFER_SIZE = 4096
+
+function float32ToInt16Base64(float32: Float32Array): string {
+    const int16 = new Int16Array(float32.length)
+    for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]))
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
+    }
+    const bytes = new Uint8Array(int16.buffer)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i])
+    }
+    return btoa(binary)
+}
+
 export const voiceLogic = kea<voiceLogicType>([
     path(['scenes', 'max', 'voiceLogic']),
 
@@ -16,12 +34,10 @@ export const voiceLogic = kea<voiceLogicType>([
         startRecording: (tabId: string) => ({ tabId }),
         stopRecording: true,
         setRecording: (recording: boolean) => ({ recording }),
-        setTranscribing: (transcribing: boolean) => ({ transcribing }),
+        setConnecting: (connecting: boolean) => ({ connecting }),
         setMicPermissionDenied: (denied: boolean) => ({ denied }),
         setVoiceModeEnabled: (enabled: boolean) => ({ enabled }),
         setActiveTabId: (tabId: string | null) => ({ tabId }),
-        transcriptionComplete: (text: string) => ({ text }),
-        transcriptionFailed: true,
         playResponse: (text: string) => ({ text }),
         setPlaybackActive: (active: boolean) => ({ active }),
         stopPlayback: true,
@@ -30,7 +46,7 @@ export const voiceLogic = kea<voiceLogicType>([
 
     reducers({
         recording: [false, { setRecording: (_, { recording }) => recording }],
-        transcribing: [false, { setTranscribing: (_, { transcribing }) => transcribing }],
+        connecting: [false, { setConnecting: (_, { connecting }) => connecting }],
         playbackActive: [false, { setPlaybackActive: (_, { active }) => active }],
         voiceModeEnabled: [
             false,
@@ -47,12 +63,14 @@ export const voiceLogic = kea<voiceLogicType>([
         startRecording: async ({ tabId }) => {
             actions.setActiveTabId(tabId)
             actions.setMicPermissionDenied(false)
+            actions.setConnecting(true)
 
             let stream: MediaStream
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true })
             } catch {
                 actions.setMicPermissionDenied(true)
+                actions.setConnecting(false)
                 return
             }
 
@@ -64,79 +82,172 @@ export const voiceLogic = kea<voiceLogicType>([
                 await cache.audioContext.resume()
             }
 
-            cache.mediaStream = stream
-            cache.audioChunks = [] as Blob[]
-            const recorder = new MediaRecorder(stream)
-            cache.mediaRecorder = recorder
-
-            recorder.ondataavailable = (event: BlobEvent) => {
-                if (event.data.size > 0) {
-                    cache.audioChunks.push(event.data)
-                }
+            // Get single-use token for client-side WebSocket auth
+            let token: string
+            try {
+                const resp = await api.conversations.sttToken()
+                token = resp.token
+            } catch {
+                stream.getTracks().forEach((t) => t.stop())
+                actions.setConnecting(false)
+                lemonToast.error('Failed to start voice input.')
+                return
             }
 
-            recorder.onstop = () => {
-                const mimeType = recorder.mimeType
-                const blob = new Blob(cache.audioChunks, { type: mimeType })
-                cache.audioChunks = []
+            cache.mediaStream = stream
+            cache.committedParts = [] as string[]
+            cache.currentPartial = ''
 
-                // Release mic
-                cache.mediaStream?.getTracks().forEach((t: MediaStreamTrack) => t.stop())
-                cache.mediaStream = null
+            const params = new URLSearchParams({
+                token,
+                model_id: 'scribe_v2_realtime',
+                commit_strategy: 'vad',
+                audio_format: `pcm_${STT_SAMPLE_RATE}`,
+            })
+            const ws = new WebSocket(`${ELEVENLABS_WSS}?${params.toString()}`)
+            cache.sttWebSocket = ws
 
-                if (blob.size === 0) {
-                    actions.setTranscribing(false)
+            ws.onopen = () => {
+                // Create a dedicated AudioContext at the STT sample rate for recording
+                const recordingCtx = new AudioContext({ sampleRate: STT_SAMPLE_RATE })
+                cache.recordingAudioContext = recordingCtx
+
+                const source = recordingCtx.createMediaStreamSource(stream)
+                // ScriptProcessorNode needs a path to destination to fire onaudioprocess.
+                // Route through a silent gain node so mic audio doesn't play through speakers.
+                const processor = recordingCtx.createScriptProcessor(STT_BUFFER_SIZE, 1, 1)
+                const silentGain = recordingCtx.createGain()
+                silentGain.gain.value = 0
+
+                source.connect(processor)
+                processor.connect(silentGain)
+                silentGain.connect(recordingCtx.destination)
+
+                processor.onaudioprocess = (e: AudioProcessingEvent) => {
+                    if (ws.readyState !== WebSocket.OPEN) {
+                        return
+                    }
+                    const float32 = e.inputBuffer.getChannelData(0)
+                    ws.send(
+                        JSON.stringify({
+                            message_type: 'input_audio_chunk',
+                            audio_base_64: float32ToInt16Base64(float32),
+                            commit: false,
+                            sample_rate: STT_SAMPLE_RATE,
+                        })
+                    )
+                }
+
+                cache.scriptProcessor = processor
+                cache.recordingSource = source
+                cache.silentGain = silentGain
+
+                actions.setConnecting(false)
+                actions.setRecording(true)
+                actions.setVoiceModeEnabled(true)
+            }
+
+            ws.onmessage = (event: MessageEvent) => {
+                const data = JSON.parse(event.data)
+                const currentTabId = values.activeTabId
+                if (!currentTabId) {
+                    return
+                }
+                const mounted = maxLogic.findMounted({ tabId: currentTabId })
+
+                if (data.message_type === 'partial_transcript') {
+                    cache.currentPartial = data.text || ''
+                } else if (data.message_type === 'committed_transcript') {
+                    if (data.text) {
+                        cache.committedParts.push(data.text)
+                    }
+                    cache.currentPartial = ''
+                } else if (data.error) {
+                    // ElevenLabs error events (auth_error, quota_exceeded, etc.) arrive as messages, not WS errors
+                    lemonToast.error(`Voice transcription error: ${data.error}`)
+                    return
+                } else {
                     return
                 }
 
-                actions.setTranscribing(true)
-                api.conversations
-                    .transcribe(blob)
-                    .then(({ text }) => {
-                        actions.setTranscribing(false)
-                        if (text?.trim()) {
-                            actions.transcriptionComplete(text.trim())
-                        } else {
-                            lemonToast.warning('No speech detected. Try again.')
-                        }
-                    })
-                    .catch(() => {
-                        actions.setTranscribing(false)
-                        actions.transcriptionFailed()
-                    })
+                const parts = cache.committedParts as string[]
+                const partial = cache.currentPartial as string
+                const fullText = [...parts, partial].filter(Boolean).join(' ')
+                mounted?.actions.setQuestion(fullText)
             }
 
-            recorder.start()
-            actions.setRecording(true)
-            actions.setVoiceModeEnabled(true)
+            ws.onerror = () => {
+                if (values.recording || values.connecting) {
+                    actions.stopRecording()
+                    lemonToast.error('Voice transcription connection failed.')
+                }
+            }
+
+            // Server-initiated close (session timeout, quota, etc.) — stop recording if user didn't initiate
+            ws.onclose = () => {
+                if (cache.sttWebSocket === ws && (values.recording || values.connecting)) {
+                    actions.stopRecording()
+                }
+            }
         },
 
         stopRecording: () => {
-            const recorder = cache.mediaRecorder as MediaRecorder | undefined
-            if (recorder && recorder.state !== 'inactive') {
-                recorder.stop()
+            // Close WebSocket
+            const ws = cache.sttWebSocket as WebSocket | undefined
+            if (ws) {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.close()
+                } else if (ws.readyState === WebSocket.CONNECTING) {
+                    ws.onopen = () => ws.close()
+                }
+                cache.sttWebSocket = null
             }
+
+            // Disconnect audio processing
+            const processor = cache.scriptProcessor as ScriptProcessorNode | undefined
+            processor?.disconnect()
+            cache.scriptProcessor = null
+            const source = cache.recordingSource as MediaStreamAudioSourceNode | undefined
+            source?.disconnect()
+            cache.recordingSource = null
+            const silentGain = cache.silentGain as GainNode | undefined
+            silentGain?.disconnect()
+            cache.silentGain = null
+            const recordingCtx = cache.recordingAudioContext as AudioContext | undefined
+            if (recordingCtx) {
+                void recordingCtx.close()
+                cache.recordingAudioContext = null
+            }
+
+            // Release mic
+            const mediaStream = cache.mediaStream as MediaStream | undefined
+            mediaStream?.getTracks().forEach((t) => t.stop())
+            cache.mediaStream = null
+
+            // Build final transcript from committed segments + any trailing partial
+            const committedParts = (cache.committedParts as string[]) || []
+            const currentPartial = (cache.currentPartial as string) || ''
+            const finalText = [...committedParts, currentPartial].filter(Boolean).join(' ').trim()
+            cache.committedParts = []
+            cache.currentPartial = ''
+
+            const wasRecording = values.recording
             actions.setRecording(false)
-        },
+            actions.setConnecting(false)
 
-        transcriptionComplete: ({ text }) => {
-            const tabId = values.activeTabId
-            if (!tabId) {
-                return
-            }
-            const mountedMaxLogic = maxLogic.findMounted({ tabId })
-            if (mountedMaxLogic) {
-                mountedMaxLogic.actions.setQuestion(text)
-            }
+            if (finalText && wasRecording) {
+                const tabId = values.activeTabId
+                if (!tabId) {
+                    return
+                }
+                const mountedMaxLogic = maxLogic.findMounted({ tabId })
+                mountedMaxLogic?.actions.setQuestion(finalText)
 
-            const mountedThreadLogic = maxThreadLogic.findMounted()
-            if (mountedThreadLogic) {
-                mountedThreadLogic.actions.askMax(text)
+                const mountedThreadLogic = maxThreadLogic.findMounted()
+                mountedThreadLogic?.actions.askMax(finalText)
+            } else if (!finalText && wasRecording) {
+                lemonToast.warning('No speech detected. Try again.')
             }
-        },
-
-        transcriptionFailed: () => {
-            lemonToast.error('Transcription failed. Please try again.')
         },
 
         playResponse: async ({ text }) => {
@@ -203,6 +314,17 @@ export const voiceLogic = kea<voiceLogicType>([
                 cache.currentSource = null
             }
             actions.setPlaybackActive(false)
+        },
+    })),
+
+    events(({ values, actions }) => ({
+        beforeUnmount: () => {
+            if (values.recording || values.connecting) {
+                actions.stopRecording()
+            }
+            if (values.playbackActive) {
+                actions.stopPlayback()
+            }
         },
     })),
 ])

@@ -143,7 +143,7 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
     const { dataProcessingAccepted, dataProcessingApprovalDisabledReason } = useValues(maxGlobalLogic)
     const { question, tabId } = useValues(maxLogic)
     const { setQuestion } = useActions(maxLogic)
-    const { recording, transcribing, micPermissionDenied } = useValues(voiceLogic)
+    const { recording, connecting, micPermissionDenied } = useValues(voiceLogic)
     const { startRecording, stopRecording, disableVoiceMode } = useActions(voiceLogic)
     const { user } = useValues(userLogic)
     const {
@@ -273,9 +273,9 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                         className="text-secondary absolute top-4 left-4 text-sm pointer-events-none"
                                     >
                                         {recording ? (
-                                            <span className="text-danger">Recording… click mic to stop</span>
-                                        ) : transcribing ? (
-                                            'Transcribing…'
+                                            <span className="text-danger">Listening… click mic to send</span>
+                                        ) : connecting ? (
+                                            'Connecting…'
                                         ) : conversation && isSharedThread ? (
                                             `This thread was shared with you by ${conversation.user.first_name} ${conversation.user.last_name}`
                                         ) : threadLoading ? (
@@ -378,7 +378,7 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                 type="tertiary"
                                 size="small"
                                 icon={
-                                    transcribing ? (
+                                    connecting ? (
                                         <Spinner className="text-muted" />
                                     ) : (
                                         <IconMicrophone
@@ -397,10 +397,10 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                     micPermissionDenied
                                         ? 'Microphone access denied — check browser settings'
                                         : recording
-                                          ? 'Stop recording'
+                                          ? 'Stop recording and send'
                                           : 'Voice input'
                                 }
-                                disabled={transcribing || inputDisabled}
+                                disabled={connecting || inputDisabled}
                             />
                         )}
                         <AIConsentPopoverWrapper
