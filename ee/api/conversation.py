@@ -14,6 +14,7 @@ import structlog
 from asgiref.sync import async_to_sync as asgi_async_to_sync
 from drf_spectacular.utils import extend_schema
 from elevenlabs import ElevenLabs
+from elevenlabs.types.voice_settings import VoiceSettings
 from loginas.utils import is_impersonated_session
 from prometheus_client import Histogram
 from rest_framework import exceptions, serializers, status
@@ -60,6 +61,7 @@ from ee.hogai.sandbox.executor import handle_sandbox_message
 from ee.hogai.stream.redis_stream import get_conversation_stream_key
 from ee.hogai.utils.aio import async_to_sync
 from ee.hogai.utils.sse import AssistantSSESerializer
+from ee.hogai.utils.tts_text import prepare_text_for_elevenlabs_tts
 from ee.hogai.utils.types import PartialAssistantState
 from ee.models.assistant import Conversation
 
@@ -614,7 +616,8 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
 
     @action(detail=False, methods=["POST"])
     def tts(self, request: Request, *args, **kwargs):
-        text = (request.data.get("text") or "")[:5000]
+        raw = request.data.get("text") or ""
+        text = prepare_text_for_elevenlabs_tts(str(raw))[:5000]
         if not text:
             return Response({"error": "No text provided"}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -622,12 +625,25 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
                 voice_id="SNQH49XmxHOJ7Xc0YHNb",
                 model_id="eleven_flash_v2_5",
                 text=text,
-                output_format="mp3_44100_128",
+                voice_settings=VoiceSettings(
+                    stability=0.5,
+                    similarity_boost=0.75,
+                    style=0.0,
+                    use_speaker_boost=True,
+                    speed=1.0,
+                ),
+                # ElevenLabs built-in normalizer (numbers, dates, etc.) — complements our abbreviation expansion
+                apply_text_normalization="on",
+                # PCM s16le mono @ 44.1kHz — streamed to the client as raw bytes (see voiceLogic TTS_PCM_SAMPLE_RATE)
+                # Requires a plan that includes 44.1kHz PCM; otherwise use e.g. pcm_24000 and match the frontend constant
+                output_format="pcm_44100",
+                optimize_streaming_latency=3,
             )
         except Exception:
             logger.exception("ElevenLabs TTS failed")
             return Response({"error": "Text-to-speech failed"}, status=status.HTTP_502_BAD_GATEWAY)
-        response = HttpResponse(content_type="audio/mpeg")
+        # Raw s16le mono @ 44.1kHz (ElevenLabs pcm_44100) — client decodes with fixed layout
+        response = HttpResponse(content_type="application/octet-stream")
         for chunk in audio:
             if chunk:
                 response.write(chunk)

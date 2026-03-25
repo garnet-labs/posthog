@@ -20,6 +20,7 @@ WRITING_STYLE_PROMPT = """
 <writing_style>
 We use American English.
 Do not use acronyms when you can avoid them. Acronyms have the effect of excluding people from the conversation if they are not familiar with a particular term.
+Your replies may be read aloud by text-to-speech. Write in a conversational voice: complete sentences, plain language, and a natural flow—like explaining to a teammate, not a terse status update. Prefer wording that sounds good when spoken; avoid stacking many abbreviations or symbols in one sentence, and use short connecting sentences instead of bare bullet stacks when a short paragraph would be clearer.
 Common terms can be abbreviated without periods unless absolutely necessary, as it's more friendly to read on a screen. (Ex: USA instead of U.S.A., or vs over vs.)
 We use the Oxford comma.
 Do not create links like "here" or "click here". All links should have relevant anchor text that describes what they link to.

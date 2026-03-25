@@ -74,6 +74,7 @@ import type { maxThreadLogicType } from './maxThreadLogicType'
 import { MaxUIContext } from './maxTypes'
 import { MAX_SLASH_COMMANDS, SlashCommand } from './slash-commands'
 import { EnhancedToolCall, getToolCallDescriptionAndWidget } from './Thread'
+import { sentenceForToolNames } from './toolCallSpeech'
 import {
     getAgentModeForScene,
     isAssistantMessage,
@@ -605,6 +606,8 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
             const traceId = uuid()
             actions.setTraceId(traceId)
 
+            voiceLogic.findMounted()?.actions.resetStreamingTtsOffsets()
+
             if (generationAttempt === 0 && streamData.content && addToThread) {
                 const message: ThreadMessage = {
                     type: AssistantMessageType.Human,
@@ -662,9 +665,14 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
 
                 while (true) {
                     const { done, value } = await reader.read()
-                    parser.feed(decoder.decode(value))
+                    if (value?.byteLength) {
+                        parser.feed(decoder.decode(value))
+                        // Process each SSE batch before reading more so UI + streaming TTS run as events arrive
+                        await Promise.all(pendingEventHandlers)
+                        pendingEventHandlers.length = 0
+                    }
                     if (done) {
-                        await Promise.all(pendingEventHandlers) // Wait for all onEvent handlers to complete
+                        await Promise.all(pendingEventHandlers)
                         break
                     }
                 }
@@ -1127,13 +1135,18 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
                 actions.askMax(nextMessage.content)
             }
 
-            // Auto-play TTS when voice mode is active (skip if queue is being consumed — TTS will fire on the final completion)
+            // Flush any remaining assistant text to TTS (streaming already enqueued sentence chunks)
             if (!shouldConsumeSandboxQueue) {
                 const voice = voiceLogic.findMounted()
                 if (voice?.values.voiceModeEnabled) {
                     const lastAssistantMsg = [...values.threadRaw].reverse().find((m) => isAssistantMessage(m))
-                    if (lastAssistantMsg?.content) {
-                        voice.actions.playResponse(lastAssistantMsg.content)
+                    if (lastAssistantMsg?.content && typeof lastAssistantMsg.content === 'string') {
+                        voice.actions.syncAssistantStreamingTts({
+                            traceId: values.traceId,
+                            messageId: lastAssistantMsg.id,
+                            content: lastAssistantMsg.content,
+                            isFinal: true,
+                        })
                     }
                 }
             }
@@ -1955,6 +1968,19 @@ export async function onEventImplementation(
                 ...parsedResponse,
                 status: 'completed',
             })
+            const voiceForToolCall = voiceLogic.findMounted()
+            if (voiceForToolCall?.values.voiceModeEnabled) {
+                const names = Object.keys(parsedResponse.ui_payload ?? {}).filter(
+                    (toolName) => !values.availableStaticTools.some((tool) => tool.identifier === toolName)
+                )
+                const sentence = sentenceForToolNames(names)
+                if (sentence) {
+                    voiceForToolCall.actions.playToolCallNarration({
+                        dedupeKey: `${values.traceId}:${parsedResponse.tool_call_id}`,
+                        sentence,
+                    })
+                }
+            }
         } else {
             if (isAssistantMessage(parsedResponse) && parsedResponse.id && parsedResponse.tool_calls?.length) {
                 for (const { name: toolName, args: toolResult } of parsedResponse.tool_calls) {
@@ -1962,6 +1988,26 @@ export async function onEventImplementation(
                         continue // Non-static tools (contextual) operate via ui_payload instead
                     }
                     await values.toolMap[toolName]?.callback?.(toolResult, props.conversationId)
+                }
+            }
+            if (isAssistantMessage(parsedResponse) && parsedResponse.tool_calls?.length) {
+                const voiceForAssistantTools = voiceLogic.findMounted()
+                if (voiceForAssistantTools?.values.voiceModeEnabled) {
+                    const names = parsedResponse.tool_calls
+                        .filter((tc) => !values.availableStaticTools.some((tool) => tool.identifier === tc.name))
+                        .map((tc) => tc.name)
+                    const sentence = sentenceForToolNames(names)
+                    if (sentence) {
+                        const ids = parsedResponse.tool_calls
+                            .map((tc) => tc.id)
+                            .filter(Boolean)
+                            .sort()
+                            .join('|')
+                        voiceForAssistantTools.actions.playToolCallNarration({
+                            dedupeKey: `${values.traceId}:${ids || names.join(',')}`,
+                            sentence,
+                        })
+                    }
                 }
             }
             // Check if a message with the same ID already exists
@@ -1991,6 +2037,19 @@ export async function onEventImplementation(
                     ...parsedResponse,
                     status: 'completed',
                 })
+            }
+
+            if (isAssistantMessage(parsedResponse) && typeof parsedResponse.content === 'string') {
+                const voice = voiceLogic.findMounted()
+                if (voice?.values.voiceModeEnabled) {
+                    // Sentence boundaries flush during streaming; isFinal only in completeThreadGeneration
+                    voice.actions.syncAssistantStreamingTts({
+                        traceId: values.traceId,
+                        messageId: parsedResponse.id,
+                        content: parsedResponse.content,
+                        isFinal: false,
+                    })
+                }
             }
         }
     } else if (event === AssistantEventType.Status) {
@@ -2038,19 +2097,34 @@ export async function onEventImplementation(
         // For agent text messages, render as normal assistant messages in the thread
         if (entry.type === 'agent') {
             const lastMsg = values.threadRaw[values.threadRaw.length - 1]
+            let streamedContent: string
+            let streamedMessageId: string | undefined
             if (isAssistantMessage(lastMsg) && lastMsg.id?.startsWith('sandbox-')) {
                 // Append to existing streaming message
+                streamedContent = (lastMsg.content || '') + (entry.message || '')
+                streamedMessageId = lastMsg.id
                 actions.replaceMessage(values.threadRaw.length - 1, {
                     ...lastMsg,
-                    content: (lastMsg.content || '') + (entry.message || ''),
+                    content: streamedContent,
                     status: 'loading',
                 })
             } else {
+                streamedMessageId = `sandbox-${entry.id}`
+                streamedContent = entry.message || ''
                 actions.addMessage({
                     type: AssistantMessageType.Assistant,
-                    id: `sandbox-${entry.id}`,
-                    content: entry.message || '',
+                    id: streamedMessageId,
+                    content: streamedContent,
                     status: 'loading',
+                })
+            }
+            const voice = voiceLogic.findMounted()
+            if (voice?.values.voiceModeEnabled) {
+                voice.actions.syncAssistantStreamingTts({
+                    traceId: values.traceId,
+                    messageId: streamedMessageId,
+                    content: streamedContent,
+                    isFinal: false,
                 })
             }
         }
