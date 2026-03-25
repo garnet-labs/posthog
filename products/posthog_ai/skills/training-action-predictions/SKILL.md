@@ -127,6 +127,10 @@ After the loop, produce a summary:
 - Experiments: {n} run, {n_winning} improvements found
 ```
 
+### Next step: score users
+
+Once a winning model exists, suggest the `predicting-user-actions` skill to score users. It uses the winning run's `artifact_scripts` to fetch fresh data, apply the trained pipeline, and write prediction scores as person properties — making them available in cohorts, feature flags, and experiments.
+
 ## Guardrails
 
 - **No hardcoding**: the reference scripts use `downloaded_file` / 28 days as an example. The agent MUST replace these with the actual target event and lookback_days from the `ActionPredictionModel`. The HogQL query, bucket thresholds, and all config should be adapted to the specific action being predicted.
