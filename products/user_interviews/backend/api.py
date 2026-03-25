@@ -52,7 +52,7 @@ class UserInterviewSerializer(serializers.ModelSerializer):
 
     def _transcribe_audio(self, audio: File, interviewee_emails: list[str]):
         transcript = elevenlabs_client.speech_to_text.convert(
-            model_id="scribe_v2_realtime",
+            model_id="scribe_v1",
             file=audio,
             num_speakers=10,  # Maximum number of speakers, not expected one
             diarize=True,
