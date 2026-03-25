@@ -12,27 +12,20 @@ import (
 func (m Model) renderHeader() string {
 	brand := headerBrandStyle.Render("phtest")
 
-	// Aggregate stats across all suites (not just visible entries)
-	var passed, failed, running, total int
-	for _, s := range m.mgr.Suites() {
-		total++
-		switch s.Status() {
-		case runner.StatusPassed:
-			passed++
-		case runner.StatusFailed:
-			failed++
-		case runner.StatusRunning:
-			running++
-		}
-	}
-
 	var parts []string
-	parts = append(parts, lipgloss.NewStyle().Foreground(colorGreen).Render(fmt.Sprintf("%d/%d passed", passed, total)))
-	if failed > 0 {
-		parts = append(parts, lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf("%d failed", failed)))
-	}
-	if running > 0 {
-		parts = append(parts, lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf("%d running", running)))
+	if s := m.activeSuite(); s != nil {
+		if r := s.Result(); r != nil {
+			total := r.Passed + r.Failed + r.Skipped + r.Errors
+			parts = append(parts, lipgloss.NewStyle().Foreground(colorGreen).Render(fmt.Sprintf("%d/%d passed", r.Passed, total)))
+			if r.Failed > 0 {
+				parts = append(parts, lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf("%d failed", r.Failed)))
+			}
+			if r.Skipped > 0 {
+				parts = append(parts, lipgloss.NewStyle().Foreground(colorGrey).Render(fmt.Sprintf("%d skipped", r.Skipped)))
+			}
+		} else if s.Status() == runner.StatusRunning {
+			parts = append(parts, lipgloss.NewStyle().Foreground(colorYellow).Render("running…"))
+		}
 	}
 	meta := headerMetaStyle.Render(strings.Join(parts, "  "))
 
@@ -43,7 +36,8 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderSidebar() string {
 	h := m.sidebarHeight()
-	innerW := sidebarWidth - 1
+	sw := m.sidebarWidth()
+	innerW := sw - 1
 
 	start := min(max(m.entryOffset, 0), max(0, len(m.entries)-1))
 	end := min(len(m.entries), start+h)
@@ -128,6 +122,51 @@ func (m *Model) ensureSidebarCursorVisible() {
 	if m.entryCursor >= m.entryOffset+h {
 		m.entryOffset = m.entryCursor - h + 1
 	}
+}
+
+func (m Model) renderDetail() string {
+	h := m.sidebarHeight()
+	innerW := detailSidebarWidth - 1
+	focused := m.focusedPane == focusDetail
+
+	start := min(max(m.detailOffset, 0), max(0, len(m.detailEntries)-1))
+	end := min(len(m.detailEntries), start+h)
+
+	var rows []string
+	for i := start; i < end; i++ {
+		e := m.detailEntries[i]
+		indent := strings.Repeat("  ", e.Depth)
+		name := truncate(e.Name, max(innerW-len(indent)-1, 1))
+
+		selected := focused && i == m.detailCursor
+		if selected {
+			row := lipgloss.NewStyle().
+				Background(colorDarkGrey).
+				Foreground(colorWhite).
+				Bold(true).
+				PaddingLeft(1).
+				Width(innerW).
+				Render(indent + name)
+			rows = append(rows, row)
+		} else {
+			row := lipgloss.NewStyle().
+				Foreground(colorGrey).
+				PaddingLeft(1).
+				Width(innerW).
+				Render(indent + name)
+			rows = append(rows, row)
+		}
+	}
+
+	for i := end - start; i < h; i++ {
+		rows = append(rows, procInactiveStyle.Width(innerW).Render(""))
+	}
+
+	style := borderStyle
+	if focused {
+		style = borderFocusedStyle
+	}
+	return style.Height(h).Render(strings.Join(rows, "\n"))
 }
 
 func (m Model) renderOutput() string {

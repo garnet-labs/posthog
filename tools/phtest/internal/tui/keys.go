@@ -28,36 +28,40 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 		m = m.applySize()
 
 	case key.Matches(msg, m.keys.NextPane):
-		if m.focusedPane == focusSidebar {
-			m.focusedPane = focusOutput
-		} else {
-			m.focusedPane = focusSidebar
-		}
+		m.focusedPane = m.nextPane(+1)
 
 	case key.Matches(msg, m.keys.PrevPane):
-		if m.focusedPane == focusOutput {
-			m.focusedPane = focusSidebar
-		} else {
-			m.focusedPane = focusOutput
-		}
+		m.focusedPane = m.nextPane(-1)
 
 	case key.Matches(msg, m.keys.NextSuite):
-		if m.focusedPane == focusSidebar {
+		switch m.focusedPane {
+		case focusSidebar:
 			if m.moveCursor(+1) {
 				m.ensureSidebarCursorVisible()
 				m = m.loadActiveSuite()
 			}
-		} else {
+		case focusDetail:
+			if m.detailCursor < len(m.detailEntries)-1 {
+				m.detailCursor++
+				m.ensureDetailCursorVisible()
+			}
+		default:
 			cmds = append(cmds, m.forwardToViewport(msg))
 		}
 
 	case key.Matches(msg, m.keys.PrevSuite):
-		if m.focusedPane == focusSidebar {
+		switch m.focusedPane {
+		case focusSidebar:
 			if m.moveCursor(-1) {
 				m.ensureSidebarCursorVisible()
 				m = m.loadActiveSuite()
 			}
-		} else {
+		case focusDetail:
+			if m.detailCursor > 0 {
+				m.detailCursor--
+				m.ensureDetailCursorVisible()
+			}
+		default:
 			cmds = append(cmds, m.forwardToViewport(msg))
 		}
 
@@ -77,12 +81,19 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 		}
 
 	case key.Matches(msg, m.keys.RunSuite):
-		if m.focusedPane == focusSidebar {
+		switch m.focusedPane {
+		case focusSidebar:
 			if e := m.entries[m.entryCursor]; e.isNode {
 				go m.mgr.RunPath(e.path)
 			} else if s := m.activeSuite(); s != nil {
 				send := m.mgr.Send()
 				go func() { _ = s.Start(send) }()
+			}
+		case focusDetail:
+			if s := m.activeSuite(); s != nil && m.detailCursor < len(m.detailEntries) {
+				cmd := filteredCmd(s, m.detailEntries[m.detailCursor].Name)
+				send := m.mgr.Send()
+				go func() { _ = s.StartFiltered(cmd, send) }()
 			}
 		}
 
@@ -106,4 +117,18 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// nextPane cycles through available panes. Detail is only included when visible.
+func (m Model) nextPane(dir int) focusPane {
+	panes := []focusPane{focusSidebar, focusOutput}
+	if m.hasDetail() {
+		panes = []focusPane{focusSidebar, focusOutput, focusDetail}
+	}
+	for i, p := range panes {
+		if p == m.focusedPane {
+			return panes[(i+dir+len(panes))%len(panes)]
+		}
+	}
+	return focusSidebar
 }

@@ -19,7 +19,9 @@ var (
 	colorBlack    = palette.ColorBlack
 )
 
-const sidebarWidth = 24
+const sidebarBaseWidth = 24
+const sidebarDepthUnit = 2
+const detailSidebarWidth = 32
 const headerHeight = 1
 const footerHeightShort = 3
 const footerHeightFull = 5
@@ -74,7 +76,6 @@ var (
 	searchCurrentMatchStyle = lipgloss.NewStyle().
 				Background(colorYellow).
 				Foreground(colorBlack)
-
 )
 
 func statusIconChar(s runner.Status) string {

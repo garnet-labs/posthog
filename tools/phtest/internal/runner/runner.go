@@ -134,6 +134,15 @@ func (s *TestSuite) Snapshot() Snapshot {
 }
 
 func (s *TestSuite) Start(send func(tea.Msg)) error {
+	return s.run(s.Suite.Cmd, send)
+}
+
+// StartFiltered runs a custom command (e.g. with a test filter) in the suite's context.
+func (s *TestSuite) StartFiltered(cmd string, send func(tea.Msg)) error {
+	return s.run(cmd, send)
+}
+
+func (s *TestSuite) run(shellCmd string, send func(tea.Msg)) error {
 	s.mu.Lock()
 	if s.status == StatusRunning {
 		s.mu.Unlock()
@@ -150,7 +159,7 @@ func (s *TestSuite) Start(send func(tea.Msg)) error {
 
 	send(StatusMsg{Name: s.Suite.Name, Status: StatusRunning})
 
-	cmd := exec.Command("bash", "-c", s.Suite.Cmd)
+	cmd := exec.Command("bash", "-c", shellCmd)
 	cmd.Dir = s.Suite.Dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 

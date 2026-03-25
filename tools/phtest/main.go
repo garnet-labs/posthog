@@ -65,7 +65,7 @@ func main() {
 	}
 
 	mgr := runner.NewManager(suites)
-	m := tui.New(mgr, logger)
+	m := tui.New(mgr, repoRoot, logger)
 	p := tea.NewProgram(m)
 	mgr.SetSend(p.Send)
 

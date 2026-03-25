@@ -3,8 +3,9 @@ package tui
 import tea "charm.land/bubbletea/v2"
 
 func (m Model) handleMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	sw := m.sidebarWidth()
 	if msg.Button == tea.MouseLeft {
-		if msg.X < sidebarWidth && msg.Y >= headerHeight {
+		if msg.X < sw && msg.Y >= headerHeight {
 			m.focusedPane = focusSidebar
 			row := msg.Y - headerHeight - 1
 			idx := m.entryOffset + row
@@ -18,7 +19,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) (tea.Mode
 					m = m.loadActiveSuite()
 				}
 			}
-		} else if msg.X >= sidebarWidth {
+		} else if msg.X >= sw {
 			m.focusedPane = focusOutput
 		}
 	}

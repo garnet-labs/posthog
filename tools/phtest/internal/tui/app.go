@@ -10,7 +10,9 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/posthog/posthog/phtest/internal/discover"
 	"github.com/posthog/posthog/phtest/internal/runner"
+	"github.com/posthog/posthog/phtest/internal/testnames"
 )
 
 type focusPane int
@@ -18,6 +20,7 @@ type focusPane int
 const (
 	focusSidebar focusPane = iota
 	focusOutput
+	focusDetail
 )
 
 // sidebarEntry is either a tree node (collapsible category) or a leaf (test suite).
@@ -30,7 +33,8 @@ type sidebarEntry struct {
 }
 
 type Model struct {
-	mgr *runner.SuiteManager
+	mgr      *runner.SuiteManager
+	repoRoot string
 
 	focusedPane focusPane
 
@@ -43,11 +47,16 @@ type Model struct {
 	searchMatches []int
 	searchCursor  int
 
-	// Sidebar
-	entries   []sidebarEntry
+	// Sidebar (left)
+	entries     []sidebarEntry
 	entryCursor int
 	entryOffset int
-	collapsed map[string]bool // keyed by slash-joined node path
+	collapsed   map[string]bool // keyed by slash-joined node path
+
+	// Detail sidebar (right) — shows individual tests in the selected file
+	detailEntries []testnames.TestEntry
+	detailCursor  int
+	detailOffset  int
 
 	keys     keyMap
 	help     help.Model
@@ -61,20 +70,18 @@ type Model struct {
 	log *log.Logger
 }
 
-func New(mgr *runner.SuiteManager, logger *log.Logger) Model {
+func New(mgr *runner.SuiteManager, repoRoot string, logger *log.Logger) Model {
 	keys := defaultKeyMap()
+	// Build the tree, compact it, then collect node paths for initial collapse state.
+	root := buildTree(mgr.Suites())
+	compactTree(root)
 	collapsed := make(map[string]bool)
-	for _, s := range mgr.Suites() {
-		parts := strings.Split(s.Suite.RelPath, string(filepath.Separator))
-		// Collapse all intermediate directories (not the leaf)
-		for i := range parts[:len(parts)-1] {
-			collapsed[strings.Join(parts[:i+1], "/")] = true
-		}
-	}
-	entries := buildSidebarEntries(mgr.Suites(), collapsed)
+	collectNodePaths(root, collapsed)
+	entries := flattenTree(root, collapsed)
 
 	return Model{
 		mgr:              mgr,
+		repoRoot:         repoRoot,
 		entries:           entries,
 		entryCursor:       0,
 		collapsed:         collapsed,
@@ -87,45 +94,140 @@ func New(mgr *runner.SuiteManager, logger *log.Logger) Model {
 	}
 }
 
+func (m *Model) ensureDetailCursorVisible() {
+	h := m.sidebarHeight()
+	if len(m.detailEntries) <= h {
+		m.detailOffset = 0
+		return
+	}
+	maxOffset := len(m.detailEntries) - h
+	if m.detailOffset > maxOffset {
+		m.detailOffset = max(maxOffset, 0)
+	}
+	if m.detailCursor < m.detailOffset {
+		m.detailOffset = m.detailCursor
+	}
+	if m.detailCursor >= m.detailOffset+h {
+		m.detailOffset = m.detailCursor - h + 1
+	}
+}
+
+// filteredCmd builds a command that runs a single test within a suite.
+func filteredCmd(s *runner.TestSuite, testName string) string {
+	q := "'" + strings.ReplaceAll(testName, "'", "'\\''") + "'"
+	switch s.Suite.Category {
+	case discover.CategoryBackend:
+		return s.Suite.Cmd + " -k " + q
+	case discover.CategoryFrontend:
+		return s.Suite.Cmd + " -t " + q
+	case discover.CategoryPlaywright:
+		return s.Suite.Cmd + " -g " + q
+	case discover.CategoryGo:
+		return s.Suite.Cmd + " -run " + q
+	case discover.CategoryRust:
+		return s.Suite.Cmd + " " + testName
+	default:
+		return s.Suite.Cmd
+	}
+}
+
+// ── sidebar tree construction ───────────────────────────────────────────────────
+
+// dirNode is an intermediate tree node used to build and compact the sidebar.
+type dirNode struct {
+	name     string
+	path     string // full slash-joined path (used as collapse key)
+	children []*dirNode
+	suites   []*runner.TestSuite
+}
+
 func buildSidebarEntries(suites []*runner.TestSuite, collapsed map[string]bool) []sidebarEntry {
-	var entries []sidebarEntry
-	emitted := make(map[string]bool)
+	root := buildTree(suites)
+	compactTree(root)
+	return flattenTree(root, collapsed)
+}
+
+// buildTree inserts all suites into a tree keyed by path segments.
+func buildTree(suites []*runner.TestSuite) *dirNode {
+	root := &dirNode{}
+	idx := make(map[string]*dirNode) // path → node
 
 	for _, s := range suites {
 		parts := strings.Split(s.Suite.RelPath, string(filepath.Separator))
-
-		// Intermediate segments become tree nodes; the leaf is the suite itself.
 		dirParts := parts[:len(parts)-1]
 
-		visible := true
+		// Ensure all intermediate nodes exist.
+		parent := root
 		for i, part := range dirParts {
 			path := strings.Join(parts[:i+1], "/")
-			if !visible {
-				break
+			if n, ok := idx[path]; ok {
+				parent = n
+				continue
 			}
-			if !emitted[path] {
-				emitted[path] = true
-				entries = append(entries, sidebarEntry{
-					isNode: true,
-					label:  part,
-					path:   path,
-					depth:  i,
-				})
-			}
-			if collapsed[path] {
-				visible = false
-			}
+			n := &dirNode{name: part, path: path}
+			idx[path] = n
+			parent.children = append(parent.children, n)
+			parent = n
 		}
+		parent.suites = append(parent.suites, s)
+	}
+	return root
+}
 
-		if visible {
-			entries = append(entries, sidebarEntry{
-				label: parts[len(parts)-1],
-				depth: len(dirParts),
-				suite: s,
-			})
-		}
+// compactTree merges single-child chains: when a node has exactly one child
+// and no direct suites, fold the child's label into the parent.
+func compactTree(node *dirNode) {
+	for _, child := range node.children {
+		compactTree(child)
+	}
+	for len(node.children) == 1 && len(node.suites) == 0 {
+		child := node.children[0]
+		node.name = node.name + "/" + child.name
+		node.path = child.path
+		node.children = child.children
+		node.suites = child.suites
+	}
+}
+
+// collectNodePaths sets all node paths as collapsed.
+func collectNodePaths(node *dirNode, collapsed map[string]bool) {
+	for _, child := range node.children {
+		collapsed[child.path] = true
+		collectNodePaths(child, collapsed)
+	}
+}
+
+// flattenTree walks the compacted tree and emits sidebar entries,
+// respecting collapsed state.
+func flattenTree(root *dirNode, collapsed map[string]bool) []sidebarEntry {
+	var entries []sidebarEntry
+	for _, child := range root.children {
+		flattenNode(child, 0, collapsed, &entries)
 	}
 	return entries
+}
+
+func flattenNode(node *dirNode, depth int, collapsed map[string]bool, entries *[]sidebarEntry) {
+	*entries = append(*entries, sidebarEntry{
+		isNode: true,
+		label:  node.name,
+		path:   node.path,
+		depth:  depth,
+	})
+	if collapsed[node.path] {
+		return
+	}
+	for _, child := range node.children {
+		flattenNode(child, depth+1, collapsed, entries)
+	}
+	for _, s := range node.suites {
+		parts := strings.Split(s.Suite.RelPath, string(filepath.Separator))
+		*entries = append(*entries, sidebarEntry{
+			label: parts[len(parts)-1],
+			depth: depth + 1,
+			suite: s,
+		})
+	}
 }
 
 func (m Model) dbg(format string, args ...any) {
@@ -204,6 +306,8 @@ func (m Model) View() tea.View {
 	var middle string
 	if m.searchMode {
 		middle = m.renderOutput()
+	} else if m.hasDetail() {
+		middle = lipgloss.JoinHorizontal(lipgloss.Top, m.renderSidebar(), m.renderOutput(), m.renderDetail())
 	} else {
 		middle = lipgloss.JoinHorizontal(lipgloss.Top, m.renderSidebar(), m.renderOutput())
 	}
@@ -230,6 +334,21 @@ func (m Model) activeSuite() *runner.TestSuite {
 	return m.entries[m.entryCursor].suite
 }
 
+func (m Model) hasDetail() bool {
+	return len(m.detailEntries) > 0 && !m.searchMode
+}
+
+// sidebarWidth returns the effective sidebar width, growing with the deepest visible entry.
+func (m Model) sidebarWidth() int {
+	maxDepth := 0
+	for _, e := range m.entries {
+		if e.depth > maxDepth {
+			maxDepth = e.depth
+		}
+	}
+	return sidebarBaseWidth + sidebarDepthUnit*maxDepth
+}
+
 func (m Model) applySize() Model {
 	fh := footerHeightShort
 	if m.showHelp {
@@ -237,9 +356,13 @@ func (m Model) applySize() Model {
 	}
 	contentH := max(m.height-headerHeight-fh, 1)
 
-	vpW := m.width - sidebarWidth - horizontalBorderCount
+	sw := m.sidebarWidth()
+	vpW := m.width - sw - horizontalBorderCount
 	if m.searchMode {
 		vpW = m.width - horizontalBorderCount
+	}
+	if m.hasDetail() {
+		vpW -= detailSidebarWidth + 2 // +2 for border
 	}
 	vpW = max(vpW, 1)
 
@@ -264,12 +387,24 @@ func (m Model) loadActiveSuite() Model {
 	}
 	m.searchMode = false
 	m.clearSearch()
+	m.loadDetailEntries()
 	m = m.applySize()
 	m.viewport.SetContent(m.buildContent())
 	if m.viewportAtBottom {
 		m.viewport.GotoBottom()
 	}
 	return m
+}
+
+func (m *Model) loadDetailEntries() {
+	m.detailEntries = nil
+	m.detailCursor = 0
+	m.detailOffset = 0
+	s := m.activeSuite()
+	if s == nil {
+		return
+	}
+	m.detailEntries = testnames.Extract(filepath.Join(m.repoRoot, s.Suite.RelPath))
 }
 
 func (m Model) buildContent() string {
