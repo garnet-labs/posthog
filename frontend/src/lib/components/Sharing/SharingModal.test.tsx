@@ -69,7 +69,7 @@ function mockInsightSharingConfiguration({
 }
 
 describe('SharingModal (dashboard)', () => {
-    function DashboardSharingModalWrapper({ extraProps }: { extraProps?: Partial<SharingModalProps> }): JSX.Element {
+    beforeEach(() => {
         // Render the dashboard sharing modal with `WHITE_LABELLING` so the UI shows
         // the branding option in the form.
         useAvailableFeatures([AvailableFeature.WHITE_LABELLING])
@@ -77,7 +77,9 @@ describe('SharingModal (dashboard)', () => {
         useMocks({
             get: mockDashboardSharingConfiguration({}),
         })
+    })
 
+    function DashboardSharingModalWrapper({ extraProps }: { extraProps?: Partial<SharingModalProps> }): JSX.Element {
         const props: SharingModalProps = {
             isOpen: true,
             closeModal: () => {},
@@ -110,13 +112,15 @@ describe('SharingModal (insight)', () => {
         name: 'My insight',
     }
 
-    function InsightSharingModalWrapper({ extraProps }: { extraProps?: Partial<SharingModalProps> }): JSX.Element {
+    beforeEach(() => {
         useAvailableFeatures([])
         initKeaTests()
         useMocks({
             get: mockInsightSharingConfiguration({ insightId: defaultInsightId }),
         })
+    })
 
+    function InsightSharingModalWrapper({ extraProps }: { extraProps?: Partial<SharingModalProps> }): JSX.Element {
         const props: SharingModalProps = {
             isOpen: true,
             closeModal: () => {},
