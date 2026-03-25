@@ -1,0 +1,49 @@
+.VoiceMode__glow {
+    background: radial-gradient(circle, var(--color-ai) 0%, transparent 70%);
+    animation: VoiceMode__GlowPulse 3s ease-in-out infinite;
+}
+
+.VoiceMode__orb--idle {
+    background: linear-gradient(135deg, var(--color-ai) 0%, #6c47ff 60%, #38bdf8 100%);
+    animation: VoiceMode__Breathe 4s ease-in-out infinite;
+}
+
+.VoiceMode__orb--user {
+    background: linear-gradient(135deg, #38bdf8 0%, var(--color-ai) 50%, #6c47ff 100%);
+    box-shadow: 0 0 32px #38bdf8aa;
+    animation: VoiceMode__Breathe 1s ease-in-out infinite;
+}
+
+.VoiceMode__orb--ai {
+    background: linear-gradient(135deg, var(--color-ai) 0%, #6c47ff 50%, #38bdf8 100%);
+    box-shadow: 0 0 40px color-mix(in sRGB, var(--color-ai) 60%, transparent);
+    animation: VoiceMode__Breathe 1.4s ease-in-out infinite;
+}
+
+.VoiceMode__orb--thinking {
+    background: linear-gradient(135deg, var(--color-ai) 0%, #6c47ff 60%, #38bdf8 100%);
+    opacity: 0.6;
+    animation: VoiceMode__Breathe 2s ease-in-out infinite;
+}
+
+@keyframes VoiceMode__Breathe {
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.08);
+    }
+}
+
+@keyframes VoiceMode__GlowPulse {
+    0%,
+    100% {
+        opacity: 0.15;
+    }
+
+    50% {
+        opacity: 0.35;
+    }
+}

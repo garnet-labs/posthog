@@ -1,6 +1,3 @@
-// Lightweight logic that loads and caches a batch export's configuration.
-// Child logics (runs, backfills, modal) connect here instead of the heavyweight form logic,
-// so they can be mounted independently (e.g. from the hog function backfills tab).
 import { afterMount, kea, key, path, props } from 'kea'
 import { loaders } from 'kea-loaders'
 

@@ -17,9 +17,11 @@ import { maxGlobalLogic } from '../maxGlobalLogic'
 import { maxLogic } from '../maxLogic'
 import { MaxThreadLogicProps, maxThreadLogic } from '../maxThreadLogic'
 import { Thread } from '../Thread'
+import { voiceLogic } from '../voiceLogic'
 import { ChatHistoryPanel } from './ChatHistoryPanel'
 import { SidebarQuestionInputWithSuggestions } from './SidebarQuestionInputWithSuggestions'
 import { ThreadAutoScroller } from './ThreadAutoScroller'
+import { VoiceMode } from './VoiceMode'
 
 /* Sits above the chat area */
 export function ChatHeader({
@@ -133,6 +135,11 @@ interface ChatAreaProps {
 
 function ChatArea({ threadVisible, conversation, onStartNewConversation }: ChatAreaProps): JSX.Element {
     const hasMessages = threadVisible
+    const { voiceModeFullscreen } = useValues(voiceLogic)
+
+    if (voiceModeFullscreen) {
+        return <VoiceMode />
+    }
 
     return (
         <div className="flex flex-col grow overflow-y-auto" data-attr="max-scrollable">

@@ -37,11 +37,14 @@ export const voiceLogic = kea<voiceLogicType>([
         setConnecting: (connecting: boolean) => ({ connecting }),
         setMicPermissionDenied: (denied: boolean) => ({ denied }),
         setVoiceModeEnabled: (enabled: boolean) => ({ enabled }),
+        setVoiceModeFullscreen: (fullscreen: boolean) => ({ fullscreen }),
         setActiveTabId: (tabId: string | null) => ({ tabId }),
         playResponse: (text: string) => ({ text }),
         setPlaybackActive: (active: boolean) => ({ active }),
         stopPlayback: true,
         disableVoiceMode: true,
+        enterVoiceMode: (tabId: string) => ({ tabId }),
+        exitVoiceMode: true,
     }),
 
     reducers({
@@ -53,6 +56,16 @@ export const voiceLogic = kea<voiceLogicType>([
             {
                 setVoiceModeEnabled: (_, { enabled }) => enabled,
                 disableVoiceMode: () => false,
+                enterVoiceMode: () => true,
+                exitVoiceMode: () => false,
+            },
+        ],
+        voiceModeFullscreen: [
+            false,
+            {
+                setVoiceModeFullscreen: (_, { fullscreen }) => fullscreen,
+                enterVoiceMode: () => true,
+                exitVoiceMode: () => false,
             },
         ],
         micPermissionDenied: [false, { setMicPermissionDenied: (_, { denied }) => denied }],
@@ -300,6 +313,30 @@ export const voiceLogic = kea<voiceLogicType>([
                 source.start()
             } catch {
                 actions.setPlaybackActive(false)
+            }
+        },
+
+        enterVoiceMode: ({ tabId }) => {
+            actions.setActiveTabId(tabId)
+            actions.startRecording(tabId)
+        },
+
+        exitVoiceMode: () => {
+            if (values.recording || values.connecting) {
+                actions.stopRecording()
+            }
+            if (values.playbackActive) {
+                actions.stopPlayback()
+            }
+        },
+
+        setPlaybackActive: ({ active }) => {
+            // Auto-resume mic recording after TTS finishes in voice mode
+            if (!active && values.voiceModeEnabled && !values.recording && !values.connecting) {
+                const tabId = values.activeTabId
+                if (tabId) {
+                    actions.startRecording(tabId)
+                }
             }
         },
 

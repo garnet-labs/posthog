@@ -6,7 +6,16 @@ import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
 import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
-import { IconArrowRight, IconCheck, IconMicrophone, IconPencil, IconStopFilled, IconTrash, IconX } from '@posthog/icons'
+import {
+    IconArrowRight,
+    IconCheck,
+    IconHeadphones,
+    IconMicrophone,
+    IconPencil,
+    IconStopFilled,
+    IconTrash,
+    IconX,
+} from '@posthog/icons'
 import { LemonButton, LemonSwitch, LemonTextArea, Spinner } from '@posthog/lemon-ui'
 
 import { AIConsentPopoverWrapper } from 'scenes/settings/organization/AIConsentPopoverWrapper'
@@ -143,8 +152,8 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
     const { dataProcessingAccepted, dataProcessingApprovalDisabledReason } = useValues(maxGlobalLogic)
     const { question, tabId } = useValues(maxLogic)
     const { setQuestion } = useActions(maxLogic)
-    const { recording, connecting, micPermissionDenied } = useValues(voiceLogic)
-    const { startRecording, stopRecording, disableVoiceMode } = useActions(voiceLogic)
+    const { recording, connecting, micPermissionDenied, voiceModeEnabled } = useValues(voiceLogic)
+    const { startRecording, stopRecording, disableVoiceMode, enterVoiceMode, exitVoiceMode } = useActions(voiceLogic)
     const { user } = useValues(userLogic)
     const {
         conversation,
@@ -373,35 +382,52 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                         )}
                     >
                         {!showStopButton && (
-                            <LemonButton
-                                data-attr="max-voice-input"
-                                type="tertiary"
-                                size="small"
-                                icon={
-                                    connecting ? (
-                                        <Spinner className="text-muted" />
-                                    ) : (
-                                        <IconMicrophone
-                                            className={recording ? 'text-danger animate-pulse' : undefined}
-                                        />
-                                    )
-                                }
-                                onClick={() => {
-                                    if (recording) {
-                                        stopRecording()
-                                    } else {
-                                        startRecording(tabId)
+                            <>
+                                <LemonButton
+                                    data-attr="max-voice-input"
+                                    type="tertiary"
+                                    size="small"
+                                    icon={
+                                        connecting ? (
+                                            <Spinner className="text-muted" />
+                                        ) : (
+                                            <IconMicrophone
+                                                className={recording ? 'text-danger animate-pulse' : undefined}
+                                            />
+                                        )
                                     }
-                                }}
-                                tooltip={
-                                    micPermissionDenied
-                                        ? 'Microphone access denied — check browser settings'
-                                        : recording
-                                          ? 'Stop recording and send'
-                                          : 'Voice input'
-                                }
-                                disabled={connecting || inputDisabled}
-                            />
+                                    onClick={() => {
+                                        if (recording) {
+                                            stopRecording()
+                                        } else {
+                                            startRecording(tabId)
+                                        }
+                                    }}
+                                    tooltip={
+                                        micPermissionDenied
+                                            ? 'Microphone access denied — check browser settings'
+                                            : recording
+                                              ? 'Stop recording and send'
+                                              : 'Voice input'
+                                    }
+                                    disabled={connecting || inputDisabled}
+                                />
+                                <LemonButton
+                                    data-attr="max-voice-mode-toggle"
+                                    type={voiceModeEnabled ? 'primary' : 'tertiary'}
+                                    size="small"
+                                    icon={<IconHeadphones />}
+                                    onClick={() => {
+                                        if (voiceModeEnabled) {
+                                            exitVoiceMode()
+                                        } else {
+                                            enterVoiceMode(tabId)
+                                        }
+                                    }}
+                                    tooltip={voiceModeEnabled ? 'Exit voice mode' : 'Voice mode'}
+                                    disabled={inputDisabled}
+                                />
+                            </>
                         )}
                         <AIConsentPopoverWrapper
                             placement="bottom-end"
