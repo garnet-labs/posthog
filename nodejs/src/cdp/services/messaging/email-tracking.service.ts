@@ -13,11 +13,7 @@ import { HogFunctionManagerService } from '../managers/hog-function-manager.serv
 import { RecipientsManagerService } from '../managers/recipients-manager.service'
 import { HogFunctionMonitoringService } from '../monitoring/hog-function-monitoring.service'
 import { SesWebhookHandler } from './helpers/ses'
-import {
-    generateEmailTrackingCode,
-    generateEmailTrackingPixelUrl,
-    parseEmailTrackingCode,
-} from './helpers/tracking-code'
+import { generateEmailTrackingCode, generateEmailTrackingPixelUrl } from './helpers/tracking-code'
 
 export const PIXEL_GIF = Buffer.from('R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==', 'base64')
 const LINK_REGEX =
@@ -36,9 +32,7 @@ const emailTrackingErrorsCounter = new Counter({
 })
 
 export const generateTrackingRedirectUrl = (
-    invocation: Pick<CyclotronJobInvocationHogFunction, 'functionId' | 'id' | 'teamId'> & {
-        state?: { actionId?: string }
-    },
+    invocation: Pick<CyclotronJobInvocationHogFunction, 'functionId' | 'id' | 'teamId'>,
     targetUrl: string
 ): string => {
     return `${defaultConfig.CDP_EMAIL_TRACKING_URL}/public/m/redirect?ph_id=${generateEmailTrackingCode(invocation)}&target=${encodeURIComponent(targetUrl)}`
@@ -75,13 +69,11 @@ export class EmailTrackingService {
     public async trackMetric({
         functionId,
         invocationId,
-        actionId,
         metricName,
         source,
     }: {
         functionId?: string
         invocationId?: string
-        actionId?: string
         metricName: MinimalAppMetric['metric_name']
         source: 'direct' | 'ses'
     }): Promise<void> {
@@ -118,7 +110,7 @@ export class EmailTrackingService {
             {
                 team_id: teamId,
                 app_source_id: appSourceId,
-                instance_id: actionId || invocationId,
+                instance_id: invocationId,
                 metric_name: metricName,
                 metric_kind: 'email',
                 count: 1,
@@ -152,7 +144,6 @@ export class EmailTrackingService {
                 await this.trackMetric({
                     functionId: metric.functionId,
                     invocationId: metric.invocationId,
-                    actionId: metric.actionId,
                     metricName: metric.metricName,
                     source: 'ses',
                 })
@@ -198,35 +189,15 @@ export class EmailTrackingService {
         }
     }
 
-    private parseTrackingParams(query: Record<string, any>): {
-        functionId?: string
-        invocationId?: string
-        actionId?: string
-    } {
-        // Support both combined ph_id format and legacy separate params
-        if (query.ph_id) {
-            const parsed = parseEmailTrackingCode(query.ph_id as string)
-            return {
-                functionId: parsed?.functionId,
-                invocationId: parsed?.invocationId,
-                actionId: parsed?.actionId,
-            }
-        }
-        return {
-            functionId: query.ph_fn_id as string | undefined,
-            invocationId: query.ph_inv_id as string | undefined,
-        }
-    }
-
-    // NOTE: this is somewhat naieve. We should expand with UA checking for things like apple's tracking prevention etc.
     public async handleEmailTrackingPixel(req: ModifiedRequest, res: express.Response): Promise<void> {
-        const { functionId, invocationId, actionId } = this.parseTrackingParams(req.query)
+        // NOTE: this is somewhat naieve. We should expand with UA checking for things like apple's tracking prevention etc.
+        const { ph_fn_id, ph_inv_id } = req.query
 
+        // Track the value
         try {
             await this.trackMetric({
-                functionId,
-                invocationId,
-                actionId,
+                functionId: ph_fn_id as string,
+                invocationId: ph_inv_id as string,
                 metricName: 'email_opened',
                 source: 'direct',
             })
@@ -239,19 +210,18 @@ export class EmailTrackingService {
     }
 
     public async handleEmailTrackingRedirect(req: ModifiedRequest, res: express.Response): Promise<void> {
-        const { functionId, invocationId, actionId } = this.parseTrackingParams(req.query)
-        const { target } = req.query
+        const { ph_fn_id, ph_inv_id, target } = req.query
 
         if (!target) {
             res.status(404).send('Not found')
             return
         }
 
+        // Track the value
         try {
             await this.trackMetric({
-                functionId,
-                invocationId,
-                actionId,
+                functionId: ph_fn_id as string,
+                invocationId: ph_inv_id as string,
                 metricName: 'email_link_clicked',
                 source: 'direct',
             })
