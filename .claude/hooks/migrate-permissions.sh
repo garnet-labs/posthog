@@ -68,8 +68,13 @@ except Exception:
     os.unlink(tmp_path)
     sys.exit(1)
 
-# Remove permissions from settings.json atomically
-del settings['permissions']
+# Remove only the migrated allow list from settings.json
+perms = settings.get('permissions', {})
+perms.pop('allow', None)
+if perms:
+    settings['permissions'] = perms
+else:
+    settings.pop('permissions', None)
 fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.json')
 try:
     with os.fdopen(fd, 'w') as f:
