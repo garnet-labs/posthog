@@ -51,18 +51,26 @@ func (m Model) renderSidebar() string {
 	var rows []string
 	for i := start; i < end; i++ {
 		e := m.entries[i]
-		if e.isCategoryHeader {
+		indent := strings.Repeat("  ", e.depth)
+		selected := i == m.entryCursor
+		availW := innerW - len(indent)
+
+		if e.isNode {
 			indicator := "▾"
-			if m.collapsedCategories[e.category] {
+			if m.collapsed[e.path] {
 				indicator = "▸"
 			}
-			label := truncate(string(e.category), innerW-4)
-			text := indicator + " " + label
-			if i == m.entryCursor {
-				rows = append(rows, categoryHeaderSelectedStyle.Width(innerW).Render(text))
-			} else {
-				rows = append(rows, categoryHeaderStyle.Width(innerW).Render(text))
+
+			// Show aggregate status icon for the node
+			ns := m.nodeStatus(e.path)
+			iconChar := statusIconChar(ns)
+			if ns == runner.StatusRunning {
+				iconChar = ansi.Strip(m.spinner.View())
 			}
+			iconColor := statusIconColor(ns)
+
+			label := truncate(e.label, max(availW-5, 1))
+			rows = append(rows, renderTreeNodeRow(indent, indicator, iconChar, label, iconColor, selected, innerW))
 			continue
 		}
 
@@ -79,9 +87,9 @@ func (m Model) renderSidebar() string {
 			total := r.Passed + r.Failed + r.Skipped + r.Errors
 			name = fmt.Sprintf("%s %d/%d", name, r.Passed, total)
 		}
-		name = truncate(name, innerW-3)
+		name = truncate(name, max(availW-3, 1))
 
-		rows = append(rows, renderSidebarRow(iconChar, name, iconColor, i == m.entryCursor, innerW))
+		rows = append(rows, renderSidebarRow(indent, iconChar, name, iconColor, selected, innerW))
 	}
 
 	// Pad remaining rows

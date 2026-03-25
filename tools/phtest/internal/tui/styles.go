@@ -75,16 +75,6 @@ var (
 				Background(colorYellow).
 				Foreground(colorBlack)
 
-	categoryHeaderStyle = lipgloss.NewStyle().
-				Foreground(colorYellow).
-				Bold(true).
-				PaddingLeft(1)
-
-	categoryHeaderSelectedStyle = lipgloss.NewStyle().
-					Background(colorDarkGrey).
-					Foreground(colorYellow).
-					Bold(true).
-					PaddingLeft(1)
 )
 
 func statusIconChar(s runner.Status) string {
@@ -117,16 +107,30 @@ func statusIconColor(s runner.Status) color.Color {
 	}
 }
 
-func renderSidebarRow(icon, name string, iconColor color.Color, selected bool, innerW int) string {
+func renderSidebarRow(indent, icon, name string, iconColor color.Color, selected bool, innerW int) string {
 	if selected {
 		base := lipgloss.NewStyle().Background(colorDarkGrey).Bold(true)
-		iconSeg := base.PaddingLeft(1).Foreground(iconColor).Render(icon)
-		nameSeg := base.Foreground(colorWhite).Width(innerW - 2).Render(" " + name)
-		return iconSeg + nameSeg
+		prefix := base.Foreground(iconColor).Render(indent + icon)
+		nameSeg := base.Foreground(colorWhite).Width(innerW - lipgloss.Width(indent) - 2).Render(" " + name)
+		return prefix + nameSeg
 	}
-	iconSeg := lipgloss.NewStyle().PaddingLeft(1).Foreground(iconColor).Render(icon)
-	nameSeg := lipgloss.NewStyle().Foreground(colorGrey).Width(innerW - 2).Render(" " + name)
-	return iconSeg + nameSeg
+	prefix := lipgloss.NewStyle().Foreground(iconColor).Render(indent + icon)
+	nameSeg := lipgloss.NewStyle().Foreground(colorGrey).Width(innerW - lipgloss.Width(indent) - 2).Render(" " + name)
+	return prefix + nameSeg
+}
+
+func renderTreeNodeRow(indent, indicator, icon, label string, iconColor color.Color, selected bool, innerW int) string {
+	if selected {
+		base := lipgloss.NewStyle().Background(colorDarkGrey).Bold(true)
+		indentSeg := base.Foreground(colorYellow).Render(indent + indicator + " ")
+		iconSeg := base.Foreground(iconColor).Render(icon)
+		labelSeg := base.Foreground(colorWhite).Width(innerW - lipgloss.Width(indent) - 4).Render(" " + label)
+		return indentSeg + iconSeg + labelSeg
+	}
+	indentSeg := lipgloss.NewStyle().Foreground(colorYellow).Render(indent + indicator + " ")
+	iconSeg := lipgloss.NewStyle().Foreground(iconColor).Render(icon)
+	labelSeg := lipgloss.NewStyle().Foreground(colorYellow).Width(innerW - lipgloss.Width(indent) - 4).Render(" " + label)
+	return indentSeg + iconSeg + labelSeg
 }
 
 func truncate(s string, maxLen int) string {

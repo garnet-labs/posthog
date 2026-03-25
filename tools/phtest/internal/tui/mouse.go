@@ -9,9 +9,9 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) (tea.Mode
 			row := msg.Y - headerHeight - 1
 			idx := m.entryOffset + row
 			if idx >= 0 && idx < len(m.entries) {
-				if m.entries[idx].isCategoryHeader {
+				if m.entries[idx].isNode {
 					m.entryCursor = idx
-					m.toggleCategory(m.entries[idx].category)
+					m.toggleNode(m.entries[idx].path)
 				} else if idx != m.entryCursor {
 					m.entryCursor = idx
 					m.ensureSidebarCursorVisible()

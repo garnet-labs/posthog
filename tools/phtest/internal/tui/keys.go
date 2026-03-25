@@ -71,8 +71,8 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 
 	case key.Matches(msg, m.keys.RunSuite):
 		if m.focusedPane == focusSidebar {
-			if e := m.entries[m.entryCursor]; e.isCategoryHeader {
-				m.toggleCategory(e.category)
+			if e := m.entries[m.entryCursor]; e.isNode {
+				m.toggleNode(e.path)
 			} else if s := m.activeSuite(); s != nil {
 				send := m.mgr.Send()
 				go func() { _ = s.Start(send) }()

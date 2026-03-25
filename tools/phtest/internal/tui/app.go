@@ -20,11 +20,13 @@ const (
 	focusOutput
 )
 
-// sidebarEntry is either a category header or a selectable suite.
+// sidebarEntry is either a tree node (collapsible category) or a leaf (test suite).
 type sidebarEntry struct {
-	isCategoryHeader bool
-	category         discover.Category
-	suite            *runner.TestSuite
+	isNode bool
+	label  string            // display label for this level
+	path   string            // full slash-joined path for collapse key (e.g. "Backend/products")
+	depth  int               // nesting depth (0 = top-level)
+	suite  *runner.TestSuite // non-nil for leaf entries
 }
 
 type Model struct {
@@ -42,10 +44,10 @@ type Model struct {
 	searchCursor  int
 
 	// Sidebar
-	entries             []sidebarEntry
-	entryCursor         int
-	entryOffset         int
-	collapsedCategories map[discover.Category]bool
+	entries   []sidebarEntry
+	entryCursor int
+	entryOffset int
+	collapsed map[string]bool // keyed by slash-joined node path
 
 	keys     keyMap
 	help     help.Model
@@ -61,36 +63,63 @@ type Model struct {
 
 func New(mgr *runner.SuiteManager, logger *log.Logger) Model {
 	keys := defaultKeyMap()
-	collapsed := make(map[discover.Category]bool)
+	collapsed := make(map[string]bool)
 	for _, s := range mgr.Suites() {
-		collapsed[s.Suite.Category] = true
+		parts := strings.Split(string(s.Suite.Category), " / ")
+		for i := range parts {
+			collapsed[strings.Join(parts[:i+1], "/")] = true
+		}
 	}
 	entries := buildSidebarEntries(mgr.Suites(), collapsed)
 
 	return Model{
-		mgr:                 mgr,
-		entries:              entries,
-		entryCursor:          0,
-		collapsedCategories:  collapsed,
-		focusedPane:          focusSidebar,
-		viewportAtBottom:     true,
-		keys:                 keys,
-		help:                 help.New(),
-		spinner:              spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		log:                  logger,
+		mgr:              mgr,
+		entries:           entries,
+		entryCursor:       0,
+		collapsed:         collapsed,
+		focusedPane:       focusSidebar,
+		viewportAtBottom:  true,
+		keys:              keys,
+		help:              help.New(),
+		spinner:           spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		log:               logger,
 	}
 }
 
-func buildSidebarEntries(suites []*runner.TestSuite, collapsed map[discover.Category]bool) []sidebarEntry {
+func buildSidebarEntries(suites []*runner.TestSuite, collapsed map[string]bool) []sidebarEntry {
 	var entries []sidebarEntry
-	var lastCat discover.Category
+	emitted := make(map[string]bool)
+
 	for _, s := range suites {
-		if s.Suite.Category != lastCat {
-			entries = append(entries, sidebarEntry{isCategoryHeader: true, category: s.Suite.Category})
-			lastCat = s.Suite.Category
+		parts := strings.Split(string(s.Suite.Category), " / ")
+
+		// Emit tree nodes for each depth level, stopping if an ancestor is collapsed.
+		visible := true
+		for i, part := range parts {
+			path := strings.Join(parts[:i+1], "/")
+			if !visible {
+				break
+			}
+			if !emitted[path] {
+				emitted[path] = true
+				entries = append(entries, sidebarEntry{
+					isNode: true,
+					label:  part,
+					path:   path,
+					depth:  i,
+				})
+			}
+			if collapsed[path] {
+				visible = false
+			}
 		}
-		if !collapsed[s.Suite.Category] {
-			entries = append(entries, sidebarEntry{suite: s})
+
+		if visible {
+			entries = append(entries, sidebarEntry{
+				label: s.Suite.Name,
+				depth: len(parts),
+				suite: s,
+			})
 		}
 	}
 	return entries
@@ -195,11 +224,7 @@ func (m Model) activeSuite() *runner.TestSuite {
 	if m.entryCursor < 0 || m.entryCursor >= len(m.entries) {
 		return nil
 	}
-	e := m.entries[m.entryCursor]
-	if e.isCategoryHeader {
-		return nil
-	}
-	return e.suite
+	return m.entries[m.entryCursor].suite
 }
 
 func (m Model) applySize() Model {
@@ -264,22 +289,22 @@ func (m *Model) moveCursor(dir int) bool {
 
 // rebuildEntries reconstructs the sidebar entries preserving the cursor position.
 func (m *Model) rebuildEntries() {
+	var curPath string
 	var curSuite *runner.TestSuite
-	var curCategory discover.Category
-	var curIsHeader bool
+	var curIsNode bool
 	if m.entryCursor >= 0 && m.entryCursor < len(m.entries) {
 		e := m.entries[m.entryCursor]
-		curIsHeader = e.isCategoryHeader
-		curCategory = e.category
+		curIsNode = e.isNode
+		curPath = e.path
 		curSuite = e.suite
 	}
 
-	m.entries = buildSidebarEntries(m.mgr.Suites(), m.collapsedCategories)
+	m.entries = buildSidebarEntries(m.mgr.Suites(), m.collapsed)
 
 	found := false
-	if curIsHeader {
+	if curIsNode {
 		for i, e := range m.entries {
-			if e.isCategoryHeader && e.category == curCategory {
+			if e.isNode && e.path == curPath {
 				m.entryCursor = i
 				found = true
 				break
@@ -287,7 +312,7 @@ func (m *Model) rebuildEntries() {
 		}
 	} else if curSuite != nil {
 		for i, e := range m.entries {
-			if !e.isCategoryHeader && e.suite == curSuite {
+			if !e.isNode && e.suite == curSuite {
 				m.entryCursor = i
 				found = true
 				break
@@ -300,8 +325,42 @@ func (m *Model) rebuildEntries() {
 	m.ensureSidebarCursorVisible()
 }
 
-// toggleCategory collapses or expands a category group.
-func (m *Model) toggleCategory(cat discover.Category) {
-	m.collapsedCategories[cat] = !m.collapsedCategories[cat]
+// toggleNode collapses or expands a tree node.
+func (m *Model) toggleNode(path string) {
+	m.collapsed[path] = !m.collapsed[path]
 	m.rebuildEntries()
+}
+
+// categoryToPath converts a Category like "Backend / products" to "Backend/products".
+func categoryToPath(cat discover.Category) string {
+	return strings.Join(strings.Split(string(cat), " / "), "/")
+}
+
+// nodeStatus returns the aggregate status of all suites under a tree node path.
+func (m Model) nodeStatus(path string) runner.Status {
+	var hasRunning, hasFailed, hasPassed bool
+	for _, s := range m.mgr.Suites() {
+		catPath := categoryToPath(s.Suite.Category)
+		if catPath != path && !strings.HasPrefix(catPath, path+"/") {
+			continue
+		}
+		switch s.Status() {
+		case runner.StatusRunning:
+			hasRunning = true
+		case runner.StatusFailed:
+			hasFailed = true
+		case runner.StatusPassed:
+			hasPassed = true
+		}
+	}
+	switch {
+	case hasRunning:
+		return runner.StatusRunning
+	case hasFailed:
+		return runner.StatusFailed
+	case hasPassed:
+		return runner.StatusPassed
+	default:
+		return runner.StatusIdle
+	}
 }
