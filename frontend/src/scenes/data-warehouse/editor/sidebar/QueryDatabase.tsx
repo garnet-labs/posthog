@@ -218,7 +218,12 @@ export const QueryDatabase = (): JSX.Element => {
                 if (item && item.record?.type === 'column') {
                     const currentQueryInput = builtTabLogic.values.queryInput
                     setQueryInput(
-                        buildQueryForColumnClick(currentQueryInput, item.record.table, item.record.columnName)
+                        buildQueryForColumnClick(
+                            builtTabLogic.values.hogqlParser,
+                            currentQueryInput,
+                            item.record.table,
+                            item.record.columnName
+                        )
                     )
                 }
 

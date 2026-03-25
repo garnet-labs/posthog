@@ -19,6 +19,7 @@ import isEqual from 'lodash.isequal'
 import { Uri, editor } from 'monaco-editor'
 import posthog from 'posthog-js'
 
+import createHogQLParser, { type HogQLParser } from '@posthog/hogql-parser'
 import { LemonCheckbox, LemonDialog, LemonInput, lemonToast, Tooltip } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
@@ -221,6 +222,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         ],
     })),
     actions(() => ({
+        setHogQLParser: (hogqlParser: HogQLParser | null) => ({ hogqlParser }),
         setQueryInput: (queryInput: string | null) => ({ queryInput }),
         runQuery: (queryOverride?: string, switchTab?: boolean) => ({
             queryOverride,
@@ -313,6 +315,12 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         ],
     })),
     reducers(({ props }) => ({
+        hogqlParser: [
+            null as HogQLParser | null,
+            {
+                setHogQLParser: (_, { hogqlParser }) => hogqlParser,
+            },
+        ],
         finishedLoading: [
             true,
             {
@@ -1447,15 +1455,15 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         ],
 
         selectedQueryTablesAndColumns: [
-            (s) => [s.queryInput],
-            (queryInput: string | null): Record<string, Record<string, boolean>> => {
-                return parseQueryTablesAndColumns(queryInput)
+            (s) => [s.queryInput, s.hogqlParser],
+            (queryInput: string | null, hogqlParser: HogQLParser | null): Record<string, Record<string, boolean>> => {
+                return parseQueryTablesAndColumns(hogqlParser, queryInput)
             },
         ],
         selectedQueryColumns: [
-            (s) => [s.queryInput],
-            (queryInput: string | null): Record<string, boolean> => {
-                const tablesAndColumns = parseQueryTablesAndColumns(queryInput)
+            (s) => [s.queryInput, s.hogqlParser],
+            (queryInput: string | null, hogqlParser: HogQLParser | null): Record<string, boolean> => {
+                const tablesAndColumns = parseQueryTablesAndColumns(hogqlParser, queryInput)
 
                 return Object.fromEntries(
                     Object.entries(tablesAndColumns).flatMap(([table, columns]) => {
@@ -1698,6 +1706,10 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
     })),
     afterMount(({ actions, props, values, cache }) => {
         cache.lastSelectedConnectionId = values.selectedConnectionId
+
+        createHogQLParser().then((parser) => {
+            actions.setHogQLParser(parser)
+        })
 
         if (
             isEmbeddedSQLEditorMode(props.mode ?? SQLEditorMode.FullScene) &&
