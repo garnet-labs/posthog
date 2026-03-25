@@ -64,7 +64,7 @@ try:
         json.dump(local, f, indent=2)
         f.write('\n')
     os.replace(tmp_path, local_path)
-except:
+except Exception:
     os.unlink(tmp_path)
     sys.exit(1)
 
