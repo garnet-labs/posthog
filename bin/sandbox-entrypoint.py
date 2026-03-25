@@ -487,8 +487,7 @@ def user_phase() -> None:
 
     def install_python_and_migrate() -> None:
         install_python_deps()
-        info("Running database migrations...")
-        run(["python", "manage.py", "sandbox_migrate"])
+        run(["python", "manage.py", "sandbox_migrate", "--parallel", "--progress-file", str(PROGRESS_FILE)])
         ensure_demo_data()
 
     # Run dependency installs in parallel. Migrations and demo data are chained
