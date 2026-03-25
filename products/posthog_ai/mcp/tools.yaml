@@ -18,27 +18,11 @@ tools:
             destructive: false
             idempotent: true
         list: true
-        mcp_version: 1
         title: List action prediction models
         description: >
-            List all action prediction models in the current project. Returns
-            name, description, action or event reference, lookback period, and
-            creation metadata for each model.
-    action-prediction-model-retrieve:
-        operation: action_prediction_models_retrieve
-        enabled: true
-        scopes:
-            - action_prediction_model:read
-        annotations:
-            readOnly: true
-            destructive: false
-            idempotent: true
-        enrich_url: '{id}'
+            List all action prediction models in the current project. Returns name, description, action or event
+            reference, lookback period, and creation metadata for each model.
         mcp_version: 1
-        title: Get action prediction model
-        description: >
-            Get a single action prediction model by ID. Returns full details
-            including the referenced action or event name.
     action-prediction-model-create:
         operation: action_prediction_models_create
         enabled: true
@@ -51,49 +35,14 @@ tools:
         enrich_url: '{id}'
         title: Create action prediction model
         description: >
-            Create a new action prediction model. Specify either an action ID
-            or an event name (not both), and a lookback period in days.
+            Create a new action prediction model. Specify either an action ID or an event name (not both), and a
+            lookback period in days.
         include_params:
             - name
             - description
             - action
             - event_name
             - lookback_days
-    action-prediction-model-partial-update:
-        operation: action_prediction_models_partial_update
-        enabled: true
-        scopes:
-            - action_prediction_model:write
-        annotations:
-            readOnly: false
-            destructive: false
-            idempotent: true
-        enrich_url: '{id}'
-        title: Update action prediction model
-        description: >
-            Update an action prediction model by ID. Can modify name,
-            description, the action or event reference, and lookback period.
-        include_params:
-            - name
-            - description
-            - action
-            - event_name
-            - lookback_days
-    action-prediction-model-update:
-        operation: action_prediction_models_update
-        enabled: false
-    action-prediction-model-destroy:
-        operation: action_prediction_models_destroy
-        enabled: true
-        scopes:
-            - action_prediction_model:write
-        annotations:
-            readOnly: false
-            destructive: true
-            idempotent: true
-        title: Delete action prediction model
-        description: >
-            Permanently delete an action prediction model by ID.
     prediction-model-run-list:
         operation: action_prediction_model_runs_list
         enabled: true
@@ -104,27 +53,11 @@ tools:
             destructive: false
             idempotent: true
         list: true
-        mcp_version: 1
         title: List prediction model runs
         description: >
-            List training runs for action prediction models, newest first.
-            Returns winning status, S3 model URL, evaluation metrics,
-            feature importance, and the training artifact script.
-    prediction-model-run-retrieve:
-        operation: action_prediction_model_runs_retrieve
-        enabled: true
-        scopes:
-            - action_prediction_model:read
-        annotations:
-            readOnly: true
-            destructive: false
-            idempotent: true
-        enrich_url: '{id}'
+            List training runs for action prediction models, newest first. Returns winning status, S3 model URL,
+            evaluation metrics, feature importance, and the training artifact script.
         mcp_version: 1
-        title: Get prediction model run
-        description: >
-            Get a single prediction model run by ID with full details
-            including metrics, feature importance, and artifact script.
     prediction-model-run-create:
         operation: action_prediction_model_runs_create
         enabled: true
@@ -137,9 +70,8 @@ tools:
         enrich_url: '{id}'
         title: Create prediction model run
         description: >
-            Record a new training run for a prediction model. Provide the
-            parent prediction model ID, S3 model URL, evaluation metrics,
-            feature importance scores, and the artifact script.
+            Record a new training run for a prediction model. Provide the parent prediction model ID, S3 model URL,
+            evaluation metrics, feature importance scores, and the artifact script.
         include_params:
             - prediction_model
             - is_winning
@@ -147,32 +79,6 @@ tools:
             - metrics
             - feature_importance
             - artifact_script
-    prediction-model-run-partial-update:
-        operation: action_prediction_model_runs_partial_update
-        enabled: true
-        scopes:
-            - action_prediction_model:write
-        annotations:
-            readOnly: false
-            destructive: false
-            idempotent: true
-        enrich_url: '{id}'
-        title: Update prediction model run
-        description: >
-            Update a prediction model run by ID. Can change winning status,
-            metrics, feature importance, or artifact script.
-        include_params:
-            - is_winning
-            - model_url
-            - metrics
-            - feature_importance
-            - artifact_script
-    prediction-model-run-update:
-        operation: action_prediction_model_runs_update
-        enabled: false
-    prediction-model-run-destroy:
-        operation: action_prediction_model_runs_destroy
-        enabled: false
     mcp-tools-create:
         operation: mcp_tools_create
         enabled: false
