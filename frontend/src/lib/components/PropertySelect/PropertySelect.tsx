@@ -13,15 +13,25 @@ import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { LemonSnack } from 'lib/lemon-ui/LemonSnack/LemonSnack'
 import { Popover } from 'lib/lemon-ui/Popover/Popover'
 
-export interface PropertySelectProps {
+type PropertySelectBaseProps = {
     addText: string
     onChange: (names: string[]) => void
     selectedProperties: string[]
     sortable?: boolean
-    taxonomicFilterGroup?: TaxonomicFilterGroupType.PersonProperties | TaxonomicFilterGroupType.EventProperties
-    taxonomicFilterGroups?: TaxonomicFilterGroupType[]
     disabledReason?: string | null
 }
+
+export type PropertySelectProps = PropertySelectBaseProps &
+    (
+        | {
+              taxonomicFilterGroup: TaxonomicFilterGroupType.PersonProperties | TaxonomicFilterGroupType.EventProperties
+              taxonomicFilterGroups?: never
+          }
+        | {
+              taxonomicFilterGroups: TaxonomicFilterGroupType[]
+              taxonomicFilterGroup?: never
+          }
+    )
 
 const SortableProperty = ({
     name,

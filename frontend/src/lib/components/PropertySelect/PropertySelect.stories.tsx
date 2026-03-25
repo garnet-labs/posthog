@@ -32,7 +32,9 @@ const meta: Meta<typeof PropertySelect> = {
 }
 export default meta
 
-const Template: StoryFn<typeof PropertySelect> = (props: Partial<PropertySelectProps>) => {
+const Template: StoryFn<typeof PropertySelect> = (
+    props: Partial<Omit<PropertySelectProps, 'taxonomicFilterGroup' | 'taxonomicFilterGroups'>>
+) => {
     const [selectedProperties, setSelectProperties] = useState<string[]>([
         '$initial_geoip_postal_code',
         '$initial_geoip_latitude',
