@@ -180,6 +180,18 @@ This analysis will output:
 
 These can be useful for figuring out _why_ certain queries are performing slow.
 
+##### ClickHouse debug panel profiling
+
+Staff users can open the ClickHouse debug panel from the command palette to see recently executed queries. Completed queries (status 2) show a **"Profile this query"** button that re-executes the query with CPU profiling enabled (`query_profiler_cpu_time_period_ns` at 10ms intervals) and a 30-second execution timeout.
+
+After execution, the panel polls ClickHouse's `system.trace_log` table for trace results (up to 10 attempts at 2-second intervals). Once collected, an interactive flamegraph is rendered inline showing CPU stack samples.
+
+Notes:
+
+- Queries are executed with `readonly=2`, restricting profiling to read-only operations
+- Requires `trace_log` to be enabled on the ClickHouse instance (see `docker/clickhouse/config.xml`)
+- If the query executes too quickly, it may not produce enough samples for a useful flamegraph
+
 ##### Metabase
 
 Need more granular access to queries than these dashboards provide? Take a look at [this Metabase query](https://metabase.posthog.net/question/97). The ClickHouse `system` tables (e.g. `system.query_log`) provide a lot of useful information for identifying and diagnosing slow queries.
