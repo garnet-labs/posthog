@@ -121,7 +121,7 @@ export function VoiceMode(): JSX.Element {
                 <div
                     data-attr="max-voice-mode-orb"
                     className={cn(
-                        'relative flex items-center justify-center w-48 h-48 transition-transform duration-150 ease-out',
+                        'relative flex items-center justify-center w-72 h-72 transition-transform duration-150 ease-out',
                         orbInteractable && 'cursor-grab active:cursor-grabbing touch-none select-none',
                         orbPointerDown && orbInteractable && 'scale-[0.96]',
                         !orbInteractable && 'pointer-events-none'
@@ -137,28 +137,41 @@ export function VoiceMode(): JSX.Element {
                     onPointerUp={orbInteractable ? handleOrbPointerEnd : undefined}
                     onPointerCancel={orbInteractable ? handleOrbPointerEnd : undefined}
                 >
-                    {/* Glow ring */}
-                    <div
+                    <div className="absolute inset-[-12%] rounded-full pointer-events-none VoiceMode__glow" />
+                    {/* SVG gradient stroke ring — no fill */}
+                    <svg
                         className={cn(
-                            'absolute inset-0 rounded-full transition-opacity duration-700 VoiceMode__glow',
-                            isUserSpeaking || isAiSpeaking ? 'opacity-40' : 'opacity-15'
+                            'absolute inset-0 w-full h-full pointer-events-none z-[1]',
+                            isUserSpeaking && 'VoiceMode__ring--user',
+                            isAiSpeaking && 'VoiceMode__ring--ai',
+                            isThinking && 'VoiceMode__ring--thinking',
+                            !isUserSpeaking && !isAiSpeaking && !isThinking && 'VoiceMode__ring--idle'
                         )}
-                    />
-                    {/* Orb */}
-                    <div
-                        className={cn(
-                            'relative w-40 h-40 rounded-full overflow-hidden flex items-center justify-center pointer-events-none',
-                            isUserSpeaking && 'VoiceMode__orb--user',
-                            isAiSpeaking && 'VoiceMode__orb--ai',
-                            isThinking && 'VoiceMode__orb--thinking',
-                            !isUserSpeaking && !isAiSpeaking && !isThinking && 'VoiceMode__orb--idle'
-                        )}
+                        viewBox="0 0 288 288"
                     >
+                        <defs>
+                            <linearGradient id="voice-ring-gradient" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stopColor="var(--color-ai)" />
+                                <stop offset="55%" stopColor="#6c47ff" />
+                                <stop offset="100%" stopColor="#38bdf8" />
+                            </linearGradient>
+                        </defs>
+                        <circle
+                            cx="144"
+                            cy="144"
+                            r="140"
+                            fill="none"
+                            stroke="url(#voice-ring-gradient)"
+                            strokeWidth="3"
+                        />
+                    </svg>
+                    {/* Hedgehog */}
+                    <div className="relative z-[10] flex items-center justify-center pointer-events-none">
                         {isAiSpeaking ? (
                             <img
                                 src={voiceTalking}
                                 alt="Speaking"
-                                className="relative z-[1] max-w-[78%] max-h-[78%] w-auto h-auto object-contain pointer-events-none select-none"
+                                className="w-52 h-52 object-contain pointer-events-none select-none"
                                 draggable={false}
                                 key="voice-mode-ai-talking"
                             />
@@ -166,15 +179,15 @@ export function VoiceMode(): JSX.Element {
                             <img
                                 src={voiceThinking}
                                 alt=""
-                                className="relative z-[1] max-w-[78%] max-h-[78%] w-auto h-auto object-contain pointer-events-none select-none"
+                                className="w-52 h-52 object-contain pointer-events-none select-none"
                                 draggable={false}
                                 key="voice-mode-thinking"
                             />
                         ) : (
                             <img
-                                src={voiceListening}
-                                alt=""
-                                className="relative z-[1] max-w-[78%] max-h-[78%] w-auto h-auto object-contain pointer-events-none select-none"
+                                src={isMouthOpen ? voiceTalking : voiceListening}
+                                alt={isMouthOpen ? 'Speaking' : 'Idle'}
+                                className="w-52 h-52 object-contain pointer-events-none select-none"
                                 draggable={false}
                                 key="voice-mode-listening"
                             />

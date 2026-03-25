@@ -1,28 +1,34 @@
+/* Halo behind the orb — donut shape so the ring interior stays dark */
 .VoiceMode__glow {
-    background: radial-gradient(circle, var(--color-ai) 0%, transparent 70%);
-    animation: VoiceMode__GlowPulse 3s ease-in-out infinite;
+    background: radial-gradient(
+        circle at 50% 50%,
+        transparent 0%,
+        transparent 40%,
+        color-mix(in sRGB, var(--color-ai) 25%, transparent) 46%,
+        color-mix(in sRGB, #38bdf8 20%, transparent) 52%,
+        transparent 66%
+    );
+    filter: blur(22px);
+    animation: VoiceMode__GlowPulse 3.5s ease-in-out infinite;
 }
 
-.VoiceMode__orb--idle {
-    background: linear-gradient(135deg, var(--color-ai) 0%, #6c47ff 60%, #38bdf8 100%);
+/* Ring state animations — applied to the SVG wrapper */
+.VoiceMode__ring--idle {
     animation: VoiceMode__Breathe 4s ease-in-out infinite;
 }
 
-.VoiceMode__orb--user {
-    background: linear-gradient(135deg, #38bdf8 0%, var(--color-ai) 50%, #6c47ff 100%);
-    box-shadow: 0 0 32px #38bdf8aa;
+.VoiceMode__ring--user {
+    filter: drop-shadow(0 0 18px #38bdf888);
     animation: VoiceMode__Breathe 1s ease-in-out infinite;
 }
 
-.VoiceMode__orb--ai {
-    background: linear-gradient(135deg, var(--color-ai) 0%, #6c47ff 50%, #38bdf8 100%);
-    box-shadow: 0 0 40px color-mix(in sRGB, var(--color-ai) 60%, transparent);
+.VoiceMode__ring--ai {
+    filter: drop-shadow(0 0 22px color-mix(in sRGB, var(--color-ai) 55%, transparent));
     animation: VoiceMode__Breathe 1.4s ease-in-out infinite;
 }
 
-.VoiceMode__orb--thinking {
-    background: linear-gradient(135deg, var(--color-ai) 0%, #6c47ff 60%, #38bdf8 100%);
-    opacity: 0.6;
+.VoiceMode__ring--thinking {
+    opacity: 0.72;
     animation: VoiceMode__Breathe 2s ease-in-out infinite;
 }
 
@@ -33,17 +39,17 @@
     }
 
     50% {
-        transform: scale(1.08);
+        transform: scale(1.06);
     }
 }
 
 @keyframes VoiceMode__GlowPulse {
     0%,
     100% {
-        opacity: 0.15;
+        opacity: 0.82;
     }
 
     50% {
-        opacity: 0.35;
+        opacity: 1;
     }
 }
