@@ -5,14 +5,12 @@ to the TCP client (clickhouse-driver) for all query patterns used in PostHog.
 """
 
 import uuid
-from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 from posthog.clickhouse.client.connection import ProxyClient, get_http_client
 from posthog.clickhouse.client.execute import sync_execute
-
 
 # ── ProxyClient unit tests ──────────────────────────────────────────────────
 
@@ -162,7 +160,7 @@ class TestProxyClientInsert:
         mock_client.command.return_value = 3
 
         proxy = ProxyClient(mock_client)
-        result = proxy.execute(
+        proxy.execute(
             "INSERT INTO t SELECT number FROM numbers(3)",
             params=[],
             settings={},
