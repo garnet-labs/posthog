@@ -30,6 +30,7 @@ from posthog.models import Team
 from products.experiments.stats.bayesian.enums import PriorType
 from products.experiments.stats.bayesian.method import BayesianConfig, BayesianMethod
 from products.experiments.stats.frequentist.method import FrequentistConfig, FrequentistMethod, TestType
+from products.experiments.stats.shared.cuped import CupedData, cuped_adjust
 from products.experiments.stats.shared.enums import DifferenceType
 from products.experiments.stats.shared.statistics import (
     ProportionStatistic,
@@ -177,10 +178,14 @@ def get_variant_result(
     }
 
     # Add metric-specific fields based on metric type
+    # Track the next index after metric-specific fields for CUPED column detection
+    next_idx = metric_fields_start_idx
     match metric:
         case ExperimentFunnelMetric():
             base_stats["step_counts"] = result[metric_fields_start_idx]
-            if len(result) > metric_fields_start_idx + 1:
+            next_idx = metric_fields_start_idx + 1
+            # Session data is a nested structure (list/tuple), CUPED columns are numeric
+            if len(result) > next_idx and not isinstance(result[next_idx], (int, float)):
                 base_stats["step_sessions"] = [
                     [
                         SessionData(
@@ -188,20 +193,27 @@ def get_variant_result(
                         )
                         for person_id, session_id, event_uuid, timestamp in step_sessions
                     ]
-                    for step_sessions in result[metric_fields_start_idx + 1]
+                    for step_sessions in result[next_idx]
                 ]
+                next_idx += 1
         case ExperimentRatioMetric():
             base_stats["denominator_sum"] = result[metric_fields_start_idx]
             base_stats["denominator_sum_squares"] = result[metric_fields_start_idx + 1]
             base_stats["numerator_denominator_sum_product"] = result[metric_fields_start_idx + 2]
+            next_idx = metric_fields_start_idx + 3
         case ExperimentRetentionMetric():
-            # Retention metrics are treated as ratio metrics for correct significance calculations
-            # Numerator: binary completion (0 or 1), Denominator: always 1 per user who started
             base_stats["denominator_sum"] = result[metric_fields_start_idx]
             base_stats["denominator_sum_squares"] = result[metric_fields_start_idx + 1]
             base_stats["numerator_denominator_sum_product"] = result[metric_fields_start_idx + 2]
+            next_idx = metric_fields_start_idx + 3
         case ExperimentMeanMetric():
             pass  # No additional fields beyond base_stats
+
+    # CUPED covariate fields (always the last 3 columns when present)
+    if len(result) >= next_idx + 3:
+        base_stats["covariate_sum"] = result[next_idx]
+        base_stats["covariate_sum_squares"] = result[next_idx + 1]
+        base_stats["main_covariate_sum_product"] = result[next_idx + 2]
 
     return (breakdown_tuple, ExperimentStatsBase(**base_stats))
 
@@ -331,6 +343,19 @@ def aggregate_variants_across_breakdowns(
                 }
             )
 
+        if variant_list[0].covariate_sum is not None:
+            aggregated_stats.update(
+                {
+                    "covariate_sum": sum(v.covariate_sum for v in variant_list if v.covariate_sum is not None),
+                    "covariate_sum_squares": sum(
+                        v.covariate_sum_squares for v in variant_list if v.covariate_sum_squares is not None
+                    ),
+                    "main_covariate_sum_product": sum(
+                        v.main_covariate_sum_product for v in variant_list if v.main_covariate_sum_product is not None
+                    ),
+                }
+            )
+
         aggregated_variants.append(ExperimentStatsBase(**aggregated_stats))
 
     return aggregated_variants
@@ -433,6 +458,24 @@ def metric_variant_to_statistic(
         )
 
 
+def _build_cuped_data(variant: ExperimentStatsBaseValidated) -> CupedData | None:
+    """Build CupedData from pre-exposure covariate fields, if present."""
+    if (
+        variant.covariate_sum is None
+        or variant.covariate_sum_squares is None
+        or variant.main_covariate_sum_product is None
+    ):
+        return None
+    return CupedData(
+        pre_statistic=SampleMeanStatistic(
+            n=variant.number_of_samples,
+            sum=variant.covariate_sum,
+            sum_squares=variant.covariate_sum_squares,
+        ),
+        sum_of_cross_products=variant.main_covariate_sum_product,
+    )
+
+
 def get_frequentist_experiment_result(
     metric: ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric,
     control_variant: ExperimentStatsBase,
@@ -491,7 +534,27 @@ def get_frequentist_experiment_result(
         if control_stat and not test_variant_validated.validation_failures:
             try:
                 test_stat = metric_variant_to_statistic(metric, test_variant_validated)
-                result = method.run_test(test_stat, control_stat)
+                run_test_kwargs: dict[str, Any] = {}
+
+                # Apply CUPED variance reduction if covariate data is available
+                cuped_config = stats_config.get("cuped", {}) if stats_config else {}
+                if cuped_config.get("enabled"):
+                    control_cuped = _build_cuped_data(control_variant_validated)
+                    test_cuped = _build_cuped_data(test_variant_validated)
+                    if control_cuped and test_cuped:
+                        try:
+                            cuped_result = cuped_adjust(test_stat, control_stat, test_cuped, control_cuped)
+                            test_stat = cuped_result.treatment_adjusted
+                            control_stat_adj = cuped_result.control_adjusted
+                            run_test_kwargs["unadjusted_mean"] = cuped_result.control_unadjusted_mean
+                        except StatisticError:
+                            control_stat_adj = control_stat
+                    else:
+                        control_stat_adj = control_stat
+                else:
+                    control_stat_adj = control_stat
+
+                result = method.run_test(test_stat, control_stat_adj, **run_test_kwargs)
 
                 confidence_interval = [result.confidence_interval[0], result.confidence_interval[1]]
 
@@ -576,7 +639,27 @@ def get_bayesian_experiment_result(
         if control_stat and not test_variant_validated.validation_failures:
             try:
                 test_stat = metric_variant_to_statistic(metric, test_variant_validated)
-                result = method.run_test(test_stat, control_stat)
+                run_test_kwargs: dict[str, Any] = {}
+
+                # Apply CUPED variance reduction if covariate data is available
+                cuped_config = stats_config.get("cuped", {}) if stats_config else {}
+                if cuped_config.get("enabled"):
+                    control_cuped = _build_cuped_data(control_variant_validated)
+                    test_cuped = _build_cuped_data(test_variant_validated)
+                    if control_cuped and test_cuped:
+                        try:
+                            cuped_result = cuped_adjust(test_stat, control_stat, test_cuped, control_cuped)
+                            test_stat = cuped_result.treatment_adjusted
+                            control_stat_adj = cuped_result.control_adjusted
+                            run_test_kwargs["unadjusted_mean"] = cuped_result.control_unadjusted_mean
+                        except StatisticError:
+                            control_stat_adj = control_stat
+                    else:
+                        control_stat_adj = control_stat
+                else:
+                    control_stat_adj = control_stat
+
+                result = method.run_test(test_stat, control_stat_adj, **run_test_kwargs)
 
                 # Convert credible interval to percentage
                 credible_interval = [result.credible_interval[0], result.credible_interval[1]]

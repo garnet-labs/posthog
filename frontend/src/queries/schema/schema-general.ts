@@ -3403,6 +3403,9 @@ export interface ExperimentStatsBase {
     numerator_denominator_sum_product?: number
     step_counts?: integer[]
     step_sessions?: SessionData[][]
+    covariate_sum?: number
+    covariate_sum_squares?: number
+    main_covariate_sum_product?: number
 }
 
 export enum ExperimentStatsValidationFailure {

@@ -84,6 +84,7 @@ class ExperimentQueryBuilder:
         ] = None,
         breakdowns: list[Breakdown] | None = None,
         force_precomputation: bool = False,
+        cuped_config: dict | None = None,
     ):
         self.team = team
         self.metric = metric
@@ -98,6 +99,8 @@ class ExperimentQueryBuilder:
         self.breakdown_injector = BreakdownInjector(self.breakdowns, metric) if metric else None
         self.preaggregation_job_ids: list[str] | None = None
         self.force_precomputation = force_precomputation
+        self.cuped_enabled = bool(cuped_config.get("enabled")) if cuped_config else False
+        self.cuped_lookback_days = cuped_config.get("lookback_days", 7) if cuped_config else 7
 
     # Experiment queries group by (variant, breakdown_values), so the row count is
     # bounded by num_variants × num_breakdown_values.  The HogQL executor injects
@@ -269,6 +272,28 @@ class ExperimentQueryBuilder:
         # Build the JOIN clause with conditional temporal filter
         temporal_filter = "AND metric_events.timestamp >= exposures.first_exposure_time" if is_unordered_funnel else ""
 
+        cuped_cte = ""
+        if self.cuped_enabled:
+            cuped_cte = """
+            , pre_entity_metrics AS (
+                SELECT
+                    exposures.entity_id AS entity_id,
+                    exposures.variant AS variant,
+                    if(count(pre_events.entity_id) > 0, 1, 0) AS pre_value
+                FROM exposures
+                LEFT JOIN (
+                    SELECT {entity_key} AS entity_id, timestamp
+                    FROM events
+                    WHERE {last_funnel_step_filter}
+                        AND timestamp >= {cuped_date_from}
+                        AND timestamp < {date_to}
+                ) AS pre_events ON exposures.entity_id = pre_events.entity_id
+                    AND pre_events.timestamp >= exposures.first_exposure_time - toIntervalDay({cuped_lookback_days})
+                    AND pre_events.timestamp < exposures.first_exposure_time
+                GROUP BY exposures.entity_id, exposures.variant
+            )
+            """
+
         ctes_sql = f"""
             exposures AS (
                 {{exposure_select_query}}
@@ -297,6 +322,7 @@ class ExperimentQueryBuilder:
                     exposures.exposure_session_id,
                     exposures.first_exposure_time
             )
+            {cuped_cte}
         """
 
         placeholders: dict[str, ast.Expr | ast.SelectQuery] = {
@@ -312,6 +338,37 @@ class ExperimentQueryBuilder:
             "exposure_select_query": self._get_exposure_query(),
         }
 
+        if self.cuped_enabled:
+            # Last funnel step filter for pre-exposure covariate
+            last_step = self.metric.series[-1]
+            placeholders["last_funnel_step_filter"] = event_or_action_to_filter(self.team, last_step)
+            placeholders["cuped_date_from"] = parse_expr(
+                "{date_from} - toIntervalDay({lookback_days})",
+                placeholders={
+                    "date_from": self.date_range_query.date_from_as_hogql(),
+                    "lookback_days": ast.Constant(value=self.cuped_lookback_days),
+                },
+            )
+            placeholders["date_to"] = self.date_range_query.date_to_as_hogql()
+            placeholders["cuped_lookback_days"] = ast.Constant(value=self.cuped_lookback_days)
+
+        cuped_join = ""
+        cuped_columns = ""
+        if self.cuped_enabled:
+            cuped_join = """
+                LEFT JOIN pre_entity_metrics
+                    ON entity_metrics.entity_id = pre_entity_metrics.entity_id
+                    AND entity_metrics.variant = pre_entity_metrics.variant
+            """
+            cuped_columns = """,
+                sum(coalesce(pre_entity_metrics.pre_value, 0)) AS covariate_sum,
+                sum(coalesce(pre_entity_metrics.pre_value, 0)) AS covariate_sum_squares,
+                sum(
+                    if(entity_metrics.value.1 = {num_steps_minus_1}, 1, 0)
+                    * coalesce(pre_entity_metrics.pre_value, 0)
+                ) AS main_covariate_sum_product
+            """
+
         query = parse_select(
             f"""
             WITH
@@ -325,10 +382,12 @@ class ExperimentQueryBuilder:
                 -- num_steps - 1
                 countIf(entity_metrics.value.1 = {{num_steps_minus_1}}) AS total_sum,
                 countIf(entity_metrics.value.1 = {{num_steps_minus_1}}) AS total_sum_of_squares
+                {cuped_columns}
                 -- step_counts added programmatically below
                 -- steps_event_data added programmatically below
                 -- breakdown columns added programmatically below
             FROM entity_metrics
+            {cuped_join}
             WHERE notEmpty(variant)
             GROUP BY entity_metrics.variant
             -- breakdown columns added programmatically below
@@ -463,6 +522,22 @@ class ExperimentQueryBuilder:
         else:
             join_condition = "exposures.entity_id = metric_events.entity_id"
 
+        cuped_cte = ""
+        if self.cuped_enabled:
+            cuped_cte = f"""
+            , pre_entity_metrics AS (
+                SELECT
+                    exposures.entity_id AS entity_id,
+                    exposures.variant AS variant,
+                    {{value_agg}} AS pre_value
+                FROM exposures
+                LEFT JOIN metric_events ON {join_condition}
+                    AND metric_events.timestamp >= exposures.first_exposure_time - toIntervalDay({{cuped_lookback_days}})
+                    AND metric_events.timestamp < exposures.first_exposure_time
+                GROUP BY exposures.entity_id, exposures.variant
+            )
+            """
+
         return f"""
             exposures AS (
                 {{exposure_select_query}}
@@ -490,6 +565,7 @@ class ExperimentQueryBuilder:
                 GROUP BY exposures.entity_id, exposures.variant
                 -- breakdown columns added programmatically below
             )
+            {cuped_cte}
         """
 
     def _get_mean_query_common_placeholders(self) -> dict:
@@ -535,6 +611,9 @@ class ExperimentQueryBuilder:
             "conversion_window_predicate": self._build_conversion_window_predicate(),
         }
 
+        if self.cuped_enabled:
+            placeholders["cuped_lookback_days"] = ast.Constant(value=self.cuped_lookback_days)
+
         # Add join condition for data warehouse
         if source_info.kind == "datawarehouse":
             placeholders["join_condition"] = parse_expr(
@@ -576,6 +655,20 @@ class ExperimentQueryBuilder:
 
         common_ctes = self._get_mean_query_common_ctes()
 
+        cuped_join = ""
+        cuped_columns = ""
+        if self.cuped_enabled:
+            cuped_join = """
+                LEFT JOIN pre_entity_metrics
+                    ON entity_metrics.entity_id = pre_entity_metrics.entity_id
+                    AND entity_metrics.variant = pre_entity_metrics.variant
+            """
+            cuped_columns = """,
+                sum(coalesce(pre_entity_metrics.pre_value, 0)) AS covariate_sum,
+                sum(power(coalesce(pre_entity_metrics.pre_value, 0), 2)) AS covariate_sum_squares,
+                sum(entity_metrics.value * coalesce(pre_entity_metrics.pre_value, 0)) AS main_covariate_sum_product
+            """
+
         query = parse_select(
             f"""
             WITH {common_ctes}
@@ -585,8 +678,10 @@ class ExperimentQueryBuilder:
                 count(entity_metrics.entity_id) AS num_users,
                 sum(entity_metrics.value) AS total_sum,
                 sum(power(entity_metrics.value, 2)) AS total_sum_of_squares
+                {cuped_columns}
                 -- breakdown columns added programmatically below
             FROM entity_metrics
+            {cuped_join}
             GROUP BY entity_metrics.variant
             -- breakdown columns added programmatically below
             """,
@@ -640,6 +735,20 @@ class ExperimentQueryBuilder:
         placeholders["lower_bound"] = lower_bound_expr
         placeholders["upper_bound"] = upper_bound_expr
 
+        cuped_join = ""
+        cuped_columns = ""
+        if self.cuped_enabled:
+            cuped_join = """
+                LEFT JOIN pre_entity_metrics
+                    ON winsorized_entity_metrics.entity_id = pre_entity_metrics.entity_id
+                    AND winsorized_entity_metrics.variant = pre_entity_metrics.variant
+            """
+            cuped_columns = """,
+                sum(coalesce(pre_entity_metrics.pre_value, 0)) AS covariate_sum,
+                sum(power(coalesce(pre_entity_metrics.pre_value, 0), 2)) AS covariate_sum_squares,
+                sum(winsorized_entity_metrics.value * coalesce(pre_entity_metrics.pre_value, 0)) AS main_covariate_sum_product
+            """
+
         query = parse_select(
             f"""
             WITH {common_ctes},
@@ -669,8 +778,10 @@ class ExperimentQueryBuilder:
                 count(winsorized_entity_metrics.entity_id) AS num_users,
                 sum(winsorized_entity_metrics.value) AS total_sum,
                 sum(power(winsorized_entity_metrics.value, 2)) AS total_sum_of_squares
+                {cuped_columns}
                 -- breakdown columns added programmatically below
             FROM winsorized_entity_metrics
+            {cuped_join}
             GROUP BY winsorized_entity_metrics.variant
             -- breakdown columns added programmatically below
             """,
@@ -944,6 +1055,16 @@ class ExperimentQueryBuilder:
 
         conversion_window_seconds = self._get_conversion_window_seconds()
 
+        date_from_expr: ast.Expr = self.date_range_query.date_from_as_hogql()
+        if self.cuped_enabled:
+            date_from_expr = parse_expr(
+                "{date_from} - toIntervalDay({lookback_days})",
+                placeholders={
+                    "date_from": self.date_range_query.date_from_as_hogql(),
+                    "lookback_days": ast.Constant(value=self.cuped_lookback_days),
+                },
+            )
+
         return parse_expr(
             """
             {timestamp_field} >= {date_from}
@@ -952,7 +1073,7 @@ class ExperimentQueryBuilder:
             """,
             placeholders={
                 "timestamp_field": ast.Field(chain=timestamp_field_chain),
-                "date_from": self.date_range_query.date_from_as_hogql(),
+                "date_from": date_from_expr,
                 "date_to": self.date_range_query.date_to_as_hogql(),
                 "conversion_window_seconds": ast.Constant(value=conversion_window_seconds),
                 "metric_event_filter": metric_event_filter,

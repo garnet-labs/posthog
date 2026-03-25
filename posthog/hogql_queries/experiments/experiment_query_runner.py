@@ -202,6 +202,9 @@ class ExperimentQueryRunner(QueryRunner):
             filter_test_accounts,
         ) = get_exposure_config_params_for_builder(self.experiment.exposure_criteria)
 
+        stats_config = self.experiment.stats_config or {}
+        cuped_config = stats_config.get("cuped", {})
+
         builder = ExperimentQueryBuilder(
             team=self.team,
             feature_flag_key=self.feature_flag.key,
@@ -214,6 +217,7 @@ class ExperimentQueryRunner(QueryRunner):
             metric=self.metric,
             breakdowns=self._get_breakdowns_for_builder(),
             force_precomputation=self.force_precomputation,
+            cuped_config=cuped_config if cuped_config.get("enabled") else None,
         )
 
         # Skip precomputation for data warehouse metrics because the precomputed table
