@@ -197,7 +197,7 @@ jobs:
     flox-activation:
         needs: changes
         if: needs.changes.outputs.python == 'true'
-        timeout-minutes: 20
+        timeout-minutes: 5
         name: Flox activation check
         runs-on: ubuntu-latest
         steps:
@@ -208,10 +208,9 @@ jobs:
             - name: Install Flox
               uses: flox/install-flox-action@v2
 
-            - name: Verify Flox activation
-              uses: flox/activate-action@v1
-              with:
-                  command: python --version
+            - name: Verify Flox activation (run mode, no profile scripts)
+              shell: bash
+              run: flox activate --mode run -- true
 
     # Collate job - single required status check for branch protection.
     # The code-quality job skips when no Python changes, but this job always
