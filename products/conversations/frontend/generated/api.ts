@@ -231,6 +231,23 @@ export const conversationsQueueClearCreate = async (
     })
 }
 
+export const getConversationsSttTokenCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/conversations/stt_token/`
+}
+
+export const conversationsSttTokenCreate = async (
+    projectId: string,
+    conversationApi: NonReadonly<ConversationApi>,
+    options?: RequestInit
+): Promise<ConversationApi> => {
+    return apiMutator<ConversationApi>(getConversationsSttTokenCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(conversationApi),
+    })
+}
+
 export const getConversationsTranscribeCreateUrl = (projectId: string) => {
     return `/api/environments/${projectId}/conversations/transcribe/`
 }
