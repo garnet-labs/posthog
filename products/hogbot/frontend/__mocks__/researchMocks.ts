@@ -1,11 +1,28 @@
-import { ResearchDocument } from '../types'
+import { SandboxFile } from '../types'
 
-export const MOCK_RESEARCH_DOCUMENTS: ResearchDocument[] = [
+export const MOCK_SANDBOX_FILES: SandboxFile[] = [
     {
-        id: 'doc-1',
+        path: '/research/mobile-retention-drop.md',
         filename: 'mobile-retention-drop.md',
-        title: 'Mobile retention drop investigation',
-        content: `# Mobile retention drop investigation
+        size: 1240,
+        modified_at: '2026-03-25T10:30:00Z',
+    },
+    {
+        path: '/research/funnel-conversion-analysis.md',
+        filename: 'funnel-conversion-analysis.md',
+        size: 890,
+        modified_at: '2026-03-25T10:01:30Z',
+    },
+    {
+        path: '/research/weekly-insights-summary.md',
+        filename: 'weekly-insights-summary.md',
+        size: 720,
+        modified_at: '2026-03-24T08:00:00Z',
+    },
+]
+
+export const MOCK_FILE_CONTENTS: Record<string, string> = {
+    '/research/mobile-retention-drop.md': `# Mobile retention drop investigation
 
 ## Summary
 
@@ -28,16 +45,9 @@ export const MOCK_RESEARCH_DOCUMENTS: ResearchDocument[] = [
 
 - Roll back mobile SDK to v2.4.0 or hotfix the onboarding navigation bug
 - Add monitoring alert for onboarding completion → home view drop-off rate
-- Consider a re-engagement campaign for affected users
-`,
-        created_at: '2026-03-25T10:05:00Z',
-        updated_at: '2026-03-25T10:30:00Z',
-    },
-    {
-        id: 'doc-2',
-        filename: 'funnel-conversion-analysis.md',
-        title: 'Funnel conversion rate analysis - March 2026',
-        content: `# Funnel conversion rate analysis - March 2026
+- Consider a re-engagement campaign for affected users`,
+
+    '/research/funnel-conversion-analysis.md': `# Funnel conversion rate analysis - March 2026
 
 ## Overview
 
@@ -55,16 +65,9 @@ Analysis of the primary signup-to-activation funnel for the 30-day period ending
 
 - Overall funnel health is improving, driven by better sign-up-to-onboarding conversion
 - The onboarding → first event step remains the weakest link
-- Users who complete onboarding within 5 minutes have 2.3x higher retention
-`,
-        created_at: '2026-03-25T10:01:30Z',
-        updated_at: '2026-03-25T10:01:30Z',
-    },
-    {
-        id: 'doc-3',
-        filename: 'weekly-insights-summary.md',
-        title: 'Weekly insights summary',
-        content: `# Weekly insights summary
+- Users who complete onboarding within 5 minutes have 2.3x higher retention`,
+
+    '/research/weekly-insights-summary.md': `# Weekly insights summary
 
 ## Week of March 17-23, 2026
 
@@ -84,9 +87,5 @@ Analysis of the primary signup-to-activation funnel for the 30-day period ending
 
 - Prioritize mobile SDK fix
 - Review API dependency timeout settings
-- Investigate feature flag evaluation performance
-`,
-        created_at: '2026-03-24T08:00:00Z',
-        updated_at: '2026-03-24T08:00:00Z',
-    },
-]
+- Investigate feature flag evaluation performance`,
+}

@@ -1,34 +1,64 @@
 # Hogbot Backend Schema
 
-This document describes the expected API endpoints, data models,
+This document describes the expected API endpoints
 and agent architecture for the Hogbot backend.
+
+There are no Django models for sessions or documents —
+the sandbox filesystem and S3 logs are the source of truth.
+
+## Log Format
+
+Hogbot uses the same log format as the Tasks product.
+Logs are stored as JSONL in S3, with each line being a JSON object
+following the ACP (Agent Communication Protocol) notification format.
+
+The frontend reuses `parseLogs` and `parseLogEvent`
+from `products/tasks/frontend/lib/parse-logs.ts`.
+
+### Two Log Streams
+
+| Agent | S3 key pattern | API path |
+|-------|---------------|----------|
+| Admin | `hogbot/{team_id}/admin.jsonl` | `/hogbot/admin/logs/` |
+| Research | `hogbot/{team_id}/research/{research_id}.jsonl` | `/hogbot/research/{research_id}/logs/` |
+
+The admin agent writes to a single known S3 file per team.
+The research agent writes one log file per research task.
+
+### Log Entry Types
+
+| Type | Rendered As |
+|------|-------------|
+| `agent` | Chat message bubble (left-aligned, from Hogbot) |
+| `user` | Chat message bubble (right-aligned, from user) |
+| `tool` | Collapsible tool call (inside "Thinking" section) |
+| `console` | Console log with level badge (inside "Thinking" section) |
+| `system` | Italic system text (inside "Thinking" section) |
+| `raw` | Monospace raw text (inside "Thinking" section) |
+
+The frontend groups consecutive non-message entries (tool, console, system, raw)
+into collapsible "Thinking" sections between chat messages.
+These are collapsed by default.
 
 ## API Endpoints
 
-### Messages
+### Admin Agent
 
-**`GET /api/projects/:team_id/hogbot/messages/`**
+**`GET /api/projects/:team_id/hogbot/admin/logs/`**
 
-List chat messages between the user and the agent.
+Returns raw JSONL log text from S3 for the admin agent.
+Proxies S3 to avoid CORS (same pattern as Tasks `runs/{id}/logs/`).
 
-Response:
-```json
-{
-    "results": [
-        {
-            "id": "uuid",
-            "role": "user" | "agent" | "system",
-            "type": "text" | "proactive",
-            "content": "string (markdown)",
-            "created_at": "2026-03-25T10:00:00Z"
-        }
-    ]
-}
-```
+Response: plain text (JSONL format, one JSON object per line).
 
-**`POST /api/projects/:team_id/hogbot/messages/`**
+**`GET /api/projects/:team_id/hogbot/admin/stream/`**
 
-Send a message from the user to the agent.
+SSE endpoint for real-time admin agent log streaming.
+Relays events from Redis stream (written by the sandbox event relay).
+
+**`POST /api/projects/:team_id/hogbot/admin/messages/`**
+
+Send a user message to the admin agent.
 
 Request:
 ```json
@@ -37,45 +67,43 @@ Request:
 }
 ```
 
-Response: returns the created user message object (same shape as above).
-The agent response will arrive asynchronously via SSE.
+Response: `202 Accepted`.
+The agent response arrives via the SSE stream.
 
-**`GET /api/projects/:team_id/hogbot/messages/stream/`**
+### Sandbox Filesystem
 
-SSE endpoint for real-time message delivery.
-Streams new messages (including proactive agent messages) as they are created.
+**`GET /api/projects/:team_id/hogbot/files/`**
 
-Event format:
-```
-event: message
-data: {"id": "uuid", "role": "agent", "type": "proactive", "content": "...", "created_at": "..."}
-```
-
-### Research Documents
-
-**`GET /api/projects/:team_id/hogbot/research/`**
-
-List research documents (markdown files from the sandbox).
+List files on the sandbox filesystem.
+Accepts an optional `glob` query parameter to filter (e.g. `/research/*.md`).
 
 Response:
 ```json
 {
     "results": [
         {
-            "id": "uuid",
+            "path": "/research/mobile-retention-drop.md",
             "filename": "mobile-retention-drop.md",
-            "title": "Mobile retention drop investigation",
-            "content": "# Full markdown content...",
-            "created_at": "2026-03-25T10:05:00Z",
-            "updated_at": "2026-03-25T10:30:00Z"
+            "size": 1240,
+            "modified_at": "2026-03-25T10:30:00Z"
         }
     ]
 }
 ```
 
-**`GET /api/projects/:team_id/hogbot/research/:id/`**
+**`GET /api/projects/:team_id/hogbot/files/read/`**
 
-Get a single research document by ID.
+Read a single file from the sandbox filesystem.
+Accepts a `path` query parameter.
+
+Response: plain text (file content).
+
+### Research Agent Logs
+
+**`GET /api/projects/:team_id/hogbot/research/:research_id/logs/`**
+
+Returns raw JSONL log text from S3 for a specific research agent run.
+Same format as admin logs.
 
 ### Tasks
 
@@ -88,69 +116,28 @@ Uses the existing `TaskViewSet` — no new endpoint needed.
 Requires adding `HOGBOT = "hogbot"` to `Task.OriginProduct` choices
 in `products/tasks/backend/models.py`.
 
-## Data Models
-
-### HogbotMessage
-
-```python
-class HogbotMessage(models.Model):
-    class Role(models.TextChoices):
-        USER = "user"
-        AGENT = "agent"
-        SYSTEM = "system"
-
-    class Type(models.TextChoices):
-        TEXT = "text"
-        PROACTIVE = "proactive"
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
-    role = models.CharField(max_length=10, choices=Role.choices)
-    type = models.CharField(max_length=10, choices=Type.choices, default=Type.TEXT)
-    content = models.TextField()
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = "posthog_hogbot_message"
-        ordering = ["created_at"]
-```
-
-### ResearchDocument
-
-```python
-class ResearchDocument(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
-    sandbox_id = models.CharField(max_length=255, null=True, blank=True)
-    filename = models.CharField(max_length=255)
-    title = models.CharField(max_length=255)
-    content = models.TextField()
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "posthog_hogbot_research_document"
-        ordering = ["-updated_at"]
-```
-
 ## Agent Architecture
 
-Hogbot runs two concurrent Claude SDK agent loops inside a cloud sandbox:
+Hogbot runs two concurrent Claude SDK agent loops inside a cloud sandbox.
+Both agents write their logs to S3 as JSONL.
 
-### 1. Research Agent
-
-- Runs continuously in the background
-- Analyzes product data using PostHog MCP tools
-- Creates and updates research documents (markdown files) in the sandbox
-- Creates Tasks (via the Tasks product API) with `origin_product="hogbot"`
-- Can send proactive messages to the user when it discovers insights
-
-### 2. Admin Agent
+### 1. Admin Agent
 
 - Handles user chat interactions
 - Receives user messages and generates responses
 - Can delegate work to the research agent
-- Manages the overall Hogbot session state
+- Writes logs to `hogbot/{team_id}/admin.jsonl`
+- SSE stream relays events to the frontend in real-time
+
+### 2. Research Agent
+
+- Runs continuously in the background
+- Analyzes product data using PostHog MCP tools
+- Creates and updates markdown files on the sandbox filesystem
+  (e.g. `/research/mobile-retention-drop.md`)
+- Creates Tasks (via the Tasks product API) with `origin_product="hogbot"`
+- Writes per-research logs to `hogbot/{team_id}/research/{research_id}.jsonl`
+- Can send proactive messages via the admin agent
 
 ### Sandbox Provisioning
 
@@ -167,18 +154,16 @@ Follow the existing Tasks product pattern:
 4. The sandbox runs an agent server (`npx agent-server`)
    that hosts both agent loops
 
-### Message Streaming
+### Log Streaming
 
-Proactive messages and agent responses stream to the frontend via SSE:
-
-1. Agent writes a message inside the sandbox
-2. Sandbox posts the message to the Hogbot API
+1. Agent activity inside the sandbox produces ACP notifications
+2. Sandbox posts events to the relevant stream endpoint
    (authenticated via connection token)
-3. Backend writes the message to a Redis stream
+3. Backend writes events to a Redis stream
    (reference: `products/tasks/backend/temporal/process_task/activities/relay_sandbox_events.py`)
 4. Django SSE endpoint reads from Redis stream
    and pushes to the connected frontend client
-5. Frontend appends the message to the chat
+5. Logs are also appended to S3 as JSONL for historical access
 
 ### OAuth & MCP Access
 
@@ -191,13 +176,12 @@ retention data, and other PostHog product data.
 ## Backend Implementation Checklist
 
 - [ ] Add `HOGBOT = "hogbot"` to `Task.OriginProduct` in `products/tasks/backend/models.py`
-- [ ] Create `HogbotMessage` model in `products/hogbot/backend/models.py`
-- [ ] Create `ResearchDocument` model in `products/hogbot/backend/models.py`
-- [ ] Create serializers in `products/hogbot/backend/presentation/serializers.py`
-- [ ] Create viewsets in `products/hogbot/backend/presentation/views.py`
+- [ ] Create sandbox filesystem proxy endpoints (list files, read file)
+- [ ] Create admin agent log proxy endpoint (S3 → response)
+- [ ] Create admin agent SSE stream endpoint (Redis → SSE)
+- [ ] Create admin agent message endpoint (POST)
+- [ ] Create research agent log proxy endpoint (per research ID)
 - [ ] Register URLs in `products/hogbot/backend/presentation/urls.py`
 - [ ] Create Temporal workflow for sandbox provisioning
-- [ ] Implement SSE endpoint for message streaming
-- [ ] Create agent server entrypoint with research + admin loops
-- [ ] Add Django migration for new models
+- [ ] Create agent server entrypoint with admin + research loops
 - [ ] Add `hogbot` to `INSTALLED_APPS` in settings
