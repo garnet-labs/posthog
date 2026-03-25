@@ -1,17 +1,17 @@
 """
-predict.py — Score users using a trained model.
+predict.py — Fetch fresh data and score users with a trained pipeline.
+
+Runs the scoring query via PostHog API (same features as training, but
+T=now() and no label), loads the trained pipeline, and outputs scores.
 
 Inputs:
-    model.pkl — trained model artifact from train.py
-    Environment:
-        POSTHOG_HOST, POSTHOG_API_KEY, POSTHOG_PROJECT_ID
+    POSTHOG_HOST, POSTHOG_API_KEY, POSTHOG_PROJECT_ID (env vars)
+    model.pkl    — trained pipeline from train.py
+    SCORING_QUERY (inline — same features as training, different time window)
 
 Outputs:
-    scores.parquet — scored users with person_id, probability, bucket
-    scores.json   — summary with distribution and top 20
-
-The scoring query mirrors the training feature query but with T=now()
-and no label column.
+    scores.parquet — person_id, probability, bucket
+    scores.json    — summary with distribution and top 20
 """
 
 import os
@@ -20,22 +20,45 @@ import pickle
 from collections import Counter
 
 import pandas as pd
-import requests
+from utils import fetch_features
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "http://localhost:8000")
-POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY", "")
-POSTHOG_PROJECT_ID = os.environ.get("POSTHOG_PROJECT_ID", "1")
-
-MODEL_PATH = os.environ.get("MODEL_OUTPUT_PATH", "/tmp/model.pkl")
-SCORES_PARQUET_PATH = os.environ.get("SCORES_OUTPUT_PATH", "/tmp/scores.parquet")
+MODEL_PATH = os.environ.get("MODEL_PATH", "/tmp/model.pkl")
+DATA_PATH = "/tmp/scoring_data.parquet"
+SCORES_PARQUET_PATH = os.environ.get("SCORES_PATH", "/tmp/scores.parquet")
 SCORES_JSON_PATH = os.environ.get("SCORES_JSON_PATH", "/tmp/scores.json")
 
-OBSERVATION_DAYS = 90
-MIN_EVENTS = 5
-
 BUCKET_THRESHOLDS = {"very_likely": 0.7, "likely": 0.4, "neutral": 0.15}
+
+# The scoring query mirrors the training query but with T=now() and no label.
+# The agent adapts this to match whatever query was used in training.
+SCORING_QUERY = """
+SELECT
+    person_id,
+    dateDiff('day', max(timestamp), now()) AS days_since_last_event,
+    dateDiff('day',
+        maxIf(timestamp, event = 'downloaded_file'),
+        now()) AS days_since_last_target,
+    count() AS events_total,
+    countIf(timestamp > now() - interval 30 day) AS events_30d,
+    countIf(timestamp > now() - interval 7 day) AS events_7d,
+    countIf(event = 'downloaded_file') AS target_action_count,
+    uniq(event) AS unique_event_types,
+    countIf(timestamp > now() - interval 15 day)
+    / greatest(countIf(timestamp > now() - interval 30 day
+        AND timestamp <= now() - interval 15 day), 1) AS trend_ratio_15d,
+    countIf(event = '$pageview')
+        / greatest(count(), 1) AS pageview_ratio,
+    countIf(event = '$autocapture')
+        / greatest(count(), 1) AS autocapture_ratio
+FROM events
+WHERE person_id IS NOT NULL
+  AND timestamp >= now() - interval 90 day
+GROUP BY person_id
+HAVING events_total >= 5
+LIMIT 50000
+"""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,90 +75,39 @@ def assign_bucket(prob: float) -> str:
         return "unlikely"
 
 
-def execute_hogql(query: str) -> pd.DataFrame:
-    """Execute a HogQL query via the PostHog API and return a DataFrame."""
-    url = f"{POSTHOG_HOST}/api/projects/{POSTHOG_PROJECT_ID}/query/"
-    headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
-    payload = {
-        "query": {
-            "kind": "HogQLQuery",
-            "query": query,
-        }
-    }
-
-    resp = requests.post(url, json=payload, headers=headers, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-
-    columns = data["columns"]
-    results = data["results"]
-    return pd.DataFrame(results, columns=columns)
-
-
-def build_scoring_query(feature_cols: list[str]) -> str:
-    """Build a scoring query that matches training features but with T=now()."""
-    # This produces the same feature columns as training but without the label.
-    # The agent adapts this per experiment to match the training feature query.
-    return f"""
-SELECT
-    person_id,
-    dateDiff('day', max(timestamp), now()) AS days_since_last_event,
-    dateDiff('day', maxIf(timestamp, event = 'downloaded_file'), now()) AS days_since_last_target,
-    count() AS events_total_{OBSERVATION_DAYS}d,
-    countIf(timestamp > now() - interval 30 day) AS events_30d,
-    countIf(timestamp > now() - interval 7 day) AS events_7d,
-    countIf(event = 'downloaded_file') AS target_action_count,
-    uniq(event) AS unique_event_types,
-    countIf(timestamp > now() - interval 15 day)
-        / greatest(countIf(timestamp > now() - interval 30 day AND timestamp <= now() - interval 15 day), 1) AS trend_ratio_15d,
-    countIf(event = '$pageview') / greatest(count(), 1) AS pageview_ratio,
-    countIf(event = '$autocapture') / greatest(count(), 1) AS autocapture_ratio
-FROM events
-WHERE person_id IS NOT NULL
-  AND timestamp >= now() - interval {OBSERVATION_DAYS} day
-GROUP BY person_id
-HAVING events_total_{OBSERVATION_DAYS}d >= {MIN_EVENTS}
-LIMIT 50000
-"""
-
-
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
-    # Load model
+    # ── Load model ───────────────────────────────────────────────────────
     with open(MODEL_PATH, "rb") as f:
-        artifact = pickle.load(f)
+        artifact = pickle.load(f)  # noqa: S301
 
-    model = artifact["model"]
+    pipeline = artifact["pipeline"]
     training_feature_cols = artifact["feature_cols"]
-    print(f"Loaded model with features: {training_feature_cols}")
+    print(f"Loaded model with {len(training_feature_cols)} features")
 
-    # Fetch scoring features
-    print("Running scoring query...")
-    query = build_scoring_query(training_feature_cols)
-    df = execute_hogql(query)
-    print(f"Scored {len(df)} users")
+    # ── Fetch scoring data ───────────────────────────────────────────────
+    print("Fetching scoring data...")
+    df = fetch_features(SCORING_QUERY, DATA_PATH)
 
-    person_ids = df["person_id"].values
-    exclude_cols = {"person_id", "label"}
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
+    assert "person_id" in df.columns, "Missing person_id column"
 
-    # Validate feature alignment
-    missing = set(training_feature_cols) - set(feature_cols)
+    # ── Validate features ────────────────────────────────────────────────
+    available_cols = [c for c in df.columns if c not in {"person_id", "label"}]
+    missing = set(training_feature_cols) - set(available_cols)
     if missing:
         print(f"ERROR: Missing features from training: {missing}")
         return
 
-    # Reorder to match training
-    df_features = df[training_feature_cols].fillna(0)
-    X = df_features.values
+    X = df[training_feature_cols]
+    person_ids = df["person_id"].values
 
-    # Score
-    probs = model.predict_proba(X)[:, 1]
-    buckets = [assign_bucket(p) for p in probs]
+    # ── Score ────────────────────────────────────────────────────────────
+    probs = pipeline.predict_proba(X)[:, 1]
+    buckets = [assign_bucket(float(p)) for p in probs]
 
-    # Build output
+    # ── Output ───────────────────────────────────────────────────────────
     scores = pd.DataFrame(
         {
             "person_id": [str(p) for p in person_ids],
@@ -146,7 +118,6 @@ def main() -> None:
 
     scores.to_parquet(SCORES_PARQUET_PATH, index=False)
 
-    # Summary
     bucket_counts = Counter(buckets)
     total = len(buckets)
     distribution = {
