@@ -23,6 +23,7 @@ class ActionPredictionModelRunSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "prediction_model",
+            "task_run",
             "is_winning",
             "model_url",
             "metrics",

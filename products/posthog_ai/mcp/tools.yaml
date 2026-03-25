@@ -94,6 +94,25 @@ tools:
         title: Delete action prediction model
         description: >
             Permanently delete an action prediction model by ID.
+    action-prediction-model-upload-url:
+        operation: action_prediction_models_upload_url_create
+        enabled: true
+        scopes:
+            - action_prediction_model:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: false
+        title: Generate model artifact upload URL
+        description: >
+            Generate a presigned S3 upload URL for a model artifact. Returns a
+            URL and form fields for direct upload to S3, plus a storage_path to
+            use as model_url when creating an ActionPredictionModelRun. Each
+            call produces a unique storage path, so call once per artifact.
+        param_overrides:
+            filename:
+                description: >
+                    Name of the file to upload, e.g. "xgboost_v1.pkl".
     prediction-model-run-list:
         operation: action_prediction_model_runs_list
         enabled: true
@@ -142,6 +161,7 @@ tools:
             feature importance scores, and the artifact script.
         include_params:
             - prediction_model
+            - task_run
             - is_winning
             - model_url
             - metrics
@@ -162,6 +182,7 @@ tools:
             Update a prediction model run by ID. Can change winning status,
             metrics, feature importance, or artifact script.
         include_params:
+            - task_run
             - is_winning
             - model_url
             - metrics

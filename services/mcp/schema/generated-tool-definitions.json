@@ -1244,6 +1244,21 @@
             "readOnlyHint": false
         }
     },
+    "action-prediction-model-upload-url": {
+        "description": "Generate a presigned S3 upload URL for a model artifact. Returns a URL and form fields for direct upload to S3, plus a storage_path to use as model_url when creating an ActionPredictionModelRun. Each call produces a unique storage path, so call once per artifact.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Generate model artifact upload URL",
+        "title": "Generate model artifact upload URL",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
     "prediction-model-run-list": {
         "description": "List training runs for action prediction models, newest first. Returns winning status, S3 model URL, evaluation metrics, feature importance, and the training artifact script.",
         "category": "AI",

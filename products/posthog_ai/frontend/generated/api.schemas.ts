@@ -69,10 +69,15 @@ export interface UserBasicApi {
 export interface ActionPredictionModelRunApi {
     readonly id: string
     prediction_model: string
+    /**
+     * Optional sandboxed agent task run that produced this model.
+     * @nullable
+     */
+    task_run?: string | null
     /** Whether this run produced a winning prediction model. */
     is_winning?: boolean
     /**
-     * S3 URL to the serialized model artifact.
+     * S3 storage path to the serialized model artifact.
      * @maxLength 2000
      */
     model_url: string
@@ -123,6 +128,16 @@ export interface ActionPredictionModelApi {
      * @minimum 1
      */
     lookback_days: number
+    /**
+     * Sandbox task run that trains this prediction model.
+     * @nullable
+     */
+    readonly task_run: string | null
+    /**
+     * Current training status: not_started, queued, in_progress, completed, failed, cancelled, or null if no training run.
+     * @nullable
+     */
+    readonly training_status: string | null
     readonly created_by: UserBasicApi
     readonly created_at: string
     /** @nullable */

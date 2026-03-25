@@ -3,7 +3,7 @@
  * MCP service uses these Zod schemas for generated tool handlers.
  * To regenerate: hogli build:openapi
  *
- * PostHog API - MCP 9 enabled ops
+ * PostHog API - MCP 10 enabled ops
  * OpenAPI spec version: 1.0.0
  */
 import * as zod from 'zod'
@@ -33,11 +33,12 @@ export const actionPredictionModelRunsCreateBodyModelUrlMax = 2000
 
 export const ActionPredictionModelRunsCreateBody = /* @__PURE__ */ zod.object({
     prediction_model: zod.string(),
+    task_run: zod.string().nullish().describe('Optional sandboxed agent task run that produced this model.'),
     is_winning: zod.boolean().optional().describe('Whether this run produced a winning prediction model.'),
     model_url: zod
-        .url()
+        .string()
         .max(actionPredictionModelRunsCreateBodyModelUrlMax)
-        .describe('S3 URL to the serialized model artifact.'),
+        .describe('S3 storage path to the serialized model artifact.'),
     metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
     feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
     artifact_script: zod
@@ -68,12 +69,13 @@ export const actionPredictionModelRunsPartialUpdateBodyModelUrlMax = 2000
 
 export const ActionPredictionModelRunsPartialUpdateBody = /* @__PURE__ */ zod.object({
     prediction_model: zod.string().optional(),
+    task_run: zod.string().nullish().describe('Optional sandboxed agent task run that produced this model.'),
     is_winning: zod.boolean().optional().describe('Whether this run produced a winning prediction model.'),
     model_url: zod
-        .url()
+        .string()
         .max(actionPredictionModelRunsPartialUpdateBodyModelUrlMax)
         .optional()
-        .describe('S3 URL to the serialized model artifact.'),
+        .describe('S3 storage path to the serialized model artifact.'),
     metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
     feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
     artifact_script: zod
@@ -168,4 +170,26 @@ export const ActionPredictionModelsDestroyParams = /* @__PURE__ */ zod.object({
         .describe(
             "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
         ),
+})
+
+/**
+ * Returns a presigned POST URL that can be used to upload a model artifact directly to S3. Use the returned storage_path as model_url when creating an ActionPredictionModelRun.
+ * @summary Generate a presigned S3 upload URL for a model artifact
+ */
+export const ActionPredictionModelsUploadUrlCreateParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction model.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
+})
+
+export const actionPredictionModelsUploadUrlCreateBodyFilenameMax = 255
+
+export const ActionPredictionModelsUploadUrlCreateBody = /* @__PURE__ */ zod.object({
+    filename: zod
+        .string()
+        .max(actionPredictionModelsUploadUrlCreateBodyFilenameMax)
+        .describe('Name of the file to upload (e.g. model.pkl).'),
 })

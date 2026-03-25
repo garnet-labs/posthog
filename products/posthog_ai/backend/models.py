@@ -79,6 +79,14 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     )
     event_name = models.CharField(max_length=400, null=True, blank=True)
     lookback_days = models.PositiveIntegerField()
+    task_run = models.ForeignKey(
+        "tasks.TaskRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_prediction_models",
+        help_text="Sandbox task run that trains this prediction model.",
+    )
 
     class Meta:
         indexes = [
@@ -106,13 +114,21 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         on_delete=models.CASCADE,
         related_name="action_prediction_model_runs",
     )
+    task_run = models.ForeignKey(
+        "tasks.TaskRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="prediction_model_runs",
+        help_text="Optional sandboxed agent task run that produced this model.",
+    )
     is_winning = models.BooleanField(
         default=False,
         help_text="Whether this run produced a winning prediction model.",
     )
-    model_url = models.URLField(
+    model_url = models.CharField(
         max_length=2000,
-        help_text="S3 URL to the serialized model artifact.",
+        help_text="S3 storage path to the serialized model artifact.",
     )
     metrics = models.JSONField(
         default=dict,

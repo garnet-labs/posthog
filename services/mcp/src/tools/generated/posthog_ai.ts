@@ -14,6 +14,8 @@ import {
     ActionPredictionModelsPartialUpdateBody,
     ActionPredictionModelsPartialUpdateParams,
     ActionPredictionModelsRetrieveParams,
+    ActionPredictionModelsUploadUrlCreateBody,
+    ActionPredictionModelsUploadUrlCreateParams,
 } from '@/generated/posthog_ai/api'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
 
@@ -156,6 +158,31 @@ const actionPredictionModelDestroy = (): ToolBase<typeof ActionPredictionModelDe
     },
 })
 
+const ActionPredictionModelUploadUrlSchema = ActionPredictionModelsUploadUrlCreateParams.omit({
+    project_id: true,
+}).extend(ActionPredictionModelsUploadUrlCreateBody.shape)
+
+const actionPredictionModelUploadUrl = (): ToolBase<
+    typeof ActionPredictionModelUploadUrlSchema,
+    Schemas.UploadURLResponse
+> => ({
+    name: 'action-prediction-model-upload-url',
+    schema: ActionPredictionModelUploadUrlSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionModelUploadUrlSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const body: Record<string, unknown> = {}
+        if (params.filename !== undefined) {
+            body['filename'] = params.filename
+        }
+        const result = await context.api.request<Schemas.UploadURLResponse>({
+            method: 'POST',
+            path: `/api/environments/${projectId}/action_prediction_models/${params.id}/upload_url/`,
+            body,
+        })
+        return result
+    },
+})
+
 const PredictionModelRunListSchema = ActionPredictionModelRunsListQueryParams
 
 const predictionModelRunList = (): ToolBase<
@@ -216,6 +243,9 @@ const predictionModelRunCreate = (): ToolBase<
         if (params.prediction_model !== undefined) {
             body['prediction_model'] = params.prediction_model
         }
+        if (params.task_run !== undefined) {
+            body['task_run'] = params.task_run
+        }
         if (params.is_winning !== undefined) {
             body['is_winning'] = params.is_winning
         }
@@ -256,6 +286,9 @@ const predictionModelRunPartialUpdate = (): ToolBase<
     handler: async (context: Context, params: z.infer<typeof PredictionModelRunPartialUpdateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
+        if (params.task_run !== undefined) {
+            body['task_run'] = params.task_run
+        }
         if (params.is_winning !== undefined) {
             body['is_winning'] = params.is_winning
         }
@@ -289,6 +322,7 @@ export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'action-prediction-model-create': actionPredictionModelCreate,
     'action-prediction-model-partial-update': actionPredictionModelPartialUpdate,
     'action-prediction-model-destroy': actionPredictionModelDestroy,
+    'action-prediction-model-upload-url': actionPredictionModelUploadUrl,
     'prediction-model-run-list': predictionModelRunList,
     'prediction-model-run-retrieve': predictionModelRunRetrieve,
     'prediction-model-run-create': predictionModelRunCreate,
