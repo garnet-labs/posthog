@@ -12,7 +12,6 @@ from posthog.schema import ProductKey
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.utils import ServerTimingsGathered, action
 from posthog.clickhouse.client import sync_execute
-from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.models import Element, Filter
 from posthog.models.element.element import chain_to_elements
 from posthog.models.element.sql import GET_ELEMENTS, GET_VALUES
@@ -112,7 +111,6 @@ class ElementViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                 )
 
             with timer("execute_query"):
-                tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
                 result = sync_execute(
                     GET_ELEMENTS.format(
                         date_from=date_from,
@@ -202,7 +200,6 @@ class ElementViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             else:
                 filter_regex = select_regex
 
-        tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
         result = sync_execute(
             GET_VALUES.format(),
             {
