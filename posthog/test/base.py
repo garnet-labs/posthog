@@ -30,7 +30,6 @@ from django.test.utils import CaptureQueriesContext
 import pendulum  # noqa F401
 import sqlparse
 from clickhouse_pool.pool import TooManyConnections
-from posthog.errors import extract_clickhouse_error_code
 from rest_framework.test import APITestCase as DRFTestCase
 from syrupy.extensions.amber import AmberSnapshotExtension
 
@@ -74,6 +73,7 @@ from posthog.clickhouse.query_log_archive import (
     QUERY_LOG_ARCHIVE_TABLE_ENGINE_NEW,
 )
 from posthog.cloud_utils import TEST_clear_instance_license_cache
+from posthog.errors import extract_clickhouse_error_code
 from posthog.helpers.two_factor_session import email_mfa_token_generator
 from posthog.hogql_queries.insights.paginators import HogQLHasMorePaginator
 from posthog.models import Action, Dashboard, DashboardTile, Insight, Organization, Team, User

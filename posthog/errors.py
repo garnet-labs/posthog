@@ -16,7 +16,6 @@ from posthog.exceptions import (
     ClickHouseQueryTimeOut,
 )
 
-
 _CH_ERROR_CODE_RE = re.compile(r"Code:\s*(\d+)")
 
 

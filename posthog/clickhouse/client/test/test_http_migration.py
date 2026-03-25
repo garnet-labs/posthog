@@ -5,15 +5,13 @@ to the TCP client (clickhouse-driver) for all query patterns used in PostHog.
 """
 
 import uuid
-from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 from posthog.clickhouse.client.connection import ProxyClient, get_http_client
 from posthog.clickhouse.client.execute import sync_execute
 from posthog.errors import extract_clickhouse_error_code
-
 
 # ── ProxyClient unit tests ──────────────────────────────────────────────────
 
@@ -163,7 +161,7 @@ class TestProxyClientInsert:
         mock_client.command.return_value = 3
 
         proxy = ProxyClient(mock_client)
-        result = proxy.execute(
+        proxy.execute(
             "INSERT INTO t SELECT number FROM numbers(3)",
             params=[],
             settings={},
@@ -349,8 +347,8 @@ class TestShadowMode:
 class TestErrorHandlingCompatibility:
     def test_run_clickhouse_statement_in_parallel_ignores_http_unknown_table(self):
         """run_clickhouse_statement_in_parallel swallows UNKNOWN_TABLE errors from HTTP client."""
+
         from posthog.test.base import run_clickhouse_statement_in_parallel
-        from concurrent.futures import Future
 
         # Simulate an HTTP-style error (no .code attribute, code embedded in message)
         http_error = Exception(
