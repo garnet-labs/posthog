@@ -11,6 +11,7 @@ Build a model that predicts P(user performs action X within W days). Uses an aut
 
 - An `ActionPredictionModel` must exist (create one via `action-prediction-model-create` if needed)
 - The project must have sufficient event data (≥500 users, ≥50 positive examples)
+- xgboost must be installed (`uv pip install xgboost` if not present)
 
 ## Workflow
 
@@ -34,8 +35,8 @@ Use `execute-sql` with HogQL to understand the project's data before engineering
 
 1. **Active users**: `SELECT uniq(person_id) FROM events WHERE timestamp >= now() - interval 90 day`
 2. **Top events**: `SELECT event, count() as c FROM events WHERE timestamp >= now() - interval 90 day GROUP BY event ORDER BY c DESC LIMIT 20`
-3. **Base rate**: `SELECT countIf(event = '{target}') > 0 as converted, count() FROM (SELECT person_id, countIf(event = '{target}' AND timestamp >= now() - interval {W} day) > 0 as converted FROM events WHERE timestamp >= now() - interval 90 day GROUP BY person_id HAVING count() >= 5) GROUP BY converted`
-4. **Person properties**: `properties-list` to discover available properties
+3. **Base rate**: `SELECT label, count() as users FROM (SELECT person_id, countIf(event = '{target}' AND timestamp >= now() - interval {W} day) > 0 AS label FROM events WHERE timestamp >= now() - interval 90 day AND person_id IS NOT NULL GROUP BY person_id HAVING count() >= 5) GROUP BY label ORDER BY label`
+4. **Person properties**: `read-data-schema` to discover available properties
 5. **Session distribution**: `SELECT count(), avg(duration) FROM sessions WHERE min_timestamp >= now() - interval 90 day`
 
 Report findings to the user before proceeding. This is the one pause point.
@@ -61,27 +62,36 @@ The agent iterates on this query across experiments — adding features, removin
 
 ### Phase 4: Training
 
-Write a Python training script and record it as a prediction model run. The script should:
+Write a self-contained Python training script. The script should:
 
-1. Accept the feature matrix as CSV/JSON input
+1. Read the feature matrix from a parquet file
 2. Train XGBoost with `scale_pos_weight` for class imbalance
 3. Use time-based cross-validation (3 folds with temporal gap)
 4. Apply isotonic calibration for probability calibration
 5. Evaluate: AUC-ROC (primary), AUC-PR, Brier score
-6. Output metrics and feature importance as JSON
+6. Save the trained model to a pickle file
+7. Output metrics and feature importance as JSON
 
 See [training script template](./references/training-script-template.md) for the baseline.
+
+**Execution flow**:
+
+1. Run the feature extraction query via `execute-sql` and save results to a parquet file
+2. Write the training script to a `.py` file
+3. Execute the script
+4. Read the output metrics JSON
+5. Record the run via `prediction-model-run-create`
 
 Record the run:
 
 ```text
 prediction-model-run-create(
   prediction_model=<model_id>,
-  is_winning=false,
-  model_url="",           # populated after artifact upload
+  is_winning=true,
+  model_url="https://placeholder.s3.amazonaws.com/models/<run_id>.pkl",
   metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
   feature_importance={"days_since_last_event": 0.15, ...},
-  artifact_script="<the full Python script>"
+  artifact_script="<the full Python training script>"
 )
 ```
 
@@ -95,11 +105,11 @@ LOOP (max 10 experiments or 3 consecutive non-improvements):
   2. Formulate hypothesis: new features, hyperparameter change, feature selection
   3. Modify the feature query and/or training script
   4. Execute:
-     a. Run feature query via execute-sql
-     b. Run training script
-     c. Record run via prediction-model-run-create
+     a. Run feature query via execute-sql, save to parquet
+     b. Write and run training script
+     c. Record run via prediction-model-run-create (is_winning=false)
   5. Compare AUC-ROC to current best:
-     → Improved: mark this run as winning (prediction-model-run-partial-update, is_winning=true)
+     → Improved: record a new run with is_winning=true
      → Equal or worse: leave is_winning=false
   6. Continue to next experiment
 ```
@@ -134,3 +144,7 @@ After the loop, produce a summary:
 - **Features**: aim for 15-40. More than 50 risks overfitting
 - **Imbalance**: always use `scale_pos_weight`, never downsample
 - **Reproducibility**: seed=42, every experiment recorded as a model run
+- **Artifacts**: every run must store the full training script in `artifact_script` and the trained model as a pickle file
+- **Winning runs**: set `is_winning=true` at creation time (no partial-update tool available) — compare metrics locally and only mark the best run as winning
+- **HogQL via MCP**: do not use `currentTeamId()` — MCP scopes queries to the correct team automatically
+- **model_url format**: must be a valid `https://` URL, not `s3://`

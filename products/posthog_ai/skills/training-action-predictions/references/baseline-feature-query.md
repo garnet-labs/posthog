@@ -4,7 +4,9 @@ This HogQL query produces a feature matrix for training. It enforces **temporal 
 
 Set `T = now() - interval {W} day` so that labels are fully observed at query time.
 
-Replace `{target}` with the target event name (from `ActionPredictionModel.event_name`) and `{W}` with the lookback window (from `ActionPredictionModel.lookback_days`).
+Replace `{target}` with the target event name (from `ActionPredictionModel.event_name` or the action's underlying event) and `{W}` with the lookback window (from `ActionPredictionModel.lookback_days`).
+
+Run via `execute-sql`. Do **not** use `currentTeamId()` — MCP scopes queries to the correct team automatically.
 
 ```sql
 SELECT
@@ -38,10 +40,6 @@ SELECT
     countIf(event = '{target}'
         AND timestamp <= toDateTime('{T}')) AS target_action_count,
 
-    -- Session behavior
-    uniqIf(properties.$session_id,
-        timestamp <= toDateTime('{T}')) AS unique_sessions,
-
     -- Event diversity
     uniqIf(event, timestamp <= toDateTime('{T}')) AS unique_event_types,
 
@@ -61,12 +59,23 @@ SELECT
         / greatest(countIf(timestamp <= toDateTime('{T}')), 1) AS autocapture_ratio
 
 FROM events
-WHERE team_id = currentTeamId()
-  AND person_id IS NOT NULL
+WHERE person_id IS NOT NULL
   AND timestamp >= toDateTime('{T}') - interval 90 day
   AND timestamp <= toDateTime('{T}') + interval {W} day
 GROUP BY person_id
 HAVING events_total_90d >= 5
+```
+
+## Saving query results
+
+After running via `execute-sql`, save the results to a parquet file for training:
+
+```python
+import pandas as pd
+
+# results = output from execute-sql (columns + rows)
+df = pd.DataFrame(results["results"], columns=results["columns"])
+df.to_parquet("/tmp/features.parquet", index=False)
 ```
 
 ## Key constraints
@@ -74,12 +83,12 @@ HAVING events_total_90d >= 5
 - **No leakage**: the target event is only used in the `label` column and `days_since_last_target` / `target_action_count` (both capped at `T`). Never include target event counts from the label window as features.
 - **Minimum activity**: `HAVING events_total_90d >= 5` filters out inactive users who add noise.
 - **`greatest(..., 1)`**: prevents division by zero in ratio features.
+- **No `currentTeamId()`**: MCP scopes queries automatically. Using `currentTeamId()` causes an error.
 
 ## Extending this query
 
 When iterating across experiments, add features by extending the `SELECT` clause. Good candidates:
 
 1. **Per-event ratios** for top events: `countIf(event = '{evt}' AND timestamp <= toDateTime('{T}')) / greatest(events_total_90d, 1) AS {evt}_ratio`
-2. **Session features**: join against `sessions` table for avg duration, pageviews per session
-3. **Person properties**: `person.properties.{prop}` for plan type, signup source, etc.
-4. **Day-of-week patterns**: `countIf(toDayOfWeek(timestamp) IN (6, 7) AND timestamp <= toDateTime('{T}')) / greatest(events_total_90d, 1) AS weekend_ratio`
+2. **Person properties**: `person.properties.{prop}` for plan type, signup source, etc.
+3. **Day-of-week patterns**: `countIf(toDayOfWeek(timestamp) IN (6, 7) AND timestamp <= toDateTime('{T}')) / greatest(events_total_90d, 1) AS weekend_ratio`

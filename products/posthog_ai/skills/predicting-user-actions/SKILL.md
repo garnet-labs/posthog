@@ -12,6 +12,7 @@ Given a trained `ActionPredictionModel` with a winning `ActionPredictionModelRun
 - A trained model must exist — check via `action-prediction-model-list` and `prediction-model-run-list`
 - At least one run should have `is_winning: true` with valid `artifact_script` and `metrics`
 - If no trained model exists, suggest running the `training-action-predictions` skill first
+- The trained model pickle file must be available locally (produced by the training skill)
 
 ## Workflow
 
@@ -20,7 +21,7 @@ Given a trained `ActionPredictionModel` with a winning `ActionPredictionModelRun
 1. List models via `action-prediction-model-list` to find the target model
 2. List runs via `prediction-model-run-list` and find the run where `is_winning: true`
 3. Extract:
-   - The `artifact_script` (the training script — contains the feature extraction logic)
+   - The `artifact_script` (the training script — contains the feature columns and model params)
    - The `metrics` (to report model quality alongside predictions)
    - The `feature_importance` (to explain which features drive predictions)
 
@@ -28,7 +29,7 @@ If no winning run exists, list all runs and pick the one with the highest `metri
 
 ### Step 2: Extract features for scoring
 
-Run the same feature extraction query used during training, but with `T = now()` (no label window needed for scoring).
+Run the same feature extraction query used during training, but with `T = now()` (no label window needed for scoring). Use `execute-sql` to run the query.
 
 Adapt the query from the winning run's training context:
 
@@ -44,8 +45,7 @@ SELECT
     -- ... all other features from the training query
     ...
 FROM events
-WHERE team_id = currentTeamId()
-  AND person_id IS NOT NULL
+WHERE person_id IS NOT NULL
   AND timestamp >= now() - interval 90 day
 GROUP BY person_id
 HAVING events_total_90d >= 5
@@ -53,14 +53,24 @@ HAVING events_total_90d >= 5
 
 The feature columns **must match** the training features exactly (same names, same order). Check the winning run's `feature_importance` keys to verify alignment.
 
+Save the results to a parquet file for scoring:
+
+```python
+import pandas as pd
+
+df = pd.DataFrame(results["results"], columns=results["columns"])
+df.to_parquet("/tmp/scoring_features.parquet", index=False)
+```
+
 ### Step 3: Score users
 
-Run the scoring script against the feature matrix. The script should:
+Write and execute a scoring script that:
 
-1. Load the feature matrix from the HogQL query output
-2. Apply the trained model (from `artifact_script`)
-3. Generate calibrated probabilities for each user
-4. Assign bucket labels based on probability thresholds
+1. Loads the trained model from the pickle file (produced by the training skill)
+2. Reads the scoring feature matrix from the parquet file
+3. Generates calibrated probabilities for each user
+4. Assigns bucket labels based on probability thresholds
+5. Outputs scored users as JSON and saves to parquet
 
 See [scoring script template](./references/scoring-script-template.md) for the baseline.
 
@@ -80,7 +90,7 @@ Bucket thresholds:
 - `neutral`: 0.15 <= probability < 0.4
 - `unlikely`: probability < 0.15
 
-Write properties via the PostHog capture API or batch person property set (`persons-property-set`).
+Write properties via `persons-property-set` for each scored user.
 
 ### Step 5: Create cohorts
 
@@ -149,3 +159,4 @@ Once predictions are person properties, these work automatically with zero extra
 - **Stale scores**: predictions degrade over time as user behavior changes. Note the scoring date in the report
 - **Model quality**: always report the model's AUC-ROC alongside predictions. If signal quality is "red" (<0.65), warn the user that predictions are low-confidence
 - **Property naming**: always use the `p_action_` prefix for prediction properties to avoid conflicts
+- **HogQL via MCP**: do not use `currentTeamId()` — MCP scopes queries to the correct team automatically
