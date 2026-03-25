@@ -36,7 +36,7 @@ def get_person_and_distinct_ids_for_identifier(
         ValueError: If parameters are invalid or both distinct_id and person_id are provided
         Exception: If person lookup fails
     """
-    from posthog.models.person.util import get_person_by_distinct_id, get_person_by_uuid
+    from posthog.models.person import Person, PersonDistinctId
 
     # Validation
     if distinct_id is not None and person_id is not None:
@@ -53,15 +53,21 @@ def get_person_and_distinct_ids_for_identifier(
 
     try:
         if distinct_id is not None:
-            person = get_person_by_distinct_id(team_id, distinct_id)
+            # Get the person that this distinct_id belongs to
+            person = Person.objects.get(team_id=team_id, persondistinctid__distinct_id=distinct_id)
         else:
-            person = get_person_by_uuid(team_id, str(person_id))
+            # Get the person by UUID
+            person = Person.objects.get(team_id=team_id, uuid=str(person_id))
 
-        if person is None:
-            return None, []
+        # Now get ALL distinct_ids for this person
+        distinct_id_objects = PersonDistinctId.objects.filter(team_id=team_id, person=person).values_list(
+            "distinct_id", flat=True
+        )
+        return person, list(distinct_id_objects)
 
-        return person, list(person.distinct_ids)
-
+    except Person.DoesNotExist:
+        # Person not found - return None and empty list
+        return None, []
     except Exception as e:
         raise Exception(f"Failed to query person distinct_ids: {str(e)}") from e
 
