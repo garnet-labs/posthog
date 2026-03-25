@@ -46,7 +46,7 @@ export const semanticColors: Record<string, ColorTuple> = {
 
     border: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-border'],
     input: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)', 'border-input'],
-    ring: ['oklch(0.6514 0.2137 37.89)', 'oklch(0.8325 0.1611 84.54)', 'border-ring'],
+    ring: ['oklch(0.446 0.03 257)', 'oklch(0.709 0 0)', 'border-ring'],
 } as const
 
 // ── Types ──────────────────────────────────────────────

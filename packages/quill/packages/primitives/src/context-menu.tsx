@@ -119,7 +119,7 @@ function ContextMenuSubTrigger({
             data-slot="context-menu-sub-trigger"
             data-inset={inset}
             className={cn(
-                "flex min-h-7 cursor-default items-center outline-hidden select-none data-inset:ps-7.5 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+                "flex cursor-default items-center outline-hidden select-none data-inset:ps-7.5 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
                 className
             )}
             render={<Button variant="ghost" className="w-full font-normal" left />}
