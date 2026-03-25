@@ -97,6 +97,7 @@ jobs:
                         - 'posthog/**/*'
                         - 'products/**/backend/**/*'
                         - 'bin/*.py'
+                        - '!bin/hobby-ci.py'
                         - pyproject.toml
                         - uv.lock
                         - requirements.txt
@@ -129,6 +130,7 @@ jobs:
                         - 'common/**/*'
                         - 'posthog/**/*'
                         - 'bin/*.py'
+                        - '!bin/hobby-ci.py'
                         - pyproject.toml
                         - uv.lock
                         - requirements.txt
