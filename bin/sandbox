@@ -263,14 +263,11 @@ JETBRAINS_PRODUCTS = {
 
 def _setup_jetbrains(product: str) -> None:
     """Download a JetBrains IDE and populate the shared volume."""
-    import platform
-    import urllib.request
-
     meta = JETBRAINS_PRODUCTS[product]
     info(f"Fetching latest {meta['name']} release info...")
     api_url = f"https://data.services.jetbrains.com/products/releases?code={meta['code']}&latest=true&type=release"
-    with urllib.request.urlopen(api_url) as resp:
-        data = json.loads(resp.read())
+    result = run(["curl", "-sfL", api_url], capture=True)
+    data = json.loads(result.stdout)
 
     release = data[meta["key"]][0]
     version = release["version"]
@@ -658,6 +655,7 @@ def _wait_for_clickhouse(project: str, timeout: int = 120) -> None:
     elapsed = 0
     while elapsed < timeout:
         result = run(
+            # nosemgrep: wget-unencrypted-url — localhost-only health check inside the container, no network exposure
             ["docker", "exec", container, "wget", "-qO-", "http://localhost:8123/ping"],
             capture=True,
             check=False,
