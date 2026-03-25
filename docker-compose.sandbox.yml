@@ -93,6 +93,9 @@ services:
         # mprocs (used by bin/start) requires a TTY
         tty: true
         stdin_open: true
+        # Required for mount --bind (bind-mounting node_modules onto a volume)
+        cap_add:
+            - SYS_ADMIN
         # VSCode reads this label when attaching to configure extensions and settings
         labels:
             devcontainer.metadata: >-
@@ -115,6 +118,9 @@ services:
             - pnpm-store:/cache/pnpm
             - cargo-target:/cache/cargo-target
             - python-env:/cache/python
+            # Per-sandbox volume for node_modules — bind-mounted over the
+            # worktree dirs at boot so pnpm writes to fast ext4, not VirtioFS.
+            - node-modules:/cache/node-modules
             # JetBrains IDE backend for Gateway (populated by bin/sandbox)
             - jetbrains:/opt/idea
         environment:
@@ -330,6 +336,7 @@ volumes:
     redpanda-data:
     clickhouse-data:
     python-env:
+    node-modules:
     uv-cache:
         name: sandbox-uv-cache
         external: true

@@ -58,6 +58,19 @@ if [ "$(id -u)" = "0" ] && [ "${SANDBOX_UID:-1000}" != "0" ]; then
     cp /tmp/claude-auth.json "$SANDBOX_HOME/.claude.json" 2>/dev/null || true
     chown -R "$SUID:$SGID" "$SANDBOX_HOME"
 
+    # Bind-mount node_modules directories onto the /cache/node-modules volume
+    # so pnpm writes to fast ext4 storage instead of the VirtioFS bind mount.
+    echo "==> Bind-mounting node_modules onto cache volume..."
+    while IFS= read -r pkg; do
+        pkg_dir=$(dirname "$pkg")
+        rel=${pkg_dir#/workspace/}   # e.g. "frontend" or "products/foo/frontend"
+        nm="$pkg_dir/node_modules"
+        cache_dir="/cache/node-modules/$rel"
+        mkdir -p "$nm" "$cache_dir"
+        mount --bind "$cache_dir" "$nm"
+    done < <(find /workspace -path '*/node_modules' -prune -o -path '*/.git' -prune -o -name 'package.json' -print)
+    chown -R "$SUID:$SGID" /cache/node-modules
+
     # Re-exec this script as the sandbox user.
     exec gosu "$SUID:$SGID" "$0" "$@"
 fi
