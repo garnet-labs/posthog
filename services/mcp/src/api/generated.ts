@@ -29357,6 +29357,20 @@ export namespace Schemas {
       source_table_key: string;
     }
 
+    export interface WaitFillTtsRequest {
+      /**
+       * Tweet bodies (verbatim) to wrap with spoken transitions for wait-fill TTS
+       * @minItems 1
+       * @maxItems 5
+       */
+      tweets: string[];
+    }
+
+    export interface WaitFillTtsResponse {
+      /** Full spoken line per tweet, in the same order as tweets */
+      lines: string[];
+    }
+
     export interface WebAnalyticsBreakdownResponse {
       /**
        * URL for next page of results

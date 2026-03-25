@@ -22,6 +22,8 @@ import type {
     TicketApi,
     ToolCallNarrationRequestApi,
     ToolCallNarrationResponseApi,
+    WaitFillTtsRequestApi,
+    WaitFillTtsResponseApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -303,6 +305,27 @@ export const conversationsTtsCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(conversationApi),
+    })
+}
+
+/**
+ * Short LLM lines for voice mode while tools run (natural transitions + verbatim tweet text).
+ * @summary Generate wait-fill TTS lines (transitions around interstitial tweets)
+ */
+export const getConversationsWaitFillTtsCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/conversations/wait_fill_tts/`
+}
+
+export const conversationsWaitFillTtsCreate = async (
+    projectId: string,
+    waitFillTtsRequestApi: WaitFillTtsRequestApi,
+    options?: RequestInit
+): Promise<WaitFillTtsResponseApi> => {
+    return apiMutator<WaitFillTtsResponseApi>(getConversationsWaitFillTtsCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(waitFillTtsRequestApi),
     })
 }
 

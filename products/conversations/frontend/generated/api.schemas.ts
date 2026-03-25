@@ -281,6 +281,20 @@ export interface ToolCallNarrationResponseApi {
     sentence: string
 }
 
+export interface WaitFillTtsRequestApi {
+    /**
+     * Tweet bodies (verbatim) to wrap with spoken transitions for wait-fill TTS
+     * @minItems 1
+     * @maxItems 5
+     */
+    tweets: string[]
+}
+
+export interface WaitFillTtsResponseApi {
+    /** Full spoken line per tweet, in the same order as tweets */
+    lines: string[]
+}
+
 /**
  * * `widget` - Widget
  * `email` - Email
