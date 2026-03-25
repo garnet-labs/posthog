@@ -289,11 +289,16 @@ CLICKHOUSE_FALLBACK_CANCEL_QUERY_ON_CLUSTER = get_from_env(
     "CLICKHOUSE_FALLBACK_CANCEL_QUERY_ON_CLUSTER", default=False, type_cast=str_to_bool
 )
 
-CLICKHOUSE_USE_HTTP: str = get_from_env("CLICKHOUSE_USE_HTTP", False, type_cast=str_to_bool)
+CLICKHOUSE_USE_HTTP: bool = get_from_env("CLICKHOUSE_USE_HTTP", False, type_cast=str_to_bool)
 CLICKHOUSE_USE_HTTP_PER_TEAM = set[int]([])
 with suppress(Exception):
     as_json = json.loads(os.getenv("CLICKHOUSE_USE_HTTP_PER_TEAM", "[]"))
     CLICKHOUSE_USE_HTTP_PER_TEAM = {int(v) for v in as_json}
+
+# Shadow mode: execute every SELECT on both TCP and HTTP, compare results, return TCP.
+# Only active when CLICKHOUSE_USE_HTTP is False (TCP is primary).
+CLICKHOUSE_HTTP_SHADOW_MODE: bool = get_from_env("CLICKHOUSE_HTTP_SHADOW_MODE", False, type_cast=str_to_bool)
+CLICKHOUSE_HTTP_SHADOW_PERCENTAGE: float = get_from_env("CLICKHOUSE_HTTP_SHADOW_PERCENTAGE", 0.01, type_cast=float)
 
 QUERYSERVICE_HOST: str = get_from_env("QUERYSERVICE_HOST", CLICKHOUSE_HOST)
 QUERYSERVICE_SECURE: bool = get_from_env("QUERYSERVICE_SECURE", CLICKHOUSE_SECURE, type_cast=str_to_bool)

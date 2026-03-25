@@ -30,6 +30,7 @@ from django.test.utils import CaptureQueriesContext
 import pendulum  # noqa F401
 import sqlparse
 from clickhouse_pool.pool import TooManyConnections
+from posthog.errors import extract_clickhouse_error_code
 from rest_framework.test import APITestCase as DRFTestCase
 from syrupy.extensions.amber import AmberSnapshotExtension
 
@@ -1492,7 +1493,7 @@ def run_clickhouse_statement_in_parallel(statements: list[str]):
             try:
                 future.result()
             except Exception as exc:
-                if hasattr(exc, "code") and exc.code == 60 and "posthog_test" in str(exc):
+                if extract_clickhouse_error_code(exc) == 60 and "posthog_test" in str(exc):
                     continue
                 exceptions.append(exc)
 

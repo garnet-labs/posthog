@@ -17,6 +17,22 @@ from posthog.exceptions import (
 )
 
 
+_CH_ERROR_CODE_RE = re.compile(r"Code:\s*(\d+)")
+
+
+def extract_clickhouse_error_code(exc: Exception) -> int | None:
+    """Extract a ClickHouse error code from either TCP or HTTP exceptions.
+
+    TCP exceptions (clickhouse_driver.errors.ServerException) carry a `.code` attribute.
+    HTTP exceptions (clickhouse_connect.driver.exceptions.DatabaseError) embed the code
+    in the message string as "Code: N".
+    """
+    if hasattr(exc, "code") and isinstance(exc.code, int):
+        return exc.code
+    match = _CH_ERROR_CODE_RE.search(str(exc))
+    return int(match.group(1)) if match else None
+
+
 class QueryErrorCategory(StrEnum):
     SUCCESS = "success"
     CANCELLED = "cancelled"
@@ -77,14 +93,28 @@ class ErrorCodeMeta:
 
 def clickhouse_error_type(e: Exception) -> str:
     "Provide a ClickHouse error type for observability"
-    if not isinstance(e, ServerException):
-        return type(e).__name__
-    return f"CHQueryError{look_up_clickhouse_error_code_meta(e).label}"
+    if isinstance(e, ServerException):
+        return f"CHQueryError{look_up_clickhouse_error_code_meta(e).label}"
+    code = extract_clickhouse_error_code(e)
+    if code is not None and code in CLICKHOUSE_ERROR_CODE_LOOKUP:
+        return f"CHQueryError{CLICKHOUSE_ERROR_CODE_LOOKUP[code].label}"
+    return type(e).__name__
 
 
 def wrap_clickhouse_query_error(err: Exception) -> Exception:
     "Beautifies clickhouse client errors, using custom error classes for every code"
     if not isinstance(err, ServerException):
+        # Handle HTTP client errors (clickhouse_connect) by extracting the error code
+        # from the message string and wrapping them the same way as TCP errors.
+        code = extract_clickhouse_error_code(err)
+        if code is not None and code in CLICKHOUSE_ERROR_CODE_LOOKUP:
+            meta = CLICKHOUSE_ERROR_CODE_LOOKUP[code]
+            message = str(err)
+            processed_error_class = ExposedCHQueryError if meta.user_safe else InternalCHQueryError
+            display_message = meta.user_safe if isinstance(meta.user_safe, str) else message
+            return type(f"CHQueryError{meta.label}", (processed_error_class,), {})(
+                display_message, code=code, code_name=meta.name.lower()
+            )
         return err
 
     meta = look_up_clickhouse_error_code_meta(err)
@@ -164,6 +194,11 @@ def classify_query_error(e: Exception) -> QueryErrorCategory:
     """Classify a query execution exception into a high-level category for observability."""
     if isinstance(e, ServerException):
         return look_up_clickhouse_error_code_meta(e).get_category()
+
+    # HTTP client errors: extract code and classify the same way as TCP
+    code = extract_clickhouse_error_code(e)
+    if code is not None and code in CLICKHOUSE_ERROR_CODE_LOOKUP:
+        return CLICKHOUSE_ERROR_CODE_LOOKUP[code].get_category()
 
     if isinstance(e, (ClickHouseAtCapacity, ConcurrencyLimitExceeded)):
         return QueryErrorCategory.RATE_LIMITED

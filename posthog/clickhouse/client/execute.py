@@ -1,3 +1,4 @@
+import random
 import time
 import types
 import logging
@@ -16,7 +17,7 @@ import sqlparse
 import structlog
 from clickhouse_driver import Client as SyncClient
 from opentelemetry import trace
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 from posthog.clickhouse.client.connection import (
     ClickHouseUser,
@@ -57,6 +58,19 @@ QUERY_ERROR_COUNTER = Counter(
     "clickhouse_query_failure",
     "Query execution failure signal is dispatched when a query fails.",
     labelnames=["exception_type", "query_type", "workload", "chargeable"],
+)
+
+SHADOW_MODE_COUNTER = Counter(
+    "posthog_clickhouse_shadow_mode_queries_total",
+    "Shadow mode query comparison results.",
+    labelnames=["result"],
+)
+
+SHADOW_MODE_LATENCY = Histogram(
+    "posthog_clickhouse_shadow_mode_latency_seconds",
+    "Query latency by protocol during shadow mode.",
+    labelnames=["protocol"],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
 
 InsertParams = Union[list, tuple, types.GeneratorType]
@@ -391,7 +405,126 @@ def sync_execute(
         if app_settings.SHELL_PLUS_PRINT_SQL:
             print("Execution time: %.6fs" % (execution_time,))  # noqa T201
 
+    # Shadow mode: re-execute SELECT queries on HTTP and compare results.
+    # Only runs when TCP is the primary path and shadow mode is enabled.
+    if (
+        app_settings.CLICKHOUSE_HTTP_SHADOW_MODE
+        and not app_settings.CLICKHOUSE_USE_HTTP
+        and not _is_mutation_query(prepared_sql)
+        and not isinstance(prepared_args, (list, tuple, types.GeneratorType))
+        and sync_client is None
+        and random.random() < app_settings.CLICKHOUSE_HTTP_SHADOW_PERCENTAGE
+    ):
+        SHADOW_MODE_LATENCY.labels(protocol="tcp").observe(execution_time)
+        _run_shadow_http_query(
+            prepared_sql=prepared_sql,
+            prepared_args=prepared_args,
+            settings=settings,
+            with_column_types=with_column_types,
+            query_id=query_id,
+            tcp_result=result,
+            workload=workload,
+            team_id=team_id,
+            readonly=readonly,
+            ch_user=ch_user,
+        )
+
     return result
+
+
+_MUTATION_PREFIXES = (
+    "INSERT", "CREATE", "ALTER", "DROP", "TRUNCATE",
+    "RENAME", "ATTACH", "DETACH", "OPTIMIZE", "SYSTEM",
+)
+
+
+def _is_mutation_query(sql: str) -> bool:
+    """Returns True for INSERT, DDL, and system commands that should not be shadow-executed."""
+    normalized = sql.strip().upper()
+    # Skip leading comments like /* kind:request_id */
+    if normalized.startswith("/*"):
+        end = normalized.find("*/")
+        if end != -1:
+            normalized = normalized[end + 2:].lstrip()
+    return any(normalized.startswith(prefix) for prefix in _MUTATION_PREFIXES)
+
+
+def _run_shadow_http_query(
+    *,
+    prepared_sql,
+    prepared_args,
+    settings,
+    with_column_types,
+    query_id,
+    tcp_result,
+    workload,
+    team_id,
+    readonly,
+    ch_user,
+):
+    """Execute the same query on HTTP and compare with the TCP result.
+
+    Never raises — all errors are caught and logged. The TCP result is always
+    the one returned to the caller.
+    """
+    from posthog.clickhouse.client.connection import get_http_client, get_kwargs_for_client
+
+    shadow_logger = structlog.get_logger("clickhouse.shadow_mode")
+    try:
+        kwargs = get_kwargs_for_client(workload=workload, team_id=team_id, readonly=readonly, ch_user=ch_user)
+        shadow_start = perf_counter()
+        with get_http_client(**kwargs) as http_client:
+            http_result = http_client.execute(
+                prepared_sql,
+                params=prepared_args,
+                settings=settings,
+                with_column_types=with_column_types,
+                query_id=f"shadow_{query_id}" if query_id else None,
+            )
+        shadow_duration = perf_counter() - shadow_start
+        SHADOW_MODE_LATENCY.labels(protocol="http").observe(shadow_duration)
+
+        # Compare results
+        tcp_rows = tcp_result
+        http_rows = http_result
+        tcp_col_types = None
+        http_col_types = None
+
+        if with_column_types and isinstance(tcp_result, tuple):
+            tcp_rows, tcp_col_types = tcp_result
+            if isinstance(http_result, tuple):
+                http_rows, http_col_types = http_result
+
+        tcp_row_count = len(tcp_rows) if isinstance(tcp_rows, list) else 0
+        http_row_count = len(http_rows) if isinstance(http_rows, list) else 0
+
+        if tcp_row_count != http_row_count:
+            SHADOW_MODE_COUNTER.labels(result="mismatch").inc()
+            shadow_logger.warning(
+                "shadow_mode_row_count_mismatch",
+                tcp_rows=tcp_row_count,
+                http_rows=http_row_count,
+                query=prepared_sql[:200],
+            )
+        elif tcp_col_types and http_col_types and tcp_col_types != http_col_types:
+            SHADOW_MODE_COUNTER.labels(result="mismatch").inc()
+            shadow_logger.warning(
+                "shadow_mode_column_type_mismatch",
+                tcp_types=str(tcp_col_types[:5]),
+                http_types=str(http_col_types[:5]),
+                query=prepared_sql[:200],
+            )
+        else:
+            SHADOW_MODE_COUNTER.labels(result="match").inc()
+
+    except Exception as e:
+        SHADOW_MODE_COUNTER.labels(result="error").inc()
+        shadow_logger.warning(
+            "shadow_mode_http_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            query=prepared_sql[:200],
+        )
 
 
 def query_with_columns(
