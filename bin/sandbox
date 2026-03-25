@@ -359,7 +359,7 @@ def compose(
 ) -> subprocess.CompletedProcess:
     """Run `docker compose` with sandbox env vars."""
     return run(
-        ["docker", "compose", "-p", project, "-f", str(COMPOSE_FILE), *args],
+        ["docker", "compose", "--progress=quiet", "-p", project, "-f", str(COMPOSE_FILE), *args],
         check=check,
         capture=capture,
         env_extra=_compose_env(port, worktree_path),
@@ -368,7 +368,7 @@ def compose(
 
 def docker_volume_run(volume: str, shell_cmd: str) -> None:
     """Run a one-shot alpine container with a volume mounted at /data."""
-    run(["docker", "run", "--rm", "-v", f"{volume}:/data", "alpine", "sh", "-c", shell_cmd])
+    run(["docker", "run", "--rm", "-v", f"{volume}:/data", "alpine", "sh", "-c", shell_cmd], capture=True)
 
 
 def wait_for_health(
@@ -381,11 +381,11 @@ def wait_for_health(
     """Poll a URL until HTTP 200, showing entrypoint progress and detecting crash loops."""
     elapsed = 0
     prev_restart_count: int | None = None
+    seen_steps: set[str] = set()
 
     while elapsed < timeout:
         result = run(["curl", "-sf", url], check=False, capture=True)
         if result.returncode == 0:
-            print()
             return True
 
         # Detect crash loops via restart count
@@ -397,7 +397,7 @@ def wait_for_health(
         if prev_restart_count is not None and restart_count > prev_restart_count:
             print()
             error(f"App container is crash-looping (restart #{restart_count}). Last logs:")
-            logs = run(["docker", "logs", "--tail=5", container], check=False, capture=True)
+            logs = run(["docker", "logs", container], check=False, capture=True)
             for line in (logs.stdout or "").strip().splitlines():
                 print(f"  {line}")
             print()
@@ -407,16 +407,14 @@ def wait_for_health(
             return False
         prev_restart_count = restart_count
 
-        # Show last entrypoint step as status
-        logs = run(["docker", "logs", "--tail=3", container], check=False, capture=True)
-        status = ""
+        # Print new entrypoint steps as they appear.
+        logs = run(["docker", "logs", container], check=False, capture=True)
         for line in (logs.stdout or "").splitlines():
             if "==>" in line:
-                status = line.strip()
-        if status:
-            print(f"\r\033[K  {status} ({elapsed}s)", end="", flush=True)
-        else:
-            print(f"\r\033[K  ... waiting ({elapsed}s)", end="", flush=True)
+                step = line.strip()
+                if step not in seen_steps:
+                    seen_steps.add(step)
+                    print(f"  {step}")
 
         time.sleep(interval)
         elapsed += interval
@@ -510,7 +508,8 @@ def _copy_sandbox_backup_xml(worktree_path: str) -> None:
 
 
 def _init_cache_cleanup(port: int, worktree: str) -> None:
-    compose("sandbox-cache-init", port, worktree, "down", "-v", check=False)
+    info("Cleaning up cache init containers...")
+    compose("sandbox-cache-init", port, worktree, "down", "-v", check=False, capture=True)
     shutil.rmtree(worktree, ignore_errors=True)
     run(["git", "worktree", "prune"], check=False)
 
@@ -525,31 +524,33 @@ def init_cache_from_master() -> None:
 
     shutil.rmtree(init_worktree, ignore_errors=True)
 
-    run(["git", "fetch", "origin", "master", "--quiet"])
-    if run(["git", "worktree", "add", "--force", "--detach", init_worktree, "origin/master"], check=False).returncode != 0:
+    run(["git", "fetch", "origin", "master", "--quiet"], capture=True)
+    if run(["git", "worktree", "add", "--force", "--detach", init_worktree, "origin/master"], check=False, capture=True).returncode != 0:
         fatal("Could not check out master for cache init.")
 
     try:
         _copy_sandbox_backup_xml(init_worktree)
-        compose(init_project, init_port, init_worktree, "up", "-d", "--build")
+        info("Building and starting containers...")
+        compose(init_project, init_port, init_worktree, "up", "-d", "--build", capture=True)
 
         info("Waiting for master to boot...")
         if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
             fatal("Cache init timed out. Check docker logs for errors.")
 
         # Snapshot postgres (stop first for consistency)
-        compose(init_project, init_port, init_worktree, "stop", "db")
+        info("Snapshotting databases...")
+        compose(init_project, init_port, init_worktree, "stop", "db", capture=True)
         run([
             "docker", "run", "--rm",
             "-v", f"{init_project}_postgres-data:/src:ro",
             "-v", "sandbox-db-cache:/dst",
             "alpine", "sh", "-c", "rm -rf /dst/postgres && cp -a /src /dst/postgres",
-        ])
+        ], capture=True)
 
         # Snapshot ClickHouse
         ch = f"{init_project}-clickhouse-1"
         if run(["docker", "exec", ch, "clickhouse-client", "--query",
-                "BACKUP DATABASE posthog TO Disk('sandbox_cache', 'posthog/')"], check=False).returncode != 0:
+                "BACKUP DATABASE posthog TO Disk('sandbox_cache', 'posthog/')"], check=False, capture=True).returncode != 0:
             fatal("ClickHouse backup failed during cache init.")
 
         # Record migration versions for staleness detection
@@ -565,7 +566,7 @@ def init_cache_from_master() -> None:
                 done
                 touch /dst/.cache-ready
             """,
-        ])
+        ], capture=True)
     finally:
         _init_cache_cleanup(init_port, init_worktree)
 
@@ -658,7 +659,7 @@ def _wait_for_clickhouse(project: str, timeout: int = 120) -> None:
          f"for i in $(seq 1 {attempts}); do "
          "clickhouse-client --query 'SELECT 1' 2>/dev/null && exit 0; "
          "sleep 2; done; exit 1"],
-        check=False,
+        check=False, capture=True,
     )
     if result.returncode != 0:
         warn("ClickHouse did not become ready within timeout -- continuing anyway.")
@@ -671,23 +672,23 @@ def _restore_and_start(
     vite_port = port + 1000
 
     if not use_cache:
-        info(f"Starting sandbox '{project}' on port {port} (Vite: {vite_port})...")
-        compose(project, port, worktree_path, "up", "-d", "--build")
+        info("Building and starting containers...")
+        compose(project, port, worktree_path, "up", "-d", "--build", capture=True)
         return
 
     # Restore postgres from volume snapshot
-    info("Restoring postgres from cache...")
+    info("Restoring Postgres from cache...")
     run([
         "docker", "run", "--rm",
         "-v", "sandbox-db-cache:/src:ro",
         "-v", f"{project}_postgres-data:/dst",
         "alpine", "sh", "-c", "cp -a /src/postgres/. /dst/",
-    ])
+    ], capture=True)
 
     # Start infra first — we need ClickHouse up before restoring its backup,
     # and both must finish before the app runs migrations.
-    info(f"Starting sandbox '{project}' on port {port} (Vite: {vite_port})...")
-    compose(project, port, worktree_path, "up", "-d", *INFRA_SERVICES)
+    info("Starting infrastructure...")
+    compose(project, port, worktree_path, "up", "-d", *INFRA_SERVICES, capture=True)
 
     _wait_for_clickhouse(project)
 
@@ -696,15 +697,16 @@ def _restore_and_start(
     result = run(
         ["docker", "exec", ch, "clickhouse-client", "--query",
          "RESTORE DATABASE posthog FROM Disk('sandbox_cache', 'posthog/')"],
-        check=False,
+        check=False, capture=True,
     )
     if result.returncode == 0:
         info("ClickHouse restored.")
     else:
-        print("WARNING: ClickHouse restore failed -- migrations will recreate tables.")
+        warn("ClickHouse restore failed — migrations will recreate tables.")
 
     # Now start the app + proxy on top of restored infra
-    compose(project, port, worktree_path, "up", "-d", "--build")
+    info("Building and starting app...")
+    compose(project, port, worktree_path, "up", "-d", "--build", capture=True)
 
 
 # ---------------------------------------------------------------------------
@@ -782,7 +784,7 @@ def cmd_start(branch: str) -> None:
     vite_port = entry.port + 1000
 
     info(f"Starting sandbox '{project}' on port {entry.port} (Vite: {vite_port})...")
-    compose(project, entry.port, entry.worktree, "up", "-d")
+    compose(project, entry.port, entry.worktree, "up", "-d", capture=True)
 
     info("Waiting for PostHog to start...")
     if not wait_for_health(f"http://localhost:{entry.port}/_health", f"{project}-app-1"):
@@ -805,7 +807,7 @@ def cmd_stop(branch: str) -> None:
     project = project_name(entry.slug)
 
     info(f"Stopping sandbox '{project}'...")
-    compose(project, entry.port, entry.worktree, "stop")
+    compose(project, entry.port, entry.worktree, "stop", capture=True)
     success("Sandbox stopped. Volumes preserved.")
 
 
@@ -820,7 +822,7 @@ def cmd_destroy(branch: str) -> None:
     warn(f"Destroying sandbox '{project}'...")
 
     # Tear down containers and per-sandbox volumes
-    compose(project, port, worktree, "down", "-v", check=False)
+    compose(project, port, worktree, "down", "-v", check=False, capture=True)
 
     # Remove worktree — containers may have created root-owned files,
     # so we use a container to delete, then rmdir the empty directory.

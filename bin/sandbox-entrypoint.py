@@ -279,12 +279,9 @@ def install_node_deps() -> None:
     info("Installing Node dependencies...")
     # CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed
     # because the pre-merge overlay may update package.json files.
-    # GIT_DIR works around the worktree's .git file pointing to the host's
-    # .git/worktrees/ dir (not mounted in the container).
-    run(["git", "init", "-q", "/tmp/sandbox-git"])
     run(
         ["pnpm", "install", "--no-frozen-lockfile"],
-        env={**os.environ, "GIT_DIR": "/tmp/sandbox-git", "CI": "1"},
+        env={**os.environ, "CI": "1"},
     )
 
 
@@ -464,6 +461,12 @@ def user_phase() -> None:
         }
     )
     Path("/cache/cargo-target").mkdir(parents=True, exist_ok=True)
+
+    # The worktree's .git file points to the host's .git/worktrees/ path,
+    # which doesn't exist inside the container. Point GIT_DIR at a dummy
+    # repo so all git commands find a valid repo without touching the host.
+    run(["git", "init", "-q", "/tmp/sandbox-git"])
+    os.environ["GIT_DIR"] = "/tmp/sandbox-git"
     os.chdir(WORKSPACE)
 
     apply_overlays()
