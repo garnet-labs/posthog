@@ -1,0 +1,34 @@
+{
+    "metrics": {
+        "auc_roc": 0.9009,
+        "auc_pr": 0.6869,
+        "brier": 0.0827,
+        "n_train": 697,
+        "n_test": 233,
+        "n_positive": 155,
+        "n_negative": 775,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "unique_event_types": 0.1305,
+        "events_30d": 0.0938,
+        "alerts_page_views": 0.0905,
+        "insights_saved": 0.0673,
+        "days_since_last_event": 0.0647,
+        "dashboards_viewed": 0.059,
+        "insights_viewed": 0.0589,
+        "events_7d": 0.056,
+        "insights_analyzed": 0.0544,
+        "events_total": 0.0493,
+        "insights_created": 0.046,
+        "feature_flags_created": 0.0399,
+        "trend_ratio": 0.0391,
+        "active_days": 0.0379,
+        "dashboards_created": 0.0364,
+        "team_members_invited": 0.0342,
+        "exports_created": 0.0296,
+        "cohorts_created": 0.0124
+    }
+}
