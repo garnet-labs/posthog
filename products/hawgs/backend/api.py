@@ -32,6 +32,8 @@ def _build_url_to_taxonomy_map(enriched_file: Path) -> dict[str, list[dict]]:
         for feature in product.get("features", []):
             for url in feature.get("source_urls", []):
                 url_map.setdefault(url, []).append({"type": "feature", "name": feature["name"]})
+                # always include the parent product when a feature matches
+                url_map[url].append({"type": "product", "name": product["name"]})
     return url_map
 
 
