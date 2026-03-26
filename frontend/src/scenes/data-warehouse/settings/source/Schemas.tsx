@@ -236,9 +236,11 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                         render: function RenderName(_, schema) {
                             const nameContent =
                                 isDirectQuerySource && schema.table ? (
-                                    <Link to={getPreviewUrl(schema.table.name)}>{schema.name}</Link>
+                                    <Link to={getPreviewUrl(schema.table.name)}>
+                                        {schema.label ?? schema.name}
+                                    </Link>
                                 ) : (
-                                    <span>{schema.name}</span>
+                                    <span>{schema.label ?? schema.name}</span>
                                 )
                             return (
                                 <div className="flex items-center gap-1">
@@ -632,7 +634,10 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
         <LemonModal
             title={
                 <>
-                    Sync method for <span className="font-mono">{currentSyncMethodModalSchema.name}</span>
+                    Sync method for{' '}
+                    <span className="font-mono">
+                        {currentSyncMethodModalSchema.label ?? currentSyncMethodModalSchema.name}
+                    </span>
                 </>
             }
             isOpen={syncMethodModalIsOpen}
