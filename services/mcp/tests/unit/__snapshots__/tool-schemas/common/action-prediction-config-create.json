@@ -1,0 +1,44 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "action": {
+            "anyOf": [
+                {
+                    "type": "number"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "ID of the PostHog action to predict. Mutually exclusive with event_name."
+        },
+        "description": {
+            "description": "Longer description of the prediction config's purpose.",
+            "type": "string"
+        },
+        "event_name": {
+            "anyOf": [
+                {
+                    "maxLength": 400,
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "Name of the raw event to predict. Mutually exclusive with action."
+        },
+        "lookback_days": {
+            "description": "Number of days to look back for prediction data.",
+            "minimum": 1,
+            "type": "number"
+        },
+        "name": {
+            "description": "Human-readable name for the prediction config.",
+            "maxLength": 400,
+            "type": "string"
+        }
+    },
+    "required": ["lookback_days"],
+    "type": "object"
+}
