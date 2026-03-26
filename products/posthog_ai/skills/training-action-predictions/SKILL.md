@@ -157,6 +157,8 @@ The key constraint:
 
 The agent iterates on this query across experiments — adding features, removing noise, testing different windows. Always add `LIMIT 50000` (HogQL defaults to 100).
 
+**Important**: set `T` at least 7 days in the past (e.g. `T = now() - interval 7 day` for a 7-day lookback) so that the label window `(T, T+W]` is fully in the past. This lets the trained model be used for scoring immediately — if `T` is too recent, the label window extends into the future and the model can't produce valid predictions yet.
+
 ### Phase 4: Training
 
 Write a `train.py` script.
@@ -183,6 +185,35 @@ action-prediction-model-create(
   artifact_scripts={"query": "<HogQL query>", "utils": "<utils.py source>", "train": "<train.py source>", "predict": "<predict.py source>"}
 )
 ```
+
+#### Mandatory: `artifact_scripts`
+
+**Every model MUST include `artifact_scripts` when recorded.** Without these scripts, the model cannot be used for scoring and the entire training effort is wasted. The scoring pipeline (`predicting-user-actions` skill) reads `artifact_scripts` from the winning model to run predictions — if they are missing, predictions cannot run.
+
+The `artifact_scripts` dict MUST contain these four keys:
+
+| Key       | Contents                                        | Why it's needed                                                                                             |
+| --------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `query`   | The exact HogQL feature query used for training | Scoring adapts this query to `T=now()` to fetch fresh features with the same columns                        |
+| `utils`   | Full source of `utils.py`                       | Shared helpers (`execute_hogql`, `fetch_features`, `capture_batch`) needed by both train and predict        |
+| `train`   | Full source of `train.py`                       | Reproducibility — anyone can re-run training from this script alone                                         |
+| `predict` | Full source of `predict.py`                     | The scoring script that loads the model, fetches features, scores users, and writes results back to PostHog |
+
+**How to populate**: read the current script sources and include the training query inline:
+
+```python
+import os
+scripts_dir = os.path.dirname(os.path.abspath(__file__))
+artifact_scripts = {}
+for name in ("utils", "train", "predict"):
+    path = os.path.join(scripts_dir, f"{name}.py")
+    if os.path.exists(path):
+        with open(path) as f:
+            artifact_scripts[name] = f.read()
+artifact_scripts["query"] = TRAINING_QUERY
+```
+
+**Do not skip this step.** If you record a model without `artifact_scripts`, the model is effectively useless — it has metrics and feature importance for analysis, but cannot produce predictions.
 
 ### Phase 5: Experiment loop (autonomous)
 
@@ -310,7 +341,7 @@ Once a winning model exists, suggest the `predicting-user-actions` skill to scor
 - **Imbalance**: always use `scale_pos_weight`, never downsample
 - **Base rate awareness**: base rate varies by action. Adjust bucket thresholds accordingly. Always report base rate.
 - **Lab notebook**: every model must include notes — what was tried, what was observed, what to try next. This is the experiment log. Future sessions will read these notes as prior research, so write them for your future self.
-- **Reproducibility**: seed=42, every run stores query + utils + train + predict in `artifact_scripts`. Fully self-contained.
+- **Reproducibility**: seed=42, every run MUST store query + utils + train + predict in `artifact_scripts`. This is not optional — without `artifact_scripts`, the model cannot be scored and predictions cannot run. See "Mandatory: `artifact_scripts`" in Phase 4.
 - **Crash handling**: if sandbox fails, log in notes, try to fix if it's simple (typo, import), skip if the idea is fundamentally broken.
 - **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
 - **model_url**: S3 storage path (use `action-prediction-config-upload-url` to get a presigned upload URL and storage path)
