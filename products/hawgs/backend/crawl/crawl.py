@@ -121,7 +121,7 @@ def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
 
         scrape_result = app.batch_scrape(
             uncached_urls,
-            formats=["markdown", {"type": "screenshot", "fullPage": True}],
+            formats=["markdown", "summary", {"type": "screenshot", "fullPage": True}],
         )
 
         if output_fn:
@@ -132,6 +132,7 @@ def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
         for doc in scrape_result.data:
             page = {
                 "markdown": doc.markdown,
+                "summary": doc.summary if hasattr(doc, "summary") else None,
                 "screenshot": doc.screenshot if hasattr(doc, "screenshot") else None,
                 "metadata": doc.metadata
                 if isinstance(doc.metadata, dict)
