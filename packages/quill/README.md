@@ -34,8 +34,6 @@ import { Button } from '@/components/ui/button'
     - [x] storybook
   - [x] primitives/card
     - [x] storybook
-  - [ ] primitives/chip
-    - [ ] storybook
   - [x] primitives/checkbox
     - [x] storybook
   - [x] primitives/collapsible
@@ -61,9 +59,9 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/field
     - [ ] storybook
   - [x] primitives/input-group
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/input
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/item
     - [x] storybook
   - [x] primitives/kbd
