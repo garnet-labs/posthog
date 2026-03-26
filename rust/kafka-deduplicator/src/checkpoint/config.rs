@@ -75,10 +75,17 @@ pub struct CheckpointConfig {
     /// This is critical during rebalance when many partitions are assigned simultaneously.
     pub max_concurrent_checkpoint_file_downloads: usize,
 
-    /// Maximum concurrent S3 file uploads during checkpoint export.
-    /// Less critical than downloads since uploads are already bounded by max_concurrent_checkpoints,
-    /// but provides additional defense in depth.
+    /// Maximum concurrent S3 file uploads during checkpoint export (global LimitStore semaphore).
+    /// Bounds total S3 API concurrency across all partition checkpoints.
     pub max_concurrent_checkpoint_file_uploads: usize,
+
+    /// Maximum concurrent upload buffers per partition checkpoint.
+    /// Controls how many files are actively being uploaded (and buffered in memory)
+    /// for a single partition's checkpoint. Each active upload holds ~18MB
+    /// (8MB read buffer + ~10MB BufWriter). This is the primary memory control
+    /// for uploads — with max_concurrent_checkpoints partitions uploading
+    /// simultaneously, worst case memory is partitions × this value × 18MB.
+    pub max_upload_buffers_per_partition: usize,
 
     /// Maximum time allowed for a complete checkpoint import for a single partition.
     /// This includes listing checkpoints, downloading metadata, and downloading all files.
@@ -117,6 +124,7 @@ impl Default for CheckpointConfig {
             checkpoint_import_attempt_depth: 10,
             max_concurrent_checkpoint_file_downloads: 1000,
             max_concurrent_checkpoint_file_uploads: 1000,
+            max_upload_buffers_per_partition: 25,
             checkpoint_partition_import_timeout: Duration::from_secs(240),
             local_checkpoint_max_staleness: Duration::from_secs(
                 DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS,

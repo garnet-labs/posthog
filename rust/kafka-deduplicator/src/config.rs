@@ -84,7 +84,7 @@ pub struct Config {
     #[envconfig(default = "5000")] // 5 seconds
     pub kafka_producer_send_timeout_ms: u32,
 
-    #[envconfig(default = "snappy")]
+    #[envconfig(default = "lz4")]
     pub kafka_compression_codec: String,
 
     #[envconfig(default = "false")]
@@ -291,10 +291,17 @@ pub struct Config {
     #[envconfig(default = "200")]
     pub max_concurrent_checkpoint_file_downloads: usize,
 
-    // Maximum concurrent S3 file uploads during checkpoint export
-    // Less critical than downloads since uploads are bounded by max_concurrent_checkpoints
+    // Maximum concurrent S3 file uploads during checkpoint export (global LimitStore semaphore).
+    // Bounds total S3 API concurrency across all partition checkpoints.
     #[envconfig(default = "200")]
     pub max_concurrent_checkpoint_file_uploads: usize,
+
+    // Maximum concurrent upload buffers per partition checkpoint.
+    // Each active upload holds ~18MB (8MB read buffer + ~10MB BufWriter).
+    // With max_concurrent_checkpoints=8, worst case memory is
+    // 8 × this value × 18MB, so 25 × 8 = 200 buffers ≈ 3.6GB.
+    #[envconfig(default = "25")]
+    pub max_upload_buffers_per_partition: usize,
 
     // Maximum time allowed for a complete checkpoint import for a single partition (seconds).
     // This includes listing checkpoints, downloading metadata, and downloading all files.
