@@ -22,13 +22,13 @@ const ActionPredictionConfigListSchema = ActionPredictionConfigsListQueryParams
 
 const actionPredictionConfigList = (): ToolBase<
     typeof ActionPredictionConfigListSchema,
-    Schemas.PaginatedActionPredictionConfigList & { _posthogUrl: string }
+    Schemas.PaginatedActionPredictionConfigListList & { _posthogUrl: string }
 > => ({
     name: 'action-prediction-config-list',
     schema: ActionPredictionConfigListSchema,
     handler: async (context: Context, params: z.infer<typeof ActionPredictionConfigListSchema>) => {
         const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.PaginatedActionPredictionConfigList>({
+        const result = await context.api.request<Schemas.PaginatedActionPredictionConfigListList>({
             method: 'GET',
             path: `/api/environments/${projectId}/action_prediction_configs/`,
             query: {
@@ -179,13 +179,13 @@ const ActionPredictionModelListSchema = ActionPredictionModelsListQueryParams
 
 const actionPredictionModelList = (): ToolBase<
     typeof ActionPredictionModelListSchema,
-    Schemas.PaginatedActionPredictionModelList & { _posthogUrl: string }
+    Schemas.PaginatedActionPredictionModelListList & { _posthogUrl: string }
 > => ({
     name: 'action-prediction-model-list',
     schema: ActionPredictionModelListSchema,
     handler: async (context: Context, params: z.infer<typeof ActionPredictionModelListSchema>) => {
         const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.PaginatedActionPredictionModelList>({
+        const result = await context.api.request<Schemas.PaginatedActionPredictionModelListList>({
             method: 'GET',
             path: `/api/environments/${projectId}/action_prediction_models/`,
             query: {

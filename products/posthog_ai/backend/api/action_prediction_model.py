@@ -11,6 +11,28 @@ from posthog.api.shared import UserBasicSerializer
 from ..models import ActionPredictionModel
 
 
+class ActionPredictionModelListSerializer(serializers.ModelSerializer):
+    created_by = UserBasicSerializer(
+        read_only=True,
+        allow_null=True,
+        help_text="User who created this model.",
+    )
+
+    class Meta:
+        model = ActionPredictionModel
+        fields = [
+            "id",
+            "config",
+            "experiment_id",
+            "model_url",
+            "metrics",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at"]
+
+
 class ActionPredictionModelSerializer(serializers.ModelSerializer):
     created_by = UserBasicSerializer(
         read_only=True,
@@ -42,6 +64,11 @@ class ActionPredictionModelViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet
     queryset = ActionPredictionModel.objects.all()
     serializer_class = ActionPredictionModelSerializer
     http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ActionPredictionModelListSerializer
+        return ActionPredictionModelSerializer
 
     def safely_get_queryset(self, queryset: QuerySet) -> QuerySet:
         qs = queryset.filter(team_id=self.team_id).select_related("created_by").order_by("-created_at")

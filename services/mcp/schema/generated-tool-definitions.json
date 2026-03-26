@@ -1170,7 +1170,7 @@
         }
     },
     "action-prediction-config-list": {
-        "description": "List all action prediction configs in the current project. Returns name, description, action or event reference, lookback period, and creation metadata for each config.",
+        "description": "List all action prediction configs in the current project. Returns name, action or event reference, lookback period, training status, and creation metadata. Use retrieve for the full description.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "List action prediction configs",
@@ -1260,7 +1260,7 @@
         }
     },
     "action-prediction-model-list": {
-        "description": "List trained prediction models, newest first. Returns S3 model URL, evaluation metrics, feature importance, artifact scripts, and experiment notes.",
+        "description": "List trained prediction models, newest first. Returns S3 model URL and evaluation metrics. Use retrieve for feature importance, artifact scripts, and notes.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "List prediction models",

@@ -66,6 +66,59 @@ export interface UserBasicApi {
     role_at_organization?: RoleAtOrganizationEnumApi | BlankEnumApi | NullEnumApi | null
 }
 
+export interface ActionPredictionConfigListApi {
+    readonly id: string
+    /**
+     * Human-readable name for the prediction config.
+     * @maxLength 400
+     */
+    name?: string
+    /**
+     * ID of the PostHog action to predict. Mutually exclusive with event_name.
+     * @nullable
+     */
+    action?: number | null
+    /**
+     * Name of the raw event to predict. Mutually exclusive with action.
+     * @maxLength 400
+     * @nullable
+     */
+    event_name?: string | null
+    /**
+     * Number of days to look back for prediction data.
+     * @minimum 1
+     */
+    lookback_days: number
+    /**
+     * Sandbox task run that trains this prediction config.
+     * @nullable
+     */
+    readonly task_run: string | null
+    /**
+     * The current winning model. Set by the agent after the experiment loop.
+     * @nullable
+     */
+    winning_model?: string | null
+    /**
+     * Current training status: not_started, queued, in_progress, completed, failed, cancelled, or null if no training run.
+     * @nullable
+     */
+    readonly training_status: string | null
+    readonly created_by: UserBasicApi
+    readonly created_at: string
+    /** @nullable */
+    readonly updated_at: string | null
+}
+
+export interface PaginatedActionPredictionConfigListListApi {
+    count: number
+    /** @nullable */
+    next?: string | null
+    /** @nullable */
+    previous?: string | null
+    results: ActionPredictionConfigListApi[]
+}
+
 export interface ActionPredictionConfigApi {
     readonly id: string
     /**
@@ -112,13 +165,35 @@ export interface ActionPredictionConfigApi {
     readonly updated_at: string | null
 }
 
-export interface PaginatedActionPredictionConfigListApi {
+export interface ActionPredictionModelListApi {
+    readonly id: string
+    config: string
+    /**
+     * Groups runs from the same agent experiment session.
+     * @nullable
+     */
+    experiment_id?: string | null
+    /**
+     * S3 storage path to the serialized model artifact.
+     * @maxLength 2000
+     */
+    model_url: string
+    /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
+    metrics?: unknown
+    /** User who created this model. */
+    readonly created_by: UserBasicApi | null
+    readonly created_at: string
+    /** @nullable */
+    readonly updated_at: string | null
+}
+
+export interface PaginatedActionPredictionModelListListApi {
     count: number
     /** @nullable */
     next?: string | null
     /** @nullable */
     previous?: string | null
-    results: ActionPredictionConfigApi[]
+    results: ActionPredictionModelListApi[]
 }
 
 export interface ActionPredictionModelApi {
@@ -147,15 +222,6 @@ export interface ActionPredictionModelApi {
     readonly created_at: string
     /** @nullable */
     readonly updated_at: string | null
-}
-
-export interface PaginatedActionPredictionModelListApi {
-    count: number
-    /** @nullable */
-    next?: string | null
-    /** @nullable */
-    previous?: string | null
-    results: ActionPredictionModelApi[]
 }
 
 export type ActionPredictionConfigsListParams = {

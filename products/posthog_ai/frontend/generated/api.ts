@@ -13,8 +13,8 @@ import type {
     ActionPredictionConfigsListParams,
     ActionPredictionModelApi,
     ActionPredictionModelsListParams,
-    PaginatedActionPredictionConfigListApi,
-    PaginatedActionPredictionModelListApi,
+    PaginatedActionPredictionConfigListListApi,
+    PaginatedActionPredictionModelListListApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -54,11 +54,14 @@ export const actionPredictionConfigsList = async (
     projectId: string,
     params?: ActionPredictionConfigsListParams,
     options?: RequestInit
-): Promise<PaginatedActionPredictionConfigListApi> => {
-    return apiMutator<PaginatedActionPredictionConfigListApi>(getActionPredictionConfigsListUrl(projectId, params), {
-        ...options,
-        method: 'GET',
-    })
+): Promise<PaginatedActionPredictionConfigListListApi> => {
+    return apiMutator<PaginatedActionPredictionConfigListListApi>(
+        getActionPredictionConfigsListUrl(projectId, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
 }
 
 export const getActionPredictionConfigsCreateUrl = (projectId: string) => {
@@ -98,8 +101,8 @@ export const actionPredictionModelsList = async (
     projectId: string,
     params?: ActionPredictionModelsListParams,
     options?: RequestInit
-): Promise<PaginatedActionPredictionModelListApi> => {
-    return apiMutator<PaginatedActionPredictionModelListApi>(getActionPredictionModelsListUrl(projectId, params), {
+): Promise<PaginatedActionPredictionModelListListApi> => {
+    return apiMutator<PaginatedActionPredictionModelListListApi>(getActionPredictionModelsListUrl(projectId, params), {
         ...options,
         method: 'GET',
     })

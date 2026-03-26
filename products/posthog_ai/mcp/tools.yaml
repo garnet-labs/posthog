@@ -20,8 +20,9 @@ tools:
         list: true
         title: List action prediction configs
         description: >
-            List all action prediction configs in the current project. Returns name, description, action or event
-            reference, lookback period, and creation metadata for each config.
+            List all action prediction configs in the current project. Returns name, action or event
+            reference, lookback period, training status, and creation metadata. Use retrieve for the full
+            description.
 
     action-prediction-config-retrieve:
         operation: action_prediction_configs_retrieve
@@ -128,8 +129,8 @@ tools:
         list: true
         title: List prediction models
         description: >
-            List trained prediction models, newest first. Returns S3 model URL,
-            evaluation metrics, feature importance, artifact scripts, and experiment notes.
+            List trained prediction models, newest first. Returns S3 model URL and
+            evaluation metrics. Use retrieve for feature importance, artifact scripts, and notes.
 
     action-prediction-model-retrieve:
         operation: action_prediction_models_retrieve
