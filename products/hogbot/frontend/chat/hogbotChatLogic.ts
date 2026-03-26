@@ -6,7 +6,7 @@ import { LogEntry, parseLogs } from 'products/tasks/frontend/lib/parse-logs'
 
 import type { hogbotChatLogicType } from './hogbotChatLogicType'
 
-const POLL_INTERVAL_MS = 2000
+const POLL_INTERVAL_MS = 3000
 
 /** Groups consecutive log entries into chat blocks for rendering. */
 export interface ChatBlock {
@@ -99,6 +99,9 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
     }),
     listeners(({ actions, cache }) => ({
         startPolling: () => {
+            if (cache.pollingInterval) {
+                clearInterval(cache.pollingInterval)
+            }
             const poll = async (): Promise<void> => {
                 try {
                     const response = await api.getResponse(`api/projects/@current/hogbot/admin/logs/`)
