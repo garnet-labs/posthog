@@ -61,6 +61,7 @@ from posthog.rate_limit import (
     HogQLQueryThrottle,
 )
 from posthog.rbac.user_access_control import UserAccessControlError
+from posthog.schema_helpers import to_dict
 from posthog.schema_migrations.upgrade import upgrade
 
 from common.hogvm.python.utils import HogVMException
@@ -163,7 +164,7 @@ class QueryViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.ViewSet)
             str(self.team.pk),
         )
 
-        query_json = query.model_dump_json()
+        query_json = orjson.dumps(to_dict(query), option=orjson.OPT_SORT_KEYS).decode()
         key = compute_coalescing_key(self.team.pk, query_json)
         coalescer = QueryCoalescer(key, dry_run=not enabled)
 

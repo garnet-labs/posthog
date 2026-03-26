@@ -319,10 +319,15 @@ class TestQueryCoalescer(TestCase):
 
 class TestQueryCoalescingEndpoint(ClickhouseTestMixin, APIBaseTest):
     def _query_and_key(self):
+        import orjson
+
         from posthog.schema import EventsQuery
 
+        from posthog.schema_helpers import to_dict
+
         query = EventsQuery(select=["event"])
-        key = compute_coalescing_key(self.team.pk, query.model_dump_json())
+        query_json = orjson.dumps(to_dict(query), option=orjson.OPT_SORT_KEYS).decode()
+        key = compute_coalescing_key(self.team.pk, query_json)
         return query, key
 
     def test_dry_run_follower_executes_normally(self):
