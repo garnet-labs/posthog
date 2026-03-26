@@ -90,6 +90,8 @@ import type { taxonomicFilterLogicType } from './taxonomicFilterLogicType'
 
 const PROPERTY_TAXONOMIC_GROUP_TYPES = new Set(Object.values(PROPERTY_FILTER_TYPE_TO_TAXONOMIC_FILTER_GROUP_TYPE))
 
+const EMPTY_ARRAY: string[] = []
+
 const SHORTCUT_TO_PROPERTY_FILTER_GROUP_TYPES = new Set<TaxonomicFilterGroupType>([
     TaxonomicFilterGroupType.PageviewUrls,
     TaxonomicFilterGroupType.PageviewEvents,
@@ -334,7 +336,7 @@ export const taxonomicFilterLogic = kea<taxonomicFilterLogicType>([
             (_, p) => [p.taxonomicFilterLogicKey],
             (taxonomicFilterLogicKey) => taxonomicFilterLogicKey,
         ],
-        eventNames: [() => [(_, props) => props.eventNames], (eventNames) => eventNames ?? []],
+        eventNames: [() => [(_, props) => props.eventNames], (eventNames) => eventNames ?? EMPTY_ARRAY],
         schemaColumns: [() => [(_, props) => props.schemaColumns], (schemaColumns) => schemaColumns ?? []],
         maxContextOptions: [
             () => [(_, props) => props.maxContextOptions],
