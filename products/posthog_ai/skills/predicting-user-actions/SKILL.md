@@ -5,12 +5,12 @@ description: 'Score users with a trained action prediction model and make predic
 
 # Predicting user actions
 
-Given a trained `ActionPredictionModel` with a winning `ActionPredictionModelRun`, score all eligible users and make predictions actionable through person properties and cohorts.
+Given a trained `ActionPredictionModel` linked as the `winning_model` on an `ActionPredictionConfig`, score all eligible users and make predictions actionable through person properties and cohorts.
 
 ## Prerequisites
 
-- A trained model must exist — check via `action-prediction-model-list` and `prediction-model-run-list`
-- At least one run should have `is_winning: true` with valid `artifact_scripts` and `metrics`
+- A prediction config must exist — check via `action-prediction-config-list`
+- The config should have a `winning_model` set with valid `artifact_scripts` and `metrics`
 - If no trained model exists, suggest running the `training-action-predictions` skill first
 
 ## Reference scripts
@@ -24,16 +24,16 @@ The prediction script is in `training-action-predictions/references/`:
 
 ### Step 1: Load the winning model
 
-1. List models via `action-prediction-model-list` to find the target model
-2. List runs via `prediction-model-run-list` and find the run where `is_winning: true`
-3. Extract from the run:
+1. List configs via `action-prediction-config-list` to find the target config
+2. Get the config's `winning_model` ID, then retrieve the model via `action-prediction-model-retrieve`
+3. Extract from the model:
    - `artifact_scripts.query` — the HogQL training query (adapt for scoring)
    - `artifact_scripts.utils` — the shared utils.py (execute_hogql, fetch_features)
    - `artifact_scripts.predict` — the predict.py script
    - `metrics` — to report model quality alongside predictions
    - `feature_importance` — to explain which features drive predictions
 
-If no winning run exists, pick the one with the highest `metrics.auc_roc`.
+If no winning model is set, list models via `action-prediction-model-list` with `?config={id}` and pick the one with the highest `metrics.auc_roc`.
 
 ### Step 2: Run the prediction script
 

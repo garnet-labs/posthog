@@ -36,8 +36,8 @@ SCORES_JSON_PATH = os.environ.get("SCORES_JSON_PATH", "/tmp/scores.json")
 
 # IMPORTANT: The agent MUST set these per experiment.
 TARGET_EVENT = "downloaded_file"  # replace with actual target
+CONFIG_ID = ""  # set to the ActionPredictionConfig UUID
 MODEL_ID = ""  # set to the ActionPredictionModel UUID
-RUN_ID = ""  # set to the ActionPredictionModelRun UUID
 
 # Bucket thresholds — the agent should adjust these based on the base rate.
 # For rare actions (base rate < 5%), lower thresholds may be more useful.
@@ -173,8 +173,8 @@ def main() -> None:
                 "event": "$ai_prediction",
                 "distinct_id": str(person_ids[i]),
                 "properties": {
+                    "$ai_prediction_config_id": CONFIG_ID,
                     "$ai_prediction_model_id": MODEL_ID,
-                    "$ai_prediction_run_id": RUN_ID,
                     "$ai_prediction_target_event": TARGET_EVENT,
                     "$ai_prediction_probability": prob,
                     "$ai_prediction_bucket": bucket,

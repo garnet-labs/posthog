@@ -53,11 +53,11 @@ def fetch_features(query: str, output_path: str) -> pd.DataFrame:
     return df
 
 
-# ── Model Run API ────────────────────────────────────────────────────────────
+# ── Model API ────────────────────────────────────────────────────────────────
 
 
-def create_model_run(
-    prediction_model_id: str,
+def create_model(
+    config_id: str,
     *,
     experiment_id: str | None = None,
     metrics: dict | None = None,
@@ -66,14 +66,14 @@ def create_model_run(
     notes: str = "",
     model_url: str = "https://placeholder.s3.amazonaws.com/models/latest.pkl",
 ) -> dict:
-    """Record a training run via the PostHog API.
+    """Record a trained model via the PostHog API.
 
-    Returns the created run dict including its ID.
+    Returns the created model dict including its ID.
     """
-    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_model_runs/"
+    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_models/"
     headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
     payload = {
-        "prediction_model": prediction_model_id,
+        "config": config_id,
         "model_url": model_url,
         "metrics": metrics or {},
         "feature_importance": feature_importance or {},
@@ -85,46 +85,44 @@ def create_model_run(
 
     resp = requests.post(url, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
-    run = resp.json()
-    print(f"Recorded model run: {run['id']}")
-    return run
-
-
-def set_winning_run(prediction_model_id: str, run_id: str) -> dict:
-    """Set the winning run on a prediction model via PATCH."""
-    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_models/{prediction_model_id}/"
-    headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
-    payload = {"winning_run": run_id}
-
-    resp = requests.patch(url, json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
     model = resp.json()
-    print(f"Set winning run on model {prediction_model_id} → {run_id}")
+    print(f"Recorded model: {model['id']}")
     return model
 
 
-def get_winning_run(prediction_model_id: str) -> dict | None:
-    """Fetch the winning run for a prediction model. Returns None if no winning run."""
-    # First get the model to find the winning_run ID
-    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_models/{prediction_model_id}/"
+def set_winning_model(config_id: str, model_id: str) -> dict:
+    """Set the winning model on a prediction config via PATCH."""
+    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_configs/{config_id}/"
+    headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
+    payload = {"winning_model": model_id}
+
+    resp = requests.patch(url, json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+    config = resp.json()
+    print(f"Set winning model on config {config_id} → {model_id}")
+    return config
+
+
+def get_winning_model(config_id: str) -> dict | None:
+    """Fetch the winning model for a prediction config. Returns None if no winning model."""
+    url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_configs/{config_id}/"
     headers = {"Authorization": f"Bearer {POSTHOG_API_KEY}"}
 
     resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
-    model = resp.json()
+    config = resp.json()
 
-    winning_run_id = model.get("winning_run")
-    if not winning_run_id:
-        print(f"No winning run set for model {prediction_model_id}")
+    winning_model_id = config.get("winning_model")
+    if not winning_model_id:
+        print(f"No winning model set for config {config_id}")
         return None
 
-    # Fetch the full run
-    run_url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_model_runs/{winning_run_id}/"
-    resp = requests.get(run_url, headers=headers, timeout=30)
+    model_url = f"{POSTHOG_HOST}/api/environments/{POSTHOG_PROJECT_ID}/action_prediction_models/{winning_model_id}/"
+    resp = requests.get(model_url, headers=headers, timeout=30)
     resp.raise_for_status()
-    run = resp.json()
-    print(f"Winning run: {run['id']} (AUC-ROC: {run.get('metrics', {}).get('auc_roc', '?')})")
-    return run
+    model = resp.json()
+    print(f"Winning model: {model['id']} (AUC-ROC: {model.get('metrics', {}).get('auc_roc', '?')})")
+    return model
 
 
 # ── Capture API ──────────────────────────────────────────────────────────────

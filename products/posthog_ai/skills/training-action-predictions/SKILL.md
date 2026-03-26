@@ -11,7 +11,7 @@ All feature engineering is pushed down to ClickHouse via HogQL. The query return
 
 ## Prerequisites
 
-- An `ActionPredictionModel` must exist (create one via `action-prediction-model-create` if needed)
+- An `ActionPredictionConfig` must exist (create one via `action-prediction-config-create` if needed)
 - The project must have sufficient event data (≥500 users, ≥50 positive examples)
 - xgboost must be installed (`uv pip install xgboost` if not present)
 
@@ -28,17 +28,19 @@ All in `./references/`:
 
 ### Phase 1: Setup
 
-1. If no `ActionPredictionModel` exists for the target, create one:
+1. If no `ActionPredictionConfig` exists for the target, create one:
 
    ```text
-   action-prediction-model-create(
+   action-prediction-config-create(
      name="Predict upgraded_plan",
      event_name="upgraded_plan",   # or action=<id>
      lookback_days=7
    )
    ```
 
-2. Note the returned model ID — all runs will reference it.
+   This auto-triggers a training Task. Note the returned config ID — all models will reference it.
+
+2. Note the returned config ID — all models will reference it.
 
 ### Phase 2: Data discovery
 
@@ -74,13 +76,12 @@ Write a `train.py` script based on `./references/train.py`. The script should:
 4. Evaluate: AUC-ROC (primary), AUC-PR, Brier score
 5. Refit on all data, save `model.pkl` + `metrics.json`
 
-Record the run:
+Record the model:
 
 ```text
-prediction-model-run-create(
-  prediction_model=<model_id>,
-  is_winning=true,
-  model_url="https://placeholder.s3.amazonaws.com/models/<run_id>.pkl",
+action-prediction-model-create(
+  config=<config_id>,
+  model_url="https://placeholder.s3.amazonaws.com/models/<model_id>.pkl",
   metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
   feature_importance={"days_since_last_event": 0.15, ...},
   artifact_scripts={"query": "<HogQL query>", "utils": "<utils.py source>", "train": "<train.py source>", "predict": "<predict.py source>"}
@@ -98,8 +99,8 @@ LOOP (until stopped or diminishing returns):
   3. Modify the HogQL query and/or training script
   4. Execute train.py (it fetches its own data, records the run)
   5. Compare AUC-ROC to current best:
-     → Improved: PATCH model → winning_run = this run
-     → Equal or worse: keep the run recorded but don't update winning_run
+     → Improved: PATCH config → winning_model = this model
+     → Equal or worse: keep the model recorded but don't update winning_model
      → Crash: log in notes, fix if easy, skip if fundamental
   6. Write notes on what you tried and observed
   7. Continue to next experiment
@@ -137,7 +138,7 @@ After the loop, produce a summary:
 
 ### Next step: score users
 
-Once a winning model exists, suggest the `predicting-user-actions` skill to score users. It uses the winning run's `artifact_scripts` to fetch fresh data, apply the trained pipeline, and write prediction scores as person properties — making them available in cohorts, feature flags, and experiments.
+Once a winning model exists, suggest the `predicting-user-actions` skill to score users. It uses the winning model's `artifact_scripts` to fetch fresh data, apply the trained pipeline, and write prediction scores as person properties — making them available in cohorts, feature flags, and experiments.
 
 ## Guardrails
 
@@ -153,4 +154,4 @@ Once a winning model exists, suggest the `predicting-user-actions` skill to scor
 - **Reproducibility**: seed=42, every run stores query + utils + train + predict in `artifact_scripts`. Fully self-contained.
 - **Crash handling**: if sandbox fails, log in notes, try to fix if it's simple (typo, import), skip if the idea is fundamentally broken.
 - **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
-- **model_url**: must be a valid `https://` URL, not `s3://`
+- **model_url**: S3 storage path (use `action-prediction-config-upload-url` to get a presigned upload URL and storage path)

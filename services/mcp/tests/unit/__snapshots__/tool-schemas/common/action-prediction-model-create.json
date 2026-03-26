@@ -1,44 +1,39 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
-        "action": {
-            "anyOf": [
-                {
-                    "type": "number"
-                },
-                {
-                    "type": "null"
-                }
-            ],
-            "description": "ID of the PostHog action to predict. Mutually exclusive with event_name."
+        "artifact_scripts": {
+            "description": "Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script)."
         },
-        "description": {
-            "description": "Longer description of the prediction model's purpose.",
+        "config": {
             "type": "string"
         },
-        "event_name": {
+        "experiment_id": {
             "anyOf": [
                 {
-                    "maxLength": 400,
                     "type": "string"
                 },
                 {
                     "type": "null"
                 }
             ],
-            "description": "Name of the raw event to predict. Mutually exclusive with action."
+            "description": "Groups runs from the same agent experiment session."
         },
-        "lookback_days": {
-            "description": "Number of days to look back for prediction data.",
-            "minimum": 1,
-            "type": "number"
+        "feature_importance": {
+            "description": "Feature importance scores from model training."
         },
-        "name": {
-            "description": "Human-readable name for the prediction model.",
-            "maxLength": 400,
+        "metrics": {
+            "description": "Model evaluation metrics (e.g. accuracy, AUC, F1)."
+        },
+        "model_url": {
+            "description": "S3 storage path to the serialized model artifact.",
+            "maxLength": 2000,
+            "type": "string"
+        },
+        "notes": {
+            "description": "Agent lab notebook: what was tried, what was observed, what to try next.",
             "type": "string"
         }
     },
-    "required": ["lookback_days"],
+    "required": ["config", "model_url"],
     "type": "object"
 }
