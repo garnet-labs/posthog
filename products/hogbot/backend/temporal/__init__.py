@@ -1,4 +1,5 @@
 from .activities import (
+    CheckHogbotServerAliveInput,
     CleanupSandboxInput,
     CreateHogbotSandboxInput,
     CreateHogbotSandboxOutput,
@@ -9,8 +10,7 @@ from .activities import (
     StartHogbotServerInput,
     StartHogbotServerOutput,
     TrackWorkflowEventInput,
-    WaitForHogbotServerExitInput,
-    WaitForHogbotServerExitOutput,
+    check_hogbot_server_alive,
     cleanup_sandbox,
     create_hogbot_sandbox,
     create_resume_snapshot,
@@ -18,7 +18,6 @@ from .activities import (
     read_sandbox_logs,
     start_hogbot_server,
     track_workflow_event,
-    wait_for_hogbot_server_exit,
 )
 from .workflow import HogbotWorkflow, HogbotWorkflowInput, HogbotWorkflowOutput
 
@@ -29,7 +28,7 @@ WORKFLOWS = [
 ACTIVITIES = [
     create_hogbot_sandbox,
     start_hogbot_server,
-    wait_for_hogbot_server_exit,
+    check_hogbot_server_alive,
     create_resume_snapshot,
     persist_hogbot_snapshot,
     read_sandbox_logs,
@@ -40,6 +39,7 @@ ACTIVITIES = [
 __all__ = [
     "ACTIVITIES",
     "WORKFLOWS",
+    "CheckHogbotServerAliveInput",
     "CleanupSandboxInput",
     "CreateHogbotSandboxInput",
     "CreateHogbotSandboxOutput",
@@ -53,8 +53,7 @@ __all__ = [
     "StartHogbotServerInput",
     "StartHogbotServerOutput",
     "TrackWorkflowEventInput",
-    "WaitForHogbotServerExitInput",
-    "WaitForHogbotServerExitOutput",
+    "check_hogbot_server_alive",
     "cleanup_sandbox",
     "create_hogbot_sandbox",
     "create_resume_snapshot",
@@ -62,5 +61,4 @@ __all__ = [
     "read_sandbox_logs",
     "start_hogbot_server",
     "track_workflow_event",
-    "wait_for_hogbot_server_exit",
 ]

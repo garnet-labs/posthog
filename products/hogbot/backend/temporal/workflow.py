@@ -10,6 +10,7 @@ from temporalio.common import RetryPolicy
 from posthog.temporal.common.base import PostHogWorkflow
 
 from .activities import (
+    CheckHogbotServerAliveInput,
     CleanupSandboxInput,
     CreateHogbotSandboxInput,
     CreateHogbotSandboxOutput,
@@ -19,16 +20,16 @@ from .activities import (
     ReadSandboxLogsInput,
     StartHogbotServerInput,
     StartHogbotServerOutput,
-    WaitForHogbotServerExitInput,
-    WaitForHogbotServerExitOutput,
+    check_hogbot_server_alive,
     cleanup_sandbox,
     create_hogbot_sandbox,
     create_resume_snapshot,
     persist_hogbot_snapshot,
     read_sandbox_logs,
     start_hogbot_server,
-    wait_for_hogbot_server_exit,
 )
+
+POLL_INTERVAL_SECONDS = 30
 
 
 @dataclass
@@ -84,7 +85,6 @@ class HogbotWorkflow(PostHogWorkflow):
 
         sandbox_output: CreateHogbotSandboxOutput | None = None
         server_output: StartHogbotServerOutput | None = None
-        wait_output: WaitForHogbotServerExitOutput | None = None
         snapshot_output: CreateResumeSnapshotOutput | None = None
 
         final_status = "failed"
@@ -126,54 +126,52 @@ class HogbotWorkflow(PostHogWorkflow):
             self._ready = True
             self._phase = "running"
 
-            wait_output = await workflow.execute_activity(
-                wait_for_hogbot_server_exit,
-                WaitForHogbotServerExitInput(sandbox_id=sandbox_output.sandbox_id),
-                start_to_close_timeout=timedelta(days=8),
-                heartbeat_timeout=timedelta(minutes=1),
-                retry_policy=RetryPolicy(maximum_attempts=1),
-            )
-            self._ready = False
-
-            if wait_output.status == "completed":
-                self._phase = "snapshotting"
-                snapshot_output = await workflow.execute_activity(
-                    create_resume_snapshot,
-                    CreateResumeSnapshotInput(sandbox_id=sandbox_output.sandbox_id),
-                    start_to_close_timeout=timedelta(minutes=5),
+            # Poll the server health endpoint until it stops responding
+            while True:
+                alive = await workflow.execute_activity(
+                    check_hogbot_server_alive,
+                    CheckHogbotServerAliveInput(sandbox_id=sandbox_output.sandbox_id),
+                    start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=RetryPolicy(maximum_attempts=1),
                 )
+                if not alive:
+                    break
+                await workflow.sleep(POLL_INTERVAL_SECONDS)
 
-                if snapshot_output.error:
-                    workflow.logger.warning(
-                        "hogbot_workflow_snapshot_creation_failed",
-                        team_id=input.team_id,
-                        sandbox_id=sandbox_output.sandbox_id,
-                        error=snapshot_output.error,
-                    )
-                    final_status = "failed"
-                    final_error = snapshot_output.error
-                elif snapshot_output.external_id is None:
-                    final_status = "failed"
-                    final_error = "Snapshot creation completed without returning an external ID"
-                else:
-                    await workflow.execute_activity(
-                        persist_hogbot_snapshot,
-                        PersistHogbotSnapshotInput(
-                            team_id=input.team_id,
-                            snapshot_external_id=snapshot_output.external_id,
-                        ),
-                        start_to_close_timeout=timedelta(minutes=1),
-                        retry_policy=RetryPolicy(maximum_attempts=3),
-                    )
-                    final_status = "completed"
-                    final_error = None
-            else:
+            self._ready = False
+            self._phase = "snapshotting"
+
+            snapshot_output = await workflow.execute_activity(
+                create_resume_snapshot,
+                CreateResumeSnapshotInput(sandbox_id=sandbox_output.sandbox_id),
+                start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+
+            if snapshot_output.error:
+                workflow.logger.warning(
+                    "hogbot_workflow_snapshot_creation_failed",
+                    team_id=input.team_id,
+                    sandbox_id=sandbox_output.sandbox_id,
+                    error=snapshot_output.error,
+                )
                 final_status = "failed"
-                if wait_output and wait_output.exit_code is not None:
-                    final_error = wait_output.error or f"Hogbot server exited with code {wait_output.exit_code}"
-                else:
-                    final_error = wait_output.error if wait_output else "Hogbot server exited unexpectedly"
+                final_error = snapshot_output.error
+            elif snapshot_output.external_id is None:
+                final_status = "failed"
+                final_error = "Snapshot creation completed without returning an external ID"
+            else:
+                await workflow.execute_activity(
+                    persist_hogbot_snapshot,
+                    PersistHogbotSnapshotInput(
+                        team_id=input.team_id,
+                        snapshot_external_id=snapshot_output.external_id,
+                    ),
+                    start_to_close_timeout=timedelta(minutes=1),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+                final_status = "completed"
+                final_error = None
 
             return HogbotWorkflowOutput(
                 success=final_status == "completed",

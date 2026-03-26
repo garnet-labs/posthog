@@ -5,13 +5,10 @@ from .persist_hogbot_snapshot import PersistHogbotSnapshotInput, persist_hogbot_
 from .read_sandbox_logs import ReadSandboxLogsInput, read_sandbox_logs
 from .start_hogbot_server import StartHogbotServerInput, StartHogbotServerOutput, start_hogbot_server
 from .track_workflow_event import TrackWorkflowEventInput, track_workflow_event
-from .wait_for_hogbot_server_exit import (
-    WaitForHogbotServerExitInput,
-    WaitForHogbotServerExitOutput,
-    wait_for_hogbot_server_exit,
-)
+from .wait_for_hogbot_server_exit import CheckHogbotServerAliveInput, check_hogbot_server_alive
 
 __all__ = [
+    "CheckHogbotServerAliveInput",
     "CleanupSandboxInput",
     "CreateHogbotSandboxInput",
     "CreateHogbotSandboxOutput",
@@ -22,8 +19,7 @@ __all__ = [
     "StartHogbotServerInput",
     "StartHogbotServerOutput",
     "TrackWorkflowEventInput",
-    "WaitForHogbotServerExitInput",
-    "WaitForHogbotServerExitOutput",
+    "check_hogbot_server_alive",
     "cleanup_sandbox",
     "create_hogbot_sandbox",
     "create_resume_snapshot",
@@ -31,5 +27,4 @@ __all__ = [
     "read_sandbox_logs",
     "start_hogbot_server",
     "track_workflow_event",
-    "wait_for_hogbot_server_exit",
 ]

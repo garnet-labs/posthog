@@ -8,12 +8,11 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from products.hogbot.backend.temporal.activities import (
+    CheckHogbotServerAliveInput,
     CreateHogbotSandboxOutput,
     CreateResumeSnapshotOutput,
     PersistHogbotSnapshotInput,
     StartHogbotServerOutput,
-    WaitForHogbotServerExitInput,
-    WaitForHogbotServerExitOutput,
 )
 from products.hogbot.backend.temporal.workflow import HogbotWorkflow, HogbotWorkflowInput, HogbotWorkflowOutput
 
@@ -22,12 +21,18 @@ pytestmark = pytest.mark.asyncio
 
 def _make_mock_activities(
     *,
-    wait_output: WaitForHogbotServerExitOutput,
+    alive_count: int = 2,
     release_server: asyncio.Event | None = None,
     snapshot_should_raise: bool = False,
 ):
+    """Build mock activities.
+
+    alive_count: how many times check_hogbot_server_alive returns True before
+    returning False (simulating the server shutting down).
+    """
     persisted_snapshots: list[PersistHogbotSnapshotInput] = []
     snapshot_calls = 0
+    health_checks = 0
 
     @activity.defn(name="create_hogbot_sandbox")
     async def mock_create_hogbot_sandbox(_input) -> CreateHogbotSandboxOutput:
@@ -56,11 +61,13 @@ def _make_mock_activities(
     async def mock_persist_hogbot_snapshot(input: PersistHogbotSnapshotInput) -> None:
         persisted_snapshots.append(input)
 
-    @activity.defn(name="wait_for_hogbot_server_exit")
-    async def mock_wait_for_hogbot_server_exit(_input: WaitForHogbotServerExitInput) -> WaitForHogbotServerExitOutput:
+    @activity.defn(name="hogbot_check_server_alive")
+    async def mock_check_hogbot_server_alive(_input: CheckHogbotServerAliveInput) -> bool:
+        nonlocal health_checks
         if release_server is not None:
             await release_server.wait()
-        return wait_output
+        health_checks += 1
+        return health_checks <= alive_count
 
     @activity.defn(name="hogbot_read_sandbox_logs")
     async def mock_read_sandbox_logs(_input) -> str:
@@ -73,14 +80,14 @@ def _make_mock_activities(
     activities = [
         mock_create_hogbot_sandbox,
         mock_start_hogbot_server,
-        mock_wait_for_hogbot_server_exit,
+        mock_check_hogbot_server_alive,
         mock_create_resume_snapshot,
         mock_persist_hogbot_snapshot,
         mock_read_sandbox_logs,
         mock_cleanup_sandbox,
     ]
 
-    return activities, persisted_snapshots, lambda: snapshot_calls
+    return activities, persisted_snapshots, lambda: snapshot_calls, lambda: health_checks
 
 
 async def _wait_for_ready_connection_info(handle) -> dict[str, object]:
@@ -101,10 +108,10 @@ async def _wait_for_ready_connection_info(handle) -> dict[str, object]:
     raise AssertionError("Hogbot workflow never became ready")
 
 
-async def test_hogbot_workflow_waits_for_server_exit_and_persists_snapshot():
+async def test_hogbot_workflow_polls_health_and_persists_snapshot():
     release_server = asyncio.Event()
-    activities, persisted_snapshots, snapshot_call_count = _make_mock_activities(
-        wait_output=WaitForHogbotServerExitOutput(status="completed", exit_code=0),
+    activities, persisted_snapshots, snapshot_call_count, health_check_count = _make_mock_activities(
+        alive_count=3,
         release_server=release_server,
     )
     task_queue = f"test-hogbot-{uuid.uuid4()}"
@@ -135,17 +142,15 @@ async def test_hogbot_workflow_waits_for_server_exit_and_persists_snapshot():
     assert result.success is True
     assert result.snapshot_external_id == "snap-1"
     assert snapshot_call_count() == 1
+    # 3 alive + 1 returning False
+    assert health_check_count() == 4
     assert persisted_snapshots == [PersistHogbotSnapshotInput(team_id=1, snapshot_external_id="snap-1")]
 
 
-async def test_hogbot_workflow_skips_snapshot_when_server_exits_with_error():
-    activities, persisted_snapshots, snapshot_call_count = _make_mock_activities(
-        wait_output=WaitForHogbotServerExitOutput(
-            status="failed",
-            exit_code=1,
-            error="Hogbot server exited with code 1",
-        ),
-        snapshot_should_raise=True,
+async def test_hogbot_workflow_completes_when_server_exits_immediately():
+    """Server health returns False on first check — should still snapshot."""
+    activities, persisted_snapshots, snapshot_call_count, health_check_count = _make_mock_activities(
+        alive_count=0,
     )
     task_queue = f"test-hogbot-{uuid.uuid4()}"
 
@@ -167,9 +172,8 @@ async def test_hogbot_workflow_skips_snapshot_when_server_exits_with_error():
                 task_queue=task_queue,
             )
 
-    assert result.success is False
-    assert result.status == "failed"
-    assert result.error is not None
-    assert "code 1" in result.error
-    assert snapshot_call_count() == 0
-    assert persisted_snapshots == []
+    assert result.success is True
+    assert result.snapshot_external_id == "snap-1"
+    assert health_check_count() == 1
+    assert snapshot_call_count() == 1
+    assert persisted_snapshots == [PersistHogbotSnapshotInput(team_id=1, snapshot_external_id="snap-1")]
