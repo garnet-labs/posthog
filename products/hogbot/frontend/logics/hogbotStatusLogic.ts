@@ -1,6 +1,4 @@
-import { actions, afterMount, beforeUnmount, kea, path, reducers, selectors } from 'kea'
-
-import api from 'lib/api'
+import { actions, afterMount, beforeUnmount, kea, listeners, path, reducers, selectors } from 'kea'
 
 import type { hogbotStatusLogicType } from './hogbotStatusLogicType'
 
@@ -73,13 +71,6 @@ export const hogbotStatusLogic = kea<hogbotStatusLogicType>([
             },
         ],
     }),
-    afterMount(({ actions }) => {
-        actions.startStatusPolling()
-    }),
-    beforeUnmount(({ actions }) => {
-        actions.stopStatusPolling()
-    }),
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     listeners(({ actions }) => ({
         startStatusPolling: () => {
             if (_statusPollInterval) {
@@ -87,13 +78,9 @@ export const hogbotStatusLogic = kea<hogbotStatusLogicType>([
             }
             const poll = async (): Promise<void> => {
                 try {
-                    const response = await api.getResponse(`api/projects/@current/hogbot/health/`)
-                    if (response.ok) {
-                        const data = await response.json()
-                        actions.setSandboxReachable(true)
-                        actions.setHealth(data as HogbotHealthStatus)
-                    } else if (response.status === 503) {
-                        const data = await response.json()
+                    const response = await fetch(`/api/projects/@current/hogbot/health/`)
+                    const data = await response.json()
+                    if (data && typeof data === 'object' && 'admin_ready' in data) {
                         actions.setSandboxReachable(true)
                         actions.setHealth(data as HogbotHealthStatus)
                     } else {
@@ -115,4 +102,10 @@ export const hogbotStatusLogic = kea<hogbotStatusLogicType>([
             }
         },
     })),
+    afterMount(({ actions }) => {
+        actions.startStatusPolling()
+    }),
+    beforeUnmount(({ actions }) => {
+        actions.stopStatusPolling()
+    }),
 ])
