@@ -47,6 +47,10 @@ export const ActionPredictionConfigsCreateBody = /* @__PURE__ */ zod.object({
         .nullish()
         .describe('Name of the raw event to predict. Mutually exclusive with action.'),
     lookback_days: zod.number().min(1).describe('Number of days to look back for prediction data.'),
+    winning_model: zod
+        .string()
+        .nullish()
+        .describe('The current winning model. Set by the agent after the experiment loop.'),
 })
 
 export const ActionPredictionConfigsRetrieveParams = /* @__PURE__ */ zod.object({
@@ -85,6 +89,10 @@ export const ActionPredictionConfigsPartialUpdateBody = /* @__PURE__ */ zod.obje
         .nullish()
         .describe('Name of the raw event to predict. Mutually exclusive with action.'),
     lookback_days: zod.number().min(1).optional().describe('Number of days to look back for prediction data.'),
+    winning_model: zod
+        .string()
+        .nullish()
+        .describe('The current winning model. Set by the agent after the experiment loop.'),
 })
 
 export const ActionPredictionConfigsDestroyParams = /* @__PURE__ */ zod.object({
@@ -134,19 +142,20 @@ export const actionPredictionModelsCreateBodyModelUrlMax = 2000
 
 export const ActionPredictionModelsCreateBody = /* @__PURE__ */ zod.object({
     config: zod.string(),
-    task: zod.string().nullish().describe('Task containing all training runs and snapshots for this model.'),
-    task_run: zod.string().nullish().describe('Specific task run that produced this model.'),
-    is_winning: zod.boolean().optional().describe('Whether this is the winning prediction model.'),
+    experiment_id: zod.string().nullish().describe('Groups runs from the same agent experiment session.'),
     model_url: zod
         .string()
         .max(actionPredictionModelsCreateBodyModelUrlMax)
         .describe('S3 storage path to the serialized model artifact.'),
     metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
     feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
-    artifact_script: zod
-        .string()
+    artifact_scripts: zod
+        .unknown()
         .optional()
-        .describe('The Python script used to train and produce the model artifact.'),
+        .describe(
+            'Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script).'
+        ),
+    notes: zod.string().optional().describe('Agent lab notebook: what was tried, what was observed, what to try next.'),
 })
 
 export const ActionPredictionModelsRetrieveParams = /* @__PURE__ */ zod.object({
@@ -171,9 +180,7 @@ export const actionPredictionModelsPartialUpdateBodyModelUrlMax = 2000
 
 export const ActionPredictionModelsPartialUpdateBody = /* @__PURE__ */ zod.object({
     config: zod.string().optional(),
-    task: zod.string().nullish().describe('Task containing all training runs and snapshots for this model.'),
-    task_run: zod.string().nullish().describe('Specific task run that produced this model.'),
-    is_winning: zod.boolean().optional().describe('Whether this is the winning prediction model.'),
+    experiment_id: zod.string().nullish().describe('Groups runs from the same agent experiment session.'),
     model_url: zod
         .string()
         .max(actionPredictionModelsPartialUpdateBodyModelUrlMax)
@@ -181,8 +188,11 @@ export const ActionPredictionModelsPartialUpdateBody = /* @__PURE__ */ zod.objec
         .describe('S3 storage path to the serialized model artifact.'),
     metrics: zod.unknown().optional().describe('Model evaluation metrics (e.g. accuracy, AUC, F1).'),
     feature_importance: zod.unknown().optional().describe('Feature importance scores from model training.'),
-    artifact_script: zod
-        .string()
+    artifact_scripts: zod
+        .unknown()
         .optional()
-        .describe('The Python script used to train and produce the model artifact.'),
+        .describe(
+            'Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script).'
+        ),
+    notes: zod.string().optional().describe('Agent lab notebook: what was tried, what was observed, what to try next.'),
 })

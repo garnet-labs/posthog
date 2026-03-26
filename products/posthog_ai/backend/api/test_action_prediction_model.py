@@ -29,11 +29,10 @@ class TestActionPredictionModelAPI(APIBaseTest):
     def _create_model(self, **overrides):
         defaults = {
             "config": str(self.config.id),
-            "is_winning": False,
             "model_url": "https://s3.amazonaws.com/bucket/model.pkl",
             "metrics": {"accuracy": 0.95, "auc": 0.87},
             "feature_importance": {"feature_a": 0.8, "feature_b": 0.2},
-            "artifact_script": "import sklearn\n# training script",
+            "artifact_scripts": {"query": "SELECT 1", "train": "import sklearn"},
         }
         defaults.update(overrides)
         return self.client.post(self._url(), defaults, format="json")
@@ -42,17 +41,16 @@ class TestActionPredictionModelAPI(APIBaseTest):
         response = self._create_model()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         data = response.json()
-        self.assertFalse(data["is_winning"])
         self.assertEqual(data["model_url"], "https://s3.amazonaws.com/bucket/model.pkl")
         self.assertEqual(data["metrics"]["accuracy"], 0.95)
         self.assertEqual(data["feature_importance"]["feature_a"], 0.8)
-        self.assertEqual(data["artifact_script"], "import sklearn\n# training script")
+        self.assertEqual(data["artifact_scripts"]["query"], "SELECT 1")
         self.assertEqual(data["config"], str(self.config.id))
         self.assertEqual(data["created_by"]["id"], self.user.id)
 
     def test_list(self):
         self._create_model()
-        self._create_model(is_winning=True, model_url="https://s3.amazonaws.com/bucket/model2.pkl")
+        self._create_model(model_url="https://s3.amazonaws.com/bucket/model2.pkl")
 
         response = self.client.get(self._url())
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -82,14 +80,6 @@ class TestActionPredictionModelAPI(APIBaseTest):
         response = self.client.get(self._url(pk))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["id"], pk)
-
-    def test_partial_update(self):
-        create_response = self._create_model()
-        pk = create_response.json()["id"]
-
-        response = self.client.patch(self._url(pk), {"is_winning": True}, format="json")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(response.json()["is_winning"])
 
     def test_partial_update_metrics(self):
         create_response = self._create_model()

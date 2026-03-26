@@ -62,11 +62,11 @@ class AgentMemory(UUIDModel):
         )
 
 
-class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
+class ActionPredictionConfig(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     team = models.ForeignKey(
         "posthog.Team",
         on_delete=models.CASCADE,
-        related_name="action_prediction_models",
+        related_name="action_prediction_configs",
     )
     name = models.CharField(max_length=400, blank=True, default="")
     description = models.TextField(blank=True, default="")
@@ -79,13 +79,21 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     )
     event_name = models.CharField(max_length=400, null=True, blank=True)
     lookback_days = models.PositiveIntegerField()
-    winning_run = models.ForeignKey(
-        "ActionPredictionModelRun",
+    task_run = models.ForeignKey(
+        "tasks.TaskRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_prediction_configs",
+        help_text="Sandbox task run that trains this prediction config.",
+    )
+    winning_model = models.ForeignKey(
+        "ActionPredictionModel",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="+",
-        help_text="The current winning run for this model. Set by the agent after the experiment loop.",
+        help_text="The current winning model. Set by the agent after the experiment loop.",
     )
 
     class Meta:
@@ -103,25 +111,41 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         ]
 
 
-class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
-    prediction_model = models.ForeignKey(
-        ActionPredictionModel,
+class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
+    config = models.ForeignKey(
+        ActionPredictionConfig,
         on_delete=models.CASCADE,
-        related_name="runs",
+        related_name="models",
     )
     team = models.ForeignKey(
         "posthog.Team",
         on_delete=models.CASCADE,
-        related_name="action_prediction_model_runs",
+        related_name="action_prediction_models",
+    )
+    task = models.ForeignKey(
+        "tasks.Task",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_prediction_models",
+        help_text="Task containing all training runs and snapshots for this model.",
+    )
+    task_run = models.ForeignKey(
+        "tasks.TaskRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_prediction_models",
+        help_text="Specific task run that produced this model.",
     )
     experiment_id = models.UUIDField(
         null=True,
         blank=True,
         help_text="Groups runs from the same agent experiment session.",
     )
-    model_url = models.URLField(
+    model_url = models.CharField(
         max_length=2000,
-        help_text="S3 URL to the serialized model artifact.",
+        help_text="S3 storage path to the serialized model artifact.",
     )
     metrics = models.JSONField(
         default=dict,
@@ -147,5 +171,5 @@ class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     class Meta:
         indexes = [
             models.Index(fields=["team", "id"]),
-            models.Index(fields=["prediction_model", "-created_at"]),
+            models.Index(fields=["config", "-created_at"]),
         ]

@@ -618,6 +618,11 @@ export namespace Schemas {
        */
       readonly task_run: string | null;
       /**
+       * The current winning model. Set by the agent after the experiment loop.
+       * @nullable
+       */
+      winning_model?: string | null;
+      /**
        * Current training status: not_started, queued, in_progress, completed, failed, cancelled, or null if no training run.
        * @nullable
        */
@@ -632,17 +637,10 @@ export namespace Schemas {
       readonly id: string;
       config: string;
       /**
-       * Task containing all training runs and snapshots for this model.
+       * Groups runs from the same agent experiment session.
        * @nullable
        */
-      task?: string | null;
-      /**
-       * Specific task run that produced this model.
-       * @nullable
-       */
-      task_run?: string | null;
-      /** Whether this is the winning prediction model. */
-      is_winning?: boolean;
+      experiment_id?: string | null;
       /**
        * S3 storage path to the serialized model artifact.
        * @maxLength 2000
@@ -652,8 +650,10 @@ export namespace Schemas {
       metrics?: unknown;
       /** Feature importance scores from model training. */
       feature_importance?: unknown;
-      /** The Python script used to train and produce the model artifact. */
-      artifact_script?: string;
+      /** Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script). */
+      artifact_scripts?: unknown;
+      /** Agent lab notebook: what was tried, what was observed, what to try next. */
+      notes?: string;
       /** User who created this model. */
       readonly created_by: UserBasic | null;
       readonly created_at: string;
@@ -21239,6 +21239,11 @@ export namespace Schemas {
        */
       readonly task_run?: string | null;
       /**
+       * The current winning model. Set by the agent after the experiment loop.
+       * @nullable
+       */
+      winning_model?: string | null;
+      /**
        * Current training status: not_started, queued, in_progress, completed, failed, cancelled, or null if no training run.
        * @nullable
        */
@@ -21253,17 +21258,10 @@ export namespace Schemas {
       readonly id?: string;
       config?: string;
       /**
-       * Task containing all training runs and snapshots for this model.
+       * Groups runs from the same agent experiment session.
        * @nullable
        */
-      task?: string | null;
-      /**
-       * Specific task run that produced this model.
-       * @nullable
-       */
-      task_run?: string | null;
-      /** Whether this is the winning prediction model. */
-      is_winning?: boolean;
+      experiment_id?: string | null;
       /**
        * S3 storage path to the serialized model artifact.
        * @maxLength 2000
@@ -21273,8 +21271,10 @@ export namespace Schemas {
       metrics?: unknown;
       /** Feature importance scores from model training. */
       feature_importance?: unknown;
-      /** The Python script used to train and produce the model artifact. */
-      artifact_script?: string;
+      /** Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script). */
+      artifact_scripts?: unknown;
+      /** Agent lab notebook: what was tried, what was observed, what to try next. */
+      notes?: string;
       /** User who created this model. */
       readonly created_by?: UserBasic | null;
       readonly created_at?: string;

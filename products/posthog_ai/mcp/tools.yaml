@@ -73,13 +73,15 @@ tools:
         title: Update action prediction config
         description: >
             Update an action prediction config by ID. Can modify name,
-            description, the action or event reference, and lookback period.
+            description, the action or event reference, lookback period,
+            and the winning model reference.
         include_params:
             - name
             - description
             - action
             - event_name
             - lookback_days
+            - winning_model
     action-prediction-config-update:
         operation: action_prediction_configs_update
         enabled: false
@@ -126,8 +128,8 @@ tools:
         list: true
         title: List prediction models
         description: >
-            List trained prediction models, newest first. Returns winning status, S3 model URL,
-            evaluation metrics, feature importance, and the training artifact script.
+            List trained prediction models, newest first. Returns S3 model URL,
+            evaluation metrics, feature importance, artifact scripts, and experiment notes.
         mcp_version: 1
     action-prediction-model-retrieve:
         operation: action_prediction_models_retrieve
@@ -140,8 +142,8 @@ tools:
             idempotent: true
         title: Get prediction model
         description: >
-            Retrieve a single trained prediction model by ID. Returns config reference, winning status,
-            S3 model URL, evaluation metrics, feature importance, task references, and the training artifact script.
+            Retrieve a single trained prediction model by ID. Returns config reference,
+            S3 model URL, evaluation metrics, feature importance, artifact scripts, and experiment notes.
     action-prediction-model-create:
         operation: action_prediction_models_create
         enabled: true
@@ -155,16 +157,15 @@ tools:
         title: Create prediction model
         description: >
             Record a new trained prediction model. Provide the parent config ID, S3 model URL,
-            evaluation metrics, feature importance scores, and the artifact script.
+            evaluation metrics, feature importance scores, and artifact scripts.
         include_params:
             - config
-            - task
-            - task_run
-            - is_winning
+            - experiment_id
             - model_url
             - metrics
             - feature_importance
-            - artifact_script
+            - artifact_scripts
+            - notes
     action-prediction-model-partial-update:
         operation: action_prediction_models_partial_update
         enabled: true
@@ -177,16 +178,14 @@ tools:
         enrich_url: '{id}'
         title: Update prediction model
         description: >
-            Update a prediction model by ID. Can change winning status,
-            metrics, feature importance, or artifact script.
+            Update a prediction model by ID. Can change model URL,
+            metrics, feature importance, artifact scripts, or notes.
         include_params:
-            - task
-            - task_run
-            - is_winning
             - model_url
             - metrics
             - feature_importance
-            - artifact_script
+            - artifact_scripts
+            - notes
     action-prediction-model-update:
         operation: action_prediction_models_update
         enabled: false

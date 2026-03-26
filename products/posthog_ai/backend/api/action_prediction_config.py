@@ -61,6 +61,7 @@ class ActionPredictionConfigSerializer(serializers.ModelSerializer):
             "event_name",
             "lookback_days",
             "task_run",
+            "winning_model",
             "training_status",
             "created_by",
             "created_at",

@@ -61,7 +61,7 @@ const actionPredictionConfigRetrieve = (): ToolBase<
     },
 })
 
-const ActionPredictionConfigCreateSchema = ActionPredictionConfigsCreateBody
+const ActionPredictionConfigCreateSchema = ActionPredictionConfigsCreateBody.omit({ winning_model: true })
 
 const actionPredictionConfigCreate = (): ToolBase<
     typeof ActionPredictionConfigCreateSchema,
@@ -126,6 +126,9 @@ const actionPredictionConfigPartialUpdate = (): ToolBase<
         }
         if (params.lookback_days !== undefined) {
             body['lookback_days'] = params.lookback_days
+        }
+        if (params.winning_model !== undefined) {
+            body['winning_model'] = params.winning_model
         }
         const result = await context.api.request<Schemas.ActionPredictionConfig>({
             method: 'PATCH',
@@ -229,14 +232,8 @@ const actionPredictionModelCreate = (): ToolBase<
         if (params.config !== undefined) {
             body['config'] = params.config
         }
-        if (params.task !== undefined) {
-            body['task'] = params.task
-        }
-        if (params.task_run !== undefined) {
-            body['task_run'] = params.task_run
-        }
-        if (params.is_winning !== undefined) {
-            body['is_winning'] = params.is_winning
+        if (params.experiment_id !== undefined) {
+            body['experiment_id'] = params.experiment_id
         }
         if (params.model_url !== undefined) {
             body['model_url'] = params.model_url
@@ -247,8 +244,11 @@ const actionPredictionModelCreate = (): ToolBase<
         if (params.feature_importance !== undefined) {
             body['feature_importance'] = params.feature_importance
         }
-        if (params.artifact_script !== undefined) {
-            body['artifact_script'] = params.artifact_script
+        if (params.artifact_scripts !== undefined) {
+            body['artifact_scripts'] = params.artifact_scripts
+        }
+        if (params.notes !== undefined) {
+            body['notes'] = params.notes
         }
         const result = await context.api.request<Schemas.ActionPredictionModel>({
             method: 'POST',
@@ -264,7 +264,7 @@ const actionPredictionModelCreate = (): ToolBase<
 
 const ActionPredictionModelPartialUpdateSchema = ActionPredictionModelsPartialUpdateParams.omit({
     project_id: true,
-}).extend(ActionPredictionModelsPartialUpdateBody.omit({ config: true }).shape)
+}).extend(ActionPredictionModelsPartialUpdateBody.omit({ config: true, experiment_id: true }).shape)
 
 const actionPredictionModelPartialUpdate = (): ToolBase<
     typeof ActionPredictionModelPartialUpdateSchema,
@@ -275,15 +275,6 @@ const actionPredictionModelPartialUpdate = (): ToolBase<
     handler: async (context: Context, params: z.infer<typeof ActionPredictionModelPartialUpdateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.task !== undefined) {
-            body['task'] = params.task
-        }
-        if (params.task_run !== undefined) {
-            body['task_run'] = params.task_run
-        }
-        if (params.is_winning !== undefined) {
-            body['is_winning'] = params.is_winning
-        }
         if (params.model_url !== undefined) {
             body['model_url'] = params.model_url
         }
@@ -293,8 +284,11 @@ const actionPredictionModelPartialUpdate = (): ToolBase<
         if (params.feature_importance !== undefined) {
             body['feature_importance'] = params.feature_importance
         }
-        if (params.artifact_script !== undefined) {
-            body['artifact_script'] = params.artifact_script
+        if (params.artifact_scripts !== undefined) {
+            body['artifact_scripts'] = params.artifact_scripts
+        }
+        if (params.notes !== undefined) {
+            body['notes'] = params.notes
         }
         const result = await context.api.request<Schemas.ActionPredictionModel>({
             method: 'PATCH',

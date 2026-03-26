@@ -1215,7 +1215,7 @@
         }
     },
     "action-prediction-config-partial-update": {
-        "description": "Update an action prediction config by ID. Can modify name, description, the action or event reference, and lookback period.",
+        "description": "Update an action prediction config by ID. Can modify name, description, the action or event reference, lookback period, and the winning model reference.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "Update action prediction config",
@@ -1260,7 +1260,7 @@
         }
     },
     "action-prediction-model-list": {
-        "description": "List trained prediction models, newest first. Returns winning status, S3 model URL, evaluation metrics, feature importance, and the training artifact script.",
+        "description": "List trained prediction models, newest first. Returns S3 model URL, evaluation metrics, feature importance, artifact scripts, and experiment notes.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "List prediction models",
@@ -1275,7 +1275,7 @@
         }
     },
     "action-prediction-model-retrieve": {
-        "description": "Retrieve a single trained prediction model by ID. Returns config reference, winning status, S3 model URL, evaluation metrics, feature importance, task references, and the training artifact script.",
+        "description": "Retrieve a single trained prediction model by ID. Returns config reference, S3 model URL, evaluation metrics, feature importance, artifact scripts, and experiment notes.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "Get prediction model",
@@ -1290,7 +1290,7 @@
         }
     },
     "action-prediction-model-create": {
-        "description": "Record a new trained prediction model. Provide the parent config ID, S3 model URL, evaluation metrics, feature importance scores, and the artifact script.",
+        "description": "Record a new trained prediction model. Provide the parent config ID, S3 model URL, evaluation metrics, feature importance scores, and artifact scripts.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "Create prediction model",
@@ -1305,7 +1305,7 @@
         }
     },
     "action-prediction-model-partial-update": {
-        "description": "Update a prediction model by ID. Can change winning status, metrics, feature importance, or artifact script.",
+        "description": "Update a prediction model by ID. Can change model URL, metrics, feature importance, artifact scripts, or notes.",
         "category": "AI",
         "feature": "action_prediction_models",
         "summary": "Update prediction model",
