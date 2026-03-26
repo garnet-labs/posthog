@@ -1091,7 +1091,7 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
                 is_new_insight: isNewInsight,
             })
 
-            if ((sanitizedQuery.data_warehouse_entity_count ?? 0) > 0) {
+            if (isNewInsight && (sanitizedQuery.data_warehouse_entity_count ?? 0) > 0) {
                 posthog.capture('insight with data warehouse source saved')
             }
         },
