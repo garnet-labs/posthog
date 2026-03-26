@@ -86,6 +86,7 @@ impl CheckpointManager {
         info!(
             max_concurrent_checkpoints = config.max_concurrent_checkpoints,
             export_enabled = exporter.is_some(),
+            skip_export = config.skip_export,
             "Creating checkpoint manager",
         );
 
@@ -110,6 +111,7 @@ impl CheckpointManager {
         info!(
             max_concurrent_checkpoints = config.max_concurrent_checkpoints,
             export_enabled = exporter.is_some(),
+            skip_export = config.skip_export,
             offset_tracking_enabled = true,
             "Creating checkpoint manager with offset tracking",
         );
@@ -186,7 +188,18 @@ impl CheckpointManager {
                             continue;
                         }
 
-                        info!("Checkpoint manager: attempting checkpoint submission for {} stores", store_count);
+                        // Calculate stagger delay: if configured to 0, auto-calculate
+                        // by spreading partitions evenly across the checkpoint interval
+                        let stagger_delay = if submit_loop_config.checkpoint_stagger_delay.is_zero() {
+                            submit_loop_config.checkpoint_interval / store_count as u32
+                        } else {
+                            submit_loop_config.checkpoint_stagger_delay
+                        };
+
+                        info!(
+                            "Checkpoint manager: attempting checkpoint submission for {} stores (stagger delay: {:?})",
+                            store_count, stagger_delay
+                        );
 
                         // Attempt to checkpoint each partitions' backing store in
                         // the candidate list. If the store is no longer owned by
@@ -195,7 +208,18 @@ impl CheckpointManager {
                         // gating lock (is_checkpointing) is at max capacity, we block
                         // at this iteration of 'inner loop until the another attempt
                         // completes and a new slot opens up
-                        'inner: for partition in candidates {
+                        'inner: for (partition_index, partition) in candidates.into_iter().enumerate() {
+                            // Stagger: sleep between partitions to spread out RocksDB
+                            // flushes and avoid compaction storms that cause memory spikes
+                            if partition_index > 0 && !stagger_delay.is_zero() {
+                                tokio::select! {
+                                    _ = cancel_submit_loop_token.cancelled() => {
+                                        info!("Checkpoint manager: shutdown during stagger delay");
+                                        break 'outer;
+                                    }
+                                    _ = tokio::time::sleep(stagger_delay) => {}
+                                }
+                            }
                             let partition_tag = partition.to_string();
 
                             // Skip checkpoint attempts during rebalancing - favor reassignment over checkpointing
@@ -239,7 +263,11 @@ impl CheckpointManager {
                             let worker_is_checkpointing = is_checkpointing.clone();
                             let worker_checkpoint_state = checkpoint_state.clone();
                             let worker_store_manager = store_manager.clone();
-                            let worker_exporter = exporter.as_ref().map(|e| e.clone());
+                            let worker_exporter = if submit_loop_config.skip_export {
+                                None
+                            } else {
+                                exporter.as_ref().map(|e| e.clone())
+                            };
                             let worker_offset_tracker = offset_tracker.clone();
                             // Shutdown token - child of main loop token, cancelled on graceful shutdown
                             let worker_shutdown_token = cancel_submit_loop_token.child_token();

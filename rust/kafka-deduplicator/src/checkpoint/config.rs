@@ -92,11 +92,20 @@ pub struct CheckpointConfig {
     /// Should be less than kafka max.poll.interval.ms to prevent consumer group kicks.
     pub checkpoint_partition_import_timeout: Duration,
 
+    /// Delay between starting each partition's checkpoint within a cycle.
+    /// Spreads out RocksDB flushes to avoid compaction storms that cause memory spikes.
+    /// Duration::ZERO means auto-calculate (checkpoint_interval / partition_count).
+    pub checkpoint_stagger_delay: Duration,
+
     /// Maximum age of a local metadata.json before the local store is considered stale
     /// and the service falls back to S3 import. Separate from checkpoint_import_window_hours
     /// (the S3 listing window): local staleness must be tighter because if a pod was down
     /// for longer than this, another pod likely consumed the partition and local data is behind.
     pub local_checkpoint_max_staleness: Duration,
+
+    /// When true, checkpoint workers perform the RocksDB flush but skip the S3 upload.
+    /// Use to isolate whether memory spikes come from the flush/compaction or the upload.
+    pub skip_export: bool,
 }
 
 impl Default for CheckpointConfig {
@@ -126,9 +135,11 @@ impl Default for CheckpointConfig {
             max_concurrent_checkpoint_file_uploads: 1000,
             max_upload_buffers_per_partition: 25,
             checkpoint_partition_import_timeout: Duration::from_secs(240),
+            checkpoint_stagger_delay: Duration::ZERO,
             local_checkpoint_max_staleness: Duration::from_secs(
                 DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS,
             ),
+            skip_export: false,
         }
     }
 }

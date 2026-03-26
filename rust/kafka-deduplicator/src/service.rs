@@ -207,7 +207,9 @@ impl KafkaDeduplicatorService {
             max_concurrent_checkpoint_file_uploads: config.max_concurrent_checkpoint_file_uploads,
             max_upload_buffers_per_partition: config.max_upload_buffers_per_partition,
             checkpoint_partition_import_timeout: config.checkpoint_partition_import_timeout(),
+            checkpoint_stagger_delay: config.checkpoint_stagger_delay(),
             local_checkpoint_max_staleness: config.local_checkpoint_max_staleness(),
+            skip_export: config.checkpoint_skip_export,
         };
 
         // Reset local checkpoint directory on startup (it's temporary storage)

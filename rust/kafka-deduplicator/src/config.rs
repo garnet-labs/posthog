@@ -242,8 +242,10 @@ pub struct Config {
     pub checkpoint_interval_secs: u64,
 
     // max checkpoint attempts to perform on a single pod at once. each
-    // concurrent attempt is against a different locally assigned partition
-    #[envconfig(default = "8")]
+    // concurrent attempt is against a different locally assigned partition.
+    // Default 1 ensures only one RocksDB flush happens at a time, avoiding
+    // compaction storms that cause memory spikes.
+    #[envconfig(default = "1")]
     pub max_concurrent_checkpoints: usize,
 
     #[envconfig(default = "200")]
@@ -302,6 +304,17 @@ pub struct Config {
     // 8 × this value × 18MB, so 25 × 8 = 200 buffers ≈ 3.6GB.
     #[envconfig(default = "25")]
     pub max_upload_buffers_per_partition: usize,
+
+    // Delay in seconds between starting each partition's checkpoint within a cycle.
+    // Spreads out RocksDB flushes to avoid compaction storms that cause memory spikes.
+    // 0 = auto-calculate (checkpoint_interval / partition_count).
+    #[envconfig(default = "0")]
+    pub checkpoint_stagger_delay_secs: u64,
+
+    // When true, checkpoint workers perform the RocksDB flush but skip the S3 upload.
+    // Use to isolate whether memory spikes come from the flush/compaction or the upload.
+    #[envconfig(default = "false")]
+    pub checkpoint_skip_export: bool,
 
     // Maximum time allowed for a complete checkpoint import for a single partition (seconds).
     // This includes listing checkpoints, downloading metadata, and downloading all files.
@@ -616,6 +629,11 @@ impl Config {
     /// Get checkpoint partition import timeout as Duration
     pub fn checkpoint_partition_import_timeout(&self) -> Duration {
         Duration::from_secs(self.checkpoint_partition_import_timeout_secs)
+    }
+
+    /// Get checkpoint stagger delay as Duration (0 = auto-calculate)
+    pub fn checkpoint_stagger_delay(&self) -> Duration {
+        Duration::from_secs(self.checkpoint_stagger_delay_secs)
     }
 
     /// Get max staleness for local checkpoint data as Duration
