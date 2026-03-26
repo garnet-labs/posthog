@@ -23,7 +23,7 @@ const STT_SAMPLE_RATE = 16000
 const STT_BUFFER_SIZE = 4096
 // How long to wait after the last transcript (partial or committed) before we *consider* auto-send.
 // Natural mid-sentence pauses often exceed 500ms; too low cuts users off.
-const TURN_COMPLETE_DEBOUNCE_MS = 850
+const TURN_COMPLETE_DEBOUNCE_MS = 500
 // After debounce, require this much local (mic) silence so we don't stop while you're still talking
 // but STT hasn't emitted a partial yet.
 const MIN_SILENCE_BEFORE_AUTO_STOP_MS = 500
