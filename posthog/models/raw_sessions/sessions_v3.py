@@ -47,58 +47,11 @@ def RAW_SESSIONS_MV_RECORDINGS_V3():
 
 
 def RAW_SESSIONS_INSERT_COLUMNS_V3(include_session_timestamp: bool = True) -> str:
+    # IMPORTANT: This list must stay in sync with RAW_SESSIONS_TABLE_BASE_SQL_V3.
+    # If you add or remove a column there, update this list too.
+    # Also check the MV SELECT clauses in RAW_SESSION_TABLE_MV_SELECT_SQL_V3
+    # and RAW_SESSION_TABLE_MV_RECORDINGS_SELECT_SQL_V3 to keep ordering consistent.
     columns = [
-        "team_id",
-        "session_id_v7",
-        *(["session_timestamp"] if include_session_timestamp else []),
-        "distinct_id",
-        "distinct_ids",
-        "min_timestamp",
-        "max_timestamp",
-        "max_inserted_at",
-        "urls",
-        "entry_url",
-        "end_url",
-        "last_external_click_url",
-        "browser",
-        "browser_version",
-        "os",
-        "os_version",
-        "device_type",
-        "viewport_width",
-        "viewport_height",
-        "geoip_country_code",
-        "geoip_subdivision_1_code",
-        "geoip_subdivision_1_name",
-        "geoip_subdivision_city_name",
-        "geoip_time_zone",
-        "entry_referring_domain",
-        "entry_utm_source",
-        "entry_utm_campaign",
-        "entry_utm_medium",
-        "entry_utm_term",
-        "entry_utm_content",
-        "entry_gclid",
-        "entry_gad_source",
-        "entry_fbclid",
-        "entry_has_gclid",
-        "entry_has_fbclid",
-        "entry_ad_ids_map",
-        "entry_ad_ids_set",
-        "entry_channel_type_properties",
-        "pageview_uniq",
-        "autocapture_uniq",
-        "screen_uniq",
-        "page_screen_uniq_up_to",
-        "has_autocapture",
-        "flag_values",
-        "flag_keys",
-        "event_names",
-        "hosts",
-        "emails",
-        "has_replay_events",
-    ]
-    return ",\n    ".join(columns)
 
 
 def TRUNCATE_RAW_SESSIONS_TABLE_SQL_V3():
