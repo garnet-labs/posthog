@@ -1,7 +1,5 @@
-import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from urllib.parse import urlparse
 
 from django.conf import settings
 
@@ -35,7 +33,11 @@ class McpServerConfig:
 
 
 def get_sandbox_api_url() -> str:
-    return settings.SANDBOX_API_URL or settings.SITE_URL
+    if settings.DEBUG:
+        # In local dev, sandboxes run in Docker and can't reach localhost.
+        # Use host.docker.internal on port 8000 (Django) instead of 8010 (webpack proxy).
+        return "http://host.docker.internal:8000"
+    return settings.SITE_URL
 
 
 def get_sandbox_mcp_configs(
@@ -46,40 +48,71 @@ def get_sandbox_mcp_configs(
 ) -> list[McpServerConfig]:
     """Return MCP server configurations for sandbox agents.
 
-    Uses SANDBOX_MCP_URL if explicitly set, otherwise derives it from SITE_URL:
-    - app.posthog.com / us.posthog.com → https://mcp.posthog.com/mcp
-    - eu.posthog.com → https://mcp-eu.posthog.com/mcp
-    - Other hosts → empty list (MCP not available)
+    When SANDBOX_MCP_AUTH_TOKEN and SANDBOX_MCP_PROJECT_ID are set, a prod MCP
+    is added (using those credentials) and the local MCP is filtered to
+    action_prediction_models only. Otherwise a single MCP is returned with
+    full access.
     """
-    url = _resolve_mcp_url()
-    if not url:
-        return []
     read_only = not has_write_scopes(scopes)
-    auth_token = os.environ.get("SANDBOX_MCP_AUTH_TOKEN", token)
-    headers = [
-        {"name": "Authorization", "value": f"Bearer {auth_token}"},
-        {"name": "x-posthog-project-id", "value": os.environ.get("SANDBOX_MCP_PROJECT_ID", str(project_id))},
-        {"name": "x-posthog-mcp-version", "value": "2"},
-        {"name": "x-posthog-read-only", "value": str(read_only).lower()},
-    ]
-    return [McpServerConfig(type="http", name="posthog", url=url, headers=headers)]
+    configs: list[McpServerConfig] = []
+
+    prod_auth_token = settings.SANDBOX_MCP_AUTH_TOKEN or ""
+    prod_project_id = settings.SANDBOX_MCP_PROJECT_ID or ""
+    has_prod = bool(prod_auth_token and prod_project_id)
+
+    # Local MCP (from SANDBOX_MCP_URL or derived from SITE_URL)
+    local_url = _resolve_local_mcp_url()
+    if local_url:
+        if has_prod:
+            local_url = _append_query_param(local_url, "features", "action_prediction_models")
+        configs.append(
+            McpServerConfig(
+                type="http",
+                name="posthog-local" if has_prod else "posthog",
+                url=local_url,
+                headers=[
+                    {"name": "Authorization", "value": f"Bearer {token}"},
+                    {"name": "x-posthog-project-id", "value": str(project_id)},
+                    {"name": "x-posthog-mcp-version", "value": "2"},
+                    {"name": "x-posthog-read-only", "value": str(read_only).lower()},
+                ],
+            )
+        )
+
+    # Prod MCP (when env credentials are provided)
+    if has_prod:
+        prod_url = _resolve_prod_mcp_url()
+        if prod_url:
+            configs.append(
+                McpServerConfig(
+                    type="http",
+                    name="posthog",
+                    url=prod_url,
+                    headers=[
+                        {"name": "Authorization", "value": f"Bearer {prod_auth_token}"},
+                        {"name": "x-posthog-project-id", "value": prod_project_id},
+                        {"name": "x-posthog-mcp-version", "value": "2"},
+                        {"name": "x-posthog-read-only", "value": str(read_only).lower()},
+                    ],
+                )
+            )
+
+    return configs
 
 
-def _resolve_mcp_url() -> str | None:
+def _append_query_param(url: str, key: str, value: str) -> str:
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{key}={value}"
+
+
+def _resolve_local_mcp_url() -> str | None:
     if settings.SANDBOX_MCP_URL:
         return settings.SANDBOX_MCP_URL
-
-    site_url = settings.SITE_URL
-    if not site_url:
-        return None
-
-    hostname = urlparse(site_url).hostname or ""
-    if hostname in ("app.posthog.com", "us.posthog.com"):
-        return "https://mcp.posthog.com/mcp"
-    if hostname == "eu.posthog.com":
-        return "https://mcp-eu.posthog.com/mcp"
-
     return None
+
+
+def _resolve_prod_mcp_url() -> str | None:
+    return "https://mcp.posthog.com/mcp"
 
 
 def get_github_token(github_integration_id: int) -> Optional[str]:

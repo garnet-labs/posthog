@@ -11,11 +11,9 @@ import requests
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "http://localhost:8010")
-POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY", "")
-POSTHOG_PROJECT_ID = os.environ.get("POSTHOG_PROJECT_ID", "1")
-# Project token for capture/batch — different from the personal API key.
-# The personal API key is for the query API; the project token is for event ingestion.
+POSTHOG_HOST = os.environ.get("POSTHOG_PROD_HOST", os.environ.get("POSTHOG_HOST", "http://localhost:8010"))
+POSTHOG_API_KEY = os.environ.get("POSTHOG_PROD_API_KEY", os.environ.get("POSTHOG_API_KEY", ""))
+POSTHOG_PROJECT_ID = os.environ.get("POSTHOG_PROD_PROJECT_ID", os.environ.get("POSTHOG_PROJECT_ID", "1"))
 POSTHOG_PROJECT_TOKEN = os.environ.get("POSTHOG_PROJECT_TOKEN", "")
 
 

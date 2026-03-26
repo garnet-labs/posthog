@@ -94,18 +94,24 @@ def create_sandbox_from_snapshot(input: CreateSandboxFromSnapshotInput) -> Creat
                 cause=e,
             )
 
+        sandbox_api_url = get_sandbox_api_url()
         environment_variables = {
             "GITHUB_TOKEN": github_token,
             "POSTHOG_PERSONAL_API_KEY": access_token,
-            "POSTHOG_API_URL": get_sandbox_api_url(),
+            "POSTHOG_API_URL": sandbox_api_url,
+            "POSTHOG_HOST": sandbox_api_url,
             "POSTHOG_PROJECT_ID": str(ctx.team_id),
             "POSTHOG_API_KEY": access_token,
         }
 
         if settings.SANDBOX_POSTHOG_HOST:
-            environment_variables["POSTHOG_HOST"] = settings.SANDBOX_POSTHOG_HOST
+            environment_variables["POSTHOG_PROD_HOST"] = settings.SANDBOX_POSTHOG_HOST
+        if settings.SANDBOX_MCP_PROJECT_ID:
+            environment_variables["POSTHOG_PROD_PROJECT_ID"] = settings.SANDBOX_MCP_PROJECT_ID
+        if settings.SANDBOX_MCP_AUTH_TOKEN:
+            environment_variables["POSTHOG_PROD_API_KEY"] = settings.SANDBOX_MCP_AUTH_TOKEN
         if settings.SANDBOX_POSTHOG_INGESTION_KEY:
-            environment_variables["POSTHOG_API_KEY"] = settings.SANDBOX_POSTHOG_INGESTION_KEY
+            environment_variables["POSTHOG_PROJECT_TOKEN"] = settings.SANDBOX_POSTHOG_INGESTION_KEY
         config = SandboxConfig(
             name=get_sandbox_name_for_task(ctx.task_id),
             template=SandboxTemplate.DEFAULT_BASE,

@@ -40,6 +40,8 @@ SANDBOX_POSTHOG_HOST: str | None = get_from_env("SANDBOX_POSTHOG_HOST", None, op
 SANDBOX_POSTHOG_INGESTION_KEY: str | None = get_from_env("SANDBOX_POSTHOG_INGESTION_KEY", None, optional=True)
 SANDBOX_LLM_GATEWAY_URL: str | None = get_from_env("SANDBOX_LLM_GATEWAY_URL", None, optional=True)
 SANDBOX_MCP_URL: str | None = get_from_env("SANDBOX_MCP_URL", None, optional=True)
+SANDBOX_MCP_AUTH_TOKEN: str | None = get_from_env("SANDBOX_MCP_AUTH_TOKEN", None, optional=True)
+SANDBOX_MCP_PROJECT_ID: str | None = get_from_env("SANDBOX_MCP_PROJECT_ID", None, optional=True)
 
 TEMPORAL_LOG_LEVEL_PRODUCE: str = os.getenv("TEMPORAL_LOG_LEVEL_PRODUCE", "DEBUG")
 TEMPORAL_EXTERNAL_LOGS_QUEUE_SIZE: int = get_from_env("TEMPORAL_EXTERNAL_LOGS_QUEUE_SIZE", 0, type_cast=int)

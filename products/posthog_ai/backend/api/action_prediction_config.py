@@ -178,7 +178,7 @@ class ActionPredictionConfigViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSe
         task = Task.create_and_run(
             team=self.team,
             title=f"Train prediction model: {instance.name or instance.event_name or 'unnamed'}",
-            description=f"/training-action-predictions Train the model for the existing configuration {serializer.validated_data} (the ID is provided). Use the query-examples skill to retrieve the data schema and query examples.",
+            description=f"/training-action-predictions Train the model for the existing configuration {serializer.validated_data} (the ID is provided). You must read the query-examples skill to retrieve the data schema and query examples before doing any SQL queries.",
             origin_product=Task.OriginProduct.USER_CREATED,
             user_id=self.request.user.id,
             repository=None,
