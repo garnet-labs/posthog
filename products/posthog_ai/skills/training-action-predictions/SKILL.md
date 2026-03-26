@@ -5,9 +5,52 @@ description: 'Train a predictive model for user actions using an autonomous expe
 
 # Training action predictions
 
-Build a model that predicts P(user performs action X within W days). Uses an autonomous experiment loop — explore data, write a HogQL feature query, train an sklearn Pipeline, evaluate, iterate.
+Build a model that predicts P(user performs action X within W days). Also supports constructed labels like churn (absence of events) and lifecycle predictions (relative to each user's signup time). Uses an autonomous experiment loop — explore data, write a HogQL feature query, train an sklearn Pipeline, evaluate, iterate.
 
 All feature engineering is pushed down to ClickHouse via HogQL. The query returns `person_id, label, features` — Python just trains the model.
+
+## Critical decisions (make these during EDA, before writing queries)
+
+### 1. Population: who do you train on?
+
+The population determines what you're predicting. Get this wrong and the model is useless regardless of AUC.
+
+**Filter to real/identified users.** Most projects have a mix of anonymous traffic (bots, one-time visitors, server-side events) and real users. Training on everyone dilutes the base rate and teaches the model noise. During EDA, find the right filter — it varies by project:
+
+- A person property like `email IS NOT NULL`, `is_signed_up`, or `is_identified`
+- A behavioral filter like "had at least N events of type X"
+- A cohort or segment the customer defines
+
+**Adoption vs continuation.** Are you predicting _new behavior_ (user hasn't done X before) or _repeat behavior_ (user who does X will do it again)? Both are valid but they're different models:
+
+- **Adoption**: exclude users who already exhibit the target behavior. Useful for: feature discovery, onboarding optimization, expansion to new product areas
+- **Continuation**: include everyone. Useful for: predicting repeat purchases, expansion (more invites), ongoing engagement
+- Document which one the model is in the model card. If `prior_target_count` dominates feature importance, it's a continuation model — note this explicitly.
+
+**Lifecycle stage filtering.** For activation predictions, restrict to users at a specific lifecycle stage (e.g. signed up in last 30 days). Use per-user time anchoring (see below) so features reflect each user's actual stage, not a fixed global window.
+
+### 2. Label design: what exactly are you predicting?
+
+The target can be:
+
+- **A simple named event**: `event = 'X'` — cleanest, no subquery needed
+- **An action (autocapture + selectors/URL)**: needs `IN` subquery to isolate the expensive `elements_chain LIKE` or `$current_url LIKE` scan to the narrow label window. Never put LIKE scans in the main aggregation.
+- **A constructed/virtual label**: absence of events (`countIf(...) = 0` for churn), threshold-based (`countIf(...) >= N`), or any HogQL expression. The framework handles these naturally.
+
+### 3. Time anchoring: fixed window or per-user?
+
+- **Fixed window** (default): `T = now() - interval W day`, features from `[T-obs, T]`, labels from `(T, T+W]`. Simple, works for general predictions.
+- **Per-user anchoring**: for lifecycle predictions, compute features relative to each user's anchor event (signup, first purchase, etc.). `INNER JOIN (SELECT person_id, min(timestamp) AS anchor_time ...)` then use `anchor_time + interval N day` in all filters. This gives more training data and matches production scoring exactly.
+
+### 4. Sampling strategy
+
+Base rate determines the approach:
+
+- **> 3%**: natural `LIMIT` sampling works. Python balanced sampling (NEG_RATIO) handles the rest.
+- **0.1% - 3%**: use `ORDER BY label DESC, rand()` in HogQL so all positives come first. Set LIMIT high enough to capture all positives + negatives.
+- **< 0.1%**: very rare — widen the label window, filter to a more relevant population, or accept that the model will have high variance.
+
+In train.py, use configurable `NEG_RATIO` (default 5.0 = ~17% positive rate). 50/50 is too aggressive and double-compensates with `scale_pos_weight`. The isotonic calibration adjusts probabilities back to the true base rate.
 
 ## Prerequisites
 
@@ -60,19 +103,28 @@ The depth of EDA depends on whether prior models exist:
 
 #### First experiment (no prior models) — comprehensive discovery
 
-Explore the project's data thoroughly. The goal is twofold: validate feasibility (enough data?) and **discover project-specific signals** that will become custom features. Generic features are free — they come from the reference query. The EDA is about finding what's unique to this project.
+Explore the project's data thoroughly. The goals are: validate feasibility, **choose the right population**, and discover project-specific feature candidates.
 
-1. **Active users**: `SELECT uniq(person_id) FROM events WHERE timestamp >= now() - interval 90 day`
-2. **Top events**: `SELECT event, count() as c FROM events WHERE timestamp >= now() - interval 90 day GROUP BY event ORDER BY c DESC LIMIT 30` — pay special attention to events that aren't standard PostHog events (`$pageview`, `$autocapture`, etc.). Custom events like `subscription_renewed`, `report_exported`, `api_key_created` are the project's domain language — these are your best feature candidates
-3. **Base rate**: count users who performed the target event vs total eligible users
-4. **Event properties**: for the most common custom events and the target event, explore what properties they carry: `SELECT event, arrayJoin(JSONExtractKeys(properties)) as key, count() as c FROM events WHERE event = 'X' AND timestamp >= now() - interval 90 day GROUP BY event, key ORDER BY c DESC LIMIT 20`. Properties like `plan_type`, `feature_used`, `error_code` become fine-grained features
-5. **Person properties**: `read-data-schema` to discover available person properties. Static attributes (`industry`, `company_size`, `signup_source`, `plan`) are often strong predictors and trivial to include
-6. **Correlations with target**: which events co-occur most with the target? `SELECT event, countIf(person_id IN (SELECT DISTINCT person_id FROM events WHERE event = '{target}')) / count() as lift FROM events GROUP BY event ORDER BY lift DESC LIMIT 20`. High-lift events are strong feature candidates
-7. **Behavioral patterns**: look for interesting patterns — do target users have different session frequencies? Different feature adoption? Different time-of-day usage?
+1. **Population analysis** (do this FIRST):
+   - Total users vs identified/real users — find the filter that separates real users from noise. Check person properties (`email`, `is_signed_up`, `is_identified`) and activity patterns. What % of users are anonymous?
+   - For the target action: who does it? Are they power users, new users, a specific segment? This determines the training population.
+   - Decide: adoption (exclude existing target users) or continuation (include everyone)?
 
-Report findings to the user before proceeding. This is the one pause point. Highlight which custom events and properties you plan to use as features and why.
+2. **Base rate among the right population**: count users who performed the target event vs total eligible users _after_ applying the population filter. The base rate among all users is often misleadingly low.
 
-**Stop conditions**: If fewer than 50 positive examples, warn. If fewer than 500 users, refuse.
+3. **Active users**: `SELECT uniq(person_id) FROM events WHERE timestamp >= now() - interval 90 day`
+
+4. **Top events**: `SELECT event, count() as c FROM events WHERE timestamp >= now() - interval 90 day GROUP BY event ORDER BY c DESC LIMIT 30` — pay special attention to custom events (not `$pageview`, `$autocapture`). These are the project's domain language.
+
+5. **Event properties**: for key events, explore what properties they carry: `SELECT event, arrayJoin(JSONExtractKeys(properties)) as key, count() as c FROM events WHERE event = 'X' GROUP BY event, key ORDER BY c DESC LIMIT 20`
+
+6. **Person properties**: `read-data-schema` to discover available person properties. Note: person properties in GROUP BY queries require `any()` wrapper. `toFloatOrDefault` needs `0.0` not `0` as the default value. Person properties from server-side events are often null — extract metadata from event properties (e.g. `$pageview` properties for device/OS/geo) instead.
+
+7. **Correlations with target**: which events co-occur most with the target? This identifies _candidates_ but **high EDA correlation does not guarantee model importance**. Population-level rate differences (2-3x baseline) often don't improve AUC because they're confounded with general activity level. The experiment loop is the real test — don't skip iterations based on EDA alone.
+
+Report findings to the user before proceeding. This is the one pause point. Highlight the population design decision and which features you plan to try.
+
+**Stop conditions**: If fewer than 50 positive examples after population filtering, warn (widen the label window or relax the population). If fewer than 500 users in the population, refuse.
 
 #### Improvement mode (prior models exist) — targeted discovery
 
@@ -115,9 +167,14 @@ These are in the reference query and provide a reasonable baseline. But they're 
 - **Behavioral sequences**: did the user do A then B? How many sessions included event X? Time between first and last occurrence of a key event
 - **Domain-specific ratios**: e.g. `support_tickets / days_active`, `features_used / features_available`, `api_calls / dashboard_views`
 
-The bet is that **project-specific features are where the real predictive power lives**. Generic recency/frequency features get you to AUC 0.6-0.7 for most targets. The custom features — informed by what the agent discovers about this specific project — are what push it to 0.8+. This is the agent's unique advantage: it can explore a project's data, understand the domain, and engineer features that would require a human data scientist to build manually.
+The bet is that **project-specific features are where the real predictive power lives**. Generic recency/frequency features get you to AUC 0.6-0.7 for most targets. The custom features — informed by what the agent discovers about this specific project — are what push it to 0.8+.
 
-**During EDA, think like a data scientist**: what would a human analyst look at to predict this action? What events suggest intent? What properties segment users meaningfully? The agent has access to the full event taxonomy and property landscape — use it.
+**Important caveats from real-world testing:**
+
+- **Behavioral features (what users DID) consistently beat metadata (who they ARE)**. Device type, geography, signup method, org properties — these add < 0.01 AUC in most cases. Prioritize event-based features.
+- **EDA correlation ≠ model importance.** A feature with 3x activation rate in EDA may add zero AUC because it's confounded with general activity level. XGBoost already captures the underlying signal from simpler features. Always validate via the experiment loop.
+- **Person properties are often weak predictors.** Static attributes (company size, plan) rarely help for behavioral predictions. If you include them, use `any()` wrapper in GROUP BY and `toFloatOrDefault(toString(any(person.properties.X)), 0.0)` for numeric conversion.
+- **Start lean, add only if AUC improves.** Don't aim for a specific feature count. 5-8 strong features often beat 20+ weak ones. Run the simplified model early — if dropping features improves or matches AUC, the baseline is near the signal ceiling.
 
 #### Leakage risks with custom features
 
@@ -237,22 +294,33 @@ LOOP (until stopped or diminishing returns):
 
 **Simplicity criterion**: all else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Removing a feature and getting equal AUC is a win — that's a simpler model. An improvement of ~0 but much simpler code? Keep.
 
-**Experiment ideas** (prioritized — project-specific features first):
+**Experiment ideas** (prioritized):
 
-Project-specific features (highest expected uplift):
+Simplification (try early — often the biggest win):
+
+- Drop features with importance < 0.03 and re-run. If AUC matches or improves, keep the simpler model
+- When signal is concentrated in a few features, extra features add noise
+
+Project-specific features:
 
 - Add counts/ratios for the project's custom events discovered during EDA
 - Add event property features (e.g. `countIf(event = 'X' AND properties.$Y = 'Z')`)
-- Add person properties as features (`person.properties.plan`, `person.properties.company_size`)
-- Build domain-specific ratios (e.g. `support_tickets / days_active`, `features_used / total_features`)
-- Correlate custom events with each other — interaction features
+- Build domain-specific ratios (e.g. `support_tickets / days_active`)
+- Extract metadata from event properties when person properties are null (e.g. device type from `$pageview`)
 
-Generic feature refinement:
+Temporal patterns (especially for churn/retention):
 
-- Add per-event ratios for top events to the HogQL query
-- Try different time windows for frequency features (3d, 14d, 60d)
-- Extend observation window from 90d to 180d
-- Interaction features in the query (e.g. downloads per session)
+- Weekly activity buckets: `countIf(... AND timestamp > T-7d AND timestamp <= T)` for each of 8 weeks
+- Decay ratios: recent weeks / earlier weeks — captures "fading out" vs "suddenly stopped"
+- `weeks_active` count — how many of N weeks had any activity (consistency signal)
+- When a dominant recency feature is legitimate, combine it with decay features rather than ablating
+
+Population and window experiments:
+
+- Try different population filters (activity thresholds, lifecycle stages)
+- Try per-user time anchoring for lifecycle targets
+- Try different label windows (7d, 14d, 30d) — wider windows help rare events
+- Try day-3 or day-7 scoring windows for early intervention models
 
 Model tuning (lowest expected uplift — do last):
 
@@ -331,17 +399,20 @@ Once a winning model exists, suggest the `predicting-user-actions` skill to scor
 
 ## Guardrails
 
-- **Single metric**: AUC-ROC on the held-out test set. Higher is better. This is the only number that decides keep vs discard.
-- **Simplicity**: all else being equal, simpler is better. Fewer features that achieve the same AUC = better model. Removing complexity for equal performance is a win.
-- **No hardcoding**: reference scripts use `downloaded_file` / 28 days as an example — replace with actual target event and lookback_days.
-- **Leakage prevention**: features from observation window only; target event excluded from feature columns. For custom features, also check for semantic leakage (feature is the label in disguise), temporal leakage (person properties reflecting post-action state), and causal leakage (feature caused by the target). If AUC jumps suspiciously, assume leakage until proven otherwise. See "Leakage risks with custom features" in Phase 3
-- **Online validation**: if prior predictions exist, check online performance before starting new experiments. Offline AUC is a proxy — real-world bucket separation is the gold standard. See Phase 6
-- **Calibration**: always isotonic via sklearn Pipeline
-- **Features**: aim for 15-40. More than 50 risks overfitting
-- **Imbalance**: always use `scale_pos_weight`, never downsample
-- **Base rate awareness**: base rate varies by action. Adjust bucket thresholds accordingly. Always report base rate.
-- **Lab notebook**: every model must include notes — what was tried, what was observed, what to try next. This is the experiment log. Future sessions will read these notes as prior research, so write them for your future self.
-- **Reproducibility**: seed=42, every run MUST store query + utils + train + predict in `artifact_scripts`. This is not optional — without `artifact_scripts`, the model cannot be scored and predictions cannot run. See "Mandatory: `artifact_scripts`" in Phase 4.
-- **Crash handling**: if sandbox fails, log in notes, try to fix if it's simple (typo, import), skip if the idea is fundamentally broken.
-- **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
+- **Population first**: decide who to train on before writing features. Filter to identified/real users. Decide adoption vs continuation. Document the population in the model card.
+- **Single metric**: AUC-ROC on the held-out test set. Higher is better. But if test set has < 100 positives, note that AUC variance is high.
+- **Leakage vigilance**: if AUC > 0.90 on a real-world target, assume leakage until proven otherwise. Check for: (a) upstream-step features from the same user journey, (b) population contamination (existing users making prediction trivial), (c) one feature with importance > 0.3. Run ablation tests on suspicious features.
+- **Simplicity**: start lean. Try dropping weak features early — fewer features often match or beat more. Don't aim for a feature count target.
+- **Imbalance**: use balanced sampling (NEG_RATIO) + `scale_pos_weight` + isotonic calibration. For rare events (< 0.5% base rate), use `ORDER BY label DESC, rand()` in HogQL.
+- **Base rate awareness**: base rate varies by action AND by population. Always report both the population definition and the base rate within it.
+- **Model card must include**: target, population, adoption-vs-continuation label, AUC-ROC, base rate, top features, what was tried.
+- **Lab notebook**: every model must include notes — what was tried, what was observed, what to try next. Future sessions read these as prior research.
+- **Reproducibility**: seed=42, every run MUST store query + utils + train + predict in `artifact_scripts`. Without these, the model cannot be scored.
+- **HogQL patterns**:
+  - Do not use `currentTeamId()` (MCP scopes automatically)
+  - Always add `LIMIT 50000`
+  - For action-based targets (autocapture + selectors), use `IN` subquery for the label to isolate expensive `elements_chain LIKE` scans
+  - Person properties in GROUP BY need `any()` wrapper
+  - `toFloatOrDefault` needs `0.0` not `0` as default
+  - For per-user time anchoring: `INNER JOIN (SELECT person_id, min(timestamp) AS anchor ...)` with `GROUP BY person_id, anchor`
 - **model_url**: S3 storage path (use `action-prediction-config-upload-url` to get a presigned upload URL and storage path)

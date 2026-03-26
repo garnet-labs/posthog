@@ -43,7 +43,13 @@ EXPERIMENT_ID = os.environ.get("EXPERIMENT_ID", "")  # UUID grouping models in t
 
 SEED = 42
 TEST_FRACTION = 0.25
-MAX_USERS = int(os.environ.get("MAX_USERS", "10000"))
+MAX_USERS = int(os.environ.get("MAX_USERS", "50000"))
+
+# Negative-to-positive ratio for balanced sampling.
+# 1.0 = 50/50, 5.0 = 5x negatives per positive (~17% positive rate).
+# The agent should tune this per experiment. For naturally balanced
+# targets (base rate > 20%), this has no effect.
+NEG_RATIO = float(os.environ.get("NEG_RATIO", "5.0"))
 
 # ── Training query ────────────────────────────────────────────────────────────
 # IMPORTANT: The agent MUST adapt this query per experiment:
@@ -106,19 +112,24 @@ def main() -> None:
     feature_cols = [c for c in df.columns if c not in {"person_id", "label"}]
     print(f"Features ({len(feature_cols)}): {feature_cols}")
 
-    # ── Sample if needed ─────────────────────────────────────────────────
-    if len(df) > MAX_USERS:
-        print(f"Sampling {MAX_USERS} from {len(df)} users")
-        pos = df[df["label"] == 1]
-        neg = df[df["label"] == 0]
-        n_pos = min(len(pos), MAX_USERS)
-        n_neg = min(len(neg), MAX_USERS - n_pos)
+    # ── Balanced sampling ──────────────────────────────────────────────
+    # Take all positives + NEG_RATIO × negatives. Isotonic calibration
+    # in the pipeline adjusts predicted probabilities to the true rate.
+    pos = df[df["label"] == 1]
+    neg = df[df["label"] == 0]
+    n_pos = len(pos)
+    n_neg_sample = min(len(neg), max(int(n_pos * NEG_RATIO), 500))
+    print(f"Raw data: {n_pos} positive, {len(neg)} negative")
+    if n_neg_sample < len(neg):
         df = pd.concat(
             [
-                pos.sample(n=n_pos, random_state=SEED),
-                neg.sample(n=n_neg, random_state=SEED),
+                pos,
+                neg.sample(n=n_neg_sample, random_state=SEED),
             ]
         ).reset_index(drop=True)
+        print(f"Balanced sample: {n_pos} positive, {n_neg_sample} negative (ratio 1:{NEG_RATIO:.0f})")
+    else:
+        print(f"Using all data (no downsampling needed)")
 
     X = df[feature_cols]
     y = df["label"].values
