@@ -409,21 +409,21 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
         # signal triggers sync_schedule which reads the current schedules.
         if schedules_data is not None:
             team_id = self.context["team_id"]
-            incoming_ids = {s["id"] for s in schedules_data if "id" in s}
-            existing = {s.id: s for s in instance.schedules.all()}
+            incoming_ids = {schedule["id"] for schedule in schedules_data if "id" in schedule}
+            existing_schedules = {schedule.id: schedule for schedule in instance.schedules.all()}
 
             # Delete schedules not in the incoming list
-            for eid in existing:
-                if eid not in incoming_ids:
-                    existing[eid].delete()
+            for existing_id in existing_schedules:
+                if existing_id not in incoming_ids:
+                    existing_schedules[existing_id].delete()
 
             # Create or update
             for schedule_data in schedules_data:
-                sid = schedule_data.pop("id", None)
-                if sid and sid in existing:
+                schedule_id = schedule_data.pop("id", None)
+                if schedule_id and schedule_id in existing_schedules:
                     for key, value in schedule_data.items():
-                        setattr(existing[sid], key, value)
-                    existing[sid].save()
+                        setattr(existing_schedules[schedule_id], key, value)
+                    existing_schedules[schedule_id].save()
                 else:
                     HogFlowSchedule.objects.create(team_id=team_id, hog_flow=instance, **schedule_data)
 
