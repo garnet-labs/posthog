@@ -624,6 +624,7 @@ class HogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMixin, vie
             serializer = HogFlowBatchJobSerializer(batch_jobs, many=True)
             return Response(serializer.data)
 
+    @extend_schema(responses=HogFlowScheduledRunSerializer(many=True))
     @action(detail=True, methods=["GET"])
     def scheduled_runs(self, request: Request, *args, **kwargs):
         hog_flow = self.get_object()

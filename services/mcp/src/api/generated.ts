@@ -15592,6 +15592,38 @@ export namespace Schemas {
     }
 
     /**
+     * * `pending` - Pending
+    * `completed` - Completed
+    * `failed` - Failed
+     */
+    export type HogFlowScheduledRunStatusEnum = typeof HogFlowScheduledRunStatusEnum[keyof typeof HogFlowScheduledRunStatusEnum];
+
+
+    export const HogFlowScheduledRunStatusEnum = {
+      Pending: 'pending',
+      Completed: 'completed',
+      Failed: 'failed',
+    } as const;
+
+    export interface HogFlowScheduledRun {
+      readonly id: string;
+      readonly run_at: string;
+      readonly status: HogFlowScheduledRunStatusEnum;
+      /** @nullable */
+      readonly schedule: string | null;
+      readonly variables: unknown;
+      /** @nullable */
+      readonly batch_job: string | null;
+      /** @nullable */
+      readonly started_at: string | null;
+      /** @nullable */
+      readonly completed_at: string | null;
+      /** @nullable */
+      readonly failure_reason: string | null;
+      readonly created_at: string;
+    }
+
+    /**
      * @nullable
      */
     export type HogFlowTemplateCreatedBy = { [key: string]: unknown } | null | null;
@@ -19141,6 +19173,15 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: HogFlowMinimal[];
+    }
+
+    export interface PaginatedHogFlowScheduledRunList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: HogFlowScheduledRun[];
     }
 
     export interface PaginatedHogFlowTemplateList {
@@ -29930,6 +29971,21 @@ export namespace Schemas {
     updated_at?: string;
     };
 
+    export type EnvironmentsHogFlowsScheduledRunsListParams = {
+    created_at?: string;
+    created_by?: number;
+    id?: string;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    updated_at?: string;
+    };
+
     export type EnvironmentsHogFunctionsListParams = {
     created_at?: string;
     created_by?: number;
@@ -32757,6 +32813,21 @@ export namespace Schemas {
     };
 
     export type HogFlowsListParams = {
+    created_at?: string;
+    created_by?: number;
+    id?: string;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    updated_at?: string;
+    };
+
+    export type HogFlowsScheduledRunsListParams = {
     created_at?: string;
     created_by?: number;
     id?: string;
