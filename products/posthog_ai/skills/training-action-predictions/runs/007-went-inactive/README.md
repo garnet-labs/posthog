@@ -13,9 +13,12 @@ First **constructed label** — not a real event but the absence of UI events. T
 
 ## Iteration comparison
 
-| Variant     | Features | AUC-ROC | AUC-PR | Key finding                                              |
-| ----------- | -------- | ------- | ------ | -------------------------------------------------------- |
-| v1-baseline | 18       | 0.836   | 0.745  | Recency + consistency dominate; product depth irrelevant |
+| Variant         | Features | AUC-ROC   | AUC-PR    | Key finding                                               |
+| --------------- | -------- | --------- | --------- | --------------------------------------------------------- |
+| v1-baseline     | 18       | 0.836     | 0.745     | Recency + consistency dominate; product depth irrelevant  |
+| v2-simple       | 5        | 0.838     | 0.740     | 5 features = same AUC. Model is just "when last visited?" |
+| v3-decay        | 13       | 0.840     | 0.755     | Weekly decay pattern matches AUC without trivial recency  |
+| **v4-combined** | **15**   | **0.845** | **0.757** | **Recency + decay = best of both worlds**                 |
 
 ## Key learnings
 

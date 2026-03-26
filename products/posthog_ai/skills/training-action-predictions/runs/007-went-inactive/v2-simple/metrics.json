@@ -1,0 +1,21 @@
+{
+    "metrics": {
+        "auc_roc": 0.8379,
+        "auc_pr": 0.7398,
+        "brier": 0.1598,
+        "n_train": 37500,
+        "n_test": 12500,
+        "n_positive": 19475,
+        "n_negative": 30525,
+        "neg_ratio": 5.0,
+        "base_rate": 0.3895,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "days_since_last_ui_event": 0.6354,
+        "active_days": 0.1615,
+        "ui_events_7d": 0.0912,
+        "events_total": 0.0574,
+        "ui_events_30d": 0.0545
+    }
+}
