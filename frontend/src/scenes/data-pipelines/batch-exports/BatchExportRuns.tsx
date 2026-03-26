@@ -164,16 +164,21 @@ function BatchExportLatestRuns({ id, context }: BatchExportRunsLogicProps): JSX.
                             return humanFriendlyNumber(run.records_completed)
                         },
                     },
-                    {
-                        title: 'Bytes exported',
-                        key: 'bytesExported',
-                        render: (_, run) => {
-                            if (run.bytes_exported == null) {
-                                return ''
-                            }
-                            return humanizeBytes(run.bytes_exported)
-                        },
-                    },
+                    // Only show bytes exported column for batch exports
+                    ...(context !== 'hog_function'
+                        ? [
+                              {
+                                  title: 'Bytes exported',
+                                  key: 'bytesExported',
+                                  render: (_: any, run: BatchExportRun) => {
+                                      if (run.bytes_exported == null) {
+                                          return ''
+                                      }
+                                      return humanizeBytes(run.bytes_exported)
+                                  },
+                              },
+                          ]
+                        : []),
                     {
                         title: 'Run start',
                         key: 'runStart',
@@ -276,16 +281,20 @@ export function BatchExportRunsGrouped({
                                             return humanFriendlyNumber(run.records_completed)
                                         },
                                     },
-                                    {
-                                        title: 'Bytes exported',
-                                        key: 'bytesExported',
-                                        render: (_, run) => {
-                                            if (run.bytes_exported == null) {
-                                                return ''
-                                            }
-                                            return humanizeBytes(run.bytes_exported)
-                                        },
-                                    },
+                                    ...(context !== 'hog_function'
+                                        ? [
+                                              {
+                                                  title: 'Bytes exported',
+                                                  key: 'bytesExported',
+                                                  render: (_: any, run: BatchExportRun) => {
+                                                      if (run.bytes_exported == null) {
+                                                          return ''
+                                                      }
+                                                      return humanizeBytes(run.bytes_exported)
+                                                  },
+                                              },
+                                          ]
+                                        : []),
                                     {
                                         title: 'Run start',
                                         key: 'runStart',
