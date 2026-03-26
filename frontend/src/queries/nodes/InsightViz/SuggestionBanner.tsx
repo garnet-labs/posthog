@@ -33,7 +33,7 @@ export function SuggestionBanner({ previousQuery, suggestedQuery, onReject }: Su
                     <span className="size-2 bg-accent-active rounded-full" />
                     <div className="flex items-center gap-1">
                         <span>{pluralize(changedLabels.length, 'change')}</span>
-                        {changedLabels.length > 0 && (
+                        {diffString && (
                             <Tooltip title={<div className="whitespace-pre-line">{diffString}</div>}>
                                 <IconInfo className="text-sm text-muted cursor-help" />
                             </Tooltip>
