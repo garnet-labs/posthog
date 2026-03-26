@@ -76,7 +76,7 @@ class ProductTeamQuerySet(TeamScopedQuerySet):
 
 
 class ProductTeamManager(TeamScopedManager):
-    """Manager for product models on separate databases.
+    """Fail-closed manager for product models on separate databases.
 
     Subclass of TeamScopedManager — shares the same get_queryset flow
     and ContextVar integration. Only the queryset class differs (uses
@@ -95,16 +95,20 @@ class ProductTeamModel(models.Model):
     """Abstract base for product models that live on a separate database.
 
     Provides team_id as a plain BigIntegerField (no FK constraint)
-    and a manager that auto-scopes queries by the current team context.
+    and a fail-closed manager that auto-scopes queries by the current
+    team context.
 
-    For intentionally unscoped access (migrations, admin, background
-    jobs without context), use Model.unscoped.
+    Accessing .objects without team context raises TeamScopeError.
+    Use .unscoped for intentional cross-team access (migrations, admin,
+    background jobs without context).
     """
 
     team_id = models.BigIntegerField(db_index=True)
 
-    unscoped = models.Manager()
+    # objects declared first so it becomes _default_manager (scoped).
+    # unscoped second — intentionally after objects to control manager ordering.
     objects = ProductTeamManager()
+    unscoped = models.Manager()  # noqa: DJ012
 
     class Meta:
         abstract = True

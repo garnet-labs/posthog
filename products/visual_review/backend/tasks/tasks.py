@@ -13,6 +13,8 @@ from uuid import UUID
 import structlog
 from celery import shared_task
 
+from posthog.models.scoping import with_team_scope
+
 logger = structlog.get_logger(__name__)
 
 # Snapshots with diff below this percentage are reclassified as unchanged.
@@ -22,7 +24,8 @@ DIFF_THRESHOLD_PERCENT = 1.0
 
 
 @shared_task(name="products.visual_review.backend.tasks.process_run_diffs", ignore_result=True)
-def process_run_diffs(run_id: str) -> None:
+@with_team_scope()
+def process_run_diffs(team_id: int, run_id: str) -> None:
     """
     Process diffs for all snapshots in a run.
 
@@ -33,12 +36,12 @@ def process_run_diffs(run_id: str) -> None:
     run_uuid = UUID(run_id)
 
     try:
-        logger.info("visual_review.diff_processing_started", run_id=run_id)
+        logger.info("visual_review.diff_processing_started", run_id=run_id, team_id=team_id)
         _process_diffs(run_uuid)
         logic.mark_run_completed(run_uuid)
-        logger.info("visual_review.diff_processing_completed", run_id=run_id)
+        logger.info("visual_review.diff_processing_completed", run_id=run_id, team_id=team_id)
     except Exception as e:
-        logger.exception("visual_review.diff_processing_failed", run_id=run_id, error=str(e))
+        logger.exception("visual_review.diff_processing_failed", run_id=run_id, team_id=team_id, error=str(e))
         logic.mark_run_completed(run_uuid, error_message=str(e))
         raise
 

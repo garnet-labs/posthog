@@ -1,19 +1,27 @@
 # Team Scoping
 
-Automatic team scoping for Django models to prevent IDOR vulnerabilities. Instead of relying on developers to always include `team_id` filters, models use scoped managers that auto-filter by the current team from request context.
+Fail-closed team scoping for Django models. Queries without team context raise `TeamScopeError` instead of silently returning all rows.
+
+This is a defense-in-depth convenience layer, not a complete security boundary. Django's `_base_manager` bypasses custom managers for related-object access, and raw SQL bypasses the ORM entirely. Use this alongside explicit team checks at the API layer.
 
 Related: [#47065](https://github.com/PostHog/posthog/issues/47065)
 
 ## How it works
 
-Middleware sets team_id in a ContextVar on every request. Managers read it and auto-filter.
+Middleware sets team_id in a ContextVar on every request. Managers read it and auto-filter. No context = exception.
 
 ```python
-# request context — automatic
+# request context — automatic via middleware
 Repo.objects.all()                    # filtered to current team
 
-# explicit cross-team
-Repo.objects.unscoped().all()         # no filtering
+# no context — raises TeamScopeError
+Repo.objects.all()                    # ← boom
+
+# explicit cross-team (opt-out)
+Repo.objects.unscoped().all()         # no filtering, no error
+
+# explicit team (outside request)
+Repo.objects.for_team(team_id)        # filtered to team_id
 
 # background jobs
 with team_scope(team_id):
@@ -27,11 +35,10 @@ def my_task(team_id: int): ...        # context set from param
 
 ## Which manager to use
 
-| Situation                  | Manager                                | Why                                                 |
-| -------------------------- | -------------------------------------- | --------------------------------------------------- |
-| New product on separate DB | `ProductTeamModel` (abstract base)     | No FK to Team, plain `team_id` field, no JOINs      |
-| Migrating existing model   | `BackwardsCompatibleTeamScopedManager` | Keeps `filter(team_id=X)` working during transition |
-| Fully migrated model       | `TeamScopedManager`                    | Strict — only context-based scoping                 |
+| Situation                  | Manager                            | Why                                            |
+| -------------------------- | ---------------------------------- | ---------------------------------------------- |
+| New product on separate DB | `ProductTeamModel` (abstract base) | No FK to Team, plain `team_id` field, no JOINs |
+| Migrating existing model   | `TeamScopedManager`                | Same fail-closed behavior, uses FK JOINs       |
 
 ## ProductTeamModel (for multi-DB products)
 
@@ -44,3 +51,9 @@ class Repo(ProductTeamModel):
 ```
 
 Auto-scoped queries, `.unscoped()` escape hatch, `.for_team(id)` for explicit scoping.
+
+## Known limitations
+
+- **`_base_manager`**: Django uses `_base_manager` (not `objects`) for related-object access like `repo.runs.all()`. This bypasses the scoped manager. Related-object traversal is still safe because the FK constrains the result set — but the team_id filter is not applied.
+- **Raw SQL**: `cursor.execute()` and `QuerySet.raw()` bypass managers entirely.
+- **Django admin**: Uses `_default_manager`. Since `objects` is declared first on `ProductTeamModel`, admin goes through the scoped manager and will raise without context. Use `.unscoped` in admin classes.

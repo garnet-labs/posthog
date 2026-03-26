@@ -579,7 +579,7 @@ def complete_run(
     mark_run_processing(run_id)
     from .tasks.tasks import process_run_diffs
 
-    process_run_diffs.delay(str(run_id))
+    process_run_diffs.delay(run.team_id, str(run_id))
     return get_run(run_id)
 
 

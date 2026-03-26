@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from rest_framework import status
 
+from posthog.models.scoping import team_scope
+
 from products.visual_review.backend import logic
 from products.visual_review.backend.facade import api
 from products.visual_review.backend.facade.contracts import CreateRunInput, SnapshotManifestItem
@@ -14,6 +16,15 @@ from products.visual_review.backend.tests.conftest import PRODUCT_DATABASES
 
 class TestRepoViewSet(APIBaseTest):
     databases = PRODUCT_DATABASES
+
+    def setUp(self):
+        super().setUp()
+        self._team_scope_cm = team_scope(self.team.id)
+        self._team_scope_cm.__enter__()
+
+    def tearDown(self):
+        self._team_scope_cm.__exit__(None, None, None)
+        super().tearDown()
 
     def test_create_repo(self):
         response = self.client.post(
@@ -60,7 +71,13 @@ class TestRunViewSet(APIBaseTest):
 
     def setUp(self):
         super().setUp()
+        self._team_scope_cm = team_scope(self.team.id)
+        self._team_scope_cm.__enter__()
         self.vr_project = api.create_repo(team_id=self.team.id, repo_external_id=99999, repo_full_name="org/test")
+
+    def tearDown(self):
+        self._team_scope_cm.__exit__(None, None, None)
+        super().tearDown()
 
     @patch("products.visual_review.backend.storage.ArtifactStorage.get_presigned_upload_url")
     def test_create_run(self, mock_presigned):

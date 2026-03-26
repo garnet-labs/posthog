@@ -17,9 +17,23 @@ from unittest.mock import MagicMock
 
 import responses
 
+from posthog.models.scoping import team_scope
+
 from products.visual_review.backend.models import Repo
 
 PRODUCT_DATABASES = {"default", "visual_review_db_writer", "visual_review_db_reader"}
+
+
+@pytest.fixture(autouse=True)
+def _set_team_scope(request, team):
+    """Set team context for all visual_review tests.
+
+    ProductTeamModel is fail-closed — queries without context raise
+    TeamScopeError. This fixture ensures all tests run with the correct
+    team scope from the shared `team` fixture.
+    """
+    with team_scope(team.id):
+        yield
 
 
 # --- Local Git Repo Fixtures ---
