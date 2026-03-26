@@ -60,6 +60,27 @@ async fn read_chunk_cancellable(
     }
 }
 
+/// Hint the kernel to evict page cache pages for a file after it has been fully read.
+/// This is a best-effort operation: failure is logged but does not abort the upload.
+/// Only effective on Linux; a no-op on other platforms.
+fn advise_dontneed(file: &File, path: &Path) {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        // SAFETY: fd is valid for the lifetime of `file`, and posix_fadvise is safe to call
+        // with any fd/offset/len combination — invalid values simply return an error code.
+        let ret = unsafe { libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_DONTNEED) };
+        if ret != 0 {
+            tracing::debug!("posix_fadvise(DONTNEED) returned {ret} for {path:?} (non-fatal)");
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (file, path);
+    }
+}
+
 /// S3Uploader using `object_store` crate with `LimitStore` for bounded concurrency.
 /// The LimitStore wraps the S3 client with a semaphore that limits concurrent requests.
 #[derive(Debug)]
@@ -156,6 +177,11 @@ impl S3Uploader {
                 }
             }
         }
+
+        // Hint the kernel to evict page cache pages for this file. Checkpoint SST files
+        // are read once for upload and never accessed again, but the kernel keeps them
+        // cached, inflating container_memory_working_set_bytes and triggering OOM kills.
+        advise_dontneed(&file, local_path);
 
         // Finalize the upload (triggers CompleteMultipartUpload API call for large files)
         upload
