@@ -206,11 +206,7 @@ describe('EditorFilters', () => {
         const { container } = render(
             <Provider>
                 <BindLogic logic={insightLogic} props={insightProps}>
-                    <EditorFilters
-                        query={{ kind: NodeKind.InsightVizNode, source: makeTrendsQuery() }}
-                        showing={false}
-                        embedded={false}
-                    />
+                    <EditorFilters query={makeTrendsQuery()} showing={false} embedded={false} />
                 </BindLogic>
             </Provider>
         )
