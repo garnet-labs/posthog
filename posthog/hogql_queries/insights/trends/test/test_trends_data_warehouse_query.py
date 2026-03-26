@@ -107,6 +107,23 @@ class TestTrendsDataWarehouseQuery(ClickhouseTestMixin, BaseTest):
 
         return table.name
 
+    def setup_numeric_data_warehouse(self):
+        table, _source, _credential, _df, self.cleanUpDataWarehouse = create_data_warehouse_table_from_csv(
+            csv_path=Path(__file__).parent / "data" / "trends_numeric_data.csv",
+            table_name="test_numeric_table",
+            table_columns={
+                "deploy_id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+                "deploy_date": {"clickhouse": "DateTime64(3, 'UTC')", "hogql": "DateTimeDatabaseField"},
+                "mat_duration": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+                "platform_name": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+                "is_zealot": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+            },
+            test_bucket=TEST_BUCKET,
+            team=self.team,
+        )
+
+        return table.name
+
     @snapshot_clickhouse_queries
     def test_trends_data_warehouse(self):
         table_name = self.setup_data_warehouse()
@@ -494,6 +511,72 @@ class TestTrendsDataWarehouseQuery(ClickhouseTestMixin, BaseTest):
         assert len(response.results) == 1
         assert response.results[0][1] == [1, 0, 0, 0, 0, 0, 0]
         assert response.results[0][2] == "a"
+
+    def test_trends_numeric_data_warehouse_property_filter_on_string_column(self):
+        table_name = self.setup_numeric_data_warehouse()
+
+        trends_query = TrendsQuery(
+            kind="TrendsQuery",
+            dateRange=DateRange(date_from="2023-01-01"),
+            series=[
+                DataWarehouseNode(
+                    id=table_name,
+                    table_name=table_name,
+                    id_field="deploy_id",
+                    distinct_id_field="deploy_id",
+                    timestamp_field="deploy_date",
+                    properties=clean_entity_properties(
+                        [
+                            {"key": "is_zealot", "value": ["0"], "type": "data_warehouse", "operator": "exact"},
+                            {"key": "mat_duration", "value": 3000, "type": "data_warehouse", "operator": "gt"},
+                        ]
+                    ),
+                )
+            ],
+        )
+
+        with freeze_time("2023-01-07"):
+            response = self.get_response(trends_query=trends_query)
+
+        assert response.columns is not None
+        assert set(response.columns).issubset({"date", "total"})
+        assert response.results[0][1] == [0, 0, 0, 1, 0, 0, 0]
+
+    def test_trends_numeric_data_warehouse_histogram_breakdown_on_string_column(self):
+        table_name = self.setup_numeric_data_warehouse()
+
+        trends_query = TrendsQuery(
+            kind="TrendsQuery",
+            dateRange=DateRange(date_from="2023-01-01"),
+            series=[
+                DataWarehouseNode(
+                    id=table_name,
+                    table_name=table_name,
+                    id_field="deploy_id",
+                    distinct_id_field="deploy_id",
+                    timestamp_field="deploy_date",
+                    properties=clean_entity_properties(
+                        [{"key": "is_zealot", "value": ["0"], "type": "data_warehouse", "operator": "exact"}]
+                    ),
+                )
+            ],
+            breakdownFilter=BreakdownFilter(
+                breakdown_type=BreakdownType.DATA_WAREHOUSE,
+                breakdown="mat_duration",
+                breakdown_histogram_bin_count=2,
+            ),
+        )
+
+        with freeze_time("2023-01-07"):
+            response = self.get_response(trends_query=trends_query)
+
+        assert response.columns is not None
+        assert set(response.columns).issubset({"date", "total", "breakdown_value"})
+        assert len(response.results) == 2
+        assert response.results[0][1] == [1, 1, 0, 0, 0, 0, 0]
+        assert response.results[0][2] == "[1000,3000]"
+        assert response.results[1][1] == [0, 0, 0, 1, 0, 0, 0]
+        assert response.results[1][2] == "[3000,5000.01]"
 
     def assert_column_names_with_display_type(self, display_type: ChartDisplayType):
         # KLUDGE: creating data on every variant

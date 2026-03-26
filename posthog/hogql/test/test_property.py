@@ -985,6 +985,25 @@ class TestProperty(BaseTest):
         self.assertEqual(compare_op_2.left.chain, ["foobars", "properties", "$feature/test"])
         self.assertEqual(compare_op_2.right.value, "test")
 
+    def test_data_warehouse_property_numeric_operators_cast_string_columns(self):
+        credential = DataWarehouseCredential.objects.create(
+            team=self.team, access_key="_accesskey", access_secret="_secret"
+        )
+        DataWarehouseTable.objects.create(
+            team=self.team,
+            name="deploys",
+            columns={"mat_duration": {"hogql": "StringDatabaseField", "clickhouse": "String"}},
+            credential=credential,
+            url_pattern="",
+        )
+
+        expr = self._property_to_expr(
+            Property(type="data_warehouse", key="deploys.mat_duration", value=3000, operator="gt"),
+            self.team,
+        )
+
+        self.assertEqual(expr, self._parse_expr("toFloat(deploys.mat_duration) > 3000"))
+
     def test_revenue_analytics_property(self):
         self.assertEqual(
             self._property_to_expr(

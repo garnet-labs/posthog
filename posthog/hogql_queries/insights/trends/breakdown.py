@@ -289,6 +289,9 @@ class Breakdown:
                 )
             )
 
+        if is_numeric_breakdown:
+            left = self.get_numeric_breakdown_transform(left)
+
         if lookup_value == BREAKDOWN_NULL_STRING_LABEL:
             none_expr = ast.CompareOperation(left=left, op=ast.CompareOperationOp.Eq, right=ast.Constant(value=None))
 
@@ -351,6 +354,10 @@ class Breakdown:
         )
 
     @staticmethod
+    def get_numeric_breakdown_transform(node: ast.Expr):
+        return cast(ast.Call, parse_expr("toFloat({node})", placeholders={"node": node}))
+
+    @staticmethod
     def get_replace_null_values_transform(node: ast.Expr):
         return cast(
             ast.Call,
@@ -394,7 +401,7 @@ class Breakdown:
         if histogram_bin_count is not None:
             return ast.Alias(
                 alias=alias,
-                expr=ast.Field(chain=properties_chain),
+                expr=self.get_numeric_breakdown_transform(ast.Field(chain=properties_chain)),
             )
 
         return ast.Alias(

@@ -1,0 +1,5 @@
+deploy_id,deploy_date,mat_duration,platform_name,is_zealot
+1,2023-01-01,1000,ios,0
+2,2023-01-02,2000,android,0
+3,2023-01-03,3500,ios,1
+4,2023-01-04,5000,android,0

@@ -127,6 +127,58 @@ def semver_range_compare(
     )
 
 
+def _coerce_data_warehouse_numeric_comparison(
+    expr: ast.Expr,
+    value: ValueT,
+    operator: PropertyOperator,
+    property: Property,
+) -> tuple[ast.Expr, ValueT]:
+    if property.type not in ("data_warehouse", "data_warehouse_person_property"):
+        return expr, value
+
+    if operator not in (
+        PropertyOperator.GT,
+        PropertyOperator.GTE,
+        PropertyOperator.LT,
+        PropertyOperator.LTE,
+        PropertyOperator.MIN,
+        PropertyOperator.MAX,
+        PropertyOperator.BETWEEN,
+        PropertyOperator.NOT_BETWEEN,
+    ):
+        return expr, value
+
+    def _parse_numeric_value(candidate: ValueT) -> ValueT | None:
+        if isinstance(candidate, bool):
+            return None
+        if isinstance(candidate, (int, float)):
+            return candidate
+        if isinstance(candidate, str):
+            try:
+                parsed = float(candidate)
+            except ValueError:
+                return None
+            if "." not in candidate and "e" not in candidate.lower() and parsed.is_integer():
+                return int(parsed)
+            return parsed
+        return None
+
+    if isinstance(value, list):
+        coerced_values: list[ValueT] = []
+        for item in value:
+            coerced_item = _parse_numeric_value(item)
+            if coerced_item is None:
+                return expr, value
+            coerced_values.append(coerced_item)
+        coerced_value: ValueT = coerced_values
+    else:
+        coerced_value = _parse_numeric_value(value)
+        if coerced_value is None:
+            return expr, value
+
+    return cast(ast.Call, parse_expr("toFloat({expr})", {"expr": expr})), coerced_value
+
+
 def _tilde_bounds(value: str) -> tuple[str, str]:
     """
     ~1.2.3 means >=1.2.3 <1.3.0 (allows patch-level changes)
@@ -344,6 +396,8 @@ def _create_multi_search_call(expr: ast.Expr, value: list) -> ast.Call:
 def _expr_to_compare_op(
     expr: ast.Expr, value: ValueT, operator: PropertyOperator, property: Property, is_json_field: bool, team: Team
 ) -> ast.Expr:
+    expr, value = _coerce_data_warehouse_numeric_comparison(expr, value, operator, property)
+
     if operator == PropertyOperator.IS_SET:
         return ast.CompareOperation(
             op=ast.CompareOperationOp.NotEq,
