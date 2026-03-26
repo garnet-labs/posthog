@@ -1839,10 +1839,8 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             },
         ],
         selectedQueryColumns: [
-            (s) => [s.queryInput, s.hogqlParser],
-            (queryInput: string | null, hogqlParser: HogQLParser | null): Record<string, boolean> => {
-                const tablesAndColumns = parseQueryTablesAndColumns(hogqlParser, queryInput)
-
+            (s) => [s.selectedQueryTablesAndColumns],
+            (tablesAndColumns: Record<string, Record<string, boolean>>): Record<string, boolean> => {
                 return Object.fromEntries(
                     Object.entries(tablesAndColumns).flatMap(([table, columns]) => {
                         return Object.keys(columns).map((column) => [`${table}.${column}`, true])

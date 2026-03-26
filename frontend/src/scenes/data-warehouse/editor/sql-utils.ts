@@ -2,6 +2,11 @@ import type { ASTNode, HogQLParser } from '@posthog/hogql-parser'
 
 import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
 
+/** Escape a possibly qualified (dot-separated) name, escaping each segment individually. */
+const escapeQualifiedIdentifier = (name: string): string => {
+    return name.split('.').map(escapePropertyAsHogQLIdentifier).join('.')
+}
+
 export const normalizeIdentifier = (identifier: string): string => {
     return identifier.replace(/^[`"']|[`"']$/g, '').toLowerCase()
 }
@@ -22,12 +27,12 @@ const tryParseSelect = (parser: HogQLParser | null, query: string): ASTNode | nu
     }
 }
 
-/** Extract the field name string from a select column AST node. */
-const fieldChainToString = (node: ASTNode): string => {
+/** Extract the field name string from a select column AST node, or null for non-Field expressions. */
+const fieldChainToString = (node: ASTNode): string | null => {
     if (node.node === 'Field') {
         return (node.chain as string[]).join('.')
     }
-    return '*'
+    return null
 }
 
 /** Collect all table names from a JoinExpr chain. */
@@ -63,7 +68,7 @@ export const buildQueryForColumnClick = (
 ): string => {
     const ast = currentQuery ? tryParseSelect(parser, currentQuery) : null
     const limitOffsetClause = ast ? extractLimitOffsetFromAST(ast) : null
-    const baseQuery = `SELECT ${columnName} FROM ${escapePropertyAsHogQLIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
+    const baseQuery = `SELECT ${escapeQualifiedIdentifier(columnName)} FROM ${escapeQualifiedIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 
     if (!ast || !currentQuery) {
         return baseQuery
@@ -80,7 +85,16 @@ export const buildQueryForColumnClick = (
     }
 
     const selectNodes: ASTNode[] = ast.select ?? []
-    let columns = selectNodes.map(fieldChainToString)
+    const fieldNames = selectNodes.map(fieldChainToString)
+    const hasNonFieldExpressions = fieldNames.some((name) => name === null)
+
+    // If the query contains non-Field expressions (e.g. COUNT(*), SUM(x)),
+    // we can't safely rewrite the SELECT list — fall back to a simple query.
+    if (hasNonFieldExpressions) {
+        return baseQuery
+    }
+
+    let columns = fieldNames as string[]
     const normalizedColumnName = normalizeIdentifier(columnName)
     const isStarOnly = columns.length === 1 && columns[0] === '*'
 
@@ -102,7 +116,7 @@ export const buildQueryForColumnClick = (
         columns = ['*']
     }
 
-    return `SELECT ${columns.map(escapePropertyAsHogQLIdentifier).join(', ')} FROM ${tableName} ${limitOffsetClause ?? 'LIMIT 100'}`
+    return `SELECT ${columns.map(escapeQualifiedIdentifier).join(', ')} FROM ${escapeQualifiedIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 }
 
 export const parseQueryTablesAndColumns = (
