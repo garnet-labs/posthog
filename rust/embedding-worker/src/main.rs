@@ -1,3 +1,5 @@
+mod hogbot_signal_worker;
+
 use std::{future::ready, sync::Arc};
 
 use axum::{
@@ -110,6 +112,12 @@ async fn main() {
     let context = Arc::new(AppContext::new(config.clone()).await.unwrap());
 
     start_health_liveness_server(&config, context.clone());
+
+    // Spawn the hogbot signal worker
+    let hogbot_kafka_config = config.kafka.clone();
+    tokio::spawn(async move {
+        hogbot_signal_worker::run(hogbot_kafka_config).await;
+    });
 
     let batch_wait_time = std::time::Duration::from_secs(config.max_event_batch_wait_seconds);
     let batch_size = config.max_events_per_batch;

@@ -16,7 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from posthog.api.routing import TeamAndOrgViewSetMixin
-from posthog.auth import OAuthAccessTokenAuthentication, PersonalAPIKeyAuthentication
+from posthog.auth import InternalAPIAuthentication, OAuthAccessTokenAuthentication, PersonalAPIKeyAuthentication
 from posthog.permissions import APIScopePermission
 from posthog.settings import SERVER_GATEWAY_INTERFACE
 
@@ -479,3 +479,74 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     @action(detail=False, methods=["post"], url_path="server/unregister", required_scopes=["project:write"])
     def unregister_server(self, request, **kwargs):
         return Response({"ok": True, "deprecated": True})
+
+
+class InternalResearchRequestSerializer(serializers.Serializer):
+    signal_id = serializers.CharField(max_length=255)
+    prompt = serializers.CharField()
+
+
+class InternalHogbotResearchViewSet(viewsets.ViewSet):
+    """
+    Internal-only endpoint for service-to-service hogbot research requests.
+    Authenticated via X-Internal-Api-Secret header, not exposed to external ingress.
+    """
+
+    authentication_classes = [InternalAPIAuthentication]
+
+    def research(self, request, team_id: str, *args, **kwargs):
+        try:
+            team_id_int = int(team_id)
+        except ValueError:
+            return Response({"error": "Invalid team_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = InternalResearchRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+
+        # Start the hogbot sandbox if not already running
+        try:
+            started = gateway.get_or_start_hogbot(team_id=team_id_int)
+        except Exception as err:
+            return Response(
+                {"error": f"Failed to start hogbot server: {err}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        connection = started
+        if not connection or not connection.ready or not connection.server_url:
+            return Response(
+                {"error": "No active hogbot server for this team"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # Proxy the research request to the sandbox
+        try:
+            request_params = {}
+            if connection.connect_token:
+                request_params["_modal_connect_token"] = connection.connect_token
+
+            url = f"{connection.server_url.rstrip('/')}/research"
+            upstream = http_requests.request(
+                method="POST",
+                url=url,
+                json=validated,
+                params=request_params or None,
+                timeout=UPSTREAM_COMMAND_TIMEOUT_SECONDS,
+            )
+        except http_requests.ConnectionError:
+            return Response({"error": "Hogbot server is not reachable"}, status=status.HTTP_502_BAD_GATEWAY)
+        except http_requests.Timeout:
+            return Response({"error": "Hogbot server request timed out"}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+
+        # The sandbox returns 409 when the researcher is busy.
+        # Translate that to 418 for the Kafka worker's retry logic.
+        upstream_status = upstream.status_code
+        if upstream_status == 409:
+            upstream_status = 418
+
+        try:
+            data = upstream.json()
+        except ValueError:
+            data = {"error": f"Hogbot server returned {upstream_status}"}
+        return Response(data, status=upstream_status)
