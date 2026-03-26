@@ -71,7 +71,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/menubar
     - [ ] storybook
   - [x] primitives/popover
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/progress
     - [ ] storybook
   - [x] primitives/radio-group
