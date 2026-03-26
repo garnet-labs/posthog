@@ -1,0 +1,32 @@
+{
+    "metrics": {
+        "auc_roc": 0.756,
+        "auc_pr": 0.4175,
+        "brier": 0.1198,
+        "n_train": 8923,
+        "n_test": 2975,
+        "n_positive": 1983,
+        "n_negative": 9915,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "insight_analyzed": 0.141,
+        "days_since_last_event": 0.1032,
+        "events_7d": 0.1003,
+        "insight_viewed": 0.0605,
+        "active_days": 0.0577,
+        "dashboard_viewed": 0.0571,
+        "unique_event_types": 0.0531,
+        "events_total": 0.052,
+        "definitions_hovered": 0.0513,
+        "visited_event_definitions": 0.0498,
+        "has_mobile_pageview": 0.0489,
+        "has_data_flowing": 0.047,
+        "taxonomic_searches": 0.0462,
+        "ai_tool_used": 0.0455,
+        "ai_mode_used": 0.0447,
+        "used_sdk_doctor": 0.0417
+    }
+}

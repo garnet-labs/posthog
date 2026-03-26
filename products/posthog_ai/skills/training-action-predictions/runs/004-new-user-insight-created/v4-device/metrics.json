@@ -1,0 +1,31 @@
+{
+    "metrics": {
+        "auc_roc": 0.7602,
+        "auc_pr": 0.4362,
+        "brier": 0.1184,
+        "n_train": 8923,
+        "n_test": 2975,
+        "n_positive": 1983,
+        "n_negative": 9915,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "insight_analyzed": 0.1272,
+        "days_since_last_event": 0.1194,
+        "events_7d": 0.1,
+        "is_mac_user": 0.0697,
+        "dashboard_viewed": 0.063,
+        "insight_viewed": 0.0583,
+        "active_days": 0.0572,
+        "events_total": 0.0572,
+        "unique_event_types": 0.0545,
+        "has_mobile_pageview": 0.0512,
+        "has_mobile_os": 0.0507,
+        "has_data_flowing": 0.0499,
+        "is_multi_device": 0.048,
+        "login_count": 0.0475,
+        "completed_onboarding": 0.0464
+    }
+}
