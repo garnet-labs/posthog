@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
 
+import structlog
 from asgiref.sync import async_to_sync
 from temporalio.client import WorkflowHandle
 from temporalio.common import RetryPolicy, WorkflowIDConflictPolicy, WorkflowIDReusePolicy
@@ -16,7 +16,7 @@ from posthog.temporal.common.client import async_connect
 
 from products.hogbot.backend.temporal.workflow import HogbotWorkflow, HogbotWorkflowInput
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 READY_POLL_INTERVAL_SECONDS = 0.5
 READY_POLL_TIMEOUT_SECONDS = 120
@@ -62,7 +62,10 @@ def get_hogbot_connection(team_id: int) -> HogbotConnectionInfo | None:
     try:
         return async_to_sync(_get_hogbot_connection)(team_id=team_id)
     except Exception:
-        logger.exception("Failed to query hogbot Temporal workflow connection info", extra={"team_id": team_id})
+        logger.exception(
+            "Failed to query hogbot Temporal workflow connection info",
+            extra={"team_id": team_id},
+        )
         return None
 
 
@@ -150,6 +153,10 @@ async def _get_or_start_hogbot(
     if last_info.ready:
         return last_info
 
+    logger.warning(
+        "last info 555555",
+        extra={"team_id": team_id, "last_info": last_info},
+    )
     raise RuntimeError(
         f"Hogbot workflow did not become ready (phase={last_info.phase}, error={last_info.error or 'unknown'})"
     )

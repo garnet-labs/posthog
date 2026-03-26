@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import fnmatch
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -289,14 +290,33 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             data = {}
         return Response(data, status=upstream.status_code)
 
+    def _log_user_message(self, content: str) -> None:
+        entry = {
+            "type": "notification",
+            "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "notification": {
+                "jsonrpc": "2.0",
+                "method": "_hogbot/text",
+                "params": {
+                    "scope": "admin",
+                    "team_id": self.team.pk,
+                    "role": "user",
+                    "text": content,
+                },
+            },
+        }
+        logic.append_log_entries(logic.get_admin_log_key(self.team.pk), self.team.pk, [entry])
+
     @action(detail=False, methods=["post"], url_path="send_message", required_scopes=["project:write"])
     def send_message(self, request, **kwargs):
         validated = self._validate_serializer(SendMessageRequestSerializer, request.data)
+        self._log_user_message(validated["content"])
         return self._proxy_json_endpoint(request, path="/send_message", payload=validated, start_if_needed=True)
 
     @action(detail=False, methods=["post"], url_path="send-message", required_scopes=["project:write"])
     def send_message_compat(self, request, **kwargs):
         validated = self._validate_serializer(SendMessageCompatRequestSerializer, request.data)
+        self._log_user_message(validated["content"])
         return self._proxy_json_endpoint(
             request,
             path="/send_message",

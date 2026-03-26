@@ -95,12 +95,9 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
                 return []
             },
         ],
-        chatBlocks: [
-            (s) => [s.entries],
-            (entries): ChatBlock[] => groupIntoChatBlocks(entries),
-        ],
+        chatBlocks: [(s) => [s.entries], (entries): ChatBlock[] => groupIntoChatBlocks(entries)],
     }),
-    listeners(({ actions, cache, values }) => ({
+    listeners(({ actions, cache }) => ({
         startPolling: () => {
             const poll = async (): Promise<void> => {
                 try {
@@ -120,10 +117,14 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
             }
         },
         sendMessage: async ({ content }) => {
-            await api.create(`api/projects/@current/hogbot/send-message/`, {
-                type: 'user_message',
-                content,
-            })
+            try {
+                await api.create(`api/projects/@current/hogbot/send-message/`, {
+                    type: 'user_message',
+                    content,
+                })
+            } catch {
+                // 503 is expected when sandbox isn't running yet
+            }
             // Trigger an immediate poll to pick up the response faster
             try {
                 const response = await api.getResponse(`api/projects/@current/hogbot/admin/logs/`)

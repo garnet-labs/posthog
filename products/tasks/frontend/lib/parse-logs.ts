@@ -177,6 +177,35 @@ function parseACPNotification(parsed: ACPNotification, id: string, toolMap: Map<
         }
     }
 
+    if (method === '_hogbot/text') {
+        const params = notification.params as { role?: string; text?: string } | undefined
+        if (params?.text) {
+            return {
+                id,
+                type: params.role === 'user' ? 'user' : 'agent',
+                timestamp,
+                message: params.text,
+            }
+        }
+        return null
+    }
+
+    if (method === '_hogbot/status') {
+        const params = notification.params as { status?: string } | undefined
+        return {
+            id,
+            type: 'system',
+            timestamp,
+            level: 'info',
+            message: `Hogbot ${params?.status || 'unknown'}`,
+        }
+    }
+
+    // Skip _hogbot/result — the text is already captured by _hogbot/text
+    if (method?.startsWith('_hogbot/')) {
+        return null
+    }
+
     if (notification.result && notification.id !== undefined) {
         return null
     }
