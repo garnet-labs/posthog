@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import time
+import webbrowser
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -775,12 +776,14 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     if not wait_for_health(f"http://localhost:{port}/_health", f"{project}-app-1"):
         error("PostHog did not start. Something is likely broken.")
         print("Troubleshooting:")
-        print(f"  Logs:   sandbox logs {branch}")
-        print(f"  Shell:  sandbox shell {branch}")
+        print(f"  Full logs:  docker logs {project}-app-1")
+        print(f"  Shell:      docker exec -it -u {os.getuid()}:{os.getgid()} {project}-app-1 bash")
+        cmd_destroy(branch)
         sys.exit(1)
 
+    url = f"http://localhost:{port}"
     print()
-    success(f"PostHog running at http://localhost:{port}")
+    success(f"PostHog running at {url}")
     info(f"Worktree:  {worktree_path}")
     info(f"Shell:     sandbox shell {branch}")
     info(f"VSCode:    sandbox code {branch}")
@@ -788,6 +791,7 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
         info(f"JetBrains: sandbox idea {branch}")
     info(f"SSH:       ssh -p {port + 2000} sandbox@localhost")
     info(f"Logs:      sandbox logs {branch}")
+    webbrowser.open(url)
 
 
 def cmd_start(branch: str) -> None:
@@ -800,6 +804,9 @@ def cmd_start(branch: str) -> None:
     info(f"Starting sandbox '{project}' on port {entry.port} (Vite: {vite_port})...")
     compose(project, entry.port, entry.worktree, "up", "-d", capture=True)
 
+    # Clear stale progress from the previous boot
+    run(["docker", "exec", f"{project}-app-1", "rm", "-f", "/tmp/sandbox-progress"], check=False, capture=True)
+
     info("Waiting for PostHog to start...")
     if not wait_for_health(f"http://localhost:{entry.port}/_health", f"{project}-app-1"):
         error("PostHog did not start. Something is likely broken.")
@@ -808,11 +815,13 @@ def cmd_start(branch: str) -> None:
         print(f"  Shell:  sandbox shell {branch}")
         sys.exit(1)
 
-    success(f"PostHog running at http://localhost:{entry.port}")
+    url = f"http://localhost:{entry.port}"
+    success(f"PostHog running at {url}")
     info(f"VSCode:    sandbox code {branch}")
     if _load_config().get("jetbrains"):
         info(f"JetBrains: sandbox idea {branch}")
     info(f"SSH:       ssh -p {entry.port + 2000} sandbox@localhost")
+    webbrowser.open(url)
 
 
 def cmd_stop(branch: str) -> None:
