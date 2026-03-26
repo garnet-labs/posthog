@@ -5612,6 +5612,10 @@ const api = {
             return new ApiRequest().conversations().withAction('wait_fill_tts').create({ data })
         },
 
+        async speculativeAck(prompt: string): Promise<{ text: string }> {
+            return new ApiRequest().conversations().withAction('speculative_ack').create({ data: { prompt } })
+        },
+
         queue: {
             list(conversationId: string): Promise<ConversationQueueResponse> {
                 return new ApiRequest().conversation(conversationId).withAction('queue').get()

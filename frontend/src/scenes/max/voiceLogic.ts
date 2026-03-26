@@ -37,6 +37,7 @@ const TTS_FIRST_PLAY_MIN_BYTES = 2048
 const TTS_STREAM_CHUNK_BYTES = 4096
 /** After AudioContext.resume(), scheduling at currentTime can clip the first ~20–50ms; small lookahead fixes it */
 const TTS_FIRST_SOURCE_SCHEDULE_LOOKAHEAD_SEC = 0.03
+
 /** <1 slows playback (wall-clock segment length = buffer.duration / rate) */
 const TTS_PLAYBACK_RATE = 0.98
 
@@ -904,6 +905,20 @@ export const voiceLogic = kea<voiceLogicType>([
                 const mountedThreadLogic =
                     conversationId != null ? maxThreadLogic.findMounted({ tabId, conversationId }) : undefined
                 mountedThreadLogic?.actions.askMax(finalText)
+
+                // Speculative contextual ack: fast Haiku call produces a greeting +
+                // acknowledgment (e.g. "Sure! Let me pull up those retention numbers.")
+                // that plays as TTS while the main agent works.
+                if (values.voiceModeEnabled) {
+                    void api.conversations
+                        .speculativeAck(finalText)
+                        .then((res) => {
+                            if (res.text && voiceLogic.findMounted()?.values.voiceModeEnabled) {
+                                actions.playResponse(res.text)
+                            }
+                        })
+                        .catch(() => {})
+                }
             } else if (!finalText && wasRecording) {
                 if (values.voiceModeEnabled && values.activeTabId) {
                     actions.startRecording(values.activeTabId)

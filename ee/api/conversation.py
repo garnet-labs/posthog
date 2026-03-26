@@ -64,6 +64,7 @@ from ee.hogai.utils.aio import async_to_sync
 from ee.hogai.utils.sse import AssistantSSESerializer
 from ee.hogai.utils.tts_text import prepare_text_for_elevenlabs_tts
 from ee.hogai.utils.types import PartialAssistantState
+from ee.hogai.utils.voice_speculative_ack import generate_speculative_ack
 from ee.hogai.utils.voice_tool_narration import generate_tool_call_narration_sentence
 from ee.hogai.utils.voice_wait_fill_tts import generate_wait_fill_tts_lines
 from ee.models.assistant import Conversation
@@ -236,6 +237,17 @@ class WaitFillTtsResponseSerializer(serializers.Serializer):
         child=serializers.CharField(max_length=2000),
         help_text="Full spoken line per tweet, in the same order as tweets",
     )
+
+
+class SpeculativeAckRequestSerializer(serializers.Serializer):
+    prompt = serializers.CharField(
+        max_length=2000,
+        help_text="The user's message to generate a contextual acknowledgment for",
+    )
+
+
+class SpeculativeAckResponseSerializer(serializers.Serializer):
+    text = serializers.CharField(help_text="Short contextual acknowledgment for TTS")
 
 
 @extend_schema(tags=["max"])
@@ -723,6 +735,25 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             logger.exception("wait_fill_tts LLM failed")
             return Response({"error": "Wait-fill line generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"lines": lines})
+
+    @validated_request(
+        request_serializer=SpeculativeAckRequestSerializer,
+        responses={200: OpenApiResponse(response=SpeculativeAckResponseSerializer)},
+        summary="Generate a fast contextual acknowledgment for voice mode",
+        tags=["max"],
+    )
+    @action(detail=False, methods=["POST"])
+    def speculative_ack(self, request: Request, *args, **kwargs):
+        """Fast Haiku call to produce a contextual 'I understood you' line before the main agent responds."""
+        vreq = cast(ValidatedRequest, request)
+        data = vreq.validated_data
+        user = cast(User, request.user)
+        try:
+            text = generate_speculative_ack(user=user, team=self.team, prompt=data["prompt"])
+        except Exception:
+            logger.exception("speculative_ack LLM failed")
+            return Response({"error": "Acknowledgment generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"text": text})
 
     @action(detail=False, methods=["POST"])
     def tts(self, request: Request, *args, **kwargs):
