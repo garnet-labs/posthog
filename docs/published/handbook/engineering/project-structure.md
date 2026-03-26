@@ -22,7 +22,7 @@ showTitle: true
 │       └── toolbar  # PostHog Toolbar code
 ├── livestream       # Golang service for live events API
 ├── playwright       # End-to-end tests using Playwright
-├── nodejs           # Node.js service for event ingestion and plugins
+├── nodejs           # Node.js services for event ingestion and plugins
 ├── posthog          # Django backend application
 │   └── api          # REST API endpoints
 │   └── clickhouse   # ClickHouse database interactions
@@ -64,11 +64,10 @@ See the [products README](https://github.com/PostHog/posthog/blob/master/product
 
 ### `nodejs`
 
-Node.js service responsible for:
+Node.js services for event processing and plugins. Contains two main servers:
 
-- Event ingestion and processing
-- Running plugins and data pipelines
-- Webhook delivery
+- **Ingestion server** (`IngestionGeneralServer`) – Event ingestion pipeline, person/group processing, cookieless tracking, and hog transformations
+- **Plugin server** (`PluginServer`) – CDP, session recordings, logs/traces ingestion, error tracking, and webhook delivery
 
 ### `rust`
 
