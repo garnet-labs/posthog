@@ -22,7 +22,7 @@ const ELEVENLABS_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 const STT_SAMPLE_RATE = 16000
 const STT_BUFFER_SIZE = 4096
 // How long to wait after the last transcript (partial or committed) before auto-sending
-const TURN_COMPLETE_DEBOUNCE_MS = 1000
+const TURN_COMPLETE_DEBOUNCE_MS = 500
 
 /** ElevenLabs `pcm_44100`: mono int16 little-endian */
 const TTS_PCM_SAMPLE_RATE = 44100
@@ -595,14 +595,28 @@ export const voiceLogic = kea<voiceLogicType>([
             actions.setIsMouthOpen(false)
             actions.setSilenceMs(0)
 
-            let stream: MediaStream
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-            } catch {
+            // Mic + STT token in parallel — previously serial (mic then HTTP), which added full token RTT on top of permission latency.
+            const [micSettled, tokenSettled] = await Promise.allSettled([
+                navigator.mediaDevices.getUserMedia({ audio: true }),
+                api.conversations.sttToken(),
+            ])
+
+            if (micSettled.status === 'rejected') {
                 actions.setMicPermissionDenied(true)
                 actions.setConnecting(false)
                 return
             }
+
+            const stream = micSettled.value
+
+            if (tokenSettled.status === 'rejected') {
+                stream.getTracks().forEach((t) => t.stop())
+                actions.setConnecting(false)
+                lemonToast.error('Failed to start voice input.')
+                return
+            }
+
+            const token = tokenSettled.value.token
 
             // Unlock AudioContext on user gesture for later TTS auto-play
             if (!cache.audioContext) {
@@ -610,18 +624,6 @@ export const voiceLogic = kea<voiceLogicType>([
             }
             if (cache.audioContext.state === 'suspended') {
                 await cache.audioContext.resume()
-            }
-
-            // Get single-use token for client-side WebSocket auth
-            let token: string
-            try {
-                const resp = await api.conversations.sttToken()
-                token = resp.token
-            } catch {
-                stream.getTracks().forEach((t) => t.stop())
-                actions.setConnecting(false)
-                lemonToast.error('Failed to start voice input.')
-                return
             }
 
             cache.mediaStream = stream
@@ -635,7 +637,7 @@ export const voiceLogic = kea<voiceLogicType>([
                 audio_format: `pcm_${STT_SAMPLE_RATE}`,
                 // VAD tuning: higher threshold rejects background noise; silence length trades latency vs mid-utterance splits
                 vad_threshold: '0.7',
-                vad_silence_threshold_secs: '0.65',
+                vad_silence_threshold_secs: '0.45',
                 min_speech_duration_ms: '200',
             })
             const ws = new WebSocket(`${ELEVENLABS_WSS}?${params.toString()}`)
