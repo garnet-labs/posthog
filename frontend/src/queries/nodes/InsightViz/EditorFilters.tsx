@@ -46,18 +46,12 @@ import {
     WebStatsTableQuery,
 } from '~/queries/schema/schema-general'
 import { isHogQLQuery, isInsightQueryNode, isWebAnalyticsInsightQuery } from '~/queries/utils'
-import {
-    AvailableFeature,
-    ChartDisplayType,
-    EditorFilterProps,
-    InsightEditorFilter,
-    InsightEditorFilterGroup,
-    PathType,
-} from '~/types'
+import { AvailableFeature, ChartDisplayType, EditorFilterProps, InsightEditorFilterGroup, PathType } from '~/types'
 
 import { Breakdown } from './Breakdown'
 import { CumulativeStickinessFilter } from './CumulativeStickinessFilter'
 import { EditorFilterGroup } from './EditorFilterGroup'
+import { filterFalsy } from './editorFilterUtils'
 import { GlobalAndOrFilters } from './GlobalAndOrFilters'
 import { LifecycleToggles } from './LifecycleToggles'
 import { SessionAnalysisWarning } from './SessionAnalysisWarning'
@@ -495,8 +489,4 @@ export function EditorFilters({ query, showing, embedded }: EditorFiltersProps):
             </div>
         </CSSTransition>
     )
-}
-
-function filterFalsy(a: (InsightEditorFilter | false | null | undefined)[]): InsightEditorFilter[] {
-    return a.filter((e): e is InsightEditorFilter => !!e)
 }
