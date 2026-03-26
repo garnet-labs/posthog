@@ -11,6 +11,7 @@ from posthog.models.hog_flow.hog_flow import HogFlow
 from products.workflows.backend.models.hog_flow_schedule import HogFlowSchedule
 from products.workflows.backend.models.hog_flow_scheduled_run import HogFlowScheduledRun
 from products.workflows.backend.utils.rrule_utils import compute_next_occurrences, validate_rrule
+from products.workflows.backend.utils.schedule_sync import _resolve_variables
 
 BATCH_TRIGGER = {
     "type": "batch",
@@ -137,6 +138,40 @@ class TestRRuleUtils(TestCase):
         )
         for o in occurrences:
             assert o.tzinfo == UTC
+
+
+class TestResolveVariables(TestCase):
+    def test_empty_defaults_and_empty_overrides(self):
+        hog_flow = type("HogFlow", (), {"variables": []})()
+        schedule = type("Schedule", (), {"variables": {}})()
+        assert _resolve_variables(hog_flow, schedule) == {}
+
+    def test_defaults_only(self):
+        hog_flow = type("HogFlow", (), {"variables": [{"key": "a", "default": 1}, {"key": "b", "default": 2}]})()
+        schedule = type("Schedule", (), {"variables": {}})()
+        assert _resolve_variables(hog_flow, schedule) == {"a": 1, "b": 2}
+
+    def test_overrides_replace_defaults(self):
+        hog_flow = type("HogFlow", (), {"variables": [{"key": "a", "default": 1}, {"key": "b", "default": 2}]})()
+        schedule = type("Schedule", (), {"variables": {"a": 99}})()
+        result = _resolve_variables(hog_flow, schedule)
+        assert result == {"a": 99, "b": 2}
+
+    def test_overrides_add_new_keys(self):
+        hog_flow = type("HogFlow", (), {"variables": [{"key": "a", "default": 1}]})()
+        schedule = type("Schedule", (), {"variables": {"b": "new"}})()
+        result = _resolve_variables(hog_flow, schedule)
+        assert result == {"a": 1, "b": "new"}
+
+    def test_none_variables_on_hogflow(self):
+        hog_flow = type("HogFlow", (), {"variables": None})()
+        schedule = type("Schedule", (), {"variables": {"a": 1}})()
+        assert _resolve_variables(hog_flow, schedule) == {"a": 1}
+
+    def test_variable_without_default(self):
+        hog_flow = type("HogFlow", (), {"variables": [{"key": "a"}, {"key": "b", "default": 2}]})()
+        schedule = type("Schedule", (), {"variables": {}})()
+        assert _resolve_variables(hog_flow, schedule) == {"a": None, "b": 2}
 
 
 class TestHogFlowScheduleAPI(APIBaseTest):
@@ -299,6 +334,58 @@ class TestHogFlowScheduleAPI(APIBaseTest):
         run = HogFlowScheduledRun.objects.get(hog_flow_id=workflow["id"], status="pending")
         assert run.variables["greeting"] == "Hello"
         assert run.variables["count"] == 5
+
+    def test_variable_overrides_merge_with_hogflow_defaults(self):
+        """Schedule variables override HogFlow defaults, unset keys keep defaults."""
+        payload = _make_workflow_payload(
+            workflow_status="active", schedules=[{**SCHEDULE, "variables": {"greeting": "Overridden"}}]
+        )
+        payload["variables"] = [
+            {"key": "greeting", "type": "string", "default": "Default Hello"},
+            {"key": "name", "type": "string", "default": "World"},
+        ]
+        response = self.client.post(f"/api/projects/{self.team.id}/hog_flows", payload)
+        assert response.status_code == status.HTTP_201_CREATED
+
+        run = HogFlowScheduledRun.objects.get(hog_flow_id=response.json()["id"], status="pending")
+        # "greeting" overridden by schedule, "name" kept from HogFlow default
+        assert run.variables["greeting"] == "Overridden"
+        assert run.variables["name"] == "World"
+
+    def test_schedule_without_variables_uses_hogflow_defaults(self):
+        payload = _make_workflow_payload(workflow_status="active", schedules=[SCHEDULE])
+        payload["variables"] = [
+            {"key": "greeting", "type": "string", "default": "Default Hello"},
+        ]
+        response = self.client.post(f"/api/projects/{self.team.id}/hog_flows", payload)
+        assert response.status_code == status.HTTP_201_CREATED
+
+        run = HogFlowScheduledRun.objects.get(hog_flow_id=response.json()["id"], status="pending")
+        assert run.variables["greeting"] == "Default Hello"
+
+    def test_multiple_schedules_with_different_variables(self):
+        schedules = [
+            {**SCHEDULE, "variables": {"region": "US"}},
+            {**SCHEDULE, "rrule": "FREQ=DAILY;INTERVAL=1", "variables": {"region": "EU"}},
+        ]
+        payload = _make_workflow_payload(workflow_status="active", schedules=schedules)
+        payload["variables"] = [
+            {"key": "region", "type": "string", "default": "Global"},
+            {"key": "format", "type": "string", "default": "html"},
+        ]
+        response = self.client.post(f"/api/projects/{self.team.id}/hog_flows", payload)
+        assert response.status_code == status.HTTP_201_CREATED
+
+        runs = HogFlowScheduledRun.objects.filter(hog_flow_id=response.json()["id"], status="pending").order_by(
+            "run_at"
+        )
+        assert runs.count() == 2
+        # Both runs have "format" from HogFlow defaults
+        assert runs[0].variables["format"] == "html"
+        assert runs[1].variables["format"] == "html"
+        # Each run has its own "region" override
+        regions = {runs[0].variables["region"], runs[1].variables["region"]}
+        assert regions == {"US", "EU"}
 
     def test_schedule_with_timezone(self):
         schedule = {**SCHEDULE, "timezone": "US/Eastern"}

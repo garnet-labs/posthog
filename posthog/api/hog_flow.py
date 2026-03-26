@@ -389,16 +389,22 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
 
         instance = super().create(validated_data=validated_data)
 
-        for schedule_data in schedules_data:
-            schedule_data.pop("id", None)
-            HogFlowSchedule.objects.create(team_id=team_id, hog_flow=instance, **schedule_data)
+        if schedules_data:
+            for schedule_data in schedules_data:
+                schedule_data.pop("id", None)
+                HogFlowSchedule.objects.create(team_id=team_id, hog_flow=instance, **schedule_data)
+            # post_save already fired but schedules didn't exist yet, so re-sync
+            from products.workflows.backend.utils.schedule_sync import sync_schedule
+
+            sync_schedule(instance, team_id)
 
         return instance
 
     def update(self, instance, validated_data):
         schedules_data = validated_data.pop("schedules", None)
-        instance = super().update(instance, validated_data)
 
+        # Reconcile schedules BEFORE saving the HogFlow, because the post_save
+        # signal triggers sync_schedule which reads the current schedules.
         if schedules_data is not None:
             team_id = self.context["team_id"]
             incoming_ids = {s["id"] for s in schedules_data if "id" in s}
@@ -419,6 +425,7 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
                 else:
                     HogFlowSchedule.objects.create(team_id=team_id, hog_flow=instance, **schedule_data)
 
+        instance = super().update(instance, validated_data)
         return instance
 
 
