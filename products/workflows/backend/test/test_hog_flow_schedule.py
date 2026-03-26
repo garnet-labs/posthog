@@ -273,12 +273,12 @@ class TestHogFlowScheduleAPI(APIBaseTest):
         regions = {runs[0].variables["region"], runs[1].variables["region"]}
         assert regions == {"US", "EU"}
 
-    def test_schedule_with_timezone(self):
-        schedule = {**SCHEDULE, "timezone": "US/Eastern"}
-        workflow = self._create_batch_workflow(schedules=[schedule])
+    def test_schedule_with_non_default_timezone(self):
+        schedule_data = {**SCHEDULE, "timezone": "US/Eastern"}
+        workflow = self._create_batch_workflow(schedules=[schedule_data])
 
-        s = HogFlowSchedule.objects.get(hog_flow_id=workflow["id"])
-        assert s.timezone == "US/Eastern"
+        schedule = HogFlowSchedule.objects.get(hog_flow_id=workflow["id"])
+        assert schedule.timezone == "US/Eastern"
 
     def test_repeated_sync_produces_one_pending_run_per_schedule(self):
         workflow = self._create_batch_workflow(schedules=[SCHEDULE])
