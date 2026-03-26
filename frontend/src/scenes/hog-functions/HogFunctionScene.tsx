@@ -428,17 +428,17 @@ export function HogFunctionScene(): JSX.Element {
 
         supportsBackfills && featureFlags[FEATURE_FLAGS.BACKFILL_WORKFLOWS_DESTINATION]
             ? {
-                  label: 'Backfill Runs',
-                  key: 'runs',
-                  content: <HogFunctionRuns id={id} />,
+                  label: 'Backfills',
+                  key: 'backfills',
+                  content: <HogFunctionBackfills id={id} />,
               }
             : null,
 
         supportsBackfills && featureFlags[FEATURE_FLAGS.BACKFILL_WORKFLOWS_DESTINATION]
             ? {
-                  label: 'Backfills',
-                  key: 'backfills',
-                  content: <HogFunctionBackfills id={id} />,
+                  label: 'Backfill Runs',
+                  key: 'runs',
+                  content: <HogFunctionRuns id={id} />,
               }
             : null,
 

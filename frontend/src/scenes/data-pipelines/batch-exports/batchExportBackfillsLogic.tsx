@@ -24,7 +24,12 @@ export const batchExportBackfillsLogic = kea<batchExportBackfillsLogicType>([
     key(({ id }) => id),
     path((key) => ['scenes', 'pipeline', 'batchExportBackfillsLogic', key]),
     connect((props: BatchExportBackfillsLogicProps) => ({
-        values: [teamLogic(), ['currentTeamId'], batchExportDataLogic({ id: props.id }), ['batchExportConfig']],
+        values: [
+            teamLogic(),
+            ['currentTeamId'],
+            batchExportDataLogic({ id: props.id }),
+            ['batchExportConfig', 'batchExportConfigLoading'],
+        ],
         actions: [
             batchExportBackfillModalLogic(props),
             ['submitBackfillFormSuccess', 'openBackfillModal', 'backfillCreated'],

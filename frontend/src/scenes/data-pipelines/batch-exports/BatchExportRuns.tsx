@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 
 import { IconCalendar, IconRefresh } from '@posthog/icons'
-import { LemonButton, LemonDialog, LemonSwitch, LemonTable, Tooltip } from '@posthog/lemon-ui'
+import { LemonButton, LemonDialog, LemonSkeleton, LemonSwitch, LemonTable, Tooltip } from '@posthog/lemon-ui'
 
 import { DateFilter } from 'lib/components/DateFilter/DateFilter'
 import { NotFound } from 'lib/components/NotFound'
@@ -23,10 +23,22 @@ function isRunInProgress(run: BatchExportRun): boolean {
 export function BatchExportRuns({ id, context }: BatchExportRunsLogicProps): JSX.Element {
     const logic = batchExportRunsLogic({ id, context })
 
-    const { batchExportConfig, groupedRuns, loading, hasMoreRunsToLoad, usingLatestRuns } = useValues(logic)
+    const { batchExportConfig, batchExportConfigLoading, groupedRuns, loading, hasMoreRunsToLoad, usingLatestRuns } =
+        useValues(logic)
     const { loadOlderRuns, retryRun } = useActions(logic)
 
     if (!batchExportConfig) {
+        if (batchExportConfigLoading) {
+            return (
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                        <LemonSkeleton className="w-20 h-8" fade />
+                        <LemonSkeleton className="w-32 h-10" fade />
+                    </div>
+                    <LemonSkeleton className="w-full h-96" fade />
+                </div>
+            )
+        }
         return <NotFound object="batch export" />
     }
 
