@@ -131,12 +131,38 @@ pub async fn run(kafka_config: KafkaConfig) {
             {
                 Ok(resp) => resp,
                 Err(e) => {
-                    error!(
-                        team_id = team_id,
-                        signal_id = %signal_id,
-                        error = %e,
-                        "Failed to send research request to Django"
-                    );
+                    if e.is_timeout() {
+                        error!(
+                            team_id = team_id,
+                            signal_id = %signal_id,
+                            attempt = attempt,
+                            timeout_secs = REQUEST_TIMEOUT.as_secs(),
+                            "Request to Django timed out after {}s, sleeping {}s before retry",
+                            REQUEST_TIMEOUT.as_secs(),
+                            ERROR_RETRY_DELAY.as_secs()
+                        );
+                    } else if e.is_connect() {
+                        error!(
+                            team_id = team_id,
+                            signal_id = %signal_id,
+                            attempt = attempt,
+                            url = %url,
+                            "Connection refused to Django at {}, sleeping {}s before retry. Is the Django server running?",
+                            DJANGO_BASE_URL,
+                            ERROR_RETRY_DELAY.as_secs()
+                        );
+                    } else {
+                        error!(
+                            team_id = team_id,
+                            signal_id = %signal_id,
+                            attempt = attempt,
+                            error = %e,
+                            error_debug = ?e,
+                            "HTTP request to Django failed: {}, sleeping {}s before retry",
+                            e,
+                            ERROR_RETRY_DELAY.as_secs()
+                        );
+                    }
                     tokio::time::sleep(ERROR_RETRY_DELAY).await;
                     continue;
                 }
@@ -184,14 +210,40 @@ pub async fn run(kafka_config: KafkaConfig) {
                 tokio::time::sleep(BUSY_RETRY_DELAY).await;
             } else {
                 let body = response.text().await.unwrap_or_default();
-                error!(
-                    team_id = team_id,
-                    signal_id = %signal_id,
-                    status = status,
-                    attempt = attempt,
-                    body = %body,
-                    "Unexpected response from Django, sleeping {}s before retry", ERROR_RETRY_DELAY.as_secs()
-                );
+                if status >= 500 {
+                    error!(
+                        team_id = team_id,
+                        signal_id = %signal_id,
+                        status = status,
+                        attempt = attempt,
+                        body = %body,
+                        "Django returned server error ({}), sleeping {}s before retry",
+                        status,
+                        ERROR_RETRY_DELAY.as_secs()
+                    );
+                } else if status >= 400 {
+                    error!(
+                        team_id = team_id,
+                        signal_id = %signal_id,
+                        status = status,
+                        attempt = attempt,
+                        body = %body,
+                        "Django returned client error ({}), sleeping {}s before retry. This may indicate a bad signal payload.",
+                        status,
+                        ERROR_RETRY_DELAY.as_secs()
+                    );
+                } else {
+                    warn!(
+                        team_id = team_id,
+                        signal_id = %signal_id,
+                        status = status,
+                        attempt = attempt,
+                        body = %body,
+                        "Django returned unexpected status ({}), sleeping {}s before retry",
+                        status,
+                        ERROR_RETRY_DELAY.as_secs()
+                    );
+                }
                 tokio::time::sleep(ERROR_RETRY_DELAY).await;
             }
         }
