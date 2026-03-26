@@ -13,7 +13,14 @@ function send(message: AdminWorkerMessage): void {
 }
 
 function emitEvent(
-    method: '_hogbot/status' | '_hogbot/text' | '_hogbot/result' | '_hogbot/error' | '_hogbot/console',
+    method:
+        | '_hogbot/status'
+        | '_hogbot/text'
+        | '_hogbot/result'
+        | '_hogbot/error'
+        | '_hogbot/console'
+        | '_hogbot/tool_call'
+        | '_hogbot/thinking',
     params: Record<string, unknown>
 ): void {
     send({ type: 'event', method, params })
@@ -76,6 +83,11 @@ async function main(): Promise<void> {
             return
         }
 
+        if (message.type === 'assistant') {
+            emitAssistantContentBlocks(message.message)
+            return
+        }
+
         if (message.type !== 'result') {
             return
         }
@@ -102,6 +114,39 @@ async function main(): Promise<void> {
         emitEvent('_hogbot/status', { status: 'failed', message: errorText })
         send({ type: 'request_error', requestId, error: errorText })
         setRequestId(null)
+    }
+
+    function emitAssistantContentBlocks(msg: unknown): void {
+        if (!msg || typeof msg !== 'object') {
+            return
+        }
+        const content = (msg as Record<string, unknown>).content
+        if (!Array.isArray(content)) {
+            return
+        }
+        for (const block of content) {
+            if (!block || typeof block !== 'object') {
+                continue
+            }
+            const b = block as Record<string, unknown>
+            if (b.type === 'thinking' && typeof b.thinking === 'string') {
+                emitEvent('_hogbot/thinking', { text: b.thinking })
+            } else if (b.type === 'tool_use') {
+                emitEvent('_hogbot/tool_call', {
+                    tool_name: (b.name as string) || 'unknown',
+                    tool_call_id: (b.id as string) || '',
+                    status: 'running',
+                    input: b.input as Record<string, unknown> | undefined,
+                })
+            } else if (b.type === 'tool_result') {
+                emitEvent('_hogbot/tool_call', {
+                    tool_name: '',
+                    tool_call_id: (b.tool_use_id as string) || '',
+                    status: b.is_error ? 'error' : 'completed',
+                    result: b.content,
+                })
+            }
+        }
     }
 
     void consumeMessages().catch((error) => {

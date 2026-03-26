@@ -8,6 +8,7 @@ import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 
 import { HogbotChat } from './chat/HogbotChat'
+import { HogbotStatusIndicator } from './components/HogbotStatusIndicator'
 import { hogbotSceneLogic } from './hogbotSceneLogic'
 import { HogbotResearch } from './research/HogbotResearch'
 import { HogbotTasks } from './tasks/HogbotTasks'
@@ -48,6 +49,7 @@ export function HogbotScene({ tabId }: { tabId?: string }): JSX.Element {
                     name="Hogbot"
                     description="AI agent sandbox with research and chat capabilities."
                     resourceType={{ type: 'default_icon_type' }}
+                    actions={<HogbotStatusIndicator />}
                 />
                 <LemonTabs activeKey={activeTab} data-attr="hogbot-tabs" tabs={tabs} sceneInset />
             </SceneContent>

@@ -48,6 +48,12 @@ export function HogbotChat(): JSX.Element {
                         {chatBlocks.map((block) =>
                             block.type === 'message' ? (
                                 <ChatMessage key={block.id} entry={block.entries[0]} />
+                            ) : block.type === 'system' ? (
+                                <div key={block.id} className="flex justify-center my-3">
+                                    <span className="text-xs text-muted bg-surface-primary border rounded-full px-3 py-1">
+                                        {block.entries[0]?.message}
+                                    </span>
+                                </div>
                             ) : (
                                 <ThinkingSection key={block.id} entries={block.entries} />
                             )

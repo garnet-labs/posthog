@@ -182,7 +182,7 @@ function parseACPNotification(parsed: ACPNotification, id: string, toolMap: Map<
         if (params?.text) {
             return {
                 id,
-                type: params.role === 'user' ? 'user' : 'agent',
+                type: params.role === 'user' ? 'user' : params.role === 'system' ? 'system' : 'agent',
                 timestamp,
                 message: params.text,
             }
@@ -194,14 +194,60 @@ function parseACPNotification(parsed: ACPNotification, id: string, toolMap: Map<
         const params = notification.params as { status?: string } | undefined
         return {
             id,
-            type: 'system',
+            type: 'console',
             timestamp,
             level: 'info',
             message: `Hogbot ${params?.status || 'unknown'}`,
         }
     }
 
-    // Skip _hogbot/result — the text is already captured by _hogbot/text
+    if (method === '_hogbot/tool_call') {
+        const params = notification.params as
+            | {
+                  tool_name?: string
+                  tool_call_id?: string
+                  status?: string
+                  input?: Record<string, unknown>
+                  result?: unknown
+              }
+            | undefined
+        const toolCallId = params?.tool_call_id || id
+        if (params?.status === 'completed' || params?.status === 'error') {
+            const existing = toolMap.get(toolCallId)
+            if (existing) {
+                existing.toolStatus = params.status === 'error' ? 'error' : 'completed'
+                if (params.result !== undefined) {
+                    existing.toolResult = params.result
+                }
+                return null
+            }
+        }
+        const entry: LogEntry = {
+            id,
+            type: 'tool',
+            timestamp,
+            toolName: params?.tool_name || 'Unknown Tool',
+            toolCallId,
+            toolStatus: normalizeToolStatus(params?.status),
+            toolArgs: params?.input,
+            toolResult: params?.result,
+        }
+        toolMap.set(toolCallId, entry)
+        return entry
+    }
+
+    if (method === '_hogbot/thinking') {
+        const params = notification.params as { text?: string } | undefined
+        return {
+            id,
+            type: 'console',
+            timestamp,
+            level: 'debug',
+            message: params?.text || '',
+        }
+    }
+
+    // Skip _hogbot/result and _hogbot/error — text is already captured by _hogbot/text
     if (method?.startsWith('_hogbot/')) {
         return null
     }

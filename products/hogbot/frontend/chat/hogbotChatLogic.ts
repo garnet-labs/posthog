@@ -8,10 +8,15 @@ import type { hogbotChatLogicType } from './hogbotChatLogicType'
 
 const POLL_INTERVAL_MS = 3000
 
+// Module-level so it survives HMR — each hot reload creates a new kea logic
+// with a fresh cache, orphaning the old setInterval. Storing it here lets
+// startPolling always clear the previous interval.
+let _pollInterval: ReturnType<typeof setInterval> | null = null
+
 /** Groups consecutive log entries into chat blocks for rendering. */
 export interface ChatBlock {
     id: string
-    type: 'message' | 'thinking'
+    type: 'message' | 'thinking' | 'system'
     entries: LogEntry[]
 }
 
@@ -36,6 +41,13 @@ function groupIntoChatBlocks(entries: LogEntry[]): ChatBlock[] {
             blocks.push({
                 id: entry.id,
                 type: 'message',
+                entries: [entry],
+            })
+        } else if (entry.type === 'system') {
+            flushThinking()
+            blocks.push({
+                id: entry.id,
+                type: 'system',
                 entries: [entry],
             })
         } else {
@@ -97,10 +109,10 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
         ],
         chatBlocks: [(s) => [s.entries], (entries): ChatBlock[] => groupIntoChatBlocks(entries)],
     }),
-    listeners(({ actions, cache }) => ({
+    listeners(({ actions }) => ({
         startPolling: () => {
-            if (cache.pollingInterval) {
-                clearInterval(cache.pollingInterval)
+            if (_pollInterval) {
+                clearInterval(_pollInterval)
             }
             const poll = async (): Promise<void> => {
                 try {
@@ -111,12 +123,12 @@ export const hogbotChatLogic = kea<hogbotChatLogicType>([
                     // Silently ignore poll errors
                 }
             }
-            cache.pollingInterval = setInterval(poll, POLL_INTERVAL_MS)
+            _pollInterval = setInterval(poll, POLL_INTERVAL_MS)
         },
         stopPolling: () => {
-            if (cache.pollingInterval) {
-                clearInterval(cache.pollingInterval)
-                cache.pollingInterval = null
+            if (_pollInterval) {
+                clearInterval(_pollInterval)
+                _pollInterval = null
             }
         },
         sendMessage: async ({ content }) => {

@@ -1,7 +1,14 @@
 export type HogbotScope = 'admin' | 'research'
 export type HogbotBusyState = 'none' | 'admin' | 'research'
 export type HogbotStatus = 'starting' | 'running' | 'completed' | 'failed' | 'cancelled'
-export type HogbotMethod = '_hogbot/status' | '_hogbot/text' | '_hogbot/result' | '_hogbot/error' | '_hogbot/console'
+export type HogbotMethod =
+    | '_hogbot/status'
+    | '_hogbot/text'
+    | '_hogbot/result'
+    | '_hogbot/error'
+    | '_hogbot/console'
+    | '_hogbot/tool_call'
+    | '_hogbot/thinking'
 
 export interface HogbotJwtPayload {
     team_id: number
