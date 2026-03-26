@@ -3,6 +3,7 @@ import { Message } from 'node-rdkafka'
 import { HogTransformerService } from '../../cdp/hog-transformations/hog-transformer.service'
 import { KafkaProducerWrapper } from '../../kafka/producer'
 import { Team } from '../../types'
+import { EventFilterManager } from '../../utils/event-filter-manager'
 import { EventIngestionRestrictionManager } from '../../utils/event-ingestion-restrictions'
 import { EventSchemaEnforcementManager } from '../../utils/event-schema-enforcement-manager'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
@@ -54,6 +55,7 @@ export interface JoinedIngestionPipelineDeps {
     personsStore: PersonsStore
     groupStore: BatchWritingGroupStore
     hogTransformer: HogTransformerService
+    eventFilterManager: EventFilterManager
     eventIngestionRestrictionManager: EventIngestionRestrictionManager
     eventSchemaEnforcementManager: EventSchemaEnforcementManager
     promiseScheduler: PromiseScheduler
@@ -135,6 +137,7 @@ export function createJoinedIngestionPipeline<
         personsStore,
         groupStore,
         hogTransformer,
+        eventFilterManager,
         eventIngestionRestrictionManager,
         eventSchemaEnforcementManager,
         promiseScheduler,
@@ -155,6 +158,7 @@ export function createJoinedIngestionPipeline<
     }
 
     const postTeamConfig: PostTeamPreprocessingSubpipelineConfig = {
+        eventFilterManager,
         eventIngestionRestrictionManager,
         eventSchemaEnforcementManager,
         eventSchemaEnforcementEnabled,

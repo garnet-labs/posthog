@@ -5,6 +5,7 @@ import { processPersonlessDistinctIdsBatchStep } from '~/worker/ingestion/event-
 
 import { HogTransformerService } from '../../cdp/hog-transformations/hog-transformer.service'
 import { EventHeaders, Team } from '../../types'
+import { EventFilterManager } from '../../utils/event-filter-manager'
 import { EventIngestionRestrictionManager } from '../../utils/event-ingestion-restrictions'
 import { EventSchemaEnforcementManager } from '../../utils/event-schema-enforcement-manager'
 import { prefetchPersonsStep } from '../../worker/ingestion/event-pipeline/prefetchPersonsStep'
@@ -19,6 +20,7 @@ import {
     createValidateEventPropertiesStep,
     createValidateEventSchemaStep,
 } from '../event-preprocessing'
+import { createApplyEventFiltersStep } from '../event-processing/apply-event-filters-step'
 import { createDropOldEventsStep } from '../event-processing/drop-old-events-step'
 import { createPrefetchHogFunctionsStep } from '../event-processing/prefetch-hog-functions-step'
 import { BatchPipelineBuilder } from '../pipelines/builders/batch-pipeline-builders'
@@ -32,6 +34,7 @@ export interface PostTeamPreprocessingSubpipelineInput {
 }
 
 export interface PostTeamPreprocessingSubpipelineConfig {
+    eventFilterManager: EventFilterManager
     eventIngestionRestrictionManager: EventIngestionRestrictionManager
     eventSchemaEnforcementManager: EventSchemaEnforcementManager
     eventSchemaEnforcementEnabled: boolean
@@ -51,6 +54,7 @@ export function createPostTeamPreprocessingSubpipeline<TInput extends PostTeamPr
     config: PostTeamPreprocessingSubpipelineConfig
 ) {
     const {
+        eventFilterManager,
         eventIngestionRestrictionManager,
         eventSchemaEnforcementManager,
         eventSchemaEnforcementEnabled,
@@ -78,6 +82,7 @@ export function createPostTeamPreprocessingSubpipeline<TInput extends PostTeamPr
                 return schemaChecked
                     .pipe(createApplyPersonProcessingRestrictionsStep(eventIngestionRestrictionManager))
                     .pipe(createDropOldEventsStep())
+                    .pipe(createApplyEventFiltersStep(eventFilterManager))
             })
             // We want to call cookieless with the whole batch at once.
             // IMPORTANT: Cookieless processing changes distinct IDs (cookieless events
