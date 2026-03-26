@@ -3,7 +3,7 @@ import './VoiceMode.scss'
 import { useActions, useValues } from 'kea'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { IconArrowRight, IconX } from '@posthog/icons'
+import { IconMicrophone, IconX } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { cn } from 'lib/utils/css-classes'
@@ -16,7 +16,6 @@ import voiceListening from 'public/hedgehog/voice/listening.png'
 import voiceTalking from 'public/hedgehog/voice/talking.gif'
 import voiceThinking from 'public/hedgehog/voice/thinking.gif'
 
-import { maxLogic } from '../maxLogic'
 import { maxThreadLogic, ThreadMessage } from '../maxThreadLogic'
 import { isArtifactMessage, isMultiVisualizationMessage, visualizationTypeToQuery } from '../utils'
 import { voiceLogic } from '../voiceLogic'
@@ -227,24 +226,11 @@ function HedgehogOrb({
 const QUERY_CONTEXT_VOICE = { limitContext: 'posthog_ai' } as const
 
 export function VoiceMode(): JSX.Element {
-    const {
-        recording,
-        connecting,
-        playbackActive,
-        isMouthOpen,
-        orbPointerDown,
-        ttsLoading,
-        activeTabId,
-        voiceModeFullscreen,
-        voiceModeEnabled,
-        micPermissionDenied,
-        mouthOpenness,
-    } = useValues(voiceLogic)
-    const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown } = useActions(voiceLogic)
+    const { recording, connecting, playbackActive, isMouthOpen, orbPointerDown, ttsLoading, mouthOpenness, micMuted } =
+        useValues(voiceLogic)
+    const { stopRecording, stopPlayback, exitVoiceMode, setOrbPointerDown, toggleMicMute } = useActions(voiceLogic)
     const orbPressActiveRef = useRef(false)
-    const { question } = useValues(maxLogic)
     const { threadLoading, threadGrouped } = useValues(maxThreadLogic)
-    const { askMax } = useActions(maxThreadLogic)
 
     const latestArtifact = useLatestArtifact(threadGrouped)
     // Track the key so we re-trigger the entrance animation when the artifact changes
@@ -275,6 +261,8 @@ export function VoiceMode(): JSX.Element {
         statusText = 'Release to send…'
     } else if (isAiSpeaking) {
         statusText = 'Hold to interrupt…'
+    } else if (recording && micMuted) {
+        statusText = 'Muted'
     } else if (recording) {
         statusText = 'Listening…'
     }
@@ -308,29 +296,6 @@ export function VoiceMode(): JSX.Element {
             stopRecording()
         }
     }
-
-    const canResumeMic =
-        !!voiceModeFullscreen &&
-        voiceModeEnabled &&
-        activeTabId != null &&
-        !recording &&
-        !connecting &&
-        !playbackActive &&
-        !ttsLoading &&
-        !isThinking &&
-        !micPermissionDenied
-
-    function handleSend(): void {
-        if (recording) {
-            stopRecording()
-        } else if (question.trim()) {
-            askMax(question)
-        } else if (canResumeMic && activeTabId) {
-            startRecording(activeTabId)
-        }
-    }
-
-    const canSend = recording || question.trim().length > 0 || canResumeMic
 
     const orbProps = {
         isAiSpeaking,
@@ -396,15 +361,17 @@ export function VoiceMode(): JSX.Element {
                     onClick={exitVoiceMode}
                     tooltip="Close voice mode"
                 />
-                <LemonButton
-                    data-attr="max-voice-mode-send"
-                    type="primary"
-                    size="medium"
-                    icon={<IconArrowRight />}
-                    onClick={handleSend}
-                    tooltip={recording ? 'Stop recording and send' : canResumeMic ? 'Start microphone' : 'Send'}
-                    disabledReason={!canSend ? 'Nothing to send' : undefined}
-                />
+                {recording && (
+                    <LemonButton
+                        data-attr="max-voice-mode-mute"
+                        type={micMuted ? 'primary' : 'secondary'}
+                        size="medium"
+                        icon={<IconMicrophone />}
+                        onClick={toggleMicMute}
+                        tooltip={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+                        className={micMuted ? 'opacity-50' : ''}
+                    />
+                )}
             </div>
         </div>
     )

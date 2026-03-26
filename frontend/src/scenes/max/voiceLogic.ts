@@ -522,6 +522,9 @@ export const voiceLogic = kea<voiceLogicType>([
         playToolCallNarration: (payload: { dedupeKey: string; sentence: string }) => payload,
         /** Queue interstitial TTS while tools run (after tool-call narration). */
         enqueueToolWaitFill: true,
+        /** Toggle mic mute — keeps STT session alive but stops sending audio chunks. */
+        toggleMicMute: true,
+        setMicMuted: (muted: boolean) => ({ muted }),
     }),
 
     reducers({
@@ -548,6 +551,16 @@ export const voiceLogic = kea<voiceLogicType>([
                 setVoiceModeFullscreen: (_, { fullscreen }) => fullscreen,
                 enterVoiceMode: () => true,
                 exitVoiceMode: () => false,
+            },
+        ],
+        micMuted: [
+            false,
+            {
+                setMicMuted: (_, { muted }) => muted,
+                toggleMicMute: (state) => !state,
+                stopRecording: () => false,
+                exitVoiceMode: () => false,
+                disableVoiceMode: () => false,
             },
         ],
         micPermissionDenied: [false, { setMicPermissionDenied: (_, { denied }) => denied }],
@@ -577,6 +590,12 @@ export const voiceLogic = kea<voiceLogicType>([
     }),
 
     listeners(({ actions, values, cache }) => ({
+        toggleMicMute: () => {
+            cache.micMuted = values.micMuted
+        },
+        setMicMuted: ({ muted }) => {
+            cache.micMuted = muted
+        },
         startRecording: async ({ tabId }) => {
             actions.setActiveTabId(tabId)
             actions.setMicPermissionDenied(false)
@@ -621,6 +640,8 @@ export const voiceLogic = kea<voiceLogicType>([
             cache.mediaStream = stream
             cache.committedParts = [] as string[]
             cache.currentPartial = ''
+            cache.micMuted = false
+            actions.setMicMuted(false)
 
             const params = new URLSearchParams({
                 token,
@@ -660,6 +681,9 @@ export const voiceLogic = kea<voiceLogicType>([
                     if (ws.readyState !== WebSocket.OPEN) {
                         return
                     }
+                    if (cache.micMuted) {
+                        return
+                    }
                     const float32 = e.inputBuffer.getChannelData(0)
                     ws.send(
                         JSON.stringify({
@@ -683,6 +707,15 @@ export const voiceLogic = kea<voiceLogicType>([
                 const amplitudeLoop = (): void => {
                     if (!cache.inputAnalyser || !cache.inputAnalyserData || !values.recording) {
                         cache.inputAmplitudeRafId = null
+                        return
+                    }
+
+                    if (cache.micMuted) {
+                        actions.setInputAmplitude(0)
+                        actions.setIsSpeaking(false)
+                        actions.setMouthOpenness(0)
+                        actions.setIsMouthOpen(false)
+                        cache.inputAmplitudeRafId = requestAnimationFrame(amplitudeLoop)
                         return
                     }
 
@@ -790,7 +823,12 @@ export const voiceLogic = kea<voiceLogicType>([
                     const tryAutoStop = (): void => {
                         cache.turnTimer = null
                         const v = voiceLogic.findMounted()
-                        if (!v?.values.recording || !v?.values.voiceModeEnabled || v.values.orbPointerDown) {
+                        if (
+                            !v?.values.recording ||
+                            !v?.values.voiceModeEnabled ||
+                            v.values.orbPointerDown ||
+                            v.values.micMuted
+                        ) {
                             return
                         }
                         const lastNonSilentAt = cache.lastNonSilentAt as number | undefined
@@ -831,6 +869,7 @@ export const voiceLogic = kea<voiceLogicType>([
 
         stopRecording: () => {
             cache.orbPointerDown = false
+            cache.waitFillUsedThisTurn = false
             // Clear any pending turn detection timer
             clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
             cache.turnTimer = null
@@ -967,6 +1006,10 @@ export const voiceLogic = kea<voiceLogicType>([
             if (!values.voiceModeEnabled) {
                 return
             }
+            if (cache.waitFillUsedThisTurn) {
+                return
+            }
+            cache.waitFillUsedThisTurn = true
             ensureTtsQueueState(cache)
             if (cache.ttsDrainGeneration === undefined) {
                 cache.ttsDrainGeneration = 0
