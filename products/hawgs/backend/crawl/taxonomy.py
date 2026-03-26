@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
-from products.hawgs.backend.crawl.crawl import CACHE_DIR, _get_page_url
+from products.hawgs.backend.crawl.crawl import CACHE_DIR, URLS_FILE, _get_page_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,23 +62,35 @@ class FeatureTaxonomy(BaseModel):
 
 
 def _load_pages_context() -> list[dict]:
-    """Load all cached pages and extract the fields needed for the taxonomy prompt."""
-    pages = []
-    for filepath in sorted(CACHE_DIR.glob("*.json")):
+    """Load all cached pages, ordered by the URL list in _selected_urls.json."""
+    # Build a lookup from URL to page data
+    pages_by_url: dict[str, dict] = {}
+    for filepath in CACHE_DIR.glob("*.json"):
         if filepath.name.startswith("_"):
             continue
         raw = json.loads(filepath.read_text())
         metadata = raw.get("metadata", {})
-        pages.append(
-            {
-                "url": _get_page_url(metadata),
+        url = _get_page_url(metadata)
+        if url and url not in pages_by_url:
+            pages_by_url[url] = {
+                "url": url,
                 "title": metadata.get("title", ""),
                 "description": metadata.get("description", metadata.get("og_description", "")),
                 "screenshot_url": raw.get("screenshot", ""),
                 "markdown": raw.get("markdown", ""),
             }
-        )
-    return pages
+
+    # Order by _selected_urls.json, then append any extras
+    ordered: list[dict] = []
+    if URLS_FILE.exists():
+        url_order = json.loads(URLS_FILE.read_text()).get("urls", [])
+        for url in url_order:
+            if url in pages_by_url:
+                ordered.append(pages_by_url.pop(url))
+
+    # Append any remaining pages not in the URL list
+    ordered.extend(pages_by_url.values())
+    return ordered
 
 
 async def build_taxonomy(
