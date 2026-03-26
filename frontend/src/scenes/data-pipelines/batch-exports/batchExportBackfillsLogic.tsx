@@ -12,9 +12,7 @@ import { BatchExportBackfill, RawBatchExportBackfill } from '~/types'
 import { batchExportBackfillModalLogic } from './batchExportBackfillModalLogic'
 import type { batchExportBackfillsLogicType } from './batchExportBackfillsLogicType'
 import { batchExportDataLogic } from './batchExportDataLogic'
-
-/** Controls wording in shared batch export components */
-export type BatchExportContext = 'batch_export' | 'hog_function'
+import { BatchExportContext } from './types'
 
 export interface BatchExportBackfillsLogicProps {
     id: string

@@ -13,8 +13,8 @@ import { capitalizeFirstLetter, humanFriendlyNumber, humanizeBytes } from 'lib/u
 import { BatchExportConfiguration, BatchExportRun, GroupedBatchExportRuns } from '~/types'
 
 import { BatchExportBackfillModal } from './BatchExportBackfillModal'
-import { BatchExportContext } from './batchExportBackfillsLogic'
 import { BatchExportRunsLogicProps, batchExportRunsLogic } from './batchExportRunsLogic'
+import { BatchExportContext } from './types'
 
 function isRunInProgress(run: BatchExportRun): boolean {
     return ['Running', 'Starting'].includes(run.status)

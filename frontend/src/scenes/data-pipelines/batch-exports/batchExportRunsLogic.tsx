@@ -10,9 +10,9 @@ import { dayjs } from 'lib/dayjs'
 import { BatchExportRun, GroupedBatchExportRuns, RawBatchExportRun } from '~/types'
 
 import { batchExportBackfillModalLogic } from './batchExportBackfillModalLogic'
-import { BatchExportContext } from './batchExportBackfillsLogic'
 import { batchExportDataLogic } from './batchExportDataLogic'
 import type { batchExportRunsLogicType } from './batchExportRunsLogicType'
+import { BatchExportContext } from './types'
 
 const DEFAULT_DATE_FROM = '-2d'
 export interface BatchExportRunsLogicProps {

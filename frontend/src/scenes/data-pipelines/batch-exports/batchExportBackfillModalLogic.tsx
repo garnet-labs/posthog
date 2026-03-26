@@ -13,8 +13,8 @@ import { ProductIntentContext, ProductKey } from '~/queries/schema/schema-genera
 import { BatchExportConfiguration } from '~/types'
 
 import type { batchExportBackfillModalLogicType } from './batchExportBackfillModalLogicType'
-import { BatchExportContext } from './batchExportBackfillsLogic'
 import { batchExportDataLogic } from './batchExportDataLogic'
+import { BatchExportContext } from './types'
 import { dayOptions } from './utils'
 
 export interface BatchExportBackfillModalLogicProps {
