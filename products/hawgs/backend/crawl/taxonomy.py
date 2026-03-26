@@ -33,7 +33,10 @@ Your task:
 3. A "feature" is a specific capability within a product (e.g. "Funnels" within "Product analytics").
 4. Some pages describe a product, others describe features within a product. Cross-reference
    the content to build the hierarchy.
-5. If a capability doesn't clearly belong under a product, place it under a "Platform" product.
+5. **Pricing signal:** If the pricing page lists a capability as a separately priced line item
+   or a distinct plan tier, treat it as a top-level product, not a feature. Pricing structure
+   is the strongest signal for what the company considers a standalone product.
+6. If a capability doesn't clearly belong under a product, place it under a "Platform" product.
 6. Use the codebase to ground your findings — check if the products/features you identify
    correspond to actual code in the repository (look at the `products/` directory structure).
    This helps validate that what the website describes actually exists as a distinct product/feature.
@@ -43,7 +46,8 @@ Rules:
 - Use the website's own naming and descriptions, don't invent new names.
 - Include source_urls: which page(s) informed each product/feature.
 - Keep descriptions concise (1-2 sentences).
-- Do NOT include pricing, company info, or non-product pages.
+- Do NOT include company info or non-product pages in the taxonomy output, but DO use pricing
+  page content to inform product vs. feature classification.
 
 Respond with a JSON object inside a ```json``` code block matching this schema:
 

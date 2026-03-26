@@ -35,9 +35,11 @@ Steps:
 3. From ALL URLs in the sitemaps, select only pages that describe product features,
    capabilities, integrations, platform overview, or use cases.
 4. EXCLUDE: blog posts, changelog, careers, team/about, docs/tutorials, guides,
-   pricing, legal, community, newsletter, handbook, case studies, customer stories,
+   legal, community, newsletter, handbook, case studies, customer stories,
    content marketing, thought leadership, API reference, and support/help pages.
-5. Aim for 20-100 URLs. Include both top-level product pages and their sub-pages
+5. ALWAYS INCLUDE the pricing page(s) — these reveal which capabilities are sold
+   as separate products vs. bundled features. This is critical for building the taxonomy.
+6. Aim for 20-100 URLs. Include both top-level product pages and their sub-pages
    that describe specific features or capabilities.
 
 IMPORTANT:
