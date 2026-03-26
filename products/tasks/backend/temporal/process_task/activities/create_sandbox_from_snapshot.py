@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from django.conf import settings
+
 from temporalio import activity
 
 from posthog.temporal.common.utils import asyncify
@@ -97,8 +99,13 @@ def create_sandbox_from_snapshot(input: CreateSandboxFromSnapshotInput) -> Creat
             "POSTHOG_PERSONAL_API_KEY": access_token,
             "POSTHOG_API_URL": get_sandbox_api_url(),
             "POSTHOG_PROJECT_ID": str(ctx.team_id),
+            "POSTHOG_API_KEY": access_token,
         }
 
+        if settings.SANDBOX_POSTHOG_HOST:
+            environment_variables["POSTHOG_HOST"] = settings.SANDBOX_POSTHOG_HOST
+        if settings.SANDBOX_POSTHOG_INGESTION_KEY:
+            environment_variables["POSTHOG_API_KEY"] = settings.SANDBOX_POSTHOG_INGESTION_KEY
         config = SandboxConfig(
             name=get_sandbox_name_for_task(ctx.task_id),
             template=SandboxTemplate.DEFAULT_BASE,

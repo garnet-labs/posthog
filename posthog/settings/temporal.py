@@ -36,6 +36,8 @@ SANDBOX_PROVIDER: str | None = get_from_env(
     "SANDBOX_PROVIDER", None, optional=True
 )  # When not set: defaults to "docker" in DEBUG mode, "modal" in production
 SANDBOX_API_URL: str | None = get_from_env("SANDBOX_API_URL", None, optional=True)
+SANDBOX_POSTHOG_HOST: str | None = get_from_env("SANDBOX_POSTHOG_HOST", None, optional=True)
+SANDBOX_POSTHOG_INGESTION_KEY: str | None = get_from_env("SANDBOX_POSTHOG_INGESTION_KEY", None, optional=True)
 SANDBOX_LLM_GATEWAY_URL: str | None = get_from_env("SANDBOX_LLM_GATEWAY_URL", None, optional=True)
 SANDBOX_MCP_URL: str | None = get_from_env("SANDBOX_MCP_URL", None, optional=True)
 
