@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import posthog from 'posthog-js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconFeatures, IconRefresh } from '@posthog/icons'
@@ -124,7 +125,25 @@ export function PropertyValue({
         [loadPropertyValues, endpoint, propertyDefinitionType, propertyKey, eventNames]
     )
 
-    const setValue = (newValue: PropertyValueProps['value']): void => onSet(newValue)
+    const optionsLoadedAt = useRef<number | null>(null)
+
+    const setValue = (newValue: PropertyValueProps['value']): void => {
+        const availableValues = new Set(displayOptions.map((o) => toString(o.name)))
+        const selectedValues =
+            newValue === null || newValue === undefined ? [] : Array.isArray(newValue) ? newValue : [newValue]
+        const fromSuggestion = selectedValues.length > 0 && selectedValues.every((v) => availableValues.has(String(v)))
+
+        posthog.capture('property_value_selected', {
+            property_key: propertyKey,
+            property_type: type,
+            from_suggestion: fromSuggestion,
+            options_count: displayOptions.length,
+            time_to_select_ms: optionsLoadedAt.current ? Math.floor(performance.now() - optionsLoadedAt.current) : null,
+            had_search_input: currentSearchInput.current !== '',
+        })
+
+        onSet(newValue)
+    }
 
     // preload values if preloadValues prop is set
     useEffect(() => {
@@ -156,6 +175,7 @@ export function PropertyValue({
     // (to avoid overwriting suggestions based on search input)
     useEffect(() => {
         if (propertyOptions?.status === 'loaded' && propertyOptions?.values && currentSearchInput.current === '') {
+            optionsLoadedAt.current = performance.now()
             const newKeys = propertyOptions.values.map((v) => toString(v.name))
             setInitialSuggestedValues((prev) => {
                 // Merge new keys into existing ones so that values already shown are never removed
@@ -176,6 +196,7 @@ export function PropertyValue({
     // reset initial suggested values when propertyKey changes
     useEffect(() => {
         setInitialSuggestedValues({ set: new Set(), orderedKeys: [] })
+        optionsLoadedAt.current = null
     }, [propertyKey])
 
     // show suggested values first, then any other available options that aren't in the suggested list
