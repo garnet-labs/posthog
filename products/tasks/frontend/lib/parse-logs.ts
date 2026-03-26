@@ -194,7 +194,7 @@ function parseACPNotification(parsed: ACPNotification, id: string, toolMap: Map<
         const params = notification.params as { status?: string } | undefined
         return {
             id,
-            type: 'system',
+            type: 'console',
             timestamp,
             level: 'info',
             message: `Hogbot ${params?.status || 'unknown'}`,
