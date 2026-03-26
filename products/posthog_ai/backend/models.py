@@ -62,11 +62,11 @@ class AgentMemory(UUIDModel):
         )
 
 
-class ActionPredictionConfig(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
+class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     team = models.ForeignKey(
         "posthog.Team",
         on_delete=models.CASCADE,
-        related_name="action_prediction_configs",
+        related_name="action_prediction_models",
     )
     name = models.CharField(max_length=400, blank=True, default="")
     description = models.TextField(blank=True, default="")
@@ -79,13 +79,13 @@ class ActionPredictionConfig(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
     )
     event_name = models.CharField(max_length=400, null=True, blank=True)
     lookback_days = models.PositiveIntegerField()
-    task_run = models.ForeignKey(
-        "tasks.TaskRun",
-        on_delete=models.SET_NULL,
+    winning_run = models.ForeignKey(
+        "ActionPredictionModelRun",
         null=True,
         blank=True,
-        related_name="action_prediction_configs",
-        help_text="Sandbox task run that trains this prediction config.",
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="The current winning run for this model. Set by the agent after the experiment loop.",
     )
 
     class Meta:
@@ -103,40 +103,25 @@ class ActionPredictionConfig(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         ]
 
 
-class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
-    config = models.ForeignKey(
-        ActionPredictionConfig,
+class ActionPredictionModelRun(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
+    prediction_model = models.ForeignKey(
+        ActionPredictionModel,
         on_delete=models.CASCADE,
-        related_name="models",
+        related_name="runs",
     )
     team = models.ForeignKey(
         "posthog.Team",
         on_delete=models.CASCADE,
-        related_name="action_prediction_models",
+        related_name="action_prediction_model_runs",
     )
-    task = models.ForeignKey(
-        "tasks.Task",
-        on_delete=models.SET_NULL,
+    experiment_id = models.UUIDField(
         null=True,
         blank=True,
-        related_name="action_prediction_models",
-        help_text="Task containing all training runs and snapshots for this model.",
+        help_text="Groups runs from the same agent experiment session.",
     )
-    task_run = models.ForeignKey(
-        "tasks.TaskRun",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="action_prediction_models",
-        help_text="Specific task run that produced this model.",
-    )
-    is_winning = models.BooleanField(
-        default=False,
-        help_text="Whether this is the winning prediction model.",
-    )
-    model_url = models.CharField(
+    model_url = models.URLField(
         max_length=2000,
-        help_text="S3 storage path to the serialized model artifact.",
+        help_text="S3 URL to the serialized model artifact.",
     )
     metrics = models.JSONField(
         default=dict,
@@ -148,14 +133,19 @@ class ActionPredictionModel(UUIDModel, CreatedMetaFields, UpdatedMetaFields):
         blank=True,
         help_text="Feature importance scores from model training.",
     )
-    artifact_script = models.TextField(
+    artifact_scripts = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script).",
+    )
+    notes = models.TextField(
         blank=True,
         default="",
-        help_text="The Python script used to train and produce the model artifact.",
+        help_text="Agent lab notebook: what was tried, what was observed, what to try next.",
     )
 
     class Meta:
         indexes = [
             models.Index(fields=["team", "id"]),
-            models.Index(fields=["config", "-created_at"]),
+            models.Index(fields=["prediction_model", "-created_at"]),
         ]

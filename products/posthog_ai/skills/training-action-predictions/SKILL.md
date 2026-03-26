@@ -5,12 +5,24 @@ description: 'Train a predictive model for user actions using an autonomous expe
 
 # Training action predictions
 
-Build a model that predicts P(user performs action X within W days). Uses an autonomous experiment loop inspired by [autoresearch](https://github.com/karpathy/autoresearch) — explore data, engineer features, train, evaluate, keep or discard, repeat.
+Build a model that predicts P(user performs action X within W days). Uses an autonomous experiment loop — explore data, write a HogQL feature query, train an sklearn Pipeline, evaluate, iterate.
+
+All feature engineering is pushed down to ClickHouse via HogQL. The query returns `person_id, label, features` — Python just trains the model.
 
 ## Prerequisites
 
 - An `ActionPredictionModel` must exist (create one via `action-prediction-model-create` if needed)
 - The project must have sufficient event data (≥500 users, ≥50 positive examples)
+- xgboost must be installed (`uv pip install xgboost` if not present)
+
+## Reference scripts
+
+All in `./references/`:
+
+- **`utils.py`** — shared `execute_hogql()` and `fetch_features()` helpers for PostHog API access
+- **`query.sql`** — reference HogQL feature query with comments. Adapt per experiment.
+- **`train.py`** — fetches training data, trains sklearn Pipeline, saves `model.pkl` + `metrics.json`
+- **`predict.py`** — fetches scoring data, loads pipeline, outputs `scores.parquet` + `scores.json`
 
 ## Workflow
 
@@ -30,122 +42,86 @@ Build a model that predicts P(user performs action X within W days). Uses an aut
 
 ### Phase 2: Data discovery
 
-Use `execute-sql` with HogQL to understand the project's data before engineering features. Run these queries:
+Use `execute-sql` with HogQL to understand the project's data before engineering features:
 
 1. **Active users**: `SELECT uniq(person_id) FROM events WHERE timestamp >= now() - interval 90 day`
 2. **Top events**: `SELECT event, count() as c FROM events WHERE timestamp >= now() - interval 90 day GROUP BY event ORDER BY c DESC LIMIT 20`
-3. **Base rate**: `SELECT countIf(event = '{target}') > 0 as converted, count() FROM (SELECT person_id, countIf(event = '{target}' AND timestamp >= now() - interval {W} day) > 0 as converted FROM events WHERE timestamp >= now() - interval 90 day GROUP BY person_id HAVING count() >= 5) GROUP BY converted`
-4. **Person properties**: `properties-list` to discover available properties
-5. **Session distribution**: `SELECT count(), avg(duration) FROM sessions WHERE min_timestamp >= now() - interval 90 day`
+3. **Base rate**: count users who performed the target event vs total eligible users
+4. **Person properties**: `read-data-schema` to discover available properties
 
 Report findings to the user before proceeding. This is the one pause point.
 
-**Stop conditions**: If base rate < 1% or fewer than 50 positive examples, warn the user — model quality will be limited. If fewer than 500 users, refuse to train.
+**Stop conditions**: If fewer than 50 positive examples, warn. If fewer than 500 users, refuse.
 
 ### Phase 3: Feature engineering
 
-Write a HogQL feature extraction query. The key constraint is **temporal correctness** — features must come from before the label window.
+Write a HogQL feature query. See `./references/query.sql` for the reference pattern.
 
-See [baseline feature query](./references/baseline-feature-query.md) for the starting point.
+The key constraint is **temporal correctness**:
 
-The agent iterates on this query across experiments — adding features, removing noise, testing different windows.
+- Training: `T = now() - interval {W} day`, features from `[T-90d, T]`, labels from `(T, T+W]`
+- Scoring: `T = now()`, features from `[now()-90d, now()]`, no labels
 
-**Feature ideas to explore** (in roughly this priority):
-
-1. Per-event ratios for top-10 events by volume
-2. Session features: avg duration, pageviews/session, bounce rate
-3. Temporal dynamics: week-over-week trend, day-of-week patterns
-4. Navigation: unique URLs, entry/exit patterns
-5. Person properties as features (plan type, signup source)
-6. Feature interactions (domain-specific)
+The agent iterates on this query across experiments — adding features, removing noise, testing different windows. Always add `LIMIT 50000` (HogQL defaults to 100).
 
 ### Phase 4: Training
 
-Write a Python training script and record it as a prediction model run. The script should:
+Write a `train.py` script based on `./references/train.py`. The script should:
 
-1. Accept the feature matrix as CSV/JSON input
-2. Train XGBoost with `scale_pos_weight` for class imbalance
-3. Use time-based cross-validation (3 folds with temporal gap)
-4. Apply isotonic calibration for probability calibration
-5. Evaluate: AUC-ROC (primary), AUC-PR, Brier score
-6. Output metrics and feature importance as JSON
+1. Fetch the training data via `utils.fetch_features()` using the HogQL query
+2. Build an sklearn Pipeline (preprocessing + XGBoost + isotonic calibration)
+3. Stratified train/test split
+4. Evaluate: AUC-ROC (primary), AUC-PR, Brier score
+5. Refit on all data, save `model.pkl` + `metrics.json`
 
-See [training script template](./references/training-script-template.md) for the baseline.
+Record the run:
 
-Upload the trained model artifact and record the run:
-
-1. **Get a presigned upload URL** from the config:
-
-   ```text
-   action-prediction-config-upload-url(config_id=<config_id>, filename="model.pkl")
-   → { url, fields, storage_path }
-   ```
-
-2. **Upload the serialized model** (e.g. pickled XGBoost) to the presigned URL using the returned `url` and `fields`.
-
-3. **Record the run** with `storage_path` as `model_url`:
-
-   ```text
-   action-prediction-model-create(
-     config=<config_id>,
-     is_winning=false,
-     model_url="<storage_path from step 1>",
-     metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
-     feature_importance={"days_since_last_event": 0.15, ...},
-     artifact_script="<the full Python script>"
-   )
-   ```
-
-Every trained model **must** be uploaded to S3 before recording. Never leave `model_url` empty — the artifact is required for scoring.
+```text
+prediction-model-run-create(
+  prediction_model=<model_id>,
+  is_winning=true,
+  model_url="https://placeholder.s3.amazonaws.com/models/<run_id>.pkl",
+  metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
+  feature_importance={"days_since_last_event": 0.15, ...},
+  artifact_scripts={"query": "<HogQL query>", "utils": "<utils.py source>", "train": "<train.py source>", "predict": "<predict.py source>"}
+)
+```
 
 ### Phase 5: Experiment loop (autonomous)
 
-Once the baseline is established, loop autonomously:
+Once the baseline is established, loop autonomously. The single metric is **AUC-ROC on the held-out test set** — higher is better.
 
 ```text
-LOOP (max 10 experiments or 3 consecutive non-improvements):
-  1. Review previous runs — what features/params helped, what didn't
-  2. Formulate hypothesis: new features, hyperparameter change, feature selection
-  3. Modify the feature query and/or training script
-  4. Execute:
-     a. Run feature query via execute-sql
-     b. Run training script
-     c. Upload model artifact to S3 via action-prediction-config-upload-url
-     d. Record run via action-prediction-model-create with the storage_path as model_url
+LOOP (until stopped or diminishing returns):
+  1. Review previous runs — read notes, check what helped, what didn't
+  2. Formulate hypothesis: what change might improve AUC-ROC?
+  3. Modify the HogQL query and/or training script
+  4. Execute train.py (it fetches its own data, records the run)
   5. Compare AUC-ROC to current best:
-     → Improved: mark this run as winning (action-prediction-model-partial-update, is_winning=true)
-     → Equal or worse: leave is_winning=false
-  6. Continue to next experiment
+     → Improved: PATCH model → winning_run = this run
+     → Equal or worse: keep the run recorded but don't update winning_run
+     → Crash: log in notes, fix if easy, skip if fundamental
+  6. Write notes on what you tried and observed
+  7. Continue to next experiment
 ```
+
+**Keep going.** Don't stop after the first improvement. Try to get even better, or see if you can simplify the model without sacrificing performance. If you're stuck, think harder — try combining near-misses, try more radical feature changes, re-examine the data.
+
+**Simplicity criterion**: all else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Removing a feature and getting equal AUC is a win — that's a simpler model. An improvement of ~0 but much simpler code? Keep.
 
 **Experiment ideas** (after baseline):
 
+- Add per-event ratios for top events to the HogQL query
 - Hyperparameter sweep: max_depth ∈ {4,6,8}, learning_rate ∈ {0.05,0.1,0.2}
 - Feature selection: drop features with importance < 0.01
-- Calibration: isotonic vs sigmoid, compare Brier scores
-- More training data: extend observation window from 90d to 180d
+- Add person properties as features
+- Extend observation window from 90d to 180d
+- Try different time windows for frequency features (3d, 14d, 60d)
+- Interaction features in the query (e.g. downloads per session)
 
-### Phase 6: Post-training guardrails
+### Phase 6: Model card
 
-**Run these checks before completing. Do not finish until all pass.**
-
-1. Call `action-prediction-model-list` filtered to this config.
-2. Walk through the table top-to-bottom — stop at the first matching condition:
-
-| #   | Condition                                      | Severity  | Action                                                                                                                     |
-| --- | ---------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| G1  | No models exist for this config                | **Fatal** | Stop. Fail the task with error: "Training produced no models."                                                             |
-| G2  | Models exist but none has `is_winning: true`   | **Steer** | Pick the model with the highest `metrics.auc_roc` and set `is_winning: true` via `action-prediction-model-partial-update`. |
-| G3  | Winning model has empty or missing `model_url` | **Steer** | Re-upload the artifact via `action-prediction-config-upload-url` and update `model_url` on the winning model.              |
-| G4  | Winning model has empty `artifact_script`      | **Steer** | Re-record the training script text on the winning model via `action-prediction-model-partial-update`.                      |
-| G5  | All checks pass                                | **Pass**  | Proceed to model card.                                                                                                     |
-
-After each steer action, re-run all checks from G1.
-If the same guardrail triggers twice consecutively, escalate to fatal.
-
-### Phase 7: Model card
-
-After guardrails pass, produce a summary:
+After the loop, produce a summary:
 
 ```markdown
 ## Model Card: {model_name}
@@ -159,10 +135,22 @@ After guardrails pass, produce a summary:
 - Experiments: {n} run, {n_winning} improvements found
 ```
 
+### Next step: score users
+
+Once a winning model exists, suggest the `predicting-user-actions` skill to score users. It uses the winning run's `artifact_scripts` to fetch fresh data, apply the trained pipeline, and write prediction scores as person properties — making them available in cohorts, feature flags, and experiments.
+
 ## Guardrails
 
-- **Leakage prevention**: always exclude the target event from features; observation window strictly before label window
-- **Calibration**: always apply isotonic calibration
+- **Single metric**: AUC-ROC on the held-out test set. Higher is better. This is the only number that decides keep vs discard.
+- **Simplicity**: all else being equal, simpler is better. Fewer features that achieve the same AUC = better model. Removing complexity for equal performance is a win.
+- **No hardcoding**: reference scripts use `downloaded_file` / 28 days as an example — replace with actual target event and lookback_days.
+- **Leakage prevention**: features from observation window only; target event excluded from feature columns
+- **Calibration**: always isotonic via sklearn Pipeline
 - **Features**: aim for 15-40. More than 50 risks overfitting
 - **Imbalance**: always use `scale_pos_weight`, never downsample
-- **Reproducibility**: seed=42, every experiment recorded as a model run
+- **Base rate awareness**: base rate varies by action. Adjust bucket thresholds accordingly. Always report base rate.
+- **Lab notebook**: every run must include notes — what was tried, what was observed, what to try next. This is the experiment log.
+- **Reproducibility**: seed=42, every run stores query + utils + train + predict in `artifact_scripts`. Fully self-contained.
+- **Crash handling**: if sandbox fails, log in notes, try to fix if it's simple (typo, import), skip if the idea is fundamentally broken.
+- **HogQL**: do not use `currentTeamId()` (MCP scopes automatically), always add `LIMIT 50000`
+- **model_url**: must be a valid `https://` URL, not `s3://`
