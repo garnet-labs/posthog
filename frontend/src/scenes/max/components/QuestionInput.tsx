@@ -6,16 +6,7 @@ import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
 import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
-import {
-    IconArrowRight,
-    IconCheck,
-    IconHeadphones,
-    IconMicrophone,
-    IconPencil,
-    IconStopFilled,
-    IconTrash,
-    IconX,
-} from '@posthog/icons'
+import { IconArrowRight, IconCheck, IconMicrophone, IconPencil, IconStopFilled, IconTrash, IconX } from '@posthog/icons'
 import { LemonButton, LemonSwitch, LemonTextArea, Spinner } from '@posthog/lemon-ui'
 
 import { AIConsentPopoverWrapper } from 'scenes/settings/organization/AIConsentPopoverWrapper'
@@ -472,21 +463,6 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                         disabled={connecting || inputDisabled}
                                     />
                                 </span>
-                                <LemonButton
-                                    data-attr="max-voice-mode-toggle"
-                                    type={voiceModeEnabled ? 'primary' : 'tertiary'}
-                                    size="small"
-                                    icon={<IconHeadphones />}
-                                    onClick={() => {
-                                        if (voiceModeEnabled) {
-                                            exitVoiceMode()
-                                        } else {
-                                            enterVoiceMode(tabId)
-                                        }
-                                    }}
-                                    tooltip={voiceModeEnabled ? 'Exit voice mode' : 'Voice mode'}
-                                    disabled={inputDisabled}
-                                />
                             </>
                         )}
                         <AIConsentPopoverWrapper
@@ -576,9 +552,25 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                     </div>
                 )}
             </div>
-            <p className="w-full flex text-xs text-muted mt-1">
-                <span className="mx-auto">PostHog AI can make mistakes. Please double-check responses.</span>
-            </p>
+            <div className="flex items-center justify-between w-full px-1 mt-1">
+                <p className="flex text-xs text-muted m-0">
+                    PostHog AI can make mistakes. Please double-check responses.
+                </p>
+                <LemonSwitch
+                    data-attr="max-voice-mode-toggle"
+                    checked={voiceModeEnabled}
+                    onChange={(checked) => {
+                        if (checked) {
+                            enterVoiceMode(tabId)
+                        } else {
+                            exitVoiceMode()
+                        }
+                    }}
+                    label="Voice mode"
+                    size="xxsmall"
+                    disabled={inputDisabled}
+                />
+            </div>
         </div>
     )
 })
