@@ -31,7 +31,7 @@ def execute_hogql(query: str) -> pd.DataFrame:
         }
     }
 
-    resp = requests.post(url, json=payload, headers=headers, timeout=120)
+    resp = requests.post(url, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
     data = resp.json()
 

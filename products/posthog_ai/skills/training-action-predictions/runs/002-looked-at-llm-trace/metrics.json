@@ -1,0 +1,39 @@
+{
+    "metrics": {
+        "auc_roc": 0.9477,
+        "auc_pr": 0.8308,
+        "brier": 0.0575,
+        "n_train": 4932,
+        "n_test": 1644,
+        "n_positive": 1096,
+        "n_negative": 5480,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "dashboard_viewed": 0.172,
+        "llm_analytics_usage": 0.1093,
+        "events_30d": 0.1059,
+        "ai_generation_count": 0.0723,
+        "events_total": 0.0638,
+        "llma_clusters_used": 0.0472,
+        "llm_eval_template_selected": 0.0458,
+        "events_7d": 0.0368,
+        "onboarding_completed": 0.0304,
+        "ai_consent_toggled": 0.0301,
+        "user_logged_in": 0.0291,
+        "pageview_ratio": 0.0267,
+        "ai_span_count": 0.026,
+        "insight_viewed": 0.0258,
+        "recording_fetched": 0.0244,
+        "unique_event_types": 0.0226,
+        "autocapture_ratio": 0.0222,
+        "trend_ratio_14d": 0.0211,
+        "setup_tasks_completed": 0.0208,
+        "ai_trace_count": 0.0195,
+        "days_since_last_event": 0.019,
+        "ai_metric_count": 0.016,
+        "ai_evaluation_count": 0.0131
+    }
+}

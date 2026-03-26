@@ -1,0 +1,6 @@
+# Credentials
+.env
+
+# Training artifacts (large binary files)
+*.pkl
+*.parquet
