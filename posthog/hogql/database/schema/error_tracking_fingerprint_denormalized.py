@@ -16,7 +16,7 @@ from posthog.hogql.database.models import (
 )
 from posthog.hogql.errors import ResolutionError
 
-ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED_FIELDS: dict[str, FieldOrTable] = {
+ERROR_TRACKING_FINGERPRINT_DENORMALIZED_FIELDS: dict[str, FieldOrTable] = {
     "team_id": IntegerDatabaseField(name="team_id", nullable=False),
     "fingerprint": StringDatabaseField(name="fingerprint", nullable=False),
     "issue_id": StringDatabaseField(name="issue_id", nullable=False),
@@ -29,7 +29,7 @@ ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED_FIELDS: dict[str, FieldOrTable] = 
 }
 
 
-def join_with_error_tracking_issue_fingerprint_denormalized_table(
+def join_with_error_tracking_fingerprint_denormalized_table(
     join_to_add: LazyJoinToAdd,
     context: HogQLContext,
     node: SelectQuery,
@@ -37,9 +37,9 @@ def join_with_error_tracking_issue_fingerprint_denormalized_table(
     from posthog.hogql import ast
 
     if not join_to_add.fields_accessed:
-        raise ResolutionError("No fields requested from error_tracking_issue_fingerprint_denormalized")
+        raise ResolutionError("No fields requested from error_tracking_fingerprint_denormalized")
     join_expr = ast.JoinExpr(
-        table=select_from_error_tracking_issue_fingerprint_denormalized_table(join_to_add.fields_accessed)
+        table=select_from_error_tracking_fingerprint_denormalized_table(join_to_add.fields_accessed)
     )
     join_expr.join_type = "LEFT OUTER JOIN"
     join_expr.alias = join_to_add.to_table
@@ -54,14 +54,14 @@ def join_with_error_tracking_issue_fingerprint_denormalized_table(
     return join_expr
 
 
-def select_from_error_tracking_issue_fingerprint_denormalized_table(
+def select_from_error_tracking_fingerprint_denormalized_table(
     requested_fields: dict[str, list[str | int]],
 ):
     # Always include issue_id as it's the key used for further joins
     if "issue_id" not in requested_fields:
         requested_fields = {**requested_fields, "issue_id": ["issue_id"]}
     select = argmax_select(
-        table_name="raw_error_tracking_issue_fingerprint_denormalized",
+        table_name="raw_error_tracking_fingerprint_denormalized",
         select_fields=requested_fields,
         group_fields=["fingerprint"],
         argmax_field="version",
@@ -71,22 +71,22 @@ def select_from_error_tracking_issue_fingerprint_denormalized_table(
     return select
 
 
-class RawErrorTrackingIssueFingerprintDenormalizedTable(Table):
+class RawErrorTrackingFingerprintDenormalizedTable(Table):
     fields: dict[str, FieldOrTable] = {
-        **ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED_FIELDS,
+        **ERROR_TRACKING_FINGERPRINT_DENORMALIZED_FIELDS,
         "is_deleted": BooleanDatabaseField(name="is_deleted", nullable=False),
         "version": IntegerDatabaseField(name="version", nullable=False),
     }
 
     def to_printed_clickhouse(self, context):
-        return "error_tracking_issue_fingerprint_denormalized"
+        return "error_tracking_fingerprint_denormalized"
 
     def to_printed_hogql(self):
-        return "raw_error_tracking_issue_fingerprint_denormalized"
+        return "raw_error_tracking_fingerprint_denormalized"
 
 
-class ErrorTrackingIssueFingerprintDenormalizedTable(LazyTable):
-    fields: dict[str, FieldOrTable] = ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED_FIELDS
+class ErrorTrackingFingerprintDenormalizedTable(LazyTable):
+    fields: dict[str, FieldOrTable] = ERROR_TRACKING_FINGERPRINT_DENORMALIZED_FIELDS
 
     def lazy_select(
         self,
@@ -94,10 +94,10 @@ class ErrorTrackingIssueFingerprintDenormalizedTable(LazyTable):
         context: HogQLContext,
         node: SelectQuery,
     ):
-        return select_from_error_tracking_issue_fingerprint_denormalized_table(table_to_add.fields_accessed)
+        return select_from_error_tracking_fingerprint_denormalized_table(table_to_add.fields_accessed)
 
     def to_printed_clickhouse(self, context):
-        return "error_tracking_issue_fingerprint_denormalized"
+        return "error_tracking_fingerprint_denormalized"
 
     def to_printed_hogql(self):
-        return "error_tracking_issue_fingerprint_denormalized"
+        return "error_tracking_fingerprint_denormalized"

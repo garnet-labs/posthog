@@ -66,10 +66,10 @@ from posthog.hogql.database.schema.document_embeddings import (
     DocumentEmbeddingsTable,
     RawDocumentEmbeddingsTable,
 )
-from posthog.hogql.database.schema.error_tracking_issue_fingerprint_denormalized import (
-    ErrorTrackingIssueFingerprintDenormalizedTable,
-    RawErrorTrackingIssueFingerprintDenormalizedTable,
-    join_with_error_tracking_issue_fingerprint_denormalized_table,
+from posthog.hogql.database.schema.error_tracking_fingerprint_denormalized import (
+    ErrorTrackingFingerprintDenormalizedTable,
+    RawErrorTrackingFingerprintDenormalizedTable,
+    join_with_error_tracking_fingerprint_denormalized_table,
 )
 from posthog.hogql.database.schema.error_tracking_issue_fingerprint_overrides import (
     ErrorTrackingIssueFingerprintOverridesTable,
@@ -232,9 +232,9 @@ ROOT_TABLES__DO_NOT_ADD_ANY_MORE: dict[str, TableNode] = {
         name="raw_error_tracking_issue_fingerprint_overrides",
         table=RawErrorTrackingIssueFingerprintOverridesTable(),
     ),
-    "raw_error_tracking_issue_fingerprint_denormalized": TableNode(
-        name="raw_error_tracking_issue_fingerprint_denormalized",
-        table=RawErrorTrackingIssueFingerprintDenormalizedTable(),
+    "raw_error_tracking_fingerprint_denormalized": TableNode(
+        name="raw_error_tracking_fingerprint_denormalized",
+        table=RawErrorTrackingFingerprintDenormalizedTable(),
     ),
     "raw_sessions": TableNode(name="raw_sessions", table=RawSessionsTableV1()),
     "raw_sessions_v3": TableNode(name="raw_sessions_v3", table=RawSessionsTableV3()),
@@ -1428,8 +1428,8 @@ def _use_error_tracking_issue_id_from_error_tracking_issue_overrides(database: D
     # Denormalized issue metadata from the fingerprint denormalized table
     table.fields["exception_issue_denormalized"] = LazyJoin(
         from_field=["fingerprint"],
-        join_table=ErrorTrackingIssueFingerprintDenormalizedTable(),
-        join_function=join_with_error_tracking_issue_fingerprint_denormalized_table,
+        join_table=ErrorTrackingFingerprintDenormalizedTable(),
+        join_function=join_with_error_tracking_fingerprint_denormalized_table,
     )
     table.fields["issue_id_denormalized"] = ExpressionField(
         name="issue_id_denormalized",

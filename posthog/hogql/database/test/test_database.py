@@ -2111,7 +2111,7 @@ class TestDatabase(BaseTest, QueryMatchingTest):
             "raw_cohort_people",
             "raw_person_distinct_id_overrides",
             "raw_error_tracking_issue_fingerprint_overrides",
-            "raw_error_tracking_issue_fingerprint_denormalized",
+            "raw_error_tracking_fingerprint_denormalized",
             "raw_sessions",
             "raw_sessions_v3",
             "raw_query_log",

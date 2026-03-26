@@ -142,10 +142,10 @@
   
   '''
 # ---
-# name: test_create_kafka_table_with_different_kafka_host[kafka_error_tracking_issue_fingerprint_denormalized]
+# name: test_create_kafka_table_with_different_kafka_host[kafka_error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS kafka_error_tracking_issue_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS kafka_error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -159,7 +159,7 @@
       is_deleted Int8,
       version Int64
       
-  ) ENGINE = Kafka(msk_cluster, kafka_topic_list = 'clickhouse_error_tracking_issue_fingerprint_denormalized_test', kafka_group_name = 'clickhouse-error-tracking-issue-fingerprint-denormalized', kafka_format = 'JSONEachRow')
+  ) ENGINE = Kafka(msk_cluster, kafka_topic_list = 'clickhouse_error_tracking_fingerprint_denormalized_test', kafka_group_name = 'clickhouse-error-tracking-fingerprint-denormalized', kafka_format = 'JSONEachRow')
   
   '''
 # ---
@@ -931,10 +931,10 @@
       
   '''
 # ---
-# name: test_create_table_query[error_tracking_issue_fingerprint_denormalized]
+# name: test_create_table_query[error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS error_tracking_issue_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -953,20 +953,20 @@
   , _offset UInt64
   , _partition UInt64
   
-      , INDEX kafka_timestamp_minmax_error_tracking_issue_fingerprint_denormalized _timestamp TYPE minmax GRANULARITY 3
+      , INDEX kafka_timestamp_minmax_error_tracking_fingerprint_denormalized _timestamp TYPE minmax GRANULARITY 3
       
-  ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/77f1df52-4b43-11e9-910f-b8ca3a9b9f3e_noshard/posthog.error_tracking_issue_fingerprint_denormalized', '{replica}-{shard}', version)
+  ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/77f1df52-4b43-11e9-910f-b8ca3a9b9f3e_noshard/posthog.error_tracking_fingerprint_denormalized', '{replica}-{shard}', version)
   
       ORDER BY (team_id, fingerprint)
       SETTINGS index_granularity = 512
       
   '''
 # ---
-# name: test_create_table_query[error_tracking_issue_fingerprint_denormalized_mv]
+# name: test_create_table_query[error_tracking_fingerprint_denormalized_mv]
   '''
   
-  CREATE MATERIALIZED VIEW IF NOT EXISTS error_tracking_issue_fingerprint_denormalized_mv ON CLUSTER 'posthog'
-  TO writable_error_tracking_issue_fingerprint_denormalized
+  CREATE MATERIALIZED VIEW IF NOT EXISTS error_tracking_fingerprint_denormalized_mv ON CLUSTER 'posthog'
+  TO writable_error_tracking_fingerprint_denormalized
   AS SELECT
   team_id,
   fingerprint,
@@ -982,7 +982,7 @@
   _timestamp,
   _offset,
   _partition
-  FROM posthog_test.kafka_error_tracking_issue_fingerprint_denormalized
+  FROM posthog_test.kafka_error_tracking_fingerprint_denormalized
   
   '''
 # ---
@@ -1578,10 +1578,10 @@
   
   '''
 # ---
-# name: test_create_table_query[kafka_error_tracking_issue_fingerprint_denormalized]
+# name: test_create_table_query[kafka_error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS kafka_error_tracking_issue_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS kafka_error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -1595,7 +1595,7 @@
       is_deleted Int8,
       version Int64
       
-  ) ENGINE = Kafka(msk_cluster, kafka_topic_list = 'clickhouse_error_tracking_issue_fingerprint_denormalized_test', kafka_group_name = 'clickhouse-error-tracking-issue-fingerprint-denormalized', kafka_format = 'JSONEachRow')
+  ) ENGINE = Kafka(msk_cluster, kafka_topic_list = 'clickhouse_error_tracking_fingerprint_denormalized_test', kafka_group_name = 'clickhouse-error-tracking-fingerprint-denormalized', kafka_format = 'JSONEachRow')
   
   '''
 # ---
@@ -5221,10 +5221,10 @@
   
   '''
 # ---
-# name: test_create_table_query[writable_error_tracking_issue_fingerprint_denormalized]
+# name: test_create_table_query[writable_error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS writable_error_tracking_issue_fingerprint_denormalized 
+  CREATE TABLE IF NOT EXISTS writable_error_tracking_fingerprint_denormalized 
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -5242,7 +5242,7 @@
   , _offset UInt64
   , _partition UInt64
   
-  ) ENGINE = Distributed('posthog_single_shard', 'posthog_test', 'error_tracking_issue_fingerprint_denormalized')
+  ) ENGINE = Distributed('posthog_single_shard', 'posthog_test', 'error_tracking_fingerprint_denormalized')
   
   '''
 # ---
@@ -6108,10 +6108,10 @@
   
   '''
 # ---
-# name: test_create_table_query_replicated_and_storage[error_tracking_issue_fingerprint_denormalized]
+# name: test_create_table_query_replicated_and_storage[error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS error_tracking_issue_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -6130,9 +6130,9 @@
   , _offset UInt64
   , _partition UInt64
   
-      , INDEX kafka_timestamp_minmax_error_tracking_issue_fingerprint_denormalized _timestamp TYPE minmax GRANULARITY 3
+      , INDEX kafka_timestamp_minmax_error_tracking_fingerprint_denormalized _timestamp TYPE minmax GRANULARITY 3
       
-  ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/77f1df52-4b43-11e9-910f-b8ca3a9b9f3e_noshard/posthog.error_tracking_issue_fingerprint_denormalized', '{replica}-{shard}', version)
+  ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/77f1df52-4b43-11e9-910f-b8ca3a9b9f3e_noshard/posthog.error_tracking_fingerprint_denormalized', '{replica}-{shard}', version)
   
       ORDER BY (team_id, fingerprint)
       SETTINGS index_granularity = 512
