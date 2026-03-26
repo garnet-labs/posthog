@@ -73,6 +73,7 @@ export const productScenes: Record<string, () => Promise<any>> = {
     Game368Hedgehogs: () => import('../../products/games/368Hedgehogs/368Hedgehogs'),
     FlappyHog: () => import('../../products/games/FlappyHog/FlappyHog'),
     ProductTaxonomy: () => import('../../products/hawgs/frontend/ProductTaxonomyScene'),
+    ProductTaxonomySite: () => import('../../products/hawgs/frontend/ProductTaxonomySiteScene'),
     Links: () => import('../../products/links/frontend/LinksScene'),
     Link: () => import('../../products/links/frontend/LinkScene'),
     LiveDebugger: () => import('../../products/live_debugger/frontend/LiveDebugger'),
@@ -147,6 +148,7 @@ export const productRoutes: Record<string, [string, string]> = {
     '/games/368hedgehogs': ['Game368Hedgehogs', 'game368Hedgehogs'],
     '/games/flappyhog': ['FlappyHog', 'flappyHog'],
     '/product_taxonomy': ['ProductTaxonomy', 'productTaxonomy'],
+    '/product_taxonomy/:domain': ['ProductTaxonomySite', 'productTaxonomySite'],
     '/links': ['Links', 'links'],
     '/link/:id': ['Link', 'link'],
     '/live-debugger': ['LiveDebugger', 'liveDebugger'],
@@ -356,6 +358,7 @@ export const productConfiguration: Record<string, any> = {
         description: 'Analyze websites to discover their product and feature taxonomy.',
         iconType: 'apps',
     },
+    ProductTaxonomySite: { name: 'Product taxonomy site', projectBased: true },
     Links: {
         name: 'Links',
         projectBased: true,
@@ -703,6 +706,7 @@ export const productUrls = {
     group: (groupTypeIndex: string | number, groupKey: string, encode: boolean = true, tab?: string | null): string =>
         `/groups/${groupTypeIndex}/${encode ? encodeURIComponent(groupKey) : groupKey}${tab ? `/${tab}` : ''}`,
     productTaxonomy: (): string => '/product_taxonomy',
+    productTaxonomySite: (domain: string): string => `/product_taxonomy/${domain}`,
     links: (): string => '/links',
     link: (id: string): string => `/link/${id}`,
     liveDebugger: (): string => '/live-debugger',
@@ -1546,7 +1550,7 @@ export const getTreeItemsProducts = (): FileSystemImport[] => [
         href: urls.productTaxonomy(),
         iconType: 'apps' as FileSystemIconType,
         sceneKey: 'ProductTaxonomy',
-        sceneKeys: ['ProductTaxonomy'],
+        sceneKeys: ['ProductTaxonomy', 'ProductTaxonomySite'],
     },
     {
         path: 'Product tours',

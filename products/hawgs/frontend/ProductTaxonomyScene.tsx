@@ -1,4 +1,5 @@
 import { useValues } from 'kea'
+import { router } from 'kea-router'
 import { useState } from 'react'
 
 import { LemonModal, LemonTable, LemonTag } from '@posthog/lemon-ui'
@@ -37,6 +38,10 @@ export function ProductTaxonomyScene(): JSX.Element {
             <LemonTable
                 loading={sitesLoading}
                 dataSource={sites}
+                onRow={(site) => ({
+                    onClick: () => router.actions.push(`/product_taxonomy/${site.domain}`),
+                    className: 'cursor-pointer',
+                })}
                 columns={[
                     {
                         title: 'Site',

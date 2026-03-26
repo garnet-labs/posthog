@@ -21,8 +21,74 @@ class AnalyzedSiteSerializer(serializers.Serializer):
     pages_count = serializers.IntegerField()
 
 
+def _build_url_to_taxonomy_map(enriched_file: Path) -> dict[str, list[dict]]:
+    """Build a map from source_url -> list of {type, name} for products and features."""
+    url_map: dict[str, list[dict]] = {}
+    with open(enriched_file) as f:
+        taxonomy = json.load(f)
+    for product in taxonomy.get("products", []):
+        for url in product.get("source_urls", []):
+            url_map.setdefault(url, []).append({"type": "product", "name": product["name"]})
+        for feature in product.get("features", []):
+            for url in feature.get("source_urls", []):
+                url_map.setdefault(url, []).append({"type": "feature", "name": feature["name"]})
+    return url_map
+
+
 class ProductTaxonomyViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     scope_object = "INTERNAL"
+    lookup_value_regex = r"[^/]+"  # allow dots in domain names
+
+    def retrieve(self, request, *args, **kwargs):
+        domain = kwargs.get("pk", "")
+        domain_dir = CRAWL_CACHE_DIR / domain
+
+        if not domain_dir.is_dir():
+            return Response({"detail": "Not found"}, status=404)
+
+        enriched_file = domain_dir / "_enriched_taxonomy.json"
+        if not enriched_file.exists():
+            return Response({"detail": "Not found"}, status=404)
+
+        url_map = _build_url_to_taxonomy_map(enriched_file)
+
+        pages = []
+        for page_file in sorted(domain_dir.iterdir()):
+            if not page_file.suffix == ".json" or page_file.name.startswith("_"):
+                continue
+
+            with open(page_file) as f:
+                page_data = json.load(f)
+
+            metadata = page_data.get("metadata", {})
+            page_url = metadata.get("source_url") or metadata.get("url") or ""
+
+            # Find related products/features via source_url matching
+            related = url_map.get(page_url, [])
+            related_products = sorted({r["name"] for r in related if r["type"] == "product"})
+            related_features = sorted({r["name"] for r in related if r["type"] == "feature"})
+
+            last_updated = None
+            try:
+                mtime = page_file.stat().st_mtime
+                last_updated = datetime.fromtimestamp(mtime, tz=UTC).isoformat()
+            except OSError:
+                pass
+
+            pages.append(
+                {
+                    "url": page_url,
+                    "title": metadata.get("title") or metadata.get("og_title") or page_file.stem,
+                    "description": metadata.get("description") or metadata.get("og_description") or "",
+                    "summary": page_data.get("summary", ""),
+                    "screenshot": page_data.get("screenshot"),
+                    "last_updated": last_updated,
+                    "related_products": related_products,
+                    "related_features": related_features,
+                }
+            )
+
+        return Response({"domain": domain, "pages": pages})
 
     def list(self, request, *args, **kwargs):
         sites = []

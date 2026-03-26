@@ -13,12 +13,19 @@ export const manifest: ProductManifest = {
             description: 'Analyze websites to discover their product and feature taxonomy.',
             iconType: 'apps',
         },
+        ProductTaxonomySite: {
+            name: 'Product taxonomy site',
+            import: () => import('./frontend/ProductTaxonomySiteScene'),
+            projectBased: true,
+        },
     },
     routes: {
         '/product_taxonomy': ['ProductTaxonomy', 'productTaxonomy'],
+        '/product_taxonomy/:domain': ['ProductTaxonomySite', 'productTaxonomySite'],
     },
     urls: {
         productTaxonomy: (): string => '/product_taxonomy',
+        productTaxonomySite: (domain: string): string => `/product_taxonomy/${domain}`,
     },
     treeItemsProducts: [
         {

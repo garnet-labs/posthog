@@ -63,6 +63,7 @@ export enum Scene {
     ExploreSessions = 'ExploreSessions',
     FeatureFlag = 'FeatureFlag',
     ProductTaxonomy = 'ProductTaxonomy',
+    ProductTaxonomySite = 'ProductTaxonomySite',
     FeatureFlags = 'FeatureFlags',
     Game368 = 'Game368',
     Group = 'Group',
