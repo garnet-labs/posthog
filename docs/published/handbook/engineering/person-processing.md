@@ -65,7 +65,7 @@ Events flow through several systems before they're queryable:
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                 │
-│   Ingestion Pipeline (Node.js) - formerly called Plugin Server                                  │
+│   Ingestion Pipeline (Node.js - IngestionGeneralServer)                                         │
 │   - Person processing (creates/updates/merges persons in PostgreSQL)            │
 │   - Property updates ($set, $set_once, $unset)                                  │
 │   - Produces person updates to Kafka                                            │
@@ -123,7 +123,7 @@ Every person has a single UUID, generated deterministically from `(team_id, dist
 ```typescript
 // nodejs/src/worker/ingestion/person-uuid.ts
 function uuidFromDistinctId(teamId: number, distinctId: string): string {
-  return uuidv5(`${teamId}:${distinctId}`, PERSON_UUIDV5_NAMESPACE)
+  return uuidv5(`${teamId}:${distinctId}`, PERSON_UUIDV5_NAMESPACE);
 }
 ```
 
@@ -241,7 +241,7 @@ The Kafka partition key for most events is `<token>:<distinct_id>`:
 
 ### 2. Ingestion pipeline (Node.js)
 
-**Location**: `nodejs/src/worker/ingestion/`
+**Location**: `nodejs/src/worker/ingestion/` (runs in the dedicated `IngestionGeneralServer` defined in `nodejs/src/servers/ingestion-general-server.ts`)
 
 The ingestion pipeline processes events in batches. For person processing:
 
@@ -492,15 +492,16 @@ WHERE team_id = X AND distinct_id = 'anon-123'
 
 ### Ingestion pipeline (Node.js)
 
-| File                                                                                  | Purpose                                         |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `nodejs/src/worker/ingestion/person-uuid.ts`                                          | Deterministic UUID generation                   |
-| `nodejs/src/worker/ingestion/event-pipeline/processPersonsStep.ts`                    | Entry point for person processing               |
-| `nodejs/src/worker/ingestion/event-pipeline/processPersonlessStep.ts`                 | Personless event handling                       |
-| `nodejs/src/worker/ingestion/event-pipeline/processPersonlessDistinctIdsBatchStep.ts` | Batch personless tracking                       |
-| `nodejs/src/worker/ingestion/persons/person-merge-service.ts`                         | Merge/identify handling, override version logic |
-| `nodejs/src/worker/ingestion/persons/person-create-service.ts`                        | Person creation                                 |
-| `nodejs/src/worker/ingestion/persons/repositories/postgres-person-repository.ts`      | PostgreSQL queries for person operations        |
+| File                                                                                  | Purpose                                           |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `nodejs/src/servers/ingestion-general-server.ts`                                      | Dedicated server that runs the ingestion pipeline |
+| `nodejs/src/worker/ingestion/person-uuid.ts`                                          | Deterministic UUID generation                     |
+| `nodejs/src/worker/ingestion/event-pipeline/processPersonsStep.ts`                    | Entry point for person processing                 |
+| `nodejs/src/worker/ingestion/event-pipeline/processPersonlessStep.ts`                 | Personless event handling                         |
+| `nodejs/src/worker/ingestion/event-pipeline/processPersonlessDistinctIdsBatchStep.ts` | Batch personless tracking                         |
+| `nodejs/src/worker/ingestion/persons/person-merge-service.ts`                         | Merge/identify handling, override version logic   |
+| `nodejs/src/worker/ingestion/persons/person-create-service.ts`                        | Person creation                                   |
+| `nodejs/src/worker/ingestion/persons/repositories/postgres-person-repository.ts`      | PostgreSQL queries for person operations          |
 
 ### PostgreSQL schema (Python/Django)
 
