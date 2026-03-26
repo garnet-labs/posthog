@@ -27,9 +27,8 @@ from dagster._core.definitions.backfill_policy import BackfillPolicy
 
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.cluster import Query, get_cluster
-from posthog.clickhouse.query_tagging import Feature, Product, get_query_tags, tag_queries
+from posthog.clickhouse.query_tagging import Feature, Product, tag_queries
 from posthog.dags.common import JobOwners
-from posthog.dags.common.common import dagster_tags
 
 
 class PostgresToClickHouseETLConfig(Config):
@@ -662,7 +661,6 @@ def sync_organizations(
     config: PostgresToClickHouseETLConfig,
 ) -> ETLState:
     """Sync organizations from Postgres to ClickHouse."""
-    get_query_tags().with_dagster(dagster_tags(context))
     tag_queries(product=Product.WAREHOUSE, feature=Feature.DATA_MODELING)
     state = ETLState()
 
@@ -744,7 +742,6 @@ def sync_teams(
     config: PostgresToClickHouseETLConfig,
 ) -> ETLState:
     """Sync teams from Postgres to ClickHouse."""
-    get_query_tags().with_dagster(dagster_tags(context))
     tag_queries(product=Product.WAREHOUSE, feature=Feature.DATA_MODELING)
     state = ETLState()
 
@@ -827,7 +824,6 @@ def verify_sync(
     team_state: ETLState,
 ) -> dict[str, Any]:
     """Verify the sync was successful by checking row counts."""
-    get_query_tags().with_dagster(dagster_tags(context))
     tag_queries(product=Product.WAREHOUSE, feature=Feature.DATA_MODELING)
     # Get counts from ClickHouse
     org_count_result = sync_execute("SELECT count(*) FROM models.posthog_organization")
@@ -891,7 +887,6 @@ def organizations_in_clickhouse(
     context: AssetExecutionContext,
 ) -> None:
     """Asset representing organizations data in ClickHouse."""
-    get_query_tags().with_dagster(dagster_tags(context))
     tag_queries(product=Product.WAREHOUSE, feature=Feature.DATA_MODELING)
     config = PostgresToClickHouseETLConfig(full_refresh=False)
 
@@ -968,7 +963,6 @@ def teams_in_clickhouse(
     context: AssetExecutionContext,
 ) -> None:
     """Asset representing teams data in ClickHouse."""
-    get_query_tags().with_dagster(dagster_tags(context))
     tag_queries(product=Product.WAREHOUSE, feature=Feature.DATA_MODELING)
     config = PostgresToClickHouseETLConfig(full_refresh=False)
 
