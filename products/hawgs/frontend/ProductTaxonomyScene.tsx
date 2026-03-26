@@ -1,6 +1,7 @@
 import { useValues } from 'kea'
+import { useState } from 'react'
 
-import { LemonTable, LemonTag } from '@posthog/lemon-ui'
+import { LemonModal, LemonTable, LemonTag } from '@posthog/lemon-ui'
 
 import { humanFriendlyDetailedTime } from 'lib/utils'
 import { SceneExport } from 'scenes/sceneTypes'
@@ -19,9 +20,15 @@ export const scene: SceneExport = {
 
 export function ProductTaxonomyScene(): JSX.Element {
     const { sites, sitesLoading } = useValues(productTaxonomyLogic)
+    const [screenshotModal, setScreenshotModal] = useState<{ url: string; domain: string } | null>(null)
 
     return (
         <SceneContent>
+            <LemonModal isOpen={!!screenshotModal} onClose={() => setScreenshotModal(null)} simple title="">
+                {screenshotModal && (
+                    <img src={screenshotModal.url} alt={screenshotModal.domain} className="w-full rounded" />
+                )}
+            </LemonModal>
             <SceneTitleSection
                 name="Product taxonomy"
                 description="Analyzed websites and their product/feature taxonomy"
@@ -40,7 +47,10 @@ export function ProductTaxonomyScene(): JSX.Element {
                                     <img
                                         src={site.screenshot}
                                         alt={site.domain}
-                                        className="w-32 h-32 rounded object-cover flex-shrink-0 border"
+                                        className="w-32 h-32 rounded object-cover flex-shrink-0 border cursor-pointer hover:opacity-80 transition-opacity"
+                                        onClick={() =>
+                                            setScreenshotModal({ url: site.screenshot!, domain: site.domain })
+                                        }
                                     />
                                 ) : (
                                     <div className="w-32 h-32 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
