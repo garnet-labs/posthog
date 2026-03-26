@@ -2146,9 +2146,13 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
     afterMount(({ actions, props, values, cache }) => {
         cache.lastSelectedConnectionId = values.selectedConnectionId
 
-        createHogQLParser().then((parser) => {
-            actions.setHogQLParser(parser)
-        })
+        createHogQLParser()
+            .then((parser) => {
+                actions.setHogQLParser(parser)
+            })
+            .catch((error) => {
+                console.warn('[HogQL] Failed to initialise WASM parser, SQL features will be degraded.', error)
+            })
 
         if (
             isEmbeddedSQLEditorMode(props.mode ?? SQLEditorMode.FullScene) &&

@@ -46,14 +46,11 @@ const collectTablesFromJoinExpr = (joinExpr: ASTNode | null): string[] => {
 /** Extract the LIMIT/OFFSET clause string from an AST, or null if absent. */
 const extractLimitOffsetFromAST = (ast: ASTNode): string | null => {
     const parts: string[] = []
-    if (ast.limit != null) {
-        // The limit field is an AST node (e.g. a Constant); extract the raw value
-        const limitVal = ast.limit.value ?? ast.limit
-        parts.push(`LIMIT ${limitVal}`)
+    if (ast.limit != null && ast.limit.node === 'Constant' && ast.limit.value != null) {
+        parts.push(`LIMIT ${ast.limit.value}`)
     }
-    if (ast.offset != null) {
-        const offsetVal = ast.offset.value ?? ast.offset
-        parts.push(`OFFSET ${offsetVal}`)
+    if (ast.offset != null && ast.offset.node === 'Constant' && ast.offset.value != null) {
+        parts.push(`OFFSET ${ast.offset.value}`)
     }
     return parts.length > 0 ? parts.join(' ') : null
 }
