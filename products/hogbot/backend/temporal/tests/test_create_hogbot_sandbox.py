@@ -76,7 +76,7 @@ class TestCreateHogbotSandboxActivity:
             "POSTHOG_PROJECT_ID": "1",
             "GITHUB_TOKEN": "github-token",
         }
-        mock_access_token.assert_called_once_with(fake_user, 1, scopes=["project:write", "project:read", "organization:read", "user:read"])
+        mock_access_token.assert_called_once_with(fake_user, 1, scopes=["*"])
         sandbox.clone_repository.assert_not_called()
         sandbox.execute.assert_not_called()
         assert result.sandbox_id == "sb-1"

@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 
 from django.conf import settings
+
 from temporalio import activity
 
 from posthog.models import Team, User
@@ -15,7 +16,7 @@ from products.tasks.backend.temporal.oauth import create_oauth_access_token_for_
 from products.tasks.backend.temporal.process_task.utils import get_sandbox_api_url
 
 HOGBOT_SANDBOX_TTL_SECONDS = 60 * 60 * 24 * 7
-HOGBOT_API_SCOPES = ["project:write", "project:read", "organization:read", "user:read"]
+HOGBOT_API_SCOPES = ["*"]
 
 logger = logging.getLogger(__name__)
 
