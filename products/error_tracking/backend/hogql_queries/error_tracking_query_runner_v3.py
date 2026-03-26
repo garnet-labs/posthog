@@ -387,10 +387,7 @@ class ErrorTrackingQueryV3Builder:
 
         if operator == PropertyOperator.EXACT:
             raw = value if isinstance(value, list) else [value]
-            values = cast(
-                list[str | float | bool],
-                [v for v in raw if v is not None],
-            )
+            values = [v for v in raw if v is not None]  # type: ignore[list-item]
             if not values:
                 return None
             if len(values) == 1:
@@ -403,10 +400,7 @@ class ErrorTrackingQueryV3Builder:
 
         if operator == PropertyOperator.IS_NOT:
             raw = value if isinstance(value, list) else [value]
-            values = cast(
-                list[str | float | bool],
-                [v for v in raw if v is not None],
-            )
+            values = [v for v in raw if v is not None]  # type: ignore[list-item]
             if not values:
                 return None
             if len(values) == 1:
