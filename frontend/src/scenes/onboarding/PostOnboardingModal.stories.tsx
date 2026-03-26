@@ -68,3 +68,5 @@ Endpoints.args = { productKey: ProductKey.ENDPOINTS }
 
 export const EarlyAccessFeatures: StoryFn<{ productKey: ProductKey }> = Template.bind({})
 EarlyAccessFeatures.args = { productKey: ProductKey.EARLY_ACCESS_FEATURES }
+
+// Trigger snapshot bot to generate missing baseline snapshots for all stories above
