@@ -90,7 +90,10 @@ class ProductTaxonomyViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
                 }
             )
 
-        return Response({"domain": domain, "pages": pages})
+        with open(enriched_file) as f:
+            taxonomy = json.load(f)
+
+        return Response({"domain": domain, "pages": pages, "products": taxonomy.get("products", [])})
 
     def list(self, request, *args, **kwargs):
         sites = []

@@ -1,7 +1,7 @@
 import { useValues } from 'kea'
 import { useState } from 'react'
 
-import { LemonModal, LemonTable, LemonTabs, LemonTag } from '@posthog/lemon-ui'
+import { LemonModal, LemonTable, LemonTabs, LemonTag, Link } from '@posthog/lemon-ui'
 
 import { humanFriendlyDetailedTime } from 'lib/utils'
 import { SceneExport } from 'scenes/sceneTypes'
@@ -9,7 +9,13 @@ import { SceneExport } from 'scenes/sceneTypes'
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 
-import { ProductTaxonomySiteLogicProps, SitePage, productTaxonomySiteLogic } from './productTaxonomySiteLogic'
+import {
+    ProductTaxonomySiteLogicProps,
+    SitePage,
+    TaxonomyFeature,
+    TaxonomyProduct,
+    productTaxonomySiteLogic,
+} from './productTaxonomySiteLogic'
 
 export const scene: SceneExport = {
     component: ProductTaxonomySiteScene,
@@ -126,8 +132,107 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
                     },
                     {
                         key: 'taxonomy',
-                        label: 'Taxonomy',
-                        content: <div className="text-muted p-8 text-center">Taxonomy view coming soon</div>,
+                        label: `Taxonomy${siteDetail ? ` (${siteDetail.products.length} products)` : ''}`,
+                        content: (
+                            <LemonTable
+                                loading={siteDetailLoading}
+                                dataSource={siteDetail?.products ?? []}
+                                columns={[
+                                    {
+                                        title: 'Product',
+                                        width: '15%',
+                                        render: (_: unknown, product: TaxonomyProduct) => (
+                                            <div className="py-1">
+                                                <div className="font-semibold text-sm">{product.name}</div>
+                                                <div className="text-xs text-muted mt-0.5">
+                                                    {product.features.length} features
+                                                </div>
+                                            </div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Description',
+                                        width: '25%',
+                                        render: (_: unknown, product: TaxonomyProduct) => (
+                                            <div className="text-xs text-muted line-clamp-3">{product.description}</div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Code paths',
+                                        width: '35%',
+                                        render: (_: unknown, product: TaxonomyProduct) => (
+                                            <div className="flex flex-col gap-0.5 overflow-hidden">
+                                                {(product.code_paths ?? []).map((p) => (
+                                                    <code key={p} className="font-mono text-[11px] text-muted truncate">
+                                                        {p}
+                                                    </code>
+                                                ))}
+                                            </div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Source URLs',
+                                        width: '25%',
+                                        render: (_: unknown, product: TaxonomyProduct) => (
+                                            <div className="flex flex-col gap-0.5 overflow-hidden">
+                                                {(product.source_urls ?? []).map((url) => (
+                                                    <Link
+                                                        key={url}
+                                                        to={url}
+                                                        target="_blank"
+                                                        className="text-xs truncate"
+                                                    >
+                                                        {url.replace(/^https?:\/\//, '')}
+                                                    </Link>
+                                                ))}
+                                            </div>
+                                        ),
+                                    },
+                                ]}
+                                expandable={{
+                                    expandedRowRender: (product: TaxonomyProduct) => (
+                                        <div className="py-2 px-4">
+                                            {product.features.map((feature: TaxonomyFeature) => (
+                                                <div
+                                                    key={feature.name}
+                                                    className="flex py-3 border-b last:border-b-0 border-border"
+                                                >
+                                                    <div className="w-[15%] flex-shrink-0 pl-2 border-l-2 border-primary">
+                                                        <div className="font-medium text-sm">{feature.name}</div>
+                                                    </div>
+                                                    <div className="w-[25%] flex-shrink-0 text-xs text-muted px-2">
+                                                        {feature.description}
+                                                    </div>
+                                                    <div className="w-[35%] flex-shrink-0 flex flex-col gap-0.5 overflow-hidden px-2">
+                                                        {(feature.code_paths ?? []).map((p) => (
+                                                            <code
+                                                                key={p}
+                                                                className="font-mono text-[11px] text-muted truncate"
+                                                            >
+                                                                {p}
+                                                            </code>
+                                                        ))}
+                                                    </div>
+                                                    <div className="w-[25%] flex-shrink-0 flex flex-col gap-0.5 overflow-hidden px-2">
+                                                        {(feature.source_urls ?? []).map((url) => (
+                                                            <Link
+                                                                key={url}
+                                                                to={url}
+                                                                target="_blank"
+                                                                className="text-xs truncate"
+                                                            >
+                                                                {url.replace(/^https?:\/\//, '')}
+                                                            </Link>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ),
+                                    rowExpandable: (product: TaxonomyProduct) => product.features.length > 0,
+                                }}
+                            />
+                        ),
                     },
                 ]}
             />

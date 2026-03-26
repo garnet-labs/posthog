@@ -19,9 +19,25 @@ export interface SitePage {
     related_features: string[]
 }
 
+export interface TaxonomyFeature {
+    name: string
+    description: string
+    source_urls: string[]
+    code_paths: string[]
+}
+
+export interface TaxonomyProduct {
+    name: string
+    description: string
+    source_urls: string[]
+    code_paths: string[]
+    features: TaxonomyFeature[]
+}
+
 export interface SiteDetail {
     domain: string
     pages: SitePage[]
+    products: TaxonomyProduct[]
 }
 
 export interface ProductTaxonomySiteLogicProps {
