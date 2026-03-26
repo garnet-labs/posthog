@@ -1,0 +1,34 @@
+{
+    "metrics": {
+        "auc_roc": 0.8362,
+        "auc_pr": 0.7454,
+        "brier": 0.1602,
+        "n_train": 37500,
+        "n_test": 12500,
+        "n_positive": 19435,
+        "n_negative": 30565,
+        "neg_ratio": 5.0,
+        "base_rate": 0.3887,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "days_since_last_ui_event": 0.3721,
+        "ui_events_7d": 0.1731,
+        "active_days": 0.0964,
+        "events_total": 0.0394,
+        "ui_events_30d": 0.0351,
+        "ui_trend_14d": 0.0305,
+        "login_count": 0.0255,
+        "ui_trend_week_over_week": 0.0234,
+        "pay_gate_shown": 0.0222,
+        "billing_paid": 0.022,
+        "dashboard_viewed": 0.0211,
+        "recording_viewed": 0.0208,
+        "ui_events_total": 0.0207,
+        "insight_viewed": 0.0203,
+        "team_member_invited": 0.0199,
+        "insight_created": 0.0197,
+        "unique_event_types": 0.0196,
+        "dashboard_created": 0.0181
+    }
+}
