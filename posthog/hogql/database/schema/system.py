@@ -527,6 +527,41 @@ error_tracking_issue_fingerprints: PostgresTable = PostgresTable(
     },
 )
 
+action_prediction_configs: PostgresTable = PostgresTable(
+    name="action_prediction_configs",
+    postgres_table_name="posthog_ai_actionpredictionconfig",
+    fields={
+        "id": StringDatabaseField(name="id"),
+        "team_id": IntegerDatabaseField(name="team_id"),
+        "name": StringDatabaseField(name="name"),
+        "description": StringDatabaseField(name="description"),
+        "action_id": IntegerDatabaseField(name="action_id"),
+        "event_name": StringDatabaseField(name="event_name"),
+        "lookback_days": IntegerDatabaseField(name="lookback_days"),
+        "winning_model_id": StringDatabaseField(name="winning_model_id"),
+        "created_at": DateTimeDatabaseField(name="created_at"),
+        "updated_at": DateTimeDatabaseField(name="updated_at"),
+    },
+)
+
+action_prediction_models: PostgresTable = PostgresTable(
+    name="action_prediction_models",
+    postgres_table_name="posthog_ai_actionpredictionmodel",
+    fields={
+        "id": StringDatabaseField(name="id"),
+        "team_id": IntegerDatabaseField(name="team_id"),
+        "config_id": StringDatabaseField(name="config_id"),
+        "experiment_id": StringDatabaseField(name="experiment_id"),
+        "model_url": StringDatabaseField(name="model_url"),
+        "metrics": StringJSONDatabaseField(name="metrics"),
+        "feature_importance": StringJSONDatabaseField(name="feature_importance"),
+        "artifact_scripts": StringJSONDatabaseField(name="artifact_scripts"),
+        "notes": StringDatabaseField(name="notes"),
+        "created_at": DateTimeDatabaseField(name="created_at"),
+        "updated_at": DateTimeDatabaseField(name="updated_at"),
+    },
+)
+
 early_access_features: PostgresTable = PostgresTable(
     name="early_access_features",
     postgres_table_name="posthog_earlyaccessfeature",
@@ -547,6 +582,8 @@ early_access_features: PostgresTable = PostgresTable(
 class SystemTables(TableNode):
     name: str = "system"
     children: dict[str, TableNode] = {
+        "action_prediction_configs": TableNode(name="action_prediction_configs", table=action_prediction_configs),
+        "action_prediction_models": TableNode(name="action_prediction_models", table=action_prediction_models),
         "activity_logs": TableNode(name="activity_logs", table=activity_logs),
         "actions": TableNode(name="actions", table=actions),
         "alerts": TableNode(name="alerts", table=alerts),
