@@ -245,8 +245,10 @@ export function VoiceMode(): JSX.Element {
         voiceModeEnabled,
         micPermissionDenied,
         mouthOpenness,
+        micMuted,
     } = useValues(voiceLogic)
-    const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown } = useActions(voiceLogic)
+    const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown, muteMic, unmuteMic } =
+        useActions(voiceLogic)
     const orbPressActiveRef = useRef(false)
     const { threadLoading, threadGrouped } = useValues(maxThreadLogic)
 
@@ -277,6 +279,8 @@ export function VoiceMode(): JSX.Element {
         statusText = 'Thinking…'
     } else if (isAiSpeaking) {
         statusText = 'Speaking…'
+    } else if (micMuted) {
+        statusText = 'Muted'
     } else if (recording) {
         statusText = 'Listening…'
     }
@@ -324,7 +328,12 @@ export function VoiceMode(): JSX.Element {
 
     function handleMicToggle(): void {
         if (recording) {
-            stopRecording()
+            // Session is active — toggle mute instead of tearing down
+            if (micMuted) {
+                unmuteMic()
+            } else {
+                muteMic()
+            }
         } else if (canResumeMic && activeTabId) {
             startRecording(activeTabId)
         }
@@ -398,12 +407,12 @@ export function VoiceMode(): JSX.Element {
                 />
                 <LemonButton
                     data-attr="max-voice-mode-mic-toggle"
-                    type={recording ? 'primary' : 'secondary'}
-                    status={recording ? 'default' : 'danger'}
+                    type={recording && !micMuted ? 'primary' : 'secondary'}
+                    status={recording && !micMuted ? 'default' : 'danger'}
                     size="medium"
-                    icon={recording ? <IconMicrophone /> : <IconMicrophoneOff />}
+                    icon={recording && !micMuted ? <IconMicrophone /> : <IconMicrophoneOff />}
                     onClick={handleMicToggle}
-                    tooltip={recording ? 'Mute microphone' : 'Unmute microphone'}
+                    tooltip={recording && !micMuted ? 'Mute microphone' : 'Unmute microphone'}
                     disabledReason={!micToggleable ? 'Microphone unavailable' : undefined}
                 />
             </div>

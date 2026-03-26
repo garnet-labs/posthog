@@ -5,6 +5,7 @@ import { lemonToast } from 'lib/lemon-ui/LemonToast'
 
 import { connectGemini, float32ToPcmBase64 } from './geminiLiveSession'
 import type { GeminiSession } from './geminiLiveSession'
+import { maxLogic } from './maxLogic'
 import type { voiceLogicType } from './voiceLogicType'
 
 const MIC_RATE = 16000
@@ -44,6 +45,8 @@ export const voiceLogic = kea<voiceLogicType>([
         }) => payload,
         playToolCallNarration: (payload: { dedupeKey: string; sentence: string }) => payload,
         enqueueToolWaitFill: true,
+        muteMic: true,
+        unmuteMic: true,
     }),
 
     reducers({
@@ -95,6 +98,16 @@ export const voiceLogic = kea<voiceLogicType>([
                 enterVoiceMode: () => false,
             },
         ],
+        micMuted: [
+            false,
+            {
+                muteMic: () => true,
+                unmuteMic: () => false,
+                stopRecording: () => false,
+                exitVoiceMode: () => false,
+                enterVoiceMode: () => false,
+            },
+        ],
     }),
 
     listeners(({ actions, values, cache }) => ({
@@ -142,6 +155,9 @@ export const voiceLogic = kea<voiceLogicType>([
 
             cache.mediaStream = stream
             cache.errored = false
+            cache.lastNarrationTraceId = null as string | null
+            cache.lastNarrationContent = '' as string
+            cache.pendingTranscription = '' as string
 
             // 4. Connect to Gemini
             const session = connectGemini(token, {
@@ -162,6 +178,14 @@ export const voiceLogic = kea<voiceLogicType>([
                     playChunk(cache, actions, b64)
                 },
                 onTurnComplete() {
+                    // Flush pending user transcription to the agent
+                    clearTimeout(cache.transcriptionDebounce as ReturnType<typeof setTimeout>)
+                    const pending = (cache.pendingTranscription as string).trim()
+                    if (pending) {
+                        cache.pendingTranscription = ''
+                        sendToAgent(pending, values.activeTabId)
+                    }
+
                     setTimeout(() => {
                         const lastAt = (cache.lastPlaybackChunkAt as number | undefined) ?? 0
                         if (performance.now() - lastAt >= 500) {
@@ -174,6 +198,23 @@ export const voiceLogic = kea<voiceLogicType>([
                     flushPlayback(cache)
                     stopVisuals(cache, actions)
                     actions.setPlaybackActive(false)
+                },
+                onInputTranscription(text) {
+                    // Debounce transcription and send to agent after speech pause
+                    const accumulated = ((cache.pendingTranscription as string) || '') + ' ' + text
+                    cache.pendingTranscription = accumulated.trim()
+
+                    clearTimeout(cache.transcriptionDebounce as ReturnType<typeof setTimeout>)
+                    cache.transcriptionDebounce = setTimeout(() => {
+                        const p = (cache.pendingTranscription as string).trim()
+                        if (p) {
+                            cache.pendingTranscription = ''
+                            sendToAgent(p, values.activeTabId)
+                        }
+                    }, 800)
+                },
+                onOutputTranscription() {
+                    // Could display in UI if needed
                 },
                 onError(msg) {
                     cache.errored = true
@@ -196,6 +237,7 @@ export const voiceLogic = kea<voiceLogicType>([
         stopRecording: () => {
             ;(cache.session as GeminiSession | undefined)?.close()
             cache.session = null
+            clearTimeout(cache.transcriptionDebounce as ReturnType<typeof setTimeout>)
 
             cancelAnimationFrame(cache.micRaf as number)
             cache.micRaf = null
@@ -240,12 +282,85 @@ export const voiceLogic = kea<voiceLogicType>([
             cache.orbPointerDown = down
         },
 
-        // Stubs for agent narration — wired up later
+        muteMic: () => {
+            // Disable the mic track so no audio is captured/sent, but keep
+            // the Gemini session alive so it can keep speaking.
+            const stream = cache.mediaStream as MediaStream | undefined
+            if (stream) {
+                for (const track of stream.getAudioTracks()) {
+                    track.enabled = false
+                }
+            }
+            actions.setInputAmplitude(0)
+            actions.setIsSpeaking(false)
+            actions.setMouthOpenness(0)
+            actions.setIsMouthOpen(false)
+        },
+
+        unmuteMic: () => {
+            const stream = cache.mediaStream as MediaStream | undefined
+            if (stream) {
+                for (const track of stream.getAudioTracks()) {
+                    track.enabled = true
+                }
+            }
+        },
+
+        /**
+         * Agent streams assistant text — send directly to Gemini via
+         * toolResponse (NON_BLOCKING, WHEN_IDLE scheduling). Safe to
+         * call at any time without crashing the session.
+         */
+        syncAssistantStreamingTts: ({ traceId, content, isFinal }) => {
+            const session = cache.session as GeminiSession | undefined
+            if (!session?.isOpen()) {
+                return
+            }
+
+            const prevTraceId = cache.lastNarrationTraceId as string | null
+            const prevContent = cache.lastNarrationContent as string
+
+            if (traceId !== prevTraceId) {
+                cache.lastNarrationTraceId = traceId
+                cache.lastNarrationContent = ''
+            }
+
+            const newContent = traceId === prevTraceId ? content.slice(prevContent.length) : content
+            cache.lastNarrationContent = content
+
+            if (newContent.trim()) {
+                const prefix = isFinal ? 'Agent final response' : 'Agent reasoning'
+                session.sendAgentEvent(`${prefix}: ${newContent}`)
+            }
+
+            if (isFinal) {
+                cache.lastNarrationTraceId = null
+                cache.lastNarrationContent = ''
+            }
+        },
+
+        playToolCallNarration: ({ sentence }) => {
+            const session = cache.session as GeminiSession | undefined
+            if (!session?.isOpen()) {
+                return
+            }
+            session.sendAgentEvent(`Agent tool call: ${sentence}`)
+        },
+
+        resetStreamingTtsOffsets: () => {
+            cache.lastNarrationTraceId = null
+            cache.lastNarrationContent = ''
+        },
+
+        enqueueToolWaitFill: () => {
+            const session = cache.session as GeminiSession | undefined
+            if (!session?.isOpen()) {
+                return
+            }
+            session.sendAgentEvent('The agent is still working on the request. Please let the user know.')
+        },
+
         playResponse: () => {},
-        resetStreamingTtsOffsets: () => {},
-        enqueueToolWaitFill: () => {},
-        playToolCallNarration: () => {},
-        syncAssistantStreamingTts: () => {},
 
         setPlaybackActive: ({ active }) => {
             if (!active) {
@@ -262,6 +377,22 @@ export const voiceLogic = kea<voiceLogicType>([
         },
     })),
 ])
+
+// ── Send user transcription to the PostHog agent ──
+
+function sendToAgent(text: string, tabId: string | null): void {
+    if (!tabId || !text.trim()) {
+        return
+    }
+    try {
+        const logic = maxLogic.findMounted({ tabId })
+        if (logic) {
+            logic.actions.askMax(text, true)
+        }
+    } catch {
+        // maxLogic not mounted for this tab
+    }
+}
 
 // ── Mic capture via AudioWorklet ──
 
