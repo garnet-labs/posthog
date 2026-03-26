@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.conf import settings
 
@@ -83,7 +84,6 @@ def start_or_restart_hogbot(
     )
 
 
-
 async def _get_or_start_hogbot(
     *,
     team_id: int,
@@ -115,6 +115,7 @@ async def _get_or_start_hogbot(
                 id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
                 retry_policy=RetryPolicy(maximum_attempts=3),
+                execution_timeout=timedelta(days=7),
             )
         except WorkflowAlreadyStartedError:
             handle = client.get_workflow_handle(hogbot_workflow_id(team_id))
