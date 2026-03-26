@@ -143,17 +143,7 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
     const { dataProcessingAccepted, dataProcessingApprovalDisabledReason } = useValues(maxGlobalLogic)
     const { question, tabId } = useValues(maxLogic)
     const { setQuestion } = useActions(maxLogic)
-    const {
-        recording,
-        connecting,
-        micPermissionDenied,
-        voiceModeEnabled,
-        inputAmplitude,
-        isSpeaking,
-        mouthOpenness,
-        isMouthOpen,
-        silenceMs,
-    } = useValues(voiceLogic)
+    const { recording, connecting, micPermissionDenied, voiceModeEnabled, inputAmplitude } = useValues(voiceLogic)
     const { startRecording, stopRecording, disableVoiceMode, enterVoiceMode, exitVoiceMode } = useActions(voiceLogic)
     const { user } = useValues(userLogic)
     const threadValues = useValues(maxThreadLogic)
@@ -383,40 +373,6 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                             isThreadVisible ? 'bottom-[9px] right-[9px]' : 'bottom-[7px] right-[7px]'
                         )}
                     >
-                        {(recording || connecting) && (
-                            <div className="mr-1 px-1.5 py-1 rounded bg-bg-light border border-primary text-[10px] leading-none tabular-nums text-muted space-y-1">
-                                <div className="flex items-center gap-1.5">
-                                    <span className={isSpeaking ? 'text-danger' : undefined}>
-                                        {isSpeaking ? 'speaking' : 'quiet'}
-                                    </span>
-                                    <span className="text-border">|</span>
-                                    <span className={isMouthOpen ? 'text-danger' : undefined}>
-                                        {isMouthOpen ? 'mouth open' : 'mouth closed'}
-                                    </span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                    <span>amp {inputAmplitude.toFixed(3)}</span>
-                                    <span className="text-border">|</span>
-                                    <span>sil {Math.round(silenceMs)}ms</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                    <span className="text-tertiary">open</span>
-                                    <div className="w-16 h-1.5 rounded bg-border overflow-hidden">
-                                        <div
-                                            className={clsx(
-                                                'h-full',
-                                                isMouthOpen ? 'bg-danger' : 'bg-muted',
-                                                'transition-[width] duration-75 ease-linear'
-                                            )}
-                                            style={{
-                                                width: `${Math.round(Math.max(0, Math.min(1, mouthOpenness)) * 100)}%`,
-                                            }}
-                                        />
-                                    </div>
-                                    <span className="text-tertiary w-8 text-right">{mouthOpenness.toFixed(2)}</span>
-                                </div>
-                            </div>
-                        )}
                         {!showStopButton && (
                             <>
                                 <LemonButton
@@ -427,7 +383,13 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                                         connecting ? (
                                             <Spinner className="text-muted" />
                                         ) : recording ? (
-                                            <IconStopFilled className="text-danger animate-pulse" />
+                                            <IconStopFilled
+                                                className="text-danger transition-transform duration-75 ease-out"
+                                                style={{
+                                                    transform: `scale(${1 + Math.min(inputAmplitude * 8, 0.5)})`,
+                                                    opacity: 0.6 + Math.min(inputAmplitude * 6, 0.4),
+                                                }}
+                                            />
                                         ) : (
                                             <IconMicrophone />
                                         )
