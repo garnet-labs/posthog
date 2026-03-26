@@ -22,7 +22,7 @@ tools:
         description: >
             List all action prediction configs in the current project. Returns name, description, action or event
             reference, lookback period, and creation metadata for each config.
-        mcp_version: 1
+
     action-prediction-config-retrieve:
         operation: action_prediction_configs_retrieve
         enabled: true
@@ -130,7 +130,7 @@ tools:
         description: >
             List trained prediction models, newest first. Returns S3 model URL,
             evaluation metrics, feature importance, artifact scripts, and experiment notes.
-        mcp_version: 1
+
     action-prediction-model-retrieve:
         operation: action_prediction_models_retrieve
         enabled: true
