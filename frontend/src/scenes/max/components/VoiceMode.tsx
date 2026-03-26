@@ -3,10 +3,21 @@ import './VoiceMode.scss'
 import { useActions, useValues } from 'kea'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { IconArrowRight, IconX } from '@posthog/icons'
+import { IconMicrophone, IconX } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { cn } from 'lib/utils/css-classes'
+
+function IconMicrophoneOff(): JSX.Element {
+    return (
+        <span className="relative inline-flex items-center justify-center">
+            <IconMicrophone />
+            <span className="absolute inset-0 flex items-center justify-center">
+                <span className="block w-[120%] h-[1.5px] bg-current rotate-[-45deg] rounded-full" />
+            </span>
+        </span>
+    )
+}
 
 import { Query } from '~/queries/Query/Query'
 import { ArtifactContentType } from '~/queries/schema/schema-assistant-messages'
@@ -16,7 +27,6 @@ import voiceListening from 'public/hedgehog/voice/listening.png'
 import voiceTalking from 'public/hedgehog/voice/talking.gif'
 import voiceThinking from 'public/hedgehog/voice/thinking.gif'
 
-import { maxLogic } from '../maxLogic'
 import { maxThreadLogic, ThreadMessage } from '../maxThreadLogic'
 import { isArtifactMessage, isMultiVisualizationMessage, visualizationTypeToQuery } from '../utils'
 import { voiceLogic } from '../voiceLogic'
@@ -173,11 +183,7 @@ function HedgehogOrb({
             )}
             role={orbInteractable ? 'button' : undefined}
             tabIndex={orbInteractable ? 0 : undefined}
-            aria-label={
-                orbInteractable
-                    ? 'Hold on the hedgehog to keep talking. While Max is speaking, hold to interrupt and speak. Release to send.'
-                    : undefined
-            }
+            aria-label={orbInteractable ? 'Voice mode active' : undefined}
             onPointerDown={orbInteractable ? onPointerDown : undefined}
             onPointerUp={orbInteractable ? onPointerUp : undefined}
             onPointerCancel={orbInteractable ? onPointerCancel : undefined}
@@ -242,9 +248,7 @@ export function VoiceMode(): JSX.Element {
     } = useValues(voiceLogic)
     const { stopRecording, startRecording, stopPlayback, exitVoiceMode, setOrbPointerDown } = useActions(voiceLogic)
     const orbPressActiveRef = useRef(false)
-    const { question } = useValues(maxLogic)
     const { threadLoading, threadGrouped } = useValues(maxThreadLogic)
-    const { askMax } = useActions(maxThreadLogic)
 
     const latestArtifact = useLatestArtifact(threadGrouped)
     // Track the key so we re-trigger the entrance animation when the artifact changes
@@ -271,10 +275,8 @@ export function VoiceMode(): JSX.Element {
         statusText = 'Loading voice…'
     } else if (isThinking) {
         statusText = 'Thinking…'
-    } else if (orbPointerDown) {
-        statusText = 'Release to send…'
     } else if (isAiSpeaking) {
-        statusText = 'Hold to interrupt…'
+        statusText = 'Speaking…'
     } else if (recording) {
         statusText = 'Listening…'
     }
@@ -320,17 +322,15 @@ export function VoiceMode(): JSX.Element {
         !isThinking &&
         !micPermissionDenied
 
-    function handleSend(): void {
+    function handleMicToggle(): void {
         if (recording) {
             stopRecording()
-        } else if (question.trim()) {
-            askMax(question)
         } else if (canResumeMic && activeTabId) {
             startRecording(activeTabId)
         }
     }
 
-    const canSend = recording || question.trim().length > 0 || canResumeMic
+    const micToggleable = recording || canResumeMic
 
     const orbProps = {
         isAiSpeaking,
@@ -397,13 +397,14 @@ export function VoiceMode(): JSX.Element {
                     tooltip="Close voice mode"
                 />
                 <LemonButton
-                    data-attr="max-voice-mode-send"
-                    type="primary"
+                    data-attr="max-voice-mode-mic-toggle"
+                    type={recording ? 'primary' : 'secondary'}
+                    status={recording ? 'default' : 'danger'}
                     size="medium"
-                    icon={<IconArrowRight />}
-                    onClick={handleSend}
-                    tooltip={recording ? 'Stop recording and send' : canResumeMic ? 'Start microphone' : 'Send'}
-                    disabledReason={!canSend ? 'Nothing to send' : undefined}
+                    icon={recording ? <IconMicrophone /> : <IconMicrophoneOff />}
+                    onClick={handleMicToggle}
+                    tooltip={recording ? 'Mute microphone' : 'Unmute microphone'}
+                    disabledReason={!micToggleable ? 'Microphone unavailable' : undefined}
                 />
             </div>
         </div>
