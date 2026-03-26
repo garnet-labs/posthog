@@ -1,7 +1,8 @@
-import { useValues } from 'kea'
+import { BindLogic, useValues } from 'kea'
 
 import { LemonSkeleton } from '@posthog/lemon-ui'
 
+import { batchExportDataLogic } from 'scenes/data-pipelines/batch-exports/batchExportDataLogic'
 import { BatchExportRuns } from 'scenes/data-pipelines/batch-exports/BatchExportRuns'
 
 import { hogFunctionBackfillsLogic, HogFunctionBackfillsLogicProps } from '../backfills/hogFunctionBackfillsLogic'
@@ -21,5 +22,9 @@ export function HogFunctionRuns({ id }: HogFunctionBackfillsLogicProps): JSX.Ele
         )
     }
 
-    return <BatchExportRuns id={configuration.batch_export_id!} context="hog_function" />
+    return (
+        <BindLogic logic={batchExportDataLogic} props={{ id: configuration.batch_export_id! }}>
+            <BatchExportRuns id={configuration.batch_export_id!} context="hog_function" />
+        </BindLogic>
+    )
 }
