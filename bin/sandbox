@@ -357,6 +357,7 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
         "SANDBOX_GID": str(os.getgid()),
         "SANDBOX_WARM_BOOT": os.environ.get("SANDBOX_WARM_BOOT", "0"),
         "SANDBOX_GIT_COMMIT": git_commit,
+        "SANDBOX_CLAUDE_JSON": str(_claude_json) if (_claude_json := Path.home() / ".claude.json").is_file() else "/dev/null",
     }
 
 
@@ -536,7 +537,8 @@ def init_cache_from_master() -> None:
     init_port = 47999
     init_worktree = "/tmp/sandbox-cache-init"
 
-    shutil.rmtree(init_worktree, ignore_errors=True)
+    # Tear down any leftover containers/volumes from a previous interrupted run
+    _init_cache_cleanup(init_port, init_worktree)
 
     run(["git", "fetch", "origin", "master", "--quiet"], capture=True)
     if run(["git", "worktree", "add", "--force", "--detach", init_worktree, "origin/master"], check=False, capture=True).returncode != 0:
