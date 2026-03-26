@@ -910,5 +910,69 @@ describe('annotationsOverlayLogic', () => {
                 },
             })
         })
+
+        it(`with per-data-point ticks, annotations near end of a long weekly range map to the correct week`, async () => {
+            // Regression test: on a 90-day weekly chart, Chart.js autoSkip produces
+            // sparse ticks (e.g. 3 out of 14 data points). With sparse ticks the
+            // modular arithmetic in determineAnnotationsDateGroup could assign an
+            // annotation to an earlier tick's group (e.g. an annotation for Sept 10
+            // appearing at the Aug 14 tick, 4 weeks early). The fix passes all data
+            // point indices as ticks so pointsPerTick=1, avoiding the offset.
+            useInsightMocks('week')
+
+            // 14 weekly dates (Sundays) simulating a ~90-day range
+            const weeklyDates = [
+                '2022-06-05',
+                '2022-06-12',
+                '2022-06-19',
+                '2022-06-26',
+                '2022-07-03',
+                '2022-07-10',
+                '2022-07-17',
+                '2022-07-24',
+                '2022-07-31',
+                '2022-08-07',
+                '2022-08-14',
+                '2022-08-21',
+                '2022-08-28',
+                '2022-09-04',
+            ]
+
+            logic = annotationsOverlayLogic({
+                dashboardItemId: MOCK_INSIGHT_SHORT_ID,
+                insightNumericId: MOCK_INSIGHT_NUMERIC_ID,
+                dates: weeklyDates,
+                // One tick per data point (the fix): pointsPerTick = 1
+                ticks: weeklyDates.map((_, i) => ({ value: i })),
+                dashboardId: MOCK_DASHBOARD_ID,
+            })
+            logic.mount()
+            await expectLogic(annotationsModel).toDispatchActions(['loadAnnotationsSuccess'])
+            await expectLogic(
+                insightLogic({ dashboardItemId: MOCK_INSIGHT_SHORT_ID, dashboardId: MOCK_DASHBOARD_ID })
+            ).toDispatchActions(['loadInsightSuccess'])
+            await expectLogic(logic).toMatchValues({
+                groupedAnnotations: {
+                    // Aug 10 annotations land in the week starting Aug 7 (Sunday)
+                    '2022-08-07 00:00:00+0000': [
+                        MOCK_ANNOTATION_ORG_SCOPED,
+                        MOCK_ANNOTATION_ORG_SCOPED_FROM_INSIGHT_3,
+                        MOCK_ANNOTATION_PROJECT_SCOPED,
+                        MOCK_ANNOTATION_INSIGHT_1_SCOPED,
+                        MOCK_ANNOTATION_PROJECT_SCOPED_FROM_INSIGHT_1,
+                        MOCK_ANNOTATION_DASHBOARD_SCOPED,
+                    ].map((annotation) => deserializeAnnotation(annotation, 'UTC')),
+                    // Aug 17 annotation lands in the week starting Aug 14 (Sunday)
+                    '2022-08-14 00:00:00+0000': [MOCK_ANNOTATION_ORG_SCOPED_FROM_INSIGHT_1].map((annotation) =>
+                        deserializeAnnotation(annotation, 'UTC')
+                    ),
+                    // Sept 10 annotation lands in the week starting Sept 4 (Sunday)
+                    // NOT in Aug 14 which is where it would end up with sparse ticks
+                    '2022-09-04 00:00:00+0000': [MOCK_ANNOTATION_PROJECT_SCOPED_FROM_INSIGHT_3].map((annotation) =>
+                        deserializeAnnotation(annotation, 'UTC')
+                    ),
+                },
+            })
+        })
     })
 })
