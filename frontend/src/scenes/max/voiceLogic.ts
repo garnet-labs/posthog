@@ -637,7 +637,7 @@ export const voiceLogic = kea<voiceLogicType>([
                 audio_format: `pcm_${STT_SAMPLE_RATE}`,
                 // VAD tuning: higher threshold rejects background noise; silence length trades latency vs mid-utterance splits
                 vad_threshold: '0.7',
-                vad_silence_threshold_secs: '0.45',
+                vad_silence_threshold_secs: '0.50',
                 min_speech_duration_ms: '200',
             })
             const ws = new WebSocket(`${ELEVENLABS_WSS}?${params.toString()}`)
