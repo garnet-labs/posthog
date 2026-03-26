@@ -18,6 +18,8 @@ McpScopePreset = Literal["read_only", "full"]
 # excluding OAuth auth scopes (openid, profile, email, introspection).
 MCP_READ_SCOPES: list[str] = [
     "action:read",
+    "action_prediction:read",
+    "action_prediction_model:read",
     "cohort:read",
     "dashboard:read",
     "error_tracking:read",
@@ -40,6 +42,8 @@ MCP_READ_SCOPES: list[str] = [
 
 MCP_WRITE_SCOPES: list[str] = [
     "action:write",
+    "action_prediction:write",
+    "action_prediction_model:write",
     "cohort:write",
     "dashboard:write",
     "error_tracking:write",

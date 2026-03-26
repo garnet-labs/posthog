@@ -129,6 +129,7 @@ class UploadURLResponseSerializer(serializers.Serializer):
 @extend_schema(tags=[ProductKey.MAX])
 class ActionPredictionConfigViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "action_prediction_model"
+    scope_object_write_actions = ["create", "update", "partial_update", "patch", "destroy", "upload_url"]
     queryset = ActionPredictionConfig.objects.select_related("action", "created_by", "task_run").all()
     serializer_class = ActionPredictionConfigSerializer
 

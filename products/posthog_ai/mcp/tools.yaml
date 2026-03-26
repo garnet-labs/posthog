@@ -49,7 +49,11 @@ tools:
         title: Create action prediction config
         description: >
             Create a new action prediction config. Specify either an action ID or an event name (not both), and a
-            lookback period in days.
+            lookback period in days. After creating a config, you must train a model before predictions
+            can be made. Use the training-action-predictions skill to run the full training loop. Training
+            is a multi-step process — do not stop after creating the config. Re-iterate through data
+            discovery, feature engineering, and the experiment loop, then wait until a winning model is
+            recorded before moving on to scoring.
         include_params:
             - name
             - description

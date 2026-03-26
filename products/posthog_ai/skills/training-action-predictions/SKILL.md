@@ -72,18 +72,31 @@ Write a Python training script and record it as a prediction model run. The scri
 
 See [training script template](./references/training-script-template.md) for the baseline.
 
-Record the run:
+Upload the trained model artifact and record the run:
 
-```text
-prediction-model-run-create(
-  prediction_model=<model_id>,
-  is_winning=false,
-  model_url="",           # populated after artifact upload
-  metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
-  feature_importance={"days_since_last_event": 0.15, ...},
-  artifact_script="<the full Python script>"
-)
-```
+1. **Get a presigned upload URL** from the config:
+
+   ```text
+   action-prediction-config-upload-url(config_id=<config_id>, filename="model.pkl")
+   → { url, fields, storage_path }
+   ```
+
+2. **Upload the serialized model** (e.g. pickled XGBoost) to the presigned URL using the returned `url` and `fields`.
+
+3. **Record the run** with `storage_path` as `model_url`:
+
+   ```text
+   action-prediction-model-create(
+     config=<config_id>,
+     is_winning=false,
+     model_url="<storage_path from step 1>",
+     metrics={"auc_roc": 0.72, "auc_pr": 0.19, "brier": 0.08},
+     feature_importance={"days_since_last_event": 0.15, ...},
+     artifact_script="<the full Python script>"
+   )
+   ```
+
+Every trained model **must** be uploaded to S3 before recording. Never leave `model_url` empty — the artifact is required for scoring.
 
 ### Phase 5: Experiment loop (autonomous)
 
@@ -97,9 +110,10 @@ LOOP (max 10 experiments or 3 consecutive non-improvements):
   4. Execute:
      a. Run feature query via execute-sql
      b. Run training script
-     c. Record run via prediction-model-run-create
+     c. Upload model artifact to S3 via action-prediction-config-upload-url
+     d. Record run via action-prediction-model-create with the storage_path as model_url
   5. Compare AUC-ROC to current best:
-     → Improved: mark this run as winning (prediction-model-run-partial-update, is_winning=true)
+     → Improved: mark this run as winning (action-prediction-model-partial-update, is_winning=true)
      → Equal or worse: leave is_winning=false
   6. Continue to next experiment
 ```
@@ -111,9 +125,27 @@ LOOP (max 10 experiments or 3 consecutive non-improvements):
 - Calibration: isotonic vs sigmoid, compare Brier scores
 - More training data: extend observation window from 90d to 180d
 
-### Phase 6: Model card
+### Phase 6: Post-training guardrails
 
-After the loop, produce a summary:
+**Run these checks before completing. Do not finish until all pass.**
+
+1. Call `action-prediction-model-list` filtered to this config.
+2. Walk through the table top-to-bottom — stop at the first matching condition:
+
+| #   | Condition                                      | Severity  | Action                                                                                                                     |
+| --- | ---------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| G1  | No models exist for this config                | **Fatal** | Stop. Fail the task with error: "Training produced no models."                                                             |
+| G2  | Models exist but none has `is_winning: true`   | **Steer** | Pick the model with the highest `metrics.auc_roc` and set `is_winning: true` via `action-prediction-model-partial-update`. |
+| G3  | Winning model has empty or missing `model_url` | **Steer** | Re-upload the artifact via `action-prediction-config-upload-url` and update `model_url` on the winning model.              |
+| G4  | Winning model has empty `artifact_script`      | **Steer** | Re-record the training script text on the winning model via `action-prediction-model-partial-update`.                      |
+| G5  | All checks pass                                | **Pass**  | Proceed to model card.                                                                                                     |
+
+After each steer action, re-run all checks from G1.
+If the same guardrail triggers twice consecutively, escalate to fatal.
+
+### Phase 7: Model card
+
+After guardrails pass, produce a summary:
 
 ```markdown
 ## Model Card: {model_name}

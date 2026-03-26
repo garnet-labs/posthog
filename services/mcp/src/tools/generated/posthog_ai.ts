@@ -10,10 +10,11 @@ import {
     ActionPredictionConfigsPartialUpdateParams,
     ActionPredictionConfigsRetrieveParams,
     ActionPredictionConfigsUploadUrlCreateParams,
-    ActionPredictionModelRunsCreateBody,
-    ActionPredictionModelRunsListQueryParams,
     ActionPredictionModelsCreateBody,
     ActionPredictionModelsListQueryParams,
+    ActionPredictionModelsPartialUpdateBody,
+    ActionPredictionModelsPartialUpdateParams,
+    ActionPredictionModelsRetrieveParams,
 } from '@/generated/posthog_ai/api'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
 
@@ -315,6 +316,7 @@ export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'action-prediction-config-destroy': actionPredictionConfigDestroy,
     'action-prediction-config-upload-url': actionPredictionConfigUploadUrl,
     'action-prediction-model-list': actionPredictionModelList,
+    'action-prediction-model-retrieve': actionPredictionModelRetrieve,
     'action-prediction-model-create': actionPredictionModelCreate,
     'action-prediction-model-partial-update': actionPredictionModelPartialUpdate,
 }

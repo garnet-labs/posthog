@@ -144,7 +144,11 @@ if __name__ == "__main__":
 
 1. Run the feature extraction query via `execute-sql` to get a CSV feature matrix.
 2. Adapt this script (add/remove features, tweak hyperparameters).
-3. Record each experiment as an `action-prediction-model-create` call with:
+3. Upload the serialized model artifact to S3:
+   - Call `action-prediction-config-upload-url(config_id=<config_id>, filename="model.pkl")` to get a presigned URL and `storage_path`
+   - Upload the pickled model to the presigned URL
+4. Record each experiment as an `action-prediction-model-create` call with:
+   - `model_url`: the `storage_path` returned from the upload URL step
    - `artifact_script`: the full Python script text
    - `metrics`: the `metrics` dict from the output
    - `feature_importance`: the `feature_importance` dict from the output
