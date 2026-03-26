@@ -242,10 +242,13 @@ const handleRequest = async (
 
     const version = Number(request.headers.get('x-posthog-mcp-version') || url.searchParams.get('v')) || 1
 
+    const excludeToolsParam = url.searchParams.get('exclude_tools')
+    const excludeTools = excludeToolsParam ? excludeToolsParam.split(',').filter(Boolean) : undefined
+
     const readOnlyRaw = request.headers.get('x-posthog-readonly') || url.searchParams.get('readonly')
     const readOnly = readOnlyRaw === 'true' || readOnlyRaw === '1' || undefined
 
-    const extraContextProps = { features, region: regionParam, version, readOnly }
+    const extraContextProps = { features, excludeTools, region: regionParam, version, readOnly }
     Object.assign(ctx.props, extraContextProps)
     log.extend(extraContextProps)
 

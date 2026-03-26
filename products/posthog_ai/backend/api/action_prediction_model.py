@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db.models import QuerySet
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -9,8 +10,11 @@ from posthog.schema import ProductKey
 
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.shared import UserBasicSerializer
+from posthog.storage import object_storage
 
 from ..models import ActionPredictionModel
+
+PRESIGNED_URL_EXPIRATION_SECONDS = 3600  # 1 hour
 
 
 class _ActionPredictionModelFieldsMixin(serializers.ModelSerializer):
@@ -19,14 +23,41 @@ class _ActionPredictionModelFieldsMixin(serializers.ModelSerializer):
         allow_null=True,
         help_text="User who created this model.",
     )
+    model_url = serializers.CharField(
+        max_length=2000,
+        help_text="S3 storage path to the serialized model artifact. Must be a storage path "
+        "(e.g. from action-prediction-config-upload-url's storage_path field), not a presigned URL.",
+    )
     prediction_status = serializers.SerializerMethodField(
         help_text="Current prediction status: not_started, queued, in_progress, completed, failed, cancelled, or null if no prediction run.",
     )
+    model_download_url = serializers.SerializerMethodField(
+        help_text="Presigned download URL for the model artifact. Docker-accessible in local dev.",
+    )
+
+    def validate_model_url(self, value: str) -> str:
+        if value.startswith(("http://", "https://")):
+            raise serializers.ValidationError(
+                "model_url must be an S3 storage path, not a full URL. "
+                "Use the storage_path returned by action-prediction-config-upload-url."
+            )
+        return value
 
     def get_prediction_status(self, obj: ActionPredictionModel) -> str | None:
         if obj.task_run_id is None:
             return None
         return obj.task_run.status
+
+    def get_model_download_url(self, obj: ActionPredictionModel) -> str | None:
+        if not obj.model_url:
+            return None
+        url = object_storage.get_presigned_url(
+            file_key=obj.model_url,
+            expiration=PRESIGNED_URL_EXPIRATION_SECONDS,
+        )
+        if url and settings.DEBUG:
+            url = url.replace("://localhost:", "://host.docker.internal:")
+        return url
 
 
 class ActionPredictionModelListSerializer(_ActionPredictionModelFieldsMixin):
@@ -37,6 +68,7 @@ class ActionPredictionModelListSerializer(_ActionPredictionModelFieldsMixin):
             "config",
             "experiment_id",
             "model_url",
+            "model_download_url",
             "metrics",
             "task_run",
             "prediction_status",
@@ -44,7 +76,15 @@ class ActionPredictionModelListSerializer(_ActionPredictionModelFieldsMixin):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "task_run", "prediction_status", "created_by", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "model_download_url",
+            "task_run",
+            "prediction_status",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class ActionPredictionModelSerializer(_ActionPredictionModelFieldsMixin):
@@ -55,6 +95,7 @@ class ActionPredictionModelSerializer(_ActionPredictionModelFieldsMixin):
             "config",
             "experiment_id",
             "model_url",
+            "model_download_url",
             "metrics",
             "feature_importance",
             "artifact_scripts",
@@ -65,7 +106,15 @@ class ActionPredictionModelSerializer(_ActionPredictionModelFieldsMixin):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "task_run", "prediction_status", "created_by", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "model_download_url",
+            "task_run",
+            "prediction_status",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class PredictRequestSerializer(serializers.Serializer):
@@ -148,7 +197,9 @@ class ActionPredictionModelViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet
             f"for config {config.id}. The model's artifact_scripts contain the predict script, "
             f"utils, and query needed for scoring. Load the winning model, adapt the training "
             f"query for scoring (T=now(), no label column), run the prediction, and write "
-            f"results as person properties and $ai_prediction events."
+            f"results as person properties and $ai_prediction events. Before running the prediction, you must use query-examples skill to get the query examples. Optionally, read the training-action-predictions skill to get the training scripts examples."
+            f" To download the model artifact, retrieve the model via action-prediction-model-retrieve"
+            f" and use the model_download_url field (a fresh presigned URL)."
             f"\n\nAdditional instructions: {prompt}"
         )
 

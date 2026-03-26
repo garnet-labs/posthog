@@ -157,8 +157,10 @@ tools:
         enrich_url: '{id}'
         title: Create prediction model
         description: >
-            Record a new trained prediction model. Provide the parent config ID, S3 model URL,
-            evaluation metrics, feature importance scores, and artifact scripts.
+            Record a new trained prediction model. Provide the parent config ID, S3 storage path
+            (from action-prediction-config-upload-url's storage_path field, NOT the presigned URL),
+            evaluation metrics, feature importance scores, and artifact scripts. The model_download_url
+            field in the response provides a fresh presigned download URL.
         include_params:
             - config
             - experiment_id

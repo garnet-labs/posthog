@@ -41,6 +41,7 @@ export type RequestProperties = {
     organizationId?: string
     projectId?: string
     clientUserAgent?: string
+    excludeTools?: string[]
     readOnly?: boolean
     transport?: 'streamable-http' | 'sse'
 }
@@ -412,7 +413,14 @@ export class MCP extends McpAgent<Env> {
     }
 
     async init(): Promise<void> {
-        const { features, version, organizationId, projectId, readOnly } = this.requestProperties
+        const {
+            features,
+            version,
+            organizationId,
+            projectId,
+            excludeTools: requestExcludeTools,
+            readOnly,
+        } = this.requestProperties
         const instructions = version === 2 ? INSTRUCTIONS_V2 : INSTRUCTIONS_TEMPLATE_V1
         this.server = new McpServer({ name: 'PostHog', version: '1.0.0' }, { instructions })
 
@@ -426,7 +434,8 @@ export class MCP extends McpAgent<Env> {
 
         // When project ID is provided, both switch tools are removed (project implies org).
         // When only organization ID is provided, only switch-organization is removed.
-        const excludeTools: string[] = []
+        // URL-level exclude_tools are merged in for sandbox use cases.
+        const excludeTools: string[] = [...(requestExcludeTools ?? [])]
         if (projectId) {
             excludeTools.push('switch-organization', 'switch-project')
         } else if (organizationId) {

@@ -65,6 +65,8 @@ def get_sandbox_mcp_configs(
     if local_url:
         if has_prod:
             local_url = _append_query_param(local_url, "features", "action_prediction_models")
+        # Prevent recursive sandbox creation — sandboxed agents must not spawn new tasks.
+        local_url = _append_query_param(local_url, "exclude_tools", "action-prediction-model-predict")
         configs.append(
             McpServerConfig(
                 type="http",

@@ -32,7 +32,7 @@ class TestActionPredictionModelAPI(APIBaseTest):
     def _create_model(self, **overrides):
         defaults = {
             "config": str(self.config.id),
-            "model_url": "https://s3.amazonaws.com/bucket/model.pkl",
+            "model_url": "tasks/prediction_models/1/abc/12345678_model.pkl",
             "metrics": {"accuracy": 0.95, "auc": 0.87},
             "feature_importance": {"feature_a": 0.8, "feature_b": 0.2},
             "artifact_scripts": {"query": "SELECT 1", "train": "import sklearn"},
@@ -44,7 +44,7 @@ class TestActionPredictionModelAPI(APIBaseTest):
         response = self._create_model()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         data = response.json()
-        self.assertEqual(data["model_url"], "https://s3.amazonaws.com/bucket/model.pkl")
+        self.assertEqual(data["model_url"], "tasks/prediction_models/1/abc/12345678_model.pkl")
         self.assertEqual(data["metrics"]["accuracy"], 0.95)
         self.assertEqual(data["feature_importance"]["feature_a"], 0.8)
         self.assertEqual(data["artifact_scripts"]["query"], "SELECT 1")
@@ -53,15 +53,15 @@ class TestActionPredictionModelAPI(APIBaseTest):
 
     def test_list(self):
         self._create_model()
-        self._create_model(model_url="https://s3.amazonaws.com/bucket/model2.pkl")
+        self._create_model(model_url="tasks/prediction_models/1/abc/12345678_model2.pkl")
 
         response = self.client.get(self._url())
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["count"], 2)
 
     def test_list_ordered_by_newest_first(self):
-        resp1 = self._create_model(model_url="https://s3.amazonaws.com/bucket/first.pkl")
-        resp2 = self._create_model(model_url="https://s3.amazonaws.com/bucket/second.pkl")
+        resp1 = self._create_model(model_url="tasks/prediction_models/1/abc/first.pkl")
+        resp2 = self._create_model(model_url="tasks/prediction_models/1/abc/second.pkl")
 
         response = self.client.get(self._url())
         results = response.json()["results"]
