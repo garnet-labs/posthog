@@ -1105,6 +1105,21 @@ def parser_test_factory(backend: HogQLParserBackend):
                 ),
             )
             self.assertEqual(
+                self._select("select count(*)::int as num_events from active_events"),
+                ast.SelectQuery(
+                    select=[
+                        ast.Alias(
+                            alias="num_events",
+                            expr=ast.TypeCast(
+                                expr=ast.Call(name="count", args=[ast.Field(chain=["*"])]),
+                                type_name="int",
+                            ),
+                        )
+                    ],
+                    select_from=ast.JoinExpr(table=ast.Field(chain=["active_events"])),
+                ),
+            )
+            self.assertEqual(
                 self._select("select 1 from events as e"),
                 ast.SelectQuery(
                     select=[ast.Constant(value=1)],
@@ -1572,6 +1587,100 @@ def parser_test_factory(backend: HogQLParserBackend):
                     group_by_mode="all",
                 ),
             )
+
+        @parameterized.expand(
+            [
+                (
+                    "count_cast_with_as",
+                    "select count(*)::int as num_events from active_events",
+                    ast.SelectQuery(
+                        select=[
+                            ast.Alias(
+                                alias="num_events",
+                                expr=ast.TypeCast(
+                                    expr=ast.Call(name="count", args=[ast.Field(chain=["*"])]),
+                                    type_name="int",
+                                ),
+                            )
+                        ],
+                        select_from=ast.JoinExpr(table=ast.Field(chain=["active_events"])),
+                    ),
+                ),
+                (
+                    "paren_count_cast_without_as",
+                    "select (count(*))::int num_events from active_events",
+                    ast.SelectQuery(
+                        select=[
+                            ast.Alias(
+                                alias="num_events",
+                                expr=ast.TypeCast(
+                                    expr=ast.Call(name="count", args=[ast.Field(chain=["*"])]),
+                                    type_name="int",
+                                ),
+                            )
+                        ],
+                        select_from=ast.JoinExpr(table=ast.Field(chain=["active_events"])),
+                    ),
+                ),
+                (
+                    "qualified_field_cast",
+                    "select e.event::text as event_name from events e",
+                    ast.SelectQuery(
+                        select=[
+                            ast.Alias(
+                                alias="event_name",
+                                expr=ast.TypeCast(expr=ast.Field(chain=["e", "event"]), type_name="text"),
+                            )
+                        ],
+                        select_from=ast.JoinExpr(table=ast.Field(chain=["events"]), alias="e"),
+                    ),
+                ),
+                (
+                    "compound_type_cast",
+                    "select now()::timestamp with time zone as ts from events",
+                    ast.SelectQuery(
+                        select=[
+                            ast.Alias(
+                                alias="ts",
+                                expr=ast.TypeCast(
+                                    expr=ast.Call(name="now", args=[]),
+                                    type_name="timestamp with time zone",
+                                ),
+                            )
+                        ],
+                        select_from=ast.JoinExpr(table=ast.Field(chain=["events"])),
+                    ),
+                ),
+                (
+                    "interval_cast",
+                    "select 1::interval as i from events",
+                    ast.SelectQuery(
+                        select=[
+                            ast.Alias(
+                                alias="i",
+                                expr=ast.TypeCast(expr=ast.Constant(value=1), type_name="interval"),
+                            )
+                        ],
+                        select_from=ast.JoinExpr(table=ast.Field(chain=["events"])),
+                    ),
+                ),
+                (
+                    "literal_cast",
+                    "select '123'::int as x from events",
+                    ast.SelectQuery(
+                        select=[
+                            ast.Alias(
+                                alias="x",
+                                expr=ast.TypeCast(expr=ast.Constant(value="123"), type_name="int"),
+                            )
+                        ],
+                        select_from=ast.JoinExpr(table=ast.Field(chain=["events"])),
+                    ),
+                ),
+            ]
+        )
+        def test_type_cast_alias_parsing(self, _, query, expected):
+            self.assertEqual(self._select(query), expected)
 
         def test_order_by(self):
             self.assertEqual(

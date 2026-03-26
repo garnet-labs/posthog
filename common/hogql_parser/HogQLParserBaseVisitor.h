@@ -343,11 +343,19 @@ public:
     return visitChildren(ctx);
   }
 
-  virtual std::any visitColumnTypeCastExprCompound(HogQLParser::ColumnTypeCastExprCompoundContext *ctx) override {
+  virtual std::any visitColumnTypeCastExprWithTimeZone(HogQLParser::ColumnTypeCastExprWithTimeZoneContext *ctx) override {
     return visitChildren(ctx);
   }
 
   virtual std::any visitColumnTypeCastExprSimple(HogQLParser::ColumnTypeCastExprSimpleContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitColumnTypeCastIdentifier(HogQLParser::ColumnTypeCastIdentifierContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitKeywordForTypeCast(HogQLParser::KeywordForTypeCastContext *ctx) override {
     return visitChildren(ctx);
   }
 
@@ -360,6 +368,10 @@ public:
   }
 
   virtual std::any visitColumnExprAliasBefore(HogQLParser::ColumnExprAliasBeforeContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitColumnExprAliasImplicit(HogQLParser::ColumnExprAliasImplicitContext *ctx) override {
     return visitChildren(ctx);
   }
 

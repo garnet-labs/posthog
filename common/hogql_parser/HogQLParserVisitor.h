@@ -183,15 +183,21 @@ public:
 
     virtual std::any visitColumnTypeExprCompound(HogQLParser::ColumnTypeExprCompoundContext *context) = 0;
 
-    virtual std::any visitColumnTypeCastExprCompound(HogQLParser::ColumnTypeCastExprCompoundContext *context) = 0;
+    virtual std::any visitColumnTypeCastExprWithTimeZone(HogQLParser::ColumnTypeCastExprWithTimeZoneContext *context) = 0;
 
     virtual std::any visitColumnTypeCastExprSimple(HogQLParser::ColumnTypeCastExprSimpleContext *context) = 0;
+
+    virtual std::any visitColumnTypeCastIdentifier(HogQLParser::ColumnTypeCastIdentifierContext *context) = 0;
+
+    virtual std::any visitKeywordForTypeCast(HogQLParser::KeywordForTypeCastContext *context) = 0;
 
     virtual std::any visitColumnExprList(HogQLParser::ColumnExprListContext *context) = 0;
 
     virtual std::any visitSelectColumnExprList(HogQLParser::SelectColumnExprListContext *context) = 0;
 
     virtual std::any visitColumnExprAliasBefore(HogQLParser::ColumnExprAliasBeforeContext *context) = 0;
+
+    virtual std::any visitColumnExprAliasImplicit(HogQLParser::ColumnExprAliasImplicitContext *context) = 0;
 
     virtual std::any visitColumnExprSelectValue(HogQLParser::ColumnExprSelectValueContext *context) = 0;
 

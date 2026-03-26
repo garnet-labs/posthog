@@ -886,6 +886,15 @@ class HogQLParseTreeConverter(ParseTreeVisitor):
 
         return ast.Alias(expr=expr, alias=alias)
 
+    def visitColumnExprAliasImplicit(self, ctx: HogQLParser.ColumnExprAliasImplicitContext):
+        alias = self.visit(ctx.alias())
+        expr = self.visit(ctx.columnExpr())
+
+        if alias.lower() in RESERVED_KEYWORDS:
+            raise SyntaxError(f'"{alias}" cannot be an alias or identifier, as it\'s a reserved keyword')
+
+        return ast.Alias(expr=expr, alias=alias)
+
     def visitColumnExprNegate(self, ctx: HogQLParser.ColumnExprNegateContext):
         return ast.ArithmeticOperation(
             op=ast.ArithmeticOperationOp.Sub,
@@ -1129,10 +1138,25 @@ class HogQLParseTreeConverter(ParseTreeVisitor):
         return ast.TypeCast(expr=self.visit(ctx.columnExpr()), type_name=type_name.lower())
 
     def visitColumnTypeCastExprSimple(self, ctx: HogQLParser.ColumnTypeCastExprSimpleContext):
-        return self.visit(ctx.identifier())
+        return self.visit(ctx.columnTypeCastIdentifier())
 
-    def visitColumnTypeCastExprCompound(self, ctx: HogQLParser.ColumnTypeCastExprCompoundContext):
-        return " ".join(self.visit(ident) for ident in ctx.identifier())
+    def visitColumnTypeCastExprWithTimeZone(self, ctx: HogQLParser.ColumnTypeCastExprWithTimeZoneContext):
+        parts = [
+            self.visit(ctx.columnTypeCastIdentifier()),
+            "with",
+        ]
+        if ctx.LOCAL():
+            parts.append("local")
+        parts.extend(["time", "zone"])
+        return " ".join(parts)
+
+    def visitColumnTypeCastIdentifier(self, ctx: HogQLParser.ColumnTypeCastIdentifierContext):
+        text = ctx.getText()
+        if len(text) >= 2 and (
+            (text.startswith("`") and text.endswith("`")) or (text.startswith('"') and text.endswith('"'))
+        ):
+            text = parse_string_literal_text(text)
+        return text
 
     def visitColumnExprBetween(self, ctx: HogQLParser.ColumnExprBetweenContext):
         expr = self.visit(ctx.columnExpr(0))

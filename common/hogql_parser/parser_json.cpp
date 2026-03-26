@@ -1493,6 +1493,21 @@ class HogQLParseTreeJSONConverter : public HogQLParserBaseVisitor {
     return json;
   }
 
+  VISIT(ColumnExprAliasImplicit) {
+    string alias = visitAsString(ctx->alias());
+
+    if (find(RESERVED_KEYWORDS.begin(), RESERVED_KEYWORDS.end(), to_lower_copy(alias)) != RESERVED_KEYWORDS.end()) {
+      throw SyntaxError("\"" + alias + "\" cannot be an alias or identifier, as it's a reserved keyword");
+    }
+
+    Json json = Json::object();
+    json["node"] = "Alias";
+    if (!is_internal) addPositionInfo(json, ctx);
+    json["expr"] = visitAsJSON(ctx->columnExpr());
+    json["alias"] = alias;
+    return json;
+  }
+
   VISIT(ColumnExprNegate) {
     Json json = Json::object();
     json["node"] = "ArithmeticOperation";
@@ -1907,15 +1922,16 @@ class HogQLParseTreeJSONConverter : public HogQLParserBaseVisitor {
   }
 
   VISIT(ColumnTypeCastExprSimple) {
-    return Json(to_lower_copy(visitAsString(ctx->identifier())));
+    return Json(to_lower_copy(visitAsString(ctx->columnTypeCastIdentifier())));
   }
 
-  VISIT(ColumnTypeCastExprCompound) {
-    string result;
-    for (auto ident : ctx->identifier()) {
-      if (!result.empty()) result += " ";
-      result += visitAsString(ident);
+  VISIT(ColumnTypeCastExprWithTimeZone) {
+    string result = visitAsString(ctx->columnTypeCastIdentifier());
+    result += " with ";
+    if (ctx->LOCAL()) {
+      result += "local ";
     }
+    result += "time zone";
     return Json(to_lower_copy(result));
   }
 
@@ -2801,15 +2817,31 @@ class HogQLParseTreeJSONConverter : public HogQLParserBaseVisitor {
 
   VISIT_UNSUPPORTED(KeywordForAlias)
 
-  VISIT(Alias) {
+  VISIT(Identifier) {
     string text = ctx->getText();
-    if (find(RESERVED_KEYWORDS.begin(), RESERVED_KEYWORDS.end(), to_lower_copy(text)) != RESERVED_KEYWORDS.end()) {
-      throw SyntaxError("ALIAS is a reserved keyword");
+    if (text.size() >= 2) {
+      char first_char = text.front();
+      char last_char = text.back();
+      if ((first_char == '`' && last_char == '`') || (first_char == '"' && last_char == '"')) {
+        return parse_string_literal_text(text);
+      }
     }
     return text;
   }
 
-  VISIT(Identifier) {
+  VISIT(ColumnTypeCastIdentifier) {
+    string text = ctx->getText();
+    if (text.size() >= 2) {
+      char first_char = text.front();
+      char last_char = text.back();
+      if ((first_char == '`' && last_char == '`') || (first_char == '"' && last_char == '"')) {
+        return parse_string_literal_text(text);
+      }
+    }
+    return text;
+  }
+
+  VISIT(Alias) {
     string text = ctx->getText();
     if (text.size() >= 2) {
       char first_char = text.front();

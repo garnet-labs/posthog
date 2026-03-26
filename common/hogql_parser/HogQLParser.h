@@ -29,26 +29,26 @@ public:
     RANGE = 87, RECURSIVE = 88, REPLACE = 89, RETURN = 90, RIGHT = 91, ROLLUP = 92, 
     ROW = 93, ROWS = 94, SAMPLE = 95, SECOND = 96, SELECT = 97, SEMI = 98, 
     SETS = 99, SETTINGS = 100, SUBSTRING = 101, THEN = 102, THROW = 103, 
-    TIES = 104, TIMESTAMP = 105, TO = 106, TOP = 107, TOTALS = 108, TRAILING = 109, 
-    TRIM = 110, TRUNCATE = 111, TRY = 112, TRY_CAST = 113, UNBOUNDED = 114, 
-    UNION = 115, UNPIVOT = 116, USING = 117, VALUES = 118, WEEK = 119, WHEN = 120, 
-    WHERE = 121, WHILE = 122, WINDOW = 123, WITH = 124, WITHIN = 125, YEAR = 126, 
-    ESCAPE_CHAR_COMMON = 127, IDENTIFIER = 128, FLOATING_LITERAL = 129, 
-    OCTAL_LITERAL = 130, DECIMAL_LITERAL = 131, HEXADECIMAL_LITERAL = 132, 
-    STRING_LITERAL = 133, ARROW = 134, ASTERISK = 135, BACKQUOTE = 136, 
-    BACKSLASH = 137, DOUBLECOLON = 138, COLONEQUALS = 139, COLON = 140, 
-    COMMA = 141, CONCAT = 142, DASH = 143, DOLLAR = 144, DOT = 145, EQ_DOUBLE = 146, 
-    EQ_SINGLE = 147, GT_EQ = 148, GT = 149, HASH = 150, IREGEX_SINGLE = 151, 
-    IREGEX_DOUBLE = 152, LBRACE = 153, LBRACKET = 154, LPAREN = 155, LT_EQ = 156, 
-    LT = 157, LT_SLASH = 158, NOT_EQ = 159, NOT_IREGEX = 160, NOT_REGEX = 161, 
-    NULL_PROPERTY = 162, NULLISH = 163, PERCENT = 164, PLUS = 165, QUERY = 166, 
-    QUOTE_DOUBLE = 167, QUOTE_SINGLE_TEMPLATE = 168, QUOTE_SINGLE_TEMPLATE_FULL = 169, 
-    QUOTE_SINGLE = 170, REGEX_SINGLE = 171, REGEX_DOUBLE = 172, RBRACE = 173, 
-    RBRACKET = 174, RPAREN = 175, SEMICOLON = 176, SLASH = 177, SLASH_GT = 178, 
-    UNDERSCORE = 179, MULTI_LINE_COMMENT = 180, SINGLE_LINE_COMMENT = 181, 
-    WHITESPACE = 182, STRING_TEXT = 183, STRING_ESCAPE_TRIGGER = 184, FULL_STRING_TEXT = 185, 
-    FULL_STRING_ESCAPE_TRIGGER = 186, TAG_WS = 187, TAGC_WS = 188, HOGQLX_TEXT_TEXT = 189, 
-    HOGQLX_TEXT_WS = 190
+    TIES = 104, TIMESTAMP = 105, TIME = 106, LOCAL = 107, ZONE = 108, TO = 109, 
+    TOP = 110, TOTALS = 111, TRAILING = 112, TRIM = 113, TRUNCATE = 114, 
+    TRY = 115, TRY_CAST = 116, UNBOUNDED = 117, UNION = 118, UNPIVOT = 119, 
+    USING = 120, VALUES = 121, WEEK = 122, WHEN = 123, WHERE = 124, WHILE = 125, 
+    WINDOW = 126, WITH = 127, WITHIN = 128, YEAR = 129, ESCAPE_CHAR_COMMON = 130, 
+    IDENTIFIER = 131, FLOATING_LITERAL = 132, OCTAL_LITERAL = 133, DECIMAL_LITERAL = 134, 
+    HEXADECIMAL_LITERAL = 135, STRING_LITERAL = 136, ARROW = 137, ASTERISK = 138, 
+    BACKQUOTE = 139, BACKSLASH = 140, DOUBLECOLON = 141, COLONEQUALS = 142, 
+    COLON = 143, COMMA = 144, CONCAT = 145, DASH = 146, DOLLAR = 147, DOT = 148, 
+    EQ_DOUBLE = 149, EQ_SINGLE = 150, GT_EQ = 151, GT = 152, HASH = 153, 
+    IREGEX_SINGLE = 154, IREGEX_DOUBLE = 155, LBRACE = 156, LBRACKET = 157, 
+    LPAREN = 158, LT_EQ = 159, LT = 160, LT_SLASH = 161, NOT_EQ = 162, NOT_IREGEX = 163, 
+    NOT_REGEX = 164, NULL_PROPERTY = 165, NULLISH = 166, PERCENT = 167, 
+    PLUS = 168, QUERY = 169, QUOTE_DOUBLE = 170, QUOTE_SINGLE_TEMPLATE = 171, 
+    QUOTE_SINGLE_TEMPLATE_FULL = 172, QUOTE_SINGLE = 173, REGEX_SINGLE = 174, 
+    REGEX_DOUBLE = 175, RBRACE = 176, RBRACKET = 177, RPAREN = 178, SEMICOLON = 179, 
+    SLASH = 180, SLASH_GT = 181, UNDERSCORE = 182, MULTI_LINE_COMMENT = 183, 
+    SINGLE_LINE_COMMENT = 184, WHITESPACE = 185, STRING_TEXT = 186, STRING_ESCAPE_TRIGGER = 187, 
+    FULL_STRING_TEXT = 188, FULL_STRING_ESCAPE_TRIGGER = 189, TAG_WS = 190, 
+    TAGC_WS = 191, HOGQLX_TEXT_TEXT = 192, HOGQLX_TEXT_WS = 193
   };
 
   enum {
@@ -72,20 +72,20 @@ public:
     RuleWinPartitionByClause = 59, RuleWinOrderByClause = 60, RuleWithinGroupClause = 61, 
     RuleWinFrameClause = 62, RuleWinFrameExtend = 63, RuleWinFrameBound = 64, 
     RuleExpr = 65, RuleColumnTypeExpr = 66, RuleColumnTypeCastExpr = 67, 
-    RuleColumnExprList = 68, RuleSelectColumnExprList = 69, RuleSelectColumnExpr = 70, 
-    RuleColumnExpr = 71, RuleColumnLambdaExpr = 72, RuleColumnsReplaceList = 73, 
-    RuleColumnsReplaceItem = 74, RuleHogqlxChildElement = 75, RuleHogqlxText = 76, 
-    RuleHogqlxTagElement = 77, RuleHogqlxTagAttribute = 78, RuleWithExprList = 79, 
-    RuleWithExpr = 80, RuleWithExprColumnNameList = 81, RuleColumnIdentifier = 82, 
-    RuleNestedIdentifier = 83, RuleTableExpr = 84, RulePivotColumnList = 85, 
-    RulePivotColumn = 86, RuleUnpivotColumnList = 87, RuleUnpivotColumn = 88, 
-    RuleColumnExprTupleOrSingle = 89, RuleColumnAliases = 90, RuleTableFunctionExpr = 91, 
-    RuleTableIdentifier = 92, RuleTableArgList = 93, RuleDatabaseIdentifier = 94, 
-    RuleFloatingLiteral = 95, RuleNumberLiteral = 96, RuleLiteral = 97, 
-    RuleInterval = 98, RuleKeyword = 99, RuleKeywordForAlias = 100, RuleAlias = 101, 
-    RuleIdentifier = 102, RuleEnumValue = 103, RulePlaceholder = 104, RuleString = 105, 
-    RuleTemplateString = 106, RuleStringContents = 107, RuleFullTemplateString = 108, 
-    RuleStringContentsFull = 109
+    RuleColumnTypeCastIdentifier = 68, RuleKeywordForTypeCast = 69, RuleColumnExprList = 70, 
+    RuleSelectColumnExprList = 71, RuleSelectColumnExpr = 72, RuleColumnExpr = 73, 
+    RuleColumnLambdaExpr = 74, RuleColumnsReplaceList = 75, RuleColumnsReplaceItem = 76, 
+    RuleHogqlxChildElement = 77, RuleHogqlxText = 78, RuleHogqlxTagElement = 79, 
+    RuleHogqlxTagAttribute = 80, RuleWithExprList = 81, RuleWithExpr = 82, 
+    RuleWithExprColumnNameList = 83, RuleColumnIdentifier = 84, RuleNestedIdentifier = 85, 
+    RuleTableExpr = 86, RulePivotColumnList = 87, RulePivotColumn = 88, 
+    RuleUnpivotColumnList = 89, RuleUnpivotColumn = 90, RuleColumnExprTupleOrSingle = 91, 
+    RuleColumnAliases = 92, RuleTableFunctionExpr = 93, RuleTableIdentifier = 94, 
+    RuleTableArgList = 95, RuleDatabaseIdentifier = 96, RuleFloatingLiteral = 97, 
+    RuleNumberLiteral = 98, RuleLiteral = 99, RuleInterval = 100, RuleKeyword = 101, 
+    RuleKeywordForAlias = 102, RuleAlias = 103, RuleIdentifier = 104, RuleEnumValue = 105, 
+    RulePlaceholder = 106, RuleString = 107, RuleTemplateString = 108, RuleStringContents = 109, 
+    RuleFullTemplateString = 110, RuleStringContentsFull = 111
   };
 
   explicit HogQLParser(antlr4::TokenStream *input);
@@ -173,6 +173,8 @@ public:
   class ExprContext;
   class ColumnTypeExprContext;
   class ColumnTypeCastExprContext;
+  class ColumnTypeCastIdentifierContext;
+  class KeywordForTypeCastContext;
   class ColumnExprListContext;
   class SelectColumnExprListContext;
   class SelectColumnExprContext;
@@ -1625,26 +1627,63 @@ public:
    
   };
 
-  class  ColumnTypeCastExprCompoundContext : public ColumnTypeCastExprContext {
-  public:
-    ColumnTypeCastExprCompoundContext(ColumnTypeCastExprContext *ctx);
-
-    std::vector<IdentifierContext *> identifier();
-    IdentifierContext* identifier(size_t i);
-
-    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
-  };
-
   class  ColumnTypeCastExprSimpleContext : public ColumnTypeCastExprContext {
   public:
     ColumnTypeCastExprSimpleContext(ColumnTypeCastExprContext *ctx);
 
-    IdentifierContext *identifier();
+    ColumnTypeCastIdentifierContext *columnTypeCastIdentifier();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  ColumnTypeCastExprWithTimeZoneContext : public ColumnTypeCastExprContext {
+  public:
+    ColumnTypeCastExprWithTimeZoneContext(ColumnTypeCastExprContext *ctx);
+
+    ColumnTypeCastIdentifierContext *columnTypeCastIdentifier();
+    antlr4::tree::TerminalNode *WITH();
+    antlr4::tree::TerminalNode *TIME();
+    antlr4::tree::TerminalNode *ZONE();
+    antlr4::tree::TerminalNode *LOCAL();
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
 
   ColumnTypeCastExprContext* columnTypeCastExpr();
+
+  class  ColumnTypeCastIdentifierContext : public antlr4::ParserRuleContext {
+  public:
+    ColumnTypeCastIdentifierContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *IDENTIFIER();
+    IntervalContext *interval();
+    KeywordForTypeCastContext *keywordForTypeCast();
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  ColumnTypeCastIdentifierContext* columnTypeCastIdentifier();
+
+  class  KeywordForTypeCastContext : public antlr4::ParserRuleContext {
+  public:
+    KeywordForTypeCastContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *DATE();
+    antlr4::tree::TerminalNode *LOCAL();
+    antlr4::tree::TerminalNode *TIME();
+    antlr4::tree::TerminalNode *TIMESTAMP();
+    antlr4::tree::TerminalNode *INTERVAL();
+    antlr4::tree::TerminalNode *WITH();
+    antlr4::tree::TerminalNode *ZONE();
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  KeywordForTypeCastContext* keywordForTypeCast();
 
   class  ColumnExprListContext : public antlr4::ParserRuleContext {
   public:
@@ -1698,6 +1737,16 @@ public:
     IdentifierContext *identifier();
     antlr4::tree::TerminalNode *COLON();
     ColumnExprContext *columnExpr();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  ColumnExprAliasImplicitContext : public SelectColumnExprContext {
+  public:
+    ColumnExprAliasImplicitContext(SelectColumnExprContext *ctx);
+
+    ColumnExprContext *columnExpr();
+    AliasContext *alias();
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -3274,6 +3323,7 @@ public:
     antlr4::tree::TerminalNode *LEFT();
     antlr4::tree::TerminalNode *LIKE();
     antlr4::tree::TerminalNode *LIMIT();
+    antlr4::tree::TerminalNode *LOCAL();
     antlr4::tree::TerminalNode *NAME();
     antlr4::tree::TerminalNode *NATURAL();
     antlr4::tree::TerminalNode *NOT();
@@ -3306,6 +3356,7 @@ public:
     antlr4::tree::TerminalNode *SUBSTRING();
     antlr4::tree::TerminalNode *THEN();
     antlr4::tree::TerminalNode *TIES();
+    antlr4::tree::TerminalNode *TIME();
     antlr4::tree::TerminalNode *TIMESTAMP();
     antlr4::tree::TerminalNode *TOTALS();
     antlr4::tree::TerminalNode *TRAILING();
@@ -3323,6 +3374,7 @@ public:
     antlr4::tree::TerminalNode *WHERE();
     antlr4::tree::TerminalNode *WINDOW();
     antlr4::tree::TerminalNode *WITH();
+    antlr4::tree::TerminalNode *ZONE();
 
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
