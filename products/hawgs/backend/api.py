@@ -49,10 +49,10 @@ class ProductTaxonomyViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             if main_page_file.exists():
                 with open(main_page_file) as f:
                     main_page = json.load(f)
-                    description = main_page.get("summary", "")
                     screenshot = main_page.get("screenshot")
                     metadata = main_page.get("metadata", {})
                     title = metadata.get("title") or metadata.get("og_title") or domain
+                    description = metadata.get("description") or metadata.get("og_description") or ""
 
             # Read enriched taxonomy for product/feature counts
             with open(enriched_file) as f:

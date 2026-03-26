@@ -40,10 +40,10 @@ export function ProductTaxonomyScene(): JSX.Element {
                                     <img
                                         src={site.screenshot}
                                         alt={site.domain}
-                                        className="w-12 h-12 rounded object-cover flex-shrink-0 border"
+                                        className="w-32 h-32 rounded object-cover flex-shrink-0 border"
                                     />
                                 ) : (
-                                    <div className="w-12 h-12 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
+                                    <div className="w-32 h-32 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
                                         N/A
                                     </div>
                                 )}
