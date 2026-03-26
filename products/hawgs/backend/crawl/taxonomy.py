@@ -37,9 +37,9 @@ Your task:
    or a distinct plan tier, treat it as a top-level product, not a feature. Pricing structure
    is the strongest signal for what the company considers a standalone product.
 6. If a capability doesn't clearly belong under a product, place it under a "Platform" product.
-6. Use the codebase to ground your findings — check if the products/features you identify
-   correspond to actual code in the repository (look at the `products/` directory structure).
-   This helps validate that what the website describes actually exists as a distinct product/feature.
+7. Use the codebase to ground your findings — check if the products/features you identify
+   correspond to actual code in the repository. This helps validate that what the website
+   describes actually exists as a distinct product/feature.
 
 Rules:
 - Every feature must belong to exactly one product.
@@ -109,6 +109,7 @@ def _load_pages_context(domain: str) -> list[dict]:
 
 async def build_taxonomy(
     domain: str,
+    repository: str,
     *,
     verbose: bool = False,
     output_fn=None,
@@ -133,7 +134,7 @@ async def build_taxonomy(
     if output_fn:
         output_fn(f"Building taxonomy from {len(pages)} pages...")
 
-    context = await sync_to_async(resolve_sandbox_context_for_local_dev)("PostHog/posthog")
+    context = await sync_to_async(resolve_sandbox_context_for_local_dev)(repository)
     output_schema = json.dumps(FeatureTaxonomy.model_json_schema(), indent=2)
     pages_json = json.dumps(pages, indent=2)
     prompt = TAXONOMY_PROMPT.format(pages_json=pages_json, output_schema=output_schema)
@@ -157,8 +158,8 @@ async def build_taxonomy(
     return result
 
 
-def run_build_taxonomy(domain: str, *, verbose: bool = False, output_fn=None) -> FeatureTaxonomy:
-    return asyncio.run(build_taxonomy(domain, verbose=verbose, output_fn=output_fn))
+def run_build_taxonomy(domain: str, repository: str, *, verbose: bool = False, output_fn=None) -> FeatureTaxonomy:
+    return asyncio.run(build_taxonomy(domain, repository, verbose=verbose, output_fn=output_fn))
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +321,7 @@ class EnrichedTaxonomyAccumulator:
 
 
 _ENRICHMENT_PREAMBLE = """\
-You are enriching a product feature taxonomy with code paths from the PostHog codebase.
+You are enriching a product feature taxonomy with code paths from the codebase.
 
 You will receive products one at a time in the same conversation.
 Keep track of what products and features you already returned.
@@ -340,11 +341,10 @@ product and feature is implemented.
 3. Product `code_paths` should capture stable roots for the area. Feature `code_paths` should be
    narrower and product-specific when distinct ownership exists.
 4. Include both backend and frontend paths when they exist.
-5. Look at `products/` directory first — most products have a dedicated directory there.
-   Also check `posthog/` for older code, `frontend/src/scenes/` for frontend scenes,
-   and `frontend/src/queries/` for query-related code.
+5. Start by exploring the top-level directory structure to understand how the codebase is organized.
+   Look for product-specific directories, feature modules, and shared code.
 6. If a feature listed under a product is actually implemented as a **separate product**
-   in the codebase (has its own `products/` directory), promote it: return it as a separate
+   in the codebase (has its own dedicated directory), promote it: return it as a separate
    product entry in the output list, and do not keep it nested under the parent in this turn.
 7. If the code clearly shows missing features or nearby products that belong with this area,
    it is okay to add them now. Only add them when the code ownership is clear and the concept is
@@ -405,6 +405,7 @@ Respond with a JSON object inside a ```json``` code block matching this schema:
 async def enrich_taxonomy(
     taxonomy: FeatureTaxonomy,
     domain: str,
+    repository: str,
     *,
     verbose: bool = False,
     output_fn=None,
@@ -433,7 +434,7 @@ async def enrich_taxonomy(
     if output_fn:
         output_fn(f"Starting multi-turn enrichment: {total} product(s)")
 
-    context = await sync_to_async(resolve_sandbox_context_for_local_dev)("PostHog/posthog")
+    context = await sync_to_async(resolve_sandbox_context_for_local_dev)(repository)
     output_schema = json.dumps(EnrichedProductTurnOutput.model_json_schema(), indent=2)
     accumulator = EnrichedTaxonomyAccumulator()
 
@@ -501,6 +502,6 @@ async def enrich_taxonomy(
     return enriched_taxonomy
 
 
-def run_enrich_taxonomy(domain: str, *, verbose: bool = False, output_fn=None) -> EnrichedTaxonomy:
-    taxonomy_result = run_build_taxonomy(domain, verbose=verbose, output_fn=output_fn)
-    return asyncio.run(enrich_taxonomy(taxonomy_result, domain, verbose=verbose, output_fn=output_fn))
+def run_enrich_taxonomy(domain: str, repository: str, *, verbose: bool = False, output_fn=None) -> EnrichedTaxonomy:
+    taxonomy_result = run_build_taxonomy(domain, repository, verbose=verbose, output_fn=output_fn)
+    return asyncio.run(enrich_taxonomy(taxonomy_result, domain, repository, verbose=verbose, output_fn=output_fn))

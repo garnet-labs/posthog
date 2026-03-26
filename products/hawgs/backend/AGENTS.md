@@ -15,10 +15,10 @@ All cache is per-domain under `crawl/crawl_cache/<domain>/`.
 python manage.py crawl_website posthog.com
 
 # 2. Build taxonomy — extract hierarchical product/feature taxonomy from scraped pages
-python manage.py build_taxonomy posthog.com
+python manage.py build_taxonomy posthog.com --repository PostHog/posthog
 
 # 3. Enrich — add code paths to the taxonomy via multi-turn sandbox agent
-python manage.py enrich_taxonomy posthog.com
+python manage.py enrich_taxonomy posthog.com --repository PostHog/posthog
 
 # 4. Contextualize — attach routes, API endpoints, and PostHog events
 python manage.py contextualize_taxonomy posthog.com
@@ -36,11 +36,11 @@ Delete the relevant `_*.json` file under `crawl_cache/<domain>/` to force a re-r
    writes `_selected_urls.json`, then batch-scrapes the selected URLs with Firecrawl.
    The homepage is automatically included. Stores one JSON per page (markdown, summary, screenshot, metadata).
    Only scrapes URLs not already cached.
-2. **`build_taxonomy <domain>`** — reads cached page JSON files, sends all page content
-   to a sandbox agent, writes `_taxonomy.json`.
+2. **`build_taxonomy <domain> --repository <org/repo>`** — reads cached page JSON files,
+   sends all page content to a sandbox agent with the target repository cloned, writes `_taxonomy.json`.
    Output: `products[] -> features[]`, each with description and `source_urls`.
-3. **`enrich_taxonomy <domain>`** — builds taxonomy if needed, then runs a multi-turn
-   sandbox agent over each product in one conversation. Writes `_enriched_taxonomy.json`.
+3. **`enrich_taxonomy <domain> --repository <org/repo>`** — builds taxonomy if needed,
+   then runs a multi-turn sandbox agent over each product in one conversation. Writes `_enriched_taxonomy.json`.
    Adds `code_paths` (directory-level globs), may promote features to products, may add
    missing products/features when code structure is more explicit than the website.
 4. **`contextualize_taxonomy <domain>`** — reads `_enriched_taxonomy.json` and
@@ -74,7 +74,9 @@ All under `crawl/crawl_cache/<domain>/`:
 - Path lookup should treat `_contextualized_taxonomy.json` as the read-only lookup DB. Prefer the most specific matching `code_paths` pattern, and prefer feature matches over broader product matches.
 - The pipeline is cache-first. If you change discovery rules, prompt logic, schemas, or enrichment heuristics, delete the affected cache files before rerunning or you will get stale results.
 - This directory now has a local command-level path lookup. A real HTTP/API layer for external callers is still future work.
-- `crawl_website` requires `FIRECRAWL_API_KEY`. Discovery, taxonomy, and enrichment also depend on the sandbox agent helpers in `products.tasks.backend.services.custom_prompt_*`.
+- `crawl_website` requires `FIRECRAWL_API_KEY`. Discovery uses a dummy repo (`PostHog/.github`).
+  Taxonomy and enrichment require `--repository` pointing to the target codebase's GitHub repo
+  and depend on the sandbox agent helpers in `products.tasks.backend.services.custom_prompt_*`.
 
 ## Future notes
 

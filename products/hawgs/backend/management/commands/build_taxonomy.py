@@ -13,6 +13,12 @@ class Command(BaseCommand):
             help="Domain to build taxonomy for (e.g. posthog.com)",
         )
         parser.add_argument(
+            "--repository",
+            type=str,
+            required=True,
+            help="GitHub repository in org/repo format (e.g. PostHog/posthog)",
+        )
+        parser.add_argument(
             "--verbose",
             action="store_true",
             help="Stream all raw agent log lines",
@@ -20,8 +26,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         domain = options["domain"]
+        repository = options["repository"]
         verbose = options["verbose"]
-        taxonomy = run_build_taxonomy(domain, verbose=verbose, output_fn=self.stdout.write)
+        taxonomy = run_build_taxonomy(domain, repository, verbose=verbose, output_fn=self.stdout.write)
 
         self.stdout.write("")
         for product in taxonomy.products:
