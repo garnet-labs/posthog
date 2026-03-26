@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 
 import { IconRefresh } from '@posthog/icons'
-import { LemonButton, LemonDialog, LemonSkeleton, LemonTable, Tooltip } from '@posthog/lemon-ui'
+import { LemonButton, LemonDialog, LemonTable, Tooltip } from '@posthog/lemon-ui'
 
 import { NotFound } from 'lib/components/NotFound'
 import { TZLabel } from 'lib/components/TZLabel'
@@ -13,6 +13,7 @@ import { BatchExportBackfill } from '~/types'
 
 import { BatchExportBackfillModal } from './BatchExportBackfillModal'
 import { BatchExportBackfillsLogicProps, batchExportBackfillsLogic } from './batchExportBackfillsLogic'
+import { BatchExportLoadingSkeleton } from './BatchExportLoadingSkeleton'
 
 export function BatchExportBackfills({ id, context }: BatchExportBackfillsLogicProps): JSX.Element {
     const logic = batchExportBackfillsLogic({ id, context })
@@ -20,15 +21,7 @@ export function BatchExportBackfills({ id, context }: BatchExportBackfillsLogicP
 
     if (!batchExportConfig) {
         if (batchExportConfigLoading) {
-            return (
-                <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                        <LemonSkeleton className="w-20 h-8" fade />
-                        <LemonSkeleton className="w-32 h-10" fade />
-                    </div>
-                    <LemonSkeleton className="w-full h-96" fade />
-                </div>
-            )
+            return <BatchExportLoadingSkeleton />
         }
         return <NotFound object="batch export" />
     }
