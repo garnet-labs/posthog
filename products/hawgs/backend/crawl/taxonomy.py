@@ -5,11 +5,18 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
-from products.hawgs.backend.crawl.crawl import CACHE_DIR, URLS_FILE, _get_page_url
+from products.hawgs.backend.crawl.crawl import _get_page_url, cache_dir_for_domain, urls_file_for_domain
 
 logger = logging.getLogger(__name__)
 
-TAXONOMY_FILE = CACHE_DIR / "_taxonomy.json"
+
+def _taxonomy_file(domain: str):
+    return cache_dir_for_domain(domain) / "_taxonomy.json"
+
+
+def _enriched_taxonomy_file(domain: str):
+    return cache_dir_for_domain(domain) / "_enriched_taxonomy.json"
+
 
 TAXONOMY_PROMPT = """\
 You are analyzing scraped product pages from a website to build a hierarchical feature taxonomy.
@@ -61,11 +68,14 @@ class FeatureTaxonomy(BaseModel):
     products: list[Product] = Field(description="Top-level products, each containing their features")
 
 
-def _load_pages_context() -> list[dict]:
+def _load_pages_context(domain: str) -> list[dict]:
     """Load all cached pages, ordered by the URL list in _selected_urls.json."""
+    cache_dir = cache_dir_for_domain(domain)
+    urls_file = urls_file_for_domain(domain)
+
     # Build a lookup from URL to page data
     pages_by_url: dict[str, dict] = {}
-    for filepath in CACHE_DIR.glob("*.json"):
+    for filepath in cache_dir.glob("*.json"):
         if filepath.name.startswith("_"):
             continue
         raw = json.loads(filepath.read_text())
@@ -82,8 +92,8 @@ def _load_pages_context() -> list[dict]:
 
     # Order by _selected_urls.json, then append any extras
     ordered: list[dict] = []
-    if URLS_FILE.exists():
-        url_order = json.loads(URLS_FILE.read_text()).get("urls", [])
+    if urls_file.exists():
+        url_order = json.loads(urls_file.read_text()).get("urls", [])
         for url in url_order:
             if url in pages_by_url:
                 ordered.append(pages_by_url.pop(url))
@@ -94,6 +104,7 @@ def _load_pages_context() -> list[dict]:
 
 
 async def build_taxonomy(
+    domain: str,
     *,
     verbose: bool = False,
     output_fn=None,
@@ -103,16 +114,17 @@ async def build_taxonomy(
     from products.tasks.backend.services.custom_prompt_executor import run_sandbox_agent_get_structured_output
     from products.tasks.backend.services.custom_prompt_runner import resolve_sandbox_context_for_local_dev
 
-    if TAXONOMY_FILE.exists():
-        cached = FeatureTaxonomy.model_validate_json(TAXONOMY_FILE.read_text())
+    taxonomy_file = _taxonomy_file(domain)
+    if taxonomy_file.exists():
+        cached = FeatureTaxonomy.model_validate_json(taxonomy_file.read_text())
         if output_fn:
             total_features = sum(len(p.features) for p in cached.products)
             output_fn(f"Using cached taxonomy: {len(cached.products)} products, {total_features} features")
         return cached
 
-    pages = _load_pages_context()
+    pages = _load_pages_context(domain)
     if not pages:
-        raise RuntimeError(f"No cached pages found in {CACHE_DIR}. Run crawl_website first.")
+        raise RuntimeError(f"No cached pages found for {domain}. Run crawl_website first.")
 
     if output_fn:
         output_fn(f"Building taxonomy from {len(pages)} pages...")
@@ -134,22 +146,20 @@ async def build_taxonomy(
         output_fn=output_fn,
     )
 
-    TAXONOMY_FILE.write_text(result.model_dump_json(indent=2))
+    taxonomy_file.write_text(result.model_dump_json(indent=2))
     if output_fn:
         total_features = sum(len(p.features) for p in result.products)
         output_fn(f"Taxonomy built: {len(result.products)} products, {total_features} features")
     return result
 
 
-def run_build_taxonomy(*, verbose: bool = False, output_fn=None) -> FeatureTaxonomy:
-    return asyncio.run(build_taxonomy(verbose=verbose, output_fn=output_fn))
+def run_build_taxonomy(domain: str, *, verbose: bool = False, output_fn=None) -> FeatureTaxonomy:
+    return asyncio.run(build_taxonomy(domain, verbose=verbose, output_fn=output_fn))
 
 
 # ---------------------------------------------------------------------------
 # Enrichment: add code paths to the taxonomy via multi-turn agent
 # ---------------------------------------------------------------------------
-
-ENRICHED_TAXONOMY_FILE = CACHE_DIR / "_enriched_taxonomy.json"
 
 
 class EnrichedFeature(BaseModel):
@@ -390,6 +400,7 @@ Respond with a JSON object inside a ```json``` code block matching this schema:
 
 async def enrich_taxonomy(
     taxonomy: FeatureTaxonomy,
+    domain: str,
     *,
     verbose: bool = False,
     output_fn=None,
@@ -403,8 +414,9 @@ async def enrich_taxonomy(
     )
     from products.tasks.backend.services.custom_prompt_runner import resolve_sandbox_context_for_local_dev
 
-    if ENRICHED_TAXONOMY_FILE.exists():
-        cached = EnrichedTaxonomy.model_validate_json(ENRICHED_TAXONOMY_FILE.read_text())
+    enriched_file = _enriched_taxonomy_file(domain)
+    if enriched_file.exists():
+        cached = EnrichedTaxonomy.model_validate_json(enriched_file.read_text())
         if output_fn:
             total_features = sum(len(p.features) for p in cached.products)
             output_fn(f"Using cached enriched taxonomy: {len(cached.products)} products, {total_features} features")
@@ -476,7 +488,7 @@ async def enrich_taxonomy(
     await end_session(session)
 
     enriched_taxonomy = EnrichedTaxonomy(products=accumulator.products)
-    ENRICHED_TAXONOMY_FILE.write_text(enriched_taxonomy.model_dump_json(indent=2))
+    enriched_file.write_text(enriched_taxonomy.model_dump_json(indent=2))
 
     if output_fn:
         total_features = sum(len(p.features) for p in enriched_taxonomy.products)
@@ -485,6 +497,6 @@ async def enrich_taxonomy(
     return enriched_taxonomy
 
 
-def run_enrich_taxonomy(*, verbose: bool = False, output_fn=None) -> EnrichedTaxonomy:
-    taxonomy_result = run_build_taxonomy(verbose=verbose, output_fn=output_fn)
-    return asyncio.run(enrich_taxonomy(taxonomy_result, verbose=verbose, output_fn=output_fn))
+def run_enrich_taxonomy(domain: str, *, verbose: bool = False, output_fn=None) -> EnrichedTaxonomy:
+    taxonomy_result = run_build_taxonomy(domain, verbose=verbose, output_fn=output_fn)
+    return asyncio.run(enrich_taxonomy(taxonomy_result, domain, verbose=verbose, output_fn=output_fn))

@@ -21,5 +21,5 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         url = options["url"]
         verbose = options["verbose"]
-        pages = crawl_website(url, verbose=verbose, output_fn=self.stdout.write)
-        self.stdout.write(self.style.SUCCESS(f"Done. {len(pages)} pages available."))
+        domain, pages = crawl_website(url, verbose=verbose, output_fn=self.stdout.write)
+        self.stdout.write(self.style.SUCCESS(f"Done. {len(pages)} pages available for {domain}."))

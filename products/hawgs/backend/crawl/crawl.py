@@ -11,8 +11,20 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-CACHE_DIR = Path(__file__).parent / "crawl_cache"
-URLS_FILE = CACHE_DIR / "_selected_urls.json"
+CACHE_ROOT = Path(__file__).parent / "crawl_cache"
+
+
+def _domain_from_url(url: str) -> str:
+    return url.replace("https://", "").replace("http://", "").split("/")[0]
+
+
+def cache_dir_for_domain(domain: str) -> Path:
+    return CACHE_ROOT / domain
+
+
+def urls_file_for_domain(domain: str) -> Path:
+    return cache_dir_for_domain(domain) / "_selected_urls.json"
+
 
 DISCOVER_PROMPT = """\
 Your goal is to find all product/feature pages for the website at {url}.
@@ -44,6 +56,7 @@ class DiscoveredUrls(BaseModel):
 
 async def _discover_product_urls(
     url: str,
+    domain: str,
     *,
     verbose: bool = False,
     output_fn=None,
@@ -53,12 +66,14 @@ async def _discover_product_urls(
     from products.tasks.backend.services.custom_prompt_executor import run_sandbox_agent_get_structured_output
     from products.tasks.backend.services.custom_prompt_runner import resolve_sandbox_context_for_local_dev
 
-    CACHE_DIR.mkdir(exist_ok=True)
+    cache_dir = cache_dir_for_domain(domain)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    urls_file = urls_file_for_domain(domain)
 
-    if URLS_FILE.exists():
-        cached = DiscoveredUrls.model_validate_json(URLS_FILE.read_text())
+    if urls_file.exists():
+        cached = DiscoveredUrls.model_validate_json(urls_file.read_text())
         if output_fn:
-            output_fn(f"Using {len(cached.urls)} cached URLs from {URLS_FILE}")
+            output_fn(f"Using {len(cached.urls)} cached URLs from {urls_file}")
         return cached.urls
 
     context = await sync_to_async(resolve_sandbox_context_for_local_dev)("PostHog/.github")
@@ -77,7 +92,7 @@ async def _discover_product_urls(
         output_fn=output_fn,
     )
 
-    URLS_FILE.write_text(result.model_dump_json(indent=2))
+    urls_file.write_text(result.model_dump_json(indent=2))
     if output_fn:
         output_fn(f"Discovered {len(result.urls)} product URLs")
     return result.urls
@@ -93,12 +108,15 @@ def _get_page_url(metadata: dict) -> str:
     return metadata.get("url", metadata.get("sourceURL", metadata.get("source_url", "")))
 
 
-def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
+def _scrape_pages(urls: list[str], domain: str, *, output_fn=None) -> list[dict]:
     from firecrawl import FirecrawlApp
+
+    cache_dir = cache_dir_for_domain(domain)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Load already-cached pages, determine which URLs still need scraping
     cached_pages: dict[str, dict] = {}
-    for filepath in CACHE_DIR.glob("*.json"):
+    for filepath in cache_dir.glob("*.json"):
         if filepath.name.startswith("_"):
             continue
         page = json.loads(filepath.read_text())
@@ -143,7 +161,7 @@ def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
             source_url = _get_page_url(page["metadata"])
             filename = _url_to_filename(source_url) if source_url else _url_to_filename(f"unknown_{len(cached_pages)}")
 
-            filepath = CACHE_DIR / filename
+            filepath = cache_dir / filename
             filepath.write_text(json.dumps(page, indent=2, default=str))
             cached_pages[source_url] = page
             if output_fn:
@@ -156,18 +174,21 @@ def _scrape_pages(urls: list[str], *, output_fn=None) -> list[dict]:
     return pages
 
 
-def crawl_website(url: str, *, verbose: bool = False, output_fn=None) -> list[dict]:
+def crawl_website(url: str, *, verbose: bool = False, output_fn=None) -> tuple[str, list[dict]]:
+    """Crawl a website's product pages. Returns (domain, pages)."""
     if not url.startswith("http"):
         url = f"https://{url}"
 
-    urls = asyncio.run(_discover_product_urls(url, verbose=verbose, output_fn=output_fn))
+    domain = _domain_from_url(url)
+
+    urls = asyncio.run(_discover_product_urls(url, domain, verbose=verbose, output_fn=output_fn))
     if not urls:
         if output_fn:
             output_fn("No product URLs discovered")
-        return []
+        return domain, []
 
     # Always include the homepage — it's the main source of "what this project is about"
     if url not in urls:
         urls.insert(0, url)
 
-    return _scrape_pages(urls, output_fn=output_fn)
+    return domain, _scrape_pages(urls, domain, output_fn=output_fn)

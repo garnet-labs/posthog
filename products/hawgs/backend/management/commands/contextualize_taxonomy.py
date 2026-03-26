@@ -10,13 +10,19 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "domain",
+            type=str,
+            help="Domain to contextualize taxonomy for (e.g. posthog.com)",
+        )
+        parser.add_argument(
             "--force",
             action="store_true",
             help="Rebuild the contextualized taxonomy even if the cached output already exists",
         )
 
     def handle(self, *args, **options):
-        contextualized = run_contextualize_taxonomy(force=options["force"], output_fn=self.stdout.write)
+        domain = options["domain"]
+        contextualized = run_contextualize_taxonomy(domain, force=options["force"], output_fn=self.stdout.write)
 
         self.stdout.write("")
         for product in contextualized.products:

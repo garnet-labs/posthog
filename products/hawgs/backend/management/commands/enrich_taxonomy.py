@@ -8,14 +8,20 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "domain",
+            type=str,
+            help="Domain to enrich taxonomy for (e.g. posthog.com)",
+        )
+        parser.add_argument(
             "--verbose",
             action="store_true",
             help="Stream all raw agent log lines",
         )
 
     def handle(self, *args, **options):
+        domain = options["domain"]
         verbose = options["verbose"]
-        enriched = run_enrich_taxonomy(verbose=verbose, output_fn=self.stdout.write)
+        enriched = run_enrich_taxonomy(domain, verbose=verbose, output_fn=self.stdout.write)
 
         self.stdout.write("")
         for product in enriched.products:

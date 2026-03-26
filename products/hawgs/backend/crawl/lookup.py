@@ -4,12 +4,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from products.hawgs.backend.crawl.contextualize import (
-    CONTEXTUALIZED_TAXONOMY_FILE,
-    ContextApiEndpoint,
-    ContextPostHogEvent,
-    ContextualizedTaxonomy,
-)
+from products.hawgs.backend.crawl.contextualize import ContextApiEndpoint, ContextPostHogEvent, ContextualizedTaxonomy
+from products.hawgs.backend.crawl.crawl import cache_dir_for_domain
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -68,19 +64,20 @@ def _format_posthog_events(posthog_events: list[ContextPostHogEvent]) -> list[st
     return [posthog_event.event_name for posthog_event in posthog_events]
 
 
-def _load_contextualized_taxonomy() -> ContextualizedTaxonomy:
-    if not CONTEXTUALIZED_TAXONOMY_FILE.exists():
+def _load_contextualized_taxonomy(domain: str) -> ContextualizedTaxonomy:
+    contextualized_file = cache_dir_for_domain(domain) / "_contextualized_taxonomy.json"
+    if not contextualized_file.exists():
         raise RuntimeError(
-            f"Missing contextualized taxonomy at {CONTEXTUALIZED_TAXONOMY_FILE}. "
-            "Run `python manage.py contextualize_taxonomy` first."
+            f"Missing contextualized taxonomy at {contextualized_file}. "
+            f"Run `python manage.py contextualize_taxonomy {domain}` first."
         )
 
-    return ContextualizedTaxonomy.model_validate_json(CONTEXTUALIZED_TAXONOMY_FILE.read_text())
+    return ContextualizedTaxonomy.model_validate_json(contextualized_file.read_text())
 
 
-def lookup_code_path(code_path: str) -> CodePathLookupResult:
+def lookup_code_path(code_path: str, domain: str = "posthog.com") -> CodePathLookupResult:
     normalized_code_path = _normalize_code_path(code_path)
-    taxonomy = _load_contextualized_taxonomy()
+    taxonomy = _load_contextualized_taxonomy(domain)
 
     feature_matches: list[CodePathLookupMatch] = []
     product_matches: list[CodePathLookupMatch] = []

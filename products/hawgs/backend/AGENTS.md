@@ -6,37 +6,62 @@ which product area a code path belongs to,
 which public pages describe it,
 and which neighboring features are likely affected.
 
-## Current flow
+## Pipeline commands (run in order)
 
-1. `python manage.py crawl_website <url>`
-   - Uses a sandbox agent to inspect sitemap URLs only and writes `crawl/crawl_cache/_selected_urls.json`
-   - Filters for product, feature, platform, integration, and use-case pages
-   - Scrapes the selected URLs with Firecrawl and stores one JSON file per page in `crawl/crawl_cache/`
-2. `python manage.py build_taxonomy`
-   - Reads the cached page JSON files and writes `crawl/crawl_cache/_taxonomy.json`
-   - Output shape: `products[] -> features[]`, each with a concise description and `source_urls`
-3. `python manage.py enrich_taxonomy`
-   - Reuses or builds the taxonomy, then runs a multi-turn agent over each product in the same conversation
-   - Writes `crawl/crawl_cache/_enriched_taxonomy.json`
-   - Adds `code_paths` to products and features, may promote a feature into its own product, and may add clearly missing nearby products/features when the code structure is more explicit than the website taxonomy
-4. `python manage.py contextualize_taxonomy`
-   - Reads `crawl/crawl_cache/_enriched_taxonomy.json` and `crawl/crawl_cache/_product-context-index.json`
-   - Writes `crawl/crawl_cache/_contextualized_taxonomy.json`
-   - Attaches safe runtime/frontend context to products and features: route patterns, API endpoints, and PostHog events
-   - Matching is conservative: prefer `page_component`, then widen to `key_files`; attach at feature level only for unique feature matches, otherwise fall back to unique product matches
-5. `python manage.py lookup_taxonomy_path <code_path>`
-   - Reads `crawl/crawl_cache/_contextualized_taxonomy.json`
-   - Matches the input repo path against product/feature `code_paths`
-   - Prefers feature matches over broader product-root matches and returns the matched taxonomy node plus attached routes/endpoints/events
+All cache is per-domain under `crawl/crawl_cache/<domain>/`.
+
+```bash
+# 1. Crawl — discover product pages from sitemap, then scrape them
+python manage.py crawl_website posthog.com
+
+# 2. Build taxonomy — extract hierarchical product/feature taxonomy from scraped pages
+python manage.py build_taxonomy posthog.com
+
+# 3. Enrich — add code paths to the taxonomy via multi-turn sandbox agent
+python manage.py enrich_taxonomy posthog.com
+
+# 4. Contextualize — attach routes, API endpoints, and PostHog events
+python manage.py contextualize_taxonomy posthog.com
+
+# 5. Lookup — query which product/feature a code path belongs to
+python manage.py lookup_taxonomy_path posthog.com <code_path>
+```
+
+Steps 2-4 are cache-first: they skip if the output file already exists.
+Delete the relevant `_*.json` file under `crawl_cache/<domain>/` to force a re-run.
+
+### Step details
+
+1. **`crawl_website <url>`** — uses a sandbox agent to inspect sitemap URLs only,
+   writes `_selected_urls.json`, then batch-scrapes the selected URLs with Firecrawl.
+   The homepage is automatically included. Stores one JSON per page (markdown, summary, screenshot, metadata).
+   Only scrapes URLs not already cached.
+2. **`build_taxonomy <domain>`** — reads cached page JSON files, sends all page content
+   to a sandbox agent, writes `_taxonomy.json`.
+   Output: `products[] -> features[]`, each with description and `source_urls`.
+3. **`enrich_taxonomy <domain>`** — builds taxonomy if needed, then runs a multi-turn
+   sandbox agent over each product in one conversation. Writes `_enriched_taxonomy.json`.
+   Adds `code_paths` (directory-level globs), may promote features to products, may add
+   missing products/features when code structure is more explicit than the website.
+4. **`contextualize_taxonomy <domain>`** — reads `_enriched_taxonomy.json` and
+   `_product-context-index.json`, writes `_contextualized_taxonomy.json`.
+   Attaches route patterns, API endpoints, and PostHog events.
+   Matching is conservative: prefer `page_component`, then widen to `key_files`;
+   feature-level only on unique matches, otherwise product-level.
+5. **`lookup_taxonomy_path <code_path>`** — reads `_contextualized_taxonomy.json`,
+   matches the input path against product/feature `code_paths`.
+   Prefers feature matches over broader product matches.
 
 ## Artifacts
 
-- `crawl/crawl_cache/_selected_urls.json`: sitemap-derived candidate product pages
-- `crawl/crawl_cache/<url-slug>.json`: scraped page cache with `markdown`, `screenshot`, and `metadata`
-- `crawl/crawl_cache/_taxonomy.json`: website-grounded product/feature taxonomy
-- `crawl/crawl_cache/_enriched_taxonomy.json`: taxonomy plus verified code paths
-- `crawl/crawl_cache/_product-context-index.json`: scene-level runtime/frontend index from the separate context-indexing tool
-- `crawl/crawl_cache/_contextualized_taxonomy.json`: enriched taxonomy plus matched routes, API endpoints, and PostHog events
+All under `crawl/crawl_cache/<domain>/`:
+
+- `_selected_urls.json`: sitemap-derived candidate product page URLs
+- `<url-slug>.json`: scraped page cache with `markdown`, `summary`, `screenshot`, and `metadata`
+- `_taxonomy.json`: website-grounded product/feature taxonomy
+- `_enriched_taxonomy.json`: taxonomy plus verified code paths
+- `_product-context-index.json`: scene-level runtime/frontend index from the separate context-indexing tool
+- `_contextualized_taxonomy.json`: enriched taxonomy plus matched routes, API endpoints, and PostHog events
 
 ## Working rules
 

@@ -5,18 +5,15 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
-from products.hawgs.backend.crawl.crawl import CACHE_DIR
+from products.hawgs.backend.crawl.crawl import cache_dir_for_domain
 from products.hawgs.backend.crawl.taxonomy import (
-    ENRICHED_TAXONOMY_FILE,
     EnrichedFeature,
     EnrichedProduct,
     EnrichedTaxonomy,
+    _enriched_taxonomy_file,
 )
 
 logger = logging.getLogger(__name__)
-
-PRODUCT_CONTEXT_INDEX_FILE = CACHE_DIR / "_product-context-index.json"
-CONTEXTUALIZED_TAXONOMY_FILE = CACHE_DIR / "_contextualized_taxonomy.json"
 
 
 class ContextIndexApiEndpoint(BaseModel):
@@ -375,29 +372,33 @@ class ContextualizedTaxonomyBuilder:
         )
 
 
-def _load_enriched_taxonomy() -> EnrichedTaxonomy:
-    if not ENRICHED_TAXONOMY_FILE.exists():
+def _load_enriched_taxonomy(domain: str) -> EnrichedTaxonomy:
+    enriched_file = _enriched_taxonomy_file(domain)
+    if not enriched_file.exists():
         raise RuntimeError(
-            f"Missing enriched taxonomy at {ENRICHED_TAXONOMY_FILE}. Run `python manage.py enrich_taxonomy` first."
+            f"Missing enriched taxonomy at {enriched_file}. Run `python manage.py enrich_taxonomy {domain}` first."
         )
 
-    return EnrichedTaxonomy.model_validate_json(ENRICHED_TAXONOMY_FILE.read_text())
+    return EnrichedTaxonomy.model_validate_json(enriched_file.read_text())
 
 
-def _load_context_index() -> dict[str, ContextIndexEntry]:
-    if not PRODUCT_CONTEXT_INDEX_FILE.exists():
+def _load_context_index(domain: str) -> dict[str, ContextIndexEntry]:
+    index_file = cache_dir_for_domain(domain) / "_product-context-index.json"
+    if not index_file.exists():
         raise RuntimeError(
-            f"Missing product context index at {PRODUCT_CONTEXT_INDEX_FILE}. "
-            "Generate `_product-context-index.json` first."
+            f"Missing product context index at {index_file}. Generate `_product-context-index.json` first."
         )
 
-    raw_index = json.loads(PRODUCT_CONTEXT_INDEX_FILE.read_text())
+    raw_index = json.loads(index_file.read_text())
     return {context_entry: ContextIndexEntry.model_validate(entry) for context_entry, entry in raw_index.items()}
 
 
-def contextualize_taxonomy(*, force: bool = False, output_fn=None) -> ContextualizedTaxonomy:
-    if CONTEXTUALIZED_TAXONOMY_FILE.exists() and not force:
-        cached = ContextualizedTaxonomy.model_validate_json(CONTEXTUALIZED_TAXONOMY_FILE.read_text())
+def contextualize_taxonomy(domain: str, *, force: bool = False, output_fn=None) -> ContextualizedTaxonomy:
+    cache_dir = cache_dir_for_domain(domain)
+    contextualized_file = cache_dir / "_contextualized_taxonomy.json"
+
+    if contextualized_file.exists() and not force:
+        cached = ContextualizedTaxonomy.model_validate_json(contextualized_file.read_text())
         if output_fn:
             output_fn(
                 "Using cached contextualized taxonomy: "
@@ -407,8 +408,8 @@ def contextualize_taxonomy(*, force: bool = False, output_fn=None) -> Contextual
             )
         return cached
 
-    taxonomy = _load_enriched_taxonomy()
-    context_index = _load_context_index()
+    taxonomy = _load_enriched_taxonomy(domain)
+    context_index = _load_context_index(domain)
 
     if output_fn:
         output_fn(
@@ -417,7 +418,7 @@ def contextualize_taxonomy(*, force: bool = False, output_fn=None) -> Contextual
         )
 
     contextualized = ContextualizedTaxonomyBuilder(taxonomy, context_index).build()
-    CONTEXTUALIZED_TAXONOMY_FILE.write_text(contextualized.model_dump_json(indent=2))
+    contextualized_file.write_text(contextualized.model_dump_json(indent=2))
 
     if output_fn:
         output_fn(
@@ -431,5 +432,5 @@ def contextualize_taxonomy(*, force: bool = False, output_fn=None) -> Contextual
     return contextualized
 
 
-def run_contextualize_taxonomy(*, force: bool = False, output_fn=None) -> ContextualizedTaxonomy:
-    return contextualize_taxonomy(force=force, output_fn=output_fn)
+def run_contextualize_taxonomy(domain: str, *, force: bool = False, output_fn=None) -> ContextualizedTaxonomy:
+    return contextualize_taxonomy(domain, force=force, output_fn=output_fn)
