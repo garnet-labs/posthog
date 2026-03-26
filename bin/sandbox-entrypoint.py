@@ -481,8 +481,13 @@ def user_phase() -> None:
     )
     Path("/cache/cargo-target").mkdir(parents=True, exist_ok=True)
 
-    # The worktree's .git file points to a host path that doesn't exist in the
-    # container. Write commit.txt so posthog/git.py uses it instead of shelling
+    # The worktree's .git file points to the host's .git/worktrees/ path,
+    # which doesn't exist inside the container. Point GIT_DIR at a dummy
+    # repo so git commands (e.g. pnpm resolving git dependencies) work.
+    run(["git", "init", "-q", "/tmp/sandbox-git"])
+    os.environ["GIT_DIR"] = "/tmp/sandbox-git/.git"
+
+    # Write commit.txt so posthog/git.py uses it instead of shelling
     # out to git (which would fail). get_git_branch() will return None.
     git_commit = os.environ.get("SANDBOX_GIT_COMMIT", "sandbox")
     (WORKSPACE / "commit.txt").write_text(f"{git_commit}\n")

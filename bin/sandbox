@@ -780,8 +780,9 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     if not wait_for_health(f"http://localhost:{port}/_health", f"{project}-app-1"):
         error("PostHog did not start. Something is likely broken.")
         print("Troubleshooting:")
-        print(f"  Logs:   sandbox logs {branch}")
-        print(f"  Shell:  sandbox shell {branch}")
+        print(f"  Full logs:  docker logs {project}-app-1")
+        print(f"  Shell:      docker exec -it -u {os.getuid()}:{os.getgid()} {project}-app-1 bash")
+        cmd_destroy(branch)
         sys.exit(1)
 
     print()
