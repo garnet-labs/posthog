@@ -26,7 +26,7 @@ const STT_BUFFER_SIZE = 4096
 const TURN_COMPLETE_DEBOUNCE_MS = 850
 // After debounce, require this much local (mic) silence so we don't stop while you're still talking
 // but STT hasn't emitted a partial yet.
-const MIN_SILENCE_BEFORE_AUTO_STOP_MS = 400
+const MIN_SILENCE_BEFORE_AUTO_STOP_MS = 500
 
 /** ElevenLabs `pcm_44100`: mono int16 little-endian */
 const TTS_PCM_SAMPLE_RATE = 44100
