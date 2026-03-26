@@ -300,6 +300,23 @@ class TestCreateAndRegisterWebhook:
         hog_fn_result.hog_function.refresh_from_db()
         assert hog_fn_result.hog_function.inputs["webhook_secret"]["value"] == "whsec_123"
 
+    def test_raises_on_extra_inputs_not_in_schema(self):
+        _, team = _create_org_and_team()
+        _create_hog_function_template()
+        webhook_source = _make_webhook_source()
+        ext_source = _create_external_data_source(team)
+        schemas = _create_schemas(team, ext_source, ["Customers"])
+
+        hog_fn_result = get_or_create_webhook_hog_function(team, webhook_source, "source-123", schemas)
+        webhook_source.create_webhook.return_value = WebhookCreationResult(
+            success=True,
+            extra_inputs={"unknown_key": "some_value"},
+        )
+
+        config = MagicMock()
+        with pytest.raises(ValueError, match="unknown_key"):
+            create_and_register_webhook(webhook_source, config, hog_fn_result, team.id)
+
     def test_failure_does_not_save_extra_inputs(self):
         _, team = _create_org_and_team()
         _create_hog_function_template()

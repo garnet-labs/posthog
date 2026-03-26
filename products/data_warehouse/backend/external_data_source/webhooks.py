@@ -139,6 +139,12 @@ def create_and_register_webhook(
     if result.success and result.extra_inputs:
         hog_function = hog_fn_result.hog_function
         assert hog_function.inputs is not None
+
+        schema_keys = {entry["key"] for entry in (hog_function.inputs_schema or [])}
+        unknown_keys = set(result.extra_inputs.keys()) - schema_keys
+        if unknown_keys:
+            raise ValueError(f"extra_inputs keys not defined in inputs_schema: {sorted(unknown_keys)}")
+
         hog_function.inputs = {
             **hog_function.inputs,
             **{key: {"value": value} for key, value in result.extra_inputs.items()},
