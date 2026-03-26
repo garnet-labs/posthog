@@ -15,7 +15,9 @@ The app itself is made up of 4 main components that run simultaneously:
 
 - Celery worker (handles execution of background tasks)
 - Django server
-- Node.js services (handles event ingestion and apps/plugins)
+- Node.js services:
+  - Plugin server (handles apps/plugins, CDP transformations, session recordings, webhooks)
+  - Ingestion server (handles event ingestion pipeline and person processing)
 - React frontend built with Node.js
 
 We also have a growing collection of Rust services that handle performance-critical operations:
