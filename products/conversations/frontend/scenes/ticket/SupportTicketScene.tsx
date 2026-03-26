@@ -264,7 +264,7 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                                     <div className="flex justify-between items-center">
                                         <span className="text-muted-alt">Slack thread</span>
                                         <Link
-                                            to={`https://app.slack.com/client/${ticket.slack_team_id}/${ticket.slack_channel_id}/thread/${ticket.slack_channel_id}-${ticket.slack_thread_ts.replace('.', '')}`}
+                                            to={`https://slack.com/app_redirect?team=${ticket.slack_team_id}&channel=${ticket.slack_channel_id}&thread_ts=${ticket.slack_thread_ts}`}
                                             target="_blank"
                                             className="text-xs"
                                         >
