@@ -84,6 +84,13 @@
             "type": "feature_flag",
             "intents": ["feature_flags", "experiments", "early_access_features"]
         },
+        {
+            "path": "Features repository",
+            "category": "Features",
+            "iconType": null,
+            "type": "features_repository",
+            "intents": ["features_repository"]
+        },
         { "path": "Links", "category": "Unreleased", "iconType": null, "type": "link", "intents": ["links"] },
         {
             "path": "Live Debugger",

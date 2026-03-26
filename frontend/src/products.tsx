@@ -72,6 +72,7 @@ export const productScenes: Record<string, () => Promise<any>> = {
     FeatureFlagTemplates: () => import('../../products/feature_flags/frontend/FeatureFlagTemplatesScene'),
     Game368Hedgehogs: () => import('../../products/games/368Hedgehogs/368Hedgehogs'),
     FlappyHog: () => import('../../products/games/FlappyHog/FlappyHog'),
+    FeaturesRepository: () => import('../../products/hawgs/frontend/FeaturesRepositoryScene'),
     Links: () => import('../../products/links/frontend/LinksScene'),
     Link: () => import('../../products/links/frontend/LinkScene'),
     LiveDebugger: () => import('../../products/live_debugger/frontend/LiveDebugger'),
@@ -145,6 +146,7 @@ export const productRoutes: Record<string, [string, string]> = {
     '/feature_flags/templates': ['FeatureFlagTemplates', 'featureFlagTemplates'],
     '/games/368hedgehogs': ['Game368Hedgehogs', 'game368Hedgehogs'],
     '/games/flappyhog': ['FlappyHog', 'flappyHog'],
+    '/features_repository': ['FeaturesRepository', 'featuresRepository'],
     '/links': ['Links', 'links'],
     '/link/:id': ['Link', 'link'],
     '/live-debugger': ['LiveDebugger', 'liveDebugger'],
@@ -348,6 +350,12 @@ export const productConfiguration: Record<string, any> = {
     },
     Game368Hedgehogs: { name: '368Hedgehogs', projectBased: true, activityScope: 'Games' },
     FlappyHog: { name: 'FlappyHog', projectBased: true, activityScope: 'Games' },
+    FeaturesRepository: {
+        name: 'Features repository',
+        projectBased: true,
+        description: 'Analyze websites to discover their product and feature taxonomy.',
+        iconType: 'apps',
+    },
     Links: {
         name: 'Links',
         projectBased: true,
@@ -694,6 +702,7 @@ export const productUrls = {
     groupsNew: (groupTypeIndex: string | number): string => `/groups/${groupTypeIndex}/new`,
     group: (groupTypeIndex: string | number, groupKey: string, encode: boolean = true, tab?: string | null): string =>
         `/groups/${groupTypeIndex}/${encode ? encodeURIComponent(groupKey) : groupKey}${tab ? `/${tab}` : ''}`,
+    featuresRepository: (): string => '/features_repository',
     links: (): string => '/links',
     link: (id: string): string => `/link/${id}`,
     liveDebugger: (): string => '/live-debugger',
@@ -1380,6 +1389,16 @@ export const getTreeItemsProducts = (): FileSystemImport[] => [
         href: urls.featureFlags(),
         sceneKey: 'FeatureFlags',
         sceneKeys: ['FeatureFlags', 'FeatureFlag'],
+    },
+    {
+        path: 'Features repository',
+        intents: [ProductKey.FEATURES_REPOSITORY],
+        category: 'Features',
+        type: 'features_repository',
+        href: urls.featuresRepository(),
+        iconType: 'apps' as FileSystemIconType,
+        sceneKey: 'FeaturesRepository',
+        sceneKeys: ['FeaturesRepository'],
     },
     {
         path: 'Heatmaps',

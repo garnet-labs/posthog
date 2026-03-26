@@ -11,6 +11,7 @@ from posthog.batch_exports import http as batch_exports
 from posthog.settings import EE_AVAILABLE
 
 import products.logs.backend.api as logs
+import products.hawgs.backend.api as hawgs
 import products.links.backend.api as link
 import products.tasks.backend.api as tasks
 import products.endpoints.backend.api as endpoints
@@ -1015,6 +1016,9 @@ register_grandfathered_environment_nested_viewset(
     ["team_id"],
 )
 
+environments_router.register(
+    r"features_repository", hawgs.FeaturesRepositoryViewSet, "environment_features_repository", ["team_id"]
+)
 projects_router.register(r"links", link.LinkViewSet, "environment_links", ["team_id"])
 
 projects_router.register(
