@@ -1,0 +1,24 @@
+{
+    "metrics": {
+        "auc_roc": 0.9006,
+        "auc_pr": 0.7025,
+        "brier": 0.0811,
+        "n_train": 6669,
+        "n_test": 2223,
+        "n_positive": 1482,
+        "n_negative": 7410,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "events_30d": 0.271,
+        "dashboard_viewed": 0.189,
+        "insight_viewed": 0.1239,
+        "events_7d": 0.112,
+        "insight_analyzed": 0.0913,
+        "unique_event_types": 0.0817,
+        "days_since_last_event": 0.0709,
+        "events_total": 0.0603
+    }
+}

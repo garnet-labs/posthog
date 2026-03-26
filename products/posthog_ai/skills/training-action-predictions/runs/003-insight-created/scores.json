@@ -1,0 +1,124 @@
+{
+    "total_scored": 50000,
+    "target_event": "insight created",
+    "distribution": {
+        "very_likely": {
+            "count": 3423,
+            "pct": 6.8
+        },
+        "likely": {
+            "count": 7364,
+            "pct": 14.7
+        },
+        "neutral": {
+            "count": 7286,
+            "pct": 14.6
+        },
+        "unlikely": {
+            "count": 31927,
+            "pct": 63.9
+        }
+    },
+    "top_20": [
+        {
+            "person_id": "018848f1-33c6-0000-d8bb-f288e8cf40f3",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "5298bcae-9e3d-5e65-971b-f3a0dcfe297b",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "3072ff2f-71f8-5e2c-8c00-34aca0685520",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "2c1c7053-d91f-5c19-8204-bd01d575532b",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "802d0808-93d0-5e34-b7b5-606e7ec51f86",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "c50a90e6-09c2-5aef-bb43-861af3ede1f2",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "5f53e4be-90ad-569b-b9c6-0a4792951987",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "725c5462-728a-5903-a025-808148f5c689",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "9bbba5f0-97c4-5e2a-86c2-0fbfe4cdd579",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "efca6004-437a-5729-a1a2-08b2f13ac8dd",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "edf1e5a3-5ee2-5e2d-b888-674fa294ea25",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "048c4f87-540f-5e70-9f35-f5652c2b613d",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "782e44ee-cdeb-5895-8569-363f8b5d095b",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "b442bc09-822c-50a3-bf67-85fd8f15e2a4",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "136208c2-6df4-5de2-9e9d-e6220fd58b35",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "411e2bd6-b8ac-5239-9ed4-71e97ce8c0bc",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "31f6d5aa-8f39-5a51-851d-ccb23531e792",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "729337f6-af40-5c7f-8508-94f73e53e2d3",
+            "probability": 1.0,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "d1b6d0aa-fbc9-51d0-8813-7150e7f3c102",
+            "probability": 0.9903,
+            "bucket": "very_likely"
+        },
+        {
+            "person_id": "9cc3a376-4a12-54ee-9a22-a7d8558c3d2a",
+            "probability": 0.9848,
+            "bucket": "very_likely"
+        }
+    ]
+}

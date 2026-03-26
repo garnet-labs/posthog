@@ -32,6 +32,8 @@ def execute_hogql(query: str) -> pd.DataFrame:
     }
 
     resp = requests.post(url, json=payload, headers=headers, timeout=300)
+    if resp.status_code >= 400:
+        print(f"API error {resp.status_code}: {resp.text[:1000]}")
     resp.raise_for_status()
     data = resp.json()
 

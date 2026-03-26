@@ -1,0 +1,39 @@
+{
+    "metrics": {
+        "auc_roc": 0.8892,
+        "auc_pr": 0.7033,
+        "brier": 0.0805,
+        "n_train": 6691,
+        "n_test": 2231,
+        "n_positive": 1487,
+        "n_negative": 7435,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "events_30d": 0.173,
+        "insight_analyzed": 0.0914,
+        "dashboard_viewed": 0.09,
+        "insight_viewed": 0.0874,
+        "unique_event_types": 0.0514,
+        "events_7d": 0.0438,
+        "user_logged_in": 0.0373,
+        "days_since_last_event": 0.0345,
+        "pay_gate_shown": 0.0288,
+        "recording_viewed": 0.0285,
+        "pageview_ratio": 0.0285,
+        "recording_fetched": 0.0283,
+        "autocapture_ratio": 0.0272,
+        "user_signed_up": 0.0264,
+        "team_member_invited": 0.0263,
+        "onboarding_started": 0.0263,
+        "trend_ratio_14d": 0.0261,
+        "onboarding_completed": 0.026,
+        "events_total": 0.0248,
+        "dashboard_created": 0.0245,
+        "feature_flag_created": 0.0237,
+        "setup_tasks_completed": 0.0232,
+        "billing_cta_shown": 0.0227
+    }
+}
