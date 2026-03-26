@@ -293,6 +293,7 @@ export function BatchExportRunsGrouped({
                                             return humanFriendlyNumber(run.records_completed)
                                         },
                                     },
+                                    // Only show bytes exported column for batch exports
                                     ...(context !== 'hog_function'
                                         ? [
                                               {
