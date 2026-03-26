@@ -6,6 +6,18 @@ import api from 'lib/api'
 import { SandboxFile } from '../types'
 import type { hogbotResearchLogicType } from './hogbotResearchLogicType'
 
+const getModifiedAtTimestamp = (file: SandboxFile): number => {
+    const timestamp = Date.parse(file.modified_at)
+    return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
+export function sortFilesByModifiedAt(files: SandboxFile[]): SandboxFile[] {
+    return [...files].sort((a, b) => {
+        const timestampDiff = getModifiedAtTimestamp(b) - getModifiedAtTimestamp(a)
+        return timestampDiff !== 0 ? timestampDiff : a.path.localeCompare(b.path)
+    })
+}
+
 export const hogbotResearchLogic = kea<hogbotResearchLogicType>([
     path(['products', 'hogbot', 'frontend', 'research', 'hogbotResearchLogic']),
     actions({
@@ -19,7 +31,7 @@ export const hogbotResearchLogic = kea<hogbotResearchLogicType>([
                     const response = await api.get(
                         `api/projects/@current/hogbot/files/?glob=${encodeURIComponent('/research/*.md')}`
                     )
-                    return response.results
+                    return sortFilesByModifiedAt(response.results)
                 },
             },
         ],

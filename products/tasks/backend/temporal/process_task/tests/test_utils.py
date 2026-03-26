@@ -29,6 +29,7 @@ class TestGetSandboxMcpConfigs(TestCase):
     def test_derives_mcp_config_from_site_url(self, site_url: str, expected_mcp_url: str) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = False
             mock_settings.SITE_URL = site_url
             configs = get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID)
             assert configs == [
@@ -43,6 +44,7 @@ class TestGetSandboxMcpConfigs(TestCase):
     def test_explicit_sandbox_mcp_url_takes_precedence(self) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = "https://custom-mcp.example.com/mcp"
+            mock_settings.DEBUG = True
             mock_settings.SITE_URL = "https://app.posthog.com"
             configs = get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID)
             assert configs == [
@@ -57,6 +59,7 @@ class TestGetSandboxMcpConfigs(TestCase):
     def test_full_scopes_preset(self) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = False
             mock_settings.SITE_URL = "https://app.posthog.com"
             configs = get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID, scopes="full")
             assert configs == [
@@ -71,6 +74,7 @@ class TestGetSandboxMcpConfigs(TestCase):
     def test_custom_scopes_with_write(self) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = False
             mock_settings.SITE_URL = "https://app.posthog.com"
             configs = get_sandbox_mcp_configs(
                 self.TOKEN, self.PROJECT_ID, scopes=["feature_flag:read", "feature_flag:write"]
@@ -87,6 +91,7 @@ class TestGetSandboxMcpConfigs(TestCase):
     def test_custom_scopes_read_only(self) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = False
             mock_settings.SITE_URL = "https://app.posthog.com"
             configs = get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID, scopes=["feature_flag:read", "insight:read"])
             assert configs == [
@@ -107,14 +112,31 @@ class TestGetSandboxMcpConfigs(TestCase):
     def test_returns_empty_list_for_unknown_hosts(self, site_url: str) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = False
             mock_settings.SITE_URL = site_url
             assert get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID) == []
 
     def test_returns_empty_list_when_no_site_url(self) -> None:
         with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
             mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = False
             mock_settings.SITE_URL = ""
             assert get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID) == []
+
+    def test_uses_local_mcp_url_by_default_in_debug(self) -> None:
+        with patch("products.tasks.backend.temporal.process_task.utils.settings") as mock_settings:
+            mock_settings.SANDBOX_MCP_URL = None
+            mock_settings.DEBUG = True
+            mock_settings.SITE_URL = "http://localhost:8000"
+            configs = get_sandbox_mcp_configs(self.TOKEN, self.PROJECT_ID, scopes="full")
+            assert configs == [
+                McpServerConfig(
+                    type="http",
+                    name="posthog",
+                    url="http://host.docker.internal:8787/mcp",
+                    headers=self._expected_headers(read_only=False),
+                )
+            ]
 
 
 class TestMcpServerConfigToDict(TestCase):

@@ -1,3 +1,4 @@
+import json
 import shlex
 import logging
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from posthog.temporal.common.utils import asyncify
 from products.hogbot.backend.models import HogbotRuntime
 from products.tasks.backend.services.sandbox import Sandbox, SandboxConfig, SandboxTemplate
 from products.tasks.backend.temporal.oauth import create_oauth_access_token_for_user
-from products.tasks.backend.temporal.process_task.utils import get_sandbox_api_url
+from products.tasks.backend.temporal.process_task.utils import get_sandbox_api_url, get_sandbox_mcp_configs
 
 HOGBOT_SANDBOX_TTL_SECONDS = 60 * 60 * 24 * 7
 HOGBOT_API_SCOPES = ["*"]
@@ -54,6 +55,18 @@ def _get_github_token(github_integration_id: int | None) -> str:
 def _get_repository_path(repository: str) -> str:
     org, repo = repository.lower().split("/")
     return f"/tmp/workspace/repos/{org}/{repo}"
+
+
+def _should_use_resume_snapshot(snapshot_external_id: str | None) -> bool:
+    if not snapshot_external_id:
+        return False
+
+    # Local Docker development should always use the freshest hogbot image rather
+    # than resuming a stale snapshot that may contain old server code.
+    if settings.DEBUG and getattr(settings, "SANDBOX_PROVIDER", None) == "docker":
+        return False
+
+    return True
 
 
 def _get_token_user(team_id: int, user_id: int | None) -> User:
@@ -130,7 +143,11 @@ def _checkout_branch(
 @asyncify
 def create_hogbot_sandbox(input: CreateHogbotSandboxInput) -> CreateHogbotSandboxOutput:
     runtime, _ = HogbotRuntime.objects.get_or_create(team_id=input.team_id)
-    snapshot_external_id = runtime.latest_snapshot_external_id
+    snapshot_external_id = (
+        runtime.latest_snapshot_external_id
+        if _should_use_resume_snapshot(runtime.latest_snapshot_external_id)
+        else None
+    )
     has_snapshot = bool(snapshot_external_id)
     github_token = _get_github_token(input.github_integration_id)
     access_token = create_oauth_access_token_for_user(
@@ -144,6 +161,9 @@ def create_hogbot_sandbox(input: CreateHogbotSandboxInput) -> CreateHogbotSandbo
         "POSTHOG_API_URL": get_sandbox_api_url(),
         "POSTHOG_PROJECT_ID": str(input.team_id),
     }
+    mcp_configs = get_sandbox_mcp_configs(access_token, input.team_id, scopes="full")
+    if mcp_configs:
+        environment_variables["POSTHOG_MCP_SERVERS_JSON"] = json.dumps([config.to_dict() for config in mcp_configs])
     if github_token:
         environment_variables["GITHUB_TOKEN"] = github_token
     if settings.SANDBOX_LLM_GATEWAY_URL:

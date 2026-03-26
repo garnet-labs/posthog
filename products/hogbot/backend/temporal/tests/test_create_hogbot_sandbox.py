@@ -27,6 +27,54 @@ def _sandbox() -> Mock:
 
 
 class TestCreateHogbotSandboxActivity:
+    def test_create_hogbot_sandbox_ignores_resume_snapshot_in_local_debug_docker(self) -> None:
+        sandbox = _sandbox()
+        runtime = SimpleNamespace(latest_snapshot_external_id="snap-local")
+        fake_user = SimpleNamespace(id=17)
+
+        with (
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.HogbotRuntime.objects.get_or_create",
+                return_value=(runtime, False),
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.Sandbox.create",
+                return_value=sandbox,
+            ) as mock_create,
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox._get_token_user",
+                return_value=fake_user,
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.create_oauth_access_token_for_user",
+                return_value="oauth-token",
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_api_url",
+                return_value="http://posthog.test",
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_mcp_configs",
+                return_value=[],
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.DEBUG",
+                True,
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.SANDBOX_PROVIDER",
+                "docker",
+            ),
+        ):
+            async_to_sync(ActivityEnvironment().run)(
+                create_hogbot_sandbox,
+                CreateHogbotSandboxInput(team_id=1, user_id=17),
+            )
+
+        config = mock_create.call_args.args[0]
+        assert config.snapshot_external_id is None
+        sandbox.execute.assert_called_once()
+
     def test_create_hogbot_sandbox_uses_runtime_snapshot_without_recloning_repository(self) -> None:
         sandbox = _sandbox()
         runtime = SimpleNamespace(latest_snapshot_external_id="snap-1")
@@ -56,6 +104,18 @@ class TestCreateHogbotSandboxActivity:
             patch(
                 "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_api_url",
                 return_value="http://posthog.test",
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_mcp_configs",
+                return_value=[],
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.DEBUG",
+                False,
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.SANDBOX_PROVIDER",
+                "docker",
             ),
         ):
             result = async_to_sync(ActivityEnvironment().run)(
@@ -112,6 +172,18 @@ class TestCreateHogbotSandboxActivity:
                 "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_api_url",
                 return_value="http://posthog.test",
             ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_mcp_configs",
+                return_value=[],
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.DEBUG",
+                False,
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.SANDBOX_PROVIDER",
+                "docker",
+            ),
         ):
             result = async_to_sync(ActivityEnvironment().run)(
                 create_hogbot_sandbox,
@@ -131,3 +203,61 @@ class TestCreateHogbotSandboxActivity:
         seed_command = sandbox.execute.call_args.args[0]
         assert HOGBOT_DEFAULT_RESEARCH_FILE in seed_command
         assert result.sandbox_id == "sb-1"
+
+    def test_create_hogbot_sandbox_passes_serialized_mcp_server_config(self) -> None:
+        sandbox = _sandbox()
+        runtime = SimpleNamespace(latest_snapshot_external_id=None)
+        fake_user = SimpleNamespace(id=21)
+        mcp_config = SimpleNamespace(
+            to_dict=lambda: {
+                "type": "http",
+                "name": "posthog",
+                "url": "http://host.docker.internal:8787/mcp",
+                "headers": [{"name": "Authorization", "value": "Bearer oauth-token"}],
+            }
+        )
+
+        with (
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.HogbotRuntime.objects.get_or_create",
+                return_value=(runtime, False),
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.Sandbox.create",
+                return_value=sandbox,
+            ) as mock_create,
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox._get_token_user",
+                return_value=fake_user,
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.create_oauth_access_token_for_user",
+                return_value="oauth-token",
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_api_url",
+                return_value="http://posthog.test",
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.get_sandbox_mcp_configs",
+                return_value=[mcp_config],
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.DEBUG",
+                False,
+            ),
+            patch(
+                "products.hogbot.backend.temporal.activities.create_hogbot_sandbox.settings.SANDBOX_PROVIDER",
+                "docker",
+            ),
+        ):
+            async_to_sync(ActivityEnvironment().run)(
+                create_hogbot_sandbox,
+                CreateHogbotSandboxInput(team_id=1, user_id=21),
+            )
+
+        config = mock_create.call_args.args[0]
+        assert config.environment_variables["POSTHOG_MCP_SERVERS_JSON"] == (
+            '[{"type": "http", "name": "posthog", "url": "http://host.docker.internal:8787/mcp", '
+            '"headers": [{"name": "Authorization", "value": "Bearer oauth-token"}]}]'
+        )

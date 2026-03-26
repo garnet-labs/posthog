@@ -67,6 +67,9 @@ def _resolve_mcp_url() -> str | None:
     if settings.SANDBOX_MCP_URL:
         return settings.SANDBOX_MCP_URL
 
+    if settings.DEBUG:
+        return "http://host.docker.internal:8787/mcp"
+
     site_url = settings.SITE_URL
     if not site_url:
         return None

@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 
 import type { ResearchParentMessage, ResearchWorkerMessage } from '../ipc'
+import { getPostHogMcpServersFromEnv } from '../mcp'
 import { RESEARCH_SYSTEM_PROMPT } from '../prompts'
 
 function send(message: ResearchWorkerMessage): void {
@@ -52,12 +53,14 @@ async function runResearch(signalId: string, prompt: string): Promise<void> {
     const sdk = require('@anthropic-ai/claude-agent-sdk') as {
         query: (typeof import('@anthropic-ai/claude-agent-sdk'))['query']
     }
+    const mcpServers = getPostHogMcpServersFromEnv(process.env)
     const query: Query = sdk.query({
         prompt,
         options: {
             cwd: workspacePath,
             env: process.env,
             tools: { type: 'preset', preset: 'claude_code' },
+            mcpServers,
             systemPrompt: { type: 'preset', preset: 'claude_code', append: RESEARCH_SYSTEM_PROMPT },
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,

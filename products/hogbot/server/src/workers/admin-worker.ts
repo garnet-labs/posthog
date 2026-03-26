@@ -2,6 +2,7 @@ import type { Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-age
 import { randomBytes } from 'crypto'
 
 import type { AdminParentMessage, AdminWorkerMessage } from '../ipc'
+import { getPostHogMcpServersFromEnv } from '../mcp'
 import { ADMIN_SYSTEM_PROMPT } from '../prompts'
 import { Pushable } from '../pushable'
 
@@ -34,12 +35,14 @@ async function main(): Promise<void> {
     const sdk = require('@anthropic-ai/claude-agent-sdk') as {
         query: (typeof import('@anthropic-ai/claude-agent-sdk'))['query']
     }
+    const mcpServers = getPostHogMcpServersFromEnv(process.env)
     const query: Query = sdk.query({
         prompt: input,
         options: {
             cwd: workspacePath,
             env: process.env,
             tools: { type: 'preset', preset: 'claude_code' },
+            mcpServers,
             systemPrompt: { type: 'preset', preset: 'claude_code', append: ADMIN_SYSTEM_PROMPT },
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
