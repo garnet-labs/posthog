@@ -1,0 +1,15 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "id": {
+            "description": "A UUID string identifying this action prediction model.",
+            "type": "string"
+        },
+        "prompt": {
+            "description": "Instructions for the prediction agent describing what to do with the model, e.g. 'score all users and write person properties', 'run a simulation for the next 30 days', 'predict which users will churn this week'.",
+            "type": "string"
+        }
+    },
+    "required": ["id", "prompt"],
+    "type": "object"
+}
