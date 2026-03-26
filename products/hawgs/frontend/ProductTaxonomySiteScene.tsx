@@ -1,7 +1,8 @@
 import { useValues } from 'kea'
+import { useMemo } from 'react'
 import { useState } from 'react'
 
-import { LemonModal, LemonTable, LemonTabs, LemonTag, Link } from '@posthog/lemon-ui'
+import { LemonModal, LemonSelect, LemonTable, LemonTabs, LemonTag, Link } from '@posthog/lemon-ui'
 
 import { humanFriendlyDetailedTime } from 'lib/utils'
 import { SceneExport } from 'scenes/sceneTypes'
@@ -27,6 +28,29 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
     const { siteDetail, siteDetailLoading } = useValues(productTaxonomySiteLogic({ domain }))
     const [screenshotModal, setScreenshotModal] = useState<{ url: string; title: string } | null>(null)
     const [activeTab, setActiveTab] = useState<'taxonomy' | 'pages'>('taxonomy')
+    const [productFilter, setProductFilter] = useState<string | null>(null)
+    const [featureFilter, setFeatureFilter] = useState<string | null>(null)
+
+    const allProducts = useMemo(
+        () => [...new Set((siteDetail?.pages ?? []).flatMap((p) => p.related_products))].sort(),
+        [siteDetail?.pages]
+    )
+    const allFeatures = useMemo(
+        () => [...new Set((siteDetail?.pages ?? []).flatMap((p) => p.related_features))].sort(),
+        [siteDetail?.pages]
+    )
+
+    const filteredPages = useMemo(() => {
+        return (siteDetail?.pages ?? []).filter((p) => {
+            if (productFilter && !p.related_products.includes(productFilter)) {
+                return false
+            }
+            if (featureFilter && !p.related_features.includes(featureFilter)) {
+                return false
+            }
+            return true
+        })
+    }, [siteDetail?.pages, productFilter, featureFilter])
 
     return (
         <SceneContent>
@@ -150,88 +174,120 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
                     },
                     {
                         key: 'pages',
-                        label: `Pages${siteDetail ? ` (${siteDetail.pages.length})` : ''}`,
+                        label: `Pages${siteDetail ? ` (${filteredPages.length}/${siteDetail.pages.length})` : ''}`,
                         content: (
-                            <LemonTable
-                                loading={siteDetailLoading}
-                                dataSource={siteDetail?.pages ?? []}
-                                columns={[
-                                    {
-                                        title: 'Page',
-                                        width: '35%',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="flex items-center gap-3 py-2">
-                                                {page.screenshot ? (
-                                                    <img
-                                                        src={page.screenshot}
-                                                        alt={page.title}
-                                                        className="w-20 h-20 rounded object-cover flex-shrink-0 border cursor-pointer hover:opacity-80 transition-opacity"
-                                                        onClick={() =>
-                                                            setScreenshotModal({
-                                                                url: page.screenshot!,
-                                                                title: page.title,
-                                                            })
-                                                        }
-                                                    />
-                                                ) : (
-                                                    <div className="w-20 h-20 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
-                                                        N/A
-                                                    </div>
-                                                )}
-                                                <div className="min-w-0">
-                                                    <div className="font-semibold text-sm truncate">{page.title}</div>
-                                                    <div className="text-xs text-muted truncate">{page.url}</div>
-                                                    {page.description && (
-                                                        <div className="text-xs text-muted mt-1 line-clamp-2">
-                                                            {page.description}
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-3 justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <LemonSelect
+                                            size="small"
+                                            placeholder="All products"
+                                            value={productFilter}
+                                            onChange={setProductFilter}
+                                            options={[
+                                                { value: null, label: 'All products' },
+                                                ...allProducts.map((p) => ({ value: p, label: p })),
+                                            ]}
+                                            allowClear
+                                        />
+                                        <LemonSelect
+                                            size="small"
+                                            placeholder="All features"
+                                            value={featureFilter}
+                                            onChange={setFeatureFilter}
+                                            options={[
+                                                { value: null, label: 'All features' },
+                                                ...allFeatures.map((f) => ({ value: f, label: f })),
+                                            ]}
+                                            allowClear
+                                        />
+                                    </div>
+                                </div>
+                                <LemonTable
+                                    loading={siteDetailLoading}
+                                    dataSource={filteredPages}
+                                    columns={[
+                                        {
+                                            title: 'Page',
+                                            width: '35%',
+                                            render: (_: unknown, page: SitePage) => (
+                                                <div className="flex items-center gap-3 py-2">
+                                                    {page.screenshot ? (
+                                                        <img
+                                                            src={page.screenshot}
+                                                            alt={page.title}
+                                                            className="w-20 h-20 rounded object-cover flex-shrink-0 border cursor-pointer hover:opacity-80 transition-opacity"
+                                                            onClick={() =>
+                                                                setScreenshotModal({
+                                                                    url: page.screenshot!,
+                                                                    title: page.title,
+                                                                })
+                                                            }
+                                                        />
+                                                    ) : (
+                                                        <div className="w-20 h-20 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
+                                                            N/A
                                                         </div>
                                                     )}
+                                                    <div className="min-w-0">
+                                                        <div className="font-semibold text-sm truncate">
+                                                            {page.title}
+                                                        </div>
+                                                        <div className="text-xs text-muted truncate">{page.url}</div>
+                                                        {page.description && (
+                                                            <div className="text-xs text-muted mt-1 line-clamp-2">
+                                                                {page.description}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Summary',
-                                        width: '25%',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="text-xs text-muted line-clamp-4">{page.summary}</div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Related products',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="flex flex-wrap gap-1">
-                                                {page.related_products.map((name) => (
-                                                    <LemonTag key={name} type="highlight">
-                                                        {name}
-                                                    </LemonTag>
-                                                ))}
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Related features',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="flex flex-wrap gap-1">
-                                                {page.related_features.map((name) => (
-                                                    <LemonTag key={name} type="completion">
-                                                        {name}
-                                                    </LemonTag>
-                                                ))}
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Updated',
-                                        align: 'right',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <span className="text-xs text-muted whitespace-nowrap">
-                                                {page.last_updated ? humanFriendlyDetailedTime(page.last_updated) : '–'}
-                                            </span>
-                                        ),
-                                    },
-                                ]}
-                            />
+                                            ),
+                                        },
+                                        {
+                                            title: 'Summary',
+                                            width: '25%',
+                                            render: (_: unknown, page: SitePage) => (
+                                                <div className="text-xs text-muted line-clamp-4">{page.summary}</div>
+                                            ),
+                                        },
+                                        {
+                                            title: 'Related products',
+                                            render: (_: unknown, page: SitePage) => (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {page.related_products.map((name) => (
+                                                        <LemonTag key={name} type="highlight">
+                                                            {name}
+                                                        </LemonTag>
+                                                    ))}
+                                                </div>
+                                            ),
+                                        },
+                                        {
+                                            title: 'Related features',
+                                            render: (_: unknown, page: SitePage) => (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {page.related_features.map((name) => (
+                                                        <LemonTag key={name} type="completion">
+                                                            {name}
+                                                        </LemonTag>
+                                                    ))}
+                                                </div>
+                                            ),
+                                        },
+                                        {
+                                            title: 'Updated',
+                                            align: 'right',
+                                            render: (_: unknown, page: SitePage) => (
+                                                <span className="text-xs text-muted whitespace-nowrap">
+                                                    {page.last_updated
+                                                        ? humanFriendlyDetailedTime(page.last_updated)
+                                                        : '–'}
+                                                </span>
+                                            ),
+                                        },
+                                    ]}
+                                />
+                            </div>
                         ),
                     },
                 ]}
