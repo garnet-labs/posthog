@@ -5,22 +5,22 @@ describe('ceoToolWaitTweets', () => {
 
     it('waitFillClipTtsText keeps tweet body intact and adds concise wrap for a single clip', () => {
         const line = waitFillClipTtsText(tweet, 0, 1)
-        expect(line.includes(tweet)).toBe(true)
-        expect(line.startsWith('While we wait')).toBe(true)
-        expect(line.endsWith('Hang tight.')).toBe(true)
+        expect(line).toContain(tweet)
+        expect(line).toContain('let me share this with you')
     })
 
-    it('first of two uses an opener; last uses handoff and closing', () => {
+    it('first of two uses an opener; last uses a different transition', () => {
         const first = waitFillClipTtsText(tweet, 0, 2)
         const last = waitFillClipTtsText(tweet, 1, 2)
-        expect(first).toContain('did you hear')
-        expect(last).toContain("Here's one more while we wait")
-        expect(last.endsWith('Hang tight.')).toBe(true)
+        expect(first).toContain(tweet)
+        expect(last).toContain(tweet)
+        expect(first).toContain('in the meantime')
+        expect(last).toContain("while we're at it")
         expect(first).not.toBe(last)
     })
 
     it('middle clip of three uses another transition', () => {
         const mid = waitFillClipTtsText(tweet, 1, 3)
-        expect(mid).toContain("Here's another while we wait")
+        expect(mid).toContain('Oh and also')
     })
 })

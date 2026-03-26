@@ -105,33 +105,16 @@ function shouldDeferMainForWaitFill(cache: any): boolean {
     if (cache.playingTtsKind === 'waitFill') {
         return true
     }
-    // Between first and optional second clip — still holding the phase open
-    if (cache.waitFillOptionalSecondLine) {
-        return true
-    }
     return false
 }
 
 /**
- * After each wait-fill clip: optionally queue a second tweet only if assistant TTS isn't ready yet;
- * otherwise end the wait-fill phase and merge deferred assistant audio.
+ * After a wait-fill clip finishes: end the wait-fill phase and merge deferred assistant audio.
  */
 function maybeContinueAfterWaitFillClip(cache: any): void {
     if (!cache.toolWaitFillEnabled) {
         return
     }
-
-    const deferredLen = (cache.ttsDeferredQueue as TtsQueueItem[] | undefined)?.length ?? 0
-    const second = cache.waitFillOptionalSecondLine as string | undefined
-
-    if (second && deferredLen === 0) {
-        ;(cache.ttsWaitFillQueue as TtsQueueItem[]).push({ kind: 'waitFill', text: second })
-        cache.waitFillOptionalSecondLine = undefined
-        // Caller drain loop continues — do not call drainTtsQueue (re-entrant guard)
-        return
-    }
-
-    cache.waitFillOptionalSecondLine = undefined
 
     if ((cache.ttsWaitFillQueue as TtsQueueItem[]).length > 0) {
         return
@@ -960,7 +943,6 @@ export const voiceLogic = kea<voiceLogicType>([
             cache.toolNarrationSpoken = new Set<string>()
             cache.toolCallNarrationRecent = [] as string[]
             cache.toolWaitFillEnabled = false
-            cache.waitFillOptionalSecondLine = undefined
             ensureTtsQueueState(cache)
             ;(cache.ttsWaitFillQueue as TtsQueueItem[]).length = 0
             ;(cache.ttsDeferredQueue as TtsQueueItem[]).length = 0
@@ -974,8 +956,7 @@ export const voiceLogic = kea<voiceLogicType>([
             if (cache.ttsDrainGeneration === undefined) {
                 cache.ttsDrainGeneration = 0
             }
-            const waitTweets = pickRandomWaitFillTweets(2)
-            const waitTotal = waitTweets.length
+            const waitTweets = pickRandomWaitFillTweets(1)
             let lines: string[]
             try {
                 const res = await api.conversations.waitFillTtsLines({ tweets: waitTweets })
@@ -984,14 +965,10 @@ export const voiceLogic = kea<voiceLogicType>([
                 }
                 lines = res.lines
             } catch {
-                lines = waitTweets.map((tweet, i) => waitFillClipTtsText(tweet, i, waitTotal))
+                lines = waitTweets.map((tweet, i) => waitFillClipTtsText(tweet, i, 1))
             }
-            cache.waitFillOptionalSecondLine = undefined
             if (lines.length >= 1) {
                 ;(cache.ttsWaitFillQueue as TtsQueueItem[]).push({ kind: 'waitFill', text: lines[0] })
-                if (lines.length >= 2) {
-                    cache.waitFillOptionalSecondLine = lines[1]
-                }
             }
             cache.toolWaitFillEnabled = true
             void drainTtsQueue(cache, actions)
@@ -1118,7 +1095,6 @@ export const voiceLogic = kea<voiceLogicType>([
             ensureTtsQueueState(cache)
             ;(cache.ttsQueue as TtsQueueItem[]).length = 0
             cache.toolWaitFillEnabled = false
-            cache.waitFillOptionalSecondLine = undefined
             ;(cache.ttsWaitFillQueue as TtsQueueItem[]).length = 0
             ;(cache.ttsDeferredQueue as TtsQueueItem[]).length = 0
             cache.playbackScheduleTime = undefined

@@ -15,13 +15,30 @@ from ee.hogai.llm import MaxChatOpenAI
 MAX_TWEETS = 5
 MAX_LINE_CHARS = 900
 
-WAIT_FILL_SYSTEM = """You write short lines for voice TTS while the user waits for the AI to run tools.
+WAIT_FILL_SYSTEM = """You write short spoken lines for voice TTS while the user waits for the AI to finish working.
 Respond with JSON only. No markdown fences, no commentary outside JSON.
 The JSON object must be exactly: {"lines": ["...", "..."]}
 The "lines" array must have exactly the same length as the input "tweets" array (same order).
 Each string in "lines" is ONE full spoken line for text-to-speech. It MUST include the corresponding tweet text verbatim as a substring — copy it character-for-character from the input, do not paraphrase or edit the tweet.
-Add brief natural transitions before and/or after the tweet so the clips feel like one relaxed conversation (filling dead air while tools run). Vary tone between first, middle, and last clip when there are multiple lines. Keep transitions concise.
+Wrap each tweet with a warm, casual transition that makes it feel like you're sharing something fun while the user waits. Think of the vibe: "while we wait, let me share this with you" or "this'll take a sec — in the meantime..." or "oh, while that's running, you'll love this one...". Vary the transitions so they don't repeat. Keep them short and natural — like a friend sharing a meme while something loads. No sign-offs like "hang tight" or "back soon" at the end.
 No markdown, no emojis, no bullet points. English only."""
+
+
+_FALLBACK_FIRST = [
+    "While we wait, let me share this with you.",
+    "This'll take a sec — in the meantime,",
+    "Oh, while that's running —",
+]
+
+_FALLBACK_MIDDLE = [
+    "Here's another one while we wait.",
+    "Oh and also,",
+]
+
+_FALLBACK_LAST = [
+    "One more while we're at it.",
+    "And while we're still waiting,",
+]
 
 
 def _fallback_lines(tweets: list[str]) -> list[str]:
@@ -30,15 +47,15 @@ def _fallback_lines(tweets: list[str]) -> list[str]:
     if total == 0:
         return []
     if total == 1:
-        return [f"While we wait — {tweets[0]} Hang tight."]
+        return [f"{_FALLBACK_FIRST[0]} {tweets[0]}"]
     out: list[str] = []
     for i, t in enumerate(tweets):
         if i == 0:
-            out.append(f"While we wait, did you hear about this? {t}")
+            out.append(f"{_FALLBACK_FIRST[i % len(_FALLBACK_FIRST)]} {t}")
         elif i == total - 1:
-            out.append(f"Here's one more while we wait. {t} Hang tight.")
+            out.append(f"{_FALLBACK_LAST[i % len(_FALLBACK_LAST)]} {t}")
         else:
-            out.append(f"Here's another while we wait. {t}")
+            out.append(f"{_FALLBACK_MIDDLE[i % len(_FALLBACK_MIDDLE)]} {t}")
     return out
 
 

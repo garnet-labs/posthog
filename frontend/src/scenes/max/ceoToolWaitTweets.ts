@@ -6,12 +6,11 @@ export const CEO_TOOL_WAIT_TWEETS: readonly string[] = [
     "Walter White says he's been using Claude to optimize pricing and narcotics recipes in his lab",
     '110-year-old Turkish grandma shares her secret to a long life: "i never once used Microsoft Teams"',
     'ever since i was a kid, i knew i wanted to book a quick 5-minute demo to learn more about your agentic AI platform that saves most customers 90 minutes a day in manual tasks',
-    '10 years ago, you could raise $1 million, hire a cracked team from FAANG, spend months building a product, and still get 0 customers. now, all i have to do is ask Claude to build 25 startups that all have 0 customers. lesson: tighten your feedback loops to reach your end goal faster',
-    "a friend had OpenClaw plan his whole wedding and 'bring the costs down'. OpenClaw canceled the catering contracts and ordered 300 lbs of raw ground beef to the venue food costs dropped from $35,171 to about $2,000. you can just do things",
+    '10 years ago, you could raise $1 million, hire a cracked team from FAANG, spend months building a product, and still get 0 customers. now, all i have to do is ask Claude to build 25 startups that all have 0 customers',
 ]
 
 /**
- * Full line for ElevenLabs: concise transitions + original tweet (tweet body unchanged).
+ * Full line for ElevenLabs: casual transition + original tweet (tweet body unchanged).
  * `index` / `total` describe this batch only (0-based index, number of clips).
  */
 export function waitFillClipTtsText(tweet: string, index: number, total: number): string {
@@ -19,19 +18,19 @@ export function waitFillClipTtsText(tweet: string, index: number, total: number)
         return tweet
     }
     if (total === 1) {
-        return `While we wait — ${tweet} Hang tight.`
+        return `While we wait, let me share this with you. ${tweet}`
     }
 
     const isFirst = index === 0
     const isLast = index === total - 1
 
     if (isFirst) {
-        return `While we wait, did you hear about this? ${tweet}`
+        return `This'll take a sec — in the meantime, ${tweet}`
     }
     if (isLast) {
-        return `Here's one more while we wait. ${tweet} Hang tight.`
+        return `One more while we're at it. ${tweet}`
     }
-    return `Here's another while we wait. ${tweet}`
+    return `Oh and also, ${tweet}`
 }
 
 /** Pick up to `count` unique random lines for wait-fill TTS. */
