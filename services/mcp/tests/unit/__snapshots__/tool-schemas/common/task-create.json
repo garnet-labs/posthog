@@ -21,7 +21,8 @@
             "type": "string"
         },
         "repository": {
-            "description": "Optional GitHub repository in org/repo format, for example `posthog/posthog`. If omitted, the task is created without a repository. If provided, PostHog will use the project team's default GitHub integration.",
+            "default": "posthog/posthog-php",
+            "description": "GitHub repository in org/repo format. Defaults to `posthog/posthog-php` (from https://github.com/posthog/posthog-php). PostHog uses the project team's default GitHub integration.",
             "pattern": "^[^/]+\\/[^/]+$",
             "type": "string"
         },

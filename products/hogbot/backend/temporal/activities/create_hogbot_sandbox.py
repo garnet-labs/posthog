@@ -17,6 +17,8 @@ from products.tasks.backend.temporal.process_task.utils import get_sandbox_api_u
 
 HOGBOT_SANDBOX_TTL_SECONDS = 60 * 60 * 24 * 7
 HOGBOT_API_SCOPES = ["*"]
+HOGBOT_RESEARCH_DIR = "/tmp/workspace/research"
+HOGBOT_DEFAULT_RESEARCH_FILE = f"{HOGBOT_RESEARCH_DIR}/README.md"
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,31 @@ def _get_token_user(team_id: int, user_id: int | None) -> User:
     if fallback_user is None:
         raise RuntimeError(f"Cannot start hogbot for team {team_id} without a user context")
     return fallback_user
+
+
+def _seed_research_directory(sandbox: Sandbox) -> None:
+    content = "\n".join(
+        [
+            "# Hogbot Research",
+            "",
+            "This directory contains markdown files produced and maintained by Hogbot research runs.",
+            "",
+            "Expected usage:",
+            "- Each signal can create or update a markdown file here.",
+            "- Humans should review these files directly.",
+            "- Keep the content concise, readable, and current.",
+            "",
+        ]
+    )
+    command = (
+        f"mkdir -p {shlex.quote(HOGBOT_RESEARCH_DIR)} && "
+        f"if [ ! -f {shlex.quote(HOGBOT_DEFAULT_RESEARCH_FILE)} ]; then "
+        f"printf %s {shlex.quote(content)} > {shlex.quote(HOGBOT_DEFAULT_RESEARCH_FILE)}; "
+        "fi"
+    )
+    result = sandbox.execute(command, timeout_seconds=30)
+    if result.exit_code != 0:
+        raise RuntimeError(f"Failed to seed hogbot research directory: {result.stderr or result.stdout}")
 
 
 def _checkout_branch(
@@ -148,6 +175,9 @@ def create_hogbot_sandbox(input: CreateHogbotSandboxInput) -> CreateHogbotSandbo
                     github_token=github_token,
                     update_remote=False,
                 )
+
+        if not has_snapshot:
+            _seed_research_directory(sandbox)
 
         credentials = sandbox.get_connect_credentials()
     except Exception:

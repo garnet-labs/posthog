@@ -258,12 +258,23 @@ test('runs research jobs, streams sse events, and rejects concurrent work', asyn
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signal_id: 'sig-2', prompt: 'second' }),
     })
-    expect(conflictResponse.status).toBe(409)
+    expect(conflictResponse.status).toBe(418)
+
+    const concurrentAdminResponse = await context.request('/send_message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'during-research' }),
+    })
+    expect(concurrentAdminResponse.status).toBe(200)
+    expect(await concurrentAdminResponse.json()).toEqual({ response: 'admin:during-research' })
 
     const events = await readSseUntil(sseResponse, (event) => event.notification?.method === '_hogbot/result', 4000)
     expect(events.some((event) => event.notification.method === '_hogbot/result')).toBe(true)
 
     await waitFor(() => Boolean(context.apiState.researchLogBatches['sig-1']?.length))
+    const researchFileResponse = await context.request('/filesystem/content?path=/research/sig-1.md')
+    expect(researchFileResponse.status).toBe(200)
+    expect((await researchFileResponse.json()).content).toContain('research:slow-research')
     await waitFor(async () => {
         const health = await context.request('/health')
         const body = await health.json()

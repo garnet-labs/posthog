@@ -186,6 +186,12 @@ dockerTest(
             )
         )
 
+        const researchFileResponse = await fetch(`${baseUrl}/filesystem/content?path=/research/sig-docker.md`, {
+            headers: { Authorization: `Bearer ${signJwt()}` },
+        })
+        expect(researchFileResponse.status).toBe(200)
+        expect((await researchFileResponse.json()).content).toContain('research:slow-research')
+
         const contentResponse = await fetch(`${baseUrl}/filesystem/content?path=/sample.txt`, {
             headers: { Authorization: `Bearer ${signJwt()}` },
         })

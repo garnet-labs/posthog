@@ -62,6 +62,10 @@ runtimeTest(
             admin_ready: true,
         })
 
+        const researchReadmeResponse = await fetch(`${server.baseUrl}/filesystem/content?path=/research/README.md`)
+        expect(researchReadmeResponse.status).toBe(200)
+        expect((await researchReadmeResponse.json()).content).toContain('# Hogbot Research')
+
         const adminResponse = await fetch(`${server.baseUrl}/send_message`, {
             method: 'POST',
             headers: authHeaders,
@@ -108,13 +112,21 @@ runtimeTest(
         expect(researchResponse.status).toBe(202)
         expect(await researchResponse.json()).toEqual({ status: 'started', signal_id: 'sig-runtime' })
 
-        const busyAdminResponse = await fetch(`${server.baseUrl}/send_message`, {
+        const concurrentResearchResponse = await fetch(`${server.baseUrl}/research`, {
             method: 'POST',
             headers: authHeaders,
-            body: JSON.stringify({ content: 'blocked-during-research' }),
+            body: JSON.stringify({ signal_id: 'sig-runtime-2', prompt: 'blocked-during-research' }),
         })
-        expect(busyAdminResponse.status).toBe(409)
-        expect(await busyAdminResponse.json()).toEqual({ error: 'busy' })
+        expect(concurrentResearchResponse.status).toBe(418)
+        expect(await concurrentResearchResponse.json()).toEqual({ error: 'busy' })
+
+        const concurrentAdminResponse = await fetch(`${server.baseUrl}/send_message`, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ content: 'during-research' }),
+        })
+        expect(concurrentAdminResponse.status).toBe(200)
+        expect(await concurrentAdminResponse.json()).toEqual({ response: 'admin:during-research' })
 
         const researchEvents = await researchEventsPromise
         expect(researchEvents.some((event) => event.notification.method === '_hogbot/result')).toBe(true)
@@ -126,6 +138,12 @@ runtimeTest(
                 )
             )
         )
+
+        const researchFileResponse = await fetch(`${server.baseUrl}/filesystem/content?path=/research/sig-runtime.md`, {
+            headers: { Authorization: `Bearer ${signJwt()}` },
+        })
+        expect(researchFileResponse.status).toBe(200)
+        expect((await researchFileResponse.json()).content).toContain('research:slow-research')
 
         const failedResearchResponse = await fetch(`${server.baseUrl}/research`, {
             method: 'POST',

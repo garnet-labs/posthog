@@ -6,6 +6,7 @@ from asgiref.sync import async_to_sync
 from temporalio.testing import ActivityEnvironment
 
 from products.hogbot.backend.temporal.activities.create_hogbot_sandbox import (
+    HOGBOT_DEFAULT_RESEARCH_FILE,
     CreateHogbotSandboxInput,
     create_hogbot_sandbox,
 )
@@ -70,12 +71,10 @@ class TestCreateHogbotSandboxActivity:
         config = mock_create.call_args.args[0]
         assert config.snapshot_external_id == "snap-1"
         assert config.template == SandboxTemplate.HOGBOT_BASE
-        assert config.environment_variables == {
-            "POSTHOG_PERSONAL_API_KEY": "oauth-token",
-            "POSTHOG_API_URL": "http://posthog.test",
-            "POSTHOG_PROJECT_ID": "1",
-            "GITHUB_TOKEN": "github-token",
-        }
+        assert config.environment_variables["POSTHOG_PERSONAL_API_KEY"] == "oauth-token"
+        assert config.environment_variables["POSTHOG_API_URL"] == "http://posthog.test"
+        assert config.environment_variables["POSTHOG_PROJECT_ID"] == "1"
+        assert config.environment_variables["GITHUB_TOKEN"] == "github-token"
         mock_access_token.assert_called_once_with(fake_user, 1, scopes=["*"])
         sandbox.clone_repository.assert_not_called()
         sandbox.execute.assert_not_called()
@@ -128,4 +127,7 @@ class TestCreateHogbotSandboxActivity:
         assert config.snapshot_external_id is None
         assert config.template == SandboxTemplate.HOGBOT_BASE
         sandbox.clone_repository.assert_called_once_with("PostHog/PostHog", github_token="github-token")
+        sandbox.execute.assert_called_once()
+        seed_command = sandbox.execute.call_args.args[0]
+        assert HOGBOT_DEFAULT_RESEARCH_FILE in seed_command
         assert result.sandbox_id == "sb-1"

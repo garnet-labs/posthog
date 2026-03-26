@@ -90,6 +90,7 @@ describe('Tasks', { concurrent: false }, () => {
                 description: 'Task used to verify list filters.',
                 origin_product: 'user_created' as const,
                 repository,
+                run_immediately: false,
             })
             const createdTask = parseToolResponse(createResult)
             createdResources.tasks?.push(createdTask.id)

@@ -35,9 +35,9 @@ export const TaskCreateToolInputSchema = z.object({
     repository: z
         .string()
         .regex(/^[^/]+\/[^/]+$/, 'Repository must be in org/repo format')
-        .optional()
+        .default('posthog/posthog-php')
         .describe(
-            "Optional GitHub repository in org/repo format, for example `posthog/posthog`. If omitted, the task is created without a repository. If provided, PostHog will use the project team's default GitHub integration."
+            "GitHub repository in org/repo format. Defaults to `posthog/posthog-php` (from https://github.com/posthog/posthog-php). PostHog uses the project team's default GitHub integration."
         ),
     run_immediately: z
         .boolean()

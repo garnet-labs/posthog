@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import fnmatch
 import json
+import fnmatch
 from typing import Any
 from urllib.parse import urlparse
 
@@ -14,14 +14,14 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from ee.hogai.utils.asgi import SyncIterableToAsync
-
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.auth import OAuthAccessTokenAuthentication, PersonalAPIKeyAuthentication
 from posthog.permissions import APIScopePermission
 from posthog.settings import SERVER_GATEWAY_INTERFACE
 
 from products.hogbot.backend import gateway, logic
+
+from ee.hogai.utils.asgi import SyncIterableToAsync
 
 UPSTREAM_COMMAND_TIMEOUT_SECONDS = 600
 UPSTREAM_GET_TIMEOUT_SECONDS = 30
@@ -117,12 +117,18 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             return True
 
         return bool(
-            parsed.scheme == "https" and parsed.hostname and any(parsed.hostname.endswith(suffix) for suffix in ALLOWED_MODAL_SUFFIXES)
+            parsed.scheme == "https"
+            and parsed.hostname
+            and any(parsed.hostname.endswith(suffix) for suffix in ALLOWED_MODAL_SUFFIXES)
         )
 
-    def _coerce_connection(self, connection: gateway.HogbotConnectionInfo | None) -> gateway.HogbotConnectionInfo | Response:
+    def _coerce_connection(
+        self, connection: gateway.HogbotConnectionInfo | None
+    ) -> gateway.HogbotConnectionInfo | Response:
         if not connection or not connection.ready or not connection.server_url:
-            return Response({"error": "No active hogbot server for this team"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response(
+                {"error": "No active hogbot server for this team"}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
         if not self._is_valid_sandbox_url(connection.server_url):
             return Response({"error": "Invalid sandbox URL"}, status=status.HTTP_400_BAD_REQUEST)
         return connection
@@ -172,7 +178,9 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             timeout=timeout,
         )
 
-    def _proxy_json_endpoint(self, request, *, path: str, payload: dict[str, Any], start_if_needed: bool = False) -> Response:
+    def _proxy_json_endpoint(
+        self, request, *, path: str, payload: dict[str, Any], start_if_needed: bool = False
+    ) -> Response:
         connection = self._ensure_connection(request) if start_if_needed else self._get_connection()
         if isinstance(connection, Response):
             return connection
@@ -326,6 +334,12 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
         pattern = validated["glob"] or "/research/*.md"
         root = pattern.rsplit("/", 1)[0] or "/"
         upstream = self._proxy_get_endpoint(path="/filesystem/list", query_params={"path": root})
+        if (
+            upstream.status_code == status.HTTP_404_NOT_FOUND
+            and isinstance(upstream.data, dict)
+            and root.startswith("/research")
+        ):
+            return Response({"results": []})
         if upstream.status_code != status.HTTP_200_OK:
             return upstream
 
@@ -412,17 +426,26 @@ class HogbotViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
         logic.append_log_entries(logic.get_admin_log_key(self.team.pk), self.team.pk, validated["entries"])
         return Response({"ok": True})
 
-    @action(detail=False, methods=["get"], url_path=r"research/(?P<signal_id>[^/.]+)/logs", required_scopes=["project:read"])
+    @action(
+        detail=False, methods=["get"], url_path=r"research/(?P<signal_id>[^/.]+)/logs", required_scopes=["project:read"]
+    )
     def research_logs(self, request, signal_id: str | None = None, **kwargs):
         validated = self._validate_serializer(LogQuerySerializer, request.query_params)
         assert signal_id is not None
         return self._read_log_response(key=logic.get_research_log_key(self.team.pk, signal_id), validated=validated)
 
-    @action(detail=False, methods=["post"], url_path=r"research/(?P<signal_id>[^/.]+)/append_log", required_scopes=["project:write"])
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"research/(?P<signal_id>[^/.]+)/append_log",
+        required_scopes=["project:write"],
+    )
     def append_research_log(self, request, signal_id: str | None = None, **kwargs):
         validated = self._validate_serializer(AppendLogRequestSerializer, request.data)
         assert signal_id is not None
-        logic.append_log_entries(logic.get_research_log_key(self.team.pk, signal_id), self.team.pk, validated["entries"])
+        logic.append_log_entries(
+            logic.get_research_log_key(self.team.pk, signal_id), self.team.pk, validated["entries"]
+        )
         return Response({"ok": True})
 
     @action(detail=False, methods=["post"], url_path="server/register", required_scopes=["project:write"])

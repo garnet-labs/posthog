@@ -1,6 +1,7 @@
 import { serve, type ServerType } from '@hono/node-server'
 import { fork, type ChildProcess } from 'child_process'
 import { randomBytes } from 'crypto'
+import { mkdir, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { AddressInfo } from 'net'
@@ -65,6 +66,18 @@ function childEnv(config: HogbotServerConfig): NodeJS.ProcessEnv {
     }
 }
 
+const DEFAULT_RESEARCH_README = [
+    '# Hogbot Research',
+    '',
+    'This directory contains markdown files produced and maintained by Hogbot research runs.',
+    '',
+    'Expected usage:',
+    '- Each signal can create or update a markdown file here.',
+    '- Humans should review these files directly.',
+    '- Keep the content concise, readable, and current.',
+    '',
+].join('\n')
+
 export class HogbotServer {
     private readonly app = new Hono()
     private readonly apiClient: PostHogApiClient
@@ -75,7 +88,6 @@ export class HogbotServer {
     private adminReady = false
     private researchChild: ChildProcess | null = null
     private server: ServerType | null = null
-    private busy: HogbotBusyState = 'none'
     private activeSignalId: string | null = null
     private lastError: string | null = null
     private heartbeatTimer: NodeJS.Timeout | null = null
@@ -100,6 +112,7 @@ export class HogbotServer {
     }
 
     async start(): Promise<void> {
+        await this.ensureResearchWorkspace()
         await this.startAdminWorker()
         await this.apiClient.registerServer({
             sandboxUrl: this.config.publicBaseUrl,
@@ -112,6 +125,19 @@ export class HogbotServer {
                 fetch: this.app.fetch,
                 port: this.config.port,
             })
+        }
+    }
+
+    private async ensureResearchWorkspace(): Promise<void> {
+        const researchDir = path.join(this.config.workspacePath, 'research')
+        const readmePath = path.join(researchDir, 'README.md')
+        await mkdir(researchDir, { recursive: true })
+        try {
+            await writeFile(readmePath, DEFAULT_RESEARCH_README, { encoding: 'utf-8', flag: 'wx' })
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+                throw error
+            }
         }
     }
 
@@ -148,10 +174,10 @@ export class HogbotServer {
             const response = {
                 status: this.adminReady ? 'ok' : 'starting',
                 team_id: this.config.teamId,
-                busy: this.busy,
+                busy: this.getBusyState(),
                 active_signal_id: this.activeSignalId,
                 admin_ready: this.adminReady,
-                research_running: !!this.researchChild,
+                research_running: this.isResearchBusy(),
             }
             return c.json(response, this.adminReady ? 200 : 503)
         })
@@ -229,7 +255,7 @@ export class HogbotServer {
             if (!this.adminReady) {
                 return c.json({ error: 'Admin worker is not ready' }, 503)
             }
-            if (this.busy !== 'none') {
+            if (this.isAdminBusy()) {
                 return c.json({ error: 'busy' }, 409)
             }
 
@@ -238,7 +264,6 @@ export class HogbotServer {
                 return c.json({ error: 'content is required' }, 400)
             }
 
-            this.busy = 'admin'
             this.lastError = null
             void this.syncHeartbeat()
 
@@ -253,7 +278,6 @@ export class HogbotServer {
                     } satisfies AdminParentMessage)
                 }).finally(() => {
                     this.pendingAdminRequest = null
-                    this.busy = 'none'
                     void this.syncHeartbeat()
                 })
 
@@ -268,7 +292,7 @@ export class HogbotServer {
         })
 
         this.app.post('/cancel', async (c) => {
-            if (this.busy !== 'admin' || !this.pendingAdminRequest) {
+            if (!this.isAdminBusy() || !this.pendingAdminRequest) {
                 return c.json({ cancelled: false })
             }
             this.adminChild?.send({
@@ -282,8 +306,8 @@ export class HogbotServer {
             if (!this.adminReady) {
                 return c.json({ error: 'Admin worker is not ready' }, 503)
             }
-            if (this.busy !== 'none') {
-                return c.json({ error: 'busy' }, 409)
+            if (this.isResearchBusy()) {
+                return c.json({ error: 'busy' }, 418)
             }
 
             const body = await c.req.json()
@@ -382,7 +406,6 @@ export class HogbotServer {
         const workerPath = this.config.researchWorkerPath ?? path.resolve(__dirname, 'workers', 'research-worker.js')
         const child = fork(workerPath, [], { env: this.workerEnv, stdio: ['inherit', 'inherit', 'inherit', 'ipc'] })
         this.researchChild = child
-        this.busy = 'research'
         this.activeSignalId = signalId
         this.lastError = null
         this.emitEvent(statusEvent('research', this.config.teamId, 'starting', { signalId }))
@@ -392,7 +415,6 @@ export class HogbotServer {
             let ready = false
             child.once('exit', (code: number | null) => {
                 this.researchChild = null
-                this.busy = 'none'
                 this.activeSignalId = null
                 void this.syncHeartbeat()
                 if (!ready && !this.stopping) {
@@ -535,10 +557,29 @@ export class HogbotServer {
         }, this.config.heartbeatIntervalMs ?? 30000)
     }
 
+    private isAdminBusy(): boolean {
+        return this.pendingAdminRequest !== null
+    }
+
+    private isResearchBusy(): boolean {
+        const child = this.researchChild
+        return !!child && !child.killed && child.exitCode === null
+    }
+
+    private getBusyState(): HogbotBusyState {
+        if (this.isResearchBusy()) {
+            return 'research'
+        }
+        if (this.isAdminBusy()) {
+            return 'admin'
+        }
+        return 'none'
+    }
+
     private async syncHeartbeat(): Promise<void> {
         await this.apiClient.heartbeat({
             status: this.lastError ? 'error' : 'running',
-            busy: this.busy,
+            busy: this.getBusyState(),
             activeSignalId: this.activeSignalId,
             lastError: this.lastError,
         })
@@ -604,7 +645,7 @@ export class HogbotServer {
         void this.apiClient
             .heartbeat({
                 status: 'error',
-                busy: this.busy,
+                busy: this.getBusyState(),
                 activeSignalId: this.activeSignalId,
                 lastError: error.message,
             })

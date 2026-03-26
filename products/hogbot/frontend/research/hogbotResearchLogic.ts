@@ -1,4 +1,4 @@
-import { actions, kea, path, reducers, selectors } from 'kea'
+import { actions, afterMount, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
 import api from 'lib/api'
@@ -58,5 +58,29 @@ export const hogbotResearchLogic = kea<hogbotResearchLogicType>([
                 return files.find((f) => f.path === path) ?? null
             },
         ],
+    }),
+    listeners(({ actions, values }) => ({
+        loadFilesSuccess: ({ files }) => {
+            if (files.length === 0) {
+                actions.selectFile(null)
+                return
+            }
+
+            const selectedPath = values.selectedFilePath
+            if (selectedPath && files.some((file) => file.path === selectedPath)) {
+                return
+            }
+
+            actions.selectFile(files[0].path)
+        },
+        selectFile: ({ path }) => {
+            if (!path) {
+                return
+            }
+            void actions.loadFileContent()
+        },
+    })),
+    afterMount(({ actions }) => {
+        void actions.loadFiles()
     }),
 ])

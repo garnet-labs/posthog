@@ -188,7 +188,9 @@ class TestHogbotServerEndpoints(BaseHogbotAPITest):
     @patch("products.hogbot.backend.api.http_requests.request")
     @patch("products.hogbot.backend.api.gateway.get_hogbot_connection")
     def test_filesystem_proxy_uses_modal_connect_token(self, mock_connection: MagicMock, mock_request: MagicMock):
-        mock_connection.return_value = self.connection_info(server_url="https://demo.modal.host", connect_token="modal-token")
+        mock_connection.return_value = self.connection_info(
+            server_url="https://demo.modal.host", connect_token="modal-token"
+        )
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"entry": {"path": "/"}}
@@ -200,17 +202,33 @@ class TestHogbotServerEndpoints(BaseHogbotAPITest):
 
     @patch("products.hogbot.backend.api.http_requests.request")
     @patch("products.hogbot.backend.api.gateway.get_hogbot_connection")
+    def test_files_returns_empty_results_when_research_directory_is_missing(
+        self, mock_connection: MagicMock, mock_request: MagicMock
+    ):
+        mock_connection.return_value = self.connection_info()
+        mock_response = MagicMock()
+        mock_response.status_code = status.HTTP_404_NOT_FOUND
+        mock_response.json.return_value = {"error": "Path not found: /research"}
+        mock_request.return_value = mock_response
+
+        response = self.client.get("/api/projects/@current/hogbot/files/?glob=/research/*.md")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json(), {"results": []})
+
+    @patch("products.hogbot.backend.api.http_requests.request")
+    @patch("products.hogbot.backend.api.gateway.get_hogbot_connection")
     def test_logs_proxy_streams_sse_chunks(self, mock_connection: MagicMock, mock_request: MagicMock):
         mock_connection.return_value = self.connection_info()
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.iter_content.return_value = [b"data: {\"ok\":true}\n\n"]
+        mock_response.iter_content.return_value = [b'data: {"ok":true}\n\n']
         mock_request.return_value = mock_response
 
         response = self.client.get("/api/projects/@current/hogbot/logs/?scope=admin")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "text/event-stream")
-        self.assertEqual(b"".join(response.streaming_content), b"data: {\"ok\":true}\n\n")
+        self.assertEqual(b"".join(response.streaming_content), b'data: {"ok":true}\n\n')
         mock_response.close.assert_called_once()
 
     @patch("products.hogbot.backend.api.http_requests.request")

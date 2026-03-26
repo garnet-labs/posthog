@@ -1,4 +1,6 @@
 import type { Query, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { mkdir, writeFile } from 'fs/promises'
+import path from 'path'
 
 import type { ResearchParentMessage, ResearchWorkerMessage } from '../ipc'
 import { RESEARCH_SYSTEM_PROMPT } from '../prompts'
@@ -24,6 +26,27 @@ function getRequiredEnv(name: string): string {
     return value
 }
 
+function slugifySignalId(signalId: string): string {
+    const slug = signalId.trim().replace(/[^A-Za-z0-9._-]+/g, '-')
+    return slug || 'research'
+}
+
+async function writeResearchMarkdown(
+    workspacePath: string,
+    signalId: string,
+    prompt: string,
+    output: string
+): Promise<string> {
+    const researchDir = path.join(workspacePath, 'research')
+    await mkdir(researchDir, { recursive: true })
+
+    const fileName = `${slugifySignalId(signalId)}.md`
+    const filePath = path.join(researchDir, fileName)
+    const markdown = [`# Research: ${signalId}`, '', `Prompt: ${prompt}`, '', output.trim()].join('\n')
+    await writeFile(filePath, markdown.endsWith('\n') ? markdown : `${markdown}\n`, 'utf-8')
+    return filePath
+}
+
 async function runResearch(signalId: string, prompt: string): Promise<void> {
     const workspacePath = getRequiredEnv('HOGBOT_WORKSPACE_PATH')
     const sdk = require('@anthropic-ai/claude-agent-sdk') as {
@@ -45,14 +68,19 @@ async function runResearch(signalId: string, prompt: string): Promise<void> {
 
     try {
         for await (const message of query) {
-            handleMessage(message, signalId)
+            await handleMessage(message, signalId, prompt, workspacePath)
         }
     } finally {
         query.close()
     }
 }
 
-function handleMessage(message: SDKMessage, signalId: string): void {
+async function handleMessage(
+    message: SDKMessage,
+    signalId: string,
+    prompt: string,
+    workspacePath: string
+): Promise<void> {
     if (message.type === 'auth_status') {
         emitEvent('_hogbot/console', {
             level: message.error ? 'error' : 'info',
@@ -66,7 +94,12 @@ function handleMessage(message: SDKMessage, signalId: string): void {
     }
 
     if (message.subtype === 'success' && typeof message.result === 'string') {
+        const outputPath = await writeResearchMarkdown(workspacePath, signalId, prompt, message.result)
         emitEvent('_hogbot/text', { role: 'assistant', text: message.result })
+        emitEvent('_hogbot/console', {
+            level: 'info',
+            message: `Wrote research output to ${path.relative(workspacePath, outputPath)}`,
+        })
         emitEvent('_hogbot/result', { output: message.result })
         emitEvent('_hogbot/status', { status: 'completed' })
         send({ type: 'done', signalId, output: message.result })

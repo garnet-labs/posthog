@@ -1440,7 +1440,7 @@
         }
     },
     "task-create": {
-        "description": "Create a new task for the current project and, by default, start running it immediately. Provide the task description and optionally a title, origin product, repository, and run settings. If a repository is provided, PostHog uses the team's default GitHub integration.",
+        "description": "Create a new task for the current project and, by default, start running it immediately. Provide the task description and optionally a title, origin product, repository, and run settings. The repository defaults to `posthog/posthog-php`, and PostHog uses the team's default GitHub integration.",
         "category": "Tasks",
         "feature": "tasks",
         "summary": "Create task",
