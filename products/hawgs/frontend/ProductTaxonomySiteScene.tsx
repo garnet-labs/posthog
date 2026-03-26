@@ -26,7 +26,7 @@ export const scene: SceneExport = {
 function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JSX.Element {
     const { siteDetail, siteDetailLoading } = useValues(productTaxonomySiteLogic({ domain }))
     const [screenshotModal, setScreenshotModal] = useState<{ url: string; title: string } | null>(null)
-    const [activeTab, setActiveTab] = useState<'pages' | 'taxonomy'>('pages')
+    const [activeTab, setActiveTab] = useState<'taxonomy' | 'pages'>('taxonomy')
 
     return (
         <SceneContent>
@@ -42,94 +42,8 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
             />
             <LemonTabs
                 activeKey={activeTab}
-                onChange={(key) => setActiveTab(key as 'pages' | 'taxonomy')}
+                onChange={(key) => setActiveTab(key as 'taxonomy' | 'pages')}
                 tabs={[
-                    {
-                        key: 'pages',
-                        label: `Pages${siteDetail ? ` (${siteDetail.pages.length})` : ''}`,
-                        content: (
-                            <LemonTable
-                                loading={siteDetailLoading}
-                                dataSource={siteDetail?.pages ?? []}
-                                columns={[
-                                    {
-                                        title: 'Page',
-                                        width: '35%',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="flex items-center gap-3 py-2">
-                                                {page.screenshot ? (
-                                                    <img
-                                                        src={page.screenshot}
-                                                        alt={page.title}
-                                                        className="w-20 h-20 rounded object-cover flex-shrink-0 border cursor-pointer hover:opacity-80 transition-opacity"
-                                                        onClick={() =>
-                                                            setScreenshotModal({
-                                                                url: page.screenshot!,
-                                                                title: page.title,
-                                                            })
-                                                        }
-                                                    />
-                                                ) : (
-                                                    <div className="w-20 h-20 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
-                                                        N/A
-                                                    </div>
-                                                )}
-                                                <div className="min-w-0">
-                                                    <div className="font-semibold text-sm truncate">{page.title}</div>
-                                                    <div className="text-xs text-muted truncate">{page.url}</div>
-                                                    {page.description && (
-                                                        <div className="text-xs text-muted mt-1 line-clamp-2">
-                                                            {page.description}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Summary',
-                                        width: '25%',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="text-xs text-muted line-clamp-4">{page.summary}</div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Related products',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="flex flex-wrap gap-1">
-                                                {page.related_products.map((name) => (
-                                                    <LemonTag key={name} type="highlight">
-                                                        {name}
-                                                    </LemonTag>
-                                                ))}
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Related features',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <div className="flex flex-wrap gap-1">
-                                                {page.related_features.map((name) => (
-                                                    <LemonTag key={name} type="completion">
-                                                        {name}
-                                                    </LemonTag>
-                                                ))}
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        title: 'Updated',
-                                        align: 'right',
-                                        render: (_: unknown, page: SitePage) => (
-                                            <span className="text-xs text-muted whitespace-nowrap">
-                                                {page.last_updated ? humanFriendlyDetailedTime(page.last_updated) : '–'}
-                                            </span>
-                                        ),
-                                    },
-                                ]}
-                            />
-                        ),
-                    },
                     {
                         key: 'taxonomy',
                         label: `Taxonomy${siteDetail ? ` (${siteDetail.products.length} products)` : ''}`,
@@ -231,6 +145,92 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
                                     ),
                                     rowExpandable: (product: TaxonomyProduct) => product.features.length > 0,
                                 }}
+                            />
+                        ),
+                    },
+                    {
+                        key: 'pages',
+                        label: `Pages${siteDetail ? ` (${siteDetail.pages.length})` : ''}`,
+                        content: (
+                            <LemonTable
+                                loading={siteDetailLoading}
+                                dataSource={siteDetail?.pages ?? []}
+                                columns={[
+                                    {
+                                        title: 'Page',
+                                        width: '35%',
+                                        render: (_: unknown, page: SitePage) => (
+                                            <div className="flex items-center gap-3 py-2">
+                                                {page.screenshot ? (
+                                                    <img
+                                                        src={page.screenshot}
+                                                        alt={page.title}
+                                                        className="w-20 h-20 rounded object-cover flex-shrink-0 border cursor-pointer hover:opacity-80 transition-opacity"
+                                                        onClick={() =>
+                                                            setScreenshotModal({
+                                                                url: page.screenshot!,
+                                                                title: page.title,
+                                                            })
+                                                        }
+                                                    />
+                                                ) : (
+                                                    <div className="w-20 h-20 rounded bg-bg-3000 flex-shrink-0 border flex items-center justify-center text-muted text-xs">
+                                                        N/A
+                                                    </div>
+                                                )}
+                                                <div className="min-w-0">
+                                                    <div className="font-semibold text-sm truncate">{page.title}</div>
+                                                    <div className="text-xs text-muted truncate">{page.url}</div>
+                                                    {page.description && (
+                                                        <div className="text-xs text-muted mt-1 line-clamp-2">
+                                                            {page.description}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Summary',
+                                        width: '25%',
+                                        render: (_: unknown, page: SitePage) => (
+                                            <div className="text-xs text-muted line-clamp-4">{page.summary}</div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Related products',
+                                        render: (_: unknown, page: SitePage) => (
+                                            <div className="flex flex-wrap gap-1">
+                                                {page.related_products.map((name) => (
+                                                    <LemonTag key={name} type="highlight">
+                                                        {name}
+                                                    </LemonTag>
+                                                ))}
+                                            </div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Related features',
+                                        render: (_: unknown, page: SitePage) => (
+                                            <div className="flex flex-wrap gap-1">
+                                                {page.related_features.map((name) => (
+                                                    <LemonTag key={name} type="completion">
+                                                        {name}
+                                                    </LemonTag>
+                                                ))}
+                                            </div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Updated',
+                                        align: 'right',
+                                        render: (_: unknown, page: SitePage) => (
+                                            <span className="text-xs text-muted whitespace-nowrap">
+                                                {page.last_updated ? humanFriendlyDetailedTime(page.last_updated) : '–'}
+                                            </span>
+                                        ),
+                                    },
+                                ]}
                             />
                         ),
                     },
