@@ -28359,6 +28359,19 @@ export namespace Schemas {
       readonly share_passwords: readonly SharePassword[];
     }
 
+    export interface SpeculativeAckRequest {
+      /**
+       * The user's message to generate a contextual acknowledgment for
+       * @maxLength 2000
+       */
+      prompt: string;
+    }
+
+    export interface SpeculativeAckResponse {
+      /** Short contextual acknowledgment for TTS */
+      text: string;
+    }
+
     export interface SummaryBullet {
       text: string;
       line_refs: string;
