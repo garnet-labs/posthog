@@ -1083,11 +1083,17 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
         },
         reportInsightSaved: async ({ insight, query, isNewInsight }) => {
             // "insight saved" is a proxy for the new insight's results being valuable to the user
+            const sanitizedQuery = sanitizeQuery(query)
+
             posthog.capture('insight saved', {
-                ...sanitizeQuery(query),
+                ...sanitizedQuery,
                 insight: sanitizeInsight(insight),
                 is_new_insight: isNewInsight,
             })
+
+            if ((sanitizedQuery.data_warehouse_entity_count ?? 0) > 0) {
+                posthog.capture('insight with data warehouse source saved')
+            }
         },
         reportInsightViewed: ({ insightModel, query, isFirstLoad, delay }) => {
             const payload: Record<string, any> = {

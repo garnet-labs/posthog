@@ -1776,6 +1776,7 @@ interface EventSchemas {
     'insight person modal viewed': Record<string, any>
     'insight refresh time': Record<string, any>
     'insight saved': Record<string, any>
+    'insight with data warehouse source saved': Record<string, any>
     'insight short url visited': Record<string, any>
     'insights table calc toggled': Record<string, any>
     'insights tab reset': Record<string, any>
