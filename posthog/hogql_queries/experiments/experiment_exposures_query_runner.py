@@ -21,7 +21,7 @@ from posthog.hogql.constants import HogQLGlobalSettings
 from posthog.hogql.modifiers import create_default_modifiers_for_team
 from posthog.hogql.query import execute_hogql_query
 
-from posthog.clickhouse.query_tagging import Product, tag_queries
+from posthog.clickhouse.query_tagging import Feature, Product, tag_queries
 from posthog.hogql_queries.experiments import MULTIPLE_VARIANT_KEY
 from posthog.hogql_queries.experiments.error_handling import experiment_error_handler
 from posthog.hogql_queries.experiments.experiment_query_builder import (
@@ -235,10 +235,11 @@ class ExperimentExposuresQueryRunner(QueryRunner):
         # Adding experiment specific tags to the tag collection
         # This will be available as labels in Prometheus
         tag_queries(
+            product=Product.EXPERIMENTS,
+            feature=Feature.QUERY,
             experiment_id=self.query.experiment_id,
             experiment_name=self.query.experiment_name,
             experiment_feature_flag_key=self.feature_flag_key,
-            product=Product.EXPERIMENTS,
         )
 
         # Set limit to avoid being cut-off by the default 100 rows limit

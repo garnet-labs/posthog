@@ -21,7 +21,7 @@ from posthog.schema import (
 
 from posthog.hogql import ast
 
-from posthog.clickhouse.query_tagging import tag_queries
+from posthog.clickhouse.query_tagging import Feature, Product, tag_queries
 from posthog.constants import ExperimentNoResultsErrorKeys
 from posthog.hogql_queries.experiments import CONTROL_VARIANT_KEY
 from posthog.hogql_queries.experiments.funnels_statistics_v2 import (
@@ -61,6 +61,8 @@ class ExperimentFunnelsQueryRunner(QueryRunner):
         # Adding experiment specific tags to the tag collection
         # This will be available as labels in Prometheus
         tag_queries(
+            product=Product.EXPERIMENTS,
+            feature=Feature.QUERY,
             query_type="ExperimentFunnelsQuery",
             experiment_id=self.experiment.id,
             experiment_name=self.experiment.name,
