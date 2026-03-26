@@ -2262,8 +2262,7 @@ class TestHogFunctionAPI(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         call_args = mock_feature_enabled.call_args
         assert call_args[0][0] == "backfill-workflows-destination"
 
-    @patch("posthog.api.hog_function.posthoganalytics.feature_enabled", return_value=True)
-    def test_enable_backfills_blocked_for_non_event_source(self, _mock_feature_enabled):
+    def test_enable_backfills_blocked_for_non_event_source(self):
         response = self.client.post(
             f"/api/projects/{self.team.id}/hog_functions/",
             data={

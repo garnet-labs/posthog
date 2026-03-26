@@ -686,6 +686,11 @@ class HogFunctionViewSet(
             return Response({"error": "Backfills already enabled for this function"}, status=400)
 
         # Only event-sourced destinations support backfills
+        if hog_function.type != HogFunctionType.DESTINATION:
+            return Response(
+                {"error": "Backfills are only supported for destination functions."},
+                status=400,
+            )
         source = (hog_function.filters or {}).get("source", "events")
         if source != "events":
             return Response(
