@@ -5587,6 +5587,10 @@ const api = {
             return api.create(new ApiRequest().conversations().withAction('stt_token').assembleFullUrl())
         },
 
+        async geminiLiveToken(): Promise<{ token: string }> {
+            return api.create(new ApiRequest().conversations().withAction('gemini_live_token').assembleFullUrl())
+        },
+
         async transcribe(audioBlob: Blob): Promise<{ text: string }> {
             const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'wav'
             const formData = new FormData()

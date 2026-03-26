@@ -653,6 +653,32 @@ class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelM
             return Response({"error": "Token generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"token": resp.json()["token"]})
 
+    @action(detail=False, methods=["POST"])
+    def gemini_live_token(self, request: Request, *args, **kwargs):
+        """Generate an ephemeral token for client-to-server Gemini Live API WebSocket."""
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            return Response({"error": "Gemini API key not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        try:
+            import datetime
+
+            from google import genai
+
+            client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
+            now = datetime.datetime.now(tz=datetime.UTC)
+            token = client.auth_tokens.create(
+                config={
+                    "uses": 1,
+                    "expire_time": now + datetime.timedelta(minutes=30),
+                    "new_session_expire_time": now + datetime.timedelta(minutes=2),
+                    "http_options": {"api_version": "v1alpha"},
+                }
+            )
+        except Exception:
+            logger.exception("Gemini Live token generation failed")
+            return Response({"error": "Token generation failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"token": token.name})
+
     @action(detail=False, methods=["POST"], parser_classes=[MultiPartParser])
     def transcribe(self, request: Request, *args, **kwargs):
         audio = request.FILES.get("audio")
