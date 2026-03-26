@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -54,9 +55,10 @@ def get_sandbox_mcp_configs(
     if not url:
         return []
     read_only = not has_write_scopes(scopes)
+    auth_token = os.environ.get("SANDBOX_MCP_AUTH_TOKEN", token)
     headers = [
-        {"name": "Authorization", "value": f"Bearer {token}"},
-        {"name": "x-posthog-project-id", "value": str(project_id)},
+        {"name": "Authorization", "value": f"Bearer {auth_token}"},
+        {"name": "x-posthog-project-id", "value": os.environ.get("SANDBOX_MCP_PROJECT_ID", str(project_id))},
         {"name": "x-posthog-mcp-version", "value": "2"},
         {"name": "x-posthog-read-only", "value": str(read_only).lower()},
     ]
