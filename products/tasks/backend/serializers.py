@@ -8,7 +8,7 @@ from posthog.api.shared import UserBasicSerializer
 from posthog.models.integration import Integration
 from posthog.storage import object_storage
 
-from .models import Task, TaskRun
+from .models import Task, TaskAutomation, TaskRun
 from .services.title_generator import generate_task_title
 
 PRESIGNED_URL_CACHE_TTL = 55 * 60  # 55 minutes (less than 1 hour URL expiry)
@@ -451,3 +451,116 @@ class TaskRunSessionLogsQuerySerializer(serializers.Serializer):
         max_value=5000,
         help_text="Maximum number of entries to return (default 1000, max 5000)",
     )
+
+
+class TaskAutomationSerializer(serializers.ModelSerializer):
+    repository = serializers.CharField(max_length=255)
+    schedule_time = serializers.CharField(required=False)
+    last_task_id = serializers.SerializerMethodField()
+    last_task_run_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskAutomation
+        fields = [
+            "id",
+            "name",
+            "prompt",
+            "repository",
+            "github_integration",
+            "schedule_time",
+            "timezone",
+            "template_id",
+            "enabled",
+            "last_run_at",
+            "last_run_status",
+            "last_task_id",
+            "last_task_run_id",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "last_run_at",
+            "last_run_status",
+            "last_task_id",
+            "last_task_run_id",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_last_task_id(self, instance: TaskAutomation) -> str | None:
+        return str(instance.last_task_id) if instance.last_task_id else None
+
+    def get_last_task_run_id(self, instance: TaskAutomation) -> str | None:
+        return str(instance.last_task_run_id) if instance.last_task_run_id else None
+
+    def validate_github_integration(self, value):
+        if value and value.team_id != self.context["team"].id:
+            raise serializers.ValidationError("Integration must belong to the same team")
+        return value
+
+    def validate_repository(self, value: str) -> str:
+        normalized = value.strip().lower()
+        parts = normalized.split("/")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise serializers.ValidationError("Repository must be in the format organization/repository")
+        return normalized
+
+    def validate_schedule_time(self, value: str) -> str:
+        parts = value.split(":")
+        if len(parts) != 2:
+            raise serializers.ValidationError("Schedule time must be in HH:MM format")
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+        except ValueError as err:
+            raise serializers.ValidationError("Schedule time must be in HH:MM format") from err
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            raise serializers.ValidationError("Schedule time must be a valid 24-hour time")
+        return f"{hour:02d}:{minute:02d}"
+
+    def validate(self, attrs):
+        schedule_time = self.initial_data.get("schedule_time")
+        if schedule_time is None and self.instance is None:
+            raise serializers.ValidationError({"schedule_time": "This field is required."})
+        return super().validate(attrs)
+
+    def create(self, validated_data):
+        schedule_time = validated_data.pop("schedule_time")
+        hour, minute = [int(part) for part in schedule_time.split(":")]
+
+        if not validated_data.get("github_integration"):
+            default_integration = Integration.objects.filter(team=self.context["team"], kind="github").first()
+            if default_integration:
+                validated_data["github_integration"] = default_integration
+
+        return TaskAutomation.objects.create(
+            team=self.context["team"],
+            created_by=self.context["request"].user,
+            schedule_hour=hour,
+            schedule_minute=minute,
+            **validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        schedule_time = validated_data.pop("schedule_time", None)
+        if schedule_time is not None:
+            hour, minute = [int(part) for part in schedule_time.split(":")]
+            instance.schedule_hour = hour
+            instance.schedule_minute = minute
+
+        return super().update(instance, validated_data)
+
+    def to_internal_value(self, data):
+        internal = super().to_internal_value(data)
+        schedule_time = data.get("schedule_time")
+        if schedule_time is not None:
+            internal["schedule_time"] = self.validate_schedule_time(schedule_time)
+        return internal
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["schedule_time"] = f"{instance.schedule_hour:02d}:{instance.schedule_minute:02d}"
+        return data

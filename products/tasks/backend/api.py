@@ -33,7 +33,13 @@ from posthog.storage import object_storage
 
 from ee.hogai.utils.aio import async_to_sync
 
-from .models import CodeInvite, CodeInviteRedemption, Task, TaskRun
+from .automation_service import (
+    delete_automation_schedule,
+    run_task_automation,
+    sync_automation_schedule,
+    update_automation_run_result,
+)
+from .models import CodeInvite, CodeInviteRedemption, Task, TaskAutomation, TaskRun
 from .repository_readiness import compute_repository_readiness
 from .serializers import (
     CodeInviteRedeemRequestSerializer,
@@ -41,6 +47,7 @@ from .serializers import (
     ErrorResponseSerializer,
     RepositoryReadinessQuerySerializer,
     RepositoryReadinessResponseSerializer,
+    TaskAutomationSerializer,
     TaskListQuerySerializer,
     TaskRunAppendLogRequestSerializer,
     TaskRunArtifactPresignRequestSerializer,
@@ -256,6 +263,41 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         return Response(TaskSerializer(task, context=self.get_serializer_context()).data)
 
 
+@extend_schema(tags=["task-automations"])
+class TaskAutomationViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
+    serializer_class = TaskAutomationSerializer
+    authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+    permission_classes = [IsAuthenticated, APIScopePermission, TasksAccessPermission]
+    scope_object = "task"
+    queryset = TaskAutomation.objects.select_related("last_task", "last_task_run", "github_integration").all()
+
+    def safely_get_queryset(self, queryset):
+        return queryset.filter(team=self.team).order_by("name", "-created_at")
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "team": self.team}
+
+    def perform_create(self, serializer):
+        automation = serializer.save()
+        sync_automation_schedule(automation)
+
+    def perform_update(self, serializer):
+        automation = serializer.save()
+        sync_automation_schedule(automation)
+
+    def perform_destroy(self, instance):
+        automation = cast(TaskAutomation, instance)
+        delete_automation_schedule(automation)
+        automation.delete()
+
+    @action(detail=True, methods=["post"], url_path="run_now", required_scopes=["task:write"])
+    def run_now(self, request, pk=None, **kwargs):
+        automation = cast(TaskAutomation, self.get_object())
+        run_task_automation(str(automation.id))
+        automation.refresh_from_db()
+        return Response(TaskAutomationSerializer(automation, context=self.get_serializer_context()).data)
+
+
 @extend_schema(tags=["task-runs"])
 class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     """
@@ -354,6 +396,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                 )
 
         task_run.save()
+        update_automation_run_result(task_run)
         self._post_slack_update_for_pr(task_run)
 
         return Response(TaskRunDetailSerializer(task_run, context=self.get_serializer_context()).data)

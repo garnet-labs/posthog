@@ -13,7 +13,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
-from django.utils import timezone
+from django.utils import timezone as django_timezone
 
 import structlog
 
@@ -37,6 +37,7 @@ class Task(DeletedMetaFields, models.Model):
         ERROR_TRACKING = "error_tracking", "Error Tracking"
         EVAL_CLUSTERS = "eval_clusters", "Eval Clusters"
         USER_CREATED = "user_created", "User Created"
+        AUTOMATION = "automation", "Automation"
         SLACK = "slack", "Slack"
         SUPPORT_QUEUE = "support_queue", "Support Queue"
         SESSION_SUMMARIES = "session_summaries", "Session Summaries"
@@ -71,7 +72,7 @@ class Task(DeletedMetaFields, models.Model):
         help_text="JSON schema for the task. This is used to validate the output of the task.",
     )
 
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(default=django_timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -143,7 +144,7 @@ class Task(DeletedMetaFields, models.Model):
 
     def soft_delete(self):
         self.deleted = True
-        self.deleted_at = timezone.now()
+        self.deleted_at = django_timezone.now()
         self.save()
 
     def delete(self, *args, **kwargs):
@@ -210,6 +211,74 @@ class Task(DeletedMetaFields, models.Model):
         return task
 
 
+class TaskAutomation(models.Model):
+    class RunStatus(models.TextChoices):
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        RUNNING = "running", "Running"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="task_automations")
+    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True, blank=True)
+    name = models.CharField(max_length=255)
+    prompt = models.TextField()
+    repository = models.CharField(max_length=255)
+    github_integration = models.ForeignKey(
+        "posthog.Integration",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={"kind": "github"},
+        help_text="GitHub integration for this automation",
+    )
+    schedule_hour = models.PositiveSmallIntegerField()
+    schedule_minute = models.PositiveSmallIntegerField(default=0)
+    timezone = models.CharField(max_length=128, default="UTC")
+    template_id = models.CharField(max_length=255, null=True, blank=True)
+    enabled = models.BooleanField(default=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_run_status = models.CharField(
+        max_length=20,
+        choices=RunStatus.choices,
+        null=True,
+        blank=True,
+    )
+    last_task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    last_task_run = models.ForeignKey("TaskRun", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    last_error = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(default=django_timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "posthog_task_automation"
+        ordering = ["name", "-created_at"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if self.repository:
+            parts = self.repository.split("/")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                raise ValidationError({"repository": "Format for repository is organization/repo"})
+            self.repository = self.repository.lower()
+
+        if not 0 <= self.schedule_hour <= 23:
+            raise ValidationError({"schedule_hour": "Must be between 0 and 23"})
+        if not 0 <= self.schedule_minute <= 59:
+            raise ValidationError({"schedule_minute": "Must be between 0 and 59"})
+
+        super().save(*args, **kwargs)
+
+    @property
+    def schedule_id(self) -> str:
+        return f"task-automation-{self.id}"
+
+    @property
+    def cron_expression(self) -> str:
+        return f"{self.schedule_minute} {self.schedule_hour} * * *"
+
+
 class TaskRun(models.Model):
     class Status(models.TextChoices):
         NOT_STARTED = "not_started", "Not Started"
@@ -268,7 +337,7 @@ class TaskRun(models.Model):
         help_text="Run state data for resuming or tracking execution state",
     )
 
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(default=django_timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -371,21 +440,21 @@ class TaskRun(models.Model):
     def mark_completed(self):
         """Mark the progress as completed."""
         self.status = self.Status.COMPLETED
-        self.completed_at = timezone.now()
+        self.completed_at = django_timezone.now()
         self.save(update_fields=["status", "completed_at"])
 
     def mark_failed(self, error: str):
         """Mark the progress as failed with an error message."""
         self.status = self.Status.FAILED
         self.error_message = error
-        self.completed_at = timezone.now()
+        self.completed_at = django_timezone.now()
         self.save(update_fields=["status", "error_message", "completed_at"])
 
     def emit_console_event(self, level: LogLevel, message: str) -> None:
         """Emit a console-style log event in ACP notification format."""
         event = {
             "type": "notification",
-            "timestamp": timezone.now().isoformat(),
+            "timestamp": django_timezone.now().isoformat(),
             "notification": {
                 "jsonrpc": "2.0",
                 "method": "_posthog/console",
@@ -402,7 +471,7 @@ class TaskRun(models.Model):
         """Emit sandbox execution output as ACP notification."""
         event = {
             "type": "notification",
-            "timestamp": timezone.now().isoformat(),
+            "timestamp": django_timezone.now().isoformat(),
             "notification": {
                 "jsonrpc": "2.0",
                 "method": "_posthog/sandbox_output",
@@ -654,7 +723,7 @@ class CodeInvite(UUIDModel):
     def is_redeemable(self) -> bool:
         if not self.is_active:
             return False
-        if self.expires_at and self.expires_at <= timezone.now():
+        if self.expires_at and self.expires_at <= django_timezone.now():
             return False
         if self.max_redemptions > 0 and self.redemption_count >= self.max_redemptions:
             return False

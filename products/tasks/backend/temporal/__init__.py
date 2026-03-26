@@ -1,3 +1,4 @@
+from .automation import RunTaskAutomationWorkflow, run_task_automation_activity
 from .create_snapshot.activities import (
     cleanup_sandbox as snapshot_cleanup_sandbox,
     clone_repository as snapshot_clone_repository,
@@ -29,6 +30,7 @@ WORKFLOWS = [
     ProcessTaskWorkflow,
     CreateSnapshotForRepositoryWorkflow,
     PostHogCodeAgentRelayWorkflow,
+    RunTaskAutomationWorkflow,
 ]
 
 ACTIVITIES = [
@@ -47,6 +49,7 @@ ACTIVITIES = [
     post_slack_update,
     update_task_run_status,
     relay_slack_message,
+    run_task_automation_activity,
     # create_snapshot activities
     get_snapshot_context,
     snapshot_create_sandbox,
