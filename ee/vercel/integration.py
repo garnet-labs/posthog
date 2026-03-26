@@ -23,7 +23,6 @@ from posthog.schema import ProductIntentContext, ProductKey
 from posthog.cloud_utils import get_cached_instance_license
 from posthog.event_usage import report_user_signed_up
 from posthog.exceptions_capture import capture_exception
-from posthog.models.experiment import Experiment
 from posthog.models.feature_flag import FeatureFlag
 from posthog.models.integration import Integration
 from posthog.models.organization import Organization, OrganizationMembership
@@ -32,6 +31,8 @@ from posthog.models.product_intent import ProductIntent
 from posthog.models.team import Team
 from posthog.models.user import User
 from posthog.utils import absolute_uri
+
+from products.experiments.backend.models.experiment import Experiment
 
 from ee.api.authentication import VercelAuthentication
 from ee.api.vercel.types import VercelClaims, VercelUserClaims
@@ -275,16 +276,18 @@ class VercelIntegration:
 
         # Check if there's already an OrganizationIntegration for this installation_id
         # If there is, we don't need to do update anything besides OrganizationIntegration's config.
-        organization_integration_exists = OrganizationIntegration.objects.filter(
+        org_integration = OrganizationIntegration.objects.filter(
             kind=OrganizationIntegration.OrganizationIntegrationKind.VERCEL,
             integration_id=installation_id,
-        ).exists()
+        ).first()
 
-        if organization_integration_exists:
-            OrganizationIntegration.objects.filter(
-                kind=OrganizationIntegration.OrganizationIntegrationKind.VERCEL,
-                integration_id=installation_id,
-            ).update(config=asdict(config))
+        config_dict = asdict(config)
+        credentials = config_dict.pop("credentials", {})
+
+        if org_integration is not None:
+            org_integration.config = config_dict
+            org_integration.sensitive_config = {"credentials": credentials}
+            org_integration.save()
             logger.info("Vercel installation updated", installation_id=installation_id, integration="vercel")
             return
 
@@ -323,7 +326,8 @@ class VercelIntegration:
                     kind=OrganizationIntegration.OrganizationIntegrationKind.VERCEL,
                     integration_id=installation_id,
                     defaults={
-                        "config": asdict(config),
+                        "config": config_dict,
+                        "sensitive_config": {"credentials": credentials},
                         "created_by": user,
                     },
                 )
@@ -548,7 +552,7 @@ class VercelIntegration:
     def _build_secrets(team: Team) -> list[dict[str, str]]:
         return [
             {
-                "name": "NEXT_PUBLIC_POSTHOG_KEY",
+                "name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
                 "value": team.api_token,
             },
             {
@@ -575,7 +579,10 @@ class VercelIntegration:
 
     @staticmethod
     def _get_access_token(installation: OrganizationIntegration) -> str | None:
-        access_token = installation.config.get("credentials", {}).get("access_token")
+        access_token = installation.sensitive_config.get("credentials", {}).get("access_token")
+        if not access_token:
+            # Fallback for installations not yet migrated
+            access_token = installation.config.get("credentials", {}).get("access_token")
         if not access_token:
             logger.exception(
                 "Missing access token for Vercel installation",
