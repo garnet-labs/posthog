@@ -1,5 +1,6 @@
 import json
 import uuid as uuid_mod
+from datetime import timedelta
 from typing import Optional, cast
 
 from django.db.models import QuerySet
@@ -39,6 +40,9 @@ from posthog.models.hog_function_template import HogFunctionTemplate
 from posthog.plugins.plugin_server_api import create_hog_flow_invocation_test
 
 from products.workflows.backend.models.hog_flow_batch_job import HogFlowBatchJob
+from products.workflows.backend.models.hog_flow_schedule import HogFlowSchedule
+from products.workflows.backend.models.hog_flow_scheduled_run import HogFlowScheduledRun
+from products.workflows.backend.utils.rrule_utils import compute_next_occurrences, validate_rrule
 
 logger = structlog.get_logger(__name__)
 
@@ -192,8 +196,69 @@ class HogFlowMaskingSerializer(serializers.Serializer):
         return super().validate(attrs)
 
 
+SCHEDULABLE_TRIGGER_TYPES = {"batch"}
+
+
+class HogFlowScheduleSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+
+    class Meta:
+        model = HogFlowSchedule
+        fields = ["id", "rrule", "starts_at", "timezone", "variables", "status", "created_at", "updated_at"]
+        read_only_fields = ["status", "created_at", "updated_at"]
+
+    def validate(self, data):
+        is_draft = self.context.get("is_draft")
+        if is_draft:
+            return data
+
+        rrule_str = data.get("rrule")
+        if not rrule_str:
+            raise serializers.ValidationError({"rrule": "RRULE string is required."})
+
+        try:
+            validate_rrule(rrule_str)
+        except (ValueError, TypeError) as e:
+            logger.warning("Invalid RRULE encountered during validation", rrule=rrule_str, error=str(e))
+            raise serializers.ValidationError({"rrule": "Invalid RRULE."})
+
+        if not data.get("starts_at"):
+            raise serializers.ValidationError({"starts_at": "Start date is required."})
+
+        try:
+            sample = compute_next_occurrences(
+                rrule_str, data["starts_at"], timezone_str=data.get("timezone", "UTC"), count=2
+            )
+        except (KeyError, ValueError):
+            raise serializers.ValidationError({"timezone": "Invalid or unknown timezone."})
+
+        if len(sample) == 2 and (sample[1] - sample[0]) < timedelta(hours=1):
+            raise serializers.ValidationError({"rrule": "Schedules must run at most once per hour."})
+
+        return data
+
+
+class HogFlowScheduledRunSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HogFlowScheduledRun
+        fields = [
+            "id",
+            "run_at",
+            "status",
+            "schedule",
+            "variables",
+            "batch_job",
+            "started_at",
+            "completed_at",
+            "failure_reason",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
 class HogFlowMinimalSerializer(serializers.ModelSerializer):
     created_by = UserBasicSerializer(read_only=True)
+    schedules = HogFlowScheduleSerializer(many=True, read_only=True)
 
     class Meta:
         model = HogFlow
@@ -215,6 +280,7 @@ class HogFlowMinimalSerializer(serializers.ModelSerializer):
             "abort_action",
             "variables",
             "billable_action_types",
+            "schedules",
         ]
         read_only_fields = fields
 
@@ -223,6 +289,7 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
     actions = serializers.ListField(child=HogFlowActionSerializer(), required=True)
     trigger_masking = HogFlowMaskingSerializer(required=False, allow_null=True)
     variables = HogFlowVariableSerializer(required=False)
+    schedules = HogFlowScheduleSerializer(many=True, required=False, default=list)
 
     def to_internal_value(self, data):
         status = data.get("status")
@@ -252,6 +319,7 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
             "abort_action",
             "variables",
             "billable_action_types",
+            "schedules",
         ]
         read_only_fields = [
             "id",
@@ -306,18 +374,52 @@ class HogFlowSerializer(HogFlowMinimalSerializer):
             if "bytecode" not in data["conversion"]:
                 data["conversion"]["bytecode"] = []
 
+        # Silently clear schedules for trigger types that don't support scheduling
+        if data.get("schedules") and data["trigger"].get("type") not in SCHEDULABLE_TRIGGER_TYPES:
+            data["schedules"] = []
+
         return data
 
     def create(self, validated_data: dict, *args, **kwargs) -> HogFlow:
         request = self.context["request"]
         team_id = self.context["team_id"]
+        schedules_data = validated_data.pop("schedules", [])
         validated_data["created_by"] = request.user
         validated_data["team_id"] = team_id
 
-        return super().create(validated_data=validated_data)
+        instance = super().create(validated_data=validated_data)
+
+        for schedule_data in schedules_data:
+            schedule_data.pop("id", None)
+            HogFlowSchedule.objects.create(team_id=team_id, hog_flow=instance, **schedule_data)
+
+        return instance
 
     def update(self, instance, validated_data):
-        return super().update(instance, validated_data)
+        schedules_data = validated_data.pop("schedules", None)
+        instance = super().update(instance, validated_data)
+
+        if schedules_data is not None:
+            team_id = self.context["team_id"]
+            incoming_ids = {s["id"] for s in schedules_data if "id" in s}
+            existing = {s.id: s for s in instance.schedules.all()}
+
+            # Delete schedules not in the incoming list
+            for eid in existing:
+                if eid not in incoming_ids:
+                    existing[eid].delete()
+
+            # Create or update
+            for schedule_data in schedules_data:
+                sid = schedule_data.pop("id", None)
+                if sid and sid in existing:
+                    for key, value in schedule_data.items():
+                        setattr(existing[sid], key, value)
+                    existing[sid].save()
+                else:
+                    HogFlowSchedule.objects.create(team_id=team_id, hog_flow=instance, **schedule_data)
+
+        return instance
 
 
 class HogFlowInvocationSerializer(serializers.Serializer):
@@ -350,6 +452,8 @@ class HogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMixin, vie
         return HogFlowMinimalSerializer if self.action == "list" else HogFlowSerializer
 
     def safely_get_queryset(self, queryset: QuerySet) -> QuerySet:
+        queryset = queryset.prefetch_related("schedules")
+
         if self.action == "list":
             queryset = queryset.order_by("-updated_at")
 
@@ -510,6 +614,13 @@ class HogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMixin, vie
             batch_jobs = HogFlowBatchJob.objects.filter(hog_flow=hog_flow, team=self.team).order_by("-created_at")
             serializer = HogFlowBatchJobSerializer(batch_jobs, many=True)
             return Response(serializer.data)
+
+    @action(detail=True, methods=["GET"])
+    def scheduled_runs(self, request: Request, *args, **kwargs):
+        hog_flow = self.get_object()
+        runs = HogFlowScheduledRun.objects.filter(hog_flow=hog_flow, team=self.team).order_by("-run_at")[:100]
+        serializer = HogFlowScheduledRunSerializer(runs, many=True)
+        return Response(serializer.data)
 
 
 class InternalHogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMixin, viewsets.ModelViewSet):

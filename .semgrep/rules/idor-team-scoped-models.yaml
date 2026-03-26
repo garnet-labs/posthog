@@ -122,6 +122,8 @@ rules:
                               |HealthIssue
                               |HogFlow
                               |HogFlowBatchJob
+                              |HogFlowSchedule
+                              |HogFlowScheduledRun
                               |HogFlowTemplate
                               |HogFunction
                               |Hook
@@ -302,6 +304,8 @@ rules:
                         |HealthIssue
                         |HogFlow
                         |HogFlowBatchJob
+                        |HogFlowSchedule
+                        |HogFlowScheduledRun
                         |HogFlowTemplate
                         |HogFunction
                         |Hook
