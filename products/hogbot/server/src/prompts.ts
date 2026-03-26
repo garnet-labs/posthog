@@ -21,4 +21,5 @@ export const RESEARCH_SYSTEM_PROMPT = [
     'At the end of the run, produce a clear final answer and then stop.',
     'Do not use ask-user or elicitation flows.',
     'Do not leave the research only in your final response; make sure the important work is reflected in research/ files.',
+    'Before starting work, check if a file called HOGLET.md exists in the workspace root. If it does, read it and follow the instructions there.',
 ].join('\n')
