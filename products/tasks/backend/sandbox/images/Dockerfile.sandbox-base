@@ -97,6 +97,25 @@ ENV PYTHONPATH="/tmp/workspace"
 
 WORKDIR /tmp/workspace
 
+# Install common notebook Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+    numpy \
+    pandas \
+    scipy \
+    scikit-learn \
+    matplotlib \
+    seaborn \
+    plotly \
+    pyarrow \
+    duckdb \
+    polars \
+    sqlalchemy \
+    requests \
+    lxml \
+    xgboost \
+    beautifulsoup4
+
 RUN python3 --version && \
     node --version && \
     npm --version
