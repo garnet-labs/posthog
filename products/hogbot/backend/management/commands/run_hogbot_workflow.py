@@ -10,23 +10,15 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--team-id", type=int, required=True, help="Team ID to run hogbot for")
-        parser.add_argument(
-            "--server-command",
-            type=str,
-            required=True,
-            help="Command used to start the hogbot server inside the sandbox",
-        )
 
     def handle(self, *args, **options):
         team_id = options["team_id"]
-        server_command = options["server_command"]
 
         if not Team.objects.filter(id=team_id).exists():
             raise CommandError(f"Team {team_id} not found")
 
         connection_info = get_or_start_hogbot(
             team_id=team_id,
-            server_command=server_command,
             repository=None,
             github_integration_id=None,
             branch=None,

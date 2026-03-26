@@ -1,11 +1,16 @@
 {
     "name": "@posthog/products-hogbot",
-    "private": true,
     "version": "1.0.0",
+    "private": true,
     "bin": {
         "hogbot-server": "./server/dist/bin.js"
     },
+    "files": [
+        "server/dist/**",
+        "package.json"
+    ],
     "scripts": {
+        "prepack": "tsup --config server/tsup.config.ts",
         "build": "tsup --config server/tsup.config.ts",
         "dev": "tsx watch server/src/bin.ts",
         "typecheck": "tsc -p server/tsconfig.json --noEmit",

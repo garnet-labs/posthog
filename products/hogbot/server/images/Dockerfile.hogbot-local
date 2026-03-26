@@ -2,6 +2,8 @@ FROM posthog-sandbox-base
 
 COPY products/hogbot /local-hogbot
 
-RUN cd /local-hogbot && pnpm pack && \
+RUN cd /local-hogbot && pnpm install --frozen-lockfile=false && \
+    pnpm run build && \
+    pnpm pack && \
     cd /scripts && pnpm install /local-hogbot/*.tgz && \
     rm -rf /local-hogbot
