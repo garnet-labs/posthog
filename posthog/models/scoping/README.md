@@ -4,7 +4,7 @@ Fail-closed team scoping for Django models. Queries without team context raise `
 
 This is a defense-in-depth convenience layer, not a complete security boundary. Django's `_base_manager` bypasses custom managers for related-object access, and raw SQL bypasses the ORM entirely. Use this alongside explicit team checks at the API layer.
 
-Related: [#47065](https://github.com/PostHog/posthog/issues/47065)
+Related: [#47073](https://github.com/PostHog/posthog/pull/47073)
 
 ## How it works
 
