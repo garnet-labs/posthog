@@ -331,6 +331,7 @@ select = [
 "posthog/personhog_client/proto/generated/**/*.pyi" = ["F401"]
 "posthog/personhog_client/proto/generated/**/*_pb2.py" = ["F401", "E402"]
 "products/posthog_ai/skills/training-action-predictions/references/*.py" = ["T201"]
+"products/posthog_ai/skills/training-action-predictions/runs/**/*.py" = ["T201", "E402"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

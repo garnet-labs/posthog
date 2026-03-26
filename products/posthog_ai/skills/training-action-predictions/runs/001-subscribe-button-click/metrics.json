@@ -1,0 +1,36 @@
+{
+    "metrics": {
+        "auc_roc": 0.7977,
+        "auc_pr": 0.7906,
+        "brier": 0.186,
+        "n_train": 1419,
+        "n_test": 473,
+        "n_positive": 946,
+        "base_rate": 0.5,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "billing_cta_shown": 0.1064,
+        "autocapture_ratio": 0.0859,
+        "onboarding_started": 0.0759,
+        "pageview_ratio": 0.0709,
+        "unique_event_types": 0.0631,
+        "onboarding_completed": 0.0628,
+        "pay_gate_shown": 0.0556,
+        "events_7d": 0.0542,
+        "upgrade_modal_shown": 0.0522,
+        "setup_tasks_completed": 0.0341,
+        "recording_fetched": 0.0329,
+        "user_logged_in": 0.032,
+        "events_30d": 0.031,
+        "trend_ratio_14d": 0.0308,
+        "days_since_last_event": 0.0299,
+        "dashboard_viewed": 0.0288,
+        "product_intent_shown": 0.0285,
+        "insight_analyzed": 0.0274,
+        "insight_viewed": 0.0273,
+        "events_total": 0.0258,
+        "user_signed_up": 0.0227,
+        "pay_gate_cta_clicked": 0.0218
+    }
+}
