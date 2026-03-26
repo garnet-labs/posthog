@@ -2,7 +2,7 @@ import './AnnotationsOverlay.scss'
 
 import { BindLogic, useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconPencil, IconPlusSmall, IconTrash } from '@posthog/icons'
 
@@ -65,26 +65,24 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
     const { insightProps } = useValues(insightLogic)
     const { tickIntervalPx, firstTickLeftPx } = useAnnotationsPositioning(chart, chartWidth, chartHeight)
 
-    // Memoize ticks by value to prevent unnecessary kea selector cascades.
-    // chart.scales.x.ticks is a Chart.js internal array that is the same object between renders
-    // when the chart hasn't changed, but .map() would create new references every render,
-    // causing all downstream selectors (tickDates → dateRange → relevantAnnotations →
-    // groupedAnnotations) to recompute unnecessarily.
-    const prevTicksRef = useRef<{ value: number }[]>([])
-    const currentChartTicks = chart.scales.x.ticks
-    if (
-        prevTicksRef.current.length !== currentChartTicks.length ||
-        prevTicksRef.current.some((t, i) => t.value !== currentChartTicks[i]?.value)
-    ) {
-        prevTicksRef.current = currentChartTicks.map(({ value }) => ({ value }))
-    }
+    // Use all data point indices as ticks so that annotation badges are
+    // positioned at each data point on the x-axis, not just at the sparse
+    // Chart.js tick labels. This prevents annotations from snapping to a
+    // distant tick (e.g., appearing 3 weeks early on a 90-day weekly chart).
+    const allDataPointTicks = useMemo(
+        () => dates.map((_, i) => ({ value: i })),
+        // dates is a new array reference each render but content is stable for
+        // a given insight result, so keying on length avoids unnecessary churn
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [dates.length]
+    )
 
     const annotationsOverlayLogicProps: AnnotationsOverlayLogicProps = {
         ...insightProps,
         dashboardId: insightProps.dashboardId,
         insightNumericId,
         dates,
-        ticks: prevTicksRef.current,
+        ticks: allDataPointTicks,
     }
     const logic = annotationsOverlayLogic(annotationsOverlayLogicProps)
     const { activeDate, tickDates } = useValues(logic)

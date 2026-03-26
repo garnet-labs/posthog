@@ -12,25 +12,22 @@ export function useAnnotationsPositioning(
     chartWidth: number,
     chartHeight: number
 ): AnnotationsPositioning {
-    // Calculate chart content coordinates for annotations overlay positioning
+    // Calculate chart content coordinates for annotations overlay positioning.
+    // We use ALL data point positions (not just visible tick positions) so that
+    // annotation badges appear at their actual date on the x-axis, rather than
+    // snapping to the nearest Chart.js tick which can be several weeks away.
     return useMemo<AnnotationsPositioning>(() => {
         // @ts-expect-error - _metasets is not officially exposed
-        if (chart && chart.scales.x.ticks.length > 1 && chart._metasets?.[0]?.data?.length > 0) {
-            const tickCount = chart.scales.x.ticks.length
-            // NOTE: If there are lots of points on the X axis, Chart.js only renders a tick once n data points
-            // so that the axis is readable. We use that mechanism to aggregate annotations for readability too.
-            // We use the internal _metasets instead just taking graph area width, because it's NOT guaranteed that the
-            // last tick is positioned at the right edge of the graph area. We need to find out where it is.
+        if (chart && chart._metasets?.[0]?.data?.length > 1) {
             // @ts-expect-error - _metasets is not officially exposed
             const points = chart._metasets[0].data as Point[]
-            const firstTickPointIndex = chart.scales.x.ticks[0].value
-            const lastTickPointIndex = chart.scales.x.ticks[tickCount - 1].value
+            const pointCount = points.length
             // Fall back to zero for resiliency against temporary chart inconsistencies during loading
-            const firstTickLeftPx = points[firstTickPointIndex]?.x ?? 0
-            const lastTickLeftPx = points[lastTickPointIndex]?.x ?? 0
+            const firstPointLeftPx = points[0]?.x ?? 0
+            const lastPointLeftPx = points[pointCount - 1]?.x ?? 0
             return {
-                tickIntervalPx: (lastTickLeftPx - firstTickLeftPx) / (tickCount - 1),
-                firstTickLeftPx,
+                tickIntervalPx: (lastPointLeftPx - firstPointLeftPx) / (pointCount - 1),
+                firstTickLeftPx: firstPointLeftPx,
             }
         }
         return {
