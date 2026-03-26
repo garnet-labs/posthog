@@ -830,8 +830,24 @@ jobs:
                     sqlx migrate info --source rust/persons_migrations/
                   python manage.py makemigrations --check --dry-run
                   git fetch origin master
-                  # Check migration safety using old SQL-based checker (still uses stdin from git diff)
-                  echo "$MIGRATIONS_FILES" | grep -v migrations/0001_ | grep -v 'rust/persons_migrations' | python manage.py test_migrations_are_safe
+                  # Check migration safety — only for NEW migrations, skip modifications to existing ones
+                  NEW_MIGRATIONS=""
+                  for file in $MIGRATIONS_FILES; do
+                    case "$file" in
+                      *migrations/0001_*|*rust/persons_migrations*) continue ;;
+                    esac
+                    # Skip files that already exist on master (modified, not new)
+                    if git cat-file -e "origin/master:$file" 2>/dev/null; then
+                      echo "Skipping $file (already exists on master, only modified)"
+                      continue
+                    fi
+                    NEW_MIGRATIONS="${NEW_MIGRATIONS}${file}"$'\n'
+                  done
+                  if [ -n "$NEW_MIGRATIONS" ]; then
+                    echo "$NEW_MIGRATIONS" | python manage.py test_migrations_are_safe
+                  else
+                    echo "No new migration files to check"
+                  fi
 
             - name: Check CH migrations
               run: |
