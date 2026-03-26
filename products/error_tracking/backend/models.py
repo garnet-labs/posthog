@@ -13,15 +13,15 @@ from rest_framework.exceptions import ValidationError
 
 from posthog.kafka_client.client import ClickhouseProducer
 from posthog.kafka_client.topics import (
+    KAFKA_ERROR_TRACKING_FINGERPRINT_DENORMALIZED,
     KAFKA_ERROR_TRACKING_ISSUE_FINGERPRINT,
-    KAFKA_ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED,
 )
 from posthog.models.integration import Integration
 from posthog.models.utils import UUIDModel, UUIDTModel
 from posthog.storage import object_storage
 
 from products.error_tracking.backend.sql import (
-    INSERT_ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED,
+    INSERT_ERROR_TRACKING_FINGERPRINT_DENORMALIZED,
     INSERT_ERROR_TRACKING_ISSUE_FINGERPRINT_OVERRIDES,
 )
 
@@ -530,8 +530,8 @@ def sync_issue_to_clickhouse(*, issue_id, team_id: int) -> None:
         first_seen_raw = fp.first_seen or issue.created_at
         first_seen = first_seen_raw.astimezone(ZoneInfo("UTC")) if first_seen_raw else None
         producer.produce(
-            sql=INSERT_ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED,
-            topic=KAFKA_ERROR_TRACKING_ISSUE_FINGERPRINT_DENORMALIZED,
+            sql=INSERT_ERROR_TRACKING_FINGERPRINT_DENORMALIZED,
+            topic=KAFKA_ERROR_TRACKING_FINGERPRINT_DENORMALIZED,
             data={
                 "fingerprint": fp.fingerprint,
                 "issue_id": str(issue.id),
