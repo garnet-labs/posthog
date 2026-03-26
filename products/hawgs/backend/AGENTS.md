@@ -24,6 +24,10 @@ and which neighboring features are likely affected.
    - Writes `crawl/crawl_cache/_contextualized_taxonomy.json`
    - Attaches safe runtime/frontend context to products and features: route patterns, API endpoints, and PostHog events
    - Matching is conservative: prefer `page_component`, then widen to `key_files`; attach at feature level only for unique feature matches, otherwise fall back to unique product matches
+5. `python manage.py lookup_taxonomy_path <code_path>`
+   - Reads `crawl/crawl_cache/_contextualized_taxonomy.json`
+   - Matches the input repo path against product/feature `code_paths`
+   - Prefers feature matches over broader product-root matches and returns the matched taxonomy node plus attached routes/endpoints/events
 
 ## Artifacts
 
@@ -42,14 +46,15 @@ and which neighboring features are likely affected.
 - `code_paths` should be verified on disk and should prefer durable, product-specific directory globs over long file lists.
 - Treat `_product-context-index.json` as a route/scene index, not as a source of truth for product hierarchy. Use it to attach operational context onto the taxonomy, not to replace the taxonomy.
 - Contextualization should stay conservative. Only attach feature-level context on unique matches; if the scene spans multiple features but clearly belongs to one product, attach it at product level instead.
+- Path lookup should treat `_contextualized_taxonomy.json` as the read-only lookup DB. Prefer the most specific matching `code_paths` pattern, and prefer feature matches over broader product matches.
 - The pipeline is cache-first. If you change discovery rules, prompt logic, schemas, or enrichment heuristics, delete the affected cache files before rerunning or you will get stale results.
-- This directory does not yet contain the final "code path -> product/feature" API. `_enriched_taxonomy.json` is the current handoff artifact for that future lookup layer.
+- This directory now has a local command-level path lookup. A real HTTP/API layer for external callers is still future work.
 - `crawl_website` requires `FIRECRAWL_API_KEY`. Discovery, taxonomy, and enrichment also depend on the sandbox agent helpers in `products.tasks.backend.services.custom_prompt_*`.
 
 ## Future notes
 
 - A periodic refresh/self-healing loop for rerunning crawl/build/enrich is still future work.
-- A direct lookup API from code path to product/feature is also still future work.
+- A real API endpoint around the local lookup command is still future work.
 
 ## Maintaining this file
 
