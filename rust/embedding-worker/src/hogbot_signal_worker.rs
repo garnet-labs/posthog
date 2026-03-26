@@ -25,7 +25,7 @@ pub async fn run(kafka_config: KafkaConfig) {
         kafka_consumer_group: KAFKA_GROUP.to_string(),
         kafka_consumer_topic: KAFKA_TOPIC.to_string(),
         kafka_consumer_offset_reset: "latest".to_string(),
-        kafka_consumer_auto_commit: true,
+        kafka_consumer_auto_commit: false,
         kafka_consumer_auto_commit_interval_ms: 5000,
     };
 
