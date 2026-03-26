@@ -31,6 +31,14 @@ tracer = trace.get_tracer(__name__)
 logger = getLogger(__name__)
 
 
+def _unquote_identifier(text: str) -> str:
+    if len(text) >= 2 and (
+        (text.startswith("`") and text.endswith("`")) or (text.startswith('"') and text.endswith('"'))
+    ):
+        text = parse_string_literal_text(text)
+    return text
+
+
 def safe_lambda(f):
     def wrapped(*args, **kwargs):
         try:
@@ -1151,12 +1159,7 @@ class HogQLParseTreeConverter(ParseTreeVisitor):
         return " ".join(parts)
 
     def visitColumnTypeCastIdentifier(self, ctx: HogQLParser.ColumnTypeCastIdentifierContext):
-        text = ctx.getText()
-        if len(text) >= 2 and (
-            (text.startswith("`") and text.endswith("`")) or (text.startswith('"') and text.endswith('"'))
-        ):
-            text = parse_string_literal_text(text)
-        return text
+        return _unquote_identifier(ctx.getText())
 
     def visitColumnExprBetween(self, ctx: HogQLParser.ColumnExprBetweenContext):
         expr = self.visit(ctx.columnExpr(0))
@@ -1579,20 +1582,10 @@ class HogQLParseTreeConverter(ParseTreeVisitor):
         raise NotImplementedError(f"Unsupported node: KeywordForAlias")
 
     def visitAlias(self, ctx: HogQLParser.AliasContext):
-        text = ctx.getText()
-        if len(text) >= 2 and (
-            (text.startswith("`") and text.endswith("`")) or (text.startswith('"') and text.endswith('"'))
-        ):
-            text = parse_string_literal_text(text)
-        return text
+        return _unquote_identifier(ctx.getText())
 
     def visitIdentifier(self, ctx: HogQLParser.IdentifierContext):
-        text = ctx.getText()
-        if len(text) >= 2 and (
-            (text.startswith("`") and text.endswith("`")) or (text.startswith('"') and text.endswith('"'))
-        ):
-            text = parse_string_literal_text(text)
-        return text
+        return _unquote_identifier(ctx.getText())
 
     def visitEnumValue(self, ctx: HogQLParser.EnumValueContext):
         raise NotImplementedError(f"Unsupported node: EnumValue")
