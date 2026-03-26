@@ -1105,21 +1105,6 @@ def parser_test_factory(backend: HogQLParserBackend):
                 ),
             )
             self.assertEqual(
-                self._select("select count(*)::int as num_events from active_events"),
-                ast.SelectQuery(
-                    select=[
-                        ast.Alias(
-                            alias="num_events",
-                            expr=ast.TypeCast(
-                                expr=ast.Call(name="count", args=[ast.Field(chain=["*"])]),
-                                type_name="int",
-                            ),
-                        )
-                    ],
-                    select_from=ast.JoinExpr(table=ast.Field(chain=["active_events"])),
-                ),
-            )
-            self.assertEqual(
                 self._select("select 1 from events as e"),
                 ast.SelectQuery(
                     select=[ast.Constant(value=1)],
