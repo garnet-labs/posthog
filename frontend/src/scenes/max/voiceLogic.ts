@@ -755,7 +755,6 @@ export const voiceLogic = kea<voiceLogicType>([
 
                 actions.setConnecting(false)
                 actions.setRecording(true)
-                actions.setVoiceModeEnabled(true)
 
                 cache.inputAmplitudeRafId = requestAnimationFrame(amplitudeLoop)
             }

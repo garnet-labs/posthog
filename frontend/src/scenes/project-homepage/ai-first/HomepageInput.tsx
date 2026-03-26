@@ -10,12 +10,13 @@ import {
     IconGear,
     IconLightBulb,
     IconLock,
+    IconMicrophone,
     IconNotification,
     IconRewind,
     IconRocket,
     IconSearch,
 } from '@posthog/icons'
-import { LemonButton } from '@posthog/lemon-ui'
+import { LemonButton, Spinner } from '@posthog/lemon-ui'
 
 import { Search } from 'lib/components/Search/Search'
 import { ButtonPrimitive } from 'lib/ui/Button/ButtonPrimitives'
@@ -25,6 +26,7 @@ import { Intro } from 'scenes/max/Intro'
 import { maxGlobalLogic } from 'scenes/max/maxGlobalLogic'
 import { maxLogic } from 'scenes/max/maxLogic'
 import { MaxThreadLogicProps, maxThreadLogic } from 'scenes/max/maxThreadLogic'
+import { voiceLogic } from 'scenes/max/voiceLogic'
 import { userLogic } from 'scenes/userLogic'
 
 import { KeyboardShortcut } from '~/layout/navigation-3000/components/KeyboardShortcut'
@@ -37,6 +39,8 @@ import { HOMEPAGE_TAB_ID } from './constants'
 function IdleInput(): JSX.Element {
     const { query, placeholder } = useValues(aiFirstHomepageLogic)
     const { setQuery, submitQuery, enterAiMode } = useActions(aiFirstHomepageLogic)
+    const { connecting, micPermissionDenied } = useValues(voiceLogic)
+    const { startRecording, stopRecording } = useActions(voiceLogic)
     const inputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -87,30 +91,63 @@ function IdleInput(): JSX.Element {
                     className="w-full px-1 py-1 text-sm focus:outline-none border-transparent"
                     autoFocus
                 />
-                {query.trim() && (
-                    <div className="flex items-center gap-1 shrink-0 transition-opacity duration-150 ease-out starting:opacity-0">
+                <div className="flex items-center gap-1 shrink-0">
+                    {!query.trim() && (
                         <ButtonPrimitive
                             size="xs"
                             className="text-tertiary hover:text-primary"
-                            onClick={() => {
-                                posthog.capture('homepage query submitted', { mode: 'search' })
-                                submitQuery('search')
+                            onPointerDown={(e: React.PointerEvent) => {
+                                e.preventDefault()
+                                posthog.capture('homepage voice input started', { source: 'idle' })
+                                enterAiMode('')
+                                startRecording(HOMEPAGE_TAB_ID)
+                                const onRelease = (): void => {
+                                    window.removeEventListener('pointerup', onRelease)
+                                    window.removeEventListener('pointercancel', onRelease)
+                                    stopRecording()
+                                }
+                                window.addEventListener('pointerup', onRelease)
+                                window.addEventListener('pointercancel', onRelease)
                             }}
+                            disabled={connecting}
+                            title={
+                                micPermissionDenied
+                                    ? 'Microphone access denied — check browser settings'
+                                    : 'Hold to talk'
+                            }
                         >
-                            <span className="text-xxs">Tab to search</span>
+                            {connecting ? (
+                                <Spinner className="size-4 text-muted" />
+                            ) : (
+                                <IconMicrophone className="size-4" />
+                            )}
                         </ButtonPrimitive>
-                        <ButtonPrimitive
-                            size="xs"
-                            onClick={() => {
-                                posthog.capture('homepage query submitted', { mode: 'ai' })
-                                submitQuery('ai')
-                            }}
-                            variant="panel"
-                        >
-                            <span className="text-xxs">Enter to ask AI</span>
-                        </ButtonPrimitive>
-                    </div>
-                )}
+                    )}
+                    {query.trim() && (
+                        <div className="flex items-center gap-1 transition-opacity duration-150 ease-out starting:opacity-0">
+                            <ButtonPrimitive
+                                size="xs"
+                                className="text-tertiary hover:text-primary"
+                                onClick={() => {
+                                    posthog.capture('homepage query submitted', { mode: 'search' })
+                                    submitQuery('search')
+                                }}
+                            >
+                                <span className="text-xxs">Tab to search</span>
+                            </ButtonPrimitive>
+                            <ButtonPrimitive
+                                size="xs"
+                                onClick={() => {
+                                    posthog.capture('homepage query submitted', { mode: 'ai' })
+                                    submitQuery('ai')
+                                }}
+                                variant="panel"
+                            >
+                                <span className="text-xxs">Enter to ask AI</span>
+                            </ButtonPrimitive>
+                        </div>
+                    )}
+                </div>
             </label>
             <div className="flex flex-col items-center gap-2 w-full">
                 <div className="px-4 w-full">

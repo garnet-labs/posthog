@@ -428,35 +428,50 @@ export const QuestionInput = React.forwardRef<HTMLDivElement, QuestionInputProps
                         )}
                         {!showStopButton && (
                             <>
-                                <LemonButton
-                                    data-attr="max-voice-input"
-                                    type="tertiary"
-                                    size="small"
-                                    icon={
-                                        connecting ? (
-                                            <Spinner className="text-muted" />
-                                        ) : (
-                                            <IconMicrophone
-                                                className={recording ? 'text-danger animate-pulse' : undefined}
-                                            />
-                                        )
-                                    }
-                                    onClick={() => {
-                                        if (recording) {
-                                            stopRecording()
-                                        } else {
-                                            startRecording(tabId)
+                                <span
+                                    onPointerDown={(e) => {
+                                        if (recording || connecting || inputDisabled) {
+                                            return
                                         }
+                                        e.preventDefault()
+                                        startRecording(tabId)
+                                        const onRelease = (): void => {
+                                            window.removeEventListener('pointerup', onRelease)
+                                            window.removeEventListener('pointercancel', onRelease)
+                                            stopRecording()
+                                        }
+                                        window.addEventListener('pointerup', onRelease)
+                                        window.addEventListener('pointercancel', onRelease)
                                     }}
-                                    tooltip={
-                                        micPermissionDenied
-                                            ? 'Microphone access denied — check browser settings'
-                                            : recording
-                                              ? 'Stop recording and send'
-                                              : 'Voice input'
-                                    }
-                                    disabled={connecting || inputDisabled}
-                                />
+                                >
+                                    <LemonButton
+                                        data-attr="max-voice-input"
+                                        type="tertiary"
+                                        size="small"
+                                        icon={
+                                            connecting ? (
+                                                <Spinner className="text-muted" />
+                                            ) : (
+                                                <IconMicrophone
+                                                    className={recording ? 'text-danger animate-pulse' : undefined}
+                                                />
+                                            )
+                                        }
+                                        onClick={() => {
+                                            if (recording) {
+                                                stopRecording()
+                                            }
+                                        }}
+                                        tooltip={
+                                            micPermissionDenied
+                                                ? 'Microphone access denied — check browser settings'
+                                                : recording
+                                                  ? 'Release to send'
+                                                  : 'Hold to talk'
+                                        }
+                                        disabled={connecting || inputDisabled}
+                                    />
+                                </span>
                                 <LemonButton
                                     data-attr="max-voice-mode-toggle"
                                     type={voiceModeEnabled ? 'primary' : 'tertiary'}
