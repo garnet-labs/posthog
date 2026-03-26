@@ -9,21 +9,21 @@ import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 import { ProductKey } from '~/queries/schema/schema-general'
 
-import { AnalyzedSite, featuresRepositoryLogic } from './featuresRepositoryLogic'
+import { AnalyzedSite, productTaxonomyLogic } from './productTaxonomyLogic'
 
 export const scene: SceneExport = {
-    component: FeaturesRepositoryScene,
-    logic: featuresRepositoryLogic,
-    productKey: ProductKey.FEATURES_REPOSITORY,
+    component: ProductTaxonomyScene,
+    logic: productTaxonomyLogic,
+    productKey: ProductKey.PRODUCT_TAXONOMY,
 }
 
-export function FeaturesRepositoryScene(): JSX.Element {
-    const { sites, sitesLoading } = useValues(featuresRepositoryLogic)
+export function ProductTaxonomyScene(): JSX.Element {
+    const { sites, sitesLoading } = useValues(productTaxonomyLogic)
 
     return (
         <SceneContent>
             <SceneTitleSection
-                name="Features repository"
+                name="Product taxonomy"
                 description="Analyzed websites and their product/feature taxonomy"
                 resourceType={{ type: 'apps' }}
             />

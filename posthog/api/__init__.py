@@ -1017,7 +1017,7 @@ register_grandfathered_environment_nested_viewset(
 )
 
 environments_router.register(
-    r"features_repository", hawgs.FeaturesRepositoryViewSet, "environment_features_repository", ["team_id"]
+    r"product_taxonomy", hawgs.ProductTaxonomyViewSet, "environment_product_taxonomy", ["team_id"]
 )
 projects_router.register(r"links", link.LinkViewSet, "environment_links", ["team_id"])
 

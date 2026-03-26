@@ -4,31 +4,31 @@ import { FileSystemIconType, ProductKey } from '~/queries/schema/schema-general'
 import { ProductManifest } from '~/types'
 
 export const manifest: ProductManifest = {
-    name: 'Features repository',
+    name: 'Product taxonomy',
     scenes: {
-        FeaturesRepository: {
-            name: 'Features repository',
-            import: () => import('./frontend/FeaturesRepositoryScene'),
+        ProductTaxonomy: {
+            name: 'Product taxonomy',
+            import: () => import('./frontend/ProductTaxonomyScene'),
             projectBased: true,
             description: 'Analyze websites to discover their product and feature taxonomy.',
             iconType: 'apps',
         },
     },
     routes: {
-        '/features_repository': ['FeaturesRepository', 'featuresRepository'],
+        '/product_taxonomy': ['ProductTaxonomy', 'productTaxonomy'],
     },
     urls: {
-        featuresRepository: (): string => '/features_repository',
+        productTaxonomy: (): string => '/product_taxonomy',
     },
     treeItemsProducts: [
         {
-            path: 'Features repository',
-            intents: [ProductKey.FEATURES_REPOSITORY],
+            path: 'Product taxonomy',
+            intents: [ProductKey.PRODUCT_TAXONOMY],
             category: 'Features',
-            type: 'features_repository',
-            href: urls.featuresRepository(),
+            type: 'product_taxonomy',
+            href: urls.productTaxonomy(),
             iconType: 'apps' as FileSystemIconType,
-            sceneKey: 'FeaturesRepository',
+            sceneKey: 'ProductTaxonomy',
         },
     ],
 }

@@ -3,7 +3,7 @@ import { loaders } from 'kea-loaders'
 
 import api from 'lib/api'
 
-import type { featuresRepositoryLogicType } from './featuresRepositoryLogicType'
+import type { productTaxonomyLogicType } from './productTaxonomyLogicType'
 
 export interface AnalyzedSite {
     domain: string
@@ -16,14 +16,14 @@ export interface AnalyzedSite {
     pages_count: number
 }
 
-export const featuresRepositoryLogic = kea<featuresRepositoryLogicType>([
-    path(['scenes', 'features-repository', 'featuresRepositoryLogic']),
+export const productTaxonomyLogic = kea<productTaxonomyLogicType>([
+    path(['scenes', 'product-taxonomy', 'productTaxonomyLogic']),
     loaders(() => ({
         sites: [
             [] as AnalyzedSite[],
             {
                 loadSites: async () => {
-                    const response = await api.get('api/environments/@current/features_repository/')
+                    const response = await api.get('api/environments/@current/product_taxonomy/')
                     return response.results
                 },
             },

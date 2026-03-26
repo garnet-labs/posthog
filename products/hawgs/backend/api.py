@@ -21,7 +21,7 @@ class AnalyzedSiteSerializer(serializers.Serializer):
     pages_count = serializers.IntegerField()
 
 
-class FeaturesRepositoryViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
+class ProductTaxonomyViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     scope_object = "INTERNAL"
 
     def list(self, request, *args, **kwargs):

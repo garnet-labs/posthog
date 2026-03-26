@@ -85,11 +85,11 @@
             "intents": ["feature_flags", "experiments", "early_access_features"]
         },
         {
-            "path": "Features repository",
+            "path": "Product taxonomy",
             "category": "Features",
             "iconType": null,
-            "type": "features_repository",
-            "intents": ["features_repository"]
+            "type": "product_taxonomy",
+            "intents": ["product_taxonomy"]
         },
         { "path": "Links", "category": "Unreleased", "iconType": null, "type": "link", "intents": ["links"] },
         {

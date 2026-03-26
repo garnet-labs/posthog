@@ -5771,7 +5771,7 @@ export enum ProductKey {
     ENDPOINTS = 'endpoints',
     ERROR_TRACKING = 'error_tracking',
     EXPERIMENTS = 'experiments',
-    FEATURES_REPOSITORY = 'features_repository',
+    PRODUCT_TAXONOMY = 'product_taxonomy',
     FEATURE_FLAGS = 'feature_flags',
     GROUP_ANALYTICS = 'group_analytics',
     HEATMAPS = 'heatmaps',
