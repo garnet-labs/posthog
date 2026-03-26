@@ -166,4 +166,8 @@ def crawl_website(url: str, *, verbose: bool = False, output_fn=None) -> list[di
             output_fn("No product URLs discovered")
         return []
 
+    # Always include the homepage — it's the main source of "what this project is about"
+    if url not in urls:
+        urls.insert(0, url)
+
     return _scrape_pages(urls, output_fn=output_fn)
