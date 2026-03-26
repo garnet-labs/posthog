@@ -340,11 +340,6 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
     """Env vars threaded through every docker compose invocation."""
     config = _load_config()
     ide = config.get("jetbrains")
-    # Grab the git commit from the worktree so the container can display it.
-    git_commit = run(
-        ["git", "-C", worktree_path, "rev-parse", "HEAD"],
-        check=False, capture=True,
-    ).stdout.strip() if worktree_path != "." else ""
     return {
         "SANDBOX_PORT": str(port),
         "SANDBOX_VITE_PORT": str(port + 1000),
@@ -356,7 +351,7 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
         "SANDBOX_UID": str(os.getuid()),
         "SANDBOX_GID": str(os.getgid()),
         "SANDBOX_WARM_BOOT": os.environ.get("SANDBOX_WARM_BOOT", "0"),
-        "SANDBOX_GIT_COMMIT": git_commit,
+        "SANDBOX_GIT_DIR": str(REPO_ROOT / ".git"),
         "SANDBOX_CLAUDE_JSON": str(_claude_json) if (_claude_json := Path.home() / ".claude.json").is_file() else "/dev/null",
     }
 

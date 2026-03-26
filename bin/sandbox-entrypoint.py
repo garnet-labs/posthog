@@ -482,10 +482,13 @@ def user_phase() -> None:
     Path("/cache/cargo-target").mkdir(parents=True, exist_ok=True)
 
     # The worktree's .git file points to a host path that doesn't exist in the
-    # container. Write commit.txt so posthog/git.py uses it instead of shelling
-    # out to git (which would fail). get_git_branch() will return None.
-    git_commit = os.environ.get("SANDBOX_GIT_COMMIT", "sandbox")
-    (WORKSPACE / "commit.txt").write_text(f"{git_commit}\n")
+    # container. The main repo's .git is mounted at /repo.git (read-only).
+    # Parse the worktree name and point GIT_DIR at the right place.
+    # e.g. "gitdir: /home/user/workspace/posthog/.git/worktrees/my-branch"
+    gitdir_line = (WORKSPACE / ".git").read_text().strip()
+    worktree_name = gitdir_line.rsplit("/", 1)[-1]
+    os.environ["GIT_DIR"] = f"/repo.git/worktrees/{worktree_name}"
+    os.environ["GIT_WORK_TREE"] = str(WORKSPACE)
     os.chdir(WORKSPACE)
 
     apply_overlays()
