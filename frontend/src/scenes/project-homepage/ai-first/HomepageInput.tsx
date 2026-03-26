@@ -40,7 +40,7 @@ function IdleInput(): JSX.Element {
     const { query, placeholder } = useValues(aiFirstHomepageLogic)
     const { setQuery, submitQuery, enterAiMode } = useActions(aiFirstHomepageLogic)
     const { connecting, micPermissionDenied } = useValues(voiceLogic)
-    const { startRecording, stopRecording } = useActions(voiceLogic)
+    const { startRecording } = useActions(voiceLogic)
     const inputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -96,24 +96,16 @@ function IdleInput(): JSX.Element {
                         <ButtonPrimitive
                             size="xs"
                             className="text-tertiary hover:text-primary"
-                            onPointerDown={(e: React.PointerEvent) => {
-                                e.preventDefault()
+                            onClick={() => {
                                 posthog.capture('homepage voice input started', { source: 'idle' })
                                 enterAiMode('')
                                 startRecording(HOMEPAGE_TAB_ID)
-                                const onRelease = (): void => {
-                                    window.removeEventListener('pointerup', onRelease)
-                                    window.removeEventListener('pointercancel', onRelease)
-                                    stopRecording()
-                                }
-                                window.addEventListener('pointerup', onRelease)
-                                window.addEventListener('pointercancel', onRelease)
                             }}
                             disabled={connecting}
                             title={
                                 micPermissionDenied
                                     ? 'Microphone access denied — check browser settings'
-                                    : 'Hold to talk'
+                                    : 'Voice input'
                             }
                         >
                             {connecting ? (
