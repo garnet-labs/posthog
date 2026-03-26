@@ -17,12 +17,21 @@ export const manifest: ProductManifest = {
             defaultDocsPath: '/docs/cdp/transformations',
             iconType: 'data_pipeline',
         },
+        EventFilters: {
+            import: () => import('../../frontend/src/scenes/data-pipelines/EventFilterScene'),
+            projectBased: true,
+            name: 'Event filters',
+            description: 'Drop events at ingestion time based on event name, distinct ID, or session ID.',
+            iconType: 'data_pipeline',
+        },
     },
     routes: {
         '/transformations': ['Transformations', 'transformations'],
+        '/event-filters': ['EventFilters', 'eventFilters'],
     },
     urls: {
         transformations: (): string => '/transformations',
+        eventFilters: (): string => '/event-filters',
     },
     treeItemsNew: [
         {
@@ -99,6 +108,15 @@ export const manifest: ProductManifest = {
             href: urls.destinations(),
             sceneKey: 'Destinations',
             sceneKeys: ['Destinations'],
+        },
+        {
+            path: 'Event filters',
+            category: 'Pipeline',
+            type: 'event_filter',
+            iconType: 'data_pipeline_metadata',
+            href: urls.eventFilters(),
+            sceneKey: 'EventFilters',
+            sceneKeys: ['EventFilters'],
         },
         {
             path: 'Event ingestion warnings',

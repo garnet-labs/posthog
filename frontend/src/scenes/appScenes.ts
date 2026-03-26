@@ -121,6 +121,7 @@ export const appScenes: Record<Scene | string, () => any> = {
     [Scene.SystemStatus]: () => import('./instance/SystemStatus'),
     [Scene.ToolbarLaunch]: () => import('./toolbar-launch/ToolbarLaunch'),
     [Scene.Transformations]: () => import('./data-pipelines/TransformationsScene'),
+    [Scene.EventFilters]: () => import('./data-pipelines/EventFilterScene'),
     [Scene.Unsubscribe]: () => import('./Unsubscribe/Unsubscribe'),
     [Scene.VercelConnect]: () => import('./authentication/VercelConnect'),
     [Scene.VercelLinkError]: () => import('./authentication/VercelLinkError'),

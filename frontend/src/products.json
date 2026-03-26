@@ -233,6 +233,13 @@
             "intents": []
         },
         {
+            "path": "Event filters",
+            "category": "Pipeline",
+            "iconType": "data_pipeline_metadata",
+            "type": "event_filter",
+            "intents": []
+        },
+        {
             "path": "Event ingestion warnings",
             "category": "Pipeline",
             "iconType": "ingestion_warning",

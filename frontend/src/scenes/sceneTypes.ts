@@ -150,6 +150,7 @@ export enum Scene {
     Tracing = 'Tracing',
     Metrics = 'Metrics',
     Transformations = 'Transformations',
+    EventFilters = 'EventFilters',
     Unsubscribe = 'Unsubscribe',
     UserInterview = 'UserInterview',
     UserInterviews = 'UserInterviews',
