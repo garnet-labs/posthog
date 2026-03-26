@@ -145,7 +145,7 @@
 # name: test_create_kafka_table_with_different_kafka_host[kafka_error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS kafka_error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS kafka_error_tracking_fingerprint_denormalized 
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -934,7 +934,7 @@
 # name: test_create_table_query[error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS error_tracking_fingerprint_denormalized 
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -965,7 +965,7 @@
 # name: test_create_table_query[error_tracking_fingerprint_denormalized_mv]
   '''
   
-  CREATE MATERIALIZED VIEW IF NOT EXISTS error_tracking_fingerprint_denormalized_mv ON CLUSTER 'posthog'
+  CREATE MATERIALIZED VIEW IF NOT EXISTS error_tracking_fingerprint_denormalized_mv 
   TO writable_error_tracking_fingerprint_denormalized
   AS SELECT
   team_id,
@@ -1581,7 +1581,7 @@
 # name: test_create_table_query[kafka_error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS kafka_error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS kafka_error_tracking_fingerprint_denormalized 
   (
       team_id Int64,
       fingerprint VARCHAR,
@@ -6111,7 +6111,7 @@
 # name: test_create_table_query_replicated_and_storage[error_tracking_fingerprint_denormalized]
   '''
   
-  CREATE TABLE IF NOT EXISTS error_tracking_fingerprint_denormalized ON CLUSTER 'posthog'
+  CREATE TABLE IF NOT EXISTS error_tracking_fingerprint_denormalized 
   (
       team_id Int64,
       fingerprint VARCHAR,
