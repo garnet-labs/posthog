@@ -85,3 +85,37 @@ export function consoleEvent(
         message,
     })
 }
+
+export function toolCallEvent(
+    scope: HogbotScope,
+    teamId: number,
+    toolName: string,
+    toolCallId: string,
+    status: 'running' | 'completed' | 'error',
+    options: { signalId?: string; input?: Record<string, unknown>; result?: unknown } = {}
+): HogbotNotificationEvent {
+    return createEvent('_hogbot/tool_call', {
+        scope,
+        team_id: teamId,
+        signal_id: options.signalId,
+        tool_name: toolName,
+        tool_call_id: toolCallId,
+        status,
+        input: options.input,
+        result: options.result,
+    })
+}
+
+export function thinkingEvent(
+    scope: HogbotScope,
+    teamId: number,
+    text: string,
+    options: { signalId?: string } = {}
+): HogbotNotificationEvent {
+    return createEvent('_hogbot/thinking', {
+        scope,
+        team_id: teamId,
+        signal_id: options.signalId,
+        text,
+    })
+}

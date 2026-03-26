@@ -409,6 +409,10 @@ export class HogbotServer {
         this.activeSignalId = signalId
         this.lastError = null
         this.emitEvent(statusEvent('research', this.config.teamId, 'starting', { signalId }))
+        this.emitEvent(
+            textEvent('admin', this.config.teamId, `Started research: ${signalId}`, { role: 'system' }),
+            'admin'
+        )
         await this.syncHeartbeat()
 
         await new Promise<void>((resolve, reject) => {
@@ -472,10 +476,18 @@ export class HogbotServer {
         }
         if (message.type === 'done') {
             this.lastError = null
+            this.emitEvent(
+                textEvent('admin', this.config.teamId, `Research completed: ${signalId}`, { role: 'system' }),
+                'admin'
+            )
             return
         }
         if (message.type === 'failed') {
             this.lastError = message.error
+            this.emitEvent(
+                textEvent('admin', this.config.teamId, `Research failed: ${signalId}`, { role: 'system' }),
+                'admin'
+            )
             return
         }
         if (message.type === 'fatal') {
