@@ -698,6 +698,16 @@ export namespace Schemas {
       artifact_scripts?: unknown;
       /** Agent lab notebook: what was tried, what was observed, what to try next. */
       notes?: string;
+      /**
+       * Specific task run that produced this model.
+       * @nullable
+       */
+      readonly task_run: string | null;
+      /**
+       * Current prediction status: not_started, queued, in_progress, completed, failed, cancelled, or null if no prediction run.
+       * @nullable
+       */
+      readonly prediction_status: string | null;
       /** User who created this model. */
       readonly created_by: UserBasic | null;
       readonly created_at: string;
@@ -720,6 +730,16 @@ export namespace Schemas {
       model_url: string;
       /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
       metrics?: unknown;
+      /**
+       * Specific task run that produced this model.
+       * @nullable
+       */
+      readonly task_run: string | null;
+      /**
+       * Current prediction status: not_started, queued, in_progress, completed, failed, cancelled, or null if no prediction run.
+       * @nullable
+       */
+      readonly prediction_status: string | null;
       /** User who created this model. */
       readonly created_by: UserBasic | null;
       readonly created_at: string;
@@ -21341,6 +21361,16 @@ export namespace Schemas {
       artifact_scripts?: unknown;
       /** Agent lab notebook: what was tried, what was observed, what to try next. */
       notes?: string;
+      /**
+       * Specific task run that produced this model.
+       * @nullable
+       */
+      readonly task_run?: string | null;
+      /**
+       * Current prediction status: not_started, queued, in_progress, completed, failed, cancelled, or null if no prediction run.
+       * @nullable
+       */
+      readonly prediction_status?: string | null;
       /** User who created this model. */
       readonly created_by?: UserBasic | null;
       readonly created_at?: string;
@@ -25248,6 +25278,11 @@ export namespace Schemas {
     export interface PinnedSceneTabs {
       tabs?: PinnedSceneTab[];
       homepage?: PinnedSceneTab | null;
+    }
+
+    export interface PredictRequest {
+      /** Instructions for the prediction agent describing what to do with the model, e.g. 'score all users and write person properties', 'run a simulation for the next 30 days', 'predict which users will churn this week'. */
+      prompt: string;
     }
 
     /**

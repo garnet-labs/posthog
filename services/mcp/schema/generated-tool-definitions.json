@@ -1319,6 +1319,21 @@
             "readOnlyHint": false
         }
     },
+    "action-prediction-model-predict": {
+        "description": "Run a prediction task using a trained model. Creates a sandboxed background agent that has access to the model's artifact_scripts (predict script, utils, query) and executes the instructions in the prompt. Use for scoring users, running simulations, or any prediction task. The model must have a model_url and artifact_scripts with a predict key. Returns the model with the new task_run attached so you can track status.",
+        "category": "AI",
+        "feature": "action_prediction_models",
+        "summary": "Run prediction task with trained model",
+        "title": "Run prediction task with trained model",
+        "required_scopes": ["action_prediction_model:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
     "prompt-list": {
         "description": "List all LLM prompts stored for the current team. Optionally filter by name. Returns paginated prompt summaries.",
         "category": "Prompts",

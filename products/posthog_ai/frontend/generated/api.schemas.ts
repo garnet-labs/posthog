@@ -180,6 +180,16 @@ export interface ActionPredictionModelListApi {
     model_url: string
     /** Model evaluation metrics (e.g. accuracy, AUC, F1). */
     metrics?: unknown
+    /**
+     * Specific task run that produced this model.
+     * @nullable
+     */
+    readonly task_run: string | null
+    /**
+     * Current prediction status: not_started, queued, in_progress, completed, failed, cancelled, or null if no prediction run.
+     * @nullable
+     */
+    readonly prediction_status: string | null
     /** User who created this model. */
     readonly created_by: UserBasicApi | null
     readonly created_at: string
@@ -217,6 +227,16 @@ export interface ActionPredictionModelApi {
     artifact_scripts?: unknown
     /** Agent lab notebook: what was tried, what was observed, what to try next. */
     notes?: string
+    /**
+     * Specific task run that produced this model.
+     * @nullable
+     */
+    readonly task_run: string | null
+    /**
+     * Current prediction status: not_started, queued, in_progress, completed, failed, cancelled, or null if no prediction run.
+     * @nullable
+     */
+    readonly prediction_status: string | null
     /** User who created this model. */
     readonly created_by: UserBasicApi | null
     readonly created_at: string

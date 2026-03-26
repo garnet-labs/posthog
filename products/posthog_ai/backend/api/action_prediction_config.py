@@ -219,10 +219,15 @@ class ActionPredictionConfigViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSe
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        url = presigned["url"]
+        if settings.DEBUG:
+            # In local dev, presigned URLs use localhost which is unreachable from Docker sandboxes.
+            url = url.replace("://localhost:", "://host.docker.internal:")
+
         return Response(
             UploadURLResponseSerializer(
                 {
-                    "url": presigned["url"],
+                    "url": url,
                     "fields": presigned["fields"],
                     "storage_path": storage_path,
                 }

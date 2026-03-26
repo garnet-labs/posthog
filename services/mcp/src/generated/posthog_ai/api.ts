@@ -3,7 +3,7 @@
  * MCP service uses these Zod schemas for generated tool handlers.
  * To regenerate: hogli build:openapi
  *
- * PostHog API - MCP 10 enabled ops
+ * PostHog API - MCP 11 enabled ops
  * OpenAPI spec version: 1.0.0
  */
 import * as zod from 'zod'
@@ -195,4 +195,25 @@ export const ActionPredictionModelsPartialUpdateBody = /* @__PURE__ */ zod.objec
             'Self-contained scripts for this run. Keys: query (HogQL), utils (API helpers), train (training script), predict (scoring script).'
         ),
     notes: zod.string().optional().describe('Agent lab notebook: what was tried, what was observed, what to try next.'),
+})
+
+/**
+ * Creates a sandboxed agent task that uses the trained model to execute the instructions in the prompt. The agent has access to the model's artifact_scripts (predict script, utils, query) and can score users, run simulations, or perform other prediction tasks.
+ * @summary Run a prediction task using this trained model
+ */
+export const ActionPredictionModelsPredictCreateParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this action prediction model.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
+})
+
+export const ActionPredictionModelsPredictCreateBody = /* @__PURE__ */ zod.object({
+    prompt: zod
+        .string()
+        .describe(
+            "Instructions for the prediction agent describing what to do with the model, e.g. 'score all users and write person properties', 'run a simulation for the next 30 days', 'predict which users will churn this week'."
+        ),
 })

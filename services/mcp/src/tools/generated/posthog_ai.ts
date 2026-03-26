@@ -14,6 +14,8 @@ import {
     ActionPredictionModelsListQueryParams,
     ActionPredictionModelsPartialUpdateBody,
     ActionPredictionModelsPartialUpdateParams,
+    ActionPredictionModelsPredictCreateBody,
+    ActionPredictionModelsPredictCreateParams,
     ActionPredictionModelsRetrieveParams,
 } from '@/generated/posthog_ai/api'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
@@ -302,6 +304,31 @@ const actionPredictionModelPartialUpdate = (): ToolBase<
     },
 })
 
+const ActionPredictionModelPredictSchema = ActionPredictionModelsPredictCreateParams.omit({ project_id: true }).extend(
+    ActionPredictionModelsPredictCreateBody.shape
+)
+
+const actionPredictionModelPredict = (): ToolBase<
+    typeof ActionPredictionModelPredictSchema,
+    Schemas.ActionPredictionModel
+> => ({
+    name: 'action-prediction-model-predict',
+    schema: ActionPredictionModelPredictSchema,
+    handler: async (context: Context, params: z.infer<typeof ActionPredictionModelPredictSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const body: Record<string, unknown> = {}
+        if (params.prompt !== undefined) {
+            body['prompt'] = params.prompt
+        }
+        const result = await context.api.request<Schemas.ActionPredictionModel>({
+            method: 'POST',
+            path: `/api/environments/${projectId}/action_prediction_models/${params.id}/predict/`,
+            body,
+        })
+        return result
+    },
+})
+
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'action-prediction-config-list': actionPredictionConfigList,
     'action-prediction-config-retrieve': actionPredictionConfigRetrieve,
@@ -313,4 +340,5 @@ export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'action-prediction-model-retrieve': actionPredictionModelRetrieve,
     'action-prediction-model-create': actionPredictionModelCreate,
     'action-prediction-model-partial-update': actionPredictionModelPartialUpdate,
+    'action-prediction-model-predict': actionPredictionModelPredict,
 }

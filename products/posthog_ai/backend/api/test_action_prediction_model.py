@@ -1,11 +1,14 @@
+import uuid
+
 from posthog.test.base import APIBaseTest
+from unittest import mock
 
 from rest_framework import status
 
 from posthog.models import Team
 from posthog.models.action import Action
 
-from products.posthog_ai.backend.models import ActionPredictionConfig
+from products.posthog_ai.backend.models import ActionPredictionConfig, ActionPredictionModel
 
 
 class TestActionPredictionModelAPI(APIBaseTest):
@@ -101,3 +104,51 @@ class TestActionPredictionModelAPI(APIBaseTest):
         self.client.logout()
         response = self.client.get(self._url())
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_predict_creates_task(self):
+        create_resp = self._create_model(
+            artifact_scripts={
+                "query": "SELECT person_id FROM events",
+                "utils": "import os",
+                "train": "import sklearn",
+                "predict": "import pickle",
+            }
+        )
+        pk = create_resp.json()["id"]
+
+        with mock.patch("products.tasks.backend.models.Task.create_and_run") as mock_create:
+            mock_task = mock.MagicMock()
+            mock_task.id = uuid.uuid4()
+            mock_task.latest_run = None
+            mock_create.return_value = mock_task
+
+            response = self.client.post(
+                f"{self._url(pk)}predict/",
+                {"prompt": "Score all users and write person properties"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args[1]
+        self.assertIn("/predicting-user-actions", call_kwargs["description"])
+        self.assertEqual(call_kwargs["mode"], "background")
+
+    def test_predict_returns_400_without_predict_script(self):
+        create_resp = self._create_model(artifact_scripts={"query": "SELECT 1", "train": "import sklearn"})
+        pk = create_resp.json()["id"]
+
+        response = self.client.post(f"{self._url(pk)}predict/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_predict_returns_400_without_model_url(self):
+        model = ActionPredictionModel.objects.create(
+            team=self.team,
+            config=self.config,
+            model_url="",
+            artifact_scripts={"predict": "import pickle"},
+            created_by=self.user,
+        )
+
+        response = self.client.post(f"{self._url(model.id)}predict/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
