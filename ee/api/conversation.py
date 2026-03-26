@@ -253,6 +253,20 @@ class SpeculativeAckResponseSerializer(serializers.Serializer):
 @extend_schema(tags=["max"])
 class ConversationViewSet(TeamAndOrgViewSetMixin, ListModelMixin, RetrieveModelMixin, GenericViewSet):
     scope_object = "conversation"
+    scope_object_write_actions = [
+        "create",
+        "update",
+        "partial_update",
+        "patch",
+        "destroy",
+        "stt_token",
+        "transcribe",
+        "tts",
+        "tool_call_narration",
+        "wait_fill_tts",
+        "append_message",
+    ]
+    scope_object_read_actions = ["list", "retrieve", "queue"]
     serializer_class = ConversationSerializer
     queryset = Conversation.objects.all()
     lookup_url_kwarg = "conversation"
