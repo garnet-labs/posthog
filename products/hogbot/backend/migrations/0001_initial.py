@@ -1,6 +1,8 @@
 import django.db.models.deletion
 from django.db import migrations, models
 
+import posthog.models.utils
+
 
 class Migration(migrations.Migration):
     initial = True
@@ -14,21 +16,22 @@ class Migration(migrations.Migration):
             name="HogbotRuntime",
             fields=[
                 (
+                    "id",
+                    models.UUIDField(
+                        default=posthog.models.utils.uuid7,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                (
                     "team",
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.CASCADE,
-                        primary_key=True,
-                        serialize=False,
                         to="posthog.team",
                     ),
                 ),
                 ("latest_snapshot_external_id", models.CharField(blank=True, max_length=255, null=True)),
-                ("active_workflow_id", models.CharField(blank=True, max_length=255, null=True)),
-                ("active_run_id", models.CharField(blank=True, max_length=255, null=True)),
-                ("sandbox_id", models.CharField(blank=True, max_length=255, null=True)),
-                ("server_url", models.CharField(blank=True, max_length=1000, null=True)),
-                ("status", models.CharField(default="idle", max_length=32)),
-                ("last_error", models.TextField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
             ],
