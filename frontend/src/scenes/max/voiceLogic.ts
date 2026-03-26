@@ -21,8 +21,12 @@ interface TtsQueueItem {
 const ELEVENLABS_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 const STT_SAMPLE_RATE = 16000
 const STT_BUFFER_SIZE = 4096
-// How long to wait after the last transcript (partial or committed) before auto-sending
-const TURN_COMPLETE_DEBOUNCE_MS = 500
+// How long to wait after the last transcript (partial or committed) before we *consider* auto-send.
+// Natural mid-sentence pauses often exceed 500ms; too low cuts users off.
+const TURN_COMPLETE_DEBOUNCE_MS = 1200
+// After debounce, require this much local (mic) silence so we don't stop while you're still talking
+// but STT hasn't emitted a partial yet.
+const MIN_SILENCE_BEFORE_AUTO_STOP_MS = 400
 
 /** ElevenLabs `pcm_44100`: mono int16 little-endian */
 const TTS_PCM_SAMPLE_RATE = 44100
@@ -33,6 +37,8 @@ const TTS_FIRST_PLAY_MIN_BYTES = 2048
 const TTS_STREAM_CHUNK_BYTES = 4096
 /** After AudioContext.resume(), scheduling at currentTime can clip the first ~20–50ms; small lookahead fixes it */
 const TTS_FIRST_SOURCE_SCHEDULE_LOOKAHEAD_SEC = 0.03
+/** <1 slows playback (wall-clock segment length = buffer.duration / rate) */
+const TTS_PLAYBACK_RATE = 0.98
 
 function pcmS16leToAudioBuffer(audioCtx: AudioContext, pcm: Uint8Array): AudioBuffer {
     const frameCount = Math.floor(pcm.length / TTS_PCM_BYTES_PER_FRAME)
@@ -317,6 +323,7 @@ async function playTtsClip(
 
                 const source = audioCtx.createBufferSource()
                 source.buffer = audioBuffer
+                source.playbackRate.value = TTS_PLAYBACK_RATE
                 source.connect(gain)
 
                 let nextT = cache.playbackScheduleTime as number | undefined
@@ -327,7 +334,8 @@ async function playTtsClip(
                     nextT += TTS_FIRST_SOURCE_SCHEDULE_LOOKAHEAD_SEC
                     firstSourceInClip = false
                 }
-                cache.playbackScheduleTime = nextT + audioBuffer.duration
+                const wallSeconds = audioBuffer.duration / TTS_PLAYBACK_RATE
+                cache.playbackScheduleTime = nextT + wallSeconds
 
                 pendingSources++
                 ;(cache.ttsPlaybackSources as AudioBufferSourceNode[]).push(source)
@@ -637,7 +645,8 @@ export const voiceLogic = kea<voiceLogicType>([
                 audio_format: `pcm_${STT_SAMPLE_RATE}`,
                 // VAD tuning: higher threshold rejects background noise; silence length trades latency vs mid-utterance splits
                 vad_threshold: '0.7',
-                vad_silence_threshold_secs: '0.50',
+                // Longer = fewer premature segment commits on short pauses (pairs with client debounce above)
+                vad_silence_threshold_secs: '0.85',
                 min_speech_duration_ms: '200',
             })
             const ws = new WebSocket(`${ELEVENLABS_WSS}?${params.toString()}`)
@@ -790,20 +799,26 @@ export const voiceLogic = kea<voiceLogicType>([
                 mounted?.actions.setQuestion(fullText)
 
                 // Turn detection: restart timer on every transcript that carries text.
-                // When no new transcript arrives for TURN_COMPLETE_DEBOUNCE_MS, auto-send.
+                // When no new transcript arrives for TURN_COMPLETE_DEBOUNCE_MS, we may auto-send (after local silence check).
                 // Hold-to-talk on the orb sets cache.orbPointerDown — no auto-send until release.
                 if (values.voiceModeEnabled && fullText) {
                     clearTimeout(cache.turnTimer as ReturnType<typeof setTimeout> | undefined)
-                    cache.turnTimer = setTimeout(() => {
+                    const tryAutoStop = (): void => {
                         cache.turnTimer = null
-                        if (
-                            values.recording &&
-                            values.voiceModeEnabled &&
-                            !(cache.orbPointerDown as boolean | undefined)
-                        ) {
-                            actions.stopRecording()
+                        const v = voiceLogic.findMounted()
+                        if (!v?.values.recording || !v?.values.voiceModeEnabled || v.values.orbPointerDown) {
+                            return
                         }
-                    }, TURN_COMPLETE_DEBOUNCE_MS)
+                        const lastNonSilentAt = cache.lastNonSilentAt as number | undefined
+                        const quietFor =
+                            lastNonSilentAt != null ? Math.max(0, performance.now() - lastNonSilentAt) : Infinity
+                        if (quietFor < MIN_SILENCE_BEFORE_AUTO_STOP_MS) {
+                            cache.turnTimer = setTimeout(tryAutoStop, 120)
+                            return
+                        }
+                        v.actions.stopRecording()
+                    }
+                    cache.turnTimer = setTimeout(tryAutoStop, TURN_COMPLETE_DEBOUNCE_MS)
                 }
             }
 
