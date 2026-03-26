@@ -121,6 +121,8 @@ def create_hogbot_sandbox(input: CreateHogbotSandboxInput) -> CreateHogbotSandbo
         environment_variables["GITHUB_TOKEN"] = github_token
     if settings.SANDBOX_LLM_GATEWAY_URL:
         environment_variables["LLM_GATEWAY_URL"] = settings.SANDBOX_LLM_GATEWAY_URL
+    if getattr(settings, "ANTHROPIC_API_KEY", None):
+        environment_variables["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
     config = SandboxConfig(
         name=f"hogbot-team-{input.team_id}",
         template=SandboxTemplate.HOGBOT_BASE,
