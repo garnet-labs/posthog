@@ -233,8 +233,8 @@ def apply_overlays() -> None:
         if src.exists():
             shutil.copy2(src, dst)
 
-    # Disable standalone migration procs — the entrypoint runs sandbox_migrate
-    # before starting mprocs, so these are redundant.
+    # Disable standalone migration procs — in sandbox mode, the backend process
+    # runs migrations before starting granian, so these are redundant.
     mprocs = WORKSPACE / "bin/mprocs.yaml"
     text = mprocs.read_text()
     for proc in ("migrate-postgres", "migrate-clickhouse", "migrate-persons-db"):
@@ -465,7 +465,7 @@ def setup_intellij_background() -> None:
 
 
 def user_phase() -> None:
-    PROGRESS_FILE.touch()
+    PROGRESS_FILE.write_text("")
 
     os.environ.update(
         {
@@ -481,11 +481,11 @@ def user_phase() -> None:
     )
     Path("/cache/cargo-target").mkdir(parents=True, exist_ok=True)
 
-    # The worktree's .git file points to the host's .git/worktrees/ path,
-    # which doesn't exist inside the container. Point GIT_DIR at a dummy
-    # repo so all git commands find a valid repo without touching the host.
-    run(["git", "init", "-q", "/tmp/sandbox-git"])
-    os.environ["GIT_DIR"] = "/tmp/sandbox-git"
+    # The worktree's .git file points to a host path that doesn't exist in the
+    # container. Write commit.txt so posthog/git.py uses it instead of shelling
+    # out to git (which would fail). get_git_branch() will return None.
+    git_commit = os.environ.get("SANDBOX_GIT_COMMIT", "sandbox")
+    (WORKSPACE / "commit.txt").write_text(f"{git_commit}\n")
     os.chdir(WORKSPACE)
 
     apply_overlays()
@@ -493,16 +493,22 @@ def user_phase() -> None:
     install_geoip()
     create_kafka_topics()
 
-    def install_python_and_migrate() -> None:
+    warm_boot = os.environ.get("SANDBOX_WARM_BOOT") == "1"
+
+    if warm_boot:
+        info("Warm boot — skipping entrypoint migrations, backend will handle them.")
+
+    def install_python_and_maybe_migrate() -> None:
         install_python_deps()
-        run(["python", "manage.py", "sandbox_migrate", "--parallel", "--progress-file", str(PROGRESS_FILE)])
-        ensure_demo_data()
+        if not warm_boot:
+            run(["python", "manage.py", "sandbox_migrate", "--parallel", "--progress-file", str(PROGRESS_FILE)])
+            ensure_demo_data()
 
     # Run dependency installs in parallel. Migrations and demo data are chained
     # after Python deps (uv ~1.5s) so they overlap with the slower pnpm/cargo.
     with ThreadPoolExecutor() as pool:
         futures = {
-            pool.submit(install_python_and_migrate): "python deps + migrations",
+            pool.submit(install_python_and_maybe_migrate): "python deps + migrations",
             pool.submit(install_node_deps): "node deps",
             pool.submit(fetch_rust_crates): "rust crates",
         }

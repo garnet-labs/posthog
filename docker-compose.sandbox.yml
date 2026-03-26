@@ -127,6 +127,8 @@ services:
             # --- Sandbox identity ---
             SANDBOX_UID: '${SANDBOX_UID:-1000}'
             SANDBOX_GID: '${SANDBOX_GID:-1000}'
+            SANDBOX_WARM_BOOT: '${SANDBOX_WARM_BOOT:-0}'
+            SANDBOX_GIT_COMMIT: '${SANDBOX_GIT_COMMIT:-}'
             POSTHOG_SANDBOX: '1'
             SANDBOX_INTENTS: '${SANDBOX_INTENTS:-product_analytics}'
             DEBUG: '1'

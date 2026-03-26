@@ -26,7 +26,7 @@ class Command(BaseCommand):
         parser.add_argument("--progress-file", type=str, help="File to write progress updates to")
 
     def _progress(self, msg: str) -> None:
-        ts = time.strftime("%H:%M:%S")
+        ts = time.strftime("%H:%M:%S", time.gmtime())
         self.stdout.write(f"[{ts}] {msg}")
         if self._progress_file:
             with open(self._progress_file, "a") as f:

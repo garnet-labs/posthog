@@ -340,6 +340,11 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
     """Env vars threaded through every docker compose invocation."""
     config = _load_config()
     ide = config.get("jetbrains")
+    # Grab the git commit from the worktree so the container can display it.
+    git_commit = run(
+        ["git", "-C", worktree_path, "rev-parse", "HEAD"],
+        check=False, capture=True,
+    ).stdout.strip() if worktree_path != "." else ""
     return {
         "SANDBOX_PORT": str(port),
         "SANDBOX_VITE_PORT": str(port + 1000),
@@ -350,6 +355,8 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
         "SANDBOX_CODE": worktree_path,
         "SANDBOX_UID": str(os.getuid()),
         "SANDBOX_GID": str(os.getgid()),
+        "SANDBOX_WARM_BOOT": os.environ.get("SANDBOX_WARM_BOOT", "0"),
+        "SANDBOX_GIT_COMMIT": git_commit,
     }
 
 
@@ -763,6 +770,8 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
             if choice == "f":
                 use_cache = False
 
+    if use_cache:
+        os.environ["SANDBOX_WARM_BOOT"] = "1"
     _restore_and_start(project, port, worktree_path, use_cache)
 
     info("Waiting for PostHog to start...")
@@ -790,6 +799,7 @@ def cmd_start(branch: str) -> None:
     project = project_name(entry.slug)
     vite_port = entry.port + 1000
 
+    os.environ["SANDBOX_WARM_BOOT"] = "1"
     info(f"Starting sandbox '{project}' on port {entry.port} (Vite: {vite_port})...")
     compose(project, entry.port, entry.worktree, "up", "-d", capture=True)
 
