@@ -8,12 +8,16 @@ Spin up a full local E2E environment (backend, frontend, docker services, Playwr
 ./bin/e2e-test-runner
 ```
 
-This uses `bin/phrocs-e2e.yaml` under the hood. If you need to reset the E2E database, trigger the `reset-db` process in the phrocs UI.
+This uses `bin/phrocs-e2e.yaml` under the hood.
+
+**First-time setup:** trigger `rebuild-snapshot` in the phrocs UI to run all migrations and create a database snapshot (slow, but only needed once or when migrations change).
+
+**Resetting the DB:** trigger `reset-db` in the phrocs UI — this restores from the snapshot in seconds. If no snapshot exists yet, it will create one automatically.
 
 To run tests against an already-running PostHog instance:
 
 ```bash
-LOGIN_USERNAME='my@email.address' LOGIN_PASSWORD="the-password" BASE_URL='http://localhost:8010' pnpm --filter=@posthog/playwright exec playwright test --ui
+LOGIN_USERNAME='my@email.address' LOGIN_PASSWORD="the-password" pnpm --filter=@posthog/playwright exec playwright test --ui
 ```
 
 You might need to install Playwright first: `pnpm --filter=@posthog/playwright exec playwright install`

@@ -1,0 +1,104 @@
+#!/bin/bash
+set -e
+
+SNAPSHOT_DIR=".e2e-snapshot"
+PG_DUMP_FILE="$SNAPSHOT_DIR/posthog_e2e.dump"
+MIGRATION_HASH_FILE="$SNAPSHOT_DIR/migration_hash"
+
+export PGHOST="${PGHOST:-localhost}"
+export PGPORT="${PGPORT:-5432}"
+export PGUSER="${PGUSER:-posthog}"
+export PGPASSWORD="${PGPASSWORD:-posthog}"
+export DATABASE_URL="postgres://$PGUSER:$PGPASSWORD@$PGHOST:$PGPORT/posthog_e2e_test"
+export CLICKHOUSE_DATABASE="posthog_test"
+export CLOUD_DEPLOYMENT="E2E"
+export SECRET_KEY="e2e_test"
+export E2E_TESTING="1"
+
+compute_migration_hash() {
+    find posthog/migrations ee/migrations products/*/backend/migrations -name '*.py' -not -name '__pycache__' 2>/dev/null | sort | md5
+}
+
+reset_postgres() {
+    echo "=== Resetting Postgres ==="
+    psql -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'posthog_e2e_test' AND pid <> pg_backend_pid();" > /dev/null 2>&1 || true
+    dropdb --if-exists posthog_e2e_test
+    createdb posthog_e2e_test
+}
+
+reset_clickhouse() {
+    echo "=== Resetting ClickHouse ==="
+    echo "DROP DATABASE IF EXISTS posthog_test SYNC" | curl -s 'http://localhost:8123/' --data-binary @- > /dev/null
+    echo "CREATE DATABASE posthog_test" | curl -s 'http://localhost:8123/' --data-binary @- > /dev/null
+}
+
+case "${1:-}" in
+    create)
+        echo "=== Creating e2e database snapshot ==="
+        echo "    This runs all migrations and dumps the result."
+        echo "    You only need to do this once, or when migrations change."
+        echo ""
+        mkdir -p "$SNAPSHOT_DIR"
+
+        reset_postgres
+        reset_clickhouse
+
+        echo "=== Running Postgres migrations ==="
+        python manage.py migrate --verbosity 0
+
+        echo "=== Running ClickHouse migrations ==="
+        python manage.py migrate_clickhouse
+
+        echo "=== Running setup_dev ==="
+        python manage.py setup_dev
+
+        echo "=== Dumping Postgres snapshot ==="
+        pg_dump -Fc posthog_e2e_test > "$PG_DUMP_FILE"
+        compute_migration_hash > "$MIGRATION_HASH_FILE"
+
+        echo "=== Snapshot created at $PG_DUMP_FILE ==="
+        echo "    Future resets will use this snapshot (seconds instead of minutes)."
+        ;;
+
+    restore)
+        if [ ! -f "$PG_DUMP_FILE" ]; then
+            echo "No snapshot found. Creating one now (this will take a while the first time)..."
+            exec "$0" create
+        fi
+
+        # Check staleness
+        current_hash=$(compute_migration_hash)
+        saved_hash=$(cat "$MIGRATION_HASH_FILE" 2>/dev/null || echo "")
+        stale=false
+        if [ "$current_hash" != "$saved_hash" ]; then
+            echo "WARNING: Migrations have changed since snapshot was created."
+            echo "         Will restore snapshot then run incremental migrations."
+            echo "         Run '$0 create' to rebuild from scratch if needed."
+            stale=true
+        fi
+
+        echo "=== Restoring from snapshot ==="
+        reset_postgres
+
+        pg_restore -d posthog_e2e_test --no-owner --no-privileges "$PG_DUMP_FILE" 2>/dev/null || true
+
+        if [ "$stale" = true ]; then
+            echo "=== Running incremental Postgres migrations ==="
+            python manage.py migrate --verbosity 0
+        fi
+
+        reset_clickhouse
+        echo "=== Running ClickHouse migrations ==="
+        python manage.py migrate_clickhouse
+
+        echo "=== Restore complete ==="
+        ;;
+
+    *)
+        echo "Usage: $0 {create|restore}"
+        echo ""
+        echo "  create   Run all migrations + setup_dev, then snapshot the DB (slow, do once)"
+        echo "  restore  Restore from snapshot + run ClickHouse migrations (fast, do often)"
+        exit 1
+        ;;
+esac

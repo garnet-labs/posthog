@@ -723,3 +723,7 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
+    e2e:db:snapshot:
+        bin_script: e2e-db-snapshot
+        description: Create a snapshot of the current state of the databases for E2E testing
+        hidden: true

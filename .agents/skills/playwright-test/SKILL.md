@@ -1,10 +1,16 @@
 ---
 name: playwright-test
 description: Write a playwright test, make sure it runs, and is not flaky.
-allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Agent, mcp__playwright__*
 ---
 
 Read @playwright/README.md for best practices, gotchas, and how to run tests.
+
+## Prerequisites
+
+The e2e stack must be running (`./bin/e2e-test-runner`). If the database needs to be set up:
+
+1. Trigger `rebuild-snapshot` in phrocs (first time only, or when migrations change)
+2. Trigger `reset-db` in phrocs to restore from the snapshot (fast)
 
 ## Rules
 
@@ -25,7 +31,7 @@ After your exploration, present the plan to me for confirmation or any changes.
 ### Step 2: Implement the test plan
 
 - Write the tests, making sure to use common patterns used in neighbouring files.
-- Run the tests with `BASE_URL='http://localhost:8010' pnpm --filter=@posthog/playwright exec playwright test <file name> --retries 0 --workers 3`
+- Run the tests with `pnpm --filter=@posthog/playwright exec playwright test <file name>`
 - Debug any failures. Look at screen shots, if needed launch the playwright mcp skills to interact with the browser. Go back to step 1 after attempting a fix.
 
 ### Step 3: Ensure no flaky tests

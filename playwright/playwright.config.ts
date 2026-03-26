@@ -31,13 +31,9 @@ export default defineConfig({
     /* Fail the build on CI if you accidentally left test.only in the source code. */
     forbidOnly: !!process.env.CI,
     /* Retry on CI only */
-    retries: process.env.CI ? 3 : 2,
-    /*
-        GitHub Actions has 4 cores so run 3 workers 
-        and leave one core for all the rest
-        For local running, our machines are all M3 or M4 by now so we can afford to run more workers
-    */
-    workers: process.env.CI ? 3 : 6,
+    retries: process.env.CI ? 3 : 0,
+    /* GitHub Actions has 4 cores, local stack can't reliably handle more than 3 */
+    workers: 3,
     /* Reporter to use. See https://playwright.dev/docs/test-reporters */
     reporter: [
         ['html', { open: 'never' }],
@@ -49,7 +45,7 @@ export default defineConfig({
         /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
         actionTimeout: 0,
         /* Base URL to use in actions like `await page.goto('/')`. */
-        baseURL: process.env.CI ? 'http://localhost:8000' : process.env.BASE_URL || 'http://localhost:8080',
+        baseURL: process.env.CI ? 'http://localhost:8000' : process.env.BASE_URL || 'http://localhost:8010',
 
         /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
         trace: 'on-first-retry',
