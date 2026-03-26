@@ -1,0 +1,33 @@
+{
+    "metrics": {
+        "auc_roc": 0.8826,
+        "auc_pr": 0.6912,
+        "brier": 0.086,
+        "n_train": 6556,
+        "n_test": 2186,
+        "n_positive": 1457,
+        "n_negative": 7285,
+        "neg_ratio": 5.0,
+        "base_rate": 0.1667,
+        "signal_quality": "green"
+    },
+    "feature_importance": {
+        "events_30d": 0.1819,
+        "insight_analyzed": 0.0965,
+        "insight_viewed": 0.0954,
+        "unique_event_types": 0.0859,
+        "query_completed": 0.0777,
+        "dashboard_viewed": 0.0705,
+        "events_7d": 0.0561,
+        "user_logged_in": 0.0462,
+        "days_since_last_event": 0.0426,
+        "events_total": 0.039,
+        "team_member_count": 0.0369,
+        "query_executed": 0.0333,
+        "definition_hovered": 0.0273,
+        "taxonomic_search": 0.0266,
+        "completed_onboarding": 0.0252,
+        "project_count": 0.0247,
+        "organization_count": 0.0241
+    }
+}
