@@ -97,6 +97,6 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/toggle-group
     - [x] storybook
   - [x] primitives/toggle
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/tooltip
     - [x] storybook
