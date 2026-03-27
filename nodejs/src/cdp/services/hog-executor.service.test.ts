@@ -167,7 +167,6 @@ describe('Hog Executor', () => {
                     "first_name": "Pumpkin",
                   },
                   "method": "POST",
-                  "timeoutMs": undefined,
                   "type": "fetch",
                   "url": "https://example.com/posthog-webhook",
                 }
@@ -207,7 +206,6 @@ describe('Hog Executor', () => {
                     "first_name": "Pumpkin",
                   },
                   "method": "POST",
-                  "timeoutMs": undefined,
                   "type": "fetch",
                   "url": "https://example.com/posthog-webhook",
                 }
