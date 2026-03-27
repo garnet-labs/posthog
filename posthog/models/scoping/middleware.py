@@ -16,7 +16,9 @@ class TeamScopingMiddleware:
     This enables automatic team scoping for all database queries within the request.
     Models using TeamScopedManager will automatically filter by this team_id.
 
-    Also caches the parent_team_id to avoid extra database queries for PERSONS_DB_MODELS.
+    Zero extra queries: only reads current_team_id (the integer FK column
+    already loaded on the User object). parent_team_id is resolved lazily
+    by the manager only when a PERSONS_DB_MODELS query actually happens.
 
     Add to MIDDLEWARE in settings.py after AuthenticationMiddleware:
         'posthog.models.scoping.middleware.TeamScopingMiddleware',
@@ -28,13 +30,14 @@ class TeamScopingMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         token = None
 
-        # Set team context if user is authenticated and has a current team
+        # Set team context if user is authenticated and has a current team.
+        # Only reads current_team_id (the integer FK column) — no extra query.
+        # parent_team_id is resolved lazily by the manager only when a
+        # PERSONS_DB_MODELS query actually happens (rare).
         if hasattr(request, "user") and request.user.is_authenticated:
             team_id = getattr(request.user, "current_team_id", None)
             if team_id is not None:
-                # Cache parent_team_id to avoid extra queries for PERSONS_DB_MODELS
-                parent_team_id = self._get_parent_team_id(request.user)
-                token = set_current_team_id(team_id, parent_team_id)
+                token = set_current_team_id(team_id)
 
         try:
             response = self.get_response(request)
@@ -44,10 +47,3 @@ class TeamScopingMiddleware:
                 reset_current_team_id(token)
 
         return response
-
-    def _get_parent_team_id(self, user) -> int | None:
-        """Get parent_team_id from the user's current team if available."""
-        current_team = getattr(user, "current_team", None)
-        if current_team is not None:
-            return getattr(current_team, "parent_team_id", None)
-        return None
