@@ -51,11 +51,7 @@ class PostgresSource(SQLSource[PostgresSourceConfig]):
 
     def __init__(self, source_name: str = "Postgres"):
         super().__init__()
-        self.source_name = source_name
-
-    @property
-    def source_display_name(self) -> str:
-        return self.source_name
+        self.source_display_name = source_name
 
     @property
     def source_type(self) -> ExternalDataSourceType:
