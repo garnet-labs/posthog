@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from posthog.test.base import APIBaseTest
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 from boto3 import resource
 from botocore.client import Config
@@ -20,6 +20,7 @@ from posthog.settings import (
 from posthog.storage import object_storage
 from posthog.storage.object_storage import ObjectStorageError
 from posthog.tasks.exports import image_exporter
+from posthog.tasks.exports.image_exporter import _build_variables_override_param
 
 from products.dashboards.backend.models.dashboard import Dashboard
 from products.dashboards.backend.models.dashboard_tile import DashboardTile
@@ -314,3 +315,193 @@ class TestImageExporter(APIBaseTest):
             assert call_kwargs["tile_filters_override"] == tile_filters, (
                 "tile_filters_override should match tile filters"
             )
+
+    @patch("posthog.tasks.exports.image_exporter.calculate_for_query_based_insight")
+    def test_dashboard_variables_saved_to_export_context_and_passed_in_url(
+        self,
+        mock_calculate: Any,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        """Dashboard variable overrides are saved to export_context and included as a URL param."""
+        var = InsightVariable.objects.create(
+            team=self.team, name="campaign", code_name="campaign", type="String", default_value="all"
+        )
+        dashboard = Dashboard.objects.create(
+            team=self.team,
+            name="Dashboard",
+            variables={
+                str(var.id): {
+                    "variableId": str(var.id),
+                    "code_name": "campaign",
+                    "value": "summer_sale",
+                }
+            },
+        )
+        insight = Insight.objects.create(
+            team=self.team,
+            query={"kind": "DataVisualizationNode", "source": {"kind": "HogQLQuery", "query": "SELECT 1"}},
+        )
+        DashboardTile.objects.create(dashboard=dashboard, insight=insight)
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            dashboard=dashboard,
+            insight=insight,
+        )
+
+        mock_calculate.return_value = make_insight_result("key1")
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            image_exporter.export_image(exported_asset)
+
+        # export_context should now contain variables_override
+        exported_asset.refresh_from_db()
+        assert exported_asset.export_context is not None
+        assert "variables_override" in exported_asset.export_context
+
+        # URL should contain the variables param
+        url = mock_screenshot_asset.call_args[0][1]
+        assert "variables=" in url, f"URL should contain variables param: {url}"
+
+    @patch("posthog.tasks.exports.image_exporter.calculate_for_query_based_insight")
+    def test_frontend_provided_variables_override_passed_in_url(
+        self,
+        mock_calculate: Any,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        """Variables provided by the frontend in export_context are passed through to the URL."""
+        insight = Insight.objects.create(
+            team=self.team,
+            query={"kind": "DataVisualizationNode", "source": {"kind": "HogQLQuery", "query": "SELECT 1"}},
+        )
+        variables_override = {
+            "var1": {"variableId": "var1", "code_name": "region", "value": "EU"},
+        }
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            insight=insight,
+            export_context={"variables_override": variables_override},
+        )
+
+        mock_calculate.return_value = make_insight_result("key2")
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            image_exporter.export_image(exported_asset)
+
+        url = mock_screenshot_asset.call_args[0][1]
+        assert "variables=" in url, f"URL should contain variables param: {url}"
+        assert "region" in url, f"URL should contain variable value: {url}"
+
+    @patch("posthog.tasks.exports.image_exporter.calculate_for_query_based_insight")
+    def test_existing_export_context_variables_not_overwritten_by_dashboard(
+        self,
+        mock_calculate: Any,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        """Frontend-provided variables_override takes precedence over dashboard variables."""
+        var = InsightVariable.objects.create(
+            team=self.team, name="region", code_name="region", type="String", default_value="US"
+        )
+        dashboard = Dashboard.objects.create(
+            team=self.team,
+            name="Dashboard",
+            variables={
+                str(var.id): {
+                    "variableId": str(var.id),
+                    "code_name": "region",
+                    "value": "dashboard_value",
+                }
+            },
+        )
+        insight = Insight.objects.create(
+            team=self.team,
+            query={"kind": "DataVisualizationNode", "source": {"kind": "HogQLQuery", "query": "SELECT 1"}},
+        )
+        DashboardTile.objects.create(dashboard=dashboard, insight=insight)
+
+        frontend_variables = {
+            str(var.id): {"variableId": str(var.id), "code_name": "region", "value": "frontend_value"},
+        }
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            dashboard=dashboard,
+            insight=insight,
+            export_context={"variables_override": frontend_variables},
+        )
+
+        mock_calculate.return_value = make_insight_result("key3")
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            image_exporter.export_image(exported_asset)
+
+        # The frontend-provided variables should NOT be overwritten
+        exported_asset.refresh_from_db()
+        assert exported_asset.export_context["variables_override"] == frontend_variables
+
+        # URL should contain the frontend value, not the dashboard value
+        url = mock_screenshot_asset.call_args[0][1]
+        assert "frontend_value" in url
+
+    @patch("posthog.tasks.exports.image_exporter.calculate_for_query_based_insight")
+    def test_no_variables_param_when_no_overrides(
+        self,
+        mock_calculate: Any,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        """URL should not contain variables param when there are no variable overrides."""
+        insight = Insight.objects.create(
+            team=self.team,
+            query={"kind": "DataVisualizationNode", "source": {"kind": "HogQLQuery", "query": "SELECT 1"}},
+        )
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            insight=insight,
+        )
+
+        mock_calculate.return_value = make_insight_result("key4")
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            image_exporter.export_image(exported_asset)
+
+        url = mock_screenshot_asset.call_args[0][1]
+        assert "variables=" not in url, f"URL should not contain variables param: {url}"
+
+
+class TestBuildVariablesOverrideParam(APIBaseTest):
+    def test_returns_empty_when_no_export_context(self) -> None:
+        asset = MagicMock()
+        asset.export_context = None
+        assert _build_variables_override_param(asset) == ""
+
+    def test_returns_empty_when_no_variables_override_key(self) -> None:
+        asset = MagicMock()
+        asset.export_context = {"filename": "export.png"}
+        assert _build_variables_override_param(asset) == ""
+
+    def test_returns_empty_when_variables_override_is_empty(self) -> None:
+        asset = MagicMock()
+        asset.export_context = {"variables_override": {}}
+        assert _build_variables_override_param(asset) == ""
+
+    def test_returns_url_encoded_param(self) -> None:
+        asset = MagicMock()
+        asset.export_context = {
+            "variables_override": {
+                "var1": {"variableId": "var1", "code_name": "region", "value": "EU"},
+            }
+        }
+        result = _build_variables_override_param(asset)
+        assert result.startswith("&variables=")
+        assert "region" in result
+        assert "EU" in result
