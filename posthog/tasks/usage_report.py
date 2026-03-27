@@ -28,7 +28,7 @@ from posthog import version_requirement
 from posthog.batch_exports.models import BatchExportDestination, BatchExportRun
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.client.connection import Workload
-from posthog.clickhouse.query_tagging import Product, tags_context
+from posthog.clickhouse.query_tagging import Feature, Product, tags_context
 from posthog.cloud_utils import get_cached_instance_license
 from posthog.constants import FlagRequestType
 from posthog.exceptions_capture import capture_exception
@@ -832,7 +832,11 @@ def get_teams_with_api_queries_metrics(
         AND JSONExtractBool(log_comment, 'chargeable')
         GROUP BY team_id
     """
-    with tags_context(usage_report="get_teams_with_api_queries_metrics"):
+    with tags_context(
+        product=Product.ENDPOINTS,
+        feature=Feature.USAGE_REPORT,
+        usage_report="get_teams_with_api_queries_metrics",
+    ):
         results = sync_execute(
             query,
             {
