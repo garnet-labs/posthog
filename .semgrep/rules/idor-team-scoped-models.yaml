@@ -149,6 +149,7 @@ rules:
                               |PluginConfig
                               |ProductTour
                               |ProjectSecretAPIKey
+                              |PushSubscription
                               |QueryTabState
                               |QuickFilter
                               |QuickFilterContext
@@ -331,6 +332,7 @@ rules:
                         |PluginConfig
                         |ProductTour
                         |ProjectSecretAPIKey
+                        |PushSubscription
                         |QueryTabState
                         |QuickFilter
                         |QuickFilterContext
