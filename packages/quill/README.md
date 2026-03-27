@@ -87,7 +87,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/skeleton
     - [x] storybook
   - [x] primitives/slider
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/switch
     - [x] storybook
   - [x] primitives/tabs
