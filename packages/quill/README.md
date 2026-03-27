@@ -95,8 +95,8 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/textarea
     - [x] storybook
   - [x] primitives/toggle-group
-    - [ ] storybook
-  - [x] primitives/toggle-toggle
+    - [x] storybook
+  - [x] primitives/toggle
     - [ ] storybook
   - [x] primitives/tooltip
     - [x] storybook

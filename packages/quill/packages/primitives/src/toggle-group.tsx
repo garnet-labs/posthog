@@ -77,7 +77,7 @@ function ToggleGroupItem({
                 className
             )}
             {...props}
-            render={(props) => <Button variant="secondary" {...props} />}
+            render={(props) => <Button variant="outline" size={size} {...props} />}
         >
             {children}
         </TogglePrimitive>
