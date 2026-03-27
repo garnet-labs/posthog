@@ -125,6 +125,9 @@ services:
             - node-modules:/cache/node-modules
             # JetBrains IDE backend for Gateway (populated by bin/sandbox)
             - jetbrains:/opt/idea
+        # Shared service defaults (Postgres, ClickHouse, Redis, etc.) come from
+        # the same env file used by docker-compose.base.yml.
+        env_file: docker/dev-services.env
         environment:
             # --- Sandbox identity ---
             SANDBOX_UID: '${SANDBOX_UID:-1000}'
@@ -133,73 +136,22 @@ services:
             SANDBOX_INTENTS: '${SANDBOX_INTENTS:-product_analytics}'
             DEBUG: '1'
             HOST_BIND: '0.0.0.0'
-            SKIP_SERVICE_VERSION_REQUIREMENTS: '1'
-            IS_BEHIND_PROXY: 'true'
-            DISABLE_SECURE_SSL_REDIRECT: 'true'
+            AUTO_LOGIN: '1'
             # Unique session cookie per sandbox so multiple sandboxes on localhost
             # don't overwrite each other's login sessions.
             # (CSRF cookie is NOT varied — frontend hardcodes 'posthog_csrftoken'.)
             SESSION_COOKIE_NAME: 'sessionid_${SANDBOX_PORT:-48001}'
-            AUTO_LOGIN: '1'
-
-            # --- Core datastores (point at compose services, not localhost) ---
-            DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog'
-            PGHOST: db
-            PGUSER: posthog
-            PGPASSWORD: posthog
-            CLICKHOUSE_HOST: 'clickhouse'
-            CLICKHOUSE_DATABASE: 'posthog'
-            CLICKHOUSE_SECURE: 'false'
-            CLICKHOUSE_VERIFY: 'false'
-            CLICKHOUSE_API_USER: 'api'
-            CLICKHOUSE_API_PASSWORD: 'apipass'
-            CLICKHOUSE_APP_USER: 'app'
-            CLICKHOUSE_APP_PASSWORD: 'apppass'
-            KAFKA_HOSTS: 'kafka:9092'
-            REDIS_URL: 'redis://redis7:6379/'
-            TEMPORAL_HOST: 'temporal'
-
-            # --- Object storage (MinIO) ---
-            OBJECT_STORAGE_ENDPOINT: 'http://objectstorage:19000'
-            OBJECT_STORAGE_ACCESS_KEY_ID: 'object_storage_root_user'
-            OBJECT_STORAGE_SECRET_ACCESS_KEY: 'object_storage_root_password'
-            SESSION_RECORDING_V2_S3_ENDPOINT: 'http://objectstorage:19000'
+            JS_URL: 'http://localhost:${SANDBOX_VITE_PORT:-49001}'
 
             # --- Persons DB ---
-            # Multiple env var names because Django, nodejs, and Rust services
-            # each read a different config key for the same connection.
-            PERSONS_DB_WRITER_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
-            PERSONS_DB_READER_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
+            # Rust and Node.js default these to localhost. Once those defaults
+            # are changed to use the `db` service name (matching Django), these
+            # overrides can be removed.
             PERSONS_WRITE_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
             PERSONS_READ_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
             PERSONS_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
             PERSONS_READONLY_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
             BEHAVIORAL_COHORTS_DATABASE_URL: 'postgres://posthog:posthog@db:5432/behavioral_cohorts'
-
-            # --- Rust services ---
-            COOKIELESS_REDIS_HOST: 'redis7'
-            COOKIELESS_REDIS_PORT: '6379'
-            AI_S3_ENDPOINT: 'http://objectstorage:19000'
-
-            # --- NodeJS plugin server ---
-            CDP_REDIS_HOST: 'redis7'
-            CDP_API_URL: 'http://localhost:6738'
-            SESSION_RECORDING_API_REDIS_HOST: 'redis7'
-            SESSION_RECORDING_API_REDIS_PORT: '6379'
-            ENCRYPTION_SALT_KEYS: '00beef0000beef0000beef0000beef00'
-
-            # --- Frontend ---
-            JS_URL: 'http://localhost:${SANDBOX_VITE_PORT:-49001}'
-
-            # --- DuckLake ---
-            DUCKLAKE_RDS_HOST: 'db'
-            DUCKLAKE_RDS_PORT: '5432'
-            DUCKLAKE_RDS_USERNAME: 'posthog'
-            DUCKLAKE_RDS_PASSWORD: 'posthog'
-            DUCKLAKE_S3_ACCESS_KEY: 'object_storage_root_user'
-            DUCKLAKE_S3_SECRET_KEY: 'object_storage_root_password'
-            DUCKLAKE_BUCKET: 'ducklake-dev'
-            DUCKLAKE_BUCKET_REGION: 'us-east-1'
         depends_on:
             db:
                 condition: service_healthy
@@ -298,6 +250,14 @@ services:
             file: docker-compose.base.yml
             service: objectstorage
 
+    seaweedfs:
+        extends:
+            file: docker-compose.base.yml
+            service: seaweedfs
+        command: server -s3 -s3.port=8333 -filer -dir=/data
+        volumes:
+            - seaweedfs-data:/data
+
     elasticsearch:
         extends:
             file: docker-compose.base.yml
@@ -338,6 +298,7 @@ volumes:
     postgres-data:
     redpanda-data:
     clickhouse-data:
+    seaweedfs-data:
     python-env:
     node-modules:
     uv-cache:
