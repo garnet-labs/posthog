@@ -89,9 +89,9 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/slider
     - [ ] storybook
   - [x] primitives/switch
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/tabs
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/textarea
     - [x] storybook
   - [x] primitives/toggle-group
