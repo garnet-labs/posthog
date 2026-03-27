@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { ChartDimensions, ChartMargins } from './types'
 
@@ -11,7 +11,6 @@ interface UseChartCanvasResult {
     wrapperRef: React.RefObject<HTMLDivElement | null>
     dimensions: ChartDimensions | null
     ctx: CanvasRenderingContext2D | null
-    requestRedraw: () => void
 }
 
 export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasResult {
@@ -20,11 +19,9 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
     const wrapperRef = useRef<HTMLDivElement | null>(null)
     const [dimensions, setDimensions] = useState<ChartDimensions | null>(null)
     const [ctx, setCtx] = useState<CanvasRenderingContext2D | null>(null)
-    const rafRef = useRef<number>(0)
-    const drawCallbackRef = useRef<(() => void) | null>(null)
 
     // Update canvas size and DPR scaling
-    const updateSize = useCallback(() => {
+    const updateSize = (): void => {
         const canvas = canvasRef.current
         const wrapper = wrapperRef.current
         if (!canvas || !wrapper) {
@@ -54,7 +51,7 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
             plotHeight: Math.max(0, rect.height - margins.top - margins.bottom),
         }
         setDimensions(dims)
-    }, [margins.left, margins.right, margins.top, margins.bottom])
+    }
 
     // ResizeObserver for responsive sizing
     useEffect(() => {
@@ -72,21 +69,8 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
 
         return () => {
             observer.disconnect()
-            if (rafRef.current) {
-                cancelAnimationFrame(rafRef.current)
-            }
         }
-    }, [updateSize])
+    }, [margins.left, margins.right, margins.top, margins.bottom])
 
-    // rAF-batched redraw request
-    const requestRedraw = useCallback(() => {
-        if (rafRef.current) {
-            cancelAnimationFrame(rafRef.current)
-        }
-        rafRef.current = requestAnimationFrame(() => {
-            drawCallbackRef.current?.()
-        })
-    }, [])
-
-    return { canvasRef, wrapperRef, dimensions, ctx, requestRedraw }
+    return { canvasRef, wrapperRef, dimensions, ctx }
 }

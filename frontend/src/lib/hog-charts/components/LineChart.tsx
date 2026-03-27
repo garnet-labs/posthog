@@ -5,9 +5,10 @@ import { getSeriesColor } from 'lib/colors'
 
 import { drawArea, drawGrid, drawHighlightPoint, drawLine, drawPoints } from '../core/canvas-renderer'
 import type { DrawContext } from '../core/canvas-renderer'
+import { ChartContext } from '../core/chart-context'
 import { buildPointClickData, buildTooltipContext, findNearestIndex, isInPlotArea } from '../core/interaction'
 import { autoFormatYTick, computePercentStackData, createScales, type ScaleSet } from '../core/scales'
-import type { ChartMargins, GoalLine, PointClickData, Series, TooltipContext } from '../core/types'
+import type { ChartMargins, LineChartConfig, PointClickData, Series, TooltipContext } from '../core/types'
 import { useChartCanvas } from '../core/use-chart-canvas'
 import { AxisLabels } from '../overlays/AxisLabels'
 import { Crosshair } from '../overlays/Crosshair'
@@ -22,14 +23,8 @@ export interface LineChartProps {
     series: Series[]
     labels: string[]
 
-    // Scale
-    yScaleType?: 'linear' | 'log'
-    multipleYAxes?: boolean
-    percentStackView?: boolean
-
-    // Axis formatting
-    xTickFormatter?: (value: string, index: number) => string | null
-    yTickFormatter?: (value: number) => string
+    // Config (grouped non-data, non-callback props)
+    config?: LineChartConfig
 
     // Tooltip (render prop)
     renderTooltip?: (context: TooltipContext) => React.ReactNode
@@ -40,23 +35,11 @@ export interface LineChartProps {
     onPointClick?: (data: PointClickData) => void
     onRangeSelect?: (startIndex: number, endIndex: number) => void
 
-    // Overlays
-    showGrid?: boolean
-    showCrosshair?: boolean
-    showDataLabels?: boolean
-    dataLabelFormatter?: (value: number, seriesIndex: number) => string
-    showTrendLines?: boolean
-    goalLines?: GoalLine[]
-
-    // Incomplete data
-    incompleteFromIndex?: number
-
-    // Visibility
-    hideXAxis?: boolean
-    hideYAxis?: boolean
-
     // Styling
     className?: string
+
+    // Custom overlays
+    children?: React.ReactNode
 }
 
 const DEFAULT_MARGINS: ChartMargins = { top: 16, right: 16, bottom: 32, left: 48 }
@@ -64,27 +47,32 @@ const DEFAULT_MARGINS: ChartMargins = { top: 16, right: 16, bottom: 32, left: 48
 export function LineChart({
     series,
     labels,
-    yScaleType = 'linear',
-    multipleYAxes = false,
-    percentStackView = false,
-    xTickFormatter,
-    yTickFormatter,
+    config,
     renderTooltip,
     onTooltipShow,
     onTooltipHide,
     onPointClick,
     onRangeSelect,
-    showGrid = false,
-    showCrosshair = false,
-    showDataLabels = false,
-    dataLabelFormatter,
-    showTrendLines = false,
-    goalLines,
-    incompleteFromIndex,
-    hideXAxis = false,
-    hideYAxis = false,
     className,
+    children,
 }: LineChartProps): React.ReactElement {
+    const {
+        yScaleType = 'linear',
+        multipleYAxes = false,
+        percentStackView = false,
+        xTickFormatter,
+        yTickFormatter,
+        hideXAxis = false,
+        hideYAxis = false,
+        showGrid = false,
+        showCrosshair = false,
+        showDataLabels = false,
+        dataLabelFormatter,
+        showTrendLines = false,
+        goalLines,
+        incompleteFromIndex,
+    } = config ?? {}
+
     const theme = useMemo(() => buildTheme(), [])
 
     // Compute margins based on axis visibility
@@ -375,127 +363,145 @@ export function LineChart({
     // Cursor style
     const cursorStyle = hoverIndex >= 0 && onPointClick ? 'pointer' : 'default'
 
+    const contextValue = useMemo(() => {
+        if (!scales || !dimensions) {
+            return null
+        }
+        return {
+            xScale: scales.x,
+            yScale: scales.y,
+            dimensions,
+            labels,
+            series: coloredSeries,
+        }
+    }, [scales, dimensions, labels, coloredSeries])
+
     return (
-        <div
-            ref={wrapperRef as React.RefObject<HTMLDivElement>}
-            className={className}
-            style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, cursor: cursorStyle }}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            onMouseDown={handleMouseDown}
-            onMouseUp={handleMouseUp}
-            onClick={handleClick}
-        >
-            <canvas
-                ref={canvasRef as React.RefObject<HTMLCanvasElement>}
-                style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    cursor: cursorStyle,
-                }}
-            />
-
-            {/* Overlay layer */}
+        <ChartContext.Provider value={contextValue}>
             <div
-                style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    pointerEvents: 'none',
-                }}
+                ref={wrapperRef as React.RefObject<HTMLDivElement>}
+                className={className}
+                style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, cursor: cursorStyle }}
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleMouseLeave}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onClick={handleClick}
             >
-                {dimensions && scales && (
-                    <>
-                        {/* Axis labels */}
-                        <AxisLabels
-                            dimensions={dimensions}
-                            xScale={scales.x}
-                            yScale={scales.y}
-                            labels={labels}
-                            xTickFormatter={xTickFormatter}
-                            yTickFormatter={resolvedYFormatter}
-                            hideXAxis={hideXAxis}
-                            hideYAxis={hideYAxis}
-                            axisColor={theme.axisColor}
-                        />
+                <canvas
+                    ref={canvasRef as React.RefObject<HTMLCanvasElement>}
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        cursor: cursorStyle,
+                    }}
+                />
 
-                        {/* Right-side Y axes for multi-axis */}
-                        {multipleYAxes &&
-                            Array.from(scales.yAxes.entries()).map(([axisId, yScale], i) => {
-                                if (axisId === 'y') {
-                                    return null
-                                }
-                                return (
-                                    <AxisLabels
-                                        key={axisId}
-                                        dimensions={dimensions}
-                                        xScale={scales.x}
-                                        yScale={yScale}
-                                        labels={labels}
-                                        yTickFormatter={resolvedYFormatter}
-                                        hideXAxis
-                                        axisColor={theme.axisColor}
-                                        yAxisSide={i % 2 === 0 ? 'right' : 'left'}
-                                    />
-                                )
-                            })}
-
-                        {/* Crosshair */}
-                        {showCrosshair &&
-                            hoverIndex >= 0 &&
-                            !isDragging.current &&
-                            (() => {
-                                const x = scales.x(labels[hoverIndex])
-                                return x != null ? (
-                                    <Crosshair x={x} dimensions={dimensions} color={theme.crosshairColor} />
-                                ) : null
-                            })()}
-
-                        {/* Goal lines */}
-                        {goalLines && goalLines.length > 0 && (
-                            <GoalLines goalLines={goalLines} yScale={(v) => scales.y(v)} dimensions={dimensions} />
-                        )}
-
-                        {/* Data labels */}
-                        {showDataLabels && (
-                            <DataLabels
-                                series={coloredSeries}
-                                labels={labels}
+                {/* Overlay layer */}
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        pointerEvents: 'none',
+                    }}
+                >
+                    {dimensions && scales && (
+                        <>
+                            {/* Axis labels */}
+                            <AxisLabels
+                                dimensions={dimensions}
                                 xScale={scales.x}
                                 yScale={scales.y}
-                                dimensions={dimensions}
-                                formatter={dataLabelFormatter}
-                                stackedData={stackedData}
-                            />
-                        )}
-
-                        {/* Trend lines */}
-                        {showTrendLines && (
-                            <TrendLine
-                                series={coloredSeries}
                                 labels={labels}
-                                xScale={scales.x}
-                                yScale={scales.y}
-                                dimensions={dimensions}
-                                incompleteFromIndex={incompleteFromIndex}
+                                xTickFormatter={xTickFormatter}
+                                yTickFormatter={resolvedYFormatter}
+                                hideXAxis={hideXAxis}
+                                hideYAxis={hideYAxis}
+                                axisColor={theme.axisColor}
                             />
-                        )}
 
-                        {/* Zoom brush */}
-                        {brushStart && brushCurrent != null && (
-                            <ZoomBrush startX={brushStart.x} currentX={brushCurrent} dimensions={dimensions} />
-                        )}
+                            {/* Right-side Y axes for multi-axis */}
+                            {multipleYAxes &&
+                                Array.from(scales.yAxes.entries()).map(([axisId, yScale], i) => {
+                                    if (axisId === 'y') {
+                                        return null
+                                    }
+                                    return (
+                                        <AxisLabels
+                                            key={axisId}
+                                            dimensions={dimensions}
+                                            xScale={scales.x}
+                                            yScale={yScale}
+                                            labels={labels}
+                                            yTickFormatter={resolvedYFormatter}
+                                            hideXAxis
+                                            axisColor={theme.axisColor}
+                                            yAxisSide={i % 2 === 0 ? 'right' : 'left'}
+                                        />
+                                    )
+                                })}
 
-                        {/* Tooltip */}
-                        {tooltipCtx && renderTooltip && !isDragging.current && (
-                            <Tooltip context={tooltipCtx} renderTooltip={renderTooltip} />
-                        )}
-                    </>
-                )}
+                            {/* Crosshair */}
+                            {showCrosshair &&
+                                hoverIndex >= 0 &&
+                                !isDragging.current &&
+                                (() => {
+                                    const x = scales.x(labels[hoverIndex])
+                                    return x != null ? (
+                                        <Crosshair x={x} dimensions={dimensions} color={theme.crosshairColor} />
+                                    ) : null
+                                })()}
+
+                            {/* Goal lines */}
+                            {goalLines && goalLines.length > 0 && (
+                                <GoalLines goalLines={goalLines} yScale={(v) => scales.y(v)} dimensions={dimensions} />
+                            )}
+
+                            {/* Data labels */}
+                            {showDataLabels && (
+                                <DataLabels
+                                    series={coloredSeries}
+                                    labels={labels}
+                                    xScale={scales.x}
+                                    yScale={scales.y}
+                                    dimensions={dimensions}
+                                    formatter={dataLabelFormatter}
+                                    stackedData={stackedData}
+                                />
+                            )}
+
+                            {/* Trend lines */}
+                            {showTrendLines && (
+                                <TrendLine
+                                    series={coloredSeries}
+                                    labels={labels}
+                                    xScale={scales.x}
+                                    yScale={scales.y}
+                                    dimensions={dimensions}
+                                    incompleteFromIndex={incompleteFromIndex}
+                                />
+                            )}
+
+                            {/* Zoom brush */}
+                            {brushStart && brushCurrent != null && (
+                                <ZoomBrush startX={brushStart.x} currentX={brushCurrent} dimensions={dimensions} />
+                            )}
+
+                            {/* Tooltip */}
+                            {tooltipCtx && renderTooltip && !isDragging.current && (
+                                <Tooltip context={tooltipCtx} renderTooltip={renderTooltip} />
+                            )}
+                        </>
+                    )}
+                </div>
+
+                {/* Custom overlay children */}
+                {children}
             </div>
-        </div>
+        </ChartContext.Provider>
     )
 }

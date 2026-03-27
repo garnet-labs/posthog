@@ -123,7 +123,6 @@ export function createScales(
     return { x, y, yAxes }
 }
 
-/** Compute percent-stacked data using d3.stack */
 export function computePercentStackData(series: Series[], labels: string[]): Map<string, number[]> {
     const visibleSeries = series.filter((s) => !s.hidden)
     if (visibleSeries.length === 0) {
@@ -156,7 +155,6 @@ export function computePercentStackData(series: Series[], labels: string[]): Map
     return result
 }
 
-/** Auto-precision for Y tick formatting */
 export function autoFormatYTick(value: number, domainMax: number): string {
     if (domainMax < 2) {
         return value.toFixed(2)

@@ -2,7 +2,6 @@ import { bisector } from 'd3'
 
 import type { ChartDimensions, PointClickData, Series, TooltipContext } from './types'
 
-/** Find the nearest data index for a given X pixel coordinate using D3 bisector (O(log n)). */
 export function findNearestIndex(
     mouseX: number,
     labels: string[],
@@ -24,7 +23,6 @@ export function findNearestIndex(
     return positions[Math.max(0, Math.min(nearestIdx, positions.length - 1))].index
 }
 
-/** Check if a mouse position is within the plot area. */
 export function isInPlotArea(mouseX: number, mouseY: number, dimensions: ChartDimensions): boolean {
     return (
         mouseX >= dimensions.plotLeft &&
@@ -34,7 +32,6 @@ export function isInPlotArea(mouseX: number, mouseY: number, dimensions: ChartDi
     )
 }
 
-/** Build a TooltipContext from mouse position and data. */
 export function buildTooltipContext(
     dataIndex: number,
     series: Series[],
@@ -78,7 +75,6 @@ export function buildTooltipContext(
     }
 }
 
-/** Build PointClickData from a click at a data index. */
 export function buildPointClickData(
     dataIndex: number,
     series: Series[],
@@ -111,8 +107,6 @@ export function buildPointClickData(
     }
 }
 
-/** Compute linear regression (least squares) for trend line.
- * Returns [slope, intercept] or null if insufficient data. */
 export function linearRegression(data: number[], endIndex?: number): { slope: number; intercept: number } | null {
     const end = endIndex ?? data.length
     if (end < 2) {

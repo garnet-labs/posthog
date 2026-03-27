@@ -1,69 +1,133 @@
-// Re-export shared chart types from the existing lib/charts
 export type { AxisFormat, ChartTheme } from 'lib/charts/types'
 
 export interface Series {
-    /** Unique identifier */
+    /** Unique identifier used to key React elements and look up stacked data. */
     key: string
-    /** Display name */
+    /** Human-readable name shown in tooltips and legends. */
     label: string
-    /** Values (same length as labels) */
+    /** Numeric values for each x-axis label. Must be the same length as the labels array. */
     data: number[]
-    /** Hex color */
+    /** CSS color string (hex, rgb, etc.) for the line and associated fill/points. */
     color: string
-    /** For multi-axis ('y', 'y1', 'y2', ...) */
+    /** Assigns this series to a named y-axis (e.g. 'y', 'y1', 'y2'). Only used when `multipleYAxes` is enabled. */
     yAxisId?: string
-    /** Area fill under the line */
+    /** When true, fills the area between the line and the x-axis baseline. */
     fillArea?: boolean
-    /** 0-1, defaults to 0.5 */
+    /** Opacity of the area fill. Range 0–1, defaults to 0.5. Ignored when `fillArea` is false. */
     fillOpacity?: number
-    /** e.g. [10, 10] for dashed */
+    /** Canvas line dash pattern, e.g. [10, 10] for evenly dashed. Omit or [] for solid. */
     dashPattern?: number[]
-    /** Don't render this series */
+    /** When true, the series is excluded from rendering, scales, and tooltips. */
     hidden?: boolean
-    /** Data point dot size (0 = no dots) */
+    /** Radius in px for data point dots. Set to 0 or omit to hide dots. */
     pointRadius?: number
 }
 
+/** A horizontal reference line drawn across the chart at a fixed y-value. */
 export interface GoalLine {
-    /** Y-axis value */
+    /** The y-axis value where the line is drawn. */
     value: number
-    /** Text label */
+    /** Optional text label displayed alongside the line. */
     label?: string
-    /** Line color */
+    /** CSS color for the line. Falls back to theme default if omitted. */
     borderColor?: string
-    /** Label position */
+    /** Which end of the line to anchor the label. Defaults to 'end'. */
     position?: 'start' | 'end'
 }
 
+/** Data passed to the `onPointClick` callback when a user clicks a data point. */
 export interface PointClickData {
+    /** Index of the clicked series within the original series array. */
     seriesIndex: number
+    /** Index along the x-axis (into the labels array) that was clicked. */
     dataIndex: number
+    /** The series that was clicked. */
     series: Series
+    /** The y-value at the clicked point. */
     value: number
+    /** The x-axis label at the clicked point. */
     label: string
+    /** Values from all visible series at this x-axis index, for cross-series comparisons. */
     crossSeriesData: { series: Series; value: number }[]
 }
 
+/** Context object passed to the `renderTooltip` render prop and tooltip event callbacks. */
 export interface TooltipContext {
+    /** Index along the x-axis that the tooltip represents. */
     dataIndex: number
+    /** The x-axis label at this index. */
     label: string
+    /** One entry per visible series with its value and color at this index. */
     seriesData: { series: Series; value: number; color: string }[]
+    /** Pixel position (relative to the chart container) for anchoring the tooltip. */
     position: { x: number; y: number }
+    /** Bounding rect of the canvas element, useful for portal-based tooltip positioning. */
     canvasBounds: DOMRect
 }
 
+/** Computed layout dimensions of the chart, derived from container size and margins. */
 export interface ChartDimensions {
+    /** Full container width in CSS pixels. */
     width: number
+    /** Full container height in CSS pixels. */
     height: number
+    /** Left edge of the plot area (after left margin). */
     plotLeft: number
+    /** Top edge of the plot area (after top margin). */
     plotTop: number
+    /** Width of the drawable plot area. */
     plotWidth: number
+    /** Height of the drawable plot area. */
     plotHeight: number
 }
 
+/** Spacing between the container edges and the plot area. */
 export interface ChartMargins {
     top: number
     right: number
     bottom: number
     left: number
+}
+
+/** Configuration object controlling chart behavior, scales, and overlays. */
+export interface LineChartConfig {
+    // — Scale —
+
+    /** Y-axis scale type. 'log' clamps minimum to 1e-10 to avoid log(0). Defaults to 'linear'. */
+    yScaleType?: 'linear' | 'log'
+    /** When true, each unique `series.yAxisId` gets its own independent y-axis. */
+    multipleYAxes?: boolean
+    /** When true, stacks all series to 100% using d3.stackOffsetExpand. */
+    percentStackView?: boolean
+
+    // — Axis formatting —
+
+    /** Custom x-axis tick label formatter. Return null to skip a tick. Called with (label, index). */
+    xTickFormatter?: (value: string, index: number) => string | null
+    /** Custom y-axis tick label formatter. Overrides the built-in auto-precision formatter. */
+    yTickFormatter?: (value: number) => string
+    /** Hide the x-axis labels and reduce bottom margin. */
+    hideXAxis?: boolean
+    /** Hide the y-axis labels and reduce left margin. */
+    hideYAxis?: boolean
+
+    // — Overlays —
+
+    /** Show horizontal grid lines at y-axis tick positions. */
+    showGrid?: boolean
+    /** Show a vertical crosshair line that follows the cursor. */
+    showCrosshair?: boolean
+    /** Show inline value labels on each data point. */
+    showDataLabels?: boolean
+    /** Custom formatter for data labels. Called with (value, seriesIndex). */
+    dataLabelFormatter?: (value: number, seriesIndex: number) => string
+    /** Show a linear regression trend line for each series. */
+    showTrendLines?: boolean
+    /** Horizontal goal/reference lines to draw across the chart. */
+    goalLines?: GoalLine[]
+
+    // — Data —
+
+    /** Index from which data is considered incomplete (rendered with dashed lines and hatched fill). */
+    incompleteFromIndex?: number
 }

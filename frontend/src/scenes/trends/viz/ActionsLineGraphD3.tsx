@@ -2,7 +2,7 @@ import { useValues } from 'kea'
 
 import { createXAxisTickCallback } from 'lib/charts/utils/dates'
 import { LineChart } from 'lib/hog-charts'
-import type { Series } from 'lib/hog-charts'
+import type { LineChartConfig, Series } from 'lib/hog-charts'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { teamLogic } from 'scenes/teamLogic'
 
@@ -66,26 +66,28 @@ export function ActionsLineGraphD3({ context }: ChartParams): JSX.Element | null
         timezone,
     })
 
+    const chartConfig: LineChartConfig = {
+        showGrid: true,
+        showCrosshair: true,
+        showDataLabels: !!showValuesOnSeries,
+        showTrendLines: !!showTrendLines,
+        yScaleType: yAxisScaleType === 'log10' ? 'log' : 'linear',
+        multipleYAxes: !!showMultipleYAxes,
+        percentStackView: !!showPercentStackView && !!supportsPercentStackView,
+        xTickFormatter: xTickFormatter,
+        goalLines: goalLines?.map((g: GoalLine) => ({
+            value: g.value,
+            label: g.label ?? undefined,
+            borderColor: g.borderColor ?? undefined,
+        })),
+        incompleteFromIndex: incompleteIdx,
+    }
+
     return (
         <LineChart
             series={hogSeries}
             labels={labels}
-            xTickFormatter={xTickFormatter}
-            showGrid
-            showCrosshair
-            showDataLabels={!!showValuesOnSeries}
-            showTrendLines={!!showTrendLines}
-            yScaleType={yAxisScaleType === 'log10' ? 'log' : 'linear'}
-            multipleYAxes={!!showMultipleYAxes}
-            percentStackView={!!showPercentStackView && !!supportsPercentStackView}
-            goalLines={goalLines?.map((g: GoalLine) => ({
-                value: g.value,
-                label: g.label ?? undefined,
-                borderColor: g.borderColor ?? undefined,
-            }))}
-            incompleteFromIndex={incompleteIdx}
-            hideXAxis={false}
-            hideYAxis={false}
+            config={chartConfig}
             renderTooltip={(ctx) => (
                 <div className="bg-[var(--bg-surface-tooltip)] text-primary px-3 py-2 rounded-md shadow-lg text-[13px]">
                     <div className="font-semibold mb-1">{ctx.label}</div>

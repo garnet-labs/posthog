@@ -10,7 +10,6 @@ export interface DrawContext {
     labels: string[]
 }
 
-/** Draw a single series line. Batches into one beginPath/stroke for performance. */
 export function drawLine(
     drawCtx: DrawContext,
     series: Series,
@@ -91,7 +90,6 @@ export function drawLine(
     }
 }
 
-/** Draw area fill under a series line. */
 export function drawArea(
     drawCtx: DrawContext,
     series: Series,
@@ -202,7 +200,6 @@ function drawAreaSegment(
     ctx.globalAlpha = 1
 }
 
-/** Draw data point dots for a series. */
 export function drawPoints(drawCtx: DrawContext, series: Series, yValues?: number[]): void {
     const { ctx, xScale, yScale, labels } = drawCtx
     const data = yValues ?? series.data
@@ -226,7 +223,6 @@ export function drawPoints(drawCtx: DrawContext, series: Series, yValues?: numbe
     }
 }
 
-/** Draw grid lines on the canvas. */
 export function drawGrid(
     drawCtx: DrawContext,
     options: {
@@ -257,7 +253,6 @@ export function drawGrid(
     }
 }
 
-/** Draw a highlighted point (for hover). */
 export function drawHighlightPoint(
     ctx: CanvasRenderingContext2D,
     x: number,
