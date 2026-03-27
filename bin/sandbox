@@ -113,6 +113,18 @@ def fatal(msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def dump_container_logs(container: str, *, tail: int = 200) -> None:
+    """Print the last N lines of a container's logs (both stdout and stderr)."""
+    logs = run(
+        ["docker", "logs", "--tail", str(tail), container],
+        check=False, capture=True,
+    )
+    for line in (logs.stdout or "").strip().splitlines():
+        print(f"  {line}")
+    for line in (logs.stderr or "").strip().splitlines():
+        print(f"  {line}")
+
+
 # ---------------------------------------------------------------------------
 # Registry — persistent JSON store at ~/.posthog-sandboxes/registry.json
 # ---------------------------------------------------------------------------
@@ -418,13 +430,7 @@ def wait_for_health(
         if prev_restart_count is not None and restart_count > prev_restart_count:
             print()
             error(f"App container is crash-looping (restart #{restart_count}). Last logs:")
-            logs = run(["docker", "logs", container], check=False, capture=True)
-            for line in (logs.stdout or "").strip().splitlines():
-                print(f"  {line}")
-            print()
-            print("Troubleshooting:")
-            print(f"  Full logs:  docker logs {container}")
-            print(f"  Shell:      docker exec -it -u {os.getuid()}:{os.getgid()} {container} bash")
+            dump_container_logs(container)
             return False
         prev_restart_count = restart_count
 
@@ -444,6 +450,8 @@ def wait_for_health(
         elapsed += interval
 
     print()
+    error(f"Container {container} did not become healthy within {timeout}s. Last logs:")
+    dump_container_logs(container)
     return False
 
 
@@ -565,7 +573,7 @@ def init_cache_from_master() -> None:
 
         info("Waiting for master to boot...")
         if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
-            fatal("Cache init timed out. Check docker logs for errors.")
+            fatal("Cache init failed. See logs above.")
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
@@ -797,12 +805,8 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
 
     info("Waiting for PostHog to start...")
     if not wait_for_health(f"http://localhost:{port}/_health", f"{project}-app-1"):
-        error("PostHog did not start. Something is likely broken.")
-        print("Troubleshooting:")
-        print(f"  Full logs:  docker logs {project}-app-1")
-        print(f"  Shell:      docker exec -it -u {os.getuid()}:{os.getgid()} {project}-app-1 bash")
         cmd_destroy(branch)
-        sys.exit(1)
+        fatal("Sandbox creation failed. See logs above.")
 
     url = f"http://localhost:{port}"
     print()
@@ -831,11 +835,7 @@ def cmd_start(branch: str) -> None:
 
     info("Waiting for PostHog to start...")
     if not wait_for_health(f"http://localhost:{entry.port}/_health", f"{project}-app-1"):
-        error("PostHog did not start. Something is likely broken.")
-        print("Troubleshooting:")
-        print(f"  Logs:   sandbox logs {branch}")
-        print(f"  Shell:  sandbox shell {branch}")
-        sys.exit(1)
+        fatal("Sandbox failed to start. See logs above.")
 
     url = f"http://localhost:{entry.port}"
     success(f"PostHog running at {url}")
@@ -1097,7 +1097,12 @@ def main() -> None:
         sys.exit(130)
     except subprocess.CalledProcessError as e:
         cmd_str = " ".join(str(a) for a in e.cmd)
-        fatal(f"Command failed (exit {e.returncode}): {cmd_str}")
+        error(f"Command failed (exit {e.returncode}): {cmd_str}")
+        for line in (e.stdout or "").strip().splitlines():
+            print(f"  {line}")
+        for line in (e.stderr or "").strip().splitlines():
+            print(f"  {line}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
