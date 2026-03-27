@@ -1,13 +1,19 @@
 import { useCallback, useRef } from 'react'
 
+const DEFAULT_THRESHOLD_PX = 100
+
 export type ScrollObserverOptions = {
     onScrollTop?: () => void
     onScrollBottom?: () => void
+    /** Pixel distance from edge to trigger callbacks (default: 100) */
+    thresholdPx?: number
 }
 
-export function useScrollObserver({ onScrollTop, onScrollBottom }: ScrollObserverOptions = {}): (
-    el: HTMLDivElement | null
-) => void {
+export function useScrollObserver({
+    onScrollTop,
+    onScrollBottom,
+    thresholdPx = DEFAULT_THRESHOLD_PX,
+}: ScrollObserverOptions = {}): (el: HTMLDivElement | null) => void {
     const containerRef = useRef<HTMLDivElement | null>(null)
 
     const handleScroll = useCallback(
@@ -16,25 +22,17 @@ export function useScrollObserver({ onScrollTop, onScrollBottom }: ScrollObserve
             if (!target) {
                 return
             }
-            const scrollTop = target.scrollTop
-            const scrollHeight = target.scrollHeight
-            const clientHeight = target.clientHeight
+            const { scrollTop, scrollHeight, clientHeight } = target
 
-            if (scrollHeight === clientHeight) {
-                return
+            if (scrollTop <= thresholdPx) {
+                onScrollTop?.()
             }
 
-            const scrollRatio = scrollTop / (scrollHeight - clientHeight)
-
-            if (scrollRatio <= 0) {
-                return onScrollTop?.()
-            }
-
-            if (scrollRatio >= 1) {
-                return onScrollBottom?.()
+            if (scrollTop + clientHeight >= scrollHeight - thresholdPx) {
+                onScrollBottom?.()
             }
         },
-        [onScrollTop, onScrollBottom]
+        [onScrollTop, onScrollBottom, thresholdPx]
     )
 
     return useCallback(

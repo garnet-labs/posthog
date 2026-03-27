@@ -3,7 +3,7 @@ import { RBTree } from 'bintrees'
 import { Dayjs } from 'lib/dayjs'
 
 // Data structure for fast insert and search operations based on timestamps.
-export class TimeTree<T extends { timestamp: Dayjs }> {
+export class TimeTree<T extends { timestamp: Dayjs; id?: string; category?: string; sortPriority?: number }> {
     tree: RBTree<T>
 
     constructor() {
@@ -54,6 +54,21 @@ export class TimeTree<T extends { timestamp: Dayjs }> {
     }
 
     private compare(a: T, b: T): number {
-        return a.timestamp.diff(b.timestamp)
+        const timestampDiff = a.timestamp.diff(b.timestamp)
+        if (timestampDiff !== 0) {
+            return timestampDiff
+        }
+
+        const sortPriorityDiff = (a.sortPriority ?? 0) - (b.sortPriority ?? 0)
+        if (sortPriorityDiff !== 0) {
+            return sortPriorityDiff
+        }
+
+        const categoryDiff = (a.category ?? '').localeCompare(b.category ?? '')
+        if (categoryDiff !== 0) {
+            return categoryDiff
+        }
+
+        return (a.id ?? '').localeCompare(b.id ?? '')
     }
 }

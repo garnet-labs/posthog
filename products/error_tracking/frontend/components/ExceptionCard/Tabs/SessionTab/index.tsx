@@ -10,6 +10,10 @@ import { SessionTimeline, SessionTimelineHandle } from 'lib/components/SessionTi
 import { ItemCategory, ItemCollector } from 'lib/components/SessionTimeline/timeline'
 import { CustomItemLoader, customItemRenderer } from 'lib/components/SessionTimeline/timeline/items/custom'
 import { ExceptionItemLoader, exceptionRenderer } from 'lib/components/SessionTimeline/timeline/items/exceptions'
+import {
+    ExceptionStepItemLoader,
+    exceptionStepRenderer,
+} from 'lib/components/SessionTimeline/timeline/items/exceptionSteps'
 import { ConsoleLogItemLoader, consoleLogRenderer } from 'lib/components/SessionTimeline/timeline/items/logs'
 import { PageItemLoader, pageRenderer } from 'lib/components/SessionTimeline/timeline/items/page'
 import { Dayjs, dayjs } from 'lib/dayjs'
@@ -73,7 +77,7 @@ export function SessionTab({ timestamp, className, ...props }: SessionTabProps):
 }
 
 export function SessionTimelineTab(): JSX.Element {
-    const { uuid } = useValues(errorPropertiesLogic)
+    const { properties, uuid } = useValues(errorPropertiesLogic)
     const sessionTimelineRef = useRef<SessionTimelineHandle>(null)
     const { currentSessionTab } = useValues(exceptionCardLogic)
     const { sessionId, timestamp } = useValues(sessionTabLogic)
@@ -100,6 +104,13 @@ export function SessionTimelineTab(): JSX.Element {
         }
         const timestampDayJs = dayjs(timestamp).add(1, 'millisecond')
         const collector = new ItemCollector(sessionId, timestampDayJs)
+        if (Array.isArray(properties?.$exception_steps)) {
+            collector.addCategory(
+                ItemCategory.EXCEPTION_STEPS,
+                exceptionStepRenderer,
+                new ExceptionStepItemLoader(uuid, dayjs.utc(timestamp), properties)
+            )
+        }
         collector.addCategory(
             ItemCategory.ERROR_TRACKING,
             exceptionRenderer,
@@ -117,7 +128,7 @@ export function SessionTimelineTab(): JSX.Element {
             new ConsoleLogItemLoader(sessionId, timestampDayJs)
         )
         return collector
-    }, [sessionId, timestamp])
+    }, [properties, sessionId, timestamp, uuid])
 
     return (
         <TabsPrimitiveContent value="timeline" className="flex-1 min-h-0 overflow-y-auto">

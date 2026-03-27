@@ -4,7 +4,6 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { Link, Spinner } from '@posthog/lemon-ui'
 
 import { Dayjs } from 'lib/dayjs'
-import { useAsyncCallback } from 'lib/hooks/useAsyncCallback'
 import { useScrollObserver } from 'lib/hooks/useScrollObserver'
 import { IconVerticalAlignCenter } from 'lib/lemon-ui/icons'
 import { ButtonPrimitive, ButtonPrimitiveProps } from 'lib/ui/Button/ButtonPrimitives'
@@ -12,7 +11,15 @@ import { cn } from 'lib/utils/css-classes'
 
 import { ItemCategory, ItemCollector, ItemRenderer, RendererProps, TimelineItem } from './timeline'
 
-const LOADING_DEBOUNCE_OPTIONS = { leading: true, delay: 500 }
+const ITEM_HEIGHT_PX = 32 // matches h-[2rem]
+const BUFFER_FACTOR = 1.5
+
+function calculateBatchSize(containerEl: HTMLElement | null): number {
+    if (!containerEl) {
+        return 25
+    }
+    return Math.max(10, Math.ceil((containerEl.clientHeight / ITEM_HEIGHT_PX) * BUFFER_FACTOR))
+}
 
 export interface SessionTimelineHandle {
     scrollToItem: (itemId: string) => void
@@ -35,6 +42,8 @@ export function SessionTimeline({
 }: SessionTimelineProps): JSX.Element {
     const [items, setItems] = useState<TimelineItem[]>([])
     const [categories, setCategories] = useState<ItemCategory[]>(() => collector.getAllCategories())
+    const [loading, setLoading] = useState(false)
+    const [scrollLoading, setScrollLoading] = useState<'before' | 'after' | null>(null)
 
     function toggleCategory(category: ItemCategory): void {
         setCategories((prevCategories) => {
@@ -56,63 +65,105 @@ export function SessionTimeline({
         }
     }, [])
 
-    const [loadBefore, beforeLoading] = useAsyncCallback(
-        () =>
-            collector.loadBefore(categories, 25).then(() => {
-                const items = collector.collectItems()
-                const containerEl = containerRef.current
-                const scrollTop = containerEl?.scrollTop || 0
-                const scrollHeight = containerEl?.scrollHeight || 0
-                setItems(items)
-                // Restore scroll position
-                requestAnimationFrame(() => {
-                    const newScrollHeight = containerEl?.scrollHeight || 0
-                    if (containerEl) {
-                        containerEl.scrollTop = scrollTop + (newScrollHeight - scrollHeight)
-                    }
-                })
-            }),
-        [collector, categories],
-        LOADING_DEBOUNCE_OPTIONS
-    )
-
-    const [loadAfter, afterLoading] = useAsyncCallback(
-        () =>
-            collector.loadAfter(categories, 25).then(() => {
-                setItems(collector.collectItems())
-            }),
-        [collector, categories],
-        LOADING_DEBOUNCE_OPTIONS
-    )
-
+    // Initial load + auto-fill
     useEffect(() => {
         collector.clear()
-        Promise.all([loadBefore(), loadAfter()]).then(() => {
-            const items = collector.collectItems()
-            setItems(items)
-            selectedItemId && scrollToItem(selectedItemId)
-        })
-    }, [collector, loadBefore, loadAfter, setItems, scrollToItem, selectedItemId])
+        setLoading(true)
+
+        const batch = calculateBatchSize(containerRef.current)
+
+        Promise.all([collector.loadBefore(categories, batch), collector.loadAfter(categories, batch)])
+            .then(async () => {
+                setItems(collector.collectItems())
+
+                if (selectedItemId) {
+                    // Wait for DOM update then scroll
+                    await new Promise<void>((r) => requestAnimationFrame(r))
+                    scrollToItem(selectedItemId)
+                }
+
+                // Auto-fill: keep loading until container overflows or data exhausted
+                const el = containerRef.current
+                if (el) {
+                    await new Promise<void>((r) => requestAnimationFrame(r))
+
+                    while (el.scrollHeight <= el.clientHeight) {
+                        const canBefore = collector.hasBefore(categories)
+                        const canAfter = collector.hasAfter(categories)
+                        if (!canBefore && !canAfter) {
+                            break
+                        }
+
+                        if (canBefore) {
+                            const scrollTop = el.scrollTop
+                            const scrollHeight = el.scrollHeight
+                            await collector.loadBefore(categories, batch)
+                            setItems(collector.collectItems())
+                            await new Promise<void>((r) => requestAnimationFrame(r))
+                            el.scrollTop = scrollTop + (el.scrollHeight - scrollHeight)
+                        } else if (canAfter) {
+                            await collector.loadAfter(categories, batch)
+                            setItems(collector.collectItems())
+                            await new Promise<void>((r) => requestAnimationFrame(r))
+                        }
+                    }
+                }
+            })
+            .finally(() => setLoading(false))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [collector, categories, selectedItemId])
+
+    // Scroll-triggered loading (throttled via scroll observer)
+    const handleScrollTop = useCallback(async () => {
+        if (!collector.hasBefore(categories) || scrollLoading) {
+            return
+        }
+        setScrollLoading('before')
+        try {
+            const el = containerRef.current
+            const scrollTop = el?.scrollTop || 0
+            const scrollHeight = el?.scrollHeight || 0
+            const batch = calculateBatchSize(el)
+            await collector.loadBefore(categories, batch)
+            setItems(collector.collectItems())
+            requestAnimationFrame(() => {
+                const newScrollHeight = el?.scrollHeight || 0
+                if (el) {
+                    el.scrollTop = scrollTop + (newScrollHeight - scrollHeight)
+                }
+            })
+        } finally {
+            setScrollLoading(null)
+        }
+    }, [collector, categories, scrollLoading])
+
+    const handleScrollBottom = useCallback(async () => {
+        if (!collector.hasAfter(categories) || scrollLoading) {
+            return
+        }
+        setScrollLoading('after')
+        try {
+            const batch = calculateBatchSize(containerRef.current)
+            await collector.loadAfter(categories, batch)
+            setItems(collector.collectItems())
+        } finally {
+            setScrollLoading(null)
+        }
+    }, [collector, categories, scrollLoading])
 
     const scrollRefCb = useScrollObserver({
-        onScrollTop: () => {
-            if (collector.hasBefore(categories)) {
-                return loadBefore()
-            }
-        },
-        onScrollBottom: () => {
-            if (collector.hasAfter(categories)) {
-                return loadAfter()
-            }
-        },
+        onScrollTop: handleScrollTop,
+        onScrollBottom: handleScrollBottom,
     })
 
     useImperativeHandle(ref, () => ({ scrollToItem }))
 
+    const isLoading = loading || scrollLoading !== null
+
     return (
         <div className={cn('flex h-full', className)}>
             <div className="flex flex-col justify-between items-center p-1 border-r border-gray-3 shrink-0">
-                <div className="flex flex-col items-center gap-2">
+                <CategoryToggleGroup>
                     {collector.getCategories().map((cat) => (
                         <ItemCategoryToggle
                             active={categories.includes(cat)}
@@ -123,12 +174,13 @@ export function SessionTimeline({
                             {collector.getRenderer(cat)?.categoryIcon}
                         </ItemCategoryToggle>
                     ))}
-                </div>
+                </CategoryToggleGroup>
                 {items.find((item) => item.id === selectedItemId) && (
                     <ButtonPrimitive
                         tooltip="Scroll to item"
                         tooltipPlacement="right"
                         iconOnly
+                        size="xs"
                         onClick={() => selectedItemId && scrollToItem(selectedItemId)}
                     >
                         <IconVerticalAlignCenter />
@@ -143,7 +195,7 @@ export function SessionTimeline({
                 className="h-full w-full overflow-y-auto relative"
                 style={{ scrollbarGutter: 'stable' }}
             >
-                {beforeLoading && (
+                {(loading || scrollLoading === 'before') && (
                     <div className={cn(itemContainer({ selected: false }), 'justify-start')}>
                         <Spinner />
                         <span className="text-secondary">loading...</span>
@@ -164,10 +216,15 @@ export function SessionTimeline({
                         />
                     )
                 })}
-                {afterLoading && !beforeLoading && (
+                {!loading && scrollLoading === 'after' && (
                     <div className={cn(itemContainer({ selected: false }), 'justify-start')}>
                         <Spinner />
                         <span className="text-secondary">loading...</span>
+                    </div>
+                )}
+                {!isLoading && items.length === 0 && (
+                    <div className={cn(itemContainer({ selected: false }), 'justify-center')}>
+                        <span className="text-secondary text-xs">No items</span>
                     </div>
                 )}
             </div>
@@ -215,11 +272,26 @@ const SessionTimelineItemContainer = forwardRef<HTMLDivElement, SessionTimelineI
     }
 )
 
+function CategoryToggleGroup({ children }: { children: React.ReactNode }): JSX.Element {
+    return (
+        <div
+            className={cn(
+                'flex flex-col gap-0.5',
+                '[&>button]:rounded [&>button]:border-0 [&>button]:px-2 [&>button]:py-1.5',
+                '[&>button:hover]:bg-fill-button-tertiary-hover'
+            )}
+        >
+            {children}
+        </div>
+    )
+}
+
 const itemCategoryToggle = cva({
-    base: 'shrink-0',
+    base: 'shrink-0 transition-colors',
     variants: {
         active: {
             true: 'text-accent',
+            false: 'text-muted opacity-50',
         },
     },
 })

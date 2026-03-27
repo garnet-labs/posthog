@@ -1,7 +1,6 @@
 import { IconTerminal } from '@posthog/icons'
 
 import { Dayjs } from 'lib/dayjs'
-import { uuid } from 'lib/utils'
 
 import { RuntimeIcon } from 'products/error_tracking/frontend/components/RuntimeIcon'
 
@@ -55,7 +54,7 @@ export class ConsoleLogItemLoader extends LogEntryLoader<ConsoleLogItem> {
         message: string
     }): ConsoleLogItem {
         return {
-            id: uuid(),
+            id: `log-${timestamp.valueOf()}-${level}-${message}`,
             category: ItemCategory.CONSOLE_LOGS,
             timestamp,
             payload: {

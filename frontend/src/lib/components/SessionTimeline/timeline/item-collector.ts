@@ -2,7 +2,7 @@ import { Dayjs } from 'lib/dayjs'
 import { TimeTree } from 'lib/utils/time-tree'
 
 // eslint-disable-next-line import/no-cycle
-import { ItemCategory, ItemLoader, ItemRenderer, TimelineItem } from '.'
+import { compareTimelineItems, ItemCategory, ItemLoader, ItemRenderer, TimelineItem } from '.'
 
 export class ItemCollector {
     sessionId: string
@@ -30,18 +30,12 @@ export class ItemCollector {
         return Array.from(this.loaders.keys())
     }
 
-    findMinTimestamp(array: TimelineItem[]): TimelineItem {
-        return array.slice().sort((a, b) => a.timestamp.diff(b.timestamp))[0]
-    }
-
-    findMaxTimestamp(array: TimelineItem[]): TimelineItem {
-        return array.slice().sort((a, b) => b.timestamp.diff(a.timestamp))[0]
-    }
-
     clear(): void {
         this.beforeCursor = this.timestamp
         this.afterCursor = this.timestamp
         this.itemCache = new TimeTree<TimelineItem>()
+
+        this.loaders.forEach((loader) => loader.clear?.())
     }
 
     getRenderer(category: ItemCategory): ItemRenderer<TimelineItem> | undefined {
@@ -73,41 +67,38 @@ export class ItemCollector {
     }
 
     async loadBefore(categories: ItemCategory[], count: number): Promise<void> {
-        const items = []
-        let currentLoaders = categories
+        const loaders = categories
             .map((cat) => this.getLoader(cat))
-            .filter((loader) => !!loader) as ItemLoader<TimelineItem>[]
+            .filter((loader): loader is ItemLoader<TimelineItem> => !!loader)
 
-        while (items.length < count) {
-            const previousItems = await Promise.all(
-                currentLoaders.map((loader) => loader.previous(this.beforeCursor, count))
-            )
-            const maxItem = this.findMaxTimestamp(previousItems.filter((item) => item !== null) as TimelineItem[])
-            if (maxItem) {
-                items.push(maxItem)
-                this.beforeCursor = maxItem.timestamp
-            } else {
-                break
-            }
+        const batches = await Promise.all(loaders.map((loader) => loader.previousBatch(this.beforeCursor, count)))
+
+        // Merge all items, sort descending (newest first), take closest `count`
+        const allItems = batches.flat().sort((a, b) => compareTimelineItems(b, a))
+        const selected = allItems.slice(0, count)
+
+        if (selected.length > 0) {
+            this.beforeCursor = selected[selected.length - 1].timestamp
         }
-        this.itemCache.add(items)
+
+        this.itemCache.add(selected)
     }
 
     async loadAfter(categories: ItemCategory[], count: number): Promise<void> {
-        const items = []
-        let currentLoaders = categories
+        const loaders = categories
             .map((cat) => this.getLoader(cat))
-            .filter((loader) => !!loader) as ItemLoader<TimelineItem>[]
-        while (items.length < count) {
-            const nextItems = await Promise.all(currentLoaders.map((loader) => loader.next(this.afterCursor, count)))
-            const minItem = this.findMinTimestamp(nextItems.filter((item) => item !== null) as TimelineItem[])
-            if (minItem) {
-                items.push(minItem)
-                this.afterCursor = minItem.timestamp
-            } else {
-                break
-            }
+            .filter((loader): loader is ItemLoader<TimelineItem> => !!loader)
+
+        const batches = await Promise.all(loaders.map((loader) => loader.nextBatch(this.afterCursor, count)))
+
+        // Merge all items, sort ascending (oldest first), take closest `count`
+        const allItems = batches.flat().sort(compareTimelineItems)
+        const selected = allItems.slice(0, count)
+
+        if (selected.length > 0) {
+            this.afterCursor = selected[selected.length - 1].timestamp
         }
-        this.itemCache.add(items)
+
+        this.itemCache.add(selected)
     }
 }
