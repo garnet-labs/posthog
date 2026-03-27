@@ -299,6 +299,13 @@ QUERYSERVICE_HOST: str = get_from_env("QUERYSERVICE_HOST", CLICKHOUSE_HOST)
 QUERYSERVICE_SECURE: bool = get_from_env("QUERYSERVICE_SECURE", CLICKHOUSE_SECURE, type_cast=str_to_bool)
 QUERYSERVICE_VERIFY: bool = get_from_env("QUERYSERVICE_VERIFY", CLICKHOUSE_VERIFY, type_cast=str_to_bool)
 
+# ClickHouse Query Gateway — routes queries through a structured JSON gateway
+# instead of sending raw SQL directly to ClickHouse.
+CLICKHOUSE_GATEWAY_ENABLED: bool = get_from_env("CLICKHOUSE_GATEWAY_ENABLED", False, type_cast=str_to_bool)
+CLICKHOUSE_GATEWAY_URL: str = os.getenv("CLICKHOUSE_GATEWAY_URL", "http://clickhouse-gateway:3100")
+CLICKHOUSE_GATEWAY_SERVICE_TOKEN: str = os.getenv("CLICKHOUSE_GATEWAY_SERVICE_TOKEN", "")
+CLICKHOUSE_GATEWAY_TIMEOUT: int = get_from_env("CLICKHOUSE_GATEWAY_TIMEOUT", 600, type_cast=int)
+
 CLICKHOUSE_CONN_POOL_MIN: int = get_from_env("CLICKHOUSE_CONN_POOL_MIN", 20, type_cast=int)
 CLICKHOUSE_CONN_POOL_MAX: int = get_from_env("CLICKHOUSE_CONN_POOL_MAX", 1000, type_cast=int)
 

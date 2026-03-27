@@ -228,7 +228,18 @@ def get_client_from_pool(
     Returns the client for a given workload.
 
     The connection pool for HTTP is managed by a library.
+    When the gateway is enabled, all queries are routed through the ClickHouse Query Gateway.
     """
+
+    if settings.CLICKHOUSE_GATEWAY_ENABLED:
+        from posthog.clickhouse.client.gateway_client import get_gateway_client_ctx
+
+        return get_gateway_client_ctx(
+            workload=workload.value if workload else None,
+            team_id=team_id,
+            readonly=readonly,
+            ch_user=ch_user.value if ch_user else None,
+        )
 
     if settings.CLICKHOUSE_USE_HTTP or team_id in settings.CLICKHOUSE_USE_HTTP_PER_TEAM:
         kwargs = get_kwargs_for_client(workload=workload, team_id=team_id, readonly=readonly, ch_user=ch_user)
