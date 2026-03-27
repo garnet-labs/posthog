@@ -444,6 +444,7 @@ class TestImageExporter(APIBaseTest):
 
         # The frontend-provided variables should NOT be overwritten
         exported_asset.refresh_from_db()
+        assert exported_asset.export_context is not None
         assert exported_asset.export_context["variables_override"] == frontend_variables
 
         # URL should contain the frontend value, not the dashboard value
