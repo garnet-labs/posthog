@@ -180,7 +180,7 @@ export class PushNotificationService {
             throw new Error(`Push notification failed for all ${subscriptions.length} device(s)`)
         }
 
-        pushNotificationSentCounter.labels({ platform: 'android' }).inc(sentCount)
+        pushNotificationSentCounter.labels({ platform: 'fcm' }).inc(sentCount)
         addLog('info', `Push notification sent via FCM to ${sentCount}/${subscriptions.length} device(s)`)
     }
 

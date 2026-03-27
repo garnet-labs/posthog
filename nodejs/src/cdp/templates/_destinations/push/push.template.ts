@@ -119,8 +119,8 @@ if (not res.success) {
     ],
     mapping_templates: [
         {
-            name: 'Android overrides',
-            include_by_default: false,
+            name: 'FCM configuration',
+            include_by_default: true,
             inputs_schema: [
                 {
                     key: 'push_provider',
@@ -131,10 +131,11 @@ if (not res.success) {
                     secret: false,
                     required: true,
                 },
+                // Android-specific options
                 {
                     key: 'android_priority',
                     type: 'choice',
-                    label: 'Priority',
+                    label: 'Android priority',
                     choices: [
                         { value: 'normal', label: 'Normal' },
                         { value: 'high', label: 'High' },
@@ -145,50 +146,107 @@ if (not res.success) {
                 {
                     key: 'android_channelId',
                     type: 'string',
-                    label: 'Channel ID',
+                    label: 'Android channel ID',
                     description: 'Android notification channel ID (Android 8.0+).',
                     required: false,
                 },
                 {
                     key: 'android_sound',
                     type: 'string',
-                    label: 'Sound',
-                    description: 'Sound to play. Use "default" for the system default.',
+                    label: 'Android sound',
+                    description: 'Sound to play on Android. Use "default" for the system default.',
                     required: false,
                 },
                 {
                     key: 'android_tag',
                     type: 'string',
-                    label: 'Tag',
+                    label: 'Android tag',
                     description: 'Notification tag. Replaces an existing notification with the same tag.',
                     required: false,
                 },
                 {
                     key: 'android_icon',
                     type: 'string',
-                    label: 'Icon',
+                    label: 'Android icon',
                     description: 'Notification icon resource name.',
                     required: false,
                 },
                 {
                     key: 'android_color',
                     type: 'string',
-                    label: 'Color',
+                    label: 'Android color',
                     description: 'Notification icon color in #RRGGBB format.',
                     required: false,
                 },
                 {
                     key: 'android_clickAction',
                     type: 'string',
-                    label: 'Click action',
+                    label: 'Android click action',
                     description: 'Activity to launch when the notification is tapped.',
                     required: false,
+                },
+                // iOS (APNS) overrides — FCM delivers to iOS devices with these settings
+                {
+                    key: 'ios_sound',
+                    type: 'string',
+                    label: 'iOS sound',
+                    description: 'Sound file name or "default" for the system default.',
+                    required: false,
+                },
+                {
+                    key: 'ios_badge',
+                    type: 'number',
+                    label: 'iOS badge count',
+                    description: 'App icon badge number.',
+                    required: false,
+                },
+                {
+                    key: 'ios_subtitle',
+                    type: 'string',
+                    label: 'iOS subtitle',
+                    description: 'Additional text below the title.',
+                    required: false,
+                },
+                {
+                    key: 'ios_category',
+                    type: 'string',
+                    label: 'iOS category',
+                    description: 'Notification category for actionable notifications.',
+                    required: false,
+                },
+                {
+                    key: 'ios_threadId',
+                    type: 'string',
+                    label: 'iOS thread ID',
+                    description: 'Identifier for grouping notifications in the notification center.',
+                    required: false,
+                },
+                {
+                    key: 'ios_interruptionLevel',
+                    type: 'choice',
+                    label: 'iOS interruption level',
+                    choices: [
+                        { value: 'passive', label: 'Passive' },
+                        { value: 'active', label: 'Active' },
+                        { value: 'time-sensitive', label: 'Time sensitive' },
+                        { value: 'critical', label: 'Critical' },
+                    ],
+                    description: 'How prominently the notification is presented (iOS 15+).',
+                    required: false,
+                },
+                {
+                    key: 'ios_mutableContent',
+                    type: 'boolean',
+                    label: 'iOS mutable content',
+                    description: 'Allow a notification service extension to modify the content before display.',
+                    required: false,
+                    default: false,
                 },
             ],
         },
         {
-            name: 'iOS overrides',
-            include_by_default: false,
+            name: 'APNS (iOS) configuration',
+            include_by_default: true,
             inputs_schema: [
                 {
                     key: 'push_provider',
