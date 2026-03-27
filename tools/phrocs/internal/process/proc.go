@@ -59,7 +59,9 @@ type StatusMsg struct {
 // when a process produces output faster than the TUI can render it.
 // The TUI reads actual lines from p.Lines().
 type OutputMsg struct {
-	Name string
+	Name    string
+	Added   []string
+	Evicted int
 }
 
 // Metrics holds the most recent sampled resource usage for a process tree.
@@ -176,10 +178,7 @@ func (p *Process) Lines() []string {
 func (p *Process) AppendLine(line string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.lines) >= p.maxLines {
-		p.lines = p.lines[1:]
-	}
-	p.lines = append(p.lines, line)
+	p.appendLinesLocked([]string{line})
 }
 
 // Returns a consistent point-in-time view of the process
@@ -466,7 +465,7 @@ func (p *Process) readLoop(r io.Reader, send func(tea.Msg)) {
 		if !ok {
 			return
 		}
-		p.bufferLine(line, send)
+		batch := []string{line}
 
 		// Drain any additional lines that arrive within the flush interval
 		deadline := time.After(flushInterval)
@@ -475,41 +474,70 @@ func (p *Process) readLoop(r io.Reader, send func(tea.Msg)) {
 			select {
 			case line, ok := <-lineCh:
 				if !ok {
-					// EOF — send final notification and return
-					send(OutputMsg{Name: p.Name})
+					evicted := p.bufferLines(batch, send)
+					send(OutputMsg{Name: p.Name, Added: batch, Evicted: evicted})
 					return
 				}
-				p.bufferLine(line, send)
+				batch = append(batch, line)
 			case <-deadline:
 				break drain
 			}
 		}
 
-		send(OutputMsg{Name: p.Name})
+		evicted := p.bufferLines(batch, send)
+		send(OutputMsg{Name: p.Name, Added: batch, Evicted: evicted})
 	}
 }
 
-// bufferLine appends a single line to the scrollback buffer and checks the
+// bufferLines appends a batch of lines to the scrollback buffer and checks the
 // ready pattern. Only sends a StatusMsg if the process just became ready.
-func (p *Process) bufferLine(line string, send func(tea.Msg)) {
+// Returns the number of evicted lines due to scrollback limit.
+func (p *Process) bufferLines(lines []string, send func(tea.Msg)) int {
 	p.mu.Lock()
-	if len(p.lines) >= p.maxLines {
-		p.lines = p.lines[1:]
-	}
-	p.lines = append(p.lines, line)
+	evicted := p.appendLinesLocked(lines)
 
 	shouldNotify := false
-	if !p.ready && p.readyPattern != nil && p.readyPattern.MatchString(line) {
-		p.ready = true
-		p.readyAt = time.Now()
-		p.status = StatusRunning
-		shouldNotify = true
+	if !p.ready && p.readyPattern != nil {
+		for _, line := range lines {
+			if p.readyPattern.MatchString(line) {
+				p.ready = true
+				p.readyAt = time.Now()
+				p.status = StatusRunning
+				shouldNotify = true
+				break
+			}
+		}
 	}
 	p.mu.Unlock()
 
 	if shouldNotify {
 		send(StatusMsg{Name: p.Name, Status: StatusRunning})
 	}
+	return evicted
+}
+
+// appendLinesLocked appends lines while honoring scrollback limits.
+// Must be called with p.mu held.
+func (p *Process) appendLinesLocked(lines []string) int {
+	if len(lines) == 0 {
+		return 0
+	}
+	if p.maxLines <= 0 {
+		p.lines = nil
+		return len(lines)
+	}
+
+	evicted := 0
+	if overflow := len(p.lines) + len(lines) - p.maxLines; overflow > 0 {
+		if overflow >= len(p.lines) {
+			p.lines = p.lines[:0]
+		} else {
+			p.lines = append(p.lines[:0], p.lines[overflow:]...)
+		}
+		evicted = overflow
+	}
+	p.lines = append(p.lines, lines...)
+	return evicted
 }
 
 // Sampling CPU/mem/threads every metricsSampleInterval for the process tree
