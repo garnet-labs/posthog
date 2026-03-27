@@ -30,17 +30,14 @@ else
     echo "🐧 Linux detected, binding to Docker bridge gateway: $HOST_BIND"
 fi
 
-GRANIAN_ARGS=(
-    --interface asgi
-    posthog.asgi:application
-    --reload
-    --reload-paths ./posthog
-    --reload-paths ./ee
-    --reload-paths ./products
-    --reload-paths ./frontend/src/products.json
-    --host "$HOST_BIND"
-    --log-level debug
+python ${DEBUG:+ -m debugpy --listen 127.0.0.1:5678} -m granian \
+    --interface asgi \
+    posthog.asgi:application \
+    --reload \
+    --reload-paths ./posthog \
+    --reload-paths ./ee \
+    --reload-paths ./products \
+    --reload-paths ./frontend/src/products.json \
+    --host $HOST_BIND \
+    --log-level debug \
     --workers 1
-)
-
-exec python ${DEBUG:+ -m debugpy --listen 127.0.0.1:5678} -m granian "${GRANIAN_ARGS[@]}"
