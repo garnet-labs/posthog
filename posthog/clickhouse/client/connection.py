@@ -1,4 +1,6 @@
 import os
+import re
+import types
 import logging
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -18,6 +20,9 @@ from clickhouse_pool import ChPool
 from posthog.clickhouse.workload import Workload
 from posthog.settings import data_stores
 from posthog.utils import patchable
+
+# Use [^)]* with a length cap to prevent polynomial backtracking on adversarial input
+_INSERT_RE = re.compile(r"INSERT\s+INTO\s+(\S+)\s*\(([^)]{1,10000})\)\s*VALUES", re.IGNORECASE)
 
 
 class NodeRole(StrEnum):
@@ -59,8 +64,6 @@ class ClickHouseUser(StrEnum):
 
     # Backups - used by Dagster backup jobs
     BACKUPS = "backups"
-    # Part breaker - used by Dagster part breaking jobs
-    PART_BREAKER = "part_breaker"
     # Dev Operations - do not normally use
     OPS = "ops"
     # Only for migrations - do not normally use
@@ -127,11 +130,18 @@ class ProxyClient:
         types_check=False,
         columnar=False,
     ):
+        # Avoid mutating caller's settings dict; handle None
+        settings = {**(settings or {})}
         if query_id:
             settings["query_id"] = query_id
+
+        # INSERT with row data (list/tuple/generator) needs clickhouse_connect.insert(),
+        # not query(). query() is for SELECT statements.
+        if isinstance(params, (list, tuple, types.GeneratorType)) and params:
+            return self._execute_insert(query, params, settings)
+
         result = self._client.query(query=query, parameters=params, settings=settings, column_oriented=columnar)
 
-        # we must play with result summary here
         written_rows = int(result.summary.get("written_rows", 0))
         if written_rows > 0:
             return written_rows
@@ -140,7 +150,26 @@ class ProxyClient:
             return result.result_set, column_types_driver_format
         return result.result_set
 
-    # Implement methods for session managment: https://peps.python.org/pep-0343/ so ProxyClient can be used in all places a clickhouse_driver.Client is.
+    def _execute_insert(self, query: str, params, settings: dict):
+        """Route INSERT with row data through clickhouse_connect.insert()."""
+        match = _INSERT_RE.search(query)
+        if not match:
+            result = self._client.command(query, settings=settings)
+            return result if isinstance(result, int) else 0
+
+        table_name = match.group(1)
+        column_names = [c.strip() for c in match.group(2).split(",")]
+
+        if isinstance(params, types.GeneratorType):
+            params = list(params)
+        if params and isinstance(params[0], dict):
+            data = [[row.get(col) for col in column_names] for row in params]
+        else:
+            data = [list(row) if not isinstance(row, (list, tuple)) else row for row in params]
+
+        summary = self._client.insert(table=table_name, data=data, column_names=column_names, settings=settings)
+        return summary.written_rows
+
     def __enter__(self):
         return self
 
@@ -228,7 +257,13 @@ def get_client_from_pool(
     Returns the client for a given workload.
 
     The connection pool for HTTP is managed by a library.
+    When the gateway is enabled, all queries are routed through the ClickHouse Query Gateway.
     """
+
+    if settings.CLICKHOUSE_GATEWAY_ENABLED:
+        from posthog.clickhouse.client.gateway_client import get_gateway_client_ctx
+
+        return get_gateway_client_ctx()
 
     if settings.CLICKHOUSE_USE_HTTP or team_id in settings.CLICKHOUSE_USE_HTTP_PER_TEAM:
         kwargs = get_kwargs_for_client(workload=workload, team_id=team_id, readonly=readonly, ch_user=ch_user)
