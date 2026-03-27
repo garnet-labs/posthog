@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("posthog", "1072_backfill_condition_aggregation"),
+        ("posthog", "1075_team_snippet_config"),
     ]
 
     operations = [
@@ -39,9 +39,9 @@ class Migration(migrations.Migration):
                     ("databricks", "Databricks"),
                     ("azure-blob", "Azure Blob"),
                     ("firebase", "Firebase"),
-                    ("apple-push", "Apple Push"),
                     ("jira", "Jira"),
                     ("pinterest-ads", "Pinterest Ads"),
+                    ("apple-push", "Apple Push"),
                 ],
                 max_length=20,
             ),

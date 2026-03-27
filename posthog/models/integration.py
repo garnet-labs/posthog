@@ -116,9 +116,9 @@ class Integration(models.Model):
         DATABRICKS = "databricks"
         AZURE_BLOB = "azure-blob"
         FIREBASE = "firebase"
-        APPLE_PUSH = "apple-push"
         JIRA = "jira"
         PINTEREST_ADS = "pinterest-ads"
+        APPLE_PUSH = "apple-push"
 
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
 

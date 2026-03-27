@@ -9,7 +9,7 @@ from posthog.models.utils import uuid7
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("workflows", "0002_hogflowbatchjob_scheduled_at"),
+        ("workflows", "0003_hogflowschedule"),
     ]
 
     operations = [
