@@ -2,6 +2,9 @@ from enum import StrEnum
 
 from posthog.models import Team
 
+from products.event_definitions.backend.models.event_definition import EventDefinition
+from products.event_definitions.backend.models.property_definition import PropertyDefinition
+
 # Cardinality thresholds for the Postgres fallback. If a low-volume org
 # exceeds these, we use ClickHouse instead so we get count-based ordering.
 EVENT_CARDINALITY_THRESHOLD = 50
@@ -31,9 +34,6 @@ def _has_high_cardinality(team: Team) -> bool:
     (ordered by last_seen_at) won't surface the most important events —
     ClickHouse count-based ordering is needed.
     """
-    from products.event_definitions.backend.models.event_definition import EventDefinition
-    from products.event_definitions.backend.models.property_definition import PropertyDefinition
-
     event_count = EventDefinition.objects.filter(team=team).count()
     if event_count > EVENT_CARDINALITY_THRESHOLD:
         return True

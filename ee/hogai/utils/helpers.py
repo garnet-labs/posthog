@@ -41,7 +41,9 @@ from posthog.hogql_queries.ai.scan_period import should_use_postgres_for_events
 from posthog.hogql_queries.ai.team_taxonomy_query_runner import TeamTaxonomyQueryRunner
 from posthog.hogql_queries.query_runner import ExecutionMode
 from posthog.models import Team
-from posthog.taxonomy.taxonomy import CORE_FILTER_DEFINITIONS_BY_GROUP
+from posthog.taxonomy.taxonomy import CORE_FILTER_DEFINITIONS_BY_GROUP, IGNORED_EVENT_NAMES
+
+from products.event_definitions.backend.models.event_definition import EventDefinition
 
 from ee.hogai.utils.anthropic import SUPPORTED_ANTHROPIC_BLOCKS
 from ee.hogai.utils.types.base import (
@@ -165,10 +167,6 @@ def _fetch_events_from_postgres(
     Fetch event names from Postgres EventDefinition for low-volume orgs.
     Events are ordered by last_seen_at (most recently seen first) as a proxy for popularity.
     """
-    from posthog.taxonomy.taxonomy import IGNORED_EVENT_NAMES
-
-    from products.event_definitions.backend.models.event_definition import EventDefinition
-
     effective_limit = limit or 500
     effective_offset = offset or 0
 
