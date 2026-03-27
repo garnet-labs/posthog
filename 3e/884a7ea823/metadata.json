@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "3e884a7ea823",
+  "strategy": "manual-commit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".cursor/hooks.json",
+    ".entire/.gitignore",
+    ".entire/settings.json",
+    ".husky/commit-msg",
+    ".husky/post-commit",
+    ".husky/pre-push.pre-entire",
+    ".husky/prepare-commit-msg",
+    "products/signals/backend/migrations/0014_add_suggested_reviewer_user_ids.py",
+    "products/signals/backend/report_generation/resolve_reviewers.py",
+    "products/tasks/frontend/lib/parse-logs.test.ts",
+    "tools/hedgebox-dummy/scripts/emit_example_session_replay_signal.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3e/884a7ea823/0/metadata.json",
+      "transcript": "/3e/884a7ea823/0/full.jsonl",
+      "content_hash": "/3e/884a7ea823/0/content_hash.txt",
+      "prompt": "/3e/884a7ea823/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 5,
+    "cache_creation_tokens": 37574,
+    "cache_read_tokens": 64352,
+    "output_tokens": 723,
+    "api_call_count": 3
+  }
+}
