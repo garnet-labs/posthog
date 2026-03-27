@@ -607,6 +607,17 @@ export function ActionFilterRow({
                                                     index,
                                                 })
                                             }}
+                                            onUpdateFunnelAggregationTarget={(
+                                                funnelAggregationTarget,
+                                                funnelAggregationTargetType
+                                            ) => {
+                                                updateFilter({
+                                                    ...filter,
+                                                    index,
+                                                    funnelAggregationTarget,
+                                                    funnelAggregationTargetType,
+                                                })
+                                            }}
                                             renameRowButton={renameRowButton}
                                             duplicateRowButton={duplicateRowButton}
                                             deleteButton={deleteButton}
