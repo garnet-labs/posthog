@@ -552,7 +552,16 @@ def init_cache_from_master() -> None:
 
         info("Waiting for master to boot...")
         if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
-            fatal("Cache init timed out. Check docker logs for errors.")
+            error("Cache init timed out. Dumping container logs:")
+            logs = run(
+                ["docker", "logs", "--tail", "200", f"{init_project}-app-1"],
+                check=False, capture=True,
+            )
+            for line in (logs.stdout or "").strip().splitlines():
+                print(f"  {line}")
+            for line in (logs.stderr or "").strip().splitlines():
+                print(f"  {line}")
+            fatal("Cache init failed. See logs above.")
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")

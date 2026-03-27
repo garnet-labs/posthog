@@ -279,7 +279,17 @@ def apply_overlays() -> None:
 
 def install_python_deps() -> None:
     info("Started: uv sync...")
-    run(["uv", "sync", "--no-editable"])
+    # Remove GIT_DIR so uv's git fetches (e.g. infi.clickhouse_orm) work.
+    # The dummy GIT_DIR we set for pnpm confuses git when run from /cache.
+    uv_env = {k: v for k, v in os.environ.items() if k != "GIT_DIR"}
+    result = subprocess.run(["uv", "sync", "--no-editable"], capture_output=True, text=True, env=uv_env)
+    if result.returncode != 0:
+        info("ERROR: uv sync failed:")
+        for line in (result.stdout or "").strip().splitlines():
+            info(f"  {line}")
+        for line in (result.stderr or "").strip().splitlines():
+            info(f"  {line}")
+        raise subprocess.CalledProcessError(result.returncode, result.args)
     info("Finished: uv sync.")
     # Make hogli available — normally done by flox on-activate.sh.
     hogli_link = Path("/cache/python/bin/hogli")
