@@ -1,0 +1,122 @@
+#!/bin/bash
+#
+# Start PostHog dev environment in a sandboxed Docker container.
+# App processes run inside the container; infra runs in docker-compose.dev.yml.
+#
+set -e
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+COMPOSE_INFRA="docker-compose.dev.yml"
+COMPOSE_PROFILES="docker-compose.profiles.yml"
+COMPOSE_PROXY_OVERRIDE="docker-compose.dev-sandboxed-proxy.yml"
+COMPOSE_SANDBOX="docker-compose.dev-sandboxed.yml"
+GENERATED_CONFIG=".posthog/.generated/mprocs.yaml"
+SANDBOX_CONFIG=".posthog/.generated/mprocs-sandboxed.yaml"
+
+# ── Parse flags ──────────────────────────────────────────────────────
+DOCKER_PROFILES=()
+SKIP_INFRA=false
+BUILD_ONLY=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --skip-infra)   SKIP_INFRA=true ;;
+        --build)        BUILD_ONLY=true ;;
+        --profile=*)    DOCKER_PROFILES+=("--profile" "${arg#--profile=}") ;;
+        *)              echo "Unknown flag: $arg"; exit 1 ;;
+    esac
+done
+
+# Always include dev_tools profile
+DOCKER_PROFILES+=("--profile" "dev_tools")
+
+# ── Step 1: Start infra ─────────────────────────────────────────────
+if [ "$SKIP_INFRA" = false ]; then
+    echo "==> Starting infrastructure services..."
+    # Use proxy override to remove extra_hosts (service names resolve via Docker DNS
+    # to the dev container's network aliases instead of host-gateway)
+    docker compose \
+        -f "$COMPOSE_INFRA" \
+        -f "$COMPOSE_PROFILES" \
+        -f "$COMPOSE_PROXY_OVERRIDE" \
+        "${DOCKER_PROFILES[@]}" \
+        up --pull always -d
+    echo "==> Infrastructure started."
+fi
+
+if [ "$BUILD_ONLY" = true ]; then
+    echo "==> Building dev container image..."
+    docker compose -f "$COMPOSE_SANDBOX" build
+    echo "==> Build complete."
+    exit 0
+fi
+
+# ── Step 2: Generate mprocs config ───────────────────────────────────
+if command -v hogli &>/dev/null; then
+    hogli dev:generate 2>/dev/null || true
+fi
+
+if [ ! -f "$GENERATED_CONFIG" ]; then
+    echo "ERROR: No generated mprocs config found at $GENERATED_CONFIG"
+    echo "Run 'hogli dev:setup' first, or ensure bin/mprocs.yaml exists."
+    exit 1
+fi
+
+# ── Step 3: Patch config for sandboxed mode ──────────────────────────
+# Remove the docker-compose process (infra is managed separately)
+# and update Caddy proxy to route to the dev container.
+python3 -c "
+import yaml, sys
+
+with open('$GENERATED_CONFIG') as f:
+    config = yaml.safe_load(f)
+
+procs = config.get('procs', {})
+
+# Remove docker-compose process — infra runs on host
+procs.pop('docker-compose', None)
+
+# Rewrite bin/wait-for-docker calls to use network checks instead
+# (container doesn't have Docker socket access)
+for name, proc in procs.items():
+    if 'shell' in proc and isinstance(proc['shell'], str):
+        # Replace 'bin/wait-for-docker' with a simple TCP check
+        proc['shell'] = proc['shell'].replace(
+            'bin/wait-for-docker',
+            'bin/wait-for-infra'
+        )
+
+config['procs'] = procs
+
+with open('$SANDBOX_CONFIG', 'w') as f:
+    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+" 2>/dev/null || {
+    # Fallback: simple sed-based patching if PyYAML not available on host
+    cp "$GENERATED_CONFIG" "$SANDBOX_CONFIG"
+    # Remove docker-compose block (from its key to the next top-level key)
+    python3 -c "
+import re, sys
+with open('$SANDBOX_CONFIG') as f:
+    content = f.read()
+# Remove docker-compose process entry
+content = re.sub(r'  docker-compose:\n(?:    .*\n)*', '', content)
+# Replace wait-for-docker with wait-for-infra
+content = content.replace('bin/wait-for-docker', 'bin/wait-for-infra')
+with open('$SANDBOX_CONFIG', 'w') as f:
+    f.write(content)
+"
+}
+
+echo "==> Generated sandboxed mprocs config at $SANDBOX_CONFIG"
+
+# ── Step 4: Caddy routing ────────────────────────────────────────────
+# The dev container joins posthog_default with DNS aliases 'web', 'capture',
+# 'plugins' — so Caddy's reverse_proxy directives resolve to the container
+# automatically. No Caddy config changes needed.
+
+# ── Step 5: Launch dev container ─────────────────────────────────────
+echo "==> Starting sandboxed dev container..."
+exec docker compose -f "$COMPOSE_SANDBOX" run --rm --service-ports dev \
+    phrocs --config "$SANDBOX_CONFIG"

@@ -729,3 +729,11 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
+    start:sandboxed:
+        bin_script: start-sandboxed
+        description: 'TODO: add description for start-sandboxed'
+        hidden: true
+    wait:for:infra:
+        bin_script: wait-for-infra
+        description: 'TODO: add description for wait-for-infra'
+        hidden: true

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+#
+# Docker-socket-free alternative to bin/wait-for-docker.
+# Checks infrastructure readiness via TCP connections instead of
+# docker inspect. Used inside the sandboxed dev container where
+# the Docker socket is not mounted.
+#
+
+TIMEOUT="${WAIT_FOR_DOCKER_TIMEOUT:-300}"
+
+# Core services and their health-check endpoints
+declare -A CHECKS=(
+    [db]="db:5432"
+    [redis7]="redis7:6379"
+    [kafka]="kafka:9092"
+    [clickhouse]="clickhouse:8123"
+)
+
+# Add any extra services passed as arguments
+for svc in "$@"; do
+    case "$svc" in
+        temporal)     CHECKS[temporal]="temporal:7233" ;;
+        objectstorage) CHECKS[objectstorage]="objectstorage:19000" ;;
+        seaweedfs)    CHECKS[seaweedfs]="seaweedfs:8333" ;;
+        *)            echo "WARN: Unknown service '$svc', skipping" ;;
+    esac
+done
+
+check_tcp() {
+    local host="${1%%:*}"
+    local port="${1##*:}"
+    # Use bash built-in TCP check, fall back to curl/nc
+    (echo > /dev/tcp/"$host"/"$port") 2>/dev/null && return 0
+    return 1
+}
+
+check_http() {
+    curl -sf --max-time 2 "$1" >/dev/null 2>&1
+}
+
+SECONDS=0
+last_log=-5
+
+while true; do
+    all_ready=true
+    pending=()
+
+    for svc in "${!CHECKS[@]}"; do
+        endpoint="${CHECKS[$svc]}"
+
+        if check_tcp "$endpoint"; then
+            continue
+        fi
+
+        all_ready=false
+        pending+=("$svc")
+    done
+
+    if [ "$all_ready" = true ]; then
+        echo "All services ready in ${SECONDS}s."
+        exit 0
+    fi
+
+    if [ "$SECONDS" -ge "$TIMEOUT" ]; then
+        echo "TIMEOUT: ${TIMEOUT}s waiting for: ${pending[*]}"
+        exit 1
+    fi
+
+    if [ $(( SECONDS - last_log )) -ge 5 ]; then
+        echo "Waiting for: ${pending[*]} (${SECONDS}s)"
+        last_log=$SECONDS
+    fi
+
+    sleep 1
+done
