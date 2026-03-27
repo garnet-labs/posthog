@@ -1,4 +1,5 @@
 import {
+    KAFKA_APP_METRICS_2,
     KAFKA_CLICKHOUSE_AI_EVENTS_JSON,
     KAFKA_CLICKHOUSE_HEATMAP_EVENTS,
     KAFKA_EVENTS_JSON,
@@ -6,7 +7,7 @@ import {
 } from '../../../config/kafka-topics'
 import { INGESTION_WARNINGS_OUTPUT } from '../../common/outputs'
 import { IngestionOutputDefinition } from '../../outputs/resolver'
-import { AI_EVENTS_OUTPUT, EVENTS_OUTPUT, HEATMAPS_OUTPUT } from '../outputs'
+import { AI_EVENTS_OUTPUT, APP_METRICS_OUTPUT, EVENTS_OUTPUT, HEATMAPS_OUTPUT } from '../outputs'
 import { DEFAULT_PRODUCER, ProducerName } from './producers'
 
 /** Static config for all analytics ingestion outputs. */
@@ -34,5 +35,11 @@ export const INGESTION_OUTPUT_DEFINITIONS: Record<string, IngestionOutputDefinit
         defaultProducerName: DEFAULT_PRODUCER,
         producerOverrideEnvVar: 'INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER',
         topicOverrideEnvVar: 'INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC',
+    },
+    [APP_METRICS_OUTPUT]: {
+        defaultTopic: KAFKA_APP_METRICS_2,
+        defaultProducerName: DEFAULT_PRODUCER,
+        producerOverrideEnvVar: 'INGESTION_OUTPUT_APP_METRICS_PRODUCER',
+        topicOverrideEnvVar: 'INGESTION_OUTPUT_APP_METRICS_TOPIC',
     },
 }

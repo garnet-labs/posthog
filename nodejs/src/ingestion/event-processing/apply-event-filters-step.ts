@@ -1,6 +1,8 @@
-import { EventHeaders, PipelineEvent, Team } from '../../types'
+import { EventHeaders, PipelineEvent, Team, TimestampFormat } from '../../types'
 import { EventFilterManager, FilterConditionNode, FilterNode } from '../../utils/event-filter-manager'
-import { PipelineWarning } from '../pipelines/pipeline.interface'
+import { castTimestampOrNow } from '../../utils/utils'
+import { APP_METRICS_OUTPUT, AppMetricsOutput } from '../analytics/outputs'
+import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineResult, drop, ok } from '../pipelines/results'
 import { ProcessingStep } from '../pipelines/steps'
 
@@ -15,9 +17,11 @@ export interface ApplyEventFiltersInput {
  *
  * Filters use a boolean expression tree with AND, OR, NOT, and condition nodes.
  * If the tree evaluates to true for an event, the event is dropped.
+ * Dropped events are recorded as app metrics entries.
  */
 export function createApplyEventFiltersStep<T extends ApplyEventFiltersInput>(
-    manager: EventFilterManager
+    manager: EventFilterManager,
+    outputs: IngestionOutputs<AppMetricsOutput>
 ): ProcessingStep<T, T> {
     return function applyEventFiltersStep(input: T): Promise<PipelineResult<T>> {
         const filter = manager.getFilter(input.team.id)
@@ -27,30 +31,45 @@ export function createApplyEventFiltersStep<T extends ApplyEventFiltersInput>(
         }
 
         if (evaluateNode(filter.filter_tree, input)) {
-            const warning: PipelineWarning = {
-                type: 'event_dropped_by_filter',
-                details: {
-                    eventUuid: input.event.uuid,
-                    event: input.event.event,
-                    distinctId: input.event.distinct_id,
-                    filterId: filter.id,
-                },
-                alwaysSend: false,
+            const metricMessage = {
+                value: Buffer.from(
+                    JSON.stringify({
+                        team_id: input.team.id,
+                        timestamp: castTimestampOrNow(null, TimestampFormat.ClickHouse),
+                        app_source: 'event_filter',
+                        app_source_id: filter.id,
+                        metric_kind: 'other',
+                        metric_name: 'dropped',
+                        count: 1,
+                    })
+                ),
+                key: Buffer.from(`${input.team.id}`),
             }
-            return Promise.resolve(drop('event_filter', [], [warning]))
+
+            const sideEffect = outputs.produce(APP_METRICS_OUTPUT, metricMessage)
+            return Promise.resolve(drop('event_filter', [sideEffect]))
         }
 
         return Promise.resolve(ok(input))
     }
 }
 
-/** Recursively evaluate a filter tree node against event input */
+/**
+ * Recursively evaluate a filter tree node against event input.
+ *
+ * SAFETY: Empty groups are conservative (never drop):
+ * - Empty AND returns false (not vacuous true) to avoid dropping all events
+ * - Empty OR returns false (no children match)
+ * This is intentional — when in doubt, don't drop. Dropping is irreversible,
+ * while not dropping just means unwanted events get through temporarily.
+ */
 export function evaluateNode(node: FilterNode, input: ApplyEventFiltersInput): boolean {
     switch (node.type) {
         case 'condition':
             return evaluateCondition(node, input)
         case 'and':
-            return node.children.every((child) => evaluateNode(child, input))
+            // Guard: [].every() is true in JS (vacuous truth) which would drop everything
+            return node.children.length > 0 && node.children.every((child) => evaluateNode(child, input))
         case 'or':
             return node.children.some((child) => evaluateNode(child, input))
         case 'not':

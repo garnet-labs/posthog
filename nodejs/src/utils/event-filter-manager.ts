@@ -33,6 +33,19 @@ export interface EventFilterRule {
     filter_tree: FilterNode
 }
 
+/** Check if a filter tree contains at least one condition leaf */
+export function treeHasConditions(node: FilterNode): boolean {
+    switch (node.type) {
+        case 'condition':
+            return true
+        case 'not':
+            return treeHasConditions(node.child)
+        case 'and':
+        case 'or':
+            return node.children.some((child) => treeHasConditions(child))
+    }
+}
+
 /**
  * Manages per-team event filter config loaded from Postgres.
  * One filter per team. Uses BackgroundRefresher to load all enabled filters.
@@ -48,9 +61,13 @@ export class EventFilterManager {
         })
     }
 
-    /** Returns the filter for a team, or null. Non-blocking. */
+    /** Returns the filter for a team, or null if not set or has no conditions. Non-blocking. */
     getFilter(teamId: number): EventFilterRule | null {
-        return this.refresher.tryGet()?.get(teamId) ?? null
+        const filter = this.refresher.tryGet()?.get(teamId) ?? null
+        if (filter && !treeHasConditions(filter.filter_tree)) {
+            return null
+        }
+        return filter
     }
 
     private async fetchAllFilters(): Promise<Map<number, EventFilterRule>> {

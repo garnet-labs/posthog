@@ -23,7 +23,7 @@ import { OkResultWithContext } from '../pipelines/filter-map-batch-pipeline'
 import { PipelineConfig } from '../pipelines/result-handling-pipeline'
 import { ok } from '../pipelines/results'
 import { OverflowRedirectService } from '../utils/overflow-redirect/overflow-redirect-service'
-import { AiEventOutput, EventOutput, HeatmapsOutput } from './outputs'
+import { AiEventOutput, AppMetricsOutput, EventOutput, HeatmapsOutput } from './outputs'
 import {
     PerDistinctIdPipelineConfig,
     PerDistinctIdPipelineInput,
@@ -45,7 +45,7 @@ export interface JoinedIngestionPipelineConfig {
     personsPrefetchEnabled: boolean
     cdpHogWatcherSampleRate: number
     groupId: string
-    outputs: IngestionOutputs<EventOutput | AiEventOutput | HeatmapsOutput | IngestionWarningsOutput>
+    outputs: IngestionOutputs<EventOutput | AiEventOutput | HeatmapsOutput | IngestionWarningsOutput | AppMetricsOutput>
     splitAiEventsConfig: SplitAiEventsStepConfig
     perDistinctIdOptions: EventPipelineRunnerOptions
 }
@@ -159,6 +159,7 @@ export function createJoinedIngestionPipeline<
 
     const postTeamConfig: PostTeamPreprocessingSubpipelineConfig = {
         eventFilterManager,
+        outputs,
         eventIngestionRestrictionManager,
         eventSchemaEnforcementManager,
         eventSchemaEnforcementEnabled,
