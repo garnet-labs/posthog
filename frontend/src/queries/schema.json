@@ -33047,6 +33047,9 @@
                 "required": {
                     "type": "boolean"
                 },
+                "requiredScopes": {
+                    "type": "string"
+                },
                 "type": {
                     "const": "oauth",
                     "type": "string"
@@ -33931,6 +33934,9 @@
                         "type": "string"
                     },
                     "type": "array"
+                },
+                "transpose": {
+                    "type": "boolean"
                 }
             },
             "type": "object"
