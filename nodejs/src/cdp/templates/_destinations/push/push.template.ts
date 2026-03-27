@@ -251,7 +251,7 @@ if (not res.success) {
                 {
                     key: 'push_provider',
                     type: 'integration',
-                    integration: 'apple-push',
+                    integration: 'apns',
                     label: 'Apple Push provider',
                     requiredScopes: 'placeholder',
                     secret: false,
