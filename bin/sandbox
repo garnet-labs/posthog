@@ -535,9 +535,11 @@ def init_cache_from_master() -> None:
     # Tear down any leftover containers/volumes from a previous interrupted run
     _init_cache_cleanup(init_port, init_worktree)
 
-    run(["git", "fetch", "origin", "master", "--quiet"], capture=True)
-    if run(["git", "worktree", "add", "--force", "--detach", init_worktree, "origin/master"], check=False, capture=True).returncode != 0:
-        fatal("Could not check out master for cache init.")
+    # TODO: change back to origin/master after this PR merges
+    cache_branch = "origin/aspicer/sandbox-dev-environment-wip"
+    run(["git", "fetch", "origin", "--quiet"], capture=True)
+    if run(["git", "worktree", "add", "--force", "--detach", init_worktree, cache_branch], check=False, capture=True).returncode != 0:
+        fatal("Could not check out cache branch for cache init.")
 
     try:
         _copy_sandbox_backup_xml(init_worktree)
