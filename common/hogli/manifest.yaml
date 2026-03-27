@@ -723,3 +723,7 @@ environment:
         description: Disable anonymous usage telemetry
     telemetry:status:
         description: Show current telemetry settings
+    test:event:filters:
+        bin_script: test-event-filters
+        description: 'TODO: add description for test-event-filters'
+        hidden: true
