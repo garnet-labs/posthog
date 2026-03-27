@@ -11,6 +11,9 @@ import { publicAssetsPlugin } from './vite-public-assets-plugin'
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const isDev = mode === 'development'
+    const codespace = process.env.CODESPACE_NAME
+    const csDomain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN
+    const viteOrigin = codespace && csDomain ? `https://${codespace}-8234.${csDomain}` : 'http://localhost:8234'
 
     return {
         plugins: [
@@ -99,12 +102,12 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             port: 8234,
-            host: process.argv.includes('--host') ? '0.0.0.0' : 'localhost',
+            host: process.argv.includes('--host') || (codespace && csDomain) ? '0.0.0.0' : 'localhost',
             // this is just used in dev
             // nosemgrep: trailofbits.javascript.apollo-graphql.v3-cors-audit.v3-potentially-bad-cors
             cors: true, // This disables CORS in dev, key for using ngrok (e.g. for testing Slack integration)
             // Configure origin for proper asset URL generation
-            origin: 'http://localhost:8234',
+            origin: viteOrigin,
             proxy: {
                 '/static': {
                     target: 'http://localhost:8000',

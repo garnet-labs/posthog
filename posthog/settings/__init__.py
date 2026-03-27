@@ -70,7 +70,13 @@ NGROK_URL: str | None = os.getenv("NGROK_URL", None)
 INSTANCE_TAG: str = os.getenv("INSTANCE_TAG", "none")
 
 if DEBUG:
-    JS_URL: str = os.getenv("JS_URL", "http://localhost:8234").rstrip("/")
+    _codespace_name = os.getenv("CODESPACE_NAME")
+    _codespace_domain = os.getenv("GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN")
+    if _codespace_name and _codespace_domain:
+        _default_js_url = f"https://{_codespace_name}-8234.{_codespace_domain}"
+    else:
+        _default_js_url = "http://localhost:8234"
+    JS_URL: str = os.getenv("JS_URL", _default_js_url).rstrip("/")
 else:
     JS_URL = os.getenv("JS_URL", "").rstrip("/")
 
