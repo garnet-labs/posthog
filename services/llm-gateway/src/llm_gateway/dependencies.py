@@ -8,7 +8,12 @@ from fastapi import Depends, HTTPException, Request, status
 
 from llm_gateway.auth.models import AuthenticatedUser
 from llm_gateway.auth.service import AuthService, get_auth_service
-from llm_gateway.products.config import ALLOWED_PRODUCTS, check_product_access, resolve_product_alias
+from llm_gateway.products.config import (
+    ALLOWED_PRODUCTS,
+    check_product_access,
+    get_product_config,
+    resolve_product_alias,
+)
 from llm_gateway.rate_limiting.cost_refresh import ensure_costs_fresh
 from llm_gateway.rate_limiting.runner import ThrottleRunner
 from llm_gateway.rate_limiting.throttles import ThrottleContext
@@ -95,9 +100,21 @@ async def enforce_throttles(
     ensure_costs_fresh()
     product = get_product_from_request(request)
 
-    # Always use the authenticated user's ID for rate limiting.
-    # The client-provided 'user' param must NOT be used for quota enforcement.
-    end_user_id = str(user.user_id)
+    # For internal service products (e.g. temporal workers), trust the
+    # client-provided 'user' param for per-team rate limiting.
+    # For end-user-facing products, always use the authenticated user's ID
+    # to prevent rate limit poisoning (see #50542).
+    product_config = get_product_config(product)
+    client_user_id = None
+    if product_config and product_config.trust_client_user_id:
+        body = await get_cached_body(request)
+        if body:
+            try:
+                data: dict[str, Any] = json.loads(body)
+                client_user_id = data.get("user")
+            except (json.JSONDecodeError, TypeError):
+                pass
+    end_user_id = client_user_id or str(user.user_id)
 
     context = ThrottleContext(
         user=user,

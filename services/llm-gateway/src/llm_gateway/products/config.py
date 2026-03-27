@@ -13,6 +13,10 @@ class ProductConfig:
     allowed_application_ids: frozenset[str] | None = None  # None = all allowed
     allowed_models: frozenset[str] | None = None  # None = all allowed
     allow_api_keys: bool = True
+    # When True, use the client-provided 'user' param for rate limiting instead
+    # of the authenticated user's ID. Only enable for internal service products
+    # where there is no risk of rate limit poisoning (e.g. temporal workers).
+    trust_client_user_id: bool = False
 
 
 # OAuth application IDs per region
@@ -94,6 +98,7 @@ PRODUCTS: Final[dict[str, ProductConfig]] = {
         allowed_application_ids=None,
         allowed_models=frozenset({"gpt-4.1-nano", "gpt-4.1-mini"}),
         allow_api_keys=True,
+        trust_client_user_id=True,
     ),
     "llma_eval_summary": ProductConfig(
         allowed_application_ids=None,
