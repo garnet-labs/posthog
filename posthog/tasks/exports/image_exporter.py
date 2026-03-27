@@ -46,15 +46,6 @@ def _build_cache_keys_param(insight_cache_keys: Optional[dict[int, str]]) -> str
     return f"&cache_keys={quote(json.dumps(insight_cache_keys))}"
 
 
-def _build_variables_override_param(exported_asset: ExportedAsset) -> str:
-    if not exported_asset.export_context:
-        return ""
-    variables_override = exported_asset.export_context.get("variables_override")
-    if not variables_override:
-        return ""
-    return f"&variables={quote(json.dumps(variables_override))}"
-
-
 TMP_DIR = "/tmp"  # NOTE: Externalise this to ENV var
 
 # Newer versions of selenium seem to include the search bar in the height calculation.
@@ -162,10 +153,7 @@ def _export_to_png(
             show_legend = exported_asset.insight.show_legend
             legend_param = "&legend=true" if show_legend else ""
             cache_keys_param = _build_cache_keys_param(insight_cache_keys)
-            variables_param = _build_variables_override_param(exported_asset)
-            url_to_render = absolute_uri(
-                f"/exporter?token={access_token}{legend_param}{cache_keys_param}{variables_param}"
-            )
+            url_to_render = absolute_uri(f"/exporter?token={access_token}{legend_param}{cache_keys_param}")
             wait_for_css_selector = ".ExportedInsight"
             query = exported_asset.insight.query or {}
             source = query.get("source", query)  # This to handle the InsightVizNode wrapper
@@ -434,17 +422,6 @@ def export_image(
                     ).first()
                     if tile:
                         tile_filters_override = tile.filters_overrides
-
-                # Ensure dashboard variable overrides are stored in export_context so
-                # the headless browser can apply them when rendering the insight
-                if dashboard_variables and not (
-                    exported_asset.export_context and exported_asset.export_context.get("variables_override")
-                ):
-                    exported_asset.export_context = {
-                        **(exported_asset.export_context or {}),
-                        "variables_override": dashboard_variables,
-                    }
-                    exported_asset.save(update_fields=["export_context"])
 
                 with upgrade_query(exported_asset.insight):
                     result = calculate_for_query_based_insight(

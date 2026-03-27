@@ -88,17 +88,7 @@ function SharedDashboardAutoRefresh({ dashboardId }: { dashboardId: number }): J
 
 export function Exporter(props: ExportedData): JSX.Element {
     // NOTE: Mounting the logic is important as it is used by sub-logics
-    const {
-        type,
-        dashboard,
-        insight,
-        recording,
-        themes,
-        accessToken,
-        exportToken,
-        variables_override,
-        ...exportOptions
-    } = props
+    const { type, dashboard, insight, recording, themes, accessToken, exportToken, ...exportOptions } = props
     const { whitelabel, showInspector = false } = exportOptions
     const forcedTheme = resolveForcedTheme(exportOptions.theme)
 
@@ -179,12 +169,7 @@ export function Exporter(props: ExportedData): JSX.Element {
                     ) : null
                 ) : null}
                 {insight ? (
-                    <ExportedInsight
-                        insight={insight}
-                        themes={themes!}
-                        exportOptions={exportOptions}
-                        variablesOverride={variables_override}
-                    />
+                    <ExportedInsight insight={insight} themes={themes!} exportOptions={exportOptions} />
                 ) : dashboard ? (
                     <>
                         {type !== ExportType.Image && <SharedDashboardAutoRefresh dashboardId={dashboard.id} />}

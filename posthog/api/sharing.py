@@ -622,18 +622,6 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
                     message="Failed to parse cache_keys parameter - continuing without it",
                 )
 
-        # Parse variables parameter if present (used by image exporter to apply dashboard variable overrides)
-        export_variables_override: Optional[dict[str, Any]] = None
-        if variables_param := request.GET.get("variables"):
-            try:
-                export_variables_override = json.loads(variables_param)
-            except (json.JSONDecodeError, ValueError, TypeError):
-                logger.warning(
-                    "export_variables_parse_error",
-                    variables_param=variables_param,
-                    message="Failed to parse variables parameter - continuing without it",
-                )
-
         context = {
             "view": self,
             "request": request,
@@ -744,8 +732,6 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
             insight_data = InsightSerializer(resource.insight, many=False, context=insight_context).data
             exported_data.update({"insight": insight_data})
             exported_data.update({"themes": get_themes_for_team(resource.team)})
-            if export_variables_override:
-                exported_data.update({"variables_override": export_variables_override})
         elif resource.dashboard and not resource.dashboard.deleted:
             asset_title = resource.dashboard.name
             asset_description = resource.dashboard.description or ""
