@@ -3,12 +3,18 @@
   "checkpoint_id": "83e99c8f74f4",
   "strategy": "manual-commit",
   "branch": "signals/reviewer-ui-and-tasks-fixes",
-  "checkpoints_count": 0,
+  "checkpoints_count": 1,
   "files_touched": [
     "frontend/src/lib/api.ts",
     "frontend/src/scenes/inbox/InboxScene.tsx",
     "frontend/src/scenes/inbox/inboxSceneLogic.ts",
     "frontend/src/scenes/inbox/types.ts",
+    "products/signals/backend/migrations/max_migration.txt",
+    "products/signals/backend/models.py",
+    "products/signals/backend/report_generation/research.py",
+    "products/signals/backend/serializers.py",
+    "products/signals/backend/temporal/buffer.py",
+    "products/signals/backend/views.py",
     "products/tasks/backend/services/connection_token.py",
     "products/tasks/frontend/lib/parse-logs.test.ts",
     "products/tasks/frontend/lib/parse-logs.ts"
@@ -19,6 +25,12 @@
       "transcript": "/83/e99c8f74f4/0/full.jsonl",
       "content_hash": "/83/e99c8f74f4/0/content_hash.txt",
       "prompt": ""
+    },
+    {
+      "metadata": "/83/e99c8f74f4/1/metadata.json",
+      "transcript": "/83/e99c8f74f4/1/full.jsonl",
+      "content_hash": "/83/e99c8f74f4/1/content_hash.txt",
+      "prompt": "/83/e99c8f74f4/1/prompt.txt"
     }
   ],
   "token_usage": {
