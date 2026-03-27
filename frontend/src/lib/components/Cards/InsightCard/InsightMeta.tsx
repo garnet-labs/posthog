@@ -518,6 +518,13 @@ export function InsightMeta({
                                         export_format: ExporterFormat.PNG,
                                         insight: insight.id,
                                         dashboard: insightLogicProps.dashboardId,
+                                        ...(variablesOverride
+                                            ? {
+                                                  export_context: {
+                                                      variables_override: variablesOverride,
+                                                  } as any,
+                                              }
+                                            : {}),
                                     },
                                     {
                                         export_format: ExporterFormat.CSV,
