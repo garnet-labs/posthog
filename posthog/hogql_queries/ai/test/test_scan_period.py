@@ -1,12 +1,17 @@
 from posthog.test.base import BaseTest
 
 from posthog.hogql_queries.ai.scan_period import (
+    EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD,
+    PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD,
     SCAN_PERIOD_DAYS,
     TaxonomyVolumeTier,
     get_scan_period_days,
     get_taxonomy_volume_tier,
     should_use_postgres_for_events,
 )
+
+from products.event_definitions.backend.models.event_definition import EventDefinition
+from products.event_definitions.backend.models.property_definition import PropertyDefinition
 
 
 class TestTaxonomyVolumeTier(BaseTest):
@@ -79,6 +84,30 @@ class TestTaxonomyVolumeTier(BaseTest):
         self._set_org_usage(event_usage=500_000_000)
         self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.EXTRA_HIGH)
 
+    def test_low_volume_with_high_event_cardinality_bumps_to_medium(self):
+        self._set_org_usage(event_usage=50_000)
+        for i in range(EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD + 1):
+            EventDefinition.objects.create(team=self.team, name=f"event_{i}")
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+    def test_low_volume_with_high_property_cardinality_bumps_to_medium(self):
+        self._set_org_usage(event_usage=50_000)
+        for i in range(PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD + 1):
+            PropertyDefinition.objects.create(team=self.team, name=f"prop_{i}", type=PropertyDefinition.Type.EVENT)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+    def test_low_volume_with_low_cardinality_stays_low(self):
+        self._set_org_usage(event_usage=50_000)
+        for i in range(10):
+            EventDefinition.objects.create(team=self.team, name=f"event_{i}")
+        for i in range(20):
+            PropertyDefinition.objects.create(team=self.team, name=f"prop_{i}", type=PropertyDefinition.Type.EVENT)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
+
+    def test_high_volume_ignores_cardinality(self):
+        self._set_org_usage(event_usage=20_000_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
+
 
 class TestGetScanPeriodDays(BaseTest):
     def _set_org_usage(self, event_usage: int):
@@ -128,4 +157,10 @@ class TestShouldUsePostgresForEvents(BaseTest):
 
     def test_no_usage_data_uses_clickhouse(self):
         self._set_org_usage(event_usage=None)
+        self.assertFalse(should_use_postgres_for_events(self.team))
+
+    def test_low_volume_high_cardinality_uses_clickhouse(self):
+        self._set_org_usage(event_usage=50_000)
+        for i in range(EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD + 1):
+            EventDefinition.objects.create(team=self.team, name=f"event_{i}")
         self.assertFalse(should_use_postgres_for_events(self.team))
