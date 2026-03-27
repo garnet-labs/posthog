@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "83f91723a1bd",
+  "strategy": "manual-commit",
+  "branch": "signals/reviewer-ui-and-tasks-fixes",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "products/signals/backend/migrations/0014_add_suggested_reviewer_user_ids.py",
+    "products/signals/backend/migrations/max_migration.txt",
+    "products/signals/backend/models.py",
+    "products/signals/backend/report_generation/research.py",
+    "products/signals/backend/report_generation/resolve_reviewers.py",
+    "products/signals/backend/serializers.py",
+    "products/signals/backend/temporal/buffer.py",
+    "products/signals/backend/views.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/83/f91723a1bd/0/metadata.json",
+      "transcript": "/83/f91723a1bd/0/full.jsonl",
+      "content_hash": "/83/f91723a1bd/0/content_hash.txt",
+      "prompt": "/83/f91723a1bd/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 21,
+    "cache_creation_tokens": 14180,
+    "cache_read_tokens": 876874,
+    "output_tokens": 2476,
+    "api_call_count": 19
+  }
+}
