@@ -1,4 +1,4 @@
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from psycopg import OperationalError
 from sshtunnel import BaseSSHTunnelForwarderError
@@ -12,11 +12,11 @@ from posthog.schema import (
 )
 
 from posthog.exceptions_capture import capture_exception
-from posthog.temporal.data_imports.pipelines.pipeline.typings import SourceInputs, SourceResponse
-from posthog.temporal.data_imports.sources.common.base import FieldType, SimpleSource
-from posthog.temporal.data_imports.sources.common.mixins import SSHTunnelMixin, ValidateDatabaseHostMixin
+from posthog.temporal.data_imports.pipelines.pipeline.typings import SourceInputs
+from posthog.temporal.data_imports.sources.common.base import FieldType
 from posthog.temporal.data_imports.sources.common.registry import SourceRegistry
 from posthog.temporal.data_imports.sources.common.schema import SourceSchema
+from posthog.temporal.data_imports.sources.common.sql_source import SQLSource
 from posthog.temporal.data_imports.sources.generated_configs import PostgresSourceConfig
 from posthog.temporal.data_imports.sources.postgres.postgres import (
     SSL_REQUIRED_AFTER_DATE,
@@ -42,10 +42,18 @@ PostgresErrors = {
 
 
 @SourceRegistry.register
-class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, ValidateDatabaseHostMixin):
+class PostgresSource(SQLSource[PostgresSourceConfig]):
+    _schema_fetcher = staticmethod(get_postgres_schemas)
+    _incremental_filter = staticmethod(filter_postgres_incremental_fields)
+    _source_creator = staticmethod(postgres_source)
+
     def __init__(self, source_name: str = "Postgres"):
         super().__init__()
         self.source_name = source_name
+
+    @property
+    def source_display_name(self) -> str:
+        return self.source_name
 
     @property
     def source_type(self) -> ExternalDataSourceType:
@@ -148,13 +156,28 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             "No space left on device": "Source database ran out of disk space. Free up disk space on your database server or add an index on your incremental field to reduce temp file usage.",
         }
 
+    def _get_extra_source_kwargs(self, config: PostgresSourceConfig, inputs: SourceInputs) -> dict[str, Any]:
+        from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
+
+        schema = ExternalDataSchema.objects.select_related("source").get(id=inputs.schema_id)
+        # Require SSL for sources created after the cutoff date
+        require_ssl = schema.source.created_at >= SSL_REQUIRED_AFTER_DATE
+
+        return {
+            "sslmode": "prefer",
+            "chunk_size_override": schema.chunk_size_override,
+            "team_id": inputs.team_id,
+            "require_ssl": require_ssl,
+        }
+
+    # -- Overrides for Postgres-specific behavior --
+
     def get_schemas(
         self, config: PostgresSourceConfig, team_id: int, with_counts: bool = False, names: list[str] | None = None
     ) -> list[SourceSchema]:
-        schemas = []
-
+        # Postgres additionally fetches foreign keys and row counts
         with self.with_ssh_tunnel(config) as (host, port):
-            db_schemas = get_postgres_schemas(
+            db_schemas = self._schema_fetcher(
                 host=host,
                 port=port,
                 user=config.user,
@@ -186,8 +209,9 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             else:
                 row_counts = {}
 
+        schemas: list[SourceSchema] = []
         for table_name, columns in db_schemas.items():
-            incremental_field_tuples = filter_postgres_incremental_fields(columns)
+            incremental_field_tuples = self._incremental_filter(columns)
             incremental_fields: list[IncrementalField] = [
                 {
                     "label": field_name,
@@ -216,12 +240,15 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
     def validate_credentials(
         self, config: PostgresSourceConfig, team_id: int, schema_name: Optional[str] = None
     ) -> tuple[bool, str | None]:
+        # Postgres has SSLRequiredError and OperationalError-specific handling
+        c = self._config(config)
+
         is_ssh_valid, ssh_valid_errors = self.ssh_tunnel_is_valid(config, team_id)
         if not is_ssh_valid:
             return is_ssh_valid, ssh_valid_errors
 
         valid_host, host_errors = self.is_database_host_valid(
-            config.host, team_id, using_ssh_tunnel=config.ssh_tunnel.enabled if config.ssh_tunnel else False
+            c.host, team_id, using_ssh_tunnel=c.ssh_tunnel.enabled if c.ssh_tunnel else False
         )
         if not valid_host:
             return valid_host, host_errors
@@ -237,16 +264,22 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                     return False, value
 
             capture_exception(e)
-            return False, f"Could not connect to {self.source_name}. Please check all connection details are valid."
+            return (
+                False,
+                f"Could not connect to {self.source_display_name}. Please check all connection details are valid.",
+            )
         except BaseSSHTunnelForwarderError as e:
             return (
                 False,
                 e.value
-                or f"Could not connect to {self.source_name} via the SSH tunnel. Please check all connection details are valid.",
+                or f"Could not connect to {self.source_display_name} via the SSH tunnel. Please check all connection details are valid.",
             )
         except Exception as e:
             capture_exception(e)
-            return False, f"Could not connect to {self.source_name}. Please check all connection details are valid."
+            return (
+                False,
+                f"Could not connect to {self.source_display_name}. Please check all connection details are valid.",
+            )
 
         return True, None
 
@@ -262,31 +295,3 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                 database=config.database,
                 require_ssl=require_ssl,
             )
-
-    def source_for_pipeline(self, config: PostgresSourceConfig, inputs: SourceInputs) -> SourceResponse:
-        from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
-
-        ssh_tunnel = self.make_ssh_tunnel_func(config)
-
-        schema = ExternalDataSchema.objects.select_related("source").get(id=inputs.schema_id)
-
-        # Require SSL for sources created after the cutoff date
-        require_ssl = schema.source.created_at >= SSL_REQUIRED_AFTER_DATE
-
-        return postgres_source(
-            tunnel=ssh_tunnel,
-            user=config.user,
-            password=config.password,
-            database=config.database,
-            sslmode="prefer",
-            schema=config.schema,
-            table_names=[inputs.schema_name],
-            should_use_incremental_field=inputs.should_use_incremental_field,
-            logger=inputs.logger,
-            incremental_field=inputs.incremental_field,
-            incremental_field_type=inputs.incremental_field_type,
-            db_incremental_field_last_value=inputs.db_incremental_field_last_value,
-            chunk_size_override=schema.chunk_size_override,
-            team_id=inputs.team_id,
-            require_ssl=require_ssl,
-        )
