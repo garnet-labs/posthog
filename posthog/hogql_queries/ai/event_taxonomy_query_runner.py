@@ -149,7 +149,10 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
 
     def _get_subquery_filter(self) -> ast.Expr:
         scan_days = get_scan_period_days(self.team)
-        date_filter = parse_expr(f"timestamp >= now() - INTERVAL {scan_days} DAY")
+        date_filter = parse_expr(
+            "timestamp >= now() - INTERVAL {scan_days} DAY",
+            placeholders={"scan_days": ast.Constant(value=scan_days)},
+        )
         filter_expr: list[ast.Expr] = [date_filter]
         if self.query.event:
             filter_expr.append(

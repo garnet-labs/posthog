@@ -37,7 +37,7 @@ from posthog.schema import (
 )
 
 from posthog.event_usage import EventSource
-from posthog.hogql_queries.ai.scan_period import TaxonomyVolumeTier, get_taxonomy_volume_tier
+from posthog.hogql_queries.ai.scan_period import should_use_postgres_for_events
 from posthog.hogql_queries.ai.team_taxonomy_query_runner import TeamTaxonomyQueryRunner
 from posthog.hogql_queries.query_runner import ExecutionMode
 from posthog.models import Team
@@ -228,13 +228,9 @@ def _process_events_data(
     team: Team,
     limit: int | None = None,
     offset: int | None = None,
-    volume_tier: TaxonomyVolumeTier | None = None,
 ) -> tuple[list[dict], dict[str, str], bool]:
     """Common logic for processing events and building event data."""
-    if volume_tier is None:
-        volume_tier = get_taxonomy_volume_tier(team)
-
-    if volume_tier == TaxonomyVolumeTier.LOW:
+    if should_use_postgres_for_events(team):
         events, has_more = _fetch_events_from_postgres(team, limit=limit, offset=offset)
     else:
         events, has_more = _fetch_events_from_clickhouse(team, limit=limit, offset=offset)
@@ -293,11 +289,8 @@ def format_events_yaml(
     team: Team,
     limit: int | None = None,
     offset: int | None = None,
-    volume_tier: TaxonomyVolumeTier | None = None,
 ) -> str:
-    processed_events, _, has_more = _process_events_data(
-        events_in_context, team, limit=limit, offset=offset, volume_tier=volume_tier
-    )
+    processed_events, _, has_more = _process_events_data(events_in_context, team, limit=limit, offset=offset)
 
     formatted_events = ["events:"]
     for event_data in processed_events:

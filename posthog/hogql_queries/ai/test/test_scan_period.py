@@ -1,5 +1,7 @@
 from posthog.test.base import BaseTest
 
+from parameterized import parameterized
+
 from posthog.hogql_queries.ai.scan_period import (
     EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD,
     PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD,
@@ -24,65 +26,31 @@ class TestTaxonomyVolumeTier(BaseTest):
             self.organization.usage = None
         self.organization.save(update_fields=["usage"])
 
-    def test_no_usage_data_returns_medium(self):
-        self._set_org_usage(usage=None)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
-
-    def test_empty_usage_returns_medium(self):
-        self._set_org_usage(usage={})
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
-
-    def test_missing_events_key_returns_medium(self):
-        self._set_org_usage(usage={"recordings": {"usage": 100}})
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
-
-    def test_none_event_usage_returns_low(self):
-        self._set_org_usage(usage={"events": {"usage": None, "limit": 100}})
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
-
-    def test_zero_events_returns_low(self):
-        self._set_org_usage(event_usage=0)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
-
-    def test_low_volume(self):
-        self._set_org_usage(event_usage=50_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
-
-    def test_low_volume_boundary(self):
-        self._set_org_usage(event_usage=99_999)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
-
-    def test_medium_volume_lower_boundary(self):
-        self._set_org_usage(event_usage=100_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
-
-    def test_medium_volume(self):
-        self._set_org_usage(event_usage=1_000_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
-
-    def test_medium_volume_upper_boundary(self):
-        self._set_org_usage(event_usage=5_000_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
-
-    def test_high_volume_lower_boundary(self):
-        self._set_org_usage(event_usage=5_000_001)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
-
-    def test_high_volume(self):
-        self._set_org_usage(event_usage=20_000_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
-
-    def test_high_volume_upper_boundary(self):
-        self._set_org_usage(event_usage=50_000_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
-
-    def test_extra_high_volume(self):
-        self._set_org_usage(event_usage=50_000_001)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.EXTRA_HIGH)
-
-    def test_very_high_volume(self):
-        self._set_org_usage(event_usage=500_000_000)
-        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.EXTRA_HIGH)
+    @parameterized.expand(
+        [
+            ("no_usage_data", None, None, TaxonomyVolumeTier.MEDIUM),
+            ("empty_usage", {}, None, TaxonomyVolumeTier.MEDIUM),
+            ("missing_events_key", {"recordings": {"usage": 100}}, None, TaxonomyVolumeTier.MEDIUM),
+            ("none_event_usage", {"events": {"usage": None, "limit": 100}}, None, TaxonomyVolumeTier.LOW),
+            ("zero_events", None, 0, TaxonomyVolumeTier.LOW),
+            ("low_volume", None, 50_000, TaxonomyVolumeTier.LOW),
+            ("low_volume_boundary", None, 99_999, TaxonomyVolumeTier.LOW),
+            ("medium_lower_boundary", None, 100_000, TaxonomyVolumeTier.MEDIUM),
+            ("medium_volume", None, 1_000_000, TaxonomyVolumeTier.MEDIUM),
+            ("medium_upper_boundary", None, 5_000_000, TaxonomyVolumeTier.MEDIUM),
+            ("high_lower_boundary", None, 5_000_001, TaxonomyVolumeTier.HIGH),
+            ("high_volume", None, 20_000_000, TaxonomyVolumeTier.HIGH),
+            ("high_upper_boundary", None, 50_000_000, TaxonomyVolumeTier.HIGH),
+            ("extra_high", None, 50_000_001, TaxonomyVolumeTier.EXTRA_HIGH),
+            ("very_high", None, 500_000_000, TaxonomyVolumeTier.EXTRA_HIGH),
+        ]
+    )
+    def test_volume_tier(self, _name, usage_dict, event_usage, expected_tier):
+        if usage_dict is not None:
+            self._set_org_usage(usage=usage_dict)
+        else:
+            self._set_org_usage(event_usage=event_usage)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), expected_tier)
 
     def test_low_volume_with_high_event_cardinality_bumps_to_medium(self):
         self._set_org_usage(event_usage=50_000)
@@ -114,21 +82,17 @@ class TestGetScanPeriodDays(BaseTest):
         self.organization.usage = {"events": {"usage": event_usage, "limit": 1_000_000, "todays_usage": 0}}
         self.organization.save(update_fields=["usage"])
 
-    def test_low_volume_returns_7_days(self):
-        self._set_org_usage(event_usage=50_000)
-        self.assertEqual(get_scan_period_days(self.team), 7)
-
-    def test_medium_volume_returns_30_days(self):
-        self._set_org_usage(event_usage=1_000_000)
-        self.assertEqual(get_scan_period_days(self.team), 30)
-
-    def test_high_volume_returns_7_days(self):
-        self._set_org_usage(event_usage=20_000_000)
-        self.assertEqual(get_scan_period_days(self.team), 7)
-
-    def test_extra_high_volume_returns_3_days(self):
-        self._set_org_usage(event_usage=100_000_000)
-        self.assertEqual(get_scan_period_days(self.team), 3)
+    @parameterized.expand(
+        [
+            ("low_volume", 50_000, 7),
+            ("medium_volume", 1_000_000, 30),
+            ("high_volume", 20_000_000, 7),
+            ("extra_high_volume", 100_000_000, 3),
+        ]
+    )
+    def test_scan_period_days(self, _name, event_usage, expected_days):
+        self._set_org_usage(event_usage=event_usage)
+        self.assertEqual(get_scan_period_days(self.team), expected_days)
 
     def test_all_tiers_have_scan_periods(self):
         for tier in TaxonomyVolumeTier:
@@ -143,17 +107,16 @@ class TestShouldUsePostgresForEvents(BaseTest):
             self.organization.usage = None
         self.organization.save(update_fields=["usage"])
 
-    def test_low_volume_uses_postgres(self):
-        self._set_org_usage(event_usage=50_000)
-        self.assertTrue(should_use_postgres_for_events(self.team))
-
-    def test_medium_volume_uses_clickhouse(self):
-        self._set_org_usage(event_usage=1_000_000)
-        self.assertFalse(should_use_postgres_for_events(self.team))
-
-    def test_high_volume_uses_clickhouse(self):
-        self._set_org_usage(event_usage=20_000_000)
-        self.assertFalse(should_use_postgres_for_events(self.team))
+    @parameterized.expand(
+        [
+            ("low_volume", 50_000, True),
+            ("medium_volume", 1_000_000, False),
+            ("high_volume", 20_000_000, False),
+        ]
+    )
+    def test_should_use_postgres(self, _name, event_usage, expected):
+        self._set_org_usage(event_usage=event_usage)
+        self.assertEqual(should_use_postgres_for_events(self.team), expected)
 
     def test_no_usage_data_uses_clickhouse(self):
         self._set_org_usage(event_usage=None)
