@@ -65,9 +65,9 @@ class ProductTeamQuerySet(TeamScopedQuerySet):
 
     def unscoped(self) -> ProductTeamQuerySet:
         """Return a queryset that bypasses automatic team scoping."""
-        return ProductTeamQuerySet(self.model, using=self._db)
+        return ProductTeamQuerySet(self.model, using=self._db)  # type: ignore[attr-defined]
 
-    def _apply_team_filter(self, team_id: int) -> ProductTeamQuerySet:  # type: ignore[override]
+    def _apply_team_filter(self, team_id: int) -> ProductTeamQuerySet:
         """Apply team filter using plain team_id (no JOIN)."""
         effective_id = _resolve_effective_team_id(team_id)
         return super(TeamScopedQuerySet, self).filter(team_id=effective_id)

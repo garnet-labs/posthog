@@ -22,7 +22,7 @@ class TestProductTeamManagerScoping(SimpleTestCase):
         from products.visual_review.backend.models import Repo
 
         mgr: ProductTeamManager = ProductTeamManager()
-        mgr.model = Repo  # type: ignore[assignment]
+        mgr.model = Repo
         mgr.auto_created = True
         return mgr
 

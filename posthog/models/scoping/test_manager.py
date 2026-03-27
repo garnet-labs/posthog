@@ -10,7 +10,7 @@ from posthog.models.team import Team
 class TestTeamScopedManager(BaseTest):
     def _make_manager(self) -> TeamScopedManager[FeatureFlag]:
         manager: TeamScopedManager[FeatureFlag] = TeamScopedManager()
-        manager.model = FeatureFlag  # type: ignore[assignment]
+        manager.model = FeatureFlag
         manager._db = "default"
         return manager
 

@@ -81,7 +81,7 @@ class TeamScopedQuerySet(models.QuerySet[T]):
 
         This creates a fresh queryset without any team filtering applied.
         """
-        return TeamScopedQuerySet(self.model, using=self._db)
+        return TeamScopedQuerySet(self.model, using=self._db)  # type: ignore[attr-defined]
 
 
 class TeamScopedManager(models.Manager[T]):
