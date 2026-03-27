@@ -31,19 +31,13 @@ from posthog.temporal.data_imports.pipelines.pipeline.utils import (
     build_pyarrow_decimal_type,
     table_from_iterator,
 )
-from posthog.temporal.data_imports.sources.common.sql import Column, Table
+from posthog.temporal.data_imports.sources.common.sql_source import Column, SSLRequiredError, Table
 
 from products.data_warehouse.backend.types import IncrementalFieldType, PartitionSettings
 
 # Sources created after this date must use SSL/TLS connections
 SSL_REQUIRED_AFTER_DATE = datetime(2026, 2, 18, tzinfo=UTC)
 IDENTIFIER_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-class SSLRequiredError(Exception):
-    """Raised when SSL/TLS is required but the database does not support it."""
-
-    pass
 
 
 def _get_sslmode(require_ssl: bool) -> str:
@@ -685,6 +679,35 @@ def _get_partition_settings(
     return PartitionSettings(partition_count=partition_count, partition_size=partition_size)
 
 
+# Mapping of Postgres type names (lowercase) to Arrow types for simple 1:1 conversions.
+# Special cases not covered here:
+#   - "numeric" / "decimal": requires numeric_precision + numeric_scale (handled in to_arrow_field)
+#   - array types (ending in "[]"): always mapped to pa.string()
+_POSTGRES_TYPE_MAP: dict[str, pa.DataType] = {
+    "bigint": pa.int64(),
+    "integer": pa.int32(),
+    "smallint": pa.int16(),
+    "real": pa.float32(),
+    "double precision": pa.float64(),
+    "text": pa.string(),
+    "varchar": pa.string(),
+    "character varying": pa.string(),
+    "date": pa.date32(),
+    "time": pa.time64("us"),
+    "time without time zone": pa.time64("us"),
+    "timestamp": pa.timestamp("us"),
+    "timestamp without time zone": pa.timestamp("us"),
+    "timestamptz": pa.timestamp("us", tz="UTC"),
+    "timestamp with time zone": pa.timestamp("us", tz="UTC"),
+    "interval": pa.duration("us"),
+    "boolean": pa.bool_(),
+    "bytea": pa.binary(),
+    "uuid": pa.string(),
+    "json": pa.string(),
+    "jsonb": pa.string(),
+}
+
+
 class PostgreSQLColumn(Column):
     """Implementation of the `Column` protocol for a PostgreSQL source.
 
@@ -716,48 +739,16 @@ class PostgreSQLColumn(Column):
 
     def to_arrow_field(self) -> pa.Field[pa.DataType]:
         """Return a `pyarrow.Field` that closely matches this column."""
-        arrow_type: pa.DataType
+        data_type = self.data_type.lower()
 
-        match self.data_type.lower():
-            case "bigint":
-                arrow_type = pa.int64()
-            case "integer":
-                arrow_type = pa.int32()
-            case "smallint":
-                arrow_type = pa.int16()
-            case "numeric" | "decimal":
-                if not self.numeric_precision or not self.numeric_scale:
-                    raise TypeError("expected `numeric_precision` and `numeric_scale` to be `int`, got `NoneType`")
-
-                arrow_type = build_pyarrow_decimal_type(self.numeric_precision, self.numeric_scale)
-            case "real":
-                arrow_type = pa.float32()
-            case "double precision":
-                arrow_type = pa.float64()
-            case "text" | "varchar" | "character varying":
-                arrow_type = pa.string()
-            case "date":
-                arrow_type = pa.date32()
-            case "time" | "time without time zone":
-                arrow_type = pa.time64("us")
-            case "timestamp" | "timestamp without time zone":
-                arrow_type = pa.timestamp("us")
-            case "timestamptz" | "timestamp with time zone":
-                arrow_type = pa.timestamp("us", tz="UTC")
-            case "interval":
-                arrow_type = pa.duration("us")
-            case "boolean":
-                arrow_type = pa.bool_()
-            case "bytea":
-                arrow_type = pa.binary()
-            case "uuid":
-                arrow_type = pa.string()
-            case "json" | "jsonb":
-                arrow_type = pa.string()
-            case _ if self.data_type.endswith("[]"):  # Array types
-                arrow_type = pa.string()
-            case _:
-                arrow_type = pa.string()
+        if data_type in ("numeric", "decimal"):
+            if not self.numeric_precision or not self.numeric_scale:
+                raise TypeError("expected `numeric_precision` and `numeric_scale` to be `int`, got `NoneType`")
+            arrow_type = build_pyarrow_decimal_type(self.numeric_precision, self.numeric_scale)
+        elif data_type.endswith("[]"):
+            arrow_type = pa.string()
+        else:
+            arrow_type = _POSTGRES_TYPE_MAP.get(data_type, pa.string())
 
         return pa.field(self.name, arrow_type, nullable=self.nullable)
 

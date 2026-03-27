@@ -4,7 +4,7 @@ import pytest
 
 import pyarrow as pa
 
-from posthog.temporal.data_imports.sources.common.sql import Column, Table, TableReference
+from posthog.temporal.data_imports.sources.common.sql_source.typing import Column, Table, TableReference
 
 
 class SimpleColumn(Column):
