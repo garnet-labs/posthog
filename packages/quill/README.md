@@ -93,10 +93,10 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/tabs
     - [ ] storybook
   - [x] primitives/textarea
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/toggle-group
     - [ ] storybook
   - [x] primitives/toggle-toggle
     - [ ] storybook
   - [x] primitives/tooltip
-    - [ ] storybook
+    - [x] storybook
