@@ -39,6 +39,49 @@ from products.dashboards.backend.models.dashboard_tile import DashboardTile
 
 logger = structlog.get_logger(__name__)
 
+# Node kinds that wrap other nodes (used for extracting variables from nested queries)
+WRAPPER_NODE_KINDS = [NodeKind.DATA_TABLE_NODE, NodeKind.DATA_VISUALIZATION_NODE, NodeKind.INSIGHT_VIZ_NODE]
+
+
+def _extract_variables_from_export_context(export_context: Optional[dict]) -> Optional[dict[str, dict]]:
+    """
+    Extract variables from export_context.source query if present.
+    Converts from query format { "var_id": { "variableId": "...", "code_name": "...", "value": "..." } }
+    to dashboard format { "var_id": { "code_name": "...", "value": "..." } }
+    """
+    if not export_context:
+        return None
+
+    source = export_context.get("source")
+    if not source:
+        return None
+
+    # Handle wrapper nodes (InsightVizNode, DataTableNode, etc.)
+    while source and source.get("kind") in [kind.value for kind in WRAPPER_NODE_KINDS]:
+        source = source.get("source")
+
+    if not source:
+        return None
+
+    # Only HogQL queries have variables
+    if source.get("kind") != NodeKind.HOG_QL_QUERY.value:
+        return None
+
+    query_variables = source.get("variables")
+    if not query_variables:
+        return None
+
+    # Convert to dashboard variables format (preserving code_name for map_stale_to_latest)
+    dashboard_variables = {}
+    for var_id, var_data in query_variables.items():
+        if isinstance(var_data, dict):
+            dashboard_variables[var_id] = {
+                "code_name": var_data.get("code_name"),
+                "value": var_data.get("value"),
+            }
+
+    return dashboard_variables if dashboard_variables else None
+
 
 def _build_cache_keys_param(insight_cache_keys: Optional[dict[int, str]]) -> str:
     if not insight_cache_keys:
@@ -410,12 +453,21 @@ def export_image(
                 )
 
                 # When exporting a single insight from a dashboard, apply the tile's filter overrides and dashboard variables
+                # Prefer variables from export_context (current session state) over dashboard.variables (saved state)
+                export_context_variables = _extract_variables_from_export_context(exported_asset.export_context)
                 dashboard_variables = None
                 tile_filters_override = None
+
+                if export_context_variables:
+                    # Variables from export_context reflect the current session state
+                    variables = list(InsightVariable.objects.filter(team=exported_asset.team).all())
+                    dashboard_variables = map_stale_to_latest(export_context_variables, variables)
+                elif exported_asset.dashboard and exported_asset.dashboard.variables:
+                    # Fall back to saved dashboard variables
+                    variables = list(InsightVariable.objects.filter(team=exported_asset.team).all())
+                    dashboard_variables = map_stale_to_latest(exported_asset.dashboard.variables, variables)
+
                 if exported_asset.dashboard:
-                    if exported_asset.dashboard.variables:
-                        variables = list(InsightVariable.objects.filter(team=exported_asset.team).all())
-                        dashboard_variables = map_stale_to_latest(exported_asset.dashboard.variables, variables)
                     tile = DashboardTile.objects.filter(
                         dashboard=exported_asset.dashboard,
                         insight=exported_asset.insight,
