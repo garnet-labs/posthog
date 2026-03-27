@@ -62,9 +62,8 @@ python manage.py setup_local_api_key --add-scopes llm_gateway:read
 
 ## User attribution
 
-When using an OAuth Access Token, the user who's token it is is the user used for analytics and rate limiting.
-
-When calling the gateway on behalf of end-users with a Personal API Key, **always specify the end-user's identifier** if you want user based analytics / rate limiting:
+- **OAuth Access Token (`pha_`)**: The token holder's user ID is used for analytics and rate limiting.
+- **Personal API Key (`phx_`)**: The end-user identifier from the request body is used for analytics and rate limiting. Pass the `user` field (OpenAI) or `metadata.user_id` (Anthropic) so each end-user gets their own rate limit bucket.
 
 ### OpenAI SDK (Python)
 
@@ -79,25 +78,25 @@ client = OpenAI(
 response = client.chat.completions.create(
     model="gpt-5-mini",
     messages=[{"role": "user", "content": "Hello"}],
-    user="user_distinct_id_123",  # End-user attribution
+    user="user_distinct_id_123",  # End-user attribution and rate limiting
 )
 ```
 
 ### OpenAI SDK (TypeScript/JavaScript)
 
 ```typescript
-import OpenAI from 'openai'
+import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: 'https://gateway.us.posthog.com/v1',
-  apiKey: 'phx_your_api_key',
-})
+  baseURL: "https://gateway.us.posthog.com/v1",
+  apiKey: "phx_your_api_key",
+});
 
 const response = await client.chat.completions.create({
-  model: 'gpt-5-mini',
-  messages: [{ role: 'user', content: 'Hello' }],
-  user: 'user_distinct_id_123', // End-user attribution
-})
+  model: "gpt-5-mini",
+  messages: [{ role: "user", content: "Hello" }],
+  user: "user_distinct_id_123", // End-user attribution and rate limiting
+});
 ```
 
 ### Anthropic SDK (Python)
@@ -114,7 +113,7 @@ response = client.messages.create(
     model="claude-opus-4-5",
     max_tokens=1024,
     messages=[{"role": "user", "content": "Hello"}],
-    metadata={"user_id": "user_distinct_id_123"},  # End-user attribution
+    metadata={"user_id": "user_distinct_id_123"},  # End-user attribution and rate limiting
 )
 ```
 
@@ -219,7 +218,10 @@ Per-user cost caps using a burst + sustained pattern. Configured in `DEFAULT_USE
 
 Products without an explicit entry fall back to the **default: $100/24h burst, $1000/30d sustained**.
 
-User-level limits only apply when an `end_user_id` is present (OAuth token holder, or `user` param in the request body).
+How the `end_user_id` is determined depends on the auth method:
+
+- **OAuth Access Token**: Uses the authenticated token holder's user ID. Always present.
+- **Personal API Key**: Uses the client-provided identifier from the request body (`user` for OpenAI, `metadata.user_id` for Anthropic). If omitted, user-level limits are **not applied**.
 
 ## Error handling
 
