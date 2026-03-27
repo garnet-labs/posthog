@@ -262,11 +262,12 @@ function SentimentControls(): JSX.Element {
             <LemonButton
                 onClick={loadGenerations}
                 type="secondary"
-                icon={generationsLoading ? <Spinner textColored /> : <IconRefresh />}
+                icon={<IconRefresh />}
                 size="small"
+                loading={generationsLoading}
                 data-attr="llma-sentiment-reload"
             >
-                {generationsLoading ? 'Loading…' : 'Reload'}
+                Reload
             </LemonButton>
             <div className="flex items-center gap-2">
                 <Tooltip title="Filter by sentiment polarity. Each user message is classified as positive, negative, or neutral.">
