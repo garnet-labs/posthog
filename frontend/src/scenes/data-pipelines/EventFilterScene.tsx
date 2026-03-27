@@ -28,6 +28,10 @@ import {
     LemonTag,
 } from '@posthog/lemon-ui'
 
+import { getColorVar } from 'lib/colors'
+import { AppMetricsFilters } from 'lib/components/AppMetrics/AppMetricsFilters'
+import { appMetricsLogic } from 'lib/components/AppMetrics/appMetricsLogic'
+import { AppMetricSummary } from 'lib/components/AppMetrics/AppMetricSummary'
 import { IconDragHandle } from 'lib/lemon-ui/icons'
 import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
 import { SceneExport } from 'scenes/sceneTypes'
@@ -35,7 +39,13 @@ import { SceneExport } from 'scenes/sceneTypes'
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 
-import { eventFilterLogic, FilterNode, TestCase } from './eventFilterLogic'
+import {
+    eventFilterLogic,
+    EVENT_FILTER_MAX_CONDITIONS,
+    EVENT_FILTER_MAX_DEPTH,
+    FilterNode,
+    TestCase,
+} from './eventFilterLogic'
 
 export const scene: SceneExport = {
     component: EventFilterScene,
@@ -159,12 +169,15 @@ function ConditionEditor({
     node,
     path,
     onDelete,
+    showValidation,
 }: {
     node: FilterNode & { type: 'condition' }
     path: (string | number)[]
     onDelete?: () => void
+    showValidation?: boolean
 }): JSX.Element {
     const { updateTreeNode } = useActions(eventFilterLogic)
+    const isEmpty = showValidation && (!node.value || node.value.trim() === '')
     return (
         <div className="flex items-center gap-2 py-1">
             <LemonSelect
@@ -185,6 +198,7 @@ function ConditionEditor({
                 onChange={(value) => updateTreeNode(path, { ...node, value })}
                 placeholder="Value..."
                 className="flex-1"
+                status={isEmpty ? 'danger' : undefined}
             />
             {onDelete && (
                 <LemonButton icon={<IconTrash />} size="xsmall" status="danger" onClick={onDelete} tooltip="Remove" />
@@ -198,11 +212,13 @@ function GroupEditor({
     path,
     depth,
     onDelete,
+    showValidation,
 }: {
     node: FilterNode & { type: 'and' | 'or' }
     path: (string | number)[]
     depth: number
     onDelete?: () => void
+    showValidation?: boolean
 }): JSX.Element {
     const { updateTreeNode, removeChild, wrapInNot, addChild } = useActions(eventFilterLogic)
 
@@ -277,6 +293,7 @@ function GroupEditor({
                                     path={childPath}
                                     depth={depth + 1}
                                     onDelete={() => removeChild(path, i)}
+                                    showValidation={showValidation}
                                 />
                             </SortableItem>
                         )
@@ -312,16 +329,18 @@ function NodeEditor({
     path,
     depth,
     onDelete,
+    showValidation,
 }: {
     node: FilterNode
     path: (string | number)[]
     depth: number
     onDelete?: () => void
+    showValidation?: boolean
 }): JSX.Element {
     const { unwrapNot } = useActions(eventFilterLogic)
 
     if (node.type === 'condition') {
-        return <ConditionEditor node={node} path={path} onDelete={onDelete} />
+        return <ConditionEditor node={node} path={path} onDelete={onDelete} showValidation={showValidation} />
     }
     if (node.type === 'not') {
         return (
@@ -341,11 +360,16 @@ function NodeEditor({
                         />
                     )}
                 </div>
-                <NodeEditor node={node.child} path={[...path, 'child']} depth={depth + 1} />
+                <NodeEditor
+                    node={node.child}
+                    path={[...path, 'child']}
+                    depth={depth + 1}
+                    showValidation={showValidation}
+                />
             </div>
         )
     }
-    return <GroupEditor node={node} path={path} depth={depth} onDelete={onDelete} />
+    return <GroupEditor node={node} path={path} depth={depth} onDelete={onDelete} showValidation={showValidation} />
 }
 
 // --- Expression display ---
@@ -402,6 +426,66 @@ function filterTreeToExpression(node: FilterNode, indent: number = 0): string {
     }
 }
 
+const EVENT_FILTER_METRIC_KEYS = ['dropped'] as const
+
+const EVENT_FILTER_METRICS_INFO: Record<string, { name: string; description: string; color: string }> = {
+    dropped: {
+        name: 'Events dropped by filters',
+        description: 'Total number of events dropped by this filter',
+        color: getColorVar('warning'),
+    },
+}
+
+function EventFilterMetrics({ filterId }: { filterId: string | null }): JSX.Element | null {
+    const logicKey = `event-filter-metrics-${filterId ?? 'none'}`
+
+    const logic = filterId
+        ? appMetricsLogic({
+              logicKey,
+              loadOnMount: true,
+              loadOnChanges: true,
+              forceParams: {
+                  appSource: 'event_filter',
+                  appSourceId: filterId,
+                  metricName: [...EVENT_FILTER_METRIC_KEYS],
+                  breakdownBy: 'metric_name',
+              },
+          })
+        : null
+
+    const { appMetricsTrendsLoading, getSingleTrendSeries } = useValues(logic ?? appMetricsLogic({ logicKey: 'noop' }))
+
+    if (!filterId) {
+        return null
+    }
+
+    return (
+        <div className="space-y-2">
+            <div className="flex items-center justify-between">
+                <label className="font-semibold">Metrics</label>
+                <AppMetricsFilters logicKey={logicKey} />
+            </div>
+            <div className="flex flex-row gap-2 flex-wrap">
+                {EVENT_FILTER_METRIC_KEYS.map((key) => (
+                    <AppMetricSummary
+                        key={key}
+                        name={EVENT_FILTER_METRICS_INFO[key].name}
+                        description={EVENT_FILTER_METRICS_INFO[key].description}
+                        loading={appMetricsTrendsLoading}
+                        timeSeries={getSingleTrendSeries(key)}
+                        previousPeriodTimeSeries={getSingleTrendSeries(key, true)}
+                        color={EVENT_FILTER_METRICS_INFO[key].color}
+                        colorIfZero={getColorVar('muted')}
+                    />
+                ))}
+            </div>
+            <p className="text-muted text-xs">
+                These counts are approximate. The actual number of dropped events may differ by a small percentage.
+            </p>
+        </div>
+    )
+}
+
 function nodeSummary(node: FilterNode): string {
     if (node.type === 'condition') {
         return `${node.field} ${node.operator} "${node.value}"`
@@ -415,7 +499,8 @@ function nodeSummary(node: FilterNode): string {
 // --- Main scene ---
 
 export function EventFilterScene(): JSX.Element {
-    const { filterForm, isFilterFormSubmitting, testResults, allTestsPass } = useValues(eventFilterLogic)
+    const { filterForm, isFilterFormSubmitting, testResults, allTestsPass, filterFormErrors, showFilterFormErrors } =
+        useValues(eventFilterLogic)
     const { setFilterFormValue, submitFilterForm, updateTreeNode, addTestCase, removeTestCase, updateTestCase } =
         useActions(eventFilterLogic)
     const [activeId, setActiveId] = useState<string | null>(null)
@@ -581,10 +666,30 @@ export function EventFilterScene(): JSX.Element {
                             you need more complex logic.
                         </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <label className="font-semibold">Enabled</label>
+
+                    <div
+                        className={`border rounded p-3 flex items-center justify-between ${
+                            filterForm.enabled ? 'border-success' : ''
+                        }`}
+                    >
+                        <div>
+                            <div className="font-semibold">
+                                {filterForm.enabled ? 'Filter is active' : 'Filter is disabled'}
+                            </div>
+                            <div className="text-muted text-sm">
+                                {filterForm.enabled
+                                    ? 'Matching events are being dropped from ingestion.'
+                                    : 'No events are being filtered. Enable to start dropping matching events.'}
+                            </div>
+                            {filterForm.enabled && !allTestsPass && filterForm.test_cases.length > 0 && (
+                                <div className="text-danger text-xs mt-1">
+                                    Tests failing — will be saved as disabled
+                                </div>
+                            )}
+                        </div>
                         <LemonSwitch
                             checked={filterForm.enabled}
+                            bordered
                             onChange={(value) => {
                                 if (value && !allTestsPass && filterForm.test_cases.length > 0) {
                                     lemonToast.error('Cannot enable filter while test cases are failing')
@@ -593,10 +698,9 @@ export function EventFilterScene(): JSX.Element {
                                 setFilterFormValue('enabled', value)
                             }}
                         />
-                        {filterForm.enabled && !allTestsPass && filterForm.test_cases.length > 0 && (
-                            <span className="text-danger text-xs">Tests failing — will be saved as disabled</span>
-                        )}
                     </div>
+
+                    <EventFilterMetrics filterId={filterForm.id} />
 
                     <div className="space-y-2">
                         <div className="flex items-start justify-between">
@@ -604,7 +708,9 @@ export function EventFilterScene(): JSX.Element {
                                 <label className="font-semibold">Drop events matching</label>
                                 <p className="text-muted text-sm mb-0">
                                     Build a filter expression. Drag conditions and groups to reorder or move between
-                                    groups.
+                                    groups. Maximum {EVENT_FILTER_MAX_CONDITIONS} conditions and{' '}
+                                    {EVENT_FILTER_MAX_DEPTH} levels of nesting. Empty groups are removed automatically
+                                    on save.
                                 </p>
                             </div>
                             <LemonButton size="small" type="secondary" onClick={() => setShowExpression(true)}>
@@ -618,8 +724,16 @@ export function EventFilterScene(): JSX.Element {
                             onDragEnd={handleDragEnd}
                         >
                             <div className="border rounded p-3">
-                                <NodeEditor node={filterForm.filter_tree} path={[]} depth={0} />
+                                <NodeEditor
+                                    node={filterForm.filter_tree}
+                                    path={[]}
+                                    depth={0}
+                                    showValidation={showFilterFormErrors}
+                                />
                             </div>
+                            {showFilterFormErrors && filterFormErrors.filter_tree && (
+                                <div className="text-danger text-sm mt-1">{filterFormErrors.filter_tree}</div>
+                            )}
                             <DragOverlay>
                                 {activeNode ? (
                                     <div className="bg-bg-light border rounded px-3 py-1 shadow-md text-sm">

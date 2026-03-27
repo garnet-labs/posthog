@@ -9,6 +9,7 @@ ALLOWED_OPERATORS = {"exact", "contains"}
 NODE_TYPES = {"and", "or", "not", "condition"}
 EXPECTED_RESULTS = {"drop", "ingest"}
 MAX_TREE_DEPTH = 5
+MAX_CONDITIONS = 20
 
 DEFAULT_FILTER_TREE = {"type": "or", "children": []}
 
@@ -62,11 +63,41 @@ class EventFilterConfig(UUIDTModel):
             validate_test_cases(self.test_cases)
 
     def save(self, *args, **kwargs):
+        if self.filter_tree:
+            self.filter_tree = prune_filter_tree(self.filter_tree)
         self.clean()
         super().save(*args, **kwargs)
 
 
-def validate_filter_tree(node: object, depth: int = 0, path: str = "root") -> None:
+def prune_filter_tree(node: dict) -> dict | None:
+    """Remove empty groups and collapse single-child groups."""
+    node_type = node.get("type")
+
+    if node_type == "condition":
+        return node
+
+    if node_type == "not":
+        child = prune_filter_tree(node.get("child", {}))
+        if child is None:
+            return None
+        return {**node, "child": child}
+
+    if node_type in ("and", "or"):
+        children = [prune_filter_tree(c) for c in node.get("children", [])]
+        children = [c for c in children if c is not None]
+        if len(children) == 0:
+            return None
+        if len(children) == 1:
+            return children[0]
+        return {**node, "children": children}
+
+    return node
+
+
+def validate_filter_tree(node: object, depth: int = 0, path: str = "root", _counter: list | None = None) -> None:
+    if _counter is None:
+        _counter = [0]  # mutable counter for total conditions across the tree
+
     if depth > MAX_TREE_DEPTH:
         raise ValidationError({"filter_tree": f"Tree exceeds maximum depth of {MAX_TREE_DEPTH} at {path}."})
 
@@ -80,17 +111,20 @@ def validate_filter_tree(node: object, depth: int = 0, path: str = "root") -> No
         )
 
     if node_type == "condition":
+        _counter[0] += 1
+        if _counter[0] > MAX_CONDITIONS:
+            raise ValidationError({"filter_tree": f"Filter exceeds maximum of {MAX_CONDITIONS} conditions."})
         _validate_condition(node, path)
     elif node_type == "not":
         if "child" not in node:
             raise ValidationError({"filter_tree": f"Node at {path}: 'not' node must have a 'child'."})
-        validate_filter_tree(node["child"], depth + 1, f"{path}.child")
+        validate_filter_tree(node["child"], depth + 1, f"{path}.child", _counter)
     elif node_type in ("and", "or"):
         children = node.get("children")
         if not isinstance(children, list):
             raise ValidationError({"filter_tree": f"Node at {path}: '{node_type}' node must have a 'children' list."})
         for i, child in enumerate(children):
-            validate_filter_tree(child, depth + 1, f"{path}.children[{i}]")
+            validate_filter_tree(child, depth + 1, f"{path}.children[{i}]", _counter)
 
 
 def _validate_condition(node: dict, path: str) -> None:
@@ -135,8 +169,29 @@ def validate_test_cases(test_cases: object) -> None:
                 raise ValidationError({"test_cases": f"Test case {i}: {field} must be a string."})
 
 
+def tree_has_conditions(node: object) -> bool:
+    """Check if a filter tree contains at least one condition leaf."""
+    if not isinstance(node, dict):
+        return False
+    node_type = node.get("type")
+    if node_type == "condition":
+        return True
+    if node_type == "not":
+        return tree_has_conditions(node.get("child"))
+    if node_type in ("and", "or"):
+        return any(tree_has_conditions(child) for child in node.get("children", []))
+    return False
+
+
 def evaluate_filter_tree(node: dict, event: dict) -> bool:
-    """Evaluate a filter tree against an event dict. Returns True if the event should be dropped."""
+    """
+    Evaluate a filter tree against an event dict. Returns True if the event should be dropped.
+
+    SAFETY: Empty groups are conservative (never drop):
+    - Empty AND returns False (not vacuous True from all([])) to avoid dropping all events
+    - Empty OR returns False (no children match)
+    Dropping is irreversible; not dropping just means unwanted events get through temporarily.
+    """
     node_type = node.get("type")
 
     if node_type == "condition":
@@ -152,7 +207,7 @@ def evaluate_filter_tree(node: dict, event: dict) -> bool:
         return False
 
     elif node_type == "and":
-        return all(evaluate_filter_tree(child, event) for child in node["children"])
+        return len(node["children"]) > 0 and all(evaluate_filter_tree(child, event) for child in node["children"])
 
     elif node_type == "or":
         return any(evaluate_filter_tree(child, event) for child in node["children"])

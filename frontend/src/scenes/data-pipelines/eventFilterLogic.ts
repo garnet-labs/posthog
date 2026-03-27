@@ -9,6 +9,10 @@ import { Breadcrumb } from '~/types'
 
 import type { eventFilterLogicType } from './eventFilterLogicType'
 
+// Limits — must match MAX_CONDITIONS and MAX_TREE_DEPTH in posthog/models/event_filter_config.py
+export const EVENT_FILTER_MAX_CONDITIONS = 20
+export const EVENT_FILTER_MAX_DEPTH = 5
+
 // Tree node types
 export type FilterNode = FilterConditionNode | FilterAndNode | FilterOrNode | FilterNotNode
 
@@ -46,12 +50,14 @@ export interface TestResult {
 }
 
 export interface EventFilterFormValues {
+    id: string | null
     enabled: boolean
     filter_tree: FilterNode
     test_cases: TestCase[]
 }
 
 const DEFAULT_FORM: EventFilterFormValues = {
+    id: null,
     enabled: false,
     filter_tree: { type: 'or', children: [] },
     test_cases: [],
@@ -79,6 +85,32 @@ export function evaluateFilterTree(node: FilterNode, event: Record<string, strin
             return node.children.some((child) => evaluateFilterTree(child, event))
         case 'not':
             return !evaluateFilterTree(node.child, event)
+    }
+}
+
+/** Check if a filter tree contains at least one condition leaf */
+export function treeHasConditions(node: FilterNode): boolean {
+    switch (node.type) {
+        case 'condition':
+            return true
+        case 'not':
+            return treeHasConditions(node.child)
+        case 'and':
+        case 'or':
+            return node.children.some((child) => treeHasConditions(child))
+    }
+}
+
+/** Check that all condition leaves have non-empty values */
+export function treeHasEmptyValues(node: FilterNode): boolean {
+    switch (node.type) {
+        case 'condition':
+            return !node.value || node.value.trim() === ''
+        case 'not':
+            return treeHasEmptyValues(node.child)
+        case 'and':
+        case 'or':
+            return node.children.some((child) => treeHasEmptyValues(child))
     }
 }
 
@@ -113,6 +145,17 @@ export const eventFilterLogic = kea<eventFilterLogicType>([
     forms(({ values }) => ({
         filterForm: {
             defaults: DEFAULT_FORM,
+            errors: ({ filter_tree, enabled }: EventFilterFormValues) => ({
+                filter_tree: (() => {
+                    if (enabled && !treeHasConditions(filter_tree)) {
+                        return 'Filter must have at least one condition to be enabled'
+                    }
+                    if (treeHasConditions(filter_tree) && treeHasEmptyValues(filter_tree)) {
+                        return 'All conditions must have a value'
+                    }
+                    return undefined
+                })(),
+            }),
             submit: async (formValues) => {
                 const { currentTeamId } = values
 
@@ -237,6 +280,7 @@ export const eventFilterLogic = kea<eventFilterLogicType>([
     afterMount(({ actions, values }) => {
         const { currentTeamId } = values
         api.get(`api/environments/${currentTeamId}/event_filters/`).then((data) => {
+            actions.setFilterFormValue('id', data.id)
             actions.setFilterFormValue('enabled', data.enabled)
             if (data.filter_tree?.type) {
                 actions.setFilterFormValue('filter_tree', data.filter_tree)
