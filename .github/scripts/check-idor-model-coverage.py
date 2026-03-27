@@ -188,13 +188,25 @@ def get_scoped_models() -> tuple[dict[str, set[str]], set[str]]:
     # Silent pass in CI. Adding here requires a category comment.
     LEGITIMATELY_UNSCOPED: set[str] = {
         # --- Django/third-party internals ---
+        "AccessAttempt",
+        "AccessFailureLog",
+        "AccessLog",
+        "Association",
+        "Code",
+        "ContentType",
+        "Group",
         "LogEntry",
+        "Nonce",
         "OAuthAccessToken",
         "OAuthApplication",
         "OAuthGrant",
         "OAuthIDToken",
         "OAuthRefreshToken",
+        "Partial",
+        "Permission",
+        "Session",
         "StaticDevice",
+        "StaticToken",
         "TOTPDevice",
         "UserSocialAuth",
         # --- Core identity (are the scope, not scoped themselves) ---
@@ -525,7 +537,7 @@ def main() -> int:
         print("\nTo fix:")
         print("  1. Add the missing models to .semgrep/rules/idor-team-scoped-models.yaml")
         print("  2. Or add them to EXCLUDED_MODELS in this script if they don't need IDOR protection")
-        print("  3. For unscoped models: add team_id, or add to UNSCOPED_MODELS with a comment")
+        print("  3. For unscoped models: add team_id, or add to LEGITIMATELY_UNSCOPED / NEEDS_TEAM_ID")
         return 1
 
     if has_warnings:

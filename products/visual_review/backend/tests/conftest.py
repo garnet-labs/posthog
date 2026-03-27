@@ -25,13 +25,20 @@ PRODUCT_DATABASES = {"default", "visual_review_db_writer", "visual_review_db_rea
 
 
 @pytest.fixture(autouse=True)
-def _set_team_scope(request, team):
-    """Set team context for all visual_review tests.
+def _set_team_scope(request):
+    """Set team context for visual_review tests that use the database.
 
     ProductTeamModel is fail-closed — queries without context raise
-    TeamScopeError. This fixture ensures all tests run with the correct
-    team scope from the shared `team` fixture.
+    TeamScopeError. Only activates for tests marked with django_db
+    to avoid pulling in DB access for pure unit tests.
     """
+    marker = request.node.get_closest_marker("django_db")
+    if marker is None:
+        yield
+        return
+
+    # Get team from the shared fixture (only when DB is available)
+    team = request.getfixturevalue("team")
     with team_scope(team.id):
         yield
 
