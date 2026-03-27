@@ -17,7 +17,29 @@ export const makeNoOpLogger = (): BuiltLogging => {
     }
 }
 
-export const makeLogger = (onIncrement: (count: number) => void): BuiltLogging => {
+const IGNORED_WARNING_PREFIXES = ['Could not find node with id']
+
+export function isIgnoredWarning(category: string): boolean {
+    return IGNORED_WARNING_PREFIXES.some((prefix) => category.startsWith(prefix))
+}
+
+export function categorizeWarning(args: any[]): string {
+    const firstArg = args[0]
+    if (typeof firstArg === 'string') {
+        const trimmed = firstArg.slice(0, 80).trim()
+        const firstSentence = trimmed.split(/[.!?\n]/)[0]
+        return firstSentence || trimmed
+    }
+    if (firstArg instanceof Error) {
+        return firstArg.message.slice(0, 80)
+    }
+    return 'unknown warning'
+}
+
+export const makeLogger = (
+    onIncrement: (count: number) => void,
+    onWarningSummary?: (summary: Record<string, number>) => void
+): BuiltLogging => {
     const counters = {
         log: 0,
         warning: 0,
@@ -30,6 +52,8 @@ export const makeLogger = (onIncrement: (count: number) => void): BuiltLogging =
         log: (window as any)[`__posthog_player_logs`],
         warning: (window as any)[`__posthog_player_warnings`],
     }
+
+    const pendingWarningCategories: string[] = []
 
     const timers: LoggingTimers = {
         log: null,
@@ -46,16 +70,29 @@ export const makeLogger = (onIncrement: (count: number) => void): BuiltLogging =
             logStores[type].push(args)
             counters[type] += 1
 
+            if (type === 'warning') {
+                const category = categorizeWarning(args)
+                if (!isIgnoredWarning(category)) {
+                    pendingWarningCategories.push(category)
+                }
+            }
+
             if (!timers[type]) {
                 timers[type] = setTimeout(() => {
                     timers[type] = null
                     if (type === 'warning') {
                         onIncrement(logStores[type].length)
+
+                        if (onWarningSummary && pendingWarningCategories.length > 0) {
+                            const summary: Record<string, number> = {}
+                            for (const category of pendingWarningCategories) {
+                                summary[category] = (summary[category] || 0) + 1
+                            }
+                            pendingWarningCategories.length = 0
+                            onWarningSummary(summary)
+                        }
                     }
 
-                    console.warn(
-                        `[PostHog Replayer] ${counters[type]} ${type}s (window.__posthog_player_${type}s to safely log them)`
-                    )
                     counters[type] = 0
                 }, 5000)
             }
