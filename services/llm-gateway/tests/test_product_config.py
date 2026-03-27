@@ -205,3 +205,25 @@ class TestValidateProduct:
 
     def test_resolve_product_alias_returns_input_if_not_aliased(self):
         assert resolve_product_alias("wizard") == "wizard"
+
+
+class TestTrustClientUserId:
+    def test_defaults_to_false(self):
+        from llm_gateway.products.config import ProductConfig
+
+        config = ProductConfig()
+        assert config.trust_client_user_id is False
+
+    def test_llma_summarization_trusts_client_user_id(self):
+        config = get_product_config("llma_summarization")
+        assert config is not None
+        assert config.trust_client_user_id is True
+
+    @pytest.mark.parametrize(
+        "product",
+        ["posthog_code", "background_agents", "wizard", "django", "llm_gateway"],
+    )
+    def test_user_facing_products_do_not_trust_client_user_id(self, product: str):
+        config = get_product_config(product)
+        assert config is not None
+        assert config.trust_client_user_id is False
