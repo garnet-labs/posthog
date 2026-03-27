@@ -118,7 +118,7 @@ class Integration(models.Model):
         FIREBASE = "firebase"
         JIRA = "jira"
         PINTEREST_ADS = "pinterest-ads"
-        APPLE_PUSH = "apple-push"
+        APPLE_PUSH = "apns"
 
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
 
@@ -165,7 +165,7 @@ class Integration(models.Model):
             return self.integration_id or "unknown ID"
         if self.kind == "email":
             return self.config.get("email", self.integration_id)
-        if self.kind == "apple-push":
+        if self.kind == "apns":
             return self.config.get("bundle_id", self.integration_id)
 
         return f"ID: {self.integration_id}"
@@ -1486,7 +1486,7 @@ class ApplePushIntegration:
     integration: Integration
 
     def __init__(self, integration: Integration) -> None:
-        if integration.kind != "apple-push":
+        if integration.kind != "apns":
             raise Exception("ApplePushIntegration init called with Integration with wrong 'kind'")
         self.integration = integration
 
@@ -1505,7 +1505,7 @@ class ApplePushIntegration:
 
         integration, _created = Integration.objects.update_or_create(
             team_id=team_id,
-            kind="apple-push",
+            kind="apns",
             integration_id=f"{team_id_apple}.{bundle_id}",
             defaults={
                 "config": {
