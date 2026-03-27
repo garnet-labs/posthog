@@ -298,8 +298,7 @@ sudo chmod +x /usr/local/bin/docker-compose
 rm -f docker-compose.yml
 cp posthog/docker-compose.base.yml docker-compose.base.yml
 cp posthog/docker-compose.hobby.yml docker-compose.yml.tmpl
-mkdir -p docker
-cp posthog/docker/dev-services.env docker/dev-services.env
+cp posthog/dev-services.env dev-services.env
 envsubst < docker-compose.yml.tmpl > docker-compose.yml
 rm docker-compose.yml.tmpl
 

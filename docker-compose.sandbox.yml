@@ -127,7 +127,7 @@ services:
             - jetbrains:/opt/idea
         # Shared service defaults (Postgres, ClickHouse, Redis, etc.) come from
         # the same env file used by docker-compose.base.yml.
-        env_file: docker/dev-services.env
+        env_file: dev-services.env
         environment:
             # --- Sandbox identity ---
             SANDBOX_UID: '${SANDBOX_UID:-1000}'
