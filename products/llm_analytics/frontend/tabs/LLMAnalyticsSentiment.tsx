@@ -236,8 +236,7 @@ function SentimentCardRow({
 function SentimentFilters(): JSX.Element {
     const { dateFilter, shouldFilterTestAccounts, propertyFilters } = useValues(llmAnalyticsSharedLogic)
     const { setDates, setShouldFilterTestAccounts, setPropertyFilters } = useActions(llmAnalyticsSharedLogic)
-    const { taxonomicGroupTypes, generationsLoading } = useValues(llmAnalyticsSentimentLogic)
-    const { loadGenerations } = useActions(llmAnalyticsSentimentLogic)
+    const { taxonomicGroupTypes } = useValues(llmAnalyticsSentimentLogic)
 
     return (
         <div className="flex gap-x-4 gap-y-2 items-center flex-wrap pb-3 mb-3 border-b">
@@ -250,26 +249,25 @@ function SentimentFilters(): JSX.Element {
             />
             <div className="flex-1" />
             <TestAccountFilterSwitch checked={shouldFilterTestAccounts} onChange={setShouldFilterTestAccounts} />
-            <LemonButton
-                icon={<IconRefresh />}
-                size="small"
-                type="secondary"
-                onClick={loadGenerations}
-                loading={generationsLoading}
-                data-attr="llma-sentiment-reload"
-            >
-                Reload
-            </LemonButton>
         </div>
     )
 }
 
 function SentimentControls(): JSX.Element {
-    const { sentimentFilter, intensityThreshold } = useValues(llmAnalyticsSentimentLogic)
-    const { setSentimentFilter, setIntensityThreshold } = useActions(llmAnalyticsSentimentLogic)
+    const { sentimentFilter, intensityThreshold, generationsLoading } = useValues(llmAnalyticsSentimentLogic)
+    const { setSentimentFilter, setIntensityThreshold, loadGenerations } = useActions(llmAnalyticsSentimentLogic)
 
     return (
         <div className="flex items-center gap-4 flex-wrap mb-3" data-attr="llma-sentiment-controls">
+            <LemonButton
+                onClick={loadGenerations}
+                type="secondary"
+                icon={generationsLoading ? <Spinner textColored /> : <IconRefresh />}
+                size="small"
+                data-attr="llma-sentiment-reload"
+            >
+                {generationsLoading ? 'Loading…' : 'Reload'}
+            </LemonButton>
             <div className="flex items-center gap-2">
                 <Tooltip title="Filter by sentiment polarity. Each user message is classified as positive, negative, or neutral.">
                     <span className="text-sm font-medium">Show:</span>
