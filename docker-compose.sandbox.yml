@@ -142,16 +142,6 @@ services:
             # (CSRF cookie is NOT varied — frontend hardcodes 'posthog_csrftoken'.)
             SESSION_COOKIE_NAME: 'sessionid_${SANDBOX_PORT:-48001}'
             JS_URL: 'http://localhost:${SANDBOX_VITE_PORT:-49001}'
-
-            # --- Persons DB ---
-            # Rust and Node.js default these to localhost. Once those defaults
-            # are changed to use the `db` service name (matching Django), these
-            # overrides can be removed.
-            PERSONS_WRITE_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
-            PERSONS_READ_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
-            PERSONS_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
-            PERSONS_READONLY_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog_persons'
-            BEHAVIORAL_COHORTS_DATABASE_URL: 'postgres://posthog:posthog@db:5432/behavioral_cohorts'
         depends_on:
             db:
                 condition: service_healthy

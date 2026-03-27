@@ -86,6 +86,14 @@ export DUCKLAKE_BUCKET_REGION=${DUCKLAKE_BUCKET_REGION:-us-east-1}
 export DUCKLAKE_S3_ACCESS_KEY=${DUCKLAKE_S3_ACCESS_KEY:-object_storage_root_user}
 export DUCKLAKE_S3_SECRET_KEY=${DUCKLAKE_S3_SECRET_KEY:-object_storage_root_password}
 
+# Node.js — these default to localhost in nodejs config.ts with no REDIS_URL fallback
+export SESSION_RECORDING_API_REDIS_HOST=${SESSION_RECORDING_API_REDIS_HOST:-redis7}
+export POSTHOG_POSTGRES_HOST=${POSTHOG_POSTGRES_HOST:-db}
+export POSTGRES_BEHAVIORAL_COHORTS_HOST=${POSTGRES_BEHAVIORAL_COHORTS_HOST:-db}
+export TEMPORAL_HOST=${TEMPORAL_HOST:-temporal}
+export CYCLOTRON_DATABASE_URL=${CYCLOTRON_DATABASE_URL:-postgres://posthog:posthog@${PGHOST:-db}:${PGPORT:-5432}/cyclotron}
+export CYCLOTRON_NODE_DATABASE_URL=${CYCLOTRON_NODE_DATABASE_URL:-postgres://posthog:posthog@${PGHOST:-db}:${PGPORT:-5432}/cyclotron_node}
+
 # Duckgres
 export DUCKGRES_PORT=${DUCKGRES_PORT:-15432}
 
