@@ -156,6 +156,40 @@ class Resolver(CloningVisitor):
         self._scope_table_names: dict[int, dict[str, str]] = {}
         self._scope_table_column_aliases: dict[int, dict[str, list[str]]] = {}
 
+    def _validate_clickhouse_join_constraint(self, join_type: str | None, constraint: ast.JoinConstraint) -> None:
+        if self.dialect != "clickhouse" or constraint.constraint_type != "ON":
+            return
+
+        if join_type is not None and "ASOF" in join_type.upper():
+            return
+
+        unsupported_expr = self._find_clickhouse_unsupported_join_on_expr(constraint.expr)
+        if unsupported_expr is not None:
+            raise QueryError(
+                "ClickHouse dialect only supports equality predicates in JOIN ... ON clauses. "
+                "Move non-equality conditions to WHERE, or use an ASOF JOIN when appropriate.",
+                node=unsupported_expr,
+            )
+
+    def _find_clickhouse_unsupported_join_on_expr(self, expr: ast.Expr) -> ast.Expr | None:
+        if isinstance(expr, ast.And | ast.Or):
+            for inner_expr in expr.exprs:
+                unsupported_expr = self._find_clickhouse_unsupported_join_on_expr(inner_expr)
+                if unsupported_expr is not None:
+                    return unsupported_expr
+            return None
+
+        if isinstance(expr, ast.CompareOperation) and expr.op != ast.CompareOperationOp.Eq:
+            return expr
+
+        if isinstance(expr, ast.Not):
+            return self._find_clickhouse_unsupported_join_on_expr(expr.expr)
+
+        if isinstance(expr, ast.IsDistinctFrom):
+            return expr
+
+        return None
+
     def _get_scope_table_names(self, scope: ast.SelectQueryType) -> dict[str, str]:
         return self._scope_table_names.setdefault(id(scope), {})
 
@@ -1019,6 +1053,7 @@ class Resolver(CloningVisitor):
 
                 if node.constraint and node.constraint.constraint_type == "ON":
                     node.constraint = self.visit_join_constraint(node.constraint)
+                    self._validate_clickhouse_join_constraint(node.join_type, node.constraint)
                 node.sample = self.visit(node.sample)
 
                 return node
@@ -1112,6 +1147,7 @@ class Resolver(CloningVisitor):
 
             if node.constraint and node.constraint.constraint_type == "ON":
                 node.constraint = self.visit_join_constraint(node.constraint)
+                self._validate_clickhouse_join_constraint(node.join_type, node.constraint)
             node.sample = self.visit(node.sample)
 
             # In case we had a function call table, and had to add an alias where none was present, mark it here
@@ -1187,6 +1223,7 @@ class Resolver(CloningVisitor):
             node.next_join = self.visit(node.next_join)
             if node.constraint and node.constraint.constraint_type == "ON":
                 node.constraint = self.visit_join_constraint(node.constraint)
+                self._validate_clickhouse_join_constraint(node.join_type, node.constraint)
             node.sample = self.visit(node.sample)
 
             return node
@@ -1231,6 +1268,7 @@ class Resolver(CloningVisitor):
             node.next_join = self.visit(node.next_join)
             if node.constraint and node.constraint.constraint_type == "ON":
                 node.constraint = self.visit_join_constraint(node.constraint)
+                self._validate_clickhouse_join_constraint(node.join_type, node.constraint)
             node.sample = self.visit(node.sample)
 
             return node
@@ -1258,6 +1296,7 @@ class Resolver(CloningVisitor):
             node.next_join = self.visit(node.next_join)
             if node.constraint and node.constraint.constraint_type == "ON":
                 node.constraint = self.visit_join_constraint(node.constraint)
+                self._validate_clickhouse_join_constraint(node.join_type, node.constraint)
             node.sample = self.visit(node.sample)
 
             return node
@@ -1284,6 +1323,7 @@ class Resolver(CloningVisitor):
             node.next_join = self.visit(node.next_join)
             if node.constraint and node.constraint.constraint_type == "ON":
                 node.constraint = self.visit_join_constraint(node.constraint)
+                self._validate_clickhouse_join_constraint(node.join_type, node.constraint)
             node.sample = self.visit(node.sample)
 
             return node
