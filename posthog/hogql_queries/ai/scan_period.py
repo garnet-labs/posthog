@@ -2,11 +2,10 @@ from enum import StrEnum
 
 from posthog.models import Team
 
-# Cardinality thresholds: if a low-volume org has more distinct events or
-# properties than these, we bump them to MEDIUM (use ClickHouse with 30d scan)
-# so we get proper count-based ordering.
-EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD = 500
-PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD = 2000
+# Cardinality thresholds for the Postgres fallback. If a low-volume org
+# exceeds these, we use ClickHouse instead so we get count-based ordering.
+EVENT_CARDINALITY_THRESHOLD = 50
+PROPERTY_CARDINALITY_THRESHOLD = 100
 
 
 class TaxonomyVolumeTier(StrEnum):
@@ -29,18 +28,18 @@ def _has_high_cardinality(team: Team) -> bool:
     Check if the team has high cardinality of event/property definitions in Postgres.
 
     Even with low event volume, high cardinality means the Postgres fallback
-    (ordered by last_seen_at) won't give useful results — ClickHouse count-based
-    ordering is needed.
+    (ordered by last_seen_at) won't surface the most important events —
+    ClickHouse count-based ordering is needed.
     """
     from products.event_definitions.backend.models.event_definition import EventDefinition
     from products.event_definitions.backend.models.property_definition import PropertyDefinition
 
     event_count = EventDefinition.objects.filter(team=team).count()
-    if event_count > EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD:
+    if event_count > EVENT_CARDINALITY_THRESHOLD:
         return True
 
-    property_count = PropertyDefinition.objects.filter(team=team).count()
-    return property_count > PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD
+    property_count = PropertyDefinition.objects.filter(team=team, type=PropertyDefinition.Type.EVENT).count()
+    return property_count > PROPERTY_CARDINALITY_THRESHOLD
 
 
 def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:

@@ -3,8 +3,8 @@ from posthog.test.base import BaseTest
 from parameterized import parameterized
 
 from posthog.hogql_queries.ai.scan_period import (
-    EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD,
-    PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD,
+    EVENT_CARDINALITY_THRESHOLD,
+    PROPERTY_CARDINALITY_THRESHOLD,
     SCAN_PERIOD_DAYS,
     TaxonomyVolumeTier,
     get_scan_period_days,
@@ -54,15 +54,21 @@ class TestTaxonomyVolumeTier(BaseTest):
 
     def test_low_volume_with_high_event_cardinality_bumps_to_medium(self):
         self._set_org_usage(event_usage=50_000)
-        for i in range(EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD + 1):
+        for i in range(EVENT_CARDINALITY_THRESHOLD + 1):
             EventDefinition.objects.create(team=self.team, name=f"event_{i}")
         self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
 
-    def test_low_volume_with_high_property_cardinality_bumps_to_medium(self):
+    def test_low_volume_with_high_event_property_cardinality_bumps_to_medium(self):
         self._set_org_usage(event_usage=50_000)
-        for i in range(PROPERTY_DEFINITION_HIGH_CARDINALITY_THRESHOLD + 1):
+        for i in range(PROPERTY_CARDINALITY_THRESHOLD + 1):
             PropertyDefinition.objects.create(team=self.team, name=f"prop_{i}", type=PropertyDefinition.Type.EVENT)
         self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+    def test_low_volume_with_high_person_property_cardinality_stays_low(self):
+        self._set_org_usage(event_usage=50_000)
+        for i in range(PROPERTY_CARDINALITY_THRESHOLD + 1):
+            PropertyDefinition.objects.create(team=self.team, name=f"prop_{i}", type=PropertyDefinition.Type.PERSON)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
 
     def test_low_volume_with_low_cardinality_stays_low(self):
         self._set_org_usage(event_usage=50_000)
@@ -124,6 +130,6 @@ class TestShouldUsePostgresForEvents(BaseTest):
 
     def test_low_volume_high_cardinality_uses_clickhouse(self):
         self._set_org_usage(event_usage=50_000)
-        for i in range(EVENT_DEFINITION_HIGH_CARDINALITY_THRESHOLD + 1):
+        for i in range(EVENT_CARDINALITY_THRESHOLD + 1):
             EventDefinition.objects.create(team=self.team, name=f"event_{i}")
         self.assertFalse(should_use_postgres_for_events(self.team))
