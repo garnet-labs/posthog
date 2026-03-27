@@ -3,28 +3,23 @@
   "checkpoint_id": "83e99c8f74f4",
   "strategy": "manual-commit",
   "branch": "signals/reviewer-ui-and-tasks-fixes",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
-    "frontend/src/lib/api.ts",
-    "frontend/src/scenes/inbox/InboxScene.tsx",
-    "frontend/src/scenes/inbox/inboxSceneLogic.ts",
-    "frontend/src/scenes/inbox/types.ts",
+    "products/signals/backend/migrations/0014_add_suggested_reviewer_user_ids.py",
     "products/signals/backend/migrations/max_migration.txt",
     "products/signals/backend/models.py",
     "products/signals/backend/report_generation/research.py",
+    "products/signals/backend/report_generation/resolve_reviewers.py",
     "products/signals/backend/serializers.py",
     "products/signals/backend/temporal/buffer.py",
-    "products/signals/backend/views.py",
-    "products/tasks/backend/services/connection_token.py",
-    "products/tasks/frontend/lib/parse-logs.test.ts",
-    "products/tasks/frontend/lib/parse-logs.ts"
+    "products/signals/backend/views.py"
   ],
   "sessions": [
     {
       "metadata": "/83/e99c8f74f4/0/metadata.json",
       "transcript": "/83/e99c8f74f4/0/full.jsonl",
       "content_hash": "/83/e99c8f74f4/0/content_hash.txt",
-      "prompt": ""
+      "prompt": "/83/e99c8f74f4/0/prompt.txt"
     },
     {
       "metadata": "/83/e99c8f74f4/1/metadata.json",
@@ -34,10 +29,10 @@
     }
   ],
   "token_usage": {
-    "input_tokens": 3,
-    "cache_creation_tokens": 1758,
-    "cache_read_tokens": 115207,
-    "output_tokens": 493,
-    "api_call_count": 3
+    "input_tokens": 5,
+    "cache_creation_tokens": 2292,
+    "cache_read_tokens": 202151,
+    "output_tokens": 574,
+    "api_call_count": 5
   }
 }
