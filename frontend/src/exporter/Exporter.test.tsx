@@ -2,10 +2,18 @@ import { render } from '@testing-library/react'
 
 import { Exporter } from '~/exporter/Exporter'
 import { ExportType, ExportedData } from '~/exporter/types'
+import { HogQLVariable } from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
+
+// Mock ExportedInsight so we can inspect props without needing full kea/Query setup
+const mockExportedInsight = jest.fn(() => <div data-testid="exported-insight" />)
+jest.mock('~/exporter/ExportedInsight/ExportedInsight', () => ({
+    ExportedInsight: (props: any) => mockExportedInsight(props),
+}))
 
 beforeEach(() => {
     initKeaTests()
+    mockExportedInsight.mockClear()
 })
 
 function makeDashboardExport(overrides: Partial<ExportedData> = {}): ExportedData {
@@ -17,6 +25,20 @@ function makeDashboardExport(overrides: Partial<ExportedData> = {}): ExportedDat
             description: 'Description',
             tags: [],
             tiles: [],
+        } as any,
+        themes: [],
+        ...overrides,
+    }
+}
+
+function makeInsightExport(overrides: Partial<ExportedData> = {}): ExportedData {
+    return {
+        type: ExportType.Image,
+        insight: {
+            id: 42,
+            short_id: 'abc123',
+            name: 'Test Insight',
+            query: { kind: 'TrendsQuery', series: [{ event: '$pageview' }] },
         } as any,
         themes: [],
         ...overrides,
@@ -60,5 +82,37 @@ describe('Exporter (shared dashboard)', () => {
 
         // Image exports use a minimal header (h1 + description), not the Scene header with "Auto refresh every"
         expect(container.querySelector('.SharedDashboard-header')).toBeNull()
+    })
+})
+
+describe('Exporter (insight with variables_override)', () => {
+    it('passes variables_override to ExportedInsight when present', () => {
+        const variablesOverride: Record<string, HogQLVariable> = {
+            var1: { variableId: 'var1', code_name: 'region', value: 'EU' },
+        }
+
+        render(<Exporter {...makeInsightExport({ variables_override: variablesOverride })} />)
+
+        expect(mockExportedInsight).toHaveBeenCalledWith(
+            expect.objectContaining({
+                variablesOverride: variablesOverride,
+            })
+        )
+    })
+
+    it('passes undefined variablesOverride when no variables_override in data', () => {
+        render(<Exporter {...makeInsightExport()} />)
+
+        expect(mockExportedInsight).toHaveBeenCalledWith(
+            expect.objectContaining({
+                variablesOverride: undefined,
+            })
+        )
+    })
+
+    it('renders ExportedInsight component for insight exports', () => {
+        render(<Exporter {...makeInsightExport()} />)
+
+        expect(mockExportedInsight).toHaveBeenCalled()
     })
 })

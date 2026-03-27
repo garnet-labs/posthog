@@ -72,6 +72,35 @@ class TestSubscriptionsTasksUtils(APIBaseTest):
             assert len(assets) == 1
             assert mock_export_task.si.call_count == 1
 
+    def test_dashboard_assets_include_dashboard_reference_for_variable_resolution(
+        self, mock_export_task: MagicMock, _mock_group: MagicMock
+    ) -> None:
+        """Assets created for dashboard subscriptions must include the dashboard reference.
+
+        The image exporter uses exported_asset.dashboard to resolve dashboard variable
+        overrides and tile filter overrides. If the dashboard is missing from the asset,
+        variables won't be applied in the exported PNG.
+        """
+        subscription = create_subscription(team=self.team, dashboard=self.dashboard, created_by=self.user)
+
+        with self.settings(PARALLEL_ASSET_GENERATION_MAX_TIMEOUT_MINUTES=1):
+            _insights, assets = generate_assets(subscription)
+
+        for asset in assets:
+            assert asset.dashboard_id == self.dashboard.id, (
+                f"Asset {asset.id} missing dashboard reference needed for variable resolution"
+            )
+            assert asset.export_format == ExportedAsset.ExportFormat.PNG
+
+    def test_insight_only_assets_have_no_dashboard(self, mock_export_task: MagicMock, _mock_group: MagicMock) -> None:
+        """Assets for insight-only subscriptions should not have a dashboard reference."""
+        with self.settings(PARALLEL_ASSET_GENERATION_MAX_TIMEOUT_MINUTES=1):
+            _insights, assets = generate_assets(self.subscription)
+
+        assert len(assets) == 1
+        assert assets[0].dashboard_id is None
+        assert assets[0].insight_id == self.insight.id
+
     def test_cancels_children_if_timed_out(self, _mock_export_task: MagicMock, mock_group: MagicMock) -> None:
         # mock the group so that its children are never ready,
         # and we capture calls to revoke
