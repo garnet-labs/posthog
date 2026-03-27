@@ -1196,10 +1196,11 @@ jobs:
                   PERSON_ON_EVENTS_V2_ENABLED: ${{ matrix.person-on-events && 'true' || 'false' }}
               shell: bash
               run: | # async_migrations covered in ci-async-migrations.yml
-                  # Kill pytest immediately on cancellation to avoid Django DB teardown
-                  # holding the runner alive for minutes after GitHub requests cancellation.
-                  trap '[ -n "$pytest_pgid" ] && { echo "[trap] Caught signal, killing pytest pgid=$pytest_pgid"; kill -KILL -$pytest_pgid 2>/dev/null; }; exit 130' TERM INT
-                  pytest -v --tb=short ${{
+                  # Run pytest in its own process group so it can be killed reliably on cancellation.
+                  # GitHub Actions sends SIGINT to bash but bash defers trap execution until the child
+                  # exits. Instead, we use a background watcher that kills pytest's process group as
+                  # soon as this shell exits (for any reason: trap, SIGKILL, normal exit).
+                  setsid pytest -v --tb=short ${{
                       matrix.compat
                       && env.CLICKHOUSE_COMPAT_PYTEST_TARGETS
                       || (
@@ -1221,14 +1222,13 @@ jobs:
                       --junitxml=junit-core.xml \
                       $PYTEST_ARGS &
                   pytest_pid=$!
-                  pytest_pgid=$(ps -o pgid= -p $pytest_pid | tr -d ' ')
-                  echo "[trap-debug] pytest pid=$pytest_pid pgid=$pytest_pgid"
-                  exit_code=0
-                  # Loop in case wait is interrupted by a signal but pytest is still running
-                  while kill -0 "$pytest_pid" 2>/dev/null; do
-                      wait $pytest_pid || exit_code=$?
-                  done
-                  trap - TERM INT
+                  # Watcher: kill pytest's process group when this shell exits for any reason.
+                  # This is reliable because it doesn't depend on bash signal delivery to traps.
+                  ( shell_pid=$$; while kill -0 $shell_pid 2>/dev/null; do sleep 0.5; done; kill -KILL -$pytest_pid 2>/dev/null ) &
+                  watcher_pid=$!
+                  wait $pytest_pid
+                  exit_code=$?
+                  kill $watcher_pid 2>/dev/null; wait $watcher_pid 2>/dev/null
                   if [ $exit_code -eq 5 ]; then
                       echo "No tests collected for this shard, this is expected when splitting tests"
                       exit 0
@@ -1272,10 +1272,11 @@ jobs:
                   MODAL_TOKEN_ID: ${{ needs.changes.outputs.tasks_temporal == 'true' && secrets.MODAL_TOKEN_ID || '' }}
                   MODAL_TOKEN_SECRET: ${{ needs.changes.outputs.tasks_temporal == 'true' && secrets.MODAL_TOKEN_SECRET || '' }}
               run: |
-                  # Kill pytest immediately on cancellation to avoid Django DB teardown
-                  # holding the runner alive for minutes after GitHub requests cancellation.
-                  trap '[ -n "$pytest_pgid" ] && { echo "[trap] Caught signal, killing pytest pgid=$pytest_pgid"; kill -KILL -$pytest_pgid 2>/dev/null; }; exit 130' TERM INT
-                  pytest -v --tb=short --timeout=600 --timeout-method=thread posthog/temporal products/batch_exports/backend/tests/temporal products/tasks/backend/temporal -m "not async_migrations" \
+                  # Run pytest in its own process group so it can be killed reliably on cancellation.
+                  # GitHub Actions sends SIGINT to bash but bash defers trap execution until the child
+                  # exits. Instead, we use a background watcher that kills pytest's process group as
+                  # soon as this shell exits (for any reason: trap, SIGKILL, normal exit).
+                  setsid pytest -v --tb=short --timeout=600 --timeout-method=thread posthog/temporal products/batch_exports/backend/tests/temporal products/tasks/backend/temporal -m "not async_migrations" \
                       --splits ${{ matrix.concurrency }} --group ${{ matrix.group }} \
                       --durations=100 --durations-min=1.0 --store-durations \
                       --splitting-algorithm=duration_based_chunks \
@@ -1284,14 +1285,13 @@ jobs:
                       --junitxml=junit-temporal.xml \
                       $PYTEST_ARGS &
                   pytest_pid=$!
-                  pytest_pgid=$(ps -o pgid= -p $pytest_pid | tr -d ' ')
-                  echo "[trap-debug] pytest pid=$pytest_pid pgid=$pytest_pgid"
-                  exit_code=0
-                  # Loop in case wait is interrupted by a signal but pytest is still running
-                  while kill -0 "$pytest_pid" 2>/dev/null; do
-                      wait $pytest_pid || exit_code=$?
-                  done
-                  trap - TERM INT
+                  # Watcher: kill pytest's process group when this shell exits for any reason.
+                  # This is reliable because it doesn't depend on bash signal delivery to traps.
+                  ( shell_pid=$$; while kill -0 $shell_pid 2>/dev/null; do sleep 0.5; done; kill -KILL -$pytest_pid 2>/dev/null ) &
+                  watcher_pid=$!
+                  wait $pytest_pid
+                  exit_code=$?
+                  kill $watcher_pid 2>/dev/null; wait $watcher_pid 2>/dev/null
                   if [ $exit_code -eq 5 ]; then
                       echo "No tests collected for this shard, this is expected when splitting tests"
                       exit 0
