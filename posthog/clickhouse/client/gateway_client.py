@@ -184,7 +184,7 @@ def get_gateway_client() -> GatewayClient:
         # doesn't carry the narrowed-to-None type from above.
         client = _gateway_client
         if client is not None:
-            return client
+            return client  # type: ignore[unreachable]
         token = settings.CLICKHOUSE_GATEWAY_SERVICE_TOKEN
         if not token:
             raise ValueError("CLICKHOUSE_GATEWAY_SERVICE_TOKEN must be set when CLICKHOUSE_GATEWAY_ENABLED is true")

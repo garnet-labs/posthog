@@ -1,116 +1,116 @@
 services:
-  ch-online-1:
-    image: clickhouse/clickhouse-server:24.8
-    container_name: ch-online-1
-    ports:
-      - 18123:8123
-    environment:
-      CLICKHOUSE_DB: default
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    healthcheck:
-      test:
-        - CMD
-        - clickhouse-client
-        - --query
-        - SELECT 1
-      interval: 2s
-      timeout: 3s
-      retries: 15
-  ch-online-2:
-    image: clickhouse/clickhouse-server:24.8
-    container_name: ch-online-2
-    ports:
-      - 28123:8123
-    environment:
-      CLICKHOUSE_DB: default
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    healthcheck:
-      test:
-        - CMD
-        - clickhouse-client
-        - --query
-        - SELECT 1
-      interval: 2s
-      timeout: 3s
-      retries: 15
-  ch-offline-1:
-    image: clickhouse/clickhouse-server:24.8
-    container_name: ch-offline-1
-    ports:
-      - 38123:8123
-    environment:
-      CLICKHOUSE_DB: default
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    healthcheck:
-      test:
-        - CMD
-        - clickhouse-client
-        - --query
-        - SELECT 1
-      interval: 2s
-      timeout: 3s
-      retries: 15
-  redis:
-    image: redis:7-alpine
-    container_name: gw-redis
-    ports:
-      - 16379:6379
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 2s
-      timeout: 3s
-      retries: 10
-  gateway:
-    build:
-      context: ./rust/clickhouse-gateway
-      dockerfile: Dockerfile
-    container_name: gw-test
-    ports:
-      - 13100:3100
-      - 19090:9090
-    environment:
-      CLICKHOUSE_ONLINE_HOSTS: http://ch-online-1:8123,http://ch-online-2:8123
-      CLICKHOUSE_OFFLINE_HOSTS: http://ch-offline-1:8123
-      CLICKHOUSE_LOGS_HOSTS: http://ch-online-1:8123
-      CLICKHOUSE_ENDPOINTS_HOSTS: http://ch-online-1:8123
-      GATEWAY_REDIS_URL: redis://redis:6379
-      GATEWAY_SERVICE_TOKEN: ""
-      GATEWAY_HOST: 0.0.0.0
-      GATEWAY_PORT: "3100"
-      GATEWAY_METRICS_PORT: "9090"
-      GATEWAY_ONLINE_MAX_CONCURRENT: "50"
-      GATEWAY_ONLINE_MAX_EXECUTION_TIME: "30"
-      GATEWAY_OFFLINE_MAX_CONCURRENT: "10"
-      GATEWAY_OFFLINE_MAX_EXECUTION_TIME: "600"
-      GATEWAY_EXPLAIN_ENABLED: "false"
-      RUST_LOG: info
-    depends_on:
-      ch-online-1:
-        condition: service_healthy
-      ch-online-2:
-        condition: service_healthy
-      ch-offline-1:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - curl
-        - -sf
-        - http://localhost:3100/_health
-      interval: 2s
-      timeout: 3s
-      retries: 30
+    ch-online-1:
+        image: clickhouse/clickhouse-server:24.8
+        container_name: ch-online-1
+        ports:
+            - 18123:8123
+        environment:
+            CLICKHOUSE_DB: default
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
+        healthcheck:
+            test:
+                - CMD
+                - clickhouse-client
+                - --query
+                - SELECT 1
+            interval: 2s
+            timeout: 3s
+            retries: 15
+    ch-online-2:
+        image: clickhouse/clickhouse-server:24.8
+        container_name: ch-online-2
+        ports:
+            - 28123:8123
+        environment:
+            CLICKHOUSE_DB: default
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
+        healthcheck:
+            test:
+                - CMD
+                - clickhouse-client
+                - --query
+                - SELECT 1
+            interval: 2s
+            timeout: 3s
+            retries: 15
+    ch-offline-1:
+        image: clickhouse/clickhouse-server:24.8
+        container_name: ch-offline-1
+        ports:
+            - 38123:8123
+        environment:
+            CLICKHOUSE_DB: default
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
+        healthcheck:
+            test:
+                - CMD
+                - clickhouse-client
+                - --query
+                - SELECT 1
+            interval: 2s
+            timeout: 3s
+            retries: 15
+    redis:
+        image: redis:7-alpine
+        container_name: gw-redis
+        ports:
+            - 16379:6379
+        healthcheck:
+            test:
+                - CMD
+                - redis-cli
+                - ping
+            interval: 2s
+            timeout: 3s
+            retries: 10
+    gateway:
+        build:
+            context: ./rust/clickhouse-gateway
+            dockerfile: Dockerfile
+        container_name: gw-test
+        ports:
+            - 13100:3100
+            - 19090:9090
+        environment:
+            CLICKHOUSE_ONLINE_HOSTS: http://ch-online-1:8123,http://ch-online-2:8123
+            CLICKHOUSE_OFFLINE_HOSTS: http://ch-offline-1:8123
+            CLICKHOUSE_LOGS_HOSTS: http://ch-online-1:8123
+            CLICKHOUSE_ENDPOINTS_HOSTS: http://ch-online-1:8123
+            GATEWAY_REDIS_URL: redis://redis:6379
+            GATEWAY_SERVICE_TOKEN: ''
+            GATEWAY_HOST: 0.0.0.0
+            GATEWAY_PORT: '3100'
+            GATEWAY_METRICS_PORT: '9090'
+            GATEWAY_ONLINE_MAX_CONCURRENT: '50'
+            GATEWAY_ONLINE_MAX_EXECUTION_TIME: '30'
+            GATEWAY_OFFLINE_MAX_CONCURRENT: '10'
+            GATEWAY_OFFLINE_MAX_EXECUTION_TIME: '600'
+            GATEWAY_EXPLAIN_ENABLED: 'false'
+            RUST_LOG: info
+        depends_on:
+            ch-online-1:
+                condition: service_healthy
+            ch-online-2:
+                condition: service_healthy
+            ch-offline-1:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        healthcheck:
+            test:
+                - CMD
+                - curl
+                - -sf
+                - http://localhost:3100/_health
+            interval: 2s
+            timeout: 3s
+            retries: 30
