@@ -69,7 +69,7 @@ class TestTeamScopingMiddleware(TestCase):
 
     def test_no_team_id_for_unauthenticated_user(self):
         """Middleware does not set team_id for unauthenticated users."""
-        captured_team_id = "not_set"
+        captured_team_id: int | None = None
 
         def get_response(request: HttpRequest) -> HttpResponse:
             nonlocal captured_team_id
@@ -88,7 +88,7 @@ class TestTeamScopingMiddleware(TestCase):
 
     def test_no_team_id_when_user_has_no_current_team(self):
         """Middleware handles users without current_team_id."""
-        captured_team_id = "not_set"
+        captured_team_id: int | None = None
 
         def get_response(request: HttpRequest) -> HttpResponse:
             nonlocal captured_team_id
@@ -108,7 +108,7 @@ class TestTeamScopingMiddleware(TestCase):
 
     def test_handles_request_without_user(self):
         """Middleware handles requests without user attribute."""
-        captured_team_id = "not_set"
+        captured_team_id: int | None = None
 
         def get_response(request: HttpRequest) -> HttpResponse:
             nonlocal captured_team_id

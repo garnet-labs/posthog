@@ -31,8 +31,6 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Self
-
 from django.db import models
 
 from posthog.models.scoping import get_current_team_context
@@ -69,7 +67,7 @@ class ProductTeamQuerySet(TeamScopedQuerySet):
         """Return a queryset that bypasses automatic team scoping."""
         return ProductTeamQuerySet(self.model, using=self._db)
 
-    def _apply_team_filter(self, team_id: int) -> Self:
+    def _apply_team_filter(self, team_id: int) -> ProductTeamQuerySet:  # type: ignore[override]
         """Apply team filter using plain team_id (no JOIN)."""
         effective_id = _resolve_effective_team_id(team_id)
         return super(TeamScopedQuerySet, self).filter(team_id=effective_id)

@@ -8,14 +8,15 @@ from posthog.models.team import Team
 
 
 class TestTeamScopedManager(BaseTest):
-    def test_no_scope_raises_team_scope_error(self):
-        """Without team scope, accessing get_queryset raises TeamScopeError."""
-        manager = TeamScopedManager()
-        manager.model = FeatureFlag
+    def _make_manager(self) -> TeamScopedManager[FeatureFlag]:
+        manager: TeamScopedManager[FeatureFlag] = TeamScopedManager()
+        manager.model = FeatureFlag  # type: ignore[assignment]
         manager._db = "default"
+        return manager
 
+    def test_no_scope_raises_team_scope_error(self):
         with pytest.raises(TeamScopeError, match="No team context set"):
-            manager.get_queryset()
+            self._make_manager().get_queryset()
 
     def test_team_scope_filters_to_team(self):
         other_team = Team.objects.create(organization=self.organization, name="Other Team")
@@ -23,14 +24,12 @@ class TestTeamScopedManager(BaseTest):
         FeatureFlag.objects.create(team=self.team, key="flag-1", created_by=self.user)
         FeatureFlag.objects.create(team=other_team, key="flag-2", created_by=self.user)
 
-        manager = TeamScopedManager()
-        manager.model = FeatureFlag
-        manager._db = "default"
-
         with team_scope(self.team.id):
-            qs = manager.get_queryset()
+            qs = self._make_manager().get_queryset()
             assert qs.count() == 1
-            assert qs.first().key == "flag-1"
+            flag = qs.first()
+            assert flag is not None
+            assert flag.key == "flag-1"
 
     def test_unscoped_bypasses_context(self):
         other_team = Team.objects.create(organization=self.organization, name="Other Team")
@@ -38,24 +37,12 @@ class TestTeamScopedManager(BaseTest):
         FeatureFlag.objects.create(team=self.team, key="flag-1", created_by=self.user)
         FeatureFlag.objects.create(team=other_team, key="flag-2", created_by=self.user)
 
-        manager = TeamScopedManager()
-        manager.model = FeatureFlag
-        manager._db = "default"
-
         with team_scope(self.team.id):
-            unscoped_qs = manager.unscoped()
-            assert unscoped_qs.count() >= 2
+            assert self._make_manager().unscoped().count() >= 2
 
     def test_unscoped_works_without_context(self):
-        """unscoped() does not raise even without team context."""
         FeatureFlag.objects.create(team=self.team, key="flag-1", created_by=self.user)
-
-        manager = TeamScopedManager()
-        manager.model = FeatureFlag
-        manager._db = "default"
-
-        qs = manager.unscoped()
-        assert qs.count() >= 1
+        assert self._make_manager().unscoped().count() >= 1
 
     def test_for_team_explicit_scoping(self):
         other_team = Team.objects.create(organization=self.organization, name="Other Team")
@@ -63,13 +50,11 @@ class TestTeamScopedManager(BaseTest):
         FeatureFlag.objects.create(team=self.team, key="flag-1", created_by=self.user)
         FeatureFlag.objects.create(team=other_team, key="flag-2", created_by=self.user)
 
-        manager = TeamScopedManager()
-        manager.model = FeatureFlag
-        manager._db = "default"
-
-        qs = manager.for_team(other_team.id)
+        qs = self._make_manager().for_team(other_team.id)
         assert qs.count() == 1
-        assert qs.first().key == "flag-2"
+        flag = qs.first()
+        assert flag is not None
+        assert flag.key == "flag-2"
 
     def test_queryset_chaining_preserves_team_filter(self):
         other_team = Team.objects.create(organization=self.organization, name="Other Team")
@@ -78,14 +63,12 @@ class TestTeamScopedManager(BaseTest):
         FeatureFlag.objects.create(team=self.team, key="inactive-flag", active=False, created_by=self.user)
         FeatureFlag.objects.create(team=other_team, key="other-active", active=True, created_by=self.user)
 
-        manager = TeamScopedManager()
-        manager.model = FeatureFlag
-        manager._db = "default"
-
         with team_scope(self.team.id):
-            qs = manager.get_queryset().filter(active=True)
+            qs = self._make_manager().get_queryset().filter(active=True)
             assert qs.count() == 1
-            assert qs.first().key == "active-flag"
+            flag = qs.first()
+            assert flag is not None
+            assert flag.key == "active-flag"
 
     def test_unscoped_context_clears_team(self):
         with team_scope(self.team.id):
@@ -103,7 +86,7 @@ class TestTeamScopedQuerySet(BaseTest):
     def test_queryset_unscoped_returns_fresh_queryset(self):
         from posthog.models.scoping.manager import TeamScopedQuerySet
 
-        qs = TeamScopedQuerySet(FeatureFlag)
+        qs: TeamScopedQuerySet[FeatureFlag] = TeamScopedQuerySet(FeatureFlag)
         unscoped_qs = qs.unscoped()
         assert isinstance(unscoped_qs, TeamScopedQuerySet)
 
@@ -115,11 +98,13 @@ class TestTeamScopedQuerySet(BaseTest):
         FeatureFlag.objects.create(team=self.team, key="flag-1", created_by=self.user)
         FeatureFlag.objects.create(team=other_team, key="flag-2", created_by=self.user)
 
-        qs = TeamScopedQuerySet(FeatureFlag)
+        qs: TeamScopedQuerySet[FeatureFlag] = TeamScopedQuerySet(FeatureFlag)
         filtered_qs = qs._apply_team_filter(self.team.id)
 
         assert filtered_qs.count() == 1
-        assert filtered_qs.first().key == "flag-1"
+        flag = filtered_qs.first()
+        assert flag is not None
+        assert flag.key == "flag-1"
 
 
 class TestTeamFilterMixinWithCachedContext(BaseTest):

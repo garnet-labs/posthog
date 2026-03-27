@@ -11,7 +11,7 @@ object access, and raw SQL bypasses the ORM entirely. Use this alongside
 explicit team checks at the API layer.
 """
 
-from typing import Self, TypeVar
+from typing import TypeVar
 
 from django.db import models
 from django.db.models import Q, Subquery
@@ -34,58 +34,43 @@ class TeamScopeError(Exception):
     pass
 
 
-class TeamFilterMixin:
+def _get_effective_team_id_for_persons_db(team_id: int) -> int:
+    """Get the effective team ID for PERSONS_DB_MODELS.
+
+    Uses cached parent_team_id from context if available, otherwise fetches from DB.
     """
-    Mixin that provides team filtering logic.
+    from posthog.models.team import Team
 
-    Handles both regular models (using JOINs) and PERSONS_DB_MODELS (cross-database).
-    Uses cached parent_team_id from context when available to avoid extra queries.
-    """
+    ctx = get_current_team_context()
+    if ctx is not None and ctx.team_id == team_id:
+        return ctx.effective_team_id
 
-    model: type[models.Model]
-
-    def _apply_team_filter(self, team_id: int) -> Self:
-        """Apply team filtering with parent team logic (from RootTeamQuerySet)."""
-        from posthog.models.team import Team
-
-        # For persons DB models, we can't join with the Team table (cross-database)
-        if self.model._meta.model_name in PERSONS_DB_MODELS:
-            effective_team_id = self._get_effective_team_id_for_persons_db(team_id)
-            return self.filter(team_id=effective_team_id)
-
-        # For non-persons DB models: use JOIN logic from RootTeamQuerySet
-        parent_team_subquery = Team.objects.filter(id=team_id).values("parent_team_id")[:1]
-        team_filter = Q(team_id=Subquery(parent_team_subquery)) | Q(team_id=team_id, team__parent_team_id__isnull=True)
-        return self.filter(team_filter)
-
-    def _get_effective_team_id_for_persons_db(self, team_id: int) -> int:
-        """
-        Get the effective team ID for PERSONS_DB_MODELS.
-
-        Uses cached parent_team_id from context if available, otherwise fetches from DB.
-        """
-        from posthog.models.team import Team
-
-        # Try to use cached parent_team_id from context
-        ctx = get_current_team_context()
-        if ctx is not None and ctx.team_id == team_id:
-            return ctx.effective_team_id
-
-        # Fall back to DB query if not in context or different team_id
-        try:
-            team = Team.objects.using("default").get(id=team_id)
-            return team.parent_team_id if team.parent_team_id else team_id
-        except Team.DoesNotExist:
-            return team_id
+    try:
+        team = Team.objects.using("default").get(id=team_id)
+        return team.parent_team_id if team.parent_team_id else team_id
+    except Team.DoesNotExist:
+        return team_id
 
 
-class TeamScopedQuerySet(TeamFilterMixin, models.QuerySet[T]):
+class TeamScopedQuerySet(models.QuerySet[T]):
     """
     QuerySet that supports automatic team scoping.
 
     Provides an `unscoped()` method to bypass automatic filtering when you
     need to explicitly query across teams.
     """
+
+    def _apply_team_filter(self, team_id: int) -> "TeamScopedQuerySet[T]":
+        """Apply team filtering with parent team logic (from RootTeamQuerySet)."""
+        from posthog.models.team import Team
+
+        if self.model._meta.model_name in PERSONS_DB_MODELS:
+            effective_team_id = _get_effective_team_id_for_persons_db(team_id)
+            return self.filter(team_id=effective_team_id)
+
+        parent_team_subquery = Team.objects.filter(id=team_id).values("parent_team_id")[:1]
+        team_filter = Q(team_id=Subquery(parent_team_subquery)) | Q(team_id=team_id, team__parent_team_id__isnull=True)
+        return self.filter(team_filter)
 
     def unscoped(self) -> "TeamScopedQuerySet[T]":
         """
@@ -114,7 +99,7 @@ class TeamScopedManager(models.Manager[T]):
     _queryset_class = TeamScopedQuerySet
 
     def get_queryset(self) -> TeamScopedQuerySet[T]:
-        qs = self._queryset_class(self.model, using=self._db)
+        qs: TeamScopedQuerySet[T] = self._queryset_class(self.model, using=self._db)
         team_id = get_current_team_id()
         if team_id is not None:
             return qs._apply_team_filter(team_id)

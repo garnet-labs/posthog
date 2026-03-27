@@ -215,7 +215,7 @@ class TestWithTeamScopeDecorator(BaseTest):
             pass
 
         with pytest.raises(TypeError, match="must be an int"):
-            my_task(team_id="not-an-int")
+            my_task(team_id="not-an-int")  # type: ignore[arg-type]
 
     def test_raises_if_team_id_is_none_explicitly(self):
         """Decorator raises ValueError if team_id is None."""
@@ -225,7 +225,7 @@ class TestWithTeamScopeDecorator(BaseTest):
             pass
 
         with pytest.raises(ValueError, match="Could not find"):
-            my_task(team_id=None)
+            my_task(team_id=None)  # type: ignore[arg-type]
 
 
 class TestTeamContext(BaseTest):
