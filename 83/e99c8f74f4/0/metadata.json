@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "83e99c8f74f4",
+  "session_id": "fdd9ee4b-a121-4b2e-9458-9d3cf81d3317",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-27T19:25:46.839824Z",
+  "branch": "signals/reviewer-ui-and-tasks-fixes",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "products/tasks/frontend/lib/parse-logs.ts",
+    "frontend/src/lib/api.ts",
+    "frontend/src/scenes/inbox/InboxScene.tsx",
+    "frontend/src/scenes/inbox/inboxSceneLogic.ts",
+    "frontend/src/scenes/inbox/types.ts",
+    "products/tasks/backend/services/connection_token.py",
+    "products/tasks/frontend/lib/parse-logs.test.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-6[1m]",
+  "turn_id": "fe439d96fec9",
+  "checkpoint_transcript_start": 21,
+  "transcript_lines_at_start": 21,
+  "token_usage": {
+    "input_tokens": 3,
+    "cache_creation_tokens": 1758,
+    "cache_read_tokens": 115207,
+    "output_tokens": 493,
+    "api_call_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-27T19:25:46.792198Z",
+    "agent_lines": 175,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 175,
+    "agent_percentage": 100
+  }
+}
