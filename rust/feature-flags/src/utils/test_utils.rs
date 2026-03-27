@@ -1,13 +1,19 @@
 use crate::{
     api::types::FlagValue,
-    cohorts::cohort_models::{Cohort, CohortId},
+    cohorts::cohort_models::{Cohort, CohortId, CohortType},
     config::{Config, DEFAULT_TEST_CONFIG},
-    flags::flag_models::{FeatureFlag, FeatureFlagRow, FlagFilters, FlagPropertyGroup},
+    flags::{
+        flag_group_type_mapping::{
+            GroupTypeCacheManager, GroupTypeFetchError, GroupTypeMapping, GroupTypeMappingFetcher,
+        },
+        flag_models::{FeatureFlag, FeatureFlagRow, FlagFilters, FlagPropertyGroup},
+    },
     properties::property_models::{OperatorType, PropertyFilter, PropertyType},
     team::team_models::Team,
 };
 use anyhow::Error;
-use axum::async_trait;
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use common_database::{get_pool, Client, CustomDatabaseError};
 use common_hypercache::{HyperCacheConfig, HyperCacheReader};
 use common_redis::{Client as RedisClientTrait, RedisClient};
@@ -161,18 +167,18 @@ pub async fn setup_hypercache_reader(
     )
 }
 
-/// Create a HyperCacheReader for tests using a mock Redis client (synchronous).
-/// Uses a dummy S3 client that always returns NotFound.
-/// This is useful for tests that need to control Redis behavior via MockRedisClient.
-/// Returns Arc<HyperCacheReader> to match the production pattern.
+/// Create a HyperCacheReader with a mock Redis client and a dummy S3 client
+/// that always returns NotFound. Parameterized for reuse across different
+/// HyperCache namespaces (feature_flags, team_metadata, etc.).
 #[cfg(test)]
-pub fn setup_hypercache_reader_with_mock_redis(
+fn setup_mock_hypercache_reader(
     redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+    namespace: &str,
+    object_name: &str,
+    token_based: bool,
 ) -> Arc<HyperCacheReader> {
-    use axum::async_trait;
     use common_s3::{S3Client, S3Error};
 
-    // Create a simple S3 client that always returns NotFound
     struct DummyS3Client;
 
     #[async_trait]
@@ -182,18 +188,27 @@ pub fn setup_hypercache_reader_with_mock_redis(
         }
     }
 
-    let config = HyperCacheConfig::new(
-        "feature_flags".to_string(),
-        "flags.json".to_string(),
+    let mut config = HyperCacheConfig::new(
+        namespace.to_string(),
+        object_name.to_string(),
         "us-east-1".to_string(),
         "posthog".to_string(),
     );
+    config.token_based = token_based;
     let s3_client: Arc<dyn S3Client + Send + Sync> = Arc::new(DummyS3Client);
     Arc::new(HyperCacheReader::new_with_s3_client(
         redis_client,
         s3_client,
         config,
     ))
+}
+
+/// Create a feature_flags HyperCacheReader with a mock Redis client.
+#[cfg(test)]
+pub fn setup_hypercache_reader_with_mock_redis(
+    redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+) -> Arc<HyperCacheReader> {
+    setup_mock_hypercache_reader(redis_client, "feature_flags", "flags.json", false)
 }
 
 /// Create a HyperCacheReader for team_metadata using the provided Redis client.
@@ -214,6 +229,14 @@ pub async fn setup_team_hypercache_reader(
             .await
             .expect("Failed to create team HyperCacheReader"),
     )
+}
+
+/// Create a team_metadata HyperCacheReader with a mock Redis client.
+#[cfg(test)]
+pub fn setup_team_hypercache_reader_with_mock_redis(
+    redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+) -> Arc<HyperCacheReader> {
+    setup_mock_hypercache_reader(redis_client, "team_metadata", "full_metadata.json", true)
 }
 
 /// Create a HyperCacheReader for remote config (array/config.json).
@@ -652,6 +675,8 @@ pub async fn insert_cohort_for_team_in_pg(
     name: Option<String>,
     filters: serde_json::Value,
     is_static: bool,
+    cohort_type: Option<CohortType>,
+    last_backfill_person_properties_at: Option<DateTime<Utc>>,
 ) -> Result<Cohort, Error> {
     let cohort = Cohort {
         id: 0, // Placeholder, will be updated after insertion
@@ -669,14 +694,15 @@ pub async fn insert_cohort_for_team_in_pg(
         errors_calculating: 0,
         groups: serde_json::json!([]),
         created_by_id: None,
-        cohort_type: None,
+        cohort_type,
+        last_backfill_person_properties_at,
     };
 
     let mut conn = client.get_connection().await?;
     let row: (i32,) = sqlx::query_as(
         r#"INSERT INTO posthog_cohort
-        (name, description, team_id, deleted, filters, query, version, pending_version, count, is_calculating, is_static, errors_calculating, groups, created_by_id) VALUES
-        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        (name, description, team_id, deleted, filters, query, version, pending_version, count, is_calculating, is_static, errors_calculating, groups, created_by_id, cohort_type, last_backfill_person_properties_at) VALUES
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING id"#,
     )
     .bind(&cohort.name)
@@ -693,6 +719,8 @@ pub async fn insert_cohort_for_team_in_pg(
     .bind(cohort.errors_calculating)
     .bind(&cohort.groups)
     .bind(cohort.created_by_id)
+    .bind(cohort.cohort_type)
+    .bind(cohort.last_backfill_person_properties_at)
     .fetch_one(&mut *conn)
     .await?;
 
@@ -808,12 +836,15 @@ pub fn create_test_flag(
                 properties: Some(vec![]),
                 rollout_percentage: Some(100.0),
                 variant: None,
+                ..Default::default()
             }],
             multivariate: None,
             aggregation_group_type_index: None,
             payloads: None,
             super_groups: None,
-            holdout_groups: None,
+            feature_enrollment: None,
+
+            holdout: None,
         }),
         deleted: deleted.unwrap_or(false),
         active: active.unwrap_or(true),
@@ -835,8 +866,8 @@ pub async fn insert_suppression_rule_in_pg(
     let rule_id = uuid::Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO posthog_errortrackingsuppressionrule
-           (id, team_id, filters, created_at, updated_at, order_key)
-           VALUES ($1, $2, $3, NOW(), NOW(), 0)"#,
+           (id, team_id, filters, created_at, updated_at, order_key, sampling_rate)
+           VALUES ($1, $2, $3, NOW(), NOW(), 0, 1.0)"#,
     )
     .bind(rule_id)
     .bind(team_id)
@@ -878,12 +909,15 @@ pub fn create_test_flag_with_properties(
                 properties: Some(filters),
                 rollout_percentage: Some(100.0),
                 variant: None,
+                ..Default::default()
             }],
             multivariate: None,
             aggregation_group_type_index: None,
             payloads: None,
             super_groups: None,
-            holdout_groups: None,
+            feature_enrollment: None,
+
+            holdout: None,
         }),
         None,
         None,
@@ -920,6 +954,7 @@ pub fn create_test_flag_that_depends_on_flag(
             prop_type: PropertyType::Flag,
             group_type_index: None,
             negation: None,
+            compiled_regex: None,
         },
     )
 }
@@ -932,6 +967,9 @@ pub struct TestContext {
     pub persons_writer: Arc<dyn Client + Send + Sync>,
     pub non_persons_reader: Arc<dyn Client + Send + Sync>,
     pub non_persons_writer: Arc<dyn Client + Send + Sync>,
+    /// Pool for the behavioral cohorts database (cohort_membership table).
+    /// Available when `behavioral_cohorts_read_database_url` is configured in test config.
+    pub behavioral_cohorts_pool: Option<Arc<sqlx::PgPool>>,
     config: Config,
 }
 
@@ -942,11 +980,28 @@ impl TestContext {
         let (persons_reader, non_persons_reader) = setup_dual_pg_readers(Some(&config));
         let (persons_writer, non_persons_writer) = setup_dual_pg_writers(Some(&config));
 
+        let behavioral_cohorts_pool = if config.is_behavioral_cohorts_db_configured() {
+            match sqlx::PgPool::connect(&config.behavioral_cohorts_read_database_url).await {
+                Ok(pool) => Some(Arc::new(pool)),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to connect to behavioral cohorts database ({}), \
+                         cohort membership tests will be skipped: {e}",
+                        config.behavioral_cohorts_read_database_url
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             persons_reader,
             persons_writer,
             non_persons_reader,
             non_persons_writer,
+            behavioral_cohorts_pool,
             config,
         }
     }
@@ -1020,6 +1075,29 @@ impl TestContext {
             name,
             filters,
             is_static,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub async fn insert_cohort_with_type(
+        &self,
+        team_id: i32,
+        name: Option<String>,
+        filters: serde_json::Value,
+        is_static: bool,
+        cohort_type: Option<CohortType>,
+        last_backfill_person_properties_at: Option<DateTime<Utc>>,
+    ) -> Result<Cohort, Error> {
+        insert_cohort_for_team_in_pg(
+            self.non_persons_writer.clone(),
+            team_id,
+            name,
+            filters,
+            is_static,
+            cohort_type,
+            last_backfill_person_properties_at,
         )
         .await
     }
@@ -1114,6 +1192,59 @@ impl TestContext {
         get_person_id_by_distinct_id(self.persons_reader.clone(), team_id, distinct_id).await
     }
 
+    /// Returns the person UUID for a given distinct_id, needed for cohort_membership inserts.
+    pub async fn get_person_uuid_by_distinct_id(
+        &self,
+        team_id: i32,
+        distinct_id: &str,
+    ) -> Result<Uuid, Error> {
+        let mut conn = self.persons_reader.get_connection().await?;
+        Person::from_distinct_id(&mut conn, team_id, distinct_id)
+            .await?
+            .map(|p| p.uuid)
+            .ok_or_else(|| anyhow::anyhow!("Person not found"))
+    }
+
+    /// Inserts a row into the `cohort_membership` table (behavioral cohorts database).
+    pub async fn insert_cohort_membership(
+        &self,
+        team_id: i32,
+        cohort_id: CohortId,
+        person_uuid: Uuid,
+        in_cohort: bool,
+    ) -> Result<(), Error> {
+        let pool = self
+            .behavioral_cohorts_pool
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("behavioral cohorts pool not configured"))?;
+        sqlx::query(
+            r#"INSERT INTO cohort_membership (team_id, cohort_id, person_id, in_cohort)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (team_id, cohort_id, person_id) DO UPDATE SET in_cohort = $4"#,
+        )
+        .bind(i64::from(team_id))
+        .bind(i64::from(cohort_id))
+        .bind(person_uuid)
+        .bind(in_cohort)
+        .execute(pool.as_ref())
+        .await?;
+        Ok(())
+    }
+
+    /// Creates a `CohortMembershipProvider` backed by the behavioral cohorts pool,
+    /// or falls back to `NoOpCohortMembershipProvider` if the pool is not available.
+    pub fn create_cohort_membership_provider(
+        &self,
+    ) -> Arc<dyn crate::cohorts::membership::CohortMembershipProvider> {
+        if let Some(pool) = &self.behavioral_cohorts_pool {
+            Arc::new(
+                crate::cohorts::membership::RealtimeCohortMembershipProvider::new(pool.clone()),
+            )
+        } else {
+            Arc::new(crate::cohorts::membership::NoOpCohortMembershipProvider)
+        }
+    }
+
     /// Creates a user with configurable options
     pub async fn create_user_with_options(
         &self,
@@ -1187,12 +1318,7 @@ impl TestContext {
         let pak_id = format!("test_pak_{}", &uuid::Uuid::new_v4().to_string()[..8]);
         let api_key_value = format!("phx_{}", &uuid::Uuid::new_v4().to_string()[..12]);
 
-        // Hash the key using SHA256
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(api_key_value.as_bytes());
-        let hash_result = hasher.finalize();
-        let secure_value = format!("sha256${}", hex::encode(hash_result));
+        let secure_value = crate::api::auth::hash_token_value(&api_key_value);
 
         let mut conn = self.non_persons_writer.get_connection().await?;
 
@@ -1235,6 +1361,41 @@ impl TestContext {
         query.build().execute(&mut *conn).await?;
 
         Ok((pak_id, api_key_value))
+    }
+
+    /// Creates a project secret API key with hashed value (SHA256 mode)
+    pub async fn create_project_secret_api_key(
+        &self,
+        team_id: i32,
+        label: &str,
+        scopes: Option<Vec<&str>>,
+    ) -> Result<String, Error> {
+        let key_id = format!("test_psk_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        let raw_key = format!("phs_{}", &uuid::Uuid::new_v4().to_string()[..12]);
+
+        let secure_value = crate::api::auth::hash_token_value(&raw_key);
+        let mask_value = format!("...{}", &raw_key[raw_key.len().saturating_sub(5)..]);
+
+        let mut conn = self.non_persons_writer.get_connection().await?;
+
+        let scopes_vec: Option<Vec<String>> =
+            scopes.map(|s| s.iter().map(|v| v.to_string()).collect());
+
+        sqlx::query(
+            r#"INSERT INTO posthog_projectsecretapikey
+               (id, team_id, label, mask_value, secure_value, scopes, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, NOW())"#,
+        )
+        .bind(&key_id)
+        .bind(team_id)
+        .bind(label)
+        .bind(&mask_value)
+        .bind(&secure_value)
+        .bind(&scopes_vec)
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(raw_key)
     }
 
     /// Creates a team with both public token and secret API token
@@ -1445,4 +1606,75 @@ impl TestContext {
         .await?;
         Ok(())
     }
+}
+
+pub struct MockGroupTypeFetcher {
+    pub mapping: GroupTypeMapping,
+}
+
+#[async_trait]
+impl GroupTypeMappingFetcher for MockGroupTypeFetcher {
+    async fn fetch(
+        &self,
+        _team_id: common_types::TeamId,
+    ) -> Result<GroupTypeMapping, GroupTypeFetchError> {
+        Ok(self.mapping.clone())
+    }
+}
+
+pub fn mock_group_type_cache(
+    types_to_indexes: std::collections::HashMap<String, i32>,
+) -> Arc<GroupTypeCacheManager> {
+    let fetcher = MockGroupTypeFetcher {
+        mapping: GroupTypeMapping::new(types_to_indexes),
+    };
+    Arc::new(GroupTypeCacheManager::new_with_fetcher(fetcher, None, None))
+}
+
+/// Delete a single auth token cache entry from Redis.
+///
+/// Both secret API tokens and personal API keys share the same cache namespace
+/// (`posthog:auth_token:{sha256_hash}`). This helper hashes the raw token/key
+/// value and deletes the corresponding Redis key.
+///
+/// NOTE: Rust's in-memory negative cache is not cleared — tests going from
+/// invalid → valid state need a fresh server or must wait for the negative
+/// cache TTL to expire.
+async fn invalidate_auth_cache_entry(
+    redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+    raw_value: &str,
+) -> Result<(), Error> {
+    let token_hash = crate::api::auth::hash_token_value(raw_value);
+    let cache_key = format!("{}{}", crate::api::auth::TOKEN_CACHE_PREFIX, token_hash);
+    redis_client
+        .del(cache_key)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to delete auth cache key: {e}"))?;
+    Ok(())
+}
+
+/// Simulate Django signal-based auth cache invalidation for a secret API token.
+///
+/// In production, rotating or deleting a team's secret token fires a Django signal
+/// that deletes the token's Redis cache entry via a Celery task. Tests that modify
+/// secret tokens directly bypass those signals, so they must call this helper to
+/// keep the auth cache consistent.
+pub async fn invalidate_secret_token_auth_cache(
+    redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+    token_value: &str,
+) -> Result<(), Error> {
+    invalidate_auth_cache_entry(redis_client, token_value).await
+}
+
+/// Simulate Django signal-based auth cache invalidation for a personal API key.
+///
+/// In production, removing a user from an organization fires a Django signal that
+/// asynchronously deletes the token's Redis cache entry via Celery. Tests that
+/// modify org membership directly bypass those signals, so they must call this
+/// helper to keep the auth cache consistent.
+pub async fn invalidate_personal_api_key_auth_cache(
+    redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+    key_value: &str,
+) -> Result<(), Error> {
+    invalidate_auth_cache_entry(redis_client, key_value).await
 }

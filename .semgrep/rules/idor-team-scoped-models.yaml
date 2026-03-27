@@ -61,9 +61,11 @@ rules:
                               |AlertConfiguration
                               |Annotation
                               |ApprovalPolicy
+                              |Artifact
                               |BatchExport
                               |BatchExportBackfill
                               |BatchImport
+                              |ButtonTile
                               |ChangeRequest
                               |ClusteringConfig
                               |ClusteringJob
@@ -90,6 +92,7 @@ rules:
                               |DataWarehouseTable
                               |DesktopRecording
                               |EarlyAccessFeature
+                              |EmailMessageMapping
                               |EvaluationContext
                               |Edge
                               |Endpoint
@@ -101,6 +104,7 @@ rules:
                               |ErrorTrackingIssueFingerprintV2
                               |ErrorTrackingRelease
                               |ErrorTrackingSpikeDetectionConfig
+                              |ErrorTrackingSpikeEvent
                               |ErrorTrackingStackFrame
                               |ErrorTrackingSuppressionRule
                               |ErrorTrackingSymbolSet
@@ -119,6 +123,7 @@ rules:
                               |HealthIssue
                               |HogFlow
                               |HogFlowBatchJob
+                              |HogFlowSchedule
                               |HogFlowTemplate
                               |HogFunction
                               |Hook
@@ -128,6 +133,7 @@ rules:
                               |Link
                               |LiveDebuggerBreakpoint
                               |LogsAlertConfiguration
+                              |LogsView
                               |LLMModelConfiguration
                               |LLMPrompt
                               |LLMProviderKey
@@ -137,6 +143,7 @@ rules:
                               |MessageRecipientPreference
                               |MessageTemplate
                               |Node
+                              |NotificationEvent
                               |Notebook
                               |ObjectMediaPreview
                               |PluginConfig
@@ -147,6 +154,8 @@ rules:
                               |QuickFilterContext
                               |Repo
                               |RepoRoutingRule
+                              |Run
+                              |RunSnapshot
                               |SandboxEnvironment
                               |ScoreDefinition
                               |SavedHeatmap
@@ -166,9 +175,14 @@ rules:
                               |Tag
                               |Task
                               |TaskRun
+                              |TeamConversationsEmailConfig
                               |Text
                               |Threshold
                               |Ticket
+                              |ReviewQueue
+                              |ReviewQueueItem
+                              |TraceReview
+                              |TraceReviewScore
                               |UploadedMedia
                               |UserInterview
                               |UserRepoPreference
@@ -231,9 +245,11 @@ rules:
                         |AlertConfiguration
                         |Annotation
                         |ApprovalPolicy
+                        |Artifact
                         |BatchExport
                         |BatchExportBackfill
                         |BatchImport
+                        |ButtonTile
                         |ChangeRequest
                         |ClusteringConfig
                         |ClusteringJob
@@ -260,6 +276,7 @@ rules:
                         |DataWarehouseTable
                         |DesktopRecording
                         |EarlyAccessFeature
+                        |EmailMessageMapping
                         |EvaluationContext
                         |Edge
                         |Endpoint
@@ -271,6 +288,7 @@ rules:
                         |ErrorTrackingIssueFingerprintV2
                         |ErrorTrackingRelease
                         |ErrorTrackingSpikeDetectionConfig
+                        |ErrorTrackingSpikeEvent
                         |ErrorTrackingStackFrame
                         |ErrorTrackingSuppressionRule
                         |ErrorTrackingSymbolSet
@@ -289,6 +307,7 @@ rules:
                         |HealthIssue
                         |HogFlow
                         |HogFlowBatchJob
+                        |HogFlowSchedule
                         |HogFlowTemplate
                         |HogFunction
                         |Hook
@@ -306,6 +325,7 @@ rules:
                         |MessageRecipientPreference
                         |MessageTemplate
                         |Node
+                        |NotificationEvent
                         |Notebook
                         |ObjectMediaPreview
                         |PluginConfig
@@ -316,6 +336,8 @@ rules:
                         |QuickFilterContext
                         |Repo
                         |RepoRoutingRule
+                        |Run
+                        |RunSnapshot
                         |SandboxEnvironment
                         |ScoreDefinition
                         |SavedHeatmap
@@ -335,9 +357,14 @@ rules:
                         |Tag
                         |Task
                         |TaskRun
+                        |TeamConversationsEmailConfig
                         |Text
                         |Threshold
                         |Ticket
+                        |ReviewQueue
+                        |ReviewQueueItem
+                        |TraceReview
+                        |TraceReviewScore
                         |UploadedMedia
                         |UserInterview
                         |UserRepoPreference

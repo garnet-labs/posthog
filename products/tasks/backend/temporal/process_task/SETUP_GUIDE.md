@@ -17,7 +17,7 @@ Optional: Issues (R/W), Workflows (R/W).
 Steps:
 
 1. GitHub -> Settings -> Developer Settings -> GitHub Apps -> New GitHub App
-2. Set the **Setup URL** to `http://localhost:8010/integrations/github/callback`
+2. Set the **Setup URL** (NOT the Callback URL or the Homepage URL) to `http://localhost:8010/integrations/github/callback`
 3. Set the permissions above
 4. Generate and download a private key
 5. Install the app on your test repositories
@@ -67,7 +67,7 @@ GITHUB_APP_SLUG=your-app-slug
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 
 # Optional: for local agent development (see step 7)
-# LOCAL_TWIG_MONOREPO_ROOT=/path/to/twig
+# LOCAL_POSTHOG_CODE_MONOREPO_ROOT=/path/to/posthog-code
 ```
 
 ## 4. Feature flag
@@ -83,7 +83,7 @@ This is the feature flag used on the endpoints and in the temporal worker.
 
 ## 5. Temporal worker
 
-Temporal and the temporal-django-worker start automatically via mprocs when you run `./bin/start`.
+Temporal and the temporal-django-worker start automatically via phrocs when you run `./bin/start`.
 
 The `process-task` workflow defined in `products/tasks/backend/temporal/process_task/workflow.py` provisions a sandbox, starts an agent inside it, and waits for the agent to finish. The workflow orchestrates these activities:
 
@@ -109,11 +109,15 @@ This is very minimal at the moment, but the tasks page can be used to see what i
 To test changes to `@posthog/agent` before publishing:
 
 ```bash
-# Set the twig monorepo root
-export LOCAL_TWIG_MONOREPO_ROOT=/path/to/twig
+# Set this as an environment variable in the PostHog monorepo root (in your .env)
+LOCAL_POSTHOG_CODE_MONOREPO_ROOT=/path/to/posthog-code
 
-# Build the packages first
-cd /path/to/twig/packages/agent && pnpm build
+# Build the @posthog/agent package OR run pnpm dev in Posthog Code
+cd /path/to/posthog-code/packages/agent && pnpm build
+
+OR
+
+pnpm dev
 
 # Run a task from the UI
 ```

@@ -3,13 +3,12 @@ import './DashboardItems.scss'
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
-import { useEffect, useRef, useState } from 'react'
-import { Layout, Responsive as ReactGridLayout } from 'react-grid-layout'
+import { RefObject, useEffect, useRef, useState } from 'react'
+import { Layout, Responsive as ReactGridLayout, useContainerWidth } from 'react-grid-layout'
 import { GridBackground } from 'react-grid-layout/extras'
 
 import { InsightCard } from 'lib/components/Cards/InsightCard'
 import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
-import { useResizeObserver } from 'lib/hooks/useResizeObserver'
 import { LemonBanner } from 'lib/lemon-ui/LemonBanner'
 import { DashboardEventSource, eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
@@ -19,14 +18,17 @@ import { getBestSurveyOpportunityFunnel } from 'scenes/surveys/utils/opportunity
 import { urls } from 'scenes/urls'
 
 import { getCurrentExporterData } from '~/exporter/exporterViewLogic'
-import { dashboardsModel } from '~/models/dashboardsModel'
 import { insightsModel } from '~/models/insightsModel'
 import { DashboardLayoutSize, DashboardMode, DashboardPlacement, DashboardType } from '~/types'
 
+import { DashboardButtonTileItem } from './items/DashboardButtonTileItem'
 import { DashboardTextItem } from './items/DashboardTextItem'
 
 const DRAG_AUTO_SCROLL_THRESHOLD = 100
-const DRAG_AUTO_SCROLL_SPEED = 8
+const DRAG_AUTO_SCROLL_SPEED = 50
+
+const BASE_ROW_HEIGHT = 80
+const BASE_MARGIN: [number, number] = [16, 16]
 
 export function DashboardItems(): JSX.Element {
     const {
@@ -47,6 +49,7 @@ export function DashboardItems(): JSX.Element {
         dataColorThemeId,
         canEditDashboard,
     } = useValues(dashboardLogic)
+    const { layoutZoom = 1 } = useValues(dashboardLogic)
     const {
         updateLayouts,
         updateContainerWidth,
@@ -56,14 +59,13 @@ export function DashboardItems(): JSX.Element {
         duplicateTile,
         refreshDashboardItem,
         moveToDashboard,
+        copyToDashboard,
         setTileOverride,
         setDashboardMode,
     } = useActions(dashboardLogic)
     const { renameInsight } = useActions(insightsModel)
     const { reportDashboardTileRepositioned } = useActions(eventUsageLogic)
     const { push } = useActions(router)
-    const { nameSortedDashboards } = useValues(dashboardsModel)
-    const otherDashboards = nameSortedDashboards.filter((nsdb) => nsdb.id !== dashboard?.id)
     const { data: surveyLinkedInsights, loading: surveyLinkedInsightsLoading } = useSurveyLinkedInsights({})
 
     const bestSurveyOpportunityFunnel = surveyLinkedInsightsLoading
@@ -71,6 +73,7 @@ export function DashboardItems(): JSX.Element {
         : getBestSurveyOpportunityFunnel(tiles || [], surveyLinkedInsights)
 
     const [resizingItem, setResizingItem] = useState<any>(null)
+    const [containerHeight, setContainerHeight] = useState<number | undefined>(undefined)
 
     // cannot click links when dragging and 250ms after
     const isDragging = useRef(false)
@@ -91,8 +94,39 @@ export function DashboardItems(): JSX.Element {
         'dashboard-edit-mode': dashboardMode === DashboardMode.Edit,
     })
 
-    const { width: gridWrapperWidth, ref: gridWrapperRef } = useResizeObserver()
-    const isMobileView = gridWrapperWidth && gridWrapperWidth <= BREAKPOINTS['sm']
+    const { width, containerRef, mounted } = useContainerWidth()
+
+    // Debounce width changes to the grid. Rapidly crossing the width causes tiles to stay squashed at 1-column
+    // width. Debouncing avoids this and reduces unnecessary re-layouts during resize.
+    const [gridWidth, setGridWidth] = useState(width)
+    useEffect(() => {
+        const timer = setTimeout(() => setGridWidth(width), 100)
+        return () => clearTimeout(timer)
+    }, [width])
+
+    useEffect(() => {
+        if (!mounted || !containerRef.current) {
+            return
+        }
+
+        const element = containerRef.current
+        const observer = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.target === element) {
+                    setContainerHeight(entry.contentRect.height)
+                }
+            }
+        })
+
+        // Set initial height
+        setContainerHeight(element.clientHeight)
+        observer.observe(element)
+
+        return () => {
+            observer.disconnect()
+        }
+    }, [mounted, containerRef])
+    const isMobileView = width && width <= BREAKPOINTS['sm']
     const isEditablePlacement = [
         DashboardPlacement.Dashboard,
         DashboardPlacement.ProjectHomepage,
@@ -103,45 +137,53 @@ export function DashboardItems(): JSX.Element {
         !!dashboard && canEditDashboard && dashboardMode !== DashboardMode.Edit && !isMobileView && isEditablePlacement
 
     const showDashboardGrid = useFeatureFlag('DASHBOARD_GRID')
+    const showLayoutZoom = useFeatureFlag('DASHBOARD_LAYOUT_ZOOM')
+    const isLayoutZoomToggled = dashboardMode === DashboardMode.Edit && showLayoutZoom && layoutZoom !== 1
+
+    const effectiveZoom = dashboardMode === DashboardMode.Edit && showLayoutZoom ? layoutZoom : 1
+    const rowHeight = BASE_ROW_HEIGHT * effectiveZoom
+    const spacingFactor = effectiveZoom < 1 ? 0.9 : 1
+    const margin = BASE_MARGIN.map((m) => m * spacingFactor) as [number, number]
 
     return (
-        <div className="dashboard-items-wrapper" ref={gridWrapperRef}>
+        <div className="dashboard-items-wrapper" ref={containerRef as RefObject<HTMLDivElement>}>
             {dashboardMode === DashboardMode.Edit && isMobileView && (
                 <LemonBanner type="warning" className="mb-4">
                     Layout editing is disabled on smaller screens. Please zoom out or use a larger screen to move or
                     resize tiles.
                 </LemonBanner>
             )}
-            {gridWrapperWidth && (
+            {mounted && (
                 <div className="relative">
                     {dashboardMode === DashboardMode.Edit && !isMobileView && showDashboardGrid && (
                         <GridBackground
-                            width={gridWrapperWidth}
+                            width={gridWidth}
                             cols={BREAKPOINT_COLUMN_COUNTS.sm}
-                            rowHeight={80}
-                            margin={[16, 16]}
+                            rowHeight={rowHeight}
+                            margin={margin}
                             containerPadding={[0, 0]}
                             rows="auto"
-                            height={gridWrapperWidth} // rough heuristic; RGL will grow as needed
+                            height={containerHeight} // kept in sync via ResizeObserver
                             color="var(--color-bg-surface-secondary)"
                         />
                     )}
 
                     <ReactGridLayout
-                        width={gridWrapperWidth}
+                        width={gridWidth}
                         className={className}
                         dragConfig={{
                             enabled: dashboardMode === DashboardMode.Edit && !isMobileView,
-                            handle: '.CardMeta,.TextCard__body',
+                            handle: '.CardMeta,.TextCard__body,.ButtonTileCard__body',
                             cancel: 'a,table,button,input,.Popover',
+                            bounded: true,
                         }}
                         resizeConfig={{
-                            enabled: dashboardMode === DashboardMode.Edit && !isMobileView,
+                            enabled: dashboardMode === DashboardMode.Edit && !isMobileView && !isLayoutZoomToggled,
                             handles: ['s', 'e', 'se', 'n', 'w', 'nw', 'ne', 'sw'],
                         }}
                         layouts={layouts as Partial<Record<DashboardLayoutSize, Layout>>}
-                        rowHeight={80}
-                        margin={[16, 16]}
+                        rowHeight={rowHeight}
+                        margin={margin}
                         containerPadding={[0, 0]}
                         onLayoutChange={(_, newLayouts) => {
                             if (dashboardMode === DashboardMode.Edit) {
@@ -161,7 +203,7 @@ export function DashboardItems(): JSX.Element {
                         onResizeStop={() => {
                             setResizingItem(null)
                             if (dashboard?.id) {
-                                reportDashboardTileRepositioned(dashboard.id, 'resized')
+                                reportDashboardTileRepositioned(dashboard.id, 'resized', effectiveZoom)
                             }
                         }}
                         onDragStart={() => {
@@ -223,12 +265,12 @@ export function DashboardItems(): JSX.Element {
                                 isDragging.current = false
                             }, 250)
                             if (dashboard?.id) {
-                                reportDashboardTileRepositioned(dashboard.id, 'moved')
+                                reportDashboardTileRepositioned(dashboard.id, 'moved', effectiveZoom)
                             }
                         }}
                     >
                         {tiles?.map((tile) => {
-                            const { insight, text } = tile
+                            const { insight, text, button_tile } = tile
                             const smLayout = layouts['sm']?.find((l) => {
                                 return l.i == tile.id.toString()
                             })
@@ -236,7 +278,10 @@ export function DashboardItems(): JSX.Element {
                             const commonTileProps = {
                                 dashboardId: dashboard?.id,
                                 showResizeHandles:
-                                    dashboardMode === DashboardMode.Edit && !isMobileView && isEditablePlacement,
+                                    dashboardMode === DashboardMode.Edit &&
+                                    !isMobileView &&
+                                    isEditablePlacement &&
+                                    !isLayoutZoomToggled,
                                 canEnterEditModeFromEdge,
                                 onEnterEditModeFromEdge: canEnterEditModeFromEdge
                                     ? () => setDashboardMode(DashboardMode.Edit, DashboardEventSource.CardEdgeHover)
@@ -253,10 +298,10 @@ export function DashboardItems(): JSX.Element {
                                               return
                                           }
 
-                                          // Don't trigger when clicking obvious interactive controls
+                                          // Don't trigger when clicking obvious interactive controls or readonly rich text (TipTap/LemonMarkdown).
                                           if (
                                               target.closest(
-                                                  'input,textarea,button,select,a,p,h4,[contenteditable="true"],[role="textbox"]'
+                                                  'input,textarea,button,select,a,p,h4,[contenteditable="true"],[role="textbox"],.ProseMirror,.LemonMarkdown'
                                               )
                                           ) {
                                               return
@@ -266,12 +311,18 @@ export function DashboardItems(): JSX.Element {
                                           setDashboardMode(DashboardMode.Edit, DashboardEventSource.CardDragHandle)
                                       }
                                     : undefined,
-                                showEditingControls: isEditablePlacement,
+                                showEditingControls: isEditablePlacement || dashboardMode === DashboardMode.Edit,
                                 moveToDashboard: ({ id, name }: Pick<DashboardType, 'id' | 'name'>) => {
                                     if (!dashboard) {
                                         throw new Error('must be on a dashboard to move this tile')
                                     }
                                     moveToDashboard(tile, dashboard.id, id, name)
+                                },
+                                copyToDashboard: ({ id, name }: Pick<DashboardType, 'id' | 'name'>) => {
+                                    if (!dashboard) {
+                                        throw new Error('must be on a dashboard to copy this tile')
+                                    }
+                                    copyToDashboard(tile, dashboard.id, id, name)
                                 },
                                 removeFromDashboard: () => removeTile(tile),
                             }
@@ -318,7 +369,6 @@ export function DashboardItems(): JSX.Element {
                                         dataColorThemeId={dataColorThemeId}
                                         surveyOpportunity={tile.id === bestSurveyOpportunityFunnel?.id}
                                         {...commonTileProps}
-                                        // NOTE: ReactGridLayout additionally injects its resize handles as `children`!
                                     />
                                 )
                             }
@@ -329,7 +379,7 @@ export function DashboardItems(): JSX.Element {
                                         key={tile.id}
                                         tile={tile}
                                         placement={placement}
-                                        otherDashboards={otherDashboards}
+                                        dashboardId={dashboard?.id}
                                         isDragging={isDragging.current}
                                         onEdit={() => {
                                             if (dashboard?.id) {
@@ -337,9 +387,41 @@ export function DashboardItems(): JSX.Element {
                                             }
                                         }}
                                         onMoveToDashboard={commonTileProps.moveToDashboard}
+                                        onCopyToDashboard={({ id, name }) => {
+                                            if (!dashboard) {
+                                                throw new Error('must be on a dashboard to copy this tile')
+                                            }
+                                            copyToDashboard(tile, dashboard.id, id, name)
+                                        }}
                                         onDuplicate={() => duplicateTile(tile)}
                                         onRemove={commonTileProps.removeFromDashboard}
                                         showResizeHandles={commonTileProps.showResizeHandles}
+                                        showEditingControls={commonTileProps.showEditingControls}
+                                        canEnterEditModeFromEdge={commonTileProps.canEnterEditModeFromEdge}
+                                        onEnterEditModeFromEdge={commonTileProps.onEnterEditModeFromEdge}
+                                        onDragHandleMouseDown={commonTileProps.onDragHandleMouseDown}
+                                    />
+                                )
+                            }
+
+                            if (button_tile) {
+                                return (
+                                    <DashboardButtonTileItem
+                                        key={tile.id}
+                                        tile={tile}
+                                        placement={placement}
+                                        dashboardId={dashboard?.id}
+                                        isDraggingRef={isDragging}
+                                        onEdit={() => {
+                                            if (dashboard?.id) {
+                                                push(urls.dashboardButtonTile(dashboard.id, tile.id))
+                                            }
+                                        }}
+                                        onMoveToDashboard={commonTileProps.moveToDashboard}
+                                        onDuplicate={() => duplicateTile(tile)}
+                                        onRemove={commonTileProps.removeFromDashboard}
+                                        showResizeHandles={commonTileProps.showResizeHandles}
+                                        showEditingControls={commonTileProps.showEditingControls}
                                         canEnterEditModeFromEdge={commonTileProps.canEnterEditModeFromEdge}
                                         onEnterEditModeFromEdge={commonTileProps.onEnterEditModeFromEdge}
                                         onDragHandleMouseDown={commonTileProps.onDragHandleMouseDown}

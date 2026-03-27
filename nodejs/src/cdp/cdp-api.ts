@@ -580,9 +580,16 @@ export class CdpApi {
             if (typeof result.execResult === 'object' && result.execResult && 'httpResponse' in result.execResult) {
                 const httpResponse = result.execResult.httpResponse as HogFunctionWebhookResult
                 if (typeof httpResponse.body === 'string') {
+                    if (httpResponse.isBase64Encoded) {
+                        const buffer = Buffer.from(httpResponse.body, 'base64')
+                        return res
+                            .status(httpResponse.status)
+                            .type(httpResponse.contentType ?? 'application/octet-stream')
+                            .send(buffer)
+                    }
                     return res
                         .status(httpResponse.status)
-                        .set('Content-Type', httpResponse.contentType ?? 'text/plain')
+                        .type(httpResponse.contentType ?? 'text/plain')
                         .send(httpResponse.body)
                 } else if (typeof httpResponse.body === 'object') {
                     return res.status(httpResponse.status).json(httpResponse.body)
@@ -643,14 +650,14 @@ export class CdpApi {
 
     private getEmailTrackingPixel =
         () =>
-        async (req: ModifiedRequest, res: express.Response): Promise<any> => {
-            await this.emailTrackingService.handleEmailTrackingPixel(req, res)
+        (req: ModifiedRequest, res: express.Response): any => {
+            this.emailTrackingService.handleEmailTrackingPixel(req, res)
         }
 
     private getEmailTrackingRedirect =
         () =>
-        async (req: ModifiedRequest, res: express.Response): Promise<any> => {
-            await this.emailTrackingService.handleEmailTrackingRedirect(req, res)
+        (req: ModifiedRequest, res: express.Response): any => {
+            this.emailTrackingService.handleEmailTrackingRedirect(req, res)
         }
 
     private generatePreferencesToken =
