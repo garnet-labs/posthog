@@ -3,7 +3,7 @@
   "checkpoint_id": "83e99c8f74f4",
   "strategy": "manual-commit",
   "branch": "signals/reviewer-ui-and-tasks-fixes",
-  "checkpoints_count": 2,
+  "checkpoints_count": 3,
   "files_touched": [
     "products/signals/backend/migrations/0014_add_suggested_reviewer_user_ids.py",
     "products/signals/backend/migrations/max_migration.txt",
@@ -26,6 +26,12 @@
       "transcript": "/83/e99c8f74f4/1/full.jsonl",
       "content_hash": "/83/e99c8f74f4/1/content_hash.txt",
       "prompt": "/83/e99c8f74f4/1/prompt.txt"
+    },
+    {
+      "metadata": "/83/e99c8f74f4/2/metadata.json",
+      "transcript": "/83/e99c8f74f4/2/full.jsonl",
+      "content_hash": "/83/e99c8f74f4/2/content_hash.txt",
+      "prompt": ""
     }
   ],
   "token_usage": {
