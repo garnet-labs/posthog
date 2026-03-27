@@ -16941,12 +16941,12 @@ export namespace Schemas {
     * `firebase` - Firebase
     * `jira` - Jira
     * `pinterest-ads` - Pinterest Ads
-    * `apple-push` - Apple Push
+    * `apns` - Apple Push
      */
-    export type Kind7e8Enum = typeof Kind7e8Enum[keyof typeof Kind7e8Enum];
+    export type KindD48Enum = typeof KindD48Enum[keyof typeof KindD48Enum];
 
 
-    export const Kind7e8Enum = {
+    export const KindD48Enum = {
       Slack: 'slack',
       SlackPosthogCode: 'slack-posthog-code',
       Salesforce: 'salesforce',
@@ -16975,7 +16975,7 @@ export namespace Schemas {
       Firebase: 'firebase',
       Jira: 'jira',
       PinterestAds: 'pinterest-ads',
-      ApplePush: 'apple-push',
+      Apns: 'apns',
     } as const;
 
     /**
@@ -16983,7 +16983,7 @@ export namespace Schemas {
      */
     export interface Integration {
       readonly id: number;
-      kind: Kind7e8Enum;
+      kind: KindD48Enum;
       config?: unknown;
       readonly created_at: string;
       readonly created_by: UserBasic;
@@ -22870,7 +22870,7 @@ export namespace Schemas {
      */
     export interface PatchedIntegration {
       readonly id?: number;
-      kind?: Kind7e8Enum;
+      kind?: KindD48Enum;
       config?: unknown;
       readonly created_at?: string;
       readonly created_by?: UserBasic;
@@ -23739,7 +23739,7 @@ export namespace Schemas {
      */
     export interface SessionRecordingExternalReferenceIntegration {
       readonly id: number;
-      readonly kind: Kind7e8Enum;
+      readonly kind: KindD48Enum;
       readonly display_name: string;
     }
 
