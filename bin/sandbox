@@ -229,10 +229,24 @@ def _claude_auth_dir() -> str:
     auth_dir = REGISTRY_DIR / "claude-auth"
     auth_dir.mkdir(parents=True, exist_ok=True)
     claude_dir = Path.home() / ".claude"
-    for filename in (".credentials.json", "settings.json", "settings.local.json"):
+    for filename in ("settings.json", "settings.local.json"):
         src = claude_dir / filename
         if src.exists():
             shutil.copy2(src, auth_dir / filename)
+
+    # Claude Code credentials: check disk first, fall back to macOS keychain.
+    creds_file = auth_dir / ".credentials.json"
+    creds_src = claude_dir / ".credentials.json"
+    if creds_src.exists():
+        shutil.copy2(creds_src, creds_file)
+    elif sys.platform == "darwin":
+        result = run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            check=False, capture=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            creds_file.write_text(result.stdout.strip())
+
     return str(auth_dir)
 
 
