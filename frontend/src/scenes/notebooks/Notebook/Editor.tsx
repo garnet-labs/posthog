@@ -60,6 +60,7 @@ import { CollapsibleHeading } from './CollapsibleHeading'
 import { DropAndPasteHandlerExtension } from './DropAndPasteHandlerExtension'
 import { InlineMenu } from './InlineMenu'
 import { notebookLogic } from './notebookLogic'
+import { NotebookDefaultBlockOnEnter } from './NotebookDefaultBlockOnEnter'
 import { SlashCommandsExtension } from './SlashCommands'
 import { TableMenu } from './TableMenu'
 
@@ -164,6 +165,10 @@ export function Editor(): JSX.Element {
 
     if (hasCollapsibleSections) {
         extensions.push(CollapsibleHeading.configure())
+    }
+
+    if (mode === 'notebook') {
+        extensions.push(NotebookDefaultBlockOnEnter)
     }
 
     return (
