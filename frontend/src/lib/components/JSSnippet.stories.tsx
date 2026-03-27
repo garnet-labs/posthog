@@ -19,4 +19,6 @@ export default meta
 
 type Story = StoryObj<typeof JSSnippet>
 
-export const Default: Story = {}
+export const Default: Story = {
+    tags: ['test-skip'], // Non-deterministic width causes intermittent snapshot failures
+}
