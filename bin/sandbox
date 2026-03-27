@@ -740,6 +740,13 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
 
     worktree_path = ensure_worktree(branch, base_branch)
 
+    if Path(worktree_path).resolve() == REPO_ROOT.resolve():
+        fatal(
+            f"Cannot create a sandbox on the branch currently checked out in the main repo.\n"
+            f"  Either check out a different branch first, or create the sandbox on a new branch:\n"
+            f"  sandbox create my-feature-branch"
+        )
+
     if not (Path(worktree_path) / "manage.py").exists():
         fatal(f"Worktree at {worktree_path} does not contain PostHog code")
 
@@ -847,16 +854,20 @@ def cmd_destroy(branch: str) -> None:
 
     # Remove worktree — containers may have created root-owned files,
     # so we use a container to delete, then rmdir the empty directory.
+    # NEVER delete the main repo even if the sandbox was created on the current branch.
     if entry and entry.worktree and Path(entry.worktree).is_dir():
-        run(
-            ["docker", "run", "--rm", "-v", f"{entry.worktree}:/cleanup",
-             "alpine", "sh", "-c", "find /cleanup -mindepth 1 -delete"],
-            check=False, capture=True,
-        )
-        try:
-            Path(entry.worktree).rmdir()
-        except OSError:
-            pass
+        if Path(entry.worktree).resolve() == REPO_ROOT.resolve():
+            info("Worktree is the main repo — skipping directory cleanup.")
+        else:
+            run(
+                ["docker", "run", "--rm", "-v", f"{entry.worktree}:/cleanup",
+                 "alpine", "sh", "-c", "find /cleanup -mindepth 1 -delete"],
+                check=False, capture=True,
+            )
+            try:
+                Path(entry.worktree).rmdir()
+            except OSError:
+                pass
 
     run(["git", "worktree", "prune"], check=False)
     registry.remove(branch)
