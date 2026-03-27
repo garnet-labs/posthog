@@ -10,9 +10,18 @@ import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
 import { useMocks } from '~/mocks/jest'
-import { LifecycleQuery, NodeKind, StickinessQuery, TrendsQuery } from '~/queries/schema/schema-general'
+import {
+    FunnelsQuery,
+    InsightQueryNode,
+    LifecycleQuery,
+    NodeKind,
+    PathsQuery,
+    RetentionQuery,
+    StickinessQuery,
+    TrendsQuery,
+} from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
-import { BaseMathType, InsightShortId } from '~/types'
+import { BaseMathType, InsightShortId, PathType, RetentionPeriod } from '~/types'
 
 import { EditorFilters } from './EditorFilters'
 
@@ -62,7 +71,39 @@ function makeStickinessQuery(): StickinessQuery {
     }
 }
 
-function setupAndRender(query: TrendsQuery | LifecycleQuery | StickinessQuery): ReturnType<typeof insightVizDataLogic> {
+function makeFunnelsQuery(): FunnelsQuery {
+    return {
+        kind: NodeKind.FunnelsQuery,
+        series: [
+            { kind: NodeKind.EventsNode, name: '$pageview', event: '$pageview' },
+            { kind: NodeKind.EventsNode, name: '$pageleave', event: '$pageleave' },
+        ],
+    }
+}
+
+function makeRetentionQuery(): RetentionQuery {
+    return {
+        kind: NodeKind.RetentionQuery,
+        retentionFilter: {
+            retentionType: 'retention_first_time',
+            totalIntervals: 11,
+            period: RetentionPeriod.Day,
+            targetEntity: { id: '$pageview', type: 'events', name: '$pageview' },
+            returningEntity: { id: '$pageview', type: 'events', name: '$pageview' },
+        },
+    }
+}
+
+function makePathsQuery(): PathsQuery {
+    return {
+        kind: NodeKind.PathsQuery,
+        pathsFilter: {
+            includeEventTypes: [PathType.PageView],
+        },
+    }
+}
+
+function setupAndRender(query: InsightQueryNode): ReturnType<typeof insightVizDataLogic> {
     insightLogic(insightProps).mount()
     insightDataLogic(insightProps).mount()
     const vizDataLogic = insightVizDataLogic(insightProps)
@@ -194,6 +235,54 @@ describe('EditorFilters', () => {
         await waitFor(() => {
             expect(vizDataLogic.values.stickinessFilter?.computedAs).toBe('cumulative')
         })
+    })
+
+    it.each([
+        {
+            name: 'trends',
+            query: makeTrendsQuery(),
+            expectedPresent: ['Enable formula mode', 'Filters'],
+            expectedAbsent: ['Retention condition', 'Event Types', 'Lifecycle Toggles', 'Stickiness Criteria'],
+        },
+        {
+            name: 'lifecycle',
+            query: makeLifecycleQuery(),
+            expectedPresent: ['Lifecycle Toggles', 'Filters'],
+            expectedAbsent: ['Enable formula mode', 'Retention condition', 'Stickiness Criteria'],
+        },
+        {
+            name: 'stickiness',
+            query: makeStickinessQuery(),
+            expectedPresent: ['Stickiness Criteria', 'Compute as', 'Filters'],
+            expectedAbsent: ['Enable formula mode', 'Lifecycle Toggles', 'Retention condition'],
+        },
+        {
+            name: 'retention',
+            query: makeRetentionQuery(),
+            expectedPresent: ['Retention condition', 'Calculation options', 'Filters'],
+            expectedAbsent: ['Enable formula mode', 'Lifecycle Toggles', 'Event Types'],
+        },
+        {
+            name: 'funnels',
+            query: makeFunnelsQuery(),
+            expectedPresent: ['Filters'],
+            expectedAbsent: ['Enable formula mode', 'Lifecycle Toggles', 'Retention condition', 'Event Types'],
+        },
+        {
+            name: 'paths',
+            query: makePathsQuery(),
+            expectedPresent: ['Event Types', 'Starts at', 'Exclusions', 'Filters'],
+            expectedAbsent: ['Enable formula mode', 'Retention condition', 'Lifecycle Toggles'],
+        },
+    ])('$name renders correct filter sections', ({ query, expectedPresent, expectedAbsent }) => {
+        setupAndRender(query)
+
+        for (const text of expectedPresent) {
+            expect(screen.getByText(text)).toBeInTheDocument()
+        }
+        for (const text of expectedAbsent) {
+            expect(screen.queryByText(text)).not.toBeInTheDocument()
+        }
     })
 
     it('renders nothing when showing is false', () => {
