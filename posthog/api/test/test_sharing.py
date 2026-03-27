@@ -1209,3 +1209,108 @@ class TestExportCacheKeyFlow(APIBaseTest):
         # fetch_cached_response_by_key should not be called since cache_keys parsing failed
         mock_fetch_cached.assert_not_called()
         mock_calculate.assert_called_once()
+
+
+class TestExportVariablesOverrideFlow(APIBaseTest):
+    """Test that variables parameter is correctly parsed and included in exported_data."""
+
+    insight: Insight
+    sharing_config: SharingConfiguration
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.insight = Insight.objects.create(
+            team=cls.team,
+            name="Test Insight",
+            query={"kind": "TrendsQuery", "series": [{"event": "$pageview"}]},
+        )
+        cls.sharing_config = SharingConfiguration.objects.create(
+            team=cls.team,
+            insight=cls.insight,
+            enabled=True,
+        )
+
+    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
+    @mock_exporter_template
+    def test_variables_param_included_in_exported_data(self, mock_calculate):
+        from posthog.caching.fetch_from_cache import InsightResult
+
+        mock_calculate.return_value = InsightResult(
+            result=[{"count": 10}],
+            cache_key="key1",
+            is_cached=False,
+            last_refresh=None,
+            timezone="UTC",
+        )
+
+        variables = {"var1": {"variableId": "var1", "code_name": "region", "value": "EU"}}
+        variables_param = quote(json.dumps(variables))
+
+        response = self.client.get(f"/shared/{self.sharing_config.access_token}?variables={variables_param}")
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "variables_override" in content
+        assert "region" in content
+        assert "EU" in content
+
+    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
+    @mock_exporter_template
+    def test_no_variables_override_when_param_absent(self, mock_calculate):
+        from posthog.caching.fetch_from_cache import InsightResult
+
+        mock_calculate.return_value = InsightResult(
+            result=[{"count": 10}],
+            cache_key="key2",
+            is_cached=False,
+            last_refresh=None,
+            timezone="UTC",
+        )
+
+        response = self.client.get(f"/shared/{self.sharing_config.access_token}")
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "variables_override" not in content
+
+    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
+    @mock_exporter_template
+    def test_invalid_variables_param_ignored(self, mock_calculate):
+        from posthog.caching.fetch_from_cache import InsightResult
+
+        mock_calculate.return_value = InsightResult(
+            result=[{"count": 10}],
+            cache_key="key3",
+            is_cached=False,
+            last_refresh=None,
+            timezone="UTC",
+        )
+
+        response = self.client.get(f"/shared/{self.sharing_config.access_token}?variables=not_valid_json")
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Should render successfully without variables_override
+        assert "variables_override" not in content
+
+    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
+    @mock_exporter_template
+    def test_variables_not_included_for_dashboard_exports(self, mock_calculate):
+        """Variables override should only be included for insight exports, not dashboards."""
+        dashboard = Dashboard.objects.create(team=self.team, name="Test Dashboard")
+        dashboard_sharing = SharingConfiguration.objects.create(
+            team=self.team,
+            dashboard=dashboard,
+            enabled=True,
+        )
+
+        variables = {"var1": {"variableId": "var1", "code_name": "region", "value": "EU"}}
+        variables_param = quote(json.dumps(variables))
+
+        response = self.client.get(f"/shared/{dashboard_sharing.access_token}?variables={variables_param}")
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        # variables_override should not be in the exported data for dashboard exports
+        assert "variables_override" not in content

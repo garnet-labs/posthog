@@ -18,7 +18,7 @@ import { InsightsTable } from 'scenes/insights/views/InsightsTable/InsightsTable
 
 import { getQueryBasedInsightModel } from '~/queries/nodes/InsightViz/utils'
 import { Query } from '~/queries/Query/Query'
-import { SharingConfigurationSettings } from '~/queries/schema/schema-general'
+import { HogQLVariable, SharingConfigurationSettings } from '~/queries/schema/schema-general'
 import { isDataTableNode, isInsightVizNode, isTrendsQuery } from '~/queries/utils'
 import { ChartDisplayType, DataColorThemeModel, InsightLogicProps, InsightModel } from '~/types'
 
@@ -26,10 +26,12 @@ export function ExportedInsight({
     insight: legacyInsight,
     themes,
     exportOptions: { whitelabel, noHeader, legend, detailed: detailedResults },
+    variablesOverride,
 }: {
     insight: InsightModel
     themes: DataColorThemeModel[]
     exportOptions: SharingConfigurationSettings
+    variablesOverride?: Record<string, HogQLVariable>
 }): JSX.Element {
     useMountedLogic(dataThemeLogic({ themes }))
 
@@ -56,6 +58,7 @@ export function ExportedInsight({
         dashboardItemId: insight.short_id,
         cachedInsight: insight,
         doNotLoad: true,
+        variablesOverride: variablesOverride ?? null,
     }
 
     const { short_id, query, name, derived_name, description } = insight

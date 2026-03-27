@@ -1,6 +1,6 @@
 import { SessionRecordingPlayerMode } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 
-import { SharingConfigurationSettings } from '~/queries/schema/schema-general'
+import { HogQLVariable, SharingConfigurationSettings } from '~/queries/schema/schema-general'
 import { DashboardType, DataColorThemeModel, HeatmapExportContext, InsightModel, SessionRecordingType } from '~/types'
 
 export enum ExportType {
@@ -26,4 +26,6 @@ export interface ExportedData extends SharingConfigurationSettings {
     exportToken?: string
     heatmap_url?: string
     heatmap_context?: HeatmapExportContext
+    /** Dashboard variable overrides for insight exports */
+    variables_override?: Record<string, HogQLVariable>
 }
