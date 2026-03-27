@@ -496,16 +496,10 @@ def user_phase() -> None:
     install_geoip()
     create_kafka_topics()
 
-    warm_boot = os.environ.get("SANDBOX_WARM_BOOT") == "1"
-
-    if warm_boot:
-        info("Warm boot — skipping entrypoint migrations, backend will handle them.")
-
     def install_python_and_maybe_migrate() -> None:
         install_python_deps()
-        if not warm_boot:
-            run(["python", "manage.py", "sandbox_migrate", "--parallel", "--progress-file", str(PROGRESS_FILE)])
-            ensure_demo_data()
+        run(["python", "manage.py", "sandbox_migrate", "--parallel", "--progress-file", str(PROGRESS_FILE)])
+        ensure_demo_data()
 
     # Run dependency installs in parallel. Migrations and demo data are chained
     # after Python deps (uv ~1.5s) so they overlap with the slower pnpm/cargo.

@@ -351,7 +351,6 @@ def _compose_env(port: int, worktree_path: str) -> dict[str, str]:
         "SANDBOX_CODE": worktree_path,
         "SANDBOX_UID": str(os.getuid()),
         "SANDBOX_GID": str(os.getgid()),
-        "SANDBOX_WARM_BOOT": os.environ.get("SANDBOX_WARM_BOOT", "0"),
         "SANDBOX_GIT_DIR": str(REPO_ROOT / ".git"),
         "SANDBOX_CLAUDE_JSON": str(_claude_json) if (_claude_json := Path.home() / ".claude.json").is_file() else "/dev/null",
     }
@@ -768,8 +767,6 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
             if choice == "f":
                 use_cache = False
 
-    if use_cache:
-        os.environ["SANDBOX_WARM_BOOT"] = "1"
     _restore_and_start(project, port, worktree_path, use_cache)
 
     info("Waiting for PostHog to start...")
@@ -800,7 +797,6 @@ def cmd_start(branch: str) -> None:
     project = project_name(entry.slug)
     vite_port = entry.port + 1000
 
-    os.environ["SANDBOX_WARM_BOOT"] = "1"
     info(f"Starting sandbox '{project}' on port {entry.port} (Vite: {vite_port})...")
     compose(project, entry.port, entry.worktree, "up", "-d", capture=True)
 
