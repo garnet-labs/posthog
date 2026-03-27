@@ -61,9 +61,11 @@ rules:
                               |AlertConfiguration
                               |Annotation
                               |ApprovalPolicy
+                              |Artifact
                               |BatchExport
                               |BatchExportBackfill
                               |BatchImport
+                              |ButtonTile
                               |ChangeRequest
                               |ClusteringConfig
                               |ClusteringJob
@@ -90,6 +92,7 @@ rules:
                               |DataWarehouseTable
                               |DesktopRecording
                               |EarlyAccessFeature
+                              |EmailMessageMapping
                               |EvaluationContext
                               |Edge
                               |Endpoint
@@ -120,6 +123,7 @@ rules:
                               |HealthIssue
                               |HogFlow
                               |HogFlowBatchJob
+                              |HogFlowSchedule
                               |HogFlowTemplate
                               |HogFunction
                               |Hook
@@ -129,6 +133,7 @@ rules:
                               |Link
                               |LiveDebuggerBreakpoint
                               |LogsAlertConfiguration
+                              |LogsView
                               |LLMModelConfiguration
                               |LLMPrompt
                               |LLMProviderKey
@@ -149,6 +154,8 @@ rules:
                               |QuickFilterContext
                               |Repo
                               |RepoRoutingRule
+                              |Run
+                              |RunSnapshot
                               |SandboxEnvironment
                               |ScoreDefinition
                               |SavedHeatmap
@@ -168,9 +175,12 @@ rules:
                               |Tag
                               |Task
                               |TaskRun
+                              |TeamConversationsEmailConfig
                               |Text
                               |Threshold
                               |Ticket
+                              |ReviewQueue
+                              |ReviewQueueItem
                               |TraceReview
                               |TraceReviewScore
                               |UploadedMedia
@@ -235,9 +245,11 @@ rules:
                         |AlertConfiguration
                         |Annotation
                         |ApprovalPolicy
+                        |Artifact
                         |BatchExport
                         |BatchExportBackfill
                         |BatchImport
+                        |ButtonTile
                         |ChangeRequest
                         |ClusteringConfig
                         |ClusteringJob
@@ -264,6 +276,7 @@ rules:
                         |DataWarehouseTable
                         |DesktopRecording
                         |EarlyAccessFeature
+                        |EmailMessageMapping
                         |EvaluationContext
                         |Edge
                         |Endpoint
@@ -294,6 +307,7 @@ rules:
                         |HealthIssue
                         |HogFlow
                         |HogFlowBatchJob
+                        |HogFlowSchedule
                         |HogFlowTemplate
                         |HogFunction
                         |Hook
@@ -322,6 +336,8 @@ rules:
                         |QuickFilterContext
                         |Repo
                         |RepoRoutingRule
+                        |Run
+                        |RunSnapshot
                         |SandboxEnvironment
                         |ScoreDefinition
                         |SavedHeatmap
@@ -341,9 +357,12 @@ rules:
                         |Tag
                         |Task
                         |TaskRun
+                        |TeamConversationsEmailConfig
                         |Text
                         |Threshold
                         |Ticket
+                        |ReviewQueue
+                        |ReviewQueueItem
                         |TraceReview
                         |TraceReviewScore
                         |UploadedMedia
