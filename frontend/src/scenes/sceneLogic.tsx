@@ -75,11 +75,21 @@ const getStorageKey = (key: string): string => {
 const generateTabId = (): string => crypto?.randomUUID?.()?.split('-')?.pop() || `${Date.now()}-${Math.random()}`
 
 const persistSessionTabs = (tabs: SceneTab[]): void => {
-    sessionStorage.setItem(getStorageKey(TAB_STATE_KEY), JSON.stringify(tabs))
+    try {
+        sessionStorage.setItem(getStorageKey(TAB_STATE_KEY), JSON.stringify(tabs))
+    } catch {
+        // sessionStorage may be unavailable (e.g. after test teardown or in restricted contexts)
+    }
 }
 
 const getPersistedSessionTabs = (): SceneTab[] | null => {
-    const savedTabs = sessionStorage.getItem(getStorageKey(TAB_STATE_KEY))
+    let savedTabs: string | null = null
+    try {
+        savedTabs = sessionStorage.getItem(getStorageKey(TAB_STATE_KEY))
+    } catch {
+        // sessionStorage may be unavailable
+        return null
+    }
     if (savedTabs) {
         try {
             return JSON.parse(savedTabs)
