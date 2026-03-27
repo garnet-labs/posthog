@@ -6,7 +6,7 @@ import { HogQLVariable } from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
 
 // Mock ExportedInsight so we can inspect props without needing full kea/Query setup
-const mockExportedInsight = jest.fn(() => <div data-testid="exported-insight" />)
+const mockExportedInsight = jest.fn((_props: any) => <div data-testid="exported-insight" />)
 jest.mock('~/exporter/ExportedInsight/ExportedInsight', () => ({
     ExportedInsight: (props: any) => mockExportedInsight(props),
 }))
