@@ -34,7 +34,7 @@ class TestPushSubscription(BaseTest):
 
     def test_upsert_updates_existing_subscription(self):
         integration_fcm = self._create_integration(kind="firebase", integration_id="proj-1")
-        integration_apns = self._create_integration(kind="apple-push", integration_id="com.example.app")
+        integration_apns = self._create_integration(kind="apns", integration_id="com.example.app")
 
         first = PushSubscription.upsert_token(
             team_id=self.team.id,
@@ -102,7 +102,7 @@ class TestPushSubscription(BaseTest):
 
     def test_get_active_tokens_filters_by_platform(self):
         fcm = self._create_integration(kind="firebase", integration_id="proj-1")
-        apns = self._create_integration(kind="apple-push", integration_id="com.example.app")
+        apns = self._create_integration(kind="apns", integration_id="com.example.app")
 
         PushSubscription.upsert_token(
             team_id=self.team.id,

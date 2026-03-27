@@ -17,7 +17,7 @@ class PushSubscription(UUIDModel):
     Tokens are stored here (not as person properties) for security - person properties
     are readable via API, but push tokens should not be exposed.
 
-    The integration FK points to an Integration of kind "firebase" or "apple-push",
+    The integration FK points to an Integration of kind "firebase" or "apns",
     which holds the provider credentials needed to deliver the notification.
     """
 

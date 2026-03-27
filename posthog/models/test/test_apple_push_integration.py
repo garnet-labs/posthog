@@ -24,7 +24,7 @@ class TestApplePushIntegration(BaseTest):
     def test_creates_integration(self):
         integration = self._create_apple_push_integration()
 
-        assert integration.kind == "apple-push"
+        assert integration.kind == "apns"
         assert integration.integration_id == "TEAM123.com.example.app"
         assert integration.config["team_id"] == "TEAM123"
         assert integration.config["bundle_id"] == "com.example.app"

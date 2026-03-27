@@ -42,7 +42,7 @@ class Migration(migrations.Migration):
                     ("firebase", "Firebase"),
                     ("jira", "Jira"),
                     ("pinterest-ads", "Pinterest Ads"),
-                    ("apple-push", "Apple Push"),
+                    ("apns", "Apple Push"),
                 ],
                 max_length=32,
             ),
