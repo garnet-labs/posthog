@@ -7,3 +7,17 @@ Sorry, you must also include products/signals as a whole
 ---
 
 enrich_reviewers_with_org_members skips users who don't have GitHub social auth set up, but this is wrong! suggested_reviewer should also return the GH users for whom we don't have an org member in PostHog - we should just show those differently in the UI, and with a tooltip telling the user to suggest that person connects their GitHub account to PostHog if they're a member of the team. We should also use the person's name on GitHub to show them, with the only being used to link to their GH profile. Lastly, for each suggested reviewer, we should include a reason WHY they are suggested, i.e. their commit(s) the agent identified as relevant (to which we should also link to github)
+
+---
+
+Error: FieldError at /api/projects/2/signal_reports/019d2743-fa29-73db-88fc-c8e460e1d0ae/suggested_reviewers/
+Unsupported lookup 'organization_memberships' for ForeignKey or join on the field not permitted.
+Request Method:    GET
+Request URL:    http://localhost:8010/api/projects/2/signal_reports/019d2743-fa29-73db-88fc-c8e460e1d0ae/suggested_reviewers/
+Django Version:    4.2.29
+Exception Type:    FieldError
+Exception Value:    
+Unsupported lookup 'organization_memberships' for ForeignKey or join on the field not permitted.
+Exception Location:    /Users/twixes/Developer/posthog/.flox/cache/venv/lib/python3.12/site-packages/django/db/models/sql/query.py, line 1359, in try_transform
+Raised during:    products.signals.backend.views.SignalReportViewSet
+Python Executable:    /Users/twixes/Developer/posthog/.flox/cache/venv/bin/python
