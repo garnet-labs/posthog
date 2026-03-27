@@ -103,10 +103,8 @@ class ProductTeamModel(models.Model):
 
     team_id = models.BigIntegerField(db_index=True)
 
-    # objects declared first so it becomes _default_manager (scoped).
-    # unscoped second — intentionally after objects to control manager ordering.
     objects = ProductTeamManager()
-    unscoped = models.Manager()  # noqa: DJ012
+    unscoped = models.Manager()  # noqa: DJ012 — both are managers, ruff misclassifies this
 
     class Meta:
         abstract = True
