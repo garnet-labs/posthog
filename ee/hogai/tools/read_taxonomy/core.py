@@ -2,6 +2,7 @@ from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
+from posthog.hogql_queries.ai.scan_period import get_taxonomy_volume_tier
 from posthog.models import Team
 
 from ee.hogai.chat_agent.query_planner.toolkit import TaxonomyAgentToolkit
@@ -84,9 +85,10 @@ def execute_taxonomy_query(query: ReadTaxonomyQuery, toolkit: TaxonomyAgentToolk
 
     This is the shared execution logic used by both internal and external tools.
     """
+    volume_tier = get_taxonomy_volume_tier(team)
     match query:
         case ReadEvents():
-            return format_events_yaml([], team, limit=query.limit, offset=query.offset)
+            return format_events_yaml([], team, limit=query.limit, offset=query.offset, volume_tier=volume_tier)
         case ReadEventProperties():
             return toolkit.retrieve_event_or_action_properties(query.event_name)
         case ReadEventSamplePropertyValues():
