@@ -26,6 +26,7 @@ import { ButtonPrimitive } from 'lib/ui/Button/ButtonPrimitives'
 import { ContextMenuGroup, ContextMenuItem } from 'lib/ui/ContextMenu/ContextMenu'
 import { DropdownMenuGroup } from 'lib/ui/DropdownMenu/DropdownMenu'
 import { cn } from 'lib/utils/css-classes'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { removeProjectIdIfPresent } from 'lib/utils/router-utils'
 import { sceneConfigurations } from 'scenes/scenes'
 import { teamLogic } from 'scenes/teamLogic'
@@ -319,6 +320,14 @@ export function ProjectTree({
                     return
                 }
 
+                if (item?.id.startsWith('project://-load-more/')) {
+                    const path = item.id.substring('project://-load-more/'.length)
+                    if (path) {
+                        loadFolder(path)
+                    }
+                    return
+                }
+
                 // Track when Data pipelines button is clicked
                 if (item?.record?.path === 'Data pipelines' && !dataPipelinesClicked) {
                     setDataPipelinesClicked(true)
@@ -333,11 +342,13 @@ export function ProjectTree({
                 if (item?.record?.path) {
                     setLastViewedId(item?.id || '')
                 }
-                if (item?.id.startsWith('project://-load-more/')) {
-                    const path = item.id.substring('project://-load-more/'.length)
-                    if (path) {
-                        loadFolder(path)
-                    }
+
+                if (item?.id.startsWith('shortcuts')) {
+                    eventUsageLogic.actions.reportNavbarStarredItemClicked(
+                        item?.record?.type || 'unknown',
+                        item?.name || 'unknown',
+                        !!isAIFirst
+                    )
                 }
 
                 // False, because we handle focus of content in LemonTree with mainContentRef prop
@@ -444,13 +455,13 @@ export function ProjectTree({
                 if (showDropdownMenu) {
                     if (item.name === 'Product analytics') {
                         return (
-                            <ButtonPrimitive iconOnly isSideActionRight className="z-2">
+                            <ButtonPrimitive iconOnly isSideActionRight className="z-2 -outline-offset-2">
                                 <IconPlusSmall className="text-tertiary" />
                             </ButtonPrimitive>
                         )
                     } else if (item.name === 'Dashboards' || item.name === 'Session replay') {
                         return (
-                            <ButtonPrimitive iconOnly isSideActionRight className="z-2">
+                            <ButtonPrimitive iconOnly isSideActionRight className="z-2 -outline-offset-2">
                                 <IconChevronRight className="size-3 text-tertiary rotate-90" />
                             </ButtonPrimitive>
                         )
@@ -556,6 +567,15 @@ export function ProjectTree({
                         return <>View all</>
                     }
                     return <>Create a new {nameNode}</>
+                }
+
+                if (root === 'data-and-people://' || root === 'project://' || root === 'shortcuts://') {
+                    const key = item.record?.sceneKey
+                    const description = sceneConfigurations[key]?.description
+                    if (description) {
+                        return <>{description}</>
+                    }
+                    return undefined
                 }
 
                 return undefined
