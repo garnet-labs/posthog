@@ -6,13 +6,6 @@ from posthog.approvals.serializers import ChangeRequestSerializer
 
 
 class ApprovalHandlingMixin:
-    """
-    Mixin for ViewSets to handle ApprovalRequired exceptions from decorated serializers.
-
-    This mixin intercepts ApprovalRequired exceptions raised by the @approval_gate decorator
-    on serializer methods and converts them into proper HTTP 409 Conflict responses with
-    change request details.
-    """
 
     def handle_exception(self, exc: Exception) -> Response:
         if isinstance(exc, ApprovalRequired):

@@ -2,7 +2,7 @@ import asyncio
 from typing import Any, Literal
 
 from django.conf import settings
-from django.db.models import Prefetch, QuerySet
+from django.db.models import Prefetch, QuerySet, TextChoices
 
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, viewsets
@@ -242,9 +242,17 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
         return service.update_experiment(instance, validated_data, serializer_context=self.context)
 
 
+class ExperimentConclusion(TextChoices):
+    WON = "won", "won"
+    LOST = "lost", "lost"
+    INCONCLUSIVE = "inconclusive", "inconclusive"
+    STOPPED_EARLY = "stopped_early", "stopped_early"
+    INVALID = "invalid", "invalid"
+
+
 class EndExperimentSerializer(serializers.Serializer):
     conclusion = serializers.ChoiceField(
-        choices=["won", "lost", "inconclusive", "stopped_early", "invalid"],
+        choices=ExperimentConclusion.choices,
         required=False,
         allow_null=True,
         help_text="The conclusion of the experiment.",
