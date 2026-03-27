@@ -64,11 +64,11 @@ export class TimeTree<T extends { timestamp: Dayjs; id?: string; category?: stri
             return sortPriorityDiff
         }
 
-        const categoryDiff = (a.category ?? '').localeCompare(b.category ?? '')
+        const categoryDiff = String(a.category ?? '').localeCompare(String(b.category ?? ''))
         if (categoryDiff !== 0) {
             return categoryDiff
         }
 
-        return (a.id ?? '').localeCompare(b.id ?? '')
+        return String(a.id ?? '').localeCompare(String(b.id ?? ''))
     }
 }
