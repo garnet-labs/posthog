@@ -2,19 +2,20 @@ import React from 'react'
 
 import { resolveVariableColor } from 'lib/charts/utils/color'
 
-import type { ChartDimensions, GoalLine } from '../core/types'
+import { useChart } from '../core/chart-context'
+import type { GoalLine } from '../core/types'
 
 interface GoalLinesProps {
     goalLines: GoalLine[]
-    yScale: (value: number) => number
-    dimensions: ChartDimensions
 }
 
-export function GoalLines({ goalLines, yScale, dimensions }: GoalLinesProps): React.ReactElement {
+export function GoalLines({ goalLines }: GoalLinesProps): React.ReactElement {
+    const { scales, dimensions } = useChart()
+
     return (
         <>
             {goalLines.map((goal, i) => {
-                const y = yScale(goal.value)
+                const y = scales.y(goal.value)
                 if (!isFinite(y) || y < dimensions.plotTop || y > dimensions.plotTop + dimensions.plotHeight) {
                     return null
                 }
@@ -23,7 +24,6 @@ export function GoalLines({ goalLines, yScale, dimensions }: GoalLinesProps): Re
 
                 return (
                     <React.Fragment key={i}>
-                        {/* Dashed line */}
                         <div
                             style={{
                                 position: 'absolute',
@@ -35,7 +35,6 @@ export function GoalLines({ goalLines, yScale, dimensions }: GoalLinesProps): Re
                                 pointerEvents: 'none',
                             }}
                         />
-                        {/* Label */}
                         {goal.label && (
                             <div
                                 style={{

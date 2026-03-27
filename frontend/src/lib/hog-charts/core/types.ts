@@ -1,3 +1,5 @@
+import type * as d3 from 'd3'
+
 export type { AxisFormat, ChartTheme } from 'lib/charts/types'
 
 export interface Series {
@@ -89,16 +91,14 @@ export interface ChartMargins {
     left: number
 }
 
-/** Configuration object controlling chart behavior, scales, and overlays. */
-export interface LineChartConfig {
+/** Base configuration shared by all chart types. */
+export interface ChartConfig {
     // — Scale —
 
     /** Y-axis scale type. 'log' clamps minimum to 1e-10 to avoid log(0). Defaults to 'linear'. */
     yScaleType?: 'linear' | 'log'
     /** When true, each unique `series.yAxisId` gets its own independent y-axis. */
     multipleYAxes?: boolean
-    /** When true, stacks all series to 100% using d3.stackOffsetExpand. */
-    percentStackView?: boolean
 
     // — Axis formatting —
 
@@ -115,21 +115,57 @@ export interface LineChartConfig {
 
     /** Show horizontal grid lines at y-axis tick positions. */
     showGrid?: boolean
-    /** Show a tooltip on hover. Defaults to true. Use the `tooltip` prop on LineChart to customize. */
+    /** Show a tooltip on hover. Defaults to true. Use the `tooltip` prop to customize content. */
     showTooltip?: boolean
     /** Show a vertical crosshair line that follows the cursor. */
     showCrosshair?: boolean
+    /** Horizontal goal/reference lines to draw across the chart. */
+    goalLines?: GoalLine[]
+}
+
+/** Line-chart-specific configuration, extending the shared base. */
+export interface LineChartConfig extends ChartConfig {
+    /** When true, stacks all series to 100% using d3.stackOffsetExpand. */
+    percentStackView?: boolean
     /** Show inline value labels on each data point. */
     showDataLabels?: boolean
     /** Custom formatter for data labels. Called with (value, seriesIndex). */
     dataLabelFormatter?: (value: number, seriesIndex: number) => string
     /** Show a linear regression trend line for each series. */
     showTrendLines?: boolean
-    /** Horizontal goal/reference lines to draw across the chart. */
-    goalLines?: GoalLine[]
-
-    // — Data —
-
     /** Index from which data is considered incomplete (rendered with dashed lines and hatched fill). */
     incompleteFromIndex?: number
+}
+
+/** Arguments passed to a chart type's canvas draw function. */
+export interface ChartDrawArgs {
+    /** 2D canvas rendering context (DPR already applied, save/restore handled by Chart). */
+    ctx: CanvasRenderingContext2D
+    /** Layout dimensions of the chart. */
+    dimensions: ChartDimensions
+    /** Scale functions for mapping data to pixel coordinates. */
+    scales: ChartScales
+    /** Series with fallback colors already applied. */
+    series: Series[]
+    /** X-axis labels. */
+    labels: string[]
+    /** Index of the currently hovered data point, or -1. */
+    hoverIndex: number
+    /** Chart theme colors. */
+    theme: import('lib/charts/types').ChartTheme
+}
+
+/** Factory function that chart types provide to create their scales from dimensions and data. */
+export type CreateScalesFn = (series: Series[], labels: string[], dimensions: ChartDimensions) => ChartScales
+
+/** Generic scale interface that Chart uses for shared overlays and interaction. */
+export interface ChartScales {
+    /** Maps a label to an x pixel coordinate. */
+    x: (label: string) => number | undefined
+    /** Maps a value to a y pixel coordinate (primary y-axis). */
+    y: (value: number) => number
+    /** Additional y-axes keyed by axis ID. */
+    yAxes: Map<string, (value: number) => number>
+    /** The underlying d3 y-scale, needed for tick generation. */
+    yRaw: d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>
 }

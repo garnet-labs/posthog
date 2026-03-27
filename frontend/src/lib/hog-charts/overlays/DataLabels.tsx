@@ -1,14 +1,9 @@
-import * as d3 from 'd3'
 import React from 'react'
 
-import type { ChartDimensions, Series } from '../core/types'
+import { useChart } from '../core/chart-context'
+import type { Series } from '../core/types'
 
 interface DataLabelsProps {
-    series: Series[]
-    labels: string[]
-    xScale: d3.ScalePoint<string>
-    yScale: d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>
-    dimensions: ChartDimensions
     formatter?: (value: number, seriesIndex: number) => string
     stackedData?: Map<string, number[]>
 }
@@ -19,25 +14,18 @@ interface LabelPosition {
     text: string
 }
 
-export function DataLabels({
-    series,
-    labels,
-    xScale,
-    yScale,
-    dimensions,
-    formatter,
-    stackedData,
-}: DataLabelsProps): React.ReactElement {
+export function DataLabels({ formatter, stackedData }: DataLabelsProps): React.ReactElement {
+    const { scales, dimensions, labels, series } = useChart()
     const allLabels: LabelPosition[] = []
 
-    series.forEach((s, si) => {
+    series.forEach((s: Series, si: number) => {
         if (s.hidden) {
             return
         }
         const data = stackedData?.get(s.key) ?? s.data
         for (let i = 0; i < data.length; i++) {
-            const x = xScale(labels[i])
-            const y = yScale(data[i])
+            const x = scales.x(labels[i])
+            const y = scales.y(data[i])
             if (x == null || !isFinite(y)) {
                 continue
             }

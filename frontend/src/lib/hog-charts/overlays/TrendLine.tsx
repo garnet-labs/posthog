@@ -1,26 +1,15 @@
-import * as d3 from 'd3'
 import React from 'react'
 
+import { useChart } from '../core/chart-context'
 import { linearRegression } from '../core/interaction'
-import type { ChartDimensions, Series } from '../core/types'
 
 interface TrendLineProps {
-    series: Series[]
-    labels: string[]
-    xScale: d3.ScalePoint<string>
-    yScale: d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>
-    dimensions: ChartDimensions
     incompleteFromIndex?: number
 }
 
-export function TrendLine({
-    series,
-    labels,
-    xScale,
-    yScale,
-    dimensions,
-    incompleteFromIndex,
-}: TrendLineProps): React.ReactElement {
+export function TrendLine({ incompleteFromIndex }: TrendLineProps): React.ReactElement {
+    const { scales, dimensions, labels, series } = useChart()
+
     return (
         <>
             {series.map((s) => {
@@ -34,20 +23,19 @@ export function TrendLine({
                     return null
                 }
 
-                const startX = xScale(labels[0])
-                const endX = xScale(labels[Math.min(endIdx - 1, labels.length - 1)])
+                const startX = scales.x(labels[0])
+                const endX = scales.x(labels[Math.min(endIdx - 1, labels.length - 1)])
                 if (startX == null || endX == null) {
                     return null
                 }
 
-                const startY = yScale(regression.intercept)
-                const endY = yScale(regression.slope * (endIdx - 1) + regression.intercept)
+                const startY = scales.y(regression.intercept)
+                const endY = scales.y(regression.slope * (endIdx - 1) + regression.intercept)
 
                 if (!isFinite(startY) || !isFinite(endY)) {
                     return null
                 }
 
-                // Use SVG for the dotted trend line overlay
                 return (
                     <svg
                         key={`trend-${s.key}`}

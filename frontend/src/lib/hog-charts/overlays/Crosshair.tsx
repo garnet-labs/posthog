@@ -1,14 +1,23 @@
 import React from 'react'
 
-import type { ChartDimensions } from '../core/types'
+import { useChart } from '../core/chart-context'
 
 interface CrosshairProps {
-    x: number
-    dimensions: ChartDimensions
     color?: string
 }
 
-export function Crosshair({ x, dimensions, color = 'rgba(0, 0, 0, 0.2)' }: CrosshairProps): React.ReactElement {
+export function Crosshair({ color = 'rgba(0, 0, 0, 0.2)' }: CrosshairProps): React.ReactElement | null {
+    const { scales, dimensions, labels, hoverIndex } = useChart()
+
+    if (hoverIndex < 0) {
+        return null
+    }
+
+    const x = scales.x(labels[hoverIndex])
+    if (x == null) {
+        return null
+    }
+
     return (
         <div
             style={{
