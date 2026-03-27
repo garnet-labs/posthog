@@ -1,4 +1,5 @@
 import re
+import time
 import uuid
 import builtins
 import dataclasses
@@ -93,6 +94,12 @@ from products.endpoints.backend.materialization import (
     get_reaggregation,
     transform_query_for_materialization,
     transform_select_for_materialized_table,
+)
+from products.endpoints.backend.metrics import (
+    ENDPOINT_DUCKLAKE_FALLBACK_TOTAL,
+    ENDPOINT_EXECUTION_DURATION_SECONDS,
+    ENDPOINT_EXECUTION_TOTAL,
+    ENDPOINT_MATERIALIZATION_EVENT_TOTAL,
 )
 from products.endpoints.backend.models import Endpoint, EndpointVersion
 from products.endpoints.backend.openapi import generate_openapi_spec
@@ -952,9 +959,11 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         """
         try:
             self._enable_materialization_inner(endpoint, sync_frequency, request, version, bucket_overrides)
+            ENDPOINT_MATERIALIZATION_EVENT_TOTAL.labels(action="enable", status="success").inc()
         except ValidationError:
             raise
         except Exception:
+            ENDPOINT_MATERIALIZATION_EVENT_TOTAL.labels(action="enable", status="error").inc()
             raise ValidationError("Failed to enable materialization.")
 
     def _enable_materialization_inner(
@@ -1057,6 +1066,7 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
                         },
                     )
             version.disable_materialization()
+            ENDPOINT_MATERIALIZATION_EVENT_TOTAL.labels(action="disable", status="success").inc()
         clear_endpoint_materialization_cache(self.team_id, endpoint.name)
 
     def destroy(self, request: Request, name=None, *args, **kwargs) -> Response:
@@ -1932,6 +1942,8 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         use_materialized = self._should_use_materialized_table(endpoint, data, version_obj)
 
         debug = data.debug or False
+        execution_type = "materialized" if use_materialized else "inline"
+        _start_time = time.monotonic()
 
         try:
             if use_materialized:
@@ -1951,11 +1963,14 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
                 if use_ducklake:
                     try:
                         result = self._execute_ducklake_endpoint(endpoint, query_to_use, debug=debug)
+                        execution_type = "ducklake"
                     except Exception:
                         logger.warning(
                             "DuckLake execution failed, falling back to inline",
                             endpoint_name=endpoint.name,
                         )
+                        ENDPOINT_DUCKLAKE_FALLBACK_TOTAL.inc()
+                        execution_type = "ducklake_fallback"
                         result = self._execute_inline_endpoint(
                             endpoint,
                             data,
@@ -1979,6 +1994,9 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
                     )
 
         except (ExposedHogQLError, ExposedCHQueryError) as e:
+            _duration = time.monotonic() - _start_time
+            ENDPOINT_EXECUTION_TOTAL.labels(execution_type=execution_type, status="error").inc()
+            ENDPOINT_EXECUTION_DURATION_SECONDS.labels(execution_type=execution_type).observe(_duration)
             logger.exception(
                 "Endpoint execution failed",
                 endpoint_name=endpoint.name,
@@ -1986,19 +2004,32 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
             )
             raise ValidationError("Query execution failed.", getattr(e, "code_name", None))
         except HogVMException:
+            _duration = time.monotonic() - _start_time
+            ENDPOINT_EXECUTION_TOTAL.labels(execution_type=execution_type, status="error").inc()
+            ENDPOINT_EXECUTION_DURATION_SECONDS.labels(execution_type=execution_type).observe(_duration)
             logger.exception(
                 "Endpoint execution failed (HogVM)",
                 endpoint_name=endpoint.name,
             )
             raise ValidationError("Query execution failed: HogQL virtual machine error")
         except ResolutionError:
+            _duration = time.monotonic() - _start_time
+            ENDPOINT_EXECUTION_TOTAL.labels(execution_type=execution_type, status="error").inc()
+            ENDPOINT_EXECUTION_DURATION_SECONDS.labels(execution_type=execution_type).observe(_duration)
             logger.exception(
                 "Endpoint resolution failed",
                 endpoint_name=endpoint.name,
             )
             raise ValidationError("Query resolution failed: unable to resolve table or field references.")
         except ConcurrencyLimitExceeded:
+            _duration = time.monotonic() - _start_time
+            ENDPOINT_EXECUTION_TOTAL.labels(execution_type=execution_type, status="timeout").inc()
+            ENDPOINT_EXECUTION_DURATION_SECONDS.labels(execution_type=execution_type).observe(_duration)
             raise Throttled(detail="Too many concurrent requests. Please try again later.")
+
+        _duration = time.monotonic() - _start_time
+        ENDPOINT_EXECUTION_TOTAL.labels(execution_type=execution_type, status="success").inc()
+        ENDPOINT_EXECUTION_DURATION_SECONDS.labels(execution_type=execution_type).observe(_duration)
 
         if get_query_tag_value("access_method") == "personal_api_key":
             now = timezone.now()
