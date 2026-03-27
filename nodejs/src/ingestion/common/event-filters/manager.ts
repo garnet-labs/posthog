@@ -1,50 +1,8 @@
-import { BackgroundRefresher } from './background-refresher'
-import { PostgresRouter, PostgresUse } from './db/postgres'
-import { logger } from './logger'
-
-// Tree node types for boolean expression tree
-export type FilterNode = FilterConditionNode | FilterAndNode | FilterOrNode | FilterNotNode
-
-export interface FilterConditionNode {
-    type: 'condition'
-    field: 'event_name' | 'distinct_id'
-    operator: 'exact' | 'contains'
-    value: string
-}
-
-export interface FilterAndNode {
-    type: 'and'
-    children: FilterNode[]
-}
-
-export interface FilterOrNode {
-    type: 'or'
-    children: FilterNode[]
-}
-
-export interface FilterNotNode {
-    type: 'not'
-    child: FilterNode
-}
-
-export interface EventFilterRule {
-    id: string
-    team_id: number
-    filter_tree: FilterNode
-}
-
-/** Check if a filter tree contains at least one condition leaf */
-export function treeHasConditions(node: FilterNode): boolean {
-    switch (node.type) {
-        case 'condition':
-            return true
-        case 'not':
-            return treeHasConditions(node.child)
-        case 'and':
-        case 'or':
-            return node.children.some((child) => treeHasConditions(child))
-    }
-}
+import { BackgroundRefresher } from '../../../utils/background-refresher'
+import { PostgresRouter, PostgresUse } from '../../../utils/db/postgres'
+import { logger } from '../../../utils/logger'
+import { treeHasConditions } from './evaluate'
+import { EventFilterRowSchema, EventFilterRule } from './schema'
 
 /**
  * Manages per-team event filter config loaded from Postgres.
@@ -74,23 +32,28 @@ export class EventFilterManager {
         const { rows } = await this.postgres.query<{
             id: string
             team_id: number
-            filter_tree: FilterNode
+            filter_tree: unknown
         }>(
             PostgresUse.COMMON_READ,
             `SELECT id, team_id, filter_tree
              FROM posthog_eventfilterconfig
-             WHERE enabled = true`,
+             WHERE enabled = true AND filter_tree IS NOT NULL`,
             [],
             'fetchAllEventFilters'
         )
 
         const map = new Map<number, EventFilterRule>()
         for (const row of rows) {
-            map.set(row.team_id, {
-                id: row.id,
-                team_id: row.team_id,
-                filter_tree: row.filter_tree,
-            })
+            const parsed = EventFilterRowSchema.safeParse(row)
+            if (parsed.success) {
+                map.set(parsed.data.team_id, parsed.data)
+            } else {
+                logger.warn('Skipping invalid event filter config', {
+                    team_id: row.team_id,
+                    id: row.id,
+                    error: parsed.error.message,
+                })
+            }
         }
 
         logger.debug('🔁 event_filter_manager - refreshed filters', { teamCount: map.size })

@@ -16,7 +16,6 @@ import {
     RedisPool,
 } from '../types'
 import { PostgresRouter } from '../utils/db/postgres'
-import { EventFilterManager } from '../utils/event-filter-manager'
 import { EventIngestionRestrictionManager } from '../utils/event-ingestion-restrictions'
 import { EventSchemaEnforcementManager } from '../utils/event-schema-enforcement-manager'
 import { logger } from '../utils/logger'
@@ -37,6 +36,7 @@ import {
     createJoinedIngestionPipeline,
 } from './analytics'
 import { AiEventOutput, EventOutput, HeatmapsOutput } from './analytics/outputs'
+import { EventFilterManager } from './common/event-filters'
 import { IngestionWarningsOutput } from './common/outputs'
 import { IngestionConsumerConfig } from './config'
 import { CookielessManager } from './cookieless/cookieless-manager'

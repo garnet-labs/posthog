@@ -5,11 +5,12 @@ import { processPersonlessDistinctIdsBatchStep } from '~/worker/ingestion/event-
 
 import { HogTransformerService } from '../../cdp/hog-transformations/hog-transformer.service'
 import { EventHeaders, Team } from '../../types'
-import { EventFilterManager } from '../../utils/event-filter-manager'
 import { EventIngestionRestrictionManager } from '../../utils/event-ingestion-restrictions'
 import { EventSchemaEnforcementManager } from '../../utils/event-schema-enforcement-manager'
 import { prefetchPersonsStep } from '../../worker/ingestion/event-pipeline/prefetchPersonsStep'
 import { PersonsStore } from '../../worker/ingestion/persons/persons-store'
+import { EventFilterManager } from '../common/event-filters'
+import { createApplyEventFiltersStep } from '../common/steps/apply-event-filters-step'
 import { CookielessManager } from '../cookieless/cookieless-manager'
 import {
     createApplyCookielessProcessingStep,
@@ -20,7 +21,6 @@ import {
     createValidateEventPropertiesStep,
     createValidateEventSchemaStep,
 } from '../event-preprocessing'
-import { createApplyEventFiltersStep } from '../event-processing/apply-event-filters-step'
 import { createDropOldEventsStep } from '../event-processing/drop-old-events-step'
 import { createPrefetchHogFunctionsStep } from '../event-processing/prefetch-hog-functions-step'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
