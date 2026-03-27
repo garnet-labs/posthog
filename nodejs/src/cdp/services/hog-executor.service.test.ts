@@ -286,8 +286,12 @@ describe('Hog Executor', () => {
                 queue: 'hog',
                 queueParameters: {
                     type: 'sendPushNotification',
-                    url: 'https://fcm.googleapis.com/v1/projects/test/messages:send',
-                    method: 'POST',
+                    integrationId: 1,
+                    distinctId: 'test-distinct-id',
+                    payload: {
+                        title: 'Test notification',
+                        body: 'Hello from PostHog',
+                    },
                 },
             })
         })
