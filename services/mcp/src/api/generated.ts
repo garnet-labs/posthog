@@ -32718,6 +32718,52 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsCreateParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsRetrieveParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsUpdateParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsPartialUpdateParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsDestroyParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsMetricsRetrieveParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
     };
 
     export type EventDefinitionsByNameRetrieveParams = {
@@ -32725,6 +32771,31 @@ export namespace Schemas {
      * The exact event name to look up
      */
     name: string;
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsGolangRetrieveParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsPythonRetrieveParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
+    };
+
+    export type EventDefinitionsTypescriptRetrieveParams = {
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     */
+    verified?: boolean;
     };
 
     export type EventSchemasListParams = {
@@ -34153,6 +34224,15 @@ export namespace Schemas {
      */
     properties?: string;
     /**
+     * Filter by property name type: posthog ($ prefixed) or custom
+
+    * `all` - all
+    * `posthog` - posthog
+    * `custom` - custom
+     * @minLength 1
+     */
+    property_name_type?: PropertyDefinitionsListPropertyNameType;
+    /**
      * Searches properties by name
      */
     search?: string;
@@ -34177,6 +34257,15 @@ export namespace Schemas {
      */
     verified?: boolean | null;
     };
+
+    export type PropertyDefinitionsListPropertyNameType = typeof PropertyDefinitionsListPropertyNameType[keyof typeof PropertyDefinitionsListPropertyNameType];
+
+
+    export const PropertyDefinitionsListPropertyNameType = {
+      All: 'all',
+      Posthog: 'posthog',
+      Custom: 'custom',
+    } as const;
 
     export type PropertyDefinitionsListType = typeof PropertyDefinitionsListType[keyof typeof PropertyDefinitionsListType];
 
