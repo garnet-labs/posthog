@@ -115,6 +115,8 @@ export interface LineChartConfig {
 
     /** Show horizontal grid lines at y-axis tick positions. */
     showGrid?: boolean
+    /** Show a tooltip on hover. Defaults to true. Use the `tooltip` prop on LineChart to customize. */
+    showTooltip?: boolean
     /** Show a vertical crosshair line that follows the cursor. */
     showCrosshair?: boolean
     /** Show inline value labels on each data point. */

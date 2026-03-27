@@ -8,3 +8,6 @@ export type { BaseChartContext, LineChartContext } from './core/chart-context'
 
 // Core types
 export type { GoalLine, LineChartConfig, PointClickData, Series, TooltipContext } from './core/types'
+
+// Built-in tooltip (for reference or extension)
+export { DefaultTooltip } from './overlays/DefaultTooltip'

@@ -4,10 +4,10 @@ import type { TooltipContext } from '../core/types'
 
 interface TooltipProps {
     context: TooltipContext
-    renderTooltip: (context: TooltipContext) => React.ReactNode
+    component: React.ComponentType<TooltipContext>
 }
 
-export function Tooltip({ context, renderTooltip }: TooltipProps): React.ReactElement {
+export function Tooltip({ context, component: Component }: TooltipProps): React.ReactElement {
     const tooltipRef = useRef<HTMLDivElement>(null)
 
     // Position tooltip: prefer right of crosshair, flip left if near edge
@@ -32,7 +32,7 @@ export function Tooltip({ context, renderTooltip }: TooltipProps): React.ReactEl
                 zIndex: 10,
             }}
         >
-            {renderTooltip(context)}
+            <Component {...context} />
         </div>
     )
 }

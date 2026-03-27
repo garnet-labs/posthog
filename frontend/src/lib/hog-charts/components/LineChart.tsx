@@ -13,6 +13,7 @@ import { useChartCanvas } from '../core/use-chart-canvas'
 import { AxisLabels } from '../overlays/AxisLabels'
 import { Crosshair } from '../overlays/Crosshair'
 import { DataLabels } from '../overlays/DataLabels'
+import { DefaultTooltip } from '../overlays/DefaultTooltip'
 import { GoalLines } from '../overlays/GoalLines'
 import { Tooltip } from '../overlays/Tooltip'
 import { TrendLine } from '../overlays/TrendLine'
@@ -26,10 +27,8 @@ export interface LineChartProps {
     // Config (grouped non-data, non-callback props)
     config?: LineChartConfig
 
-    // Tooltip (render prop)
-    renderTooltip?: (context: TooltipContext) => React.ReactNode
-    onTooltipShow?: (context: TooltipContext) => void
-    onTooltipHide?: () => void
+    // Tooltip — custom component receiving TooltipContext as props. Defaults to DefaultTooltip.
+    tooltip?: React.ComponentType<TooltipContext>
 
     // Interaction
     onPointClick?: (data: PointClickData) => void
@@ -48,9 +47,7 @@ export function LineChart({
     series,
     labels,
     config,
-    renderTooltip,
-    onTooltipShow,
-    onTooltipHide,
+    tooltip: TooltipComponent = DefaultTooltip,
     onPointClick,
     onRangeSelect,
     className,
@@ -65,6 +62,7 @@ export function LineChart({
         hideXAxis = false,
         hideYAxis = false,
         showGrid = false,
+        showTooltip = true,
         showCrosshair = false,
         showDataLabels = false,
         dataLabelFormatter,
@@ -162,19 +160,16 @@ export function LineChart({
 
             if (!isInPlotArea(mouseX, mouseY, dimensions)) {
                 setHoverIndex(-1)
-                if (tooltipCtx) {
-                    setTooltipCtx(null)
-                    onTooltipHide?.()
-                }
+                setTooltipCtx(null)
                 return
             }
 
             const index = findNearestIndex(mouseX, labels, (l) => scales.x(l))
             setHoverIndex(index)
 
-            if (index >= 0 && renderTooltip) {
+            if (index >= 0 && showTooltip) {
                 const canvasBounds = canvasRef.current?.getBoundingClientRect() ?? new DOMRect()
-                const ctx = buildTooltipContext(
+                const newTooltipCtx = buildTooltipContext(
                     index,
                     coloredSeries,
                     labels,
@@ -183,33 +178,18 @@ export function LineChart({
                     canvasBounds,
                     stackedData
                 )
-                setTooltipCtx(ctx)
-                if (ctx) {
-                    onTooltipShow?.(ctx)
-                }
+                setTooltipCtx(newTooltipCtx)
             }
         },
-        [
-            scales,
-            dimensions,
-            labels,
-            coloredSeries,
-            renderTooltip,
-            stackedData,
-            onTooltipShow,
-            onTooltipHide,
-            tooltipCtx,
-            canvasRef,
-        ]
+        [scales, dimensions, labels, coloredSeries, showTooltip, stackedData, canvasRef]
     )
 
     const handleMouseLeave = useCallback(() => {
         if (!isDragging.current) {
             setHoverIndex(-1)
             setTooltipCtx(null)
-            onTooltipHide?.()
         }
-    }, [onTooltipHide])
+    }, [])
 
     const handleMouseDown = useCallback(
         (e: React.MouseEvent<HTMLDivElement>) => {
@@ -492,8 +472,8 @@ export function LineChart({
                             )}
 
                             {/* Tooltip */}
-                            {tooltipCtx && renderTooltip && !isDragging.current && (
-                                <Tooltip context={tooltipCtx} renderTooltip={renderTooltip} />
+                            {tooltipCtx && showTooltip && !isDragging.current && (
+                                <Tooltip context={tooltipCtx} component={TooltipComponent} />
                             )}
                         </>
                     )}
