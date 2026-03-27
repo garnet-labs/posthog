@@ -1,4 +1,7 @@
 from enum import StrEnum
+from functools import lru_cache
+
+from django.utils import timezone
 
 from posthog.models import Team
 
@@ -9,6 +12,9 @@ from products.event_definitions.backend.models.property_definition import Proper
 # exceeds these, we use ClickHouse instead so we get count-based ordering.
 EVENT_CARDINALITY_THRESHOLD = 50
 PROPERTY_CARDINALITY_THRESHOLD = 100
+
+# How long to cache the volume tier result (seconds).
+_CACHE_TTL_SECONDS = 300
 
 
 class TaxonomyVolumeTier(StrEnum):
@@ -26,14 +32,51 @@ SCAN_PERIOD_DAYS: dict[TaxonomyVolumeTier, int] = {
 }
 
 
-def _has_high_cardinality(team: Team) -> bool:
+class TaxonomyScanConfig:
     """
-    Check if the team has high cardinality of event/property definitions in Postgres.
+    Resolves and caches the taxonomy scan configuration for a team.
 
-    Even with low event volume, high cardinality means the Postgres fallback
-    (ordered by last_seen_at) won't surface the most important events —
-    ClickHouse count-based ordering is needed.
+    Caches the volume tier per team_id for up to 5 minutes to avoid
+    redundant DB queries (cardinality checks) when multiple taxonomy
+    tools are called in the same conversation turn.
     """
+
+    def __init__(self, team: Team):
+        self._team = team
+        self._tier: TaxonomyVolumeTier | None = None
+
+    @property
+    def volume_tier(self) -> TaxonomyVolumeTier:
+        if self._tier is None:
+            self._tier = _get_cached_volume_tier(self._team.pk)
+        return self._tier
+
+    @property
+    def scan_period_days(self) -> int:
+        return SCAN_PERIOD_DAYS[self.volume_tier]
+
+    @property
+    def use_postgres_for_events(self) -> bool:
+        return self.volume_tier == TaxonomyVolumeTier.LOW
+
+
+@lru_cache(maxsize=128)
+def _get_cached_volume_tier_inner(team_pk: int, cache_bucket: int) -> TaxonomyVolumeTier:
+    """
+    Cached computation of volume tier. The `cache_bucket` parameter
+    is derived from the current time divided by the TTL, so entries
+    expire naturally as the bucket rolls over.
+    """
+    team = Team.objects.select_related("organization").get(pk=team_pk)
+    return _compute_volume_tier(team)
+
+
+def _get_cached_volume_tier(team_pk: int) -> TaxonomyVolumeTier:
+    bucket = int(timezone.now().timestamp()) // _CACHE_TTL_SECONDS
+    return _get_cached_volume_tier_inner(team_pk, bucket)
+
+
+def _has_high_cardinality(team: Team) -> bool:
     event_count = EventDefinition.objects.filter(team=team).count()
     if event_count > EVENT_CARDINALITY_THRESHOLD:
         return True
@@ -42,18 +85,7 @@ def _has_high_cardinality(team: Team) -> bool:
     return property_count > PROPERTY_CARDINALITY_THRESHOLD
 
 
-def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:
-    """
-    Determine the taxonomy volume tier based on the org's billing usage data
-    and the cardinality of stored event/property definitions.
-
-    Uses organization.usage['events']['usage'] (billing-period event count)
-    cached from the billing service. Falls back to MEDIUM for self-hosted
-    instances without billing data.
-
-    For orgs that would be LOW by volume but have high cardinality of stored
-    definitions, we bump to MEDIUM so ClickHouse count-based ordering is used.
-    """
+def _compute_volume_tier(team: Team) -> TaxonomyVolumeTier:
     usage = team.organization.usage
     if not usage or not usage.get("events"):
         return TaxonomyVolumeTier.MEDIUM
@@ -70,11 +102,14 @@ def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:
     return TaxonomyVolumeTier.EXTRA_HIGH
 
 
+# Module-level convenience functions for callers that don't need the full config object.
+def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:
+    return TaxonomyScanConfig(team).volume_tier
+
+
 def get_scan_period_days(team: Team) -> int:
-    """Return the ClickHouse scan period in days for the team's volume tier."""
-    return SCAN_PERIOD_DAYS[get_taxonomy_volume_tier(team)]
+    return TaxonomyScanConfig(team).scan_period_days
 
 
 def should_use_postgres_for_events(team: Team) -> bool:
-    """Whether to use Postgres EventDefinition instead of ClickHouse for event listing."""
-    return get_taxonomy_volume_tier(team) == TaxonomyVolumeTier.LOW
+    return TaxonomyScanConfig(team).use_postgres_for_events
