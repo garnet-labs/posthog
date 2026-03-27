@@ -39,6 +39,12 @@ const eventTypeOptions: LemonSelectOptions<EventDefinitionType> = [
     },
 ]
 
+const verifiedOptions: LemonSelectOptions<string> = [
+    { value: 'all', label: 'All', 'data-attr': 'verified-option-all' },
+    { value: 'verified', label: 'Verified only', 'data-attr': 'verified-option-verified' },
+    { value: 'unverified', label: 'Unverified only', 'data-attr': 'verified-option-unverified' },
+]
+
 export function EventDefinitionsTable(): JSX.Element {
     const { eventDefinitions, eventDefinitionsLoading, filters } = useValues(eventDefinitionsTableLogic)
     const { loadEventDefinitions, setFilters } = useActions(eventDefinitionsTableLogic)
@@ -180,6 +186,21 @@ export function EventDefinitionsTable(): JSX.Element {
                         dropdownMatchSelectWidth={false}
                         onChange={(value) => {
                             setFilters({ event_type: value as EventDefinitionType })
+                        }}
+                        size="small"
+                    />
+                    <span>Verified:</span>
+                    <LemonSelect
+                        value={
+                            filters.verified === true ? 'verified' : filters.verified === false ? 'unverified' : 'all'
+                        }
+                        options={verifiedOptions}
+                        data-attr="verified-filter"
+                        dropdownMatchSelectWidth={false}
+                        onChange={(value) => {
+                            setFilters({
+                                verified: value === 'verified' ? true : value === 'unverified' ? false : undefined,
+                            })
                         }}
                         size="small"
                     />
