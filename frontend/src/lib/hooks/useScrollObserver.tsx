@@ -26,9 +26,7 @@ export function useScrollObserver({
 
             if (scrollTop <= thresholdPx) {
                 onScrollTop?.()
-            }
-
-            if (scrollTop + clientHeight >= scrollHeight - thresholdPx) {
+            } else if (scrollTop + clientHeight >= scrollHeight - thresholdPx) {
                 onScrollBottom?.()
             }
         },

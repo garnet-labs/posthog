@@ -44,6 +44,7 @@ export function SessionTimeline({
     const [categories, setCategories] = useState<ItemCategory[]>(() => collector.getAllCategories())
     const [loading, setLoading] = useState(false)
     const [scrollLoading, setScrollLoading] = useState<'before' | 'after' | null>(null)
+    const scrollLoadingRef = useRef<'before' | 'after' | null>(null)
 
     function toggleCategory(category: ItemCategory): void {
         setCategories((prevCategories) => {
@@ -115,9 +116,10 @@ export function SessionTimeline({
 
     // Scroll-triggered loading (throttled via scroll observer)
     const handleScrollTop = useCallback(async () => {
-        if (!collector.hasBefore(categories) || scrollLoading) {
+        if (!collector.hasBefore(categories) || scrollLoadingRef.current) {
             return
         }
+        scrollLoadingRef.current = 'before'
         setScrollLoading('before')
         try {
             const el = containerRef.current
@@ -133,23 +135,26 @@ export function SessionTimeline({
                 }
             })
         } finally {
+            scrollLoadingRef.current = null
             setScrollLoading(null)
         }
-    }, [collector, categories, scrollLoading])
+    }, [collector, categories])
 
     const handleScrollBottom = useCallback(async () => {
-        if (!collector.hasAfter(categories) || scrollLoading) {
+        if (!collector.hasAfter(categories) || scrollLoadingRef.current) {
             return
         }
+        scrollLoadingRef.current = 'after'
         setScrollLoading('after')
         try {
             const batch = calculateBatchSize(containerRef.current)
             await collector.loadAfter(categories, batch)
             setItems(collector.collectItems())
         } finally {
+            scrollLoadingRef.current = null
             setScrollLoading(null)
         }
-    }, [collector, categories, scrollLoading])
+    }, [collector, categories])
 
     const scrollRefCb = useScrollObserver({
         onScrollTop: handleScrollTop,
