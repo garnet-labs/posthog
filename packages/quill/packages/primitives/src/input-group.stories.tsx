@@ -1,19 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
+import { CheckIcon, CopyIcon, CreditCardIcon, EyeOffIcon, InfoIcon, LucideArrowUpRight, MailIcon, RefreshCcwIcon, Search, SearchIcon, Star, StarIcon } from 'lucide-react'
+import { useState } from 'react'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from './field'
 import { Input } from './input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText, InputGroupTextarea } from './input-group'
-import { ArrowDownLeft, ArrowDownRightSquare, ArrowUpRightFromCircle, CheckIcon, CopyIcon, CreditCardIcon, EyeOffIcon, InfoIcon, LucideArrowDownRight, LucideArrowUpRight, MailIcon, RefreshCcwIcon, Search, SearchIcon, Star, StarIcon } from 'lucide-react'
-import { Field, FieldDescription, FieldGroup, FieldLabel } from './field'
-import { useState } from 'react'
+import { Kbd } from './kbd'
 import { Popover, PopoverContent, PopoverTrigger } from './popover'
 import { Spinner } from './spinner'
-import { Kbd } from './kbd'
 
 const meta = {
     title: 'Primitives/Input Group',
-    component: InputGroup,
     tags: ['autodocs'],
-} satisfies Meta<typeof Input>
+} satisfies Meta<typeof InputGroup>
 
 export default meta
 type Story = StoryObj<typeof meta>
