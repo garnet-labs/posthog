@@ -7,6 +7,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from './field'
 import { useState } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from './popover'
 import { Spinner } from './spinner'
+import { Kbd } from './kbd'
 
 const meta = {
     title: 'Primitives/Input Group',
@@ -203,9 +204,6 @@ export const Buttons: Story = {
 
 export const Loading: Story = {
     render: () => {
-        const [isFavorite, setIsFavorite] = useState(false)
-        const [isCopied, setIsCopied] = useState(false)
-
         return (
             <div className="grid w-full max-w-sm gap-6">
                 <InputGroup>
@@ -219,59 +217,77 @@ export const Loading: Story = {
     },
 } satisfies Story
 
+export const KBD: Story = {
+    render: () => {
+        return (
+            <div className="grid w-full max-w-sm gap-6">
+                <InputGroup>
+                    <InputGroupAddon align="inline-end">
+                        <Kbd>⌘K</Kbd>
+                    </InputGroupAddon>
+                    <InputGroupAddon>
+                        <SearchIcon className="text-muted-foreground" />
+                    </InputGroupAddon>
+                    <InputGroupInput placeholder="Search..." />
+                </InputGroup>
+            </div>
+        )
+    },
+} satisfies Story
+
 
 export const Textarea: Story = {
     render: () => {
         return (
             <div className="grid w-full max-w-md gap-4">
-      <InputGroup>
-        <InputGroupTextarea
-          id="textarea-code-32"
-          placeholder="Normal textarea"
-          className="min-h-[100px]"
-        />
-      </InputGroup>
+                <InputGroup>
+                    <InputGroupTextarea
+                        id="textarea-code-32"
+                        placeholder="Normal textarea"
+                        className="min-h-[100px]"
+                    />
+                </InputGroup>
 
-      <InputGroup>
-        <InputGroupTextarea
-          id="textarea-code-32"
-          placeholder="Textarea with footer"
-          className="min-h-[100px]"
-        />
-        <InputGroupAddon align="block-end" className="border-t">
-          <InputGroupText>Line 1, Column 1</InputGroupText>
-          <InputGroupButton size="sm" className="ml-auto" variant="default">
-            Run <LucideArrowUpRight />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-     
-      <InputGroup>
-        <InputGroupTextarea
-          id="textarea-code-32"
-          placeholder="Textarea with header and footer"
-          className="min-h-[100px]"
-        />
-        <InputGroupAddon align="block-end" className="border-t">
-          <InputGroupText>Line 1, Column 1</InputGroupText>
-          <InputGroupButton size="sm" className="ml-auto" variant="default">
-            Run <LucideArrowUpRight />
-          </InputGroupButton>
-        </InputGroupAddon>
-        
-        <InputGroupAddon align="block-start" className="border-b">
-          <InputGroupText className="font-mono font-medium">
-            script.js
-          </InputGroupText>
-          <InputGroupButton className="ml-auto" size="icon-xs">
-            <RefreshCcwIcon />
-          </InputGroupButton>
-          <InputGroupButton variant="ghost" size="icon-xs">
-            <CopyIcon />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </div>
+                <InputGroup>
+                    <InputGroupTextarea
+                        id="textarea-code-32"
+                        placeholder="Textarea with footer"
+                        className="min-h-[100px]"
+                    />
+                    <InputGroupAddon align="block-end" className="border-t border-input/30">
+                        <InputGroupText>Line 1, Column 1</InputGroupText>
+                        <InputGroupButton size="sm" className="ml-auto" variant="default">
+                            Run <LucideArrowUpRight />
+                        </InputGroupButton>
+                    </InputGroupAddon>
+                </InputGroup>
+
+                <InputGroup>
+                    <InputGroupTextarea
+                        id="textarea-code-32"
+                        placeholder="Textarea with header and footer"
+                        className="min-h-[100px]"
+                    />
+                    <InputGroupAddon align="block-end" className="border-t border-input/30">
+                        <InputGroupText>Line 1, Column 1</InputGroupText>
+                        <InputGroupButton size="sm" className="ml-auto" variant="default">
+                            Run <LucideArrowUpRight />
+                        </InputGroupButton>
+                    </InputGroupAddon>
+
+                    <InputGroupAddon align="block-start" className="border-b border-input/30">
+                        <InputGroupText className="font-mono font-medium">
+                            script.js
+                        </InputGroupText>
+                        <InputGroupButton className="ml-auto" size="icon-xs">
+                            <RefreshCcwIcon />
+                        </InputGroupButton>
+                        <InputGroupButton variant="ghost" size="icon-xs">
+                            <CopyIcon />
+                        </InputGroupButton>
+                    </InputGroupAddon>
+                </InputGroup>
+            </div>
         )
     },
 } satisfies Story
