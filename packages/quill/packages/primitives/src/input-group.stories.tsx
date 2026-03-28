@@ -216,6 +216,36 @@ export const Loading: Story = {
     },
 } satisfies Story
 
+export const Invalid: Story = {
+    render: () => {
+        return (
+            <div className="grid w-full max-w-sm gap-6">
+                <InputGroup>
+                    <InputGroupAddon>
+                        <MailIcon />
+                    </InputGroupAddon>
+                    <InputGroupInput placeholder="Oops"  aria-invalid="true" />
+                </InputGroup>
+
+                <InputGroup>
+                    <InputGroupTextarea
+                        id="textarea-code-32"
+                        placeholder="Textarea with footer"
+                        className="min-h-[100px]"
+                        aria-invalid="true"
+                    />
+                    <InputGroupAddon align="block-end" className="border-t border-input/30">
+                        <InputGroupText>Line 1, Column 1</InputGroupText>
+                        <InputGroupButton size="sm" className="ml-auto" variant="default">
+                            Run <LucideArrowUpRight />
+                        </InputGroupButton>
+                    </InputGroupAddon>
+                </InputGroup>
+            </div>
+        )
+    },
+} satisfies Story
+
 export const KBD: Story = {
     render: () => {
         return (

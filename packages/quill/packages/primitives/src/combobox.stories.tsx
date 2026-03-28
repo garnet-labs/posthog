@@ -54,7 +54,7 @@ export const Multiple: Story = {
                 items={frameworks}
                 defaultValue={[frameworks[0]]}
             >
-                <ComboboxChips ref={anchor} className="w-full max-w-xs">
+                <ComboboxChips ref={anchor} className="max-w-xs">
                     <ComboboxValue>
                         {(values) => (
                             <React.Fragment>
@@ -85,7 +85,7 @@ export const Clearable: Story = {
     render: () => {
         return (
             <Combobox items={frameworks} defaultValue={frameworks[0]}>
-                <ComboboxInput placeholder="Select a framework" showClear className="w-full max-w-xs" />
+                <ComboboxInput placeholder="Select a framework" showClear className="max-w-xs" />
                 <ComboboxContent>
                     <ComboboxEmpty>No items found.</ComboboxEmpty>
                     <ComboboxList>
@@ -141,7 +141,7 @@ export const GroupsAndSeparators: Story = {
 
         return (
             <Combobox items={timezones}>
-                <ComboboxInput placeholder="Select a timezone" className="w-full max-w-xs" />
+                <ComboboxInput placeholder="Select a timezone" className="max-w-xs" />
                 <ComboboxContent>
                     <ComboboxEmpty>No timezones found.</ComboboxEmpty>
                     <ComboboxList>
@@ -225,7 +225,7 @@ export const CustomItems: Story = {
                 items={countries.filter((country) => country.code !== "")}
                 itemToStringValue={(country: (typeof countries)[number]) => country.label}
             >
-                <ComboboxInput placeholder="Search countries..." className="w-full max-w-xs"/>
+                <ComboboxInput placeholder="Search countries..." className="max-w-xs"/>
                 <ComboboxContent>
                     <ComboboxEmpty>No countries found.</ComboboxEmpty>
                     <ComboboxList>
@@ -255,7 +255,7 @@ export const Invalid: Story = {
     render: () => {
         return (
             <Combobox items={frameworks}>
-                <ComboboxInput placeholder="Select a framework" aria-invalid="true" />
+                <ComboboxInput placeholder="Select a framework" aria-invalid="true" className="max-w-xs"/>
                 <ComboboxContent>
                     <ComboboxEmpty>No items found.</ComboboxEmpty>
                     <ComboboxList>
