@@ -73,7 +73,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/popover
     - [x] storybook
   - [x] primitives/progress
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/radio-group
     - [ ] storybook
   - [x] primitives/resizable
@@ -81,7 +81,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/scroll-area
     - [x] storybook
   - [x] primitives/seperator
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/skeleton-text
     - [x] storybook
   - [x] primitives/skeleton
