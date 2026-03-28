@@ -2,7 +2,7 @@ import '../../../funnels/Funnel.scss'
 
 import { createContext, useContext, useMemo } from 'react'
 
-import { ExperimentMetric, NewExperimentQueryResponse } from '~/queries/schema/schema-general'
+import { ExperimentMetric, FunnelsQuery, NewExperimentQueryResponse } from '~/queries/schema/schema-general'
 import {
     ChartParams,
     Experiment,
@@ -11,6 +11,7 @@ import {
     FunnelStepWithNestedBreakdown,
 } from '~/types'
 
+import { buildExperimentFunnelsQuery } from './experimentFunnelUtils'
 import { FunnelBarVertical } from './FunnelBarVertical'
 import { FunnelDataProcessingOptions, processFunnelData } from './funnelUtils'
 
@@ -37,6 +38,8 @@ export interface FunnelChartDataContext {
     experimentResult: NewExperimentQueryResponse
     experiment?: Experiment
     metric?: ExperimentMetric
+    /** Pre-built FunnelsQuery for the persons modal, computed once and shared across StepBars */
+    funnelsQuery: FunnelsQuery | null
 }
 
 const FunnelChartDataContext = createContext<FunnelChartDataContext | null>(null)
@@ -74,6 +77,11 @@ export function FunnelChart({
         return processFunnelData(steps, options)
     }, [steps, stepReference, disableBaseline, hiddenLegendBreakdowns])
 
+    const funnelsQuery = useMemo(
+        () => (experiment && metric ? buildExperimentFunnelsQuery(experiment, metric) : null),
+        [experiment, metric]
+    )
+
     const contextValue: FunnelChartDataContext = useMemo(
         () => ({
             stepsWithConversionMetrics: processedData.stepsWithConversionMetrics,
@@ -82,8 +90,9 @@ export function FunnelChart({
             experimentResult,
             experiment,
             metric,
+            funnelsQuery,
         }),
-        [processedData, experimentResult, experiment, metric]
+        [processedData, experimentResult, experiment, metric, funnelsQuery]
     )
 
     return (
