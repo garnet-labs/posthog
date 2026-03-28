@@ -5,8 +5,7 @@ Sandbox container entrypoint.
 Two-phase startup:
   1. Root phase (UID 0): create sandbox user, configure system, bind-mount
      node_modules onto the cache volume, then re-exec as the sandbox user.
-  2. User phase: install dependencies, apply overlays, and launch mprocs
-     inside tmux.
+  2. User phase: install dependencies and launch mprocs inside tmux.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from textwrap import dedent
 
 WORKSPACE = Path("/workspace")
 SANDBOX_HOME = Path("/tmp/sandbox-home")
-OVERLAY_DIR = Path("/usr/local/share/sandbox")
 PROGRESS_FILE = Path("/tmp/sandbox-progress")
 
 # ---------------------------------------------------------------------------
@@ -65,11 +63,6 @@ def write_file(path: Path, content: str, mode: int | None = None) -> None:
 def write_file_if_missing(path: Path, content: str) -> None:
     if not path.exists():
         write_file(path, content)
-
-
-def patch_file(path: Path, old: str, new: str) -> None:
-    text = path.read_text()
-    path.write_text(text.replace(old, new))
 
 
 # ---------------------------------------------------------------------------
@@ -209,74 +202,6 @@ def root_phase() -> None:
 # ---------------------------------------------------------------------------
 
 
-def apply_overlays() -> None:
-    """Copy sandbox-aware scripts from the Docker image onto the worktree.
-
-    This is a pre-merge workaround: branches that don't have sandbox changes
-    yet get the sandbox-aware versions overlaid at boot. Once the sandbox PR
-    merges to master, these copies overwrite with identical files and the sed
-    commands are no-ops.
-    """
-    info("Applying sandbox script overlays...")
-    copies = {
-        "bin/wait-for-docker": "bin/wait-for-docker",
-        "bin/mprocs.yaml": "bin/mprocs.yaml",
-        "bin/start-backend": "bin/start-backend",
-        "bin/start-rust-service": "bin/start-rust-service",
-        "posthog/management/commands/sandbox_migrate.py": "posthog/management/commands/sandbox_migrate.py",
-        "nodejs/package.json": "nodejs/package.json",
-        "rust/cyclotron-node/package.json": "rust/cyclotron-node/package.json",
-    }
-    for overlay_path, worktree_path in copies.items():
-        src = OVERLAY_DIR / overlay_path
-        dst = WORKSPACE / worktree_path
-        if src.exists():
-            shutil.copy2(src, dst)
-
-    # Disable standalone migration procs — in sandbox mode, the backend process
-    # runs migrations before starting granian, so these are redundant.
-    mprocs = WORKSPACE / "bin/mprocs.yaml"
-    text = mprocs.read_text()
-    for proc in ("migrate-postgres", "migrate-clickhouse", "migrate-persons-db"):
-        text = re.sub(
-            rf"(    {proc}:\n        shell: [^\n]+\n)",
-            r"\1        autostart: false\n",
-            text,
-        )
-    mprocs.write_text(text)
-
-    # Patch JS_URL into source files.
-    js_url = os.environ.get("JS_URL", "")
-    if js_url:
-        patch_file(WORKSPACE / "posthog/utils.py", "http://localhost:8234", js_url)
-        js_port = js_url.rsplit(":", 1)[-1]
-        patch_file(WORKSPACE / "posthog/utils.py", ':8234"', f':{js_port}"')
-
-        patch_file(
-            WORKSPACE / "frontend/vite.config.ts",
-            "origin: 'http://localhost:8234'",
-            f"origin: process.env.JS_URL || 'http://localhost:8234',\n"
-            f"            hmr: process.env.JS_URL ? {{ clientPort: parseInt(process.env.JS_URL.split(':').pop()) }} : undefined",
-        )
-
-    patch_file(
-        WORKSPACE / "turbo.json",
-        '"passThroughEnv": ["SKIP_TYPEGEN", "COREPACK_ENABLE_DOWNLOAD_PROMPT", "SSL_CERT_FILE"]',
-        '"passThroughEnv": ["SKIP_TYPEGEN", "COREPACK_ENABLE_DOWNLOAD_PROMPT", "SSL_CERT_FILE", "JS_URL"]',
-    )
-
-    # Add SESSION_COOKIE_NAME env var support if not present.
-    web_settings = WORKSPACE / "posthog/settings/web.py"
-    text = web_settings.read_text()
-    if not re.search(r"SESSION_COOKIE_NAME.*get_from_env", text):
-        text = text.replace(
-            "CSRF_COOKIE_NAME",
-            'SESSION_COOKIE_NAME = get_from_env("SESSION_COOKIE_NAME", "sessionid")\nCSRF_COOKIE_NAME',
-            1,
-        )
-        web_settings.write_text(text)
-
-
 def install_python_deps() -> None:
     info("Started: uv sync...")
     result = subprocess.run(["uv", "sync", "--no-editable"], capture_output=True, text=True)
@@ -300,7 +225,7 @@ def install_python_deps() -> None:
 def install_node_deps() -> None:
     info("Started: pnpm install...")
     # CI=1 suppresses interactive prompts. --no-frozen-lockfile is needed
-    # because the pre-merge overlay may update package.json files.
+    # because the sandbox branch may have different dependencies than the cache.
     run(
         ["pnpm", "install", "--no-frozen-lockfile"],
         env={**os.environ, "CI": "1"},
@@ -497,8 +422,6 @@ def user_phase() -> None:
     os.environ["GIT_DIR"] = f"/repo.git/worktrees/{worktree_name}"
     os.environ["GIT_WORK_TREE"] = str(WORKSPACE)
     os.chdir(WORKSPACE)
-
-    apply_overlays()
 
     install_geoip()
     create_kafka_topics()

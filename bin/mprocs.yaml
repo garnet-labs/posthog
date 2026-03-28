@@ -228,12 +228,12 @@ procs:
         capability: stripe_app
 
     migrate-postgres:
-        shell: 'bin/wait-for-docker && bin/check_ducklake_up && bin/migrate --scope=postgres'
+        shell: '[ "$POSTHOG_SANDBOX" = "1" ] && echo "All migrations completed successfully" && exit 0; bin/wait-for-docker && bin/check_ducklake_up && bin/migrate --scope=postgres'
         capability: core_infra
         ready_pattern: 'All migrations completed successfully'
 
     migrate-clickhouse:
-        shell: 'bin/wait-for-docker && bin/check_ducklake_up && bin/migrate --scope=clickhouse'
+        shell: '[ "$POSTHOG_SANDBOX" = "1" ] && echo "All migrations completed successfully" && exit 0; bin/wait-for-docker && bin/check_ducklake_up && bin/migrate --scope=clickhouse'
         capability: core_infra
         ready_pattern: 'All migrations completed successfully'
 
@@ -243,7 +243,7 @@ procs:
         ready_pattern: 'All migrations completed successfully'
 
     migrate-persons-db:
-        shell: 'bin/wait-for-docker && bin/migrate --scope=persons'
+        shell: '[ "$POSTHOG_SANDBOX" = "1" ] && echo "All migrations completed successfully" && exit 0; bin/wait-for-docker && bin/migrate --scope=persons'
         ready_pattern: 'All migrations completed successfully'
         # no capability - optional migration
 

@@ -88,18 +88,7 @@ RUN mkdir -p /cache/uv /cache/pnpm /cache/python /run/sshd \
 
 WORKDIR /workspace
 
-# --- Changes often: entrypoint and overlay files ---
+# --- Changes often: entrypoint ---
 COPY --chmod=755 bin/sandbox-entrypoint.py /usr/local/bin/sandbox-entrypoint.py
-
-# --- PRE-MERGE WORKAROUND (delete this block after merging to master) ---
-# See sandbox-entrypoint.py for details.
-COPY bin/wait-for-docker     /usr/local/share/sandbox/bin/wait-for-docker
-COPY bin/mprocs.yaml         /usr/local/share/sandbox/bin/mprocs.yaml
-COPY bin/start-backend       /usr/local/share/sandbox/bin/start-backend
-COPY bin/start-rust-service  /usr/local/share/sandbox/bin/start-rust-service
-COPY posthog/management/commands/sandbox_migrate.py /usr/local/share/sandbox/posthog/management/commands/sandbox_migrate.py
-COPY nodejs/package.json     /usr/local/share/sandbox/nodejs/package.json
-COPY rust/cyclotron-node/package.json /usr/local/share/sandbox/rust/cyclotron-node/package.json
-# --- END PRE-MERGE WORKAROUND ---
 
 ENTRYPOINT ["python3", "/usr/local/bin/sandbox-entrypoint.py"]
