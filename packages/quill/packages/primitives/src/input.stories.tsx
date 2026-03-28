@@ -12,7 +12,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 
-export const InputDefault: Story = {
+export const Default: Story = {
     render: () => (
         <Field>
             <Input placeholder="Enter your text" id="text" />
@@ -20,7 +20,7 @@ export const InputDefault: Story = {
     ),
 } satisfies Story
 
-export const InputWithLabel: Story = {
+export const WithLabel: Story = {
     render: () => (
         <Field>
             <FieldLabel htmlFor="text">Text</FieldLabel>
@@ -29,7 +29,7 @@ export const InputWithLabel: Story = {
     ),
 } satisfies Story
 
-export const InputWithDescription: Story = {
+export const WithDescription: Story = {
     render: () => (
         <Field>
             <FieldLabel htmlFor="username">Username</FieldLabel>
@@ -39,7 +39,7 @@ export const InputWithDescription: Story = {
     ),
 } satisfies Story
 
-export const InputPassword: Story = {
+export const Password: Story = {
     render: () => (
         <Field>
             <FieldLabel htmlFor="password">Password</FieldLabel>
@@ -48,7 +48,7 @@ export const InputPassword: Story = {
     ),
 } satisfies Story
 
-export const InputDisabled: Story = {
+export const Disabled: Story = {
     render: () => (
         <Field data-disabled>
             <FieldLabel htmlFor="email">Email</FieldLabel>
@@ -57,7 +57,7 @@ export const InputDisabled: Story = {
     ),
 } satisfies Story
 
-export const InputInvalid: Story = {
+export const Invalid: Story = {
     render: () => (
         <Field data-invalid>
             <FieldLabel htmlFor="email">Email</FieldLabel>
