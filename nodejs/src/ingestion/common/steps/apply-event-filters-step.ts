@@ -13,11 +13,11 @@ export interface ApplyEventFiltersInput {
 }
 
 /**
- * Creates a pipeline step that drops events matching customer-configured filters.
+ * Creates a pipeline step that evaluates customer-configured event filters.
  *
- * Filters use a boolean expression tree with AND, OR, NOT, and condition nodes.
- * If the tree evaluates to true for an event, the event is dropped.
- * Dropped events are recorded as app metrics entries.
+ * In "live" mode, matching events are dropped and a "dropped" metric is recorded.
+ * In "dry_run" mode, matching events are NOT dropped but a "would_be_dropped" metric
+ * is recorded, allowing customers to verify their filter before enabling it.
  */
 export function createApplyEventFiltersStep<T extends ApplyEventFiltersInput>(
     manager: EventFilterManager,
@@ -30,12 +30,13 @@ export function createApplyEventFiltersStep<T extends ApplyEventFiltersInput>(
             return Promise.resolve(ok(input))
         }
 
-        const dropped = evaluateFilterTree(filter.filter_tree, {
+        const matched = evaluateFilterTree(filter.filter_tree, {
             event_name: input.event.event,
             distinct_id: input.event.distinct_id ?? input.headers.distinct_id ?? undefined,
         })
 
-        if (dropped) {
+        if (matched) {
+            const isDryRun = filter.mode === 'dry_run'
             const metricMessage = {
                 value: Buffer.from(
                     JSON.stringify({
@@ -44,7 +45,7 @@ export function createApplyEventFiltersStep<T extends ApplyEventFiltersInput>(
                         app_source: 'event_filter',
                         app_source_id: filter.id,
                         metric_kind: 'other',
-                        metric_name: 'dropped',
+                        metric_name: isDryRun ? 'would_be_dropped' : 'dropped',
                         count: 1,
                     })
                 ),
@@ -52,6 +53,12 @@ export function createApplyEventFiltersStep<T extends ApplyEventFiltersInput>(
             }
 
             const sideEffect = outputs.produce(APP_METRICS_OUTPUT, metricMessage)
+
+            if (isDryRun) {
+                // Dry run: record the metric but let the event through
+                return Promise.resolve(ok(input, [sideEffect]))
+            }
+
             return Promise.resolve(drop('event_filter', [sideEffect]))
         }
 

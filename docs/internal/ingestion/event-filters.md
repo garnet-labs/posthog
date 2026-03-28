@@ -18,13 +18,17 @@ The filter is a single boolean expression tree per team, not a flat list of rule
 
 Conditions match against two fields available early in the ingestion pipeline: `event_name` (the event's name like `$pageview`) and `distinct_id` (the user/device identifier). These are the fields available in Kafka message headers before full event parsing, which is why they were chosen over property-level filtering. Two operators are supported: `exact` (string equality) and `contains` (substring match). `contains` is useful for patterns like "drop all events from distinct IDs containing `bot-`".
 
-### Enable/disable toggle
+### Mode (disabled / dry run / live)
 
-The filter defaults to disabled. This is deliberate — you should be able to build and test a filter expression without it affecting live traffic. The toggle is prominent at the top of the page with a status card showing "Filter is active" or "Filter is disabled" and a description of what that means. The pipeline step only loads filters where `enabled = true` from Postgres, so disabled filters have zero runtime cost.
+The filter has three modes: **disabled** (default), **dry run**, and **live**. This is a `mode` field on the model (`EventFilterMode` enum), not a boolean.
+
+In **disabled** mode, the filter is not loaded by the pipeline at all — zero runtime cost. In **dry run** mode, matching events are evaluated and a `would_be_dropped` metric is recorded to app_metrics2, but the events are NOT actually dropped. They continue through the pipeline as normal. This lets customers verify their filter against real production traffic before committing to dropping events. In **live** mode, matching events are dropped and a `dropped` metric is recorded.
+
+The UI shows a prominent status card at the top with a dropdown selector (Disabled / Dry run / Live) and a description of the current behavior. The pipeline step only loads filters where `mode != 'disabled'`. The recommended workflow is: configure expression → add test cases → enable dry run → verify metrics → go live.
 
 ### Test cases
 
-Test cases let you verify your filter expression against example events before enabling it. Each test case specifies an event (event_name, distinct_id) and the expected result (drop or ingest). They are evaluated client-side in real-time as you edit the expression — results update instantly without saving or hitting the API. This exists because filter misconfiguration can be catastrophic: an overly broad filter silently drops production data with no way to recover. Test cases are a safety net. They are persisted in the database alongside the filter so they survive page reloads and can be re-validated after editing. The filter cannot be enabled while any test case fails — the UI blocks the toggle and shows an error. If you save with tests failing while the filter is enabled, it auto-disables on save.
+Test cases let you verify your filter expression against example events before activating it. Each test case specifies an event (event_name, distinct_id) and the expected result (drop or ingest). They are evaluated client-side in real-time as you edit the expression — results update instantly without saving or hitting the API. This exists because filter misconfiguration can be catastrophic: an overly broad filter silently drops production data with no way to recover. Test cases are a safety net. They are persisted in the database alongside the filter so they survive page reloads and can be re-validated after editing. The filter cannot go live while any test case fails — the UI blocks switching to live mode. If you save in live mode with tests failing, it falls back to dry run.
 
 ### Pruning
 
@@ -62,7 +66,7 @@ One `EventFilterConfig` per team, stored in Postgres:
 | ------------- | ------------------ | --------------------------------------------- |
 | `id`          | UUID               | Primary key                                   |
 | `team`        | OneToOne → Team    | One filter config per team                    |
-| `enabled`     | boolean            | Whether the filter is active (default: false) |
+| `mode`        | varchar(20)        | disabled / dry_run / live (default: disabled) |
 | `filter_tree` | JSON (nullable)    | Boolean expression tree                       |
 | `test_cases`  | JSON (default: []) | Test events with expected results             |
 | `created_at`  | DateTime           | Auto                                          |

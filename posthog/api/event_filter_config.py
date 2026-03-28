@@ -29,7 +29,7 @@ class EventFilterConfigSerializer(serializers.ModelSerializer):
         model = EventFilterConfig
         fields = [
             "id",
-            "enabled",
+            "mode",
             "filter_tree",
             "test_cases",
             "created_at",
@@ -66,7 +66,7 @@ class EventFilterConfigViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     def _get_or_create(self) -> EventFilterConfig:
         config, _ = EventFilterConfig.objects.get_or_create(
             team_id=self.team_id,
-            defaults={"filter_tree": DEFAULT_FILTER_TREE, "enabled": False, "test_cases": []},
+            defaults={"filter_tree": DEFAULT_FILTER_TREE, "mode": "disabled", "test_cases": []},
         )
         return config
 

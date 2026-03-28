@@ -110,10 +110,11 @@ describe('FilterNodeSchema', () => {
 })
 
 describe('EventFilterRowSchema', () => {
-    it('accepts a valid row', () => {
+    it('accepts a valid row with live mode', () => {
         const result = EventFilterRowSchema.safeParse({
             id: 'abc-123',
             team_id: 1,
+            mode: 'live',
             filter_tree: {
                 type: 'or',
                 children: [{ type: 'condition', field: 'event_name', operator: 'exact', value: '$drop' }],
@@ -122,9 +123,39 @@ describe('EventFilterRowSchema', () => {
         expect(result.success).toBe(true)
     })
 
+    it('accepts a valid row with dry_run mode', () => {
+        const result = EventFilterRowSchema.safeParse({
+            id: 'abc-123',
+            team_id: 1,
+            mode: 'dry_run',
+            filter_tree: { type: 'or', children: [] },
+        })
+        expect(result.success).toBe(true)
+    })
+
+    it('rejects row with missing mode', () => {
+        const result = EventFilterRowSchema.safeParse({
+            id: 'abc-123',
+            team_id: 1,
+            filter_tree: { type: 'or', children: [] },
+        })
+        expect(result.success).toBe(false)
+    })
+
+    it('rejects row with invalid mode', () => {
+        const result = EventFilterRowSchema.safeParse({
+            id: 'abc-123',
+            team_id: 1,
+            mode: 'turbo',
+            filter_tree: { type: 'or', children: [] },
+        })
+        expect(result.success).toBe(false)
+    })
+
     it('rejects row with missing team_id', () => {
         const result = EventFilterRowSchema.safeParse({
             id: 'abc-123',
+            mode: 'live',
             filter_tree: { type: 'or', children: [] },
         })
         expect(result.success).toBe(false)
@@ -134,6 +165,7 @@ describe('EventFilterRowSchema', () => {
         const result = EventFilterRowSchema.safeParse({
             id: 'abc-123',
             team_id: 1,
+            mode: 'live',
             filter_tree: { type: 'bad' },
         })
         expect(result.success).toBe(false)

@@ -25,9 +25,13 @@ export const FilterNodeSchema: z.ZodType<FilterNode> = z.lazy(() =>
     ])
 )
 
+export const EventFilterModeSchema = z.enum(['disabled', 'dry_run', 'live'])
+export type EventFilterMode = z.infer<typeof EventFilterModeSchema>
+
 export const EventFilterRowSchema = z.object({
     id: z.string(),
     team_id: z.number(),
+    mode: EventFilterModeSchema,
     filter_tree: FilterNodeSchema,
 })
 
@@ -53,5 +57,6 @@ export interface FilterNotNode {
 export interface EventFilterRule {
     id: string
     team_id: number
+    mode: EventFilterMode
     filter_tree: FilterNode
 }

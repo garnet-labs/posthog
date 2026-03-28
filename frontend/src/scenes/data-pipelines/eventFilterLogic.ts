@@ -49,16 +49,18 @@ export interface TestResult {
     pass: boolean
 }
 
+export type EventFilterMode = 'disabled' | 'dry_run' | 'live'
+
 export interface EventFilterFormValues {
     id: string | null
-    enabled: boolean
+    mode: EventFilterMode
     filter_tree: FilterNode
     test_cases: TestCase[]
 }
 
 const DEFAULT_FORM: EventFilterFormValues = {
     id: null,
-    enabled: false,
+    mode: 'disabled',
     filter_tree: { type: 'or', children: [] },
     test_cases: [],
 }
@@ -145,10 +147,10 @@ export const eventFilterLogic = kea<eventFilterLogicType>([
     forms(({ values }) => ({
         filterForm: {
             defaults: DEFAULT_FORM,
-            errors: ({ filter_tree, enabled }: EventFilterFormValues) => ({
+            errors: ({ filter_tree, mode }: EventFilterFormValues) => ({
                 filter_tree: (() => {
-                    if (enabled && !treeHasConditions(filter_tree)) {
-                        return 'Filter must have at least one condition to be enabled'
+                    if (mode !== 'disabled' && !treeHasConditions(filter_tree)) {
+                        return 'Filter must have at least one condition to be activated'
                     }
                     if (treeHasConditions(filter_tree) && treeHasEmptyValues(filter_tree)) {
                         return 'All conditions must have a value'
@@ -160,8 +162,8 @@ export const eventFilterLogic = kea<eventFilterLogicType>([
                 const { currentTeamId } = values
 
                 // Force-disable if tests are failing
-                if (formValues.enabled && !values.allTestsPass && formValues.test_cases.length > 0) {
-                    formValues = { ...formValues, enabled: false }
+                if (formValues.mode === 'live' && !values.allTestsPass && formValues.test_cases.length > 0) {
+                    formValues = { ...formValues, mode: 'dry_run' }
                 }
 
                 await api.create(`api/environments/${currentTeamId}/event_filters/`, formValues)
@@ -281,7 +283,7 @@ export const eventFilterLogic = kea<eventFilterLogicType>([
         const { currentTeamId } = values
         api.get(`api/environments/${currentTeamId}/event_filters/`).then((data) => {
             actions.setFilterFormValue('id', data.id)
-            actions.setFilterFormValue('enabled', data.enabled)
+            actions.setFilterFormValue('mode', data.mode ?? 'disabled')
             if (data.filter_tree?.type) {
                 actions.setFilterFormValue('filter_tree', data.filter_tree)
             }

@@ -2,19 +2,14 @@
 """
 Integration test for event filters.
 
-Sets up a filter, sends events (some matching, some not), and verifies
-via the metrics API that the right events were dropped.
+Tests both dry_run and live modes with configurable event counts.
 
 Usage:
-    bin/test-event-filters --api-key <personal_api_key> [--host http://localhost:8000]
-
-Requires a running PostHog instance with the event filters feature.
+    bin/test-event-filters --api-key <key> --dry-run-events 200 --live-events 500 --drop-pct 0.4
 """
 
 import argparse
-import json
 import random
-import string
 import sys
 import time
 from datetime import datetime, timezone
@@ -35,98 +30,24 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Integration test for event filters")
-    parser.add_argument("--api-key", required=True, help="PostHog personal API key")
-    parser.add_argument("--host", default="http://localhost:8000", help="PostHog API host URL")
-    parser.add_argument("--capture-host", default="http://localhost:3307", help="Capture host URL (default: http://localhost:3307)")
-    parser.add_argument("--events", type=int, default=100, help="Number of events to send")
-    parser.add_argument("--drop-pct", type=float, default=0.3, help="Fraction of events that should be dropped (0-1)")
-    parser.add_argument("--poll-interval", type=int, default=10, help="Seconds between metric checks")
-    parser.add_argument("--poll-count", type=int, default=6, help="Number of times to poll metrics")
-    args = parser.parse_args()
-
-    host = args.host.rstrip("/")
-    capture_host = args.capture_host.rstrip("/")
-    headers = {"Authorization": f"Bearer {args.api_key}"}
-
-    # --- 1. Get team info and project API key ---
-    log("Fetching team info...")
-    resp = requests.get(f"{host}/api/users/@me/", headers=headers)
-    resp.raise_for_status()
-    user = resp.json()
-    team = user["team"]
-    team_id = team["id"]
-    api_token = team["api_token"]
-    log(f"Team ID: {team_id}, API token: {api_token[:8]}...")
-
-    # --- 2. Set up a filter ---
-    # Filter: drop events where
-    #   (event_name = "$drop_me")
-    #   OR (event_name = "$internal" AND distinct_id contains "bot-")
-    filter_tree = {
-        "type": "or",
-        "children": [
-            {
-                "type": "condition",
-                "field": "event_name",
-                "operator": "exact",
-                "value": "$drop_me",
+def send_events(capture_url: str, api_token: str, batch: list[dict]) -> None:
+    for i, event in enumerate(batch):
+        resp = requests.post(
+            capture_url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "api_key": api_token,
+                "event": event["event"],
+                "distinct_id": event["distinct_id"],
+                "properties": event.get("properties", {}),
             },
-            {
-                "type": "and",
-                "children": [
-                    {
-                        "type": "condition",
-                        "field": "event_name",
-                        "operator": "exact",
-                        "value": "$internal",
-                    },
-                    {
-                        "type": "condition",
-                        "field": "distinct_id",
-                        "operator": "contains",
-                        "value": "bot-",
-                    },
-                ],
-            },
-        ],
-    }
+        )
+        if resp.status_code != 200:
+            log(f"  WARNING: event {i + 1} returned {resp.status_code}: {resp.text[:100]}")
+    log(f"  Sent {len(batch)} events")
 
-    test_cases = [
-        {"event_name": "$drop_me", "distinct_id": "user-1", "expected_result": "drop"},
-        {"event_name": "$internal", "distinct_id": "bot-crawler", "expected_result": "drop"},
-        {"event_name": "$internal", "distinct_id": "real-user", "expected_result": "ingest"},
-        {"event_name": "$pageview", "distinct_id": "user-1", "expected_result": "ingest"},
-        {"event_name": "$pageview", "distinct_id": "bot-crawler", "expected_result": "ingest"},
-    ]
 
-    log("Configuring event filter...")
-    resp = requests.post(
-        f"{host}/api/environments/{team_id}/event_filters/",
-        headers={**headers, "Content-Type": "application/json"},
-        json={
-            "enabled": True,
-            "filter_tree": filter_tree,
-            "test_cases": test_cases,
-        },
-    )
-    resp.raise_for_status()
-    filter_config = resp.json()
-    filter_id = filter_config["id"]
-    log(f"Filter configured: {filter_id}")
-    log(f"  Expression: DROP WHERE (event = '$drop_me') OR (event = '$internal' AND distinct_id ~ 'bot-')")
-
-    # Wait for BackgroundRefresher to pick up the config (60s cycle)
-    log("Waiting 5s for config to propagate...")
-    time.sleep(5)
-
-    # Record run start for metric queries.
-    # app_metrics2 aggregates by hour, so we query from start of current hour.
-    run_start = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-    # Get baseline count before sending events
-    baseline_dropped = 0
+def get_totals(host: str, team_id: int, headers: dict, run_start: datetime) -> dict:
     resp = requests.get(
         f"{host}/api/environments/{team_id}/event_filters/metrics/totals/",
         headers=headers,
@@ -137,15 +58,30 @@ def main():
         },
     )
     if resp.status_code == 200:
-        baseline_dropped = resp.json().get("totals", {}).get("dropped", 0)
-        log(f"Baseline drops this hour: {baseline_dropped}")
+        return resp.json().get("totals", {})
+    return {}
 
-    # --- 3. Generate events ---
-    # Event pool:
-    #   - "$drop_me" with any distinct_id → DROPPED
-    #   - "$internal" with "bot-*" distinct_id → DROPPED
-    #   - "$internal" with normal distinct_id → INGESTED
-    #   - "$pageview" with any distinct_id → INGESTED
+
+def poll_metric(
+    host: str, team_id: int, headers: dict, run_start: datetime,
+    metric_name: str, baseline: int, expected: int,
+    poll_interval: int, poll_count: int,
+) -> bool:
+    for attempt in range(1, poll_count + 1):
+        time.sleep(poll_interval)
+        totals = get_totals(host, team_id, headers, run_start)
+        total = totals.get(metric_name, 0)
+        new = total - baseline
+
+        log(f"  [{attempt}] {metric_name}: {new} / {expected} expected (total this hour: {total})")
+
+        if new >= expected:
+            return True
+
+    return False
+
+
+def build_batch(n_events: int, drop_pct: float, filter_id: str) -> tuple[list[dict], int, int]:
     dropped_events = [
         {"event": "$drop_me", "distinct_id": f"user-{random_id()}"},
         {"event": "$internal", "distinct_id": f"bot-{random_id()}"},
@@ -156,122 +92,185 @@ def main():
         {"event": "$click", "distinct_id": f"user-{random_id()}"},
     ]
 
-    n_events = args.events
-    n_should_drop = int(n_events * args.drop_pct)
-    n_should_ingest = n_events - n_should_drop
-
-    log(f"Sending {n_events} events ({n_should_drop} should be dropped, {n_should_ingest} should be ingested)...")
+    n_should_match = int(n_events * drop_pct)
+    n_should_pass = n_events - n_should_match
 
     batch = []
     for i in range(n_events):
-        if i < n_should_drop:
-            template = random.choice(dropped_events)
-        else:
-            template = random.choice(ingested_events)
-
+        template = random.choice(dropped_events) if i < n_should_match else random.choice(ingested_events)
         batch.append({
             "event": template["event"],
             "distinct_id": template["distinct_id"],
-            "properties": {
-                "$lib": "test-event-filters",
-                "test_run": filter_id,
-                "batch_index": i,
-            },
+            "properties": {"$lib": "test-event-filters", "test_run": filter_id, "batch_index": i},
         })
 
-    # Shuffle so drops and ingests are interleaved
     random.shuffle(batch)
+    return batch, n_should_match, n_should_pass
 
-    # Send via capture endpoint
-    capture_url = f"{capture_host}/i/v0/e"
-    for i, event in enumerate(batch):
-        resp = requests.post(
-            capture_url,
-            headers={"Content-Type": "application/json"},
-            json={
-                "api_key": api_token,
-                "event": event["event"],
-                "distinct_id": event["distinct_id"],
-                "properties": event["properties"],
+
+def main():
+    parser = argparse.ArgumentParser(description="Integration test for event filters")
+    parser.add_argument("--api-key", required=True, help="PostHog personal API key")
+    parser.add_argument("--host", default="http://localhost:8000", help="PostHog API host URL")
+    parser.add_argument("--capture-host", default="http://localhost:3307", help="Capture host URL")
+    parser.add_argument("--dry-run-events", type=int, default=200, help="Number of events in dry run phase")
+    parser.add_argument("--live-events", type=int, default=500, help="Number of events in live phase")
+    parser.add_argument("--drop-pct", type=float, default=0.4, help="Fraction of events that should match (0-1)")
+    parser.add_argument("--poll-interval", type=int, default=10, help="Seconds between metric checks")
+    parser.add_argument("--poll-count", type=int, default=6, help="Number of times to poll metrics")
+    parser.add_argument("--skip-dry-run", action="store_true", help="Skip dry run phase")
+    parser.add_argument("--skip-live", action="store_true", help="Skip live phase")
+    args = parser.parse_args()
+
+    host = args.host.rstrip("/")
+    capture_url = f"{args.capture_host.rstrip('/')}/i/v0/e"
+    headers = {"Authorization": f"Bearer {args.api_key}"}
+
+    # --- 1. Get team info ---
+    log("Fetching team info...")
+    resp = requests.get(f"{host}/api/users/@me/", headers=headers)
+    resp.raise_for_status()
+    team = resp.json()["team"]
+    team_id = team["id"]
+    api_token = team["api_token"]
+    log(f"Team ID: {team_id}, API token: {api_token[:8]}...")
+
+    # --- 2. Set up filter ---
+    filter_tree = {
+        "type": "or",
+        "children": [
+            {"type": "condition", "field": "event_name", "operator": "exact", "value": "$drop_me"},
+            {
+                "type": "and",
+                "children": [
+                    {"type": "condition", "field": "event_name", "operator": "exact", "value": "$internal"},
+                    {"type": "condition", "field": "distinct_id", "operator": "contains", "value": "bot-"},
+                ],
             },
-        )
-        if resp.status_code != 200:
-            log(f"  WARNING: event {i + 1} returned {resp.status_code}: {resp.text[:100]}")
-    log(f"  Sent {len(batch)} events")
+        ],
+    }
+    test_cases = [
+        {"event_name": "$drop_me", "distinct_id": "user-1", "expected_result": "drop"},
+        {"event_name": "$internal", "distinct_id": "bot-crawler", "expected_result": "drop"},
+        {"event_name": "$internal", "distinct_id": "real-user", "expected_result": "ingest"},
+        {"event_name": "$pageview", "distinct_id": "user-1", "expected_result": "ingest"},
+    ]
 
-    run_end = datetime.now(timezone.utc)
-    log(f"All {n_events} events sent.")
-    log(f"  Run window: {run_start.isoformat()} → {run_end.isoformat()}")
+    run_start = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
-    # --- 4. Poll metrics ---
-    log(f"Polling metrics every {args.poll_interval}s (up to {args.poll_count} times)...")
-
-    dropped_count = 0
-    for attempt in range(1, args.poll_count + 1):
-        time.sleep(args.poll_interval)
-
-        resp = requests.get(
-            f"{host}/api/environments/{team_id}/event_filters/metrics/totals/",
-            headers=headers,
-            params={
-                "after": run_start.strftime("%Y-%m-%dT%H:%M:%S"),
-                "before": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-                "breakdown_by": "name",
-                "_": str(int(time.time())),  # cache bust
-            },
-        )
-
-        if resp.status_code != 200:
-            log(f"  [{attempt}] Metrics API returned {resp.status_code}: {resp.text[:100]}")
-            continue
-
-        data = resp.json()
-        totals = data.get("totals", {})
-        total_dropped = totals.get("dropped", 0)
-        new_drops = total_dropped - baseline_dropped
-
-        log(f"  [{attempt}] New drops: {new_drops} / {n_should_drop} expected (total this hour: {total_dropped})")
-
-        if new_drops >= n_should_drop:
-            log(f"SUCCESS: All {n_should_drop} events were dropped as expected.")
-            break
-    else:
-        log(f"TIMEOUT: Only {new_drops} of {n_should_drop} expected drops observed after polling.")
-        log("This may be due to:")
-        log("  - Plugin server not running (events stuck in Kafka)")
-        log("  - BackgroundRefresher hasn't loaded the filter config yet (60s cycle)")
-        log("  - ClickHouse ingestion lag for app_metrics2")
-
-    # --- 5. Show time-series ---
-    log("Fetching time-series metrics...")
-    resp = requests.get(
-        f"{host}/api/environments/{team_id}/event_filters/metrics/",
-        headers=headers,
-        params={
-            "after": run_start.strftime("%Y-%m-%dT%H:%M:%S"),
-            "before": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-            "interval": "hour",
-            "breakdown_by": "name",
-            "_": str(int(time.time())),
-        },
-    )
-    if resp.status_code == 200:
-        data = resp.json()
-        for series in data.get("series", []):
-            total = sum(series.get("values", []))
-            log(f"  {series['name']}: {total}")
-    else:
-        log(f"  Metrics API returned {resp.status_code}")
-
-    # --- 6. Disable filter ---
-    log("Disabling filter...")
+    # Initial config (disabled, just to get the filter ID)
+    log("Configuring filter...")
     resp = requests.post(
         f"{host}/api/environments/{team_id}/event_filters/",
         headers={**headers, "Content-Type": "application/json"},
-        json={"enabled": False},
+        json={"mode": "disabled", "filter_tree": filter_tree, "test_cases": test_cases},
     )
     resp.raise_for_status()
-    log("Filter disabled. Test complete.")
+    filter_id = resp.json()["id"]
+    log(f"Filter: {filter_id}")
+    log(f"  DROP WHERE (event = '$drop_me') OR (event = '$internal' AND distinct_id ~ 'bot-')")
+
+    dry_run_ok = True
+    live_ok = True
+
+    # ========================================
+    # Phase 1: Dry run
+    # ========================================
+    if not args.skip_dry_run:
+        log("")
+        log("=" * 60)
+        log(f"PHASE 1: DRY RUN ({args.dry_run_events} events, {args.drop_pct:.0%} matching)")
+        log("=" * 60)
+
+        resp = requests.post(
+            f"{host}/api/environments/{team_id}/event_filters/",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"mode": "dry_run"},
+        )
+        resp.raise_for_status()
+
+        log("Waiting 65s for BackgroundRefresher to pick up config...")
+        time.sleep(65)
+
+        baseline = get_totals(host, team_id, headers, run_start)
+        baseline_wbd = baseline.get("would_be_dropped", 0)
+        log(f"Baseline would_be_dropped: {baseline_wbd}")
+
+        batch, n_match, _ = build_batch(args.dry_run_events, args.drop_pct, filter_id)
+        log(f"Sending {args.dry_run_events} events ({n_match} should match)...")
+        send_events(capture_url, api_token, batch)
+
+        log("Polling for would_be_dropped...")
+        dry_run_ok = poll_metric(
+            host, team_id, headers, run_start,
+            "would_be_dropped", baseline_wbd, n_match,
+            args.poll_interval, args.poll_count,
+        )
+        if dry_run_ok:
+            log(f"DRY RUN OK: {n_match} events matched (not dropped).")
+        else:
+            log("DRY RUN: Not all metrics visible yet.")
+
+    # ========================================
+    # Phase 2: Live
+    # ========================================
+    if not args.skip_live:
+        log("")
+        log("=" * 60)
+        log(f"PHASE 2: LIVE ({args.live_events} events, {args.drop_pct:.0%} matching)")
+        log("=" * 60)
+
+        resp = requests.post(
+            f"{host}/api/environments/{team_id}/event_filters/",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"mode": "live"},
+        )
+        resp.raise_for_status()
+
+        log("Waiting 65s for BackgroundRefresher to pick up mode change...")
+        time.sleep(65)
+
+        baseline = get_totals(host, team_id, headers, run_start)
+        baseline_dropped = baseline.get("dropped", 0)
+        log(f"Baseline dropped: {baseline_dropped}")
+
+        batch, n_drop, _ = build_batch(args.live_events, args.drop_pct, filter_id)
+        log(f"Sending {args.live_events} events ({n_drop} should be dropped)...")
+        send_events(capture_url, api_token, batch)
+
+        log("Polling for dropped...")
+        live_ok = poll_metric(
+            host, team_id, headers, run_start,
+            "dropped", baseline_dropped, n_drop,
+            args.poll_interval, args.poll_count,
+        )
+        if live_ok:
+            log(f"LIVE OK: {n_drop} events dropped.")
+        else:
+            log("LIVE: Not all metrics visible yet.")
+
+    # ========================================
+    # Final metrics
+    # ========================================
+    log("")
+    log("Final metrics:")
+    totals = get_totals(host, team_id, headers, run_start)
+    for name, count in sorted(totals.items()):
+        log(f"  {name}: {count}")
+
+    log("Disabling filter...")
+    requests.post(
+        f"{host}/api/environments/{team_id}/event_filters/",
+        headers={**headers, "Content-Type": "application/json"},
+        json={"mode": "disabled"},
+    )
+
+    log("")
+    if dry_run_ok and live_ok:
+        log("ALL TESTS PASSED")
+    else:
+        log("SOME TESTS INCOMPLETE")
+    log("Done.")
 
 
 if __name__ == "__main__":

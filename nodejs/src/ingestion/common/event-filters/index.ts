@@ -1,6 +1,6 @@
 export { EventFilterManager } from './manager'
 export { evaluateFilterTree, treeHasConditions } from './evaluate'
-export { FilterNodeSchema, EventFilterRowSchema } from './schema'
+export { FilterNodeSchema, EventFilterRowSchema, EventFilterModeSchema } from './schema'
 export type {
     FilterNode,
     FilterConditionNode,
@@ -8,4 +8,5 @@ export type {
     FilterOrNode,
     FilterNotNode,
     EventFilterRule,
+    EventFilterMode,
 } from './schema'

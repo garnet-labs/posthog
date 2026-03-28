@@ -24,20 +24,20 @@ import {
     LemonInput,
     LemonModal,
     LemonSelect,
-    LemonSwitch,
     LemonTag,
+    SpinnerOverlay,
 } from '@posthog/lemon-ui'
 
-import { getColorVar } from 'lib/colors'
 import { AppMetricsFilters } from 'lib/components/AppMetrics/AppMetricsFilters'
-import { appMetricsLogic } from 'lib/components/AppMetrics/appMetricsLogic'
-import { AppMetricSummary } from 'lib/components/AppMetrics/AppMetricSummary'
+import { appMetricsLogic, AppMetricsTimeSeriesResponse } from 'lib/components/AppMetrics/appMetricsLogic'
 import { IconDragHandle } from 'lib/lemon-ui/icons'
 import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
 import { SceneExport } from 'scenes/sceneTypes'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
+import { LineGraph } from '~/queries/nodes/DataVisualization/Components/Charts/LineGraph'
+import { ChartDisplayType } from '~/types'
 
 import {
     eventFilterLogic,
@@ -426,15 +426,49 @@ function filterTreeToExpression(node: FilterNode, indent: number = 0): string {
     }
 }
 
-const EVENT_FILTER_METRIC_KEYS = ['dropped'] as const
-
-const EVENT_FILTER_METRICS_INFO: Record<string, { name: string; description: string; color: string }> = {
-    dropped: {
-        name: 'Events dropped by filters',
-        description: 'Total number of events dropped by this filter',
-        color: getColorVar('warning'),
-    },
+function CompactMetricsChart({
+    data,
+    loading,
+}: {
+    data: AppMetricsTimeSeriesResponse | null
+    loading: boolean
+}): JSX.Element {
+    return (
+        <div className="relative border rounded h-52">
+            {loading ? (
+                <SpinnerOverlay />
+            ) : !data ? (
+                <div className="flex-1 flex items-center justify-center text-muted text-sm">No data</div>
+            ) : (
+                <LineGraph
+                    className="p-2"
+                    xData={{
+                        column: {
+                            name: 'date',
+                            type: { name: 'DATE', isNumerical: false },
+                            label: 'Date',
+                            dataIndex: 0,
+                        },
+                        data: data.labels,
+                    }}
+                    yData={data.series.map((x) => ({
+                        column: {
+                            name: x.name,
+                            type: { name: 'INTEGER', isNumerical: true },
+                            label: x.name,
+                            dataIndex: 0,
+                        },
+                        data: x.values,
+                    }))}
+                    visualizationType={ChartDisplayType.ActionsLineGraph}
+                    chartSettings={{ showLegend: true, showTotalRow: false }}
+                />
+            )}
+        </div>
+    )
 }
+
+const EVENT_FILTER_METRIC_KEYS = ['dropped', 'would_be_dropped'] as const
 
 function EventFilterMetrics({ filterId }: { filterId: string | null }): JSX.Element | null {
     const logicKey = `event-filter-metrics-${filterId ?? 'none'}`
@@ -453,7 +487,7 @@ function EventFilterMetrics({ filterId }: { filterId: string | null }): JSX.Elem
           })
         : null
 
-    const { appMetricsTrendsLoading, getSingleTrendSeries } = useValues(logic ?? appMetricsLogic({ logicKey: 'noop' }))
+    const { appMetricsTrends, appMetricsTrendsLoading } = useValues(logic ?? appMetricsLogic({ logicKey: 'noop' }))
 
     if (!filterId) {
         return null
@@ -465,20 +499,7 @@ function EventFilterMetrics({ filterId }: { filterId: string | null }): JSX.Elem
                 <label className="font-semibold">Metrics</label>
                 <AppMetricsFilters logicKey={logicKey} />
             </div>
-            <div className="flex flex-row gap-2 flex-wrap">
-                {EVENT_FILTER_METRIC_KEYS.map((key) => (
-                    <AppMetricSummary
-                        key={key}
-                        name={EVENT_FILTER_METRICS_INFO[key].name}
-                        description={EVENT_FILTER_METRICS_INFO[key].description}
-                        loading={appMetricsTrendsLoading}
-                        timeSeries={getSingleTrendSeries(key)}
-                        previousPeriodTimeSeries={getSingleTrendSeries(key, true)}
-                        color={EVENT_FILTER_METRICS_INFO[key].color}
-                        colorIfZero={getColorVar('muted')}
-                    />
-                ))}
-            </div>
+            <CompactMetricsChart data={appMetricsTrends} loading={appMetricsTrendsLoading} />
             <p className="text-muted text-xs">
                 These counts are approximate. The actual number of dropped events may differ by a small percentage.
             </p>
@@ -669,33 +690,46 @@ export function EventFilterScene(): JSX.Element {
 
                     <div
                         className={`border rounded p-3 flex items-center justify-between ${
-                            filterForm.enabled ? 'border-success' : ''
+                            filterForm.mode === 'live'
+                                ? 'border-success'
+                                : filterForm.mode === 'dry_run'
+                                  ? 'border-warning'
+                                  : ''
                         }`}
                     >
                         <div>
                             <div className="font-semibold">
-                                {filterForm.enabled ? 'Filter is active' : 'Filter is disabled'}
+                                {filterForm.mode === 'live'
+                                    ? 'Filter is active'
+                                    : filterForm.mode === 'dry_run'
+                                      ? 'Filter is in dry run'
+                                      : 'Filter is disabled'}
                             </div>
                             <div className="text-muted text-sm">
-                                {filterForm.enabled
+                                {filterForm.mode === 'live'
                                     ? 'Matching events are being dropped from ingestion.'
-                                    : 'No events are being filtered. Enable to start dropping matching events.'}
+                                    : filterForm.mode === 'dry_run'
+                                      ? 'Matching events are counted but not dropped. Use this to verify your filter before going live.'
+                                      : 'No events are being filtered or counted.'}
                             </div>
-                            {filterForm.enabled && !allTestsPass && filterForm.test_cases.length > 0 && (
-                                <div className="text-danger text-xs mt-1">
-                                    Tests failing — will be saved as disabled
-                                </div>
+                            {filterForm.mode === 'live' && !allTestsPass && filterForm.test_cases.length > 0 && (
+                                <div className="text-danger text-xs mt-1">Tests failing — will be saved as dry run</div>
                             )}
                         </div>
-                        <LemonSwitch
-                            checked={filterForm.enabled}
-                            bordered
+                        <LemonSelect
+                            size="small"
+                            options={[
+                                { value: 'disabled', label: 'Disabled' },
+                                { value: 'dry_run', label: 'Dry run' },
+                                { value: 'live', label: 'Live' },
+                            ]}
+                            value={filterForm.mode}
                             onChange={(value) => {
-                                if (value && !allTestsPass && filterForm.test_cases.length > 0) {
-                                    lemonToast.error('Cannot enable filter while test cases are failing')
+                                if (value === 'live' && !allTestsPass && filterForm.test_cases.length > 0) {
+                                    lemonToast.error('Cannot go live while test cases are failing')
                                     return
                                 }
-                                setFilterFormValue('enabled', value)
+                                setFilterFormValue('mode', value)
                             }}
                         />
                     </div>
@@ -863,10 +897,10 @@ export function EventFilterScene(): JSX.Element {
 
                     <LemonDivider />
 
-                    {!allTestsPass && filterForm.enabled && (
+                    {!allTestsPass && filterForm.mode === 'live' && (
                         <div className="text-danger text-sm">
-                            Some test cases are failing. The filter cannot be enabled until all tests pass. You can save
-                            with tests failing, but the filter will be saved as disabled.
+                            Some test cases are failing. The filter cannot go live until all tests pass. You can save
+                            with tests failing, but the filter will be saved in dry run mode.
                         </div>
                     )}
 
@@ -874,8 +908,8 @@ export function EventFilterScene(): JSX.Element {
                         <LemonButton
                             type="primary"
                             onClick={() => {
-                                if (filterForm.enabled && !allTestsPass) {
-                                    setFilterFormValue('enabled', false)
+                                if (filterForm.mode === 'live' && !allTestsPass) {
+                                    setFilterFormValue('mode', 'dry_run')
                                 }
                                 submitFilterForm()
                             }}

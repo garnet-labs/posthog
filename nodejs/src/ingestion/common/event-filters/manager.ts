@@ -6,7 +6,8 @@ import { EventFilterRowSchema, EventFilterRule } from './schema'
 
 /**
  * Manages per-team event filter config loaded from Postgres.
- * One filter per team. Uses BackgroundRefresher to load all enabled filters.
+ * One filter per team. Uses BackgroundRefresher to load all active filters
+ * (mode = 'dry_run' or 'live').
  */
 export class EventFilterManager {
     private refresher: BackgroundRefresher<Map<number, EventFilterRule>>
@@ -19,7 +20,7 @@ export class EventFilterManager {
         })
     }
 
-    /** Returns the filter for a team, or null if not set or has no conditions. Non-blocking. */
+    /** Returns the filter for a team, or null if disabled or has no conditions. Non-blocking. */
     getFilter(teamId: number): EventFilterRule | null {
         const filter = this.refresher.tryGet()?.get(teamId) ?? null
         if (filter && !treeHasConditions(filter.filter_tree)) {
@@ -32,12 +33,13 @@ export class EventFilterManager {
         const { rows } = await this.postgres.query<{
             id: string
             team_id: number
+            mode: string
             filter_tree: unknown
         }>(
             PostgresUse.COMMON_READ,
-            `SELECT id, team_id, filter_tree
+            `SELECT id, team_id, mode, filter_tree
              FROM posthog_eventfilterconfig
-             WHERE enabled = true AND filter_tree IS NOT NULL`,
+             WHERE mode != 'disabled' AND filter_tree IS NOT NULL`,
             [],
             'fetchAllEventFilters'
         )

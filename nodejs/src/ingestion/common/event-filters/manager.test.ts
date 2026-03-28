@@ -12,17 +12,17 @@ describe('EventFilterManager', () => {
     it('returns null for unknown team', async () => {
         mockPostgres.query.mockResolvedValue({ rows: [] })
         const manager = new EventFilterManager(mockPostgres)
-        // Wait for initial load
         await new Promise((r) => setTimeout(r, 100))
         expect(manager.getFilter(999)).toBeNull()
     })
 
-    it('returns filter for team with valid config', async () => {
+    it('returns filter for team in live mode', async () => {
         mockPostgres.query.mockResolvedValue({
             rows: [
                 {
                     id: 'filter-1',
                     team_id: 1,
+                    mode: 'live',
                     filter_tree: {
                         type: 'or',
                         children: [{ type: 'condition', field: 'event_name', operator: 'exact', value: '$drop' }],
@@ -36,7 +36,31 @@ describe('EventFilterManager', () => {
         const filter = manager.getFilter(1)
         expect(filter).not.toBeNull()
         expect(filter!.id).toBe('filter-1')
-        expect(filter!.filter_tree.type).toBe('or')
+        expect(filter!.mode).toBe('live')
+    })
+
+    it('returns filter for team in dry_run mode', async () => {
+        mockPostgres.query.mockResolvedValue({
+            rows: [
+                {
+                    id: 'filter-dry',
+                    team_id: 1,
+                    mode: 'dry_run',
+                    filter_tree: {
+                        type: 'condition',
+                        field: 'event_name',
+                        operator: 'exact',
+                        value: '$test',
+                    },
+                },
+            ],
+        })
+        const manager = new EventFilterManager(mockPostgres)
+        await new Promise((r) => setTimeout(r, 100))
+
+        const filter = manager.getFilter(1)
+        expect(filter).not.toBeNull()
+        expect(filter!.mode).toBe('dry_run')
     })
 
     it('returns null for filter with no conditions (empty tree)', async () => {
@@ -45,6 +69,7 @@ describe('EventFilterManager', () => {
                 {
                     id: 'filter-empty',
                     team_id: 1,
+                    mode: 'live',
                     filter_tree: { type: 'or', children: [] },
                 },
             ],
@@ -61,11 +86,13 @@ describe('EventFilterManager', () => {
                 {
                     id: 'bad-filter',
                     team_id: 1,
+                    mode: 'live',
                     filter_tree: { type: 'invalid' },
                 },
                 {
                     id: 'good-filter',
                     team_id: 2,
+                    mode: 'live',
                     filter_tree: {
                         type: 'condition',
                         field: 'event_name',
@@ -89,6 +116,7 @@ describe('EventFilterManager', () => {
                 {
                     id: 'empty-value',
                     team_id: 1,
+                    mode: 'live',
                     filter_tree: {
                         type: 'condition',
                         field: 'event_name',
@@ -101,7 +129,6 @@ describe('EventFilterManager', () => {
         const manager = new EventFilterManager(mockPostgres)
         await new Promise((r) => setTimeout(r, 100))
 
-        // Zod rejects empty value, so the row is skipped
         expect(manager.getFilter(1)).toBeNull()
     })
 
@@ -111,11 +138,13 @@ describe('EventFilterManager', () => {
                 {
                     id: 'f1',
                     team_id: 1,
+                    mode: 'live',
                     filter_tree: { type: 'condition', field: 'event_name', operator: 'exact', value: 'a' },
                 },
                 {
                     id: 'f2',
                     team_id: 2,
+                    mode: 'dry_run',
                     filter_tree: { type: 'condition', field: 'distinct_id', operator: 'contains', value: 'bot' },
                 },
             ],
