@@ -55,7 +55,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/dropdown-menu
     - [x] storybook
   - [x] primitives/empty
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/field
     - [ ] storybook
   - [x] primitives/input-group
