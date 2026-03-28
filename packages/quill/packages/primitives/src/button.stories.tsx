@@ -81,22 +81,41 @@ export const IconOnly = {
 
 export const Sizes = {
     render: () => (
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-[70px_30px_100px] gap-x-4 gap-y-2 items-center justify-items-start">
             <Button size="lg">Large</Button>
             <Button size="icon-lg">
                 <TrashIcon />
             </Button>
+            <Button size="lg">
+                <TrashIcon />
+                With icon
+            </Button>
+
             <Button size="default">Default</Button>
             <Button size="icon">
                 <TrashIcon />
             </Button>
+            <Button size="default">
+                <TrashIcon />
+                With icon
+            </Button>
+
             <Button size="sm">Small</Button>
             <Button size="icon-sm">
                 <TrashIcon />
             </Button>
+            <Button size="sm">
+                <TrashIcon />
+                With icon
+            </Button>
+
             <Button size="xs">Extra small</Button>
             <Button size="icon-xs">
                 <TrashIcon />
+            </Button>
+            <Button size="xs">
+                <TrashIcon />
+                With icon
             </Button>
         </div>
     ),
