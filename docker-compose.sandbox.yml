@@ -153,6 +153,8 @@ services:
                 condition: service_healthy
             objectstorage:
                 condition: service_started
+            seaweedfs:
+                condition: service_started
 
     db:
         # Not using extends — base mounts volumes that merge with ours,
