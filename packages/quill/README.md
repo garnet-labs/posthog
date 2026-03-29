@@ -65,9 +65,9 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/item
     - [x] storybook
   - [x] primitives/kbd
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/label
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/menubar
     - [ ] storybook
   - [x] primitives/popover
