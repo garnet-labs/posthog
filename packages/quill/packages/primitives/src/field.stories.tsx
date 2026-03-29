@@ -2,7 +2,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './resizable'
-import { Field, FieldDescription, FieldError, FieldLabel } from './field'
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from './field'
 import { Input } from './input'
 
 const meta = {
@@ -19,6 +19,18 @@ export const Default: Story = {
         <Field className="max-w-sm">
             <FieldLabel htmlFor="username">Username</FieldLabel>
             <Input placeholder="Enter your username" id="username" />
+        </Field>
+    ),
+} satisfies Story
+
+export const Horizontal: Story = {
+    render: () => (
+        <Field orientation="horizontal">
+            <FieldLabel htmlFor="name">Name</FieldLabel>
+            <FieldContent>
+                <Input placeholder="Enter your name" id="name" />
+                <FieldDescription>Helper text</FieldDescription>
+            </FieldContent>
         </Field>
     ),
 } satisfies Story
