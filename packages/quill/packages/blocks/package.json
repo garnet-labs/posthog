@@ -22,9 +22,9 @@
         "build": "vite build"
     },
     "dependencies": {
-        "@posthog/quill-components": "workspace:*",
-        "@posthog/quill-primitives": "workspace:*",
-        "@posthog/quill-tokens": "workspace:*"
+        "@posthog/quill-components": "workspace:^",
+        "@posthog/quill-primitives": "workspace:^",
+        "@posthog/quill-tokens": "workspace:^"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.1.17",
