@@ -77,7 +77,7 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/radio-group
     - [x] storybook
   - [x] primitives/resizable
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/scroll-area
     - [x] storybook
   - [x] primitives/seperator
