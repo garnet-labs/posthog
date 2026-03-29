@@ -1,23 +1,20 @@
 # UI Architecture
 
-> Architecture reference for re-implementing the UI design system inside `posthog/posthog`.
+> Architecture reference for the quill design system inside `posthog/posthog`.
 
 ---
 
 ## 1. Monorepo overview
 
 ```text
-ui/
+quill/
 ├── packages/
 │   ├── tokens/          @posthog/quill-tokens       — Source-of-truth design tokens (JS) + CSS generation
 │   ├── primitives/      @posthog/quill-primitives    — Base UI components (React + Tailwind v4 + Base-UI)
 │   ├── components/      @posthog/quill-components    — Composed primitives with easy-to-use APIs (what apps import)
-│   ├── blocks/          @posthog/quill-blocks        — Product-level patterns (FeatureFlag, Experiment, etc.)
-│   └── mcp-renderer/    @posthog/quill-mcp-renderer  — MCP iframe HTML renderer
+│   └── blocks/          @posthog/quill-blocks        — Product-level patterns (FeatureFlag, Experiment, etc.)
 ├── apps/
-│   ├── web/             — Vite dev/showcase app
 │   └── storybook/       — Storybook documentation
-├── pnpm-workspace.yaml  — packages: ['packages/*', 'apps/*']
 └── package.json         — Root scripts (pnpm -r build, etc.)
 ```
 
@@ -38,13 +35,15 @@ ui/
         ├──▶ @posthog/quill-components      (imports primitives + tokens)
         │       └── @posthog/quill-primitives
         │
-        ├──▶ @posthog/quill-blocks          (imports components + primitives + tokens)
-        │       └── @posthog/quill-components
-        │
-        └──▶ @posthog/quill-mcp-renderer
+        └──▶ @posthog/quill-blocks          (imports components + primitives + tokens)
+                └── @posthog/quill-components
 
-Apps (web, storybook) depend on components + tokens at workspace:*
+Apps (storybook) depend on components + tokens at workspace:^
 ```
+
+### Inter-package references
+
+All packages use `workspace:^` (not `workspace:*`). This resolves to the local workspace package during development, and pnpm automatically converts it to `^0.0.1` (the actual version) at publish time.
 
 ---
 
@@ -61,193 +60,78 @@ Apps (web, storybook) depend on components + tokens at workspace:*
 | `border-radius.ts` | `borderRadius`                        | Static radius values (sm through full)                            |
 | `css.ts`           | `cssVars()`, `cssVarsFlat()`, helpers | Utility functions that convert JS objects → CSS custom properties |
 
-Each token file also exports a `generate*CSS()` function that produces the CSS lines for its category.
+### 3.2 Generation script
 
-### 3.2 Color token structure
+**`packages/tokens/src/build.ts`** runs via `tsx src/build.ts` as the first step of `pnpm build`.
 
-```ts
-// packages/tokens/src/colors.ts
-export const semanticColors = {
-  background: ['oklch(0.97 0.006 106)', 'hsl(240 8% 8%)'], // [light, dark]
-  foreground: ['oklch(0.13 0.028 262)', 'oklch(0.967 0.003 265)'],
-  primary: ['hsl(19 100% 48%)', 'hsl(43 94% 57%)'],
-  'primary-foreground': ['oklch(1 0 0)', 'oklch(0.13 0.028 262)'],
-  destructive: ['oklch(0.577 0.245 27)', 'oklch(0.704 0.191 22)'],
-  success: ['oklch(0.627 0.194 149)', 'oklch(0.792 0.209 152)'],
-  warning: ['oklch(0.554 0.135 66)', 'oklch(0.852 0.199 92)'],
-  info: ['oklch(0.546 0.245 263)', 'oklch(0.707 0.165 255)'],
-  border: ['oklch(0.923 0.003 49)', 'hsl(230 8% 20%)'],
-  ring: ['hsl(228 100% 56%)', 'oklch(0.707 0.165 255)'],
-  // ... ~20 total pairs
-} as const
-```
+It produces three CSS files in `packages/tokens/dist/`:
 
-### 3.3 Generation script
+| File               | Purpose                                                          |
+| ------------------ | ---------------------------------------------------------------- |
+| `color-system.css` | `:root` + `.dark` CSS custom properties with actual color values |
+| `tailwind.css`     | `@theme` mappings + `@layer base` resets (for apps)              |
+| `tailwind-lib.css` | `@theme` mappings only, no base resets (for libraries)           |
 
-**`packages/tokens/scripts/generate-css.ts`** runs via `pnpm --filter @posthog/quill-tokens build` (after vite build).
-
-It calls two generator functions:
-
-1. **`generateColorSystemCSS()`** → produces `color-system.css`
-2. **`generateStylesCSS(config)`** → produces `styles.css`
-
-#### `generateColorSystemCSS()` output
-
-Sets CSS custom properties on `:root` (light) and `.dark` (dark override):
-
-```css
-:root {
-  color-scheme: light;
-}
-.dark {
-  color-scheme: dark;
-}
-
-:root {
-  --radius: 0.625rem;
-  --background: oklch(0.97 0.006 106);
-  --foreground: oklch(0.13 0.028 262);
-  --primary: hsl(19 100% 48%);
-  /* ... all semantic colors ... */
-}
-
-.dark {
-  --radius: 0.625rem;
-  --background: hsl(240 8% 8%);
-  --foreground: oklch(0.967 0.003 265);
-  --primary: hsl(43 94% 57%);
-  /* ... dark overrides ... */
-}
-```
-
-#### `generateStylesCSS(config)` output
-
-Produces a Tailwind v4 stylesheet. Has two modes controlled by config:
-
-**Library mode** (`importColorSystem: false, includeBaseLayer: false`):
-
-```css
-@import 'tailwindcss';
-
-@custom-variant dark (&:is(.dark, .dark *));
-
-@theme inline {
-  --animate-skeleton: skeleton 2s -1s infinite linear;
-
-  /* Colors — maps Tailwind's --color-* to our CSS vars */
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-primary: var(--primary);
-  /* ... all color mappings ... */
-
-  /* Spacing */
-  --spacing-0: 0px;
-  --spacing-1: 4px;
-  /* ... */
-
-  /* Font sizes, families, shadows, radius ... */
-}
-```
-
-**App mode** (`importColorSystem: true, includeBaseLayer: true`):
-
-```css
-@import 'tailwindcss';
-@import './color-system.css'; /* ← adds actual color values */
-
-@source "../../../packages/primitives/src/**/*.{ts,tsx}"; /* ← scans component classes */
-
-@custom-variant dark (&:is(.dark, .dark *));
-
-@theme inline {
-  /* same as library mode */
-}
-
-@layer base {
-  /* ← adds base resets */
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
-```
-
-### 3.4 Distribution targets
-
-The script writes files to multiple locations:
-
-| Target                     | Gets `color-system.css`? | Gets `styles.css`? | Mode    |
-| -------------------------- | ------------------------ | ------------------ | ------- |
-| `tokens/dist/`             | Yes                      | No                 | —       |
-| `packages/primitives/src/` | No                       | Yes                | Library |
-| `packages/components/src/` | No                       | Yes                | Library |
-| `packages/blocks/src/`     | No                       | Yes                | Library |
-| `apps/web/src/`            | Yes                      | Yes                | App     |
-| `apps/storybook/src/`      | Yes                      | Yes                | App     |
-
-**Key insight:** Libraries never ship color values. They only ship the `--color-*: var(--*)` mappings so Tailwind can generate the right utility classes. The consuming app provides the actual color values via `color-system.css`.
+**Key insight:** Libraries never ship color values. They only ship `--color-*: var(--*)` mappings so Tailwind can generate the right utility classes. The consuming app provides the actual color values via `color-system.css`.
 
 ---
 
-## 4. Package exports (npm entry points)
+## 4. Package exports
 
 ### @posthog/quill-tokens
 
 ```json
 {
   "exports": {
-    ".": { "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    "./tailwind.css": "./dist/tailwind.css",
+    "./tailwind-lib.css": "./dist/tailwind-lib.css",
     "./color-system.css": "./dist/color-system.css"
   }
 }
 ```
 
-**JS exports:** `semanticColors`, `resolveTheme()`, `generateColorSystemCSS()`, `generateStylesCSS()`, `spacing`, `fontSize`, `fontFamily`, `borderRadius`, `shadow`, CSS utility functions.
+**JS exports:** `semanticColors`, `resolveTheme()`, `generateColorSystemCSS()`, `generateStylesCSS()`, `spacing`, `fontSize`, `fontFamily`, `borderRadius`, `shadow`, CSS utility functions, and all associated types.
 
 ### @posthog/quill-primitives
 
 ```json
 {
   "exports": {
-    ".": { "import": "./dist/index.js", "require": "./dist/index.cjs" },
-    "./styles.css": "./dist/styles.css"
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    "./index.css": "./src/index.css"
   }
 }
 ```
 
-**JS exports:** 40+ React components (Button, Dialog, Sheet, Card, Menu, Select, etc.) plus `useMediaQuery` hook.
+**JS exports:** 40+ React components (Button, Dialog, Card, Select, etc.) plus `ThemeProvider`, `useTheme`, and `cn` utility.
+
+**CSS export (`index.css`):** A Tailwind v4 source CSS file that consumers `@import` into their own CSS. It includes:
+
+- `@import '@posthog/quill-tokens/color-system.css'` — actual color values
+- `@import '@posthog/quill-tokens/tailwind-lib.css'` — `@theme` mappings (no base resets)
+- `@import 'tw-animate-css'` — animation utilities
+- `@import 'shadcn/tailwind.css'` — shadcn base styles
+- `@source "./"` — tells Tailwind to scan this package's component source for utility classes
+
+This is **source CSS, not pre-compiled**. It requires the consumer to have Tailwind v4 processing enabled (via `@tailwindcss/vite` or `@tailwindcss/postcss`). Tailwind processes all the directives in one pass, generating utility classes for both quill's components and the consumer's own code.
 
 ### @posthog/quill-components
 
 ```json
 {
   "exports": {
-    ".": { "import": "./dist/index.js", "require": "./dist/index.cjs" },
-    "./styles.css": "./dist/styles.css"
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" }
   }
 }
 ```
-
-**JS exports:** Re-exports all primitives, plus composed components with easy-to-use APIs. This is the primary import for apps — consumers import from `@posthog/quill-components` rather than reaching into primitives directly.
 
 ### @posthog/quill-blocks
 
 ```json
 {
   "exports": {
-    ".": { "import": "./dist/index.js", "require": "./dist/index.cjs" }
-  }
-}
-```
-
-### @posthog/quill-mcp-renderer
-
-```json
-{
-  "exports": {
-    ".": { "import": "./dist/index.js", "require": "./dist/index.cjs" }
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" }
   }
 }
 ```
@@ -287,9 +171,9 @@ const buttonVariants = cva(
 
 The classes like `bg-primary`, `text-foreground`, `border-input` work because:
 
-1. `styles.css` maps `--color-primary: var(--primary)` in the `@theme` block
+1. `tailwind-lib.css` maps `--color-primary: var(--primary)` in the `@theme` block
 2. Tailwind v4 resolves `bg-primary` → `background-color: var(--color-primary)` → `var(--primary)`
-3. The actual color value comes from `color-system.css` (provided by the app)
+3. The actual color value comes from `color-system.css` (`:root { --primary: oklch(...) }`)
 
 ### Component primitives
 
@@ -303,49 +187,61 @@ Built on **@base-ui/react** (unstyled headless components from the Base-UI libra
 
 ## 6. How consuming apps wire everything together
 
-### Internal app (e.g., apps/web)
+### Consumer setup (external app)
 
-```tsx
-// main.tsx
-import './styles.css' // Generated file — imports tailwindcss + color-system.css + @theme + @layer base
+The consumer needs Tailwind v4 processing. Two options:
 
-// App.tsx
-import { Button, Dialog } from '@posthog/quill-components'
+**Vite** — add `@tailwindcss/vite`:
+
+```ts
+// vite.config.ts
+import tailwindcss from '@tailwindcss/vite'
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+})
 ```
 
-The app's `styles.css` (generated) includes:
+**PostCSS** (Next.js, Webpack, etc.) — add `@tailwindcss/postcss`:
 
-- `@import "tailwindcss"` — Tailwind v4 engine
-- `@import "./color-system.css"` — actual color values for light/dark
-- `@source` directives — tells Tailwind to scan primitives source for used classes
-- `@theme inline` — token-to-CSS-variable mappings
-- `@layer base` — global resets
-
-### External app (via npm)
-
-An external consumer would:
-
-```tsx
-// 1. Import the color system (provides CSS variable values)
-import '@posthog/quill-tokens/color-system.css'
-
-// 2. Import component styles (provides Tailwind utility classes used by components)
-import '@posthog/quill-components/styles.css'
-
-// 3. Use components
-import { Button } from '@posthog/quill-components'
+```js
+// postcss.config.mjs
+export default { plugins: { '@tailwindcss/postcss': {} } }
 ```
 
-The external app also needs Tailwind v4 configured, and must add a `.dark` class to the root element for dark mode (the `@custom-variant dark` directive maps dark variants to `.dark` ancestry).
+Then two CSS imports:
+
+```css
+/* app.css */
+@import 'tailwindcss';
+@import '@posthog/quill-primitives/index.css';
+```
+
+This gives the consumer:
+
+- All quill components styled correctly
+- All quill design tokens available in their own code (`bg-primary`, `text-muted-foreground`, etc.)
+- Their own Tailwind utility classes generated normally
+
+### Why `@source` matters
+
+Tailwind v4 auto-detects source files in the project directory but **ignores `node_modules`** by default. The `@source "./"` directive in primitives' `index.css` explicitly tells Tailwind to scan the package's own `src/` directory for utility class usage. Without this, Tailwind wouldn't generate the CSS rules for classes used inside quill components.
+
+### Peer dependencies
+
+Primitives declares these as peer dependencies because they're CSS-only packages that must be resolvable from the consumer's CSS processing context (pnpm's strict isolation prevents resolving them from within the package's own `node_modules`):
+
+- `tailwindcss` — Tailwind v4 engine
+- `shadcn` — shadcn UI base styles (imported via `@import 'shadcn/tailwind.css'`)
+- `tw-animate-css` — Animation utilities (imported via `@import 'tw-animate-css'`)
+- `@fontsource-variable/inter` — Inter font
 
 ### For posthog/posthog specifically
 
 Since PostHog already has its own Tailwind setup, integration would involve:
 
-1. Import `@posthog/quill-tokens/color-system.css` to get semantic CSS variables
-2. Either import `@posthog/quill-components/styles.css` or regenerate equivalent styles using `generateStylesCSS()` with custom `@source` paths
-3. Ensure `.dark` class toggling on a parent element
-4. Import and use components from `@posthog/quill-components`
+1. Import `@posthog/quill-primitives/index.css` (or its constituent imports individually)
+2. Ensure `.dark` class toggling on a parent element
+3. Import and use components from `@posthog/quill-primitives` or `@posthog/quill-components`
 
 ---
 
@@ -353,47 +249,83 @@ Since PostHog already has its own Tailwind setup, integration would involve:
 
 ```text
 pnpm build (root)
-  └── pnpm -r build (runs in dependency order)
+  └── pnpm -r --filter '@posthog/quill-*' build (runs in dependency order)
 
       1. @posthog/quill-tokens
-         ├── vite build        → dist/index.js, dist/index.cjs, dist/index.d.ts
-         └── tsx generate-css  → dist/color-system.css
-                                  + writes styles.css & color-system.css to all targets
+         ├── tsx src/build.ts   → dist/color-system.css, dist/tailwind.css, dist/tailwind-lib.css
+         └── vite build         → dist/index.js, dist/index.cjs, dist/index.d.ts
 
       2. @posthog/quill-primitives
-         └── vite build        → dist/index.js, dist/index.cjs, dist/index.d.ts, dist/styles.css
-             (Tailwind v4 plugin processes src/styles.css during build)
+         └── vite build         → dist/index.js, dist/index.cjs, dist/index.d.ts + per-component .d.ts
 
       3. @posthog/quill-components
-         └── vite build        → dist/index.js, dist/index.cjs, dist/index.d.ts, dist/styles.css
-             (re-exports primitives + adds composed components)
+         └── vite build         → dist/index.js, dist/index.cjs, dist/index.d.ts
 
       4. @posthog/quill-blocks
-         └── vite build        → dist/index.js, dist/index.cjs, dist/index.d.ts
-
-      5. @posthog/quill-mcp-renderer
-         └── vite build        → dist/index.js, dist/index.cjs, dist/index.d.ts
+         └── vite build         → dist/index.js, dist/index.cjs, dist/index.d.ts
 ```
 
-### Vite config (primitives example)
+### Vite config pattern
+
+Each package has a `vite.config.ts` for library-mode builds and a `tsconfig.build.json` for type generation (without `erasableSyntaxOnly`, which `vite-plugin-dts`'s api-extractor doesn't support).
 
 ```ts
+// packages/primitives/vite.config.ts
 export default defineConfig({
-  plugins: [react(), tailwindcss(), dts({ rollupTypes: true })],
+  plugins: [
+    react(),
+    tailwindcss(),
+    dts({
+      tsconfigPath: resolve(__dirname, 'tsconfig.build.json'),
+      exclude: ['src/**/*.stories.tsx', 'src/**/*.stories.ts'],
+    }),
+  ],
   build: {
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       formats: ['es', 'cjs'],
+      fileName: (format) => `index.${format === 'es' ? 'js' : 'cjs'}`,
     },
     rollupOptions: {
-      external: ['react', 'react-dom', 'react/jsx-runtime', '@posthog/quill-tokens'],
+      external: [
+        'react',
+        'react-dom',
+        'react/jsx-runtime',
+        '@posthog/quill-tokens',
+        '@base-ui/react',
+        /^@base-ui\/react\//,
+        'lucide-react',
+        'cmdk',
+        'sonner',
+        'vaul',
+        'react-resizable-panels',
+        'class-variance-authority',
+        'clsx',
+        'tailwind-merge',
+        'tw-animate-css',
+        '@fontsource-variable/inter',
+        'next-themes',
+      ],
     },
-    cssCodeSplit: false, // Bundle all CSS into one file
+    cssCodeSplit: false,
   },
 })
 ```
 
-Key: `@posthog/quill-tokens` is externalized — primitives reference token CSS vars at runtime, not at build time.
+Key decisions:
+
+- All runtime dependencies are **externalized** — the consumer installs them
+- `@posthog/quill-tokens` is externalized — primitives reference token CSS vars at runtime
+- Stories are excluded from type generation
+- CSS is not code-split (bundled into one file if any CSS is imported by JS)
+
+### Build output
+
+The JS build produces compiled ESM + CJS bundles. The CSS is shipped as **source CSS** (`src/index.css`), not pre-compiled, because:
+
+1. Tailwind v4 directives (`@theme`, `@custom-variant`, `@source`) must be processed by the consumer's Tailwind engine
+2. The consumer's Tailwind needs to scan both quill's components AND their own code in one pass
+3. Pre-compiled CSS would not allow consumers to use quill's design tokens in their own Tailwind classes
 
 ---
 
@@ -404,15 +336,18 @@ Key: `@posthog/quill-tokens` is externalized — primitives reference token CSS 
 - **Color-scheme:** `:root { color-scheme: light; }` / `.dark { color-scheme: dark; }`
 - **Components use:** `dark:bg-*` variant classes that activate under `.dark` ancestry
 - **App responsibility:** Toggle `.dark` class on `<html>` or a wrapper element
+- **ThemeProvider:** Built-in React component that handles localStorage persistence, system preference detection, cross-tab sync, and a keyboard shortcut (press `d` to toggle)
 
 ---
 
-## 9. Key patterns to preserve when re-implementing
+## 9. Key patterns to preserve
 
 1. **Tokens are JS-first** — colors, spacing, typography defined as typed JS objects, CSS is derived
-2. **Library vs App CSS split** — libraries ship only `@theme` mappings (no color values), apps provide the actual values
-3. **`@source` directive** — Tailwind v4 needs to scan component source files to know which utility classes to generate
-4. **CVA for variants** — all component variants defined via `class-variance-authority`
-5. **Base-UI for behavior** — components use `@base-ui/react` for accessibility and state, not custom implementations
-6. **`cn()` utility** — `clsx` + `tailwind-merge` for class composition without conflicts
-7. **CSS variables as the contract** — `--primary`, `--background`, etc. are the interface between tokens and components
+2. **Library vs App CSS split** — libraries ship only `@theme` mappings (no color values), apps provide the actual values via `color-system.css`
+3. **`@source` directive** — primitives' `index.css` includes `@source "./"` so Tailwind scans component source files for utility classes
+4. **Source CSS, not pre-compiled** — CSS is shipped as Tailwind source that the consumer's Tailwind engine processes
+5. **CVA for variants** — all component variants defined via `class-variance-authority`
+6. **Base-UI for behavior** — components use `@base-ui/react` for accessibility and state, not custom implementations
+7. **`cn()` utility** — `clsx` + `tailwind-merge` for class composition without conflicts
+8. **CSS variables as the contract** — `--primary`, `--background`, etc. are the interface between tokens and components
+9. **Peer deps for CSS packages** — `shadcn`, `tw-animate-css`, `@fontsource-variable/inter` are peer dependencies because pnpm's strict isolation requires them to be resolvable from the consumer's context
