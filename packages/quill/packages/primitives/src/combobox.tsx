@@ -2,8 +2,7 @@ import { Combobox as ComboboxPrimitive } from '@base-ui/react'
 import { ChevronDownIcon, XIcon, CheckIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { Button } from './button'
-import { Chip } from './chip'
+import { Chip, ChipClose } from './chip'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './input-group'
 import { cn } from './lib/utils'
 
@@ -232,16 +231,15 @@ function ComboboxChip({
 }): React.ReactElement {
     return (
         <ComboboxPrimitive.Chip
-            render={<Chip variant="outline" />}
+            render={<Chip variant="outline" className="pr-0" />}
             data-slot="combobox-chip"
-            className={cn(className, 'pr-0')}
+            className={cn(className)}
             {...props}
         >
             {children}
             {showRemove && (
                 <ComboboxPrimitive.ChipRemove
-                    render={<Button variant="ghost" size="icon-xs" />}
-                    className="opacity-50 hover:opacity-100 -mr-px"
+                    render={<ChipClose />}
                     data-slot="combobox-chip-remove"
                 >
                     <XIcon className="pointer-events-none" />

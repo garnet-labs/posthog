@@ -39,13 +39,13 @@ import { Button } from '@/components/ui/button'
   - [x] primitives/collapsible
     - [x] storybook
   - [x] primitives/combobox
-    - [ ] storybook
+    - [x] storybook
   - [x] primitives/command (move to /components?)
     - [ ] storybook
   - [x] primitives/context-menu
     - [x] storybook
-  - [ ] primitives/chip
-    - [ ] storybook
+  - [x] primitives/chip
+    - [x] storybook
   - [x] primitives/dialog
     - [x] storybook
   - [x] primitives/direction
