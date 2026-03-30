@@ -105,7 +105,19 @@ class Command(BaseCommand):
             logger.warning("Not running migration-specific checks. See .github/workflows/ci-backend.yml for usage.")
             return
 
-        migrations = [m.strip() for m in sys.stdin.readlines() if m.strip()]
+        raw_paths = [m.strip() for m in sys.stdin.readlines() if m.strip()]
+
+        # Deduplicate directory-based migrations: multiple files (up.sql, down.sql,
+        # manifest.yaml) in the same directory represent one migration.
+        seen: dict[str, str] = {}
+        for path in raw_paths:
+            dir_match = re.search(r"clickhouse/migrations/([0-9]+_[a-zA-Z_0-9]+)/", path)
+            if dir_match:
+                key = dir_match.group(1)
+                seen.setdefault(key, path)
+            else:
+                seen[path] = path
+        migrations = list(seen.values())
 
         if len(migrations) > 1:
             logger.error("Multiple migrations in PR. Please limit to one migration per PR.")
