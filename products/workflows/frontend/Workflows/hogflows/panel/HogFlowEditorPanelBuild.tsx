@@ -109,6 +109,14 @@ export const LOGIC_NODES_TO_SHOW: CreateActionType[] = [
             ],
         },
     },
+    {
+        type: 'exit',
+        name: 'Exit',
+        description: 'Exit the workflow, skipping all remaining steps.',
+        config: {
+            reason: '',
+        },
+    },
 ]
 
 export const POSTHOG_NODES_TO_SHOW: CreateActionType[] = [
@@ -298,7 +306,7 @@ export function HogFlowEditorPanelBuild(): JSX.Element {
             ))}
 
             <span className="flex gap-2 text-sm font-semibold mt-2 items-center">
-                Audience split <LemonDivider className="flex-1" />
+                Flow control <LemonDivider className="flex-1" />
             </span>
             {LOGIC_NODES_TO_SHOW.map((action, index) => (
                 <HogFlowEditorToolbarNode key={`${action.type}-${index}`} action={action} />

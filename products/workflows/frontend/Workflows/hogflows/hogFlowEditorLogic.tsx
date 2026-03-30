@@ -317,6 +317,12 @@ export const hogFlowEditorLogic = kea<hogFlowEditorLogicType>([
                 }
 
                 const outgoingNodes = getOutgoers(selectedNode, nodes, edges)
+
+                // Terminal nodes (like additional exit nodes) can always be deleted
+                if (outgoingNodes.length === 0) {
+                    return true
+                }
+
                 if (outgoingNodes.length === 1) {
                     return true
                 }
@@ -331,8 +337,8 @@ export const hogFlowEditorLogic = kea<hogFlowEditorLogicType>([
                     return false
                 }
 
-                const branchingTypes = ['conditional_branch', 'random_cohort_branch', 'wait_until_condition']
-                return !branchingTypes.includes(selectedNode?.data.type ?? '')
+                const nonCopyableTypes = ['conditional_branch', 'random_cohort_branch', 'wait_until_condition', 'exit']
+                return !nonCopyableTypes.includes(selectedNode?.data.type ?? '')
             },
         ],
     }),
@@ -487,7 +493,7 @@ export const hogFlowEditorLogic = kea<hogFlowEditorLogicType>([
                             data: action,
                             position: { x: 0, y: 0 },
                             handles: Object.values(handlesByIdByNodeId[action.id] ?? {}),
-                            deletable: !['trigger', 'exit'].includes(action.type),
+                            deletable: action.type !== 'trigger' && action.id !== EXIT_NODE_ID,
                             selectable: true,
                             draggable: false,
                             connectable: false,
@@ -704,7 +710,7 @@ export const hogFlowEditorLogic = kea<hogFlowEditorLogicType>([
                     // We add the new action with two new edges - the continue edge and the target edge
                     // We also then check for any other missing edges based on the type of edge being replaced
 
-                    const newEdges: HogFlow['edges'] = [...values.workflow.edges]
+                    let newEdges: HogFlow['edges'] = [...values.workflow.edges]
 
                     // First remove the edge to be replaced
                     const edgesToBeReplaced = edgesToBeReplacedIndexes.map((index) => values.workflow.edges[index])
@@ -724,24 +730,29 @@ export const hogFlowEditorLogic = kea<hogFlowEditorLogicType>([
                         })
                     }
 
-                    // Then any branch edges (once, not per incoming edge)
-                    for (let i = 0; i < branchEdges; i++) {
-                        // Add in branching edges
+                    // Exit nodes are terminal - they don't have outgoing edges
+                    const isExitNode = newAction.type === 'exit'
+
+                    if (!isExitNode) {
+                        // Then any branch edges (once, not per incoming edge)
+                        for (let i = 0; i < branchEdges; i++) {
+                            // Add in branching edges
+                            newEdges.push({
+                                ...edgesToBeReplaced[0],
+                                index: i,
+                                type: 'branch',
+                                from: newAction.id,
+                            })
+                        }
+
+                        // Finally the last continue edge
                         newEdges.push({
                             ...edgesToBeReplaced[0],
-                            index: i,
-                            type: 'branch',
+                            index: undefined,
+                            type: 'continue',
                             from: newAction.id,
                         })
                     }
-
-                    // Finally the last continue edge
-                    newEdges.push({
-                        ...edgesToBeReplaced[0],
-                        index: undefined,
-                        type: 'continue',
-                        from: newAction.id,
-                    })
 
                     // Auto-create workflow variables if the action has a default output_variable
                     let updatedVariables = values.workflow.variables
@@ -793,10 +804,29 @@ export const hogFlowEditorLogic = kea<hogFlowEditorLogicType>([
                         }
                     }
 
-                    const oldActions = values.workflow.actions
-                    const newActions = [...oldActions.slice(0, -1), newAction, oldActions[oldActions.length - 1]]
+                    let allActions = [...values.workflow.actions, newAction]
 
-                    actions.setWorkflowInfo({ actions: newActions, edges: newEdges, variables: updatedVariables })
+                    // If this is an exit node, clean up any nodes that become unreachable
+                    if (isExitNode) {
+                        const reachable = new Set<string>()
+                        const queue = [TRIGGER_NODE_ID]
+                        while (queue.length > 0) {
+                            const current = queue.pop()!
+                            if (reachable.has(current)) {
+                                continue
+                            }
+                            reachable.add(current)
+                            for (const edge of newEdges) {
+                                if (edge.from === current) {
+                                    queue.push(edge.to)
+                                }
+                            }
+                        }
+                        allActions = allActions.filter((a) => reachable.has(a.id))
+                        newEdges = newEdges.filter((e) => reachable.has(e.from) && reachable.has(e.to))
+                    }
+
+                    actions.setWorkflowInfo({ actions: allActions, edges: newEdges, variables: updatedVariables })
                     actions.setNodeToBeAdded(null)
                     actions.setSelectedNodeId(newAction.id)
                 }
