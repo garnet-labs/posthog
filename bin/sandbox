@@ -3,11 +3,11 @@
 Manages isolated dev sandboxes — each branch gets its own
 Docker Compose project with fully independent infrastructure.
 
-Usage: sandbox.py <command> [arguments]
-Run `sandbox.py --help` for details.
+Usage: sandbox <command> [arguments]
+Run `sandbox --help` for details.
 
-Managed by bin/sandbox.py — not intended for direct invocation of
-docker-compose.sandbox.yml. See `sandbox.py --help` for usage.
+Managed by bin/sandbox — not intended for direct invocation of
+docker-compose.sandbox.yml. See `sandbox --help` for usage.
 """
 
 from __future__ import annotations
@@ -53,10 +53,12 @@ INFRA_SERVICES = [
     "temporal",
 ]
 
+DB_CACHE_VOLUME = "sandbox-db-cache"
+
 SHARED_VOLUMES = [
     "sandbox-uv-cache",
     "sandbox-pnpm-store",
-    "sandbox-db-cache",
+    DB_CACHE_VOLUME,
     "sandbox-cargo-target",
     "sandbox-intellij",
     "sandbox-pycharm",
@@ -65,7 +67,7 @@ SHARED_VOLUMES = [
 # These need 777 so that containers running as different UIDs
 # (clickhouse=101, app=host UID) can all write.
 WORLD_WRITABLE_VOLUMES = [
-    "sandbox-db-cache",
+    DB_CACHE_VOLUME,
     "sandbox-cargo-target",
     "sandbox-intellij",
     "sandbox-pycharm",
@@ -404,6 +406,11 @@ def docker_volume_run(volume: str, shell_cmd: str) -> None:
     run(["docker", "run", "--rm", "-v", f"{volume}:/data", "alpine", "sh", "-c", shell_cmd], capture=True)
 
 
+def clear_volume(volume: str) -> None:
+    """Delete all contents of a Docker volume."""
+    docker_volume_run(volume, "find /data -mindepth 1 -delete")
+
+
 def wait_for_health(
     url: str,
     container: str,
@@ -514,7 +521,7 @@ def _is_cache_ready() -> bool:
     result = run(
         [
             "docker", "run", "--rm",
-            "-v", "sandbox-db-cache:/cache:ro",
+            "-v", f"{DB_CACHE_VOLUME}:/cache:ro",
             "alpine", "sh", "-c",
             "[ -f /cache/.cache-ready ] && echo yes || echo no",
         ],
@@ -581,7 +588,7 @@ def init_cache_from_master() -> None:
         run([
             "docker", "run", "--rm",
             "-v", f"{init_project}_postgres-data:/src:ro",
-            "-v", "sandbox-db-cache:/dst",
+            "-v", f"{DB_CACHE_VOLUME}:/dst",
             "alpine", "sh", "-c", "rm -rf /dst/postgres && cp -a /src /dst/postgres",
         ], capture=True)
 
@@ -595,7 +602,7 @@ def init_cache_from_master() -> None:
         run([
             "docker", "run", "--rm",
             "-v", f"{init_worktree}:/src:ro",
-            "-v", "sandbox-db-cache:/dst",
+            "-v", f"{DB_CACHE_VOLUME}:/dst",
             "alpine", "sh", "-c", """
                 mkdir -p /dst/migrations
                 find /src -name max_migration.txt -not -path '*/node_modules/*' | while read f; do
@@ -619,7 +626,7 @@ def check_migration_staleness(worktree_path: str) -> str | None:
     result = run(
         [
             "docker", "run", "--rm",
-            "-v", "sandbox-db-cache:/cache:ro",
+            "-v", f"{DB_CACHE_VOLUME}:/cache:ro",
             "alpine", "sh", "-c",
             'for f in /cache/migrations/*; do '
             '  key=$(basename "$f"); '
@@ -718,7 +725,7 @@ def _restore_and_start(
     info("Restoring Postgres from cache...")
     run([
         "docker", "run", "--rm",
-        "-v", "sandbox-db-cache:/src:ro",
+        "-v", f"{DB_CACHE_VOLUME}:/src:ro",
         "-v", f"{project}_postgres-data:/dst",
         "alpine", "sh", "-c", "cp -a /src/postgres/. /dst/",
     ], capture=True)
@@ -985,11 +992,8 @@ def cmd_logs(branch: str) -> None:
 
 def cmd_rebuild_cache() -> None:
     info("Clearing database cache...")
-    run([
-        "docker", "run", "--rm", "-v", "sandbox-db-cache:/cache",
-        "alpine", "sh", "-c", "find /cache -mindepth 1 -delete",
-    ], capture=True)
-    docker_volume_run("sandbox-db-cache", "chmod 777 /data")
+    clear_volume(DB_CACHE_VOLUME)
+    docker_volume_run(DB_CACHE_VOLUME, "chmod 777 /data")
     init_cache_from_master()
 
 
@@ -998,8 +1002,9 @@ def cmd_nuke() -> None:
     registry = Registry()
     for branch in list(registry.list_all()):
         cmd_destroy(branch)
-    cmd_rebuild_cache()
-    success("All sandboxes destroyed and cache rebuilt.")
+    # Don't rebuild the cache here — it will be rebuilt on the next `sandbox create`.
+    clear_volume(DB_CACHE_VOLUME)
+    success("All sandboxes destroyed and cache cleared.")
 
 
 # ---------------------------------------------------------------------------

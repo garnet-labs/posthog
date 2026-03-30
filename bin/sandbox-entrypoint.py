@@ -319,11 +319,23 @@ def generate_mprocs_config() -> None:
     subprocess.run(["hogli", "dev:generate"], capture_output=True)
 
 
-def setup_intellij_background() -> None:
-    """Register IntelliJ IDEA backend in a background process."""
+def _read_jetbrains_data_dir_name() -> str:
+    """Read the config directory name from the installed IDE's product-info.json."""
+    import json as _json
+
+    product_info = Path("/opt/idea/product-info.json")
+    data = _json.loads(product_info.read_text())
+    data_dir_name = data["dataDirectoryName"]
+    return data_dir_name
+
+
+def setup_jetbrains_background() -> None:
+    """Register JetBrains IDE backend in a background process."""
     idea_script = Path("/opt/idea/bin/remote-dev-server.sh")
     if not idea_script.exists():
         return
+
+    data_dir_name = _read_jetbrains_data_dir_name()
 
     pid = os.fork()
     if pid != 0:
@@ -332,14 +344,14 @@ def setup_intellij_background() -> None:
     # Child process — runs in background
     os.environ["JAVA_TOOL_OPTIONS"] = f"-Duser.home={SANDBOX_HOME}"
 
-    info("Registering IntelliJ IDEA for Gateway (background)...")
+    info(f"Registering {data_dir_name} for Gateway (background)...")
     result = subprocess.run(
         ["remote-dev-server.sh", "registerBackendLocationForGateway"],
         executable=str(idea_script),
         env={**os.environ, "REMOTE_DEV_NON_INTERACTIVE": "1"},
     )
     if result.returncode != 0:
-        print(f"[{_ts()}] ERROR: IntelliJ backend registration failed (exit {result.returncode}).")  # noqa: T201
+        print(f"[{_ts()}] ERROR: IDE backend registration failed (exit {result.returncode}).")  # noqa: T201
 
     # Install Python plugin if not already present
     jetbrains_dir = SANDBOX_HOME / ".local/share/JetBrains"
@@ -361,8 +373,8 @@ def setup_intellij_background() -> None:
         if result.returncode != 0:
             print(f"[{_ts()}] ERROR: Plugin installation failed (exit {result.returncode}).")  # noqa: T201
 
-    # Configure Python SDK
-    idea_config = SANDBOX_HOME / ".config/JetBrains/IntelliJIdea2025.3"
+    # Configure Python SDK using the IDE's own config directory name
+    idea_config = SANDBOX_HOME / ".config/JetBrains" / data_dir_name
     write_file_if_missing(
         idea_config / "options/jdk.table.xml",
         dedent("""\
@@ -410,7 +422,7 @@ def setup_intellij_background() -> None:
         """),
     )
 
-    info("IntelliJ IDEA backend ready")
+    info(f"{data_dir_name} backend ready")
     os._exit(0)
 
 
@@ -458,9 +470,13 @@ def user_phase() -> None:
 
     # generate_mprocs_config needs the hogli symlink created by install_python_deps.
     generate_mprocs_config()
-    # setup_intellij_background uses os.fork(), which is unsafe inside a
+    # setup_jetbrains_background uses os.fork(), which is unsafe inside a
     # ThreadPoolExecutor, so it runs after the pool is closed.
-    setup_intellij_background()
+    try:
+        setup_jetbrains_background()
+    except Exception as e:
+        # Loud but non-fatal — IDE setup failing should not prevent the sandbox from booting.
+        print(f"[{_ts()}] ERROR: JetBrains IDE setup failed: {e}", flush=True)  # noqa: T201
 
     info("Starting PostHog via mprocs in tmux...")
     lock = WORKSPACE / "bin/start.lock"
