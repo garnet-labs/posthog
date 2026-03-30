@@ -120,7 +120,9 @@ For complex investigations, combine multiple query types. For example, use `quer
 
 ### Data volume discovery
 
-When you need to understand event volume (e.g., to calibrate time ranges or assess data density), use SQL:
+The project context above includes data volume for the current billing period (events, recordings, etc.) from the organization's usage summary. Use this to calibrate time ranges and understand data density without running extra queries.
+
+For more granular breakdowns (e.g., daily volume or per-event volume), use SQL:
 
 ```sql
 -- Total events in the last 24 hours

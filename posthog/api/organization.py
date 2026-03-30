@@ -121,6 +121,7 @@ class OrganizationSerializer(
             "default_role_id",
             "is_active",
             "is_not_active_reason",
+            "usage",
         ]
         read_only_fields = [
             "id",
@@ -138,6 +139,7 @@ class OrganizationSerializer(
             "default_role_id",
             "is_active",
             "is_not_active_reason",
+            "usage",
         ]
         extra_kwargs = {
             "slug": {
