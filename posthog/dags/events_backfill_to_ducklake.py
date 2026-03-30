@@ -213,6 +213,12 @@ ORDER BY event_time DESC;
     return f"http://localhost:8123/play?user=default#{base64.b64encode(sql.encode('utf-8')).decode('utf-8')}"
 
 
+def _validate_identifier(identifier: str) -> None:
+    """Validate that an identifier is safe for SQL interpolation."""
+    if not identifier.replace("_", "").isalnum():
+        raise ValueError(f"Invalid SQL identifier: {identifier}")
+
+
 def _ensure_partition_columns_exist(
     conn: duckdb.DuckDBPyConnection,
     alias: str,
@@ -223,6 +229,9 @@ def _ensure_partition_columns_exist(
 
     Returns the current set of column names (including any newly added ones).
     """
+    _validate_identifier(alias)
+    _validate_identifier(table)
+
     result = conn.execute(f"DESCRIBE {alias}.posthog.{table}").fetchall()
     columns = {row[0] for row in result}
 
