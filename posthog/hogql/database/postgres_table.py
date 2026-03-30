@@ -67,6 +67,13 @@ class PostgresTable(FunctionCallTable):
     access_scope: Optional[APIScopeObject] = None
     predicates: list[Expr] = []
 
+    # FK-based team_id: for tables that inherit team_id through a foreign key
+    # to a parent table. When set, to_printed_clickhouse() returns a subquery
+    # joining with the parent to surface team_id, so the standard guard works.
+    team_id_parent_postgres_table_name: Optional[str] = None
+    team_id_parent_fk_field: Optional[str] = None
+    team_id_parent_pk_field: str = "id"
+
     def get_predicates(self) -> list[Expr]:
         return self.predicates
 
@@ -74,4 +81,13 @@ class PostgresTable(FunctionCallTable):
         return escape_hogql_identifier(self.name)
 
     def to_printed_clickhouse(self, context):
+        if self.team_id_parent_postgres_table_name and self.team_id_parent_fk_field:
+            child_sql = build_function_call(self.postgres_table_name, context)
+            parent_sql = build_function_call(self.team_id_parent_postgres_table_name, context)
+            return (
+                f"(SELECT child.*, parent.team_id"
+                f" FROM {child_sql} AS child"
+                f" INNER JOIN {parent_sql} AS parent"
+                f" ON child.{self.team_id_parent_fk_field} = parent.{self.team_id_parent_pk_field})"
+            )
         return build_function_call(self.postgres_table_name, context)

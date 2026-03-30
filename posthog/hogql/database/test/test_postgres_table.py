@@ -321,3 +321,65 @@ class TestPostgresTable(BaseTest):
             self._select("SELECT id FROM postgres_table LIMIT 10"),
             f"SELECT postgres_table.id AS id FROM postgresql(%(hogql_val_1_sensitive)s, %(hogql_val_2_sensitive)s, %(hogql_val_0_sensitive)s, %(hogql_val_3_sensitive)s, %(hogql_val_4_sensitive)s) AS postgres_table WHERE and(equals(postgres_table.team_id, {self.team.pk}), ifNull(notEquals(replaceRegexpAll(nullIf(nullIf(JSONExtractRaw(postgres_table.properties, %(hogql_val_15)s), ''), 'null'), '^\"|\"$', ''), %(hogql_val_16)s), 1)) LIMIT 10",
         )
+
+    def test_fk_guarded_team_id(self):
+        self.database = Database.create_for(team=self.team)
+        self.database.tables.add_child(
+            TableNode(
+                name="child_table",
+                table=PostgresTable(
+                    name="child_table",
+                    postgres_table_name="child_pg_table",
+                    team_id_parent_postgres_table_name="parent_pg_table",
+                    team_id_parent_fk_field="parent_id",
+                    fields={
+                        "id": IntegerDatabaseField(name="id"),
+                        "team_id": IntegerDatabaseField(name="team_id"),
+                        "parent_id": IntegerDatabaseField(name="parent_id"),
+                        "name": StringDatabaseField(name="name"),
+                    },
+                ),
+            )
+        )
+        self.context = HogQLContext(
+            team_id=self.team.pk,
+            enable_select_queries=True,
+            database=self.database,
+            modifiers=create_default_modifiers_for_team(self.team),
+        )
+
+        result = self._select("SELECT name FROM child_table LIMIT 10")
+        assert "(SELECT child.*, parent.team_id FROM postgresql(" in result
+        assert "INNER JOIN postgresql(" in result
+        assert "ON child.parent_id = parent.id)" in result
+        assert f"equals(child_table.team_id, {self.team.pk})" in result
+
+    def test_fk_guarded_team_id_custom_pk(self):
+        self.database = Database.create_for(team=self.team)
+        self.database.tables.add_child(
+            TableNode(
+                name="child_table",
+                table=PostgresTable(
+                    name="child_table",
+                    postgres_table_name="child_pg_table",
+                    team_id_parent_postgres_table_name="parent_pg_table",
+                    team_id_parent_fk_field="parent_id",
+                    team_id_parent_pk_field="uuid",
+                    fields={
+                        "id": IntegerDatabaseField(name="id"),
+                        "team_id": IntegerDatabaseField(name="team_id"),
+                        "parent_id": IntegerDatabaseField(name="parent_id"),
+                        "name": StringDatabaseField(name="name"),
+                    },
+                ),
+            )
+        )
+        self.context = HogQLContext(
+            team_id=self.team.pk,
+            enable_select_queries=True,
+            database=self.database,
+            modifiers=create_default_modifiers_for_team(self.team),
+        )
+
+        result = self._select("SELECT name FROM child_table LIMIT 10")
+        assert "ON child.parent_id = parent.uuid)" in result
