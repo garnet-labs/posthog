@@ -302,13 +302,19 @@ def generate_mprocs_config() -> None:
         needs_seed = "_posthog:" not in config_file.read_text()
 
     if needs_seed:
+        import yaml
+        from hogli.devenv.generator import DevenvConfig
+
         intents = os.environ.get("SANDBOX_INTENTS", "product_analytics")
         info(f"Seeding intents: {intents}")
-        lines = ["_posthog:", "  intents:"]
-        for intent in intents.split(","):
-            lines.append(f"  - {intent.strip()}")
-        lines.append("procs: {}")
-        config_file.write_text("\n".join(lines) + "\n")
+        config = DevenvConfig(
+            intents=[i.strip() for i in intents.split(",")],
+            # Migrations already ran in the entrypoint; skip autostart to avoid
+            # redundant Django startup overhead in mprocs.
+            skip_autostart=["migrate-postgres", "migrate-clickhouse", "migrate-persons-db"],
+        )
+        seed = {"_posthog": config.model_dump(exclude_defaults=True), "procs": {}}
+        config_file.write_text(yaml.dump(seed, default_flow_style=False, sort_keys=False))
 
     subprocess.run(["hogli", "dev:generate"], capture_output=True)
 
