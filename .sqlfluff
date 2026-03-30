@@ -1,0 +1,18 @@
+[sqlfluff]
+dialect = clickhouse
+templater = jinja
+max_line_length = 120
+# CP03: ClickHouse function/engine names are PascalCase (MergeTree, Enum8)
+# CP05: ClickHouse types are PascalCase (UInt32, String, DateTime64)
+# RF04: common ClickHouse column names overlap with SQL keywords (host, checksum)
+# LT01: ClickHouse types use no space before brackets — Enum8(...), DateTime64(3)
+exclude_rules = CP03, CP05, RF04, LT01
+
+[sqlfluff:templater:jinja:context]
+database = posthog
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.types]
+capitalisation_policy = upper
