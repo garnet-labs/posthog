@@ -128,7 +128,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -153,7 +152,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -175,7 +173,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -193,7 +190,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -213,7 +209,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -236,7 +231,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId: newDistinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -272,7 +266,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId: distinctIdA,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -295,12 +288,10 @@ describe('PushSubscriptionsManagerService', () => {
                 android_token: {
                     distinctId: distinctId1,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
                 ios_token: {
                     distinctId: distinctId2,
                     integrationId: apnsIntegrationId,
-                    platform: 'ios',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
@@ -322,7 +313,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             })
             expect(fcmResult).toEqual({
@@ -335,7 +325,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId,
                     integrationId: apnsIntegrationId,
-                    platform: 'ios',
                 },
             })
             expect(apnsResult).toEqual({
@@ -348,7 +337,6 @@ describe('PushSubscriptionsManagerService', () => {
                 push_subscription: {
                     distinctId: 'non-existent-user',
                     integrationId: fcmIntegrationId,
-                    platform: 'android',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)

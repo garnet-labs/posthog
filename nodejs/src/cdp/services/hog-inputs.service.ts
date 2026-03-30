@@ -151,10 +151,7 @@ export class HogInputsService {
         // Push subscriptions are scoped to the integration that registered them.
         const integrationId = getIntegrationIdForPush(integrationInputs)
 
-        const pushSubscriptionPairs: Record<
-            string,
-            { distinctId: string; integrationId: number; platform?: 'android' | 'ios' }
-        > = {}
+        const pushSubscriptionPairs: Record<string, { distinctId: string; integrationId: number }> = {}
         for (const [key, { rawValue, schema }] of Object.entries(inputsToLoad)) {
             let resolvedValue: unknown = rawValue
             const input = hogFunction.inputs?.[key]
@@ -186,7 +183,6 @@ export class HogInputsService {
             pushSubscriptionPairs[key] = {
                 distinctId: resolvedValue,
                 integrationId,
-                platform: schema.platform,
             }
         }
 

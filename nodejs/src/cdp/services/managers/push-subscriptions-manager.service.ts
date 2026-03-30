@@ -20,36 +20,20 @@ const getDistinctIdsForSamePersonCounter = new Counter({
 export type PushSubscriptionGetArgs = {
     teamId: number
     distinctId: string
-    platform?: 'android' | 'ios'
     integrationId?: number
 }
 
 const toKey = (args: PushSubscriptionGetArgs): string => {
-    return JSON.stringify([args.teamId, args.distinctId, args.platform ?? 'all', args.integrationId ?? 'all'])
+    return JSON.stringify([args.teamId, args.distinctId, args.integrationId ?? 'all'])
 }
 
 const fromKey = (key: string): PushSubscriptionGetArgs => {
-    const [teamId, distinctId, platform, integrationId] = parseJSON(key)
+    const [teamId, distinctId, integrationId] = parseJSON(key)
     return {
         teamId: parseInt(teamId),
         distinctId,
-        platform: platform === 'all' ? undefined : (platform as 'android' | 'ios'),
         integrationId: integrationId === 'all' ? undefined : Number(integrationId),
     }
-}
-
-// Type for the query result from the database
-type PushSubscriptionRow = {
-    id: string
-    team_id: number
-    distinct_id: string
-    token: string
-    platform: 'android' | 'ios'
-    integration_id: number
-    is_active: boolean
-    last_successfully_used_at: string | null
-    created_at: string
-    updated_at: string
 }
 
 export type PushSubscription = {
@@ -68,7 +52,6 @@ export type PushSubscription = {
 export type PushSubscriptionInputToLoad = {
     distinctId: string
     integrationId: number
-    platform?: 'android' | 'ios'
 }
 
 const SELECT_COLUMNS = `
@@ -117,7 +100,7 @@ export class PushSubscriptionsManagerService {
             LIMIT 1`
 
         const rows = (
-            await this.postgres.query<PushSubscriptionRow>(
+            await this.postgres.query<PushSubscription>(
                 PostgresUse.COMMON_READ,
                 queryString,
                 [subscriptionId, teamId],
@@ -133,7 +116,7 @@ export class PushSubscriptionsManagerService {
         return this.rowToSubscription(row)
     }
 
-    private rowToSubscription(row: PushSubscriptionRow): PushSubscription {
+    private rowToSubscription(row: PushSubscription): PushSubscription {
         const decryptedToken = this.encryptedFields.decrypt(row.token, { ignoreDecryptionErrors: true }) ?? row.token
         return {
             id: row.id,
@@ -160,11 +143,6 @@ export class PushSubscriptionsManagerService {
             const conditionParts: string[] = [`team_id = $${paramIdx++}`, `distinct_id = $${paramIdx++}`]
             params.push(args.teamId, args.distinctId)
 
-            if (args.platform) {
-                conditionParts.push(`platform = $${paramIdx++}`)
-                params.push(args.platform)
-            }
-
             if (args.integrationId) {
                 conditionParts.push(`integration_id = $${paramIdx++}`)
                 params.push(args.integrationId)
@@ -179,7 +157,7 @@ export class PushSubscriptionsManagerService {
             WHERE ${conditions.join(' OR ')}
             ORDER BY last_successfully_used_at DESC NULLS LAST, created_at DESC`
 
-        const response = await this.postgres.query<PushSubscriptionRow>(
+        const response = await this.postgres.query<PushSubscription>(
             PostgresUse.COMMON_READ,
             queryString,
             params,
@@ -197,15 +175,9 @@ export class PushSubscriptionsManagerService {
         for (const row of subscriptionRows) {
             for (const key of ids) {
                 const args = fromKey(key)
-                const matchesPlatform = !args.platform || args.platform === row.platform
                 const matchesIntegration = !args.integrationId || args.integrationId === row.integration_id
 
-                if (
-                    args.teamId === row.team_id &&
-                    args.distinctId === row.distinct_id &&
-                    matchesPlatform &&
-                    matchesIntegration
-                ) {
+                if (args.teamId === row.team_id && args.distinctId === row.distinct_id && matchesIntegration) {
                     result[key].push(this.rowToSubscription(row))
                 }
             }
@@ -368,7 +340,6 @@ export class PushSubscriptionsManagerService {
     public async findSubscriptionByPersonDistinctIds(
         teamId: number,
         distinctIds: string[],
-        platform?: 'android' | 'ios',
         integrationId?: number
     ): Promise<PushSubscription | null> {
         if (distinctIds.length === 0) {
@@ -377,25 +348,21 @@ export class PushSubscriptionsManagerService {
 
         const placeholders = distinctIds.map((_, idx) => `$${idx + 2}`).join(', ')
         let paramIndex = distinctIds.length + 2
-        const platformFilter = platform ? `AND platform = $${paramIndex++}` : ''
         const integrationFilter = integrationId ? `AND integration_id = $${paramIndex++}` : ''
 
         const params: any[] = [teamId, ...distinctIds]
-        if (platform) {
-            params.push(platform)
-        }
         if (integrationId) {
             params.push(integrationId)
         }
 
         const queryString = `SELECT ${SELECT_COLUMNS}
             FROM workflows_pushsubscription
-            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${platformFilter} ${integrationFilter}
+            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${integrationFilter}
             ORDER BY last_successfully_used_at DESC NULLS LAST, created_at DESC
             LIMIT 1`
 
         const rows = (
-            await this.postgres.query<PushSubscriptionRow>(
+            await this.postgres.query<PushSubscription>(
                 PostgresUse.COMMON_READ,
                 queryString,
                 params,
@@ -414,7 +381,6 @@ export class PushSubscriptionsManagerService {
     public async findSubscriptionsByPersonDistinctIds(
         teamId: number,
         distinctIds: string[],
-        platform?: 'android' | 'ios',
         integrationId?: number
     ): Promise<PushSubscription[]> {
         if (distinctIds.length === 0) {
@@ -423,23 +389,19 @@ export class PushSubscriptionsManagerService {
 
         const placeholders = distinctIds.map((_, idx) => `$${idx + 2}`).join(', ')
         let paramIndex = distinctIds.length + 2
-        const platformFilter = platform ? `AND platform = $${paramIndex++}` : ''
         const integrationFilter = integrationId ? `AND integration_id = $${paramIndex++}` : ''
 
         const params: any[] = [teamId, ...distinctIds]
-        if (platform) {
-            params.push(platform)
-        }
         if (integrationId) {
             params.push(integrationId)
         }
 
         const queryString = `SELECT ${SELECT_COLUMNS}
             FROM workflows_pushsubscription
-            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${platformFilter} ${integrationFilter}
+            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${integrationFilter}
             ORDER BY last_successfully_used_at DESC NULLS LAST, created_at DESC`
 
-        const { rows } = await this.postgres.query<PushSubscriptionRow>(
+        const { rows } = await this.postgres.query<PushSubscription>(
             PostgresUse.COMMON_READ,
             queryString,
             params,
@@ -472,12 +434,11 @@ export class PushSubscriptionsManagerService {
 
         const returnInputs: Record<string, { value: string | null }> = {}
 
-        const entries = Object.entries(inputsToLoad).map(([key, { distinctId, integrationId, platform }]) => ({
+        const entries = Object.entries(inputsToLoad).map(([key, { distinctId, integrationId }]) => ({
             inputKey: key,
             getArgs: {
                 teamId: hogFunction.team_id,
                 distinctId,
-                platform,
                 integrationId,
             },
         }))
@@ -504,7 +465,6 @@ export class PushSubscriptionsManagerService {
                     const personSubscriptions = await this.findSubscriptionsByPersonDistinctIds(
                         hogFunction.team_id,
                         relatedDistinctIds,
-                        getArgs.platform,
                         getArgs.integrationId
                     )
 
