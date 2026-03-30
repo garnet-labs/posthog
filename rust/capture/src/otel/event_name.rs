@@ -75,16 +75,15 @@ fn has_ai_markers(attrs: &serde_json::Map<String, Value>) -> bool {
 }
 
 /// Lightweight check on raw protobuf attributes to avoid converting irrelevant
-/// spans into JSON. Mirrors the logic in `has_ai_markers` and the classifier
-/// key set.
+/// spans into JSON. Derives classifier keys from `EVENT_CLASSIFIERS` so the
+/// two stay in sync automatically.
 pub fn has_ai_attributes_raw(attrs: &[opentelemetry_proto::tonic::common::v1::KeyValue]) -> bool {
     attrs.iter().any(|kv| {
         AI_ATTRIBUTE_PREFIXES
             .iter()
             .any(|prefix| kv.key.starts_with(prefix))
             || AI_MARKER_KEYS.contains(&kv.key.as_str())
-            || kv.key == "ai.operationId"
-            || kv.key == "llm.request.type"
+            || EVENT_CLASSIFIERS.iter().any(|c| c.attr_key == kv.key)
     })
 }
 
