@@ -89,6 +89,40 @@ class TestTaxonomyVolumeTier(BaseTest):
         self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
 
 
+class TestVolumeTierCaching(BaseTest):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    def _set_org_usage(self, event_usage: int):
+        self.organization.usage = {"events": {"usage": event_usage, "limit": 1_000_000, "todays_usage": 0}}
+        self.organization.save(update_fields=["usage"])
+
+    def test_result_is_cached_in_redis(self):
+        self._set_org_usage(event_usage=1_000_000)
+        tier = get_taxonomy_volume_tier(self.team)
+        self.assertEqual(tier, TaxonomyVolumeTier.MEDIUM)
+
+        cached_value = cache.get(f"taxonomy_volume_tier:{self.team.pk}")
+        self.assertEqual(cached_value, TaxonomyVolumeTier.MEDIUM.value)
+
+    def test_cached_value_is_returned_without_recomputing(self):
+        self._set_org_usage(event_usage=1_000_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+        # Change usage to HIGH tier, but cache still holds MEDIUM
+        self._set_org_usage(event_usage=20_000_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+    def test_clearing_cache_returns_fresh_result(self):
+        self._set_org_usage(event_usage=1_000_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+        self._set_org_usage(event_usage=20_000_000)
+        cache.clear()
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
+
+
 class TestGetScanPeriodDays(BaseTest):
     def setUp(self):
         super().setUp()
