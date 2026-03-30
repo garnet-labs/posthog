@@ -60,6 +60,71 @@ Base UI automatically merges event handlers, aria attributes, and `data-*` state
 
 ---
 
+## Card vs Item — when to use which
+
+|                     | Card                        | Item                        |
+| ------------------- | --------------------------- | --------------------------- |
+| **Focus**           | Visual impact, rich data    | Structure, efficiency       |
+| **Structure**       | Header, Content, Footer     | Title, Description, Actions |
+| **Layout**          | Tiles/grid                  | Vertical/horizontal lists   |
+| **Content density** | High (media, buttons, text) | Low/medium (text, icon)     |
+
+**Use Card** for rich, grouped content that needs a distinct visual border or shadow — product grids, dashboard widgets, user profile cards, settings panels with multiple controls.
+
+**Use Item** for compact, scannable lists where space efficiency matters — file lists, notification items, navigation menus, settings entries.
+
+Cards can contain Items — use `ItemGroup` inside `CardContent` for a card with a list inside it.
+
+```tsx
+{
+  /* Card with an item list inside */
+}
+;<Card>
+  <CardHeader>
+    <CardTitle>Team members</CardTitle>
+  </CardHeader>
+  <CardContent>
+    <Field>
+      <FieldLabel>Members</FieldLabel>
+      <ItemGroup combined>
+        <Item
+          variant="pressable"
+          render={
+            // eslint-disable-next-line react/forbid-elements
+            <a href="#">
+              <ItemMedia variant="icon">
+                <UserIcon />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Alice</ItemTitle>
+                <ItemDescription>Admin</ItemDescription>
+              </ItemContent>
+            </a>
+          }
+        />
+        <Item
+          variant="pressable"
+          render={
+            // eslint-disable-next-line react/forbid-elements
+            <a href="#">
+              <ItemMedia variant="icon">
+                <UserIcon />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Bob</ItemTitle>
+                <ItemDescription>Member</ItemDescription>
+              </ItemContent>
+            </a>
+          }
+        />
+      </ItemGroup>
+    </Field>
+  </CardContent>
+</Card>
+```
+
+---
+
 ## Composition Patterns
 
 ### Card

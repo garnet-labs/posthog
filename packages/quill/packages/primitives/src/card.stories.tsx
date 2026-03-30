@@ -2,6 +2,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { Button } from './button'
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './card'
+import { Item, ItemTitle, ItemContent, ItemSeparator, ItemDescription, ItemMedia, ItemGroup } from './item'
+import { UserIcon } from 'lucide-react'
+import { Label } from './label'
+import { Field, FieldLabel } from './field'
 
 const meta = {
     title: 'Primitives/Card',
@@ -78,16 +82,38 @@ export const WithActions: Story = {
     ),
 } satisfies Story
 
-export const SettingsCard: Story = {
+export const CardWithItems: Story = {
     render: () => (
-        <Card className="max-w-sm">
+        <Card>
             <CardHeader>
-                <CardTitle>Card Title</CardTitle>
-                <CardDescription>Card Description</CardDescription>
-                <CardAction>
-                    <Button variant="outline">Button 1</Button>
-                </CardAction>
+                <CardTitle>Team members</CardTitle>
             </CardHeader>
+            <CardContent>
+                <Field>
+                    <ItemGroup combined>
+                        <Item variant="pressable" render={
+                            // eslint-disable-next-line react/forbid-elements
+                            <a href="#">
+                                <ItemMedia variant="icon"><UserIcon /></ItemMedia>
+                                <ItemContent>
+                                    <ItemTitle>Alice</ItemTitle>
+                                    <ItemDescription>Admin</ItemDescription>
+                                </ItemContent>
+                            </a>
+                        }/>
+                        <Item variant="pressable" render={
+                            // eslint-disable-next-line react/forbid-elements
+                            <a href="#">
+                                <ItemMedia variant="icon"><UserIcon /></ItemMedia>
+                                <ItemContent>
+                                    <ItemTitle>Bob</ItemTitle>
+                                    <ItemDescription>Member</ItemDescription>
+                                </ItemContent>
+                            </a>
+                        }/>
+                    </ItemGroup>
+                </Field>
+            </CardContent>
         </Card>
     ),
 } satisfies Story
