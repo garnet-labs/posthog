@@ -30,13 +30,11 @@ Partition Strategy:
     - date is the partition date (YYYY-MM-DD)
 """
 
+import calendar
 import json
 import time
-import calendar
 from datetime import date, datetime, timedelta
 from typing import Any
-
-from django.utils import timezone
 
 import duckdb
 import structlog
@@ -56,6 +54,7 @@ from dagster import (
     define_asset_job,
     sensor,
 )
+from django.utils import timezone
 from tenacity import (
     retry,
     retry_if_exception_type,

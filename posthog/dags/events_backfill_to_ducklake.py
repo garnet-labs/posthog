@@ -17,10 +17,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
-from django.conf import settings as django_settings
-
-import duckdb
 import dagster
+import duckdb
 import structlog
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
@@ -33,6 +31,7 @@ from dagster import (
     asset,
     define_asset_job,
 )
+from django.conf import settings as django_settings
 from tenacity import (
     retry,
     retry_if_exception_type,
