@@ -6,7 +6,6 @@ The actual video rendering is executed as a child workflow by the parent summari
 """
 
 import time
-import uuid
 from datetime import timedelta
 
 from django.utils.timezone import now
@@ -18,7 +17,10 @@ from posthog.models import Team
 from posthog.models.exported_asset import ExportedAsset
 from posthog.session_recordings.queries.session_replay_events import SessionReplayEvents
 from posthog.sync import database_sync_to_async
-from posthog.temporal.ai.session_summary.types.video import PrepSessionVideoAssetResult, VideoSummarySingleSessionInputs
+from posthog.temporal.session_replay.session_summary.types.video import (
+    PrepSessionVideoAssetResult,
+    VideoSummarySingleSessionInputs,
+)
 
 from ee.hogai.session_summaries.constants import (
     EXPIRES_AFTER_DAYS,
@@ -72,20 +74,6 @@ async def prep_session_video_asset_activity(
         )
 
         if existing_asset:
-            # Check duration from existing asset's export_context
-            existing_duration_s = (
-                existing_asset.export_context.get("duration", 0) if existing_asset.export_context else 0
-            )
-            if existing_duration_s < MIN_SESSION_DURATION_FOR_VIDEO_SUMMARY_S:
-                logger.warning(
-                    f"Session {inputs.session_id} in team {inputs.team_id} is too short ({existing_duration_s * 1000:.0f}ms) to summarize, skipping",
-                    extra={
-                        "session_id": inputs.session_id,
-                        "team_id": inputs.team_id,
-                        "signals_type": "session-summaries",
-                    },
-                )
-                return None
             logger.debug(
                 f"Found existing video export for session {inputs.session_id}, reusing asset {existing_asset.id}",
                 session_id=inputs.session_id,
@@ -116,19 +104,14 @@ async def prep_session_video_asset_activity(
             return None
 
         # Create ExportedAsset record (the actual video rendering happens as a child workflow)
-        filename = f"session-video-summary_{inputs.session_id}_{uuid.uuid4()}"
         created_at = now()
         exported_asset = await ExportedAsset.objects.acreate(
             team_id=inputs.team_id,
             export_format=FULL_VIDEO_EXPORT_FORMAT,
             export_context={
                 "session_recording_id": inputs.session_id,
-                "timestamp": 0,  # Start from beginning
-                "filename": filename,
-                "duration": session_duration,
                 "playback_speed": VIDEO_ANALYSIS_PLAYBACK_SPEED,
                 "recording_fps": VIDEO_ANALYSIS_RECORDING_FPS,
-                "mode": "video",
                 "show_metadata_footer": True,
             },
             created_by_id=inputs.user_id,
