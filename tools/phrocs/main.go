@@ -24,11 +24,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/posthog/posthog/phrocs/internal/config"
 	"github.com/posthog/posthog/phrocs/internal/ipc"
 	"github.com/posthog/posthog/phrocs/internal/process"
+	"github.com/posthog/posthog/phrocs/internal/telemetry"
 	"github.com/posthog/posthog/phrocs/internal/tui"
 )
 
@@ -114,4 +116,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "phrocs: %v\n", err)
 		os.Exit(1)
 	}
+
+	telemetry.Flush(2 * time.Second)
 }
