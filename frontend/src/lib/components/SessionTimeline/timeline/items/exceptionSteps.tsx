@@ -153,7 +153,7 @@ function buildStepItem({
         item: {
             id: `${exceptionUuid}-exception-step-${stepIndex}`,
             category: ItemCategory.EXCEPTION_STEPS,
-            timestamp: dayjs.utc(exceptionTimestamp).add(offsetMs! + stepIndex, 'millisecond'),
+            timestamp: dayjs.utc(exceptionTimestamp).add(offsetMs!, 'millisecond'),
             sortPriority: -1000 + stepIndex,
             payload: {
                 runtime,

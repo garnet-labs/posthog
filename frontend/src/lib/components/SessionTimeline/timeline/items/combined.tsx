@@ -43,7 +43,7 @@ export class CombinedEventLoader implements ItemLoader<TimelineItem> {
             kind: NodeKind.EventsQuery,
             select: SELECT,
             where: buildWhere(this.sessionId),
-            after: this.centerTimestamp.subtract(WINDOW_HOURS, 'hours').toISOString(),
+            after: cursor.subtract(WINDOW_HOURS, 'hours').toISOString(),
             before: cursor.toISOString(),
             orderBy: ['timestamp DESC'],
             limit,
