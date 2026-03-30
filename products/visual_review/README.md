@@ -17,7 +17,7 @@ No sync problems, no "baseline service went down", no mystery diffs from someone
 
 ## Concepts
 
-**Repo** — a visual review project within a PostHog team. Usually maps 1:1 to a GitHub repository. Holds configuration like which baseline file paths to use per run type.
+**Repo** — a visual review project within a PostHog team. Usually maps 1:1 to a GitHub repository. Holds configuration like which baseline file paths to use per run type, and whether to post PR comments when visual changes are detected (`enable_pr_comments`, default `false`).
 
 **Artifact** — a PNG stored by the SHA-256 hash of its RGBA bitmap data. Content-addressed: identical pixels produce identical hashes, regardless of PNG compression or metadata. Two runs producing the same screenshot share one artifact. Storage is S3, scoped per repo.
 
@@ -49,6 +49,7 @@ Backend queues async diff (Celery)
   - upload diff overlay artifact
   - mark run completed
   - post GitHub Check (pass/fail)
+  - optionally post PR comment with review link (if `enable_pr_comments` is on)
        │
        ▼
 Developer opens the web UI
@@ -77,7 +78,7 @@ Commands: `vr submit` (main flow), `vr verify` (local baseline check without API
 
 ## Current state
 
-Working end to end: CI upload → async diff → GitHub Check → web review → approve → baseline commit → clean re-run. Multi-repo per team, snapshot change history across runs, run supersession, GitHub commit status checks on transitions.
+Working end to end: CI upload → async diff → GitHub Check → web review → approve → baseline commit → clean re-run. Multi-repo per team, snapshot change history across runs, run supersession, GitHub commit status checks on transitions. Optional PR comments when visual changes are detected (opt-in per repo).
 
 **Known gaps:**
 
