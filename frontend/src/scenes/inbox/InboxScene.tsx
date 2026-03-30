@@ -666,10 +666,18 @@ export function InboxScene(): JSX.Element {
 
     if (!isProductAutonomyEnabled) {
         return (
-            <SceneContent className="flex items-center justify-center h-full">
-                <div className="flex flex-col items-center gap-4 text-center max-w-md">
-                    <GraphsHog className="w-36" />
-                    <h2 className="text-xl font-bold m-0">Inbox is available in the PostHog Code desktop app.</h2>
+            <div className="flex flex-col items-center max-w-[50rem] px-4 mx-auto mt-24 text-center text-balance">
+                <div
+                    className="w-full h-[135px] bg-no-repeat bg-center bg-contain"
+                    // eslint-disable-next-line react/forbid-dom-props
+                    style={{ backgroundImage: 'url(/static/not-found-astrohog.png)' }}
+                />
+                <h1 className="text-2xl font-bold mt-4 mb-0">Inbox is available in the PostHog Code desktop app</h1>
+                <p className="text-sm font-semibold italic mt-3 mb-0">Your proactive analytics companion awaits.</p>
+                <p className="text-sm mt-3 mb-0">
+                    PostHog Code brings Inbox and more powerful features right to your desktop.
+                </p>
+                <div className="flex justify-center mt-4">
                     <LemonButton
                         type="primary"
                         to="https://posthog.com/code?utm_source=app&utm_medium=in-product&utm_campaign=inbox-cta"
@@ -678,7 +686,7 @@ export function InboxScene(): JSX.Element {
                         Download here
                     </LemonButton>
                 </div>
-            </SceneContent>
+            </div>
         )
     }
 
