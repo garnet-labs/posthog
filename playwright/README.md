@@ -12,7 +12,7 @@ This uses `bin/phrocs-e2e.yaml` under the hood.
 
 **First-time setup:** trigger `rebuild-snapshot` in the phrocs UI to run all migrations and create a database snapshot (slow, but only needed once or when migrations change).
 
-**Resetting the DB:** trigger `reset-db` in the phrocs UI — this restores from the snapshot in seconds. If no snapshot exists yet, it will create one automatically.
+**Resetting the DB:** trigger `restore-db` in the phrocs UI — this restores from the snapshot in seconds. If no snapshot exists yet, it will create one automatically.
 
 To run tests against an already-running PostHog instance:
 

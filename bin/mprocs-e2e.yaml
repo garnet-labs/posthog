@@ -38,8 +38,8 @@ procs:
         shell: 'docker compose -f docker-compose.dev.yml -f docker-compose.profiles.yml up --pull always -d && echo "docker-compose ready" && docker compose -f docker-compose.dev.yml -f docker-compose.profiles.yml logs --tail=100 -f'
         ready_pattern: 'docker-compose ready'
 
-    # Fast reset: restores from snapshot (seconds). Run rebuild-snapshot first if you haven't yet.
-    reset-db:
+    # Fast restores from snapshot (seconds). Run rebuild-snapshot first if you haven't yet.
+    restore-db:
         shell: 'bin/wait-for-docker && bin/e2e-db-snapshot restore'
         autostart: false
         env:
@@ -50,7 +50,7 @@ procs:
             DEBUG: '1'
             E2E_TESTING: '1'
 
-    # Full rebuild: runs all migrations + setup_dev, then saves a snapshot. Slow, do once.
+    # Fully runs all migrations + setup_dev, then saves a snapshot. Slow, do once.
     rebuild-snapshot:
         shell: 'bin/wait-for-docker && bin/e2e-db-snapshot create'
         autostart: false

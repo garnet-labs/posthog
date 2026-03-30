@@ -10,7 +10,7 @@ Read @playwright/README.md for best practices, gotchas, and how to run tests.
 The e2e stack must be running (`./bin/e2e-test-runner`). If the database needs to be set up:
 
 1. Trigger `rebuild-snapshot` in phrocs (first time only, or when migrations change)
-2. Trigger `reset-db` in phrocs to restore from the snapshot (fast)
+2. Trigger `restore-db` in phrocs to restore from the snapshot (fast)
 
 ## Rules
 
