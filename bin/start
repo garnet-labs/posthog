@@ -25,8 +25,18 @@ export DEBUG=${DEBUG:-1}
 export SKIP_SERVICE_VERSION_REQUIREMENTS=${SKIP_SERVICE_VERSION_REQUIREMENTS:-1}
 
 # Limit Rust parallel compilation jobs to reduce CPU contention when multiple
-# services start simultaneously via phrocs (they share a build lock anyway)
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+# services start simultaneously via phrocs. The cargo file lock only serializes
+# the final link step — different crates within the dependency graph compile in
+# parallel, so allowing more than 1 job significantly speeds up recompilation.
+# Defaults to half the available cores, capped at 4 to avoid starving other
+# processes. Override with CARGO_BUILD_JOBS=N if needed.
+if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
+    _ncpu=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+    _half=$(( _ncpu / 2 ))
+    [ "$_half" -lt 1 ] && _half=1
+    [ "$_half" -gt 4 ] && _half=4
+    export CARGO_BUILD_JOBS="$_half"
+fi
 
 # Use sccache for Rust compilation caching (if available via flox or homebrew)
 if [[ -z "${RUSTC_WRAPPER:-}" ]] && command -v sccache &>/dev/null; then
@@ -67,6 +77,12 @@ if [[ "$*" == *"--tracing"* ]]; then
     echo "👉 Tracing enabled, see http://localhost:16686 for Jaeger UI"
 else
     export OTEL_SDK_DISABLED="true"
+fi
+
+# --no-pull: skip docker image pull checks (use --pull missing instead of --pull always)
+# Useful for faster restarts when images are already cached locally
+if [[ "$*" == *"--no-pull"* ]]; then
+    export DOCKER_PULL_POLICY="missing"
 fi
 
 if [ -f .env ]; then

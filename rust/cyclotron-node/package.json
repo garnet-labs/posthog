@@ -13,7 +13,8 @@
         "build:cross": "cross build --message-format=json > cross.log",
         "build:typescript": "tsc",
         "clean": "rm -rf index.node",
-        "package": "NODE_ENV=development pnpm --filter=@posthog/cyclotron run build"
+        "package": "NODE_ENV=development pnpm --filter=@posthog/cyclotron run build",
+        "package:if-needed": "bash build-if-needed.sh"
     },
     "author": "",
     "license": "MIT",

@@ -317,7 +317,8 @@ printf '  {gray}Run {reset}{blue}hogli dev:setup{reset}{gray} to tailor this to 
         else:
             message = "echo '▶ docker-compose: core services only (configure via: hogli dev:setup)' && "
 
-        up_cmd = build_docker_compose_command(profiles, "up --pull always -d")
+        # DOCKER_PULL_POLICY defaults to "always"; bin/start --no-pull sets it to "missing"
+        up_cmd = build_docker_compose_command(profiles, "up --pull ${DOCKER_PULL_POLICY:-always} -d")
         logs_cmd = build_docker_compose_command(profiles, "logs --tail=100 -f")
 
         return {

@@ -14,8 +14,8 @@
         "start:dist": "node dist/index.js",
         "start:dev": "NODE_ENV=dev tsx watch src/index.ts",
         "start:devNoWatch": "NODE_ENV=dev tsx src/index.ts",
-        "prestart:dev": "pnpm build:cyclotron",
-        "prestart:devNoWatch": "pnpm build:cyclotron",
+        "prestart:dev": "pnpm build:cyclotron:if-needed",
+        "prestart:devNoWatch": "pnpm build:cyclotron:if-needed",
         "build": "pnpm clean && pnpm typescript:compile && pnpm typescript:compile-cleanup",
         "clean": "rm -rf dist/*",
         "typescript:compile": "tsc -b && tsc-alias",
@@ -40,6 +40,7 @@
         "services:clean": "cd .. && docker compose -f docker-compose.dev.yml rm -v",
         "services": "pnpm services:stop && pnpm services:clean && pnpm services:start",
         "build:cyclotron": "pnpm --filter=@posthog/cyclotron package",
+        "build:cyclotron:if-needed": "pnpm --filter=@posthog/cyclotron package:if-needed",
         "update-ai-costs": "ts-node src/ingestion/ai/costs/scripts/update-ai-costs.ts",
         "sync-segment-icons": "DATABASE_URL=something ts-node src/cdp/segment/sync-segment-icons.ts",
         "start:recording-rasterizer": "node dist/session-replay/recording-rasterizer/index.js"
