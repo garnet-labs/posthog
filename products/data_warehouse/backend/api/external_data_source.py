@@ -675,6 +675,13 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             access_method=access_method,
         )
 
+        # CDC: create slot + publication for PostHog-managed sources
+        cdc_enabled = payload.get("cdc_enabled", False)
+        if cdc_enabled and source_type_model == ExternalDataSourceType.POSTGRES:
+            cdc_result = self._setup_cdc_slot(source, source_config, new_source_model, payload)
+            if cdc_result is not None:
+                return cdc_result
+
         source_schemas = source.get_schemas(source_config, self.team_id)
         if is_direct_postgres:
             new_source_model.connection_metadata = get_direct_postgres_connection_metadata(
@@ -741,6 +748,21 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 else {}
             )
 
+            is_cdc_schema = sync_type == "cdc"
+            if requires_incremental_fields and new_source_model.supports_scheduled_sync:
+                sync_type_config = {
+                    "incremental_field": incremental_field,
+                    "incremental_field_type": incremental_field_type,
+                    "schema_metadata": schema_metadata,
+                }
+            elif is_cdc_schema:
+                sync_type_config = {
+                    "cdc_mode": "snapshot",
+                    "schema_metadata": schema_metadata,
+                }
+            else:
+                sync_type_config = {"schema_metadata": schema_metadata}
+
             schema_model = ExternalDataSchema.objects.create(
                 name=schema_name,
                 team=self.team,
@@ -748,18 +770,19 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 should_sync=should_sync,
                 sync_type=sync_type if new_source_model.supports_scheduled_sync else None,
                 sync_time_of_day=sync_time_of_day if new_source_model.supports_scheduled_sync else None,
-                sync_type_config=(
-                    {
-                        "incremental_field": incremental_field,
-                        "incremental_field_type": incremental_field_type,
-                        "schema_metadata": schema_metadata,
-                    }
-                    if requires_incremental_fields and new_source_model.supports_scheduled_sync
-                    else {"schema_metadata": schema_metadata}
-                ),
+                sync_type_config=sync_type_config,
                 description=source_schema.description if source_schema else None,
                 label=schema_label_by_name.get(schema_name),
             )
+
+            # For CDC schemas with PostHog-managed mode, add table to publication
+            if is_cdc_schema and should_sync and cdc_enabled:
+                job_inputs = new_source_model.job_inputs or {}
+                if job_inputs.get("cdc_management_mode", "posthog") == "posthog":
+                    pub_name = job_inputs.get("cdc_publication_name")
+                    db_schema_name = job_inputs.get("schema", "public")
+                    if pub_name:
+                        self._add_table_to_cdc_publication(source, source_config, pub_name, db_schema_name, schema_name)
 
             if new_source_model.is_direct_postgres and should_sync:
                 schema_model.table = upsert_direct_postgres_table(
@@ -780,6 +803,15 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             # Log error but don't fail because the source model was already created
             logger.exception("Could not trigger external data job", exc_info=e)
 
+        # Start CDC extraction schedule if any CDC schemas are active
+        if cdc_enabled:
+            try:
+                from products.data_warehouse.backend.data_load.service import sync_cdc_extraction_schedule
+
+                sync_cdc_extraction_schedule(new_source_model, create=True)
+            except Exception as e:
+                logger.exception("Could not create CDC extraction schedule", exc_info=e)
+
         if new_source_model.revenue_analytics_config_safe.enabled:
             managed_viewset, _ = DataWarehouseManagedViewSet.objects.get_or_create(
                 team=self.team,
@@ -788,6 +820,135 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             managed_viewset.sync_views()
 
         return Response(status=status.HTTP_201_CREATED, data={"id": new_source_model.pk})
+
+    def _setup_cdc_slot(
+        self, source_impl, source_config, source_model: ExternalDataSource, payload: dict
+    ) -> Response | None:
+        """Create replication slot + publication for PostHog-managed CDC sources.
+
+        For self-managed mode, validates that the provided slot/publication exist.
+        Updates source_model.job_inputs with CDC config.
+        Returns a Response on error, None on success.
+        """
+        import psycopg
+
+        management_mode = payload.get("cdc_management_mode", "posthog")
+        slot_name = payload.get("cdc_slot_name") or f"posthog_{source_model.id.hex[:12]}"
+        pub_name = payload.get("cdc_publication_name") or f"posthog_pub_{source_model.id.hex[:12]}"
+
+        # Store CDC config in job_inputs
+        job_inputs = source_model.job_inputs or {}
+        job_inputs.update(
+            {
+                "cdc_enabled": True,
+                "cdc_management_mode": management_mode,
+                "cdc_slot_name": slot_name,
+                "cdc_publication_name": pub_name,
+                "cdc_auto_drop_slot": payload.get("cdc_auto_drop_slot", True),
+                "cdc_lag_warning_threshold_mb": payload.get("cdc_lag_warning_threshold_mb", 1024),
+                "cdc_lag_critical_threshold_mb": payload.get("cdc_lag_critical_threshold_mb", 10240),
+                "cdc_schema_disable_grace_period_hours": payload.get("cdc_schema_disable_grace_period_hours", 12),
+            }
+        )
+
+        if management_mode == "posthog":
+            from posthog.temporal.data_imports.cdc.postgres.slot_manager import create_slot_and_publication
+
+            try:
+                with source_impl.with_ssh_tunnel(source_config) as (host, port):
+                    conn = psycopg.connect(
+                        host=host,
+                        port=port,
+                        dbname=source_config.database,
+                        user=source_config.user,
+                        password=source_config.password,
+                        connect_timeout=15,
+                    )
+                    try:
+                        # Create with empty table list — tables added per-schema
+                        consistent_point = create_slot_and_publication(
+                            conn, slot_name, pub_name, source_config.schema, tables=[]
+                        )
+                        job_inputs["cdc_consistent_point"] = consistent_point
+                    finally:
+                        conn.close()
+            except Exception as e:
+                source_model.delete()
+                logger.exception("Failed to create CDC slot and publication", error=str(e))
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": f"Failed to create replication slot: {e}"},
+                )
+
+        elif management_mode == "self_managed":
+            from posthog.temporal.data_imports.cdc.postgres.slot_manager import publication_exists, slot_exists
+
+            try:
+                with source_impl.with_ssh_tunnel(source_config) as (host, port):
+                    conn = psycopg.connect(
+                        host=host,
+                        port=port,
+                        dbname=source_config.database,
+                        user=source_config.user,
+                        password=source_config.password,
+                        connect_timeout=15,
+                    )
+                    try:
+                        if not slot_exists(conn, slot_name):
+                            source_model.delete()
+                            return Response(
+                                status=status.HTTP_400_BAD_REQUEST,
+                                data={"message": f"Replication slot '{slot_name}' does not exist"},
+                            )
+                        if not publication_exists(conn, pub_name):
+                            source_model.delete()
+                            return Response(
+                                status=status.HTTP_400_BAD_REQUEST,
+                                data={"message": f"Publication '{pub_name}' does not exist"},
+                            )
+                    finally:
+                        conn.close()
+            except Exception as e:
+                source_model.delete()
+                logger.exception("Failed to validate self-managed CDC slot", error=str(e))
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": f"Failed to validate replication slot: {e}"},
+                )
+
+        source_model.job_inputs = job_inputs
+        source_model.save(update_fields=["job_inputs", "updated_at"])
+        return None
+
+    def _add_table_to_cdc_publication(
+        self, source_impl, source_config, pub_name: str, db_schema: str, table_name: str
+    ) -> None:
+        """Best-effort add a table to the CDC publication during source creation."""
+        import psycopg
+
+        from posthog.temporal.data_imports.cdc.postgres.slot_manager import add_table_to_publication
+
+        try:
+            with source_impl.with_ssh_tunnel(source_config) as (host, port):
+                conn = psycopg.connect(
+                    host=host,
+                    port=port,
+                    dbname=source_config.database,
+                    user=source_config.user,
+                    password=source_config.password,
+                    connect_timeout=15,
+                )
+                try:
+                    add_table_to_publication(conn, pub_name, db_schema, table_name)
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.exception(
+                "Failed to add table to CDC publication",
+                table=table_name,
+                pub_name=pub_name,
+                error=str(e),
+            )
 
     def prefix_required(self, source_type: str) -> bool:
         source_type_exists = (
@@ -1019,6 +1180,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 "incremental_fields": schema.incremental_fields,
                 "incremental_available": schema.supports_incremental,
                 "append_available": schema.supports_append,
+                "cdc_available": schema.supports_cdc,
                 "incremental_field": schema.incremental_fields[0]["field"]
                 if len(schema.incremental_fields) > 0 and len(schema.incremental_fields[0]["field"]) > 0
                 else None,

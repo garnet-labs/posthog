@@ -41,6 +41,36 @@ PostgresErrors = {
 }
 
 
+def _get_tables_with_primary_keys(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    database: str,
+    schema: str,
+    table_names: list[str],
+) -> set[str]:
+    """Return the set of table names that have a primary key constraint."""
+    if not table_names:
+        return set()
+
+    import psycopg
+
+    try:
+        with psycopg.connect(
+            host=host, port=port, user=user, password=password, dbname=database, connect_timeout=15
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT table_name FROM information_schema.table_constraints "
+                    "WHERE constraint_type = 'PRIMARY KEY' AND table_schema = %s AND table_name = ANY(%s)",
+                    (schema, table_names),
+                )
+                return {row[0] for row in cur.fetchall()}
+    except Exception:
+        return set()
+
+
 @SourceRegistry.register
 class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, ValidateDatabaseHostMixin):
     def __init__(self, source_name: str = "Postgres"):
@@ -186,6 +216,16 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             else:
                 row_counts = {}
 
+            tables_with_pks = _get_tables_with_primary_keys(
+                host=host,
+                port=port,
+                user=config.user,
+                password=config.password,
+                database=config.database,
+                schema=config.schema,
+                table_names=list(db_schemas.keys()),
+            )
+
         for table_name, columns in db_schemas.items():
             incremental_field_tuples = filter_postgres_incremental_fields(columns)
             incremental_fields: list[IncrementalField] = [
@@ -204,6 +244,7 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                     name=table_name,
                     supports_incremental=len(incremental_fields) > 0,
                     supports_append=len(incremental_fields) > 0,
+                    supports_cdc=table_name in tables_with_pks,
                     incremental_fields=incremental_fields,
                     row_count=row_counts.get(table_name, None),
                     columns=columns,
@@ -250,6 +291,50 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
 
         return True, None
 
+    def validate_cdc_credentials(
+        self,
+        config: PostgresSourceConfig,
+        team_id: int,
+        management_mode: str,
+        tables: list[str],
+        slot_name: str | None = None,
+        publication_name: str | None = None,
+    ) -> tuple[bool, list[str]]:
+        """Validate CDC-specific prerequisites on top of regular credentials.
+
+        Returns (is_valid, list_of_error_messages).
+        """
+        import psycopg
+
+        from posthog.temporal.data_imports.cdc.postgres.prerequisite_validator import validate_cdc_prerequisites
+
+        try:
+            with self.with_ssh_tunnel(config) as (host, port):
+                conn = psycopg.connect(
+                    host=host,
+                    port=port,
+                    dbname=config.database,
+                    user=config.user,
+                    password=config.password,
+                    connect_timeout=15,
+                )
+                try:
+                    errors = validate_cdc_prerequisites(
+                        conn=conn,
+                        management_mode=management_mode,  # type: ignore[arg-type]
+                        tables=tables,
+                        schema=config.schema,
+                        slot_name=slot_name,
+                        publication_name=publication_name,
+                    )
+                finally:
+                    conn.close()
+        except Exception as e:
+            capture_exception(e)
+            return False, [f"Could not connect to validate CDC prerequisites: {e}"]
+
+        return len(errors) == 0, errors
+
     def get_connection_metadata(
         self, config: PostgresSourceConfig, team_id: int, require_ssl: bool = False
     ) -> dict[str, object]:
@@ -264,12 +349,21 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             )
 
     def source_for_pipeline(self, config: PostgresSourceConfig, inputs: SourceInputs) -> SourceResponse:
+        from posthog.temporal.data_imports.sources.postgres.exceptions import CDCHandledExternally
+
         from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
 
         ssh_tunnel = self.make_ssh_tunnel_func(config)
 
         schema = ExternalDataSchema.objects.select_related("source").get(id=inputs.schema_id)
 
+        # CDC streaming schemas are handled by CDCExtractionWorkflow, not here
+        if schema.is_cdc and schema.cdc_mode == "streaming":
+            raise CDCHandledExternally(
+                f"Schema {schema.name} is in CDC streaming mode — handled by CDCExtractionWorkflow"
+            )
+
+        # CDC snapshot schemas fall through to run initial full_refresh via postgres_source()
         # Require SSL for sources created after the cutoff date
         require_ssl = schema.source.created_at >= SSL_REQUIRED_AFTER_DATE
 

@@ -106,6 +106,59 @@ class ExternalDataSource(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
         self.deleted_at = datetime.now()
         self.save()
 
+        self._cleanup_cdc_resources()
+
+    def _cleanup_cdc_resources(self) -> None:
+        """Best-effort cleanup of CDC replication slot and publication on source deletion.
+
+        Only drops resources for PostHog-managed mode. Self-managed slots are
+        never dropped by PostHog.
+        """
+        job_inputs = self.job_inputs or {}
+        if not job_inputs.get("cdc_enabled"):
+            return
+
+        if job_inputs.get("cdc_management_mode") != "posthog":
+            return
+
+        slot_name = job_inputs.get("cdc_slot_name")
+        pub_name = job_inputs.get("cdc_publication_name")
+        if not slot_name or not pub_name:
+            return
+
+        # Delete the CDC extraction schedule
+        try:
+            from products.data_warehouse.backend.data_load.service import delete_cdc_extraction_schedule
+
+            delete_cdc_extraction_schedule(str(self.id))
+        except Exception:
+            logger.exception("Failed to delete CDC extraction schedule", source_id=str(self.id))
+
+        # Drop slot and publication on the source database
+        try:
+            import psycopg
+
+            from posthog.temporal.data_imports.cdc.postgres.slot_manager import drop_slot_and_publication
+
+            conn = psycopg.connect(
+                host=job_inputs.get("host", ""),
+                port=int(job_inputs.get("port", 5432)),
+                dbname=job_inputs.get("database", ""),
+                user=job_inputs.get("user", ""),
+                password=job_inputs.get("password", ""),
+                connect_timeout=10,
+            )
+            try:
+                drop_slot_and_publication(conn, slot_name, pub_name)
+            finally:
+                conn.close()
+        except Exception:
+            logger.exception(
+                "Failed to drop CDC slot/publication on source DB (best-effort)",
+                source_id=str(self.id),
+                slot_name=slot_name,
+            )
+
     def reload_schemas(self):
         from products.data_warehouse.backend.data_load.service import (
             sync_external_data_job_workflow,

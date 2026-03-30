@@ -25,6 +25,7 @@ from products.data_warehouse.backend.data_load.service import (
     external_data_workflow_exists,
     is_any_external_data_schema_paused,
     pause_external_data_schedule,
+    sync_cdc_extraction_schedule,
     sync_external_data_job_workflow,
     trigger_external_data_workflow,
     unpause_external_data_schedule,
@@ -143,6 +144,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             and sync_type != ExternalDataSchema.SyncType.INCREMENTAL
             and sync_type != ExternalDataSchema.SyncType.APPEND
             and sync_type != ExternalDataSchema.SyncType.WEBHOOK
+            and sync_type != ExternalDataSchema.SyncType.CDC
         ):
             raise ValidationError("Invalid sync type")
 
@@ -178,6 +180,11 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
                         payload["incremental_field_last_value"] = None
                         trigger_refresh = True
 
+            validated_data["sync_type_config"] = payload
+        elif sync_type == ExternalDataSchema.SyncType.CDC:
+            payload = instance.sync_type_config
+            if payload.get("cdc_mode") is None:
+                payload["cdc_mode"] = "snapshot"
             validated_data["sync_type_config"] = payload
         else:
             # No need to update sync_type_config for full refresh sync_type - it'll happen on the next sync
@@ -246,6 +253,13 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             if should_sync is False and instance.should_sync is True:
                 hide_direct_postgres_table(instance.table)
 
+        # CDC publication management: add/remove table when toggling should_sync
+        is_cdc = (sync_type == ExternalDataSchema.SyncType.CDC) or (
+            sync_type is None and instance.sync_type == ExternalDataSchema.SyncType.CDC
+        )
+        if is_cdc and source.source_type == ExternalDataSourceType.POSTGRES:
+            self._handle_cdc_publication_change(instance, source, should_sync, sync_type)
+
         if trigger_refresh:
             instance.sync_type_config.update({"reset_pipeline": True})
             validated_data["sync_type_config"].update({"reset_pipeline": True})
@@ -256,6 +270,13 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
 
         if sync_type == ExternalDataSchema.SyncType.WEBHOOK:
             self._maybe_create_webhook(updated_instance)
+
+        # Sync CDC extraction schedule after any CDC schema change
+        if is_cdc:
+            try:
+                sync_cdc_extraction_schedule(source)
+            except Exception as e:
+                logger.exception("Failed to sync CDC extraction schedule", exc_info=e)
 
         return updated_instance
 
@@ -310,6 +331,102 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             raise ValidationError(
                 "Failed to create webhook. You can set up the webhook manually from the Webhook tab."
             ) from e
+
+    def _handle_cdc_publication_change(
+        self,
+        instance: ExternalDataSchema,
+        source: ExternalDataSource,
+        should_sync: bool | None,
+        sync_type: str | None,
+    ) -> None:
+        """Manage CDC publication tables when a schema is toggled or newly set to CDC."""
+        job_inputs = source.job_inputs or {}
+        management_mode = job_inputs.get("cdc_management_mode", "posthog")
+
+        if management_mode != "posthog":
+            return
+
+        pub_name = job_inputs.get("cdc_publication_name")
+        db_schema = job_inputs.get("schema", "public")
+        if not pub_name:
+            return
+
+        newly_set_to_cdc = (
+            sync_type == ExternalDataSchema.SyncType.CDC and instance.sync_type != ExternalDataSchema.SyncType.CDC
+        )
+
+        # Add table to publication when enabling CDC or toggling sync on
+        if newly_set_to_cdc or (should_sync is True and not instance.should_sync):
+            self._alter_cdc_publication(source, pub_name, db_schema, instance.name, action="add")
+
+            # Check grace period on re-enable
+            if should_sync is True and not newly_set_to_cdc:
+                disabled_at = instance.sync_type_config.get("cdc_disabled_at")
+                grace_hours = job_inputs.get("cdc_schema_disable_grace_period_hours", 12)
+                if disabled_at is not None:
+                    from datetime import UTC, datetime
+
+                    disabled_dt = datetime.fromisoformat(disabled_at)
+                    elapsed = datetime.now(tz=UTC) - disabled_dt
+                    if elapsed.total_seconds() > grace_hours * 3600:
+                        instance.sync_type_config["cdc_mode"] = "snapshot"
+                        instance.initial_sync_complete = False
+                        instance.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
+
+                instance.sync_type_config.pop("cdc_disabled_at", None)
+
+        # Remove table from publication when toggling sync off
+        elif should_sync is False and instance.should_sync:
+            self._alter_cdc_publication(source, pub_name, db_schema, instance.name, action="remove")
+            instance.sync_type_config["cdc_disabled_at"] = dt.datetime.now(tz=dt.UTC).isoformat()
+
+    def _alter_cdc_publication(
+        self,
+        source: ExternalDataSource,
+        pub_name: str,
+        db_schema: str,
+        table_name: str,
+        action: str,
+    ) -> None:
+        """Best-effort add/remove a table from the CDC publication."""
+        import psycopg
+
+        from posthog.temporal.data_imports.cdc.postgres.slot_manager import (
+            add_table_to_publication,
+            remove_table_from_publication,
+        )
+
+        job_inputs = source.job_inputs or {}
+
+        try:
+            source_type = ExternalDataSourceType(source.source_type)
+            source_impl = SourceRegistry.get_source(source_type)
+            config = source_impl.parse_config(job_inputs)
+
+            with source_impl.with_ssh_tunnel(config) as (host, port):
+                conn = psycopg.connect(
+                    host=host,
+                    port=port,
+                    dbname=config.database,
+                    user=config.user,
+                    password=config.password,
+                    connect_timeout=15,
+                )
+                try:
+                    if action == "add":
+                        add_table_to_publication(conn, pub_name, db_schema, table_name)
+                    else:
+                        remove_table_from_publication(conn, pub_name, db_schema, table_name)
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.exception(
+                "Failed to alter CDC publication",
+                action=action,
+                table=table_name,
+                pub_name=pub_name,
+                error=str(e),
+            )
 
 
 class SimpleExternalDataSchemaSerializer(serializers.ModelSerializer):
@@ -453,6 +570,7 @@ class ExternalDataSchemaViewset(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             "incremental_fields": schema.incremental_fields,
             "incremental_available": schema.supports_incremental,
             "append_available": schema.supports_append,
+            "cdc_available": schema.supports_cdc,
             "full_refresh_available": True,
             "supports_webhooks": schema.supports_webhooks,
         }

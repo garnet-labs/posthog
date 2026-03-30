@@ -29,6 +29,7 @@ from posthog.temporal.data_imports.row_tracking import setup_row_tracking
 from posthog.temporal.data_imports.sources import SourceRegistry
 from posthog.temporal.data_imports.sources.common.base import ResumableSource, SimpleSource
 from posthog.temporal.data_imports.sources.common.resumable import ResumableSourceManager
+from posthog.temporal.data_imports.sources.postgres.exceptions import CDCHandledExternally
 
 from products.data_warehouse.backend.models import DataWarehouseTable, ExternalDataJob, ExternalDataSource
 from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema, process_incremental_value
@@ -158,19 +159,23 @@ async def import_data_activity_sync(inputs: ImportDataActivityInputs) -> Pipelin
             config = new_source.parse_config(model.pipeline.job_inputs)
 
             resumable_source_manager: ResumableSourceManager | None = None
-            if isinstance(new_source, ResumableSource):
-                resumable_source_manager = new_source.get_resumable_source_manager(source_inputs)
-                source_response = await database_sync_to_async_pool(new_source.source_for_pipeline)(
-                    config, resumable_source_manager, source_inputs
-                )
-            elif isinstance(new_source, SimpleSource):
-                source_response = await database_sync_to_async_pool(new_source.source_for_pipeline)(
-                    config, source_inputs
-                )
-            else:
-                raise TypeError(
-                    f"{new_source.__class__.__name__} does not implement either SimpleSource or ResumableSource"
-                )
+            try:
+                if isinstance(new_source, ResumableSource):
+                    resumable_source_manager = new_source.get_resumable_source_manager(source_inputs)
+                    source_response = await database_sync_to_async_pool(new_source.source_for_pipeline)(
+                        config, resumable_source_manager, source_inputs
+                    )
+                elif isinstance(new_source, SimpleSource):
+                    source_response = await database_sync_to_async_pool(new_source.source_for_pipeline)(
+                        config, source_inputs
+                    )
+                else:
+                    raise TypeError(
+                        f"{new_source.__class__.__name__} does not implement either SimpleSource or ResumableSource"
+                    )
+            except CDCHandledExternally:
+                await logger.ainfo("Schema is in CDC streaming mode — handled by CDCExtractionWorkflow, skipping")
+                return PipelineResult(should_trigger_cdp_producer=False, consumer_manages_job_status=True)
 
             return await _run(
                 job_inputs=job_inputs,

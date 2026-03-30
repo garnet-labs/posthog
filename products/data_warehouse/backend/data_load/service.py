@@ -246,3 +246,106 @@ def is_any_external_data_schema_paused(team_id: int) -> bool:
         .filter(team_id=team_id, status=ExternalDataSchema.Status.PAUSED)
         .exists()
     )
+
+
+# ---------------------------------------------------------------------------
+# CDC extraction scheduling (source-level)
+# ---------------------------------------------------------------------------
+
+
+def _get_cdc_extraction_schedule_id(source_id: str) -> str:
+    return f"cdc-extraction-{source_id}"
+
+
+def get_cdc_extraction_schedule(
+    source: "ExternalDataSource",
+    min_interval: timedelta,
+) -> Schedule:
+    """Build a Temporal Schedule for the CDC extraction workflow.
+
+    The schedule runs at the source level and the interval is the minimum
+    sync_frequency_interval of all CDC-enabled schemas in the source.
+    """
+    from posthog.temporal.data_imports.cdc.workflows import CDCExtractionInput
+
+    inputs = CDCExtractionInput(
+        team_id=source.team_id,
+        source_id=source.id,
+    )
+
+    action = ScheduleActionStartWorkflow(
+        "cdc-extraction",
+        asdict(inputs),
+        id=_get_cdc_extraction_schedule_id(str(source.id)),
+        task_queue=str(settings.DATA_WAREHOUSE_TASK_QUEUE),
+        retry_policy=RetryPolicy(
+            initial_interval=timedelta(seconds=10),
+            maximum_interval=timedelta(seconds=120),
+            maximum_attempts=3,
+        ),
+    )
+
+    spec = ScheduleSpec(
+        intervals=[ScheduleIntervalSpec(every=min_interval)],
+    )
+
+    return Schedule(
+        action=action,
+        spec=spec,
+        state=ScheduleState(
+            note=f"CDC extraction schedule for source: {source.id}",
+        ),
+        policy=SchedulePolicy(overlap=ScheduleOverlapPolicy.SKIP),
+    )
+
+
+def sync_cdc_extraction_schedule(source: "ExternalDataSource", create: bool = False) -> None:
+    """Create or update the CDC extraction Temporal schedule for a source.
+
+    Calculates the interval from the most frequent CDC schema. If no CDC
+    schemas are active, deletes the schedule.
+    """
+    from products.data_warehouse.backend.models import ExternalDataSchema
+
+    cdc_schemas = list(
+        ExternalDataSchema.objects.filter(
+            source=source,
+            sync_type=ExternalDataSchema.SyncType.CDC,
+            should_sync=True,
+        ).exclude(deleted=True)
+    )
+
+    schedule_id = _get_cdc_extraction_schedule_id(str(source.id))
+
+    if not cdc_schemas:
+        try:
+            delete_external_data_schedule(schedule_id)
+        except Exception:
+            pass
+        return
+
+    intervals = [s.sync_frequency_interval for s in cdc_schemas if s.sync_frequency_interval is not None]
+    min_interval = min(intervals) if intervals else timedelta(hours=1)
+
+    temporal = sync_connect()
+    schedule = get_cdc_extraction_schedule(source, min_interval)
+
+    if create:
+        create_schedule(temporal, id=schedule_id, schedule=schedule, trigger_immediately=True)
+    else:
+        try:
+            update_schedule(temporal, id=schedule_id, schedule=schedule)
+        except temporalio.service.RPCError as e:
+            if e.status == temporalio.service.RPCStatusCode.NOT_FOUND:
+                create_schedule(temporal, id=schedule_id, schedule=schedule, trigger_immediately=True)
+            else:
+                raise
+
+
+def delete_cdc_extraction_schedule(source_id: str) -> None:
+    """Delete the CDC extraction schedule for a source."""
+    schedule_id = _get_cdc_extraction_schedule_id(source_id)
+    try:
+        delete_external_data_schedule(schedule_id)
+    except Exception:
+        pass

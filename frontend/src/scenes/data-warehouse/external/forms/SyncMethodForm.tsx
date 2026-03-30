@@ -63,8 +63,23 @@ interface SyncMethodFormProps {
     isNewSource?: boolean
 }
 
+const getCdcSyncSupported = (
+    schema: ExternalDataSourceSyncSchema
+): { disabled: true; disabledReason: string } | { disabled: false } => {
+    if (!schema.cdc_available) {
+        return {
+            disabled: true,
+            disabledReason: 'This table has no primary key, which is required for CDC',
+        }
+    }
+
+    return {
+        disabled: false,
+    }
+}
+
 const getSaveDisabledReason = (
-    syncType: 'full_refresh' | 'incremental' | 'append' | 'webhook' | undefined,
+    syncType: 'full_refresh' | 'incremental' | 'append' | 'webhook' | 'cdc' | undefined,
     incrementalField: string | null,
     appendField: string | null
 ): string | undefined => {
@@ -85,7 +100,7 @@ const getInitialRadioState = (
     schema: ExternalDataSourceSyncSchema,
     incrementalSyncSupported: boolean,
     appendSyncSupported: boolean
-): 'full_refresh' | 'incremental' | 'append' | 'webhook' => {
+): 'full_refresh' | 'incremental' | 'append' | 'webhook' | 'cdc' => {
     if (schema.sync_type) {
         return schema.sync_type
     }
@@ -110,6 +125,7 @@ export const SyncMethodForm = ({
 }: SyncMethodFormProps): JSX.Element => {
     const incrementalSyncSupported = getIncrementalSyncSupported(schema)
     const appendSyncSupported = getAppendOnlySyncSupported(schema)
+    const cdcSyncSupported = getCdcSyncSupported(schema)
 
     const [radioValue, setRadioValue] = useState(() =>
         getInitialRadioState(schema, !incrementalSyncSupported.disabled, !appendSyncSupported.disabled)
@@ -127,7 +143,7 @@ export const SyncMethodForm = ({
     }, [schema.table]) // oxlint-disable-line react-hooks/exhaustive-deps
 
     const radioOptions: {
-        value: 'webhook' | 'incremental' | 'append' | 'full_refresh'
+        value: 'webhook' | 'incremental' | 'append' | 'full_refresh' | 'cdc'
         disabledReason?: string
         label: JSX.Element
     }[] = []
@@ -274,6 +290,25 @@ export const SyncMethodForm = ({
         }
     )
 
+    if (schema.cdc_available !== undefined) {
+        radioOptions.push({
+            value: 'cdc',
+            disabledReason: (cdcSyncSupported.disabled && cdcSyncSupported.disabledReason) || undefined,
+            label: (
+                <div className="mb-4 font-normal">
+                    <div className="items-center flex leading-[normal] overflow-hidden mb-1">
+                        <h4 className="mb-0 mr-2 text-base font-semibold">CDC (change data capture)</h4>
+                        <LemonTag type="completion">Beta</LemonTag>
+                    </div>
+                    <p className="m-0">
+                        Capture inserts, updates, and deletes in real-time via logical replication. Requires a primary
+                        key on the source table.
+                    </p>
+                </div>
+            ),
+        })
+    }
+
     return (
         <>
             <LemonRadio
@@ -293,6 +328,8 @@ export const SyncMethodForm = ({
                     onClick={() => {
                         if (radioValue === 'webhook') {
                             onSave('webhook', null, null)
+                        } else if (radioValue === 'cdc') {
+                            onSave('cdc', null, null)
                         } else if (radioValue === 'incremental') {
                             const fieldSelected = schema.incremental_fields.find(
                                 (n) => n.field === incrementalFieldValue

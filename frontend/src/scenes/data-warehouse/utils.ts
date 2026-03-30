@@ -130,6 +130,7 @@ export const SyncTypeLabelMap: Record<NonNullable<ExternalDataSourceSyncSchema['
     incremental: 'Incremental',
     append: 'Append only',
     webhook: 'Webhook',
+    cdc: 'CDC',
 }
 
 export const StatusTagSetting: Record<ExternalDataJobStatus, LemonTagType> = {

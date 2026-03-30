@@ -37,7 +37,7 @@ logger = structlog.get_logger(__name__)
 
 def _get_write_type(sync_type: SyncTypeLiteral) -> Literal["incremental", "full_refresh", "append"]:
     """Convert sync type to write type for DeltaTableHelper."""
-    if sync_type == "incremental":
+    if sync_type in ("incremental", "cdc"):
         return "incremental"
     elif sync_type == "append":
         return "append"

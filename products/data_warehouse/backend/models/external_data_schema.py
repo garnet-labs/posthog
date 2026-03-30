@@ -42,6 +42,7 @@ class ExternalDataSchema(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
         INCREMENTAL = "incremental", "incremental"
         APPEND = "append", "append"
         WEBHOOK = "webhook", "webhook"
+        CDC = "cdc", "cdc"
 
     class SyncFrequency(models.TextChoices):
         DAILY = "day", "Daily"
@@ -95,6 +96,22 @@ class ExternalDataSchema(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
     @property
     def is_webhook(self):
         return self.sync_type == self.SyncType.WEBHOOK
+
+    @property
+    def is_cdc(self):
+        return self.sync_type == self.SyncType.CDC
+
+    @property
+    def cdc_mode(self) -> Literal["snapshot", "streaming"] | None:
+        if self.sync_type_config:
+            return self.sync_type_config.get("cdc_mode")
+        return None
+
+    @property
+    def cdc_last_log_position(self) -> str | None:
+        if self.sync_type_config:
+            return self.sync_type_config.get("cdc_last_log_position")
+        return None
 
     @property
     def should_use_incremental_field(self):

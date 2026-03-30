@@ -99,7 +99,14 @@ async def set_initial_sync_complete(schema_id: str, team_id: int) -> None:
         schema = ExternalDataSchema.objects.exclude(deleted=True).get(id=schema_id, team_id=team_id)
         if not schema.initial_sync_complete:
             schema.initial_sync_complete = True
-            schema.save(update_fields=["initial_sync_complete"])
+            update_fields = ["initial_sync_complete"]
+
+            # CDC snapshot → streaming transition
+            if schema.is_cdc and schema.cdc_mode == "snapshot":
+                schema.sync_type_config["cdc_mode"] = "streaming"
+                update_fields.append("sync_type_config")
+
+            schema.save(update_fields=update_fields)
 
     await _update()
 

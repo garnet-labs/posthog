@@ -8,7 +8,7 @@ from posthog.kafka_client.client import _KafkaProducer
 from posthog.temporal.data_imports.pipelines.pipeline.typings import PartitionFormat, PartitionMode
 from posthog.utils import SingletonDecorator
 
-SyncTypeLiteral = Literal["full_refresh", "incremental", "append"]
+SyncTypeLiteral = Literal["full_refresh", "incremental", "append", "cdc"]
 
 _WarpStreamKafkaProducer = SingletonDecorator(_KafkaProducer)
 

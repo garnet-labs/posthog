@@ -682,6 +682,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         incremental_field_type: currentSyncMethodModalSchema.incremental_field_type ?? null,
                         incremental_available: schemaIncrementalFields.incremental_available,
                         append_available: schemaIncrementalFields.append_available,
+                        cdc_available: schemaIncrementalFields.cdc_available,
                         incremental_fields: schemaIncrementalFields.incremental_fields,
                         supports_webhooks: schemaIncrementalFields?.supports_webhooks ?? false,
                     }}
@@ -690,12 +691,13 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         closeSyncMethodModal()
                     }}
                     onSave={(syncType, incrementalField, incrementalFieldType) => {
+                        const noIncrementalField = syncType === 'full_refresh' || syncType === 'cdc'
                         updateSchema({
                             ...currentSyncMethodModalSchema,
                             should_sync: true,
                             sync_type: syncType,
-                            incremental_field: syncType === 'full_refresh' ? null : incrementalField,
-                            incremental_field_type: syncType === 'full_refresh' ? null : incrementalFieldType,
+                            incremental_field: noIncrementalField ? null : incrementalField,
+                            incremental_field_type: noIncrementalField ? null : incrementalFieldType,
                             sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
                         })
                     }}

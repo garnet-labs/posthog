@@ -1,0 +1,164 @@
+"""Replication slot and publication lifecycle management for PostgreSQL CDC."""
+
+from __future__ import annotations
+
+import logging
+
+import psycopg
+from psycopg import sql
+
+logger = logging.getLogger(__name__)
+
+
+def create_slot_and_publication(
+    conn: psycopg.Connection,
+    slot_name: str,
+    pub_name: str,
+    schema: str,
+    tables: list[str],
+) -> str:
+    """Create a publication and replication slot.
+
+    Returns the consistent_point LSN from slot creation.
+    """
+    with conn.cursor() as cur:
+        if tables:
+            table_list = sql.SQL(", ").join(
+                sql.SQL("{}.{}").format(sql.Identifier(schema), sql.Identifier(t)) for t in tables
+            )
+            cur.execute(
+                sql.SQL("CREATE PUBLICATION {} FOR TABLE {} WITH (publish_via_partition_root = true)").format(
+                    sql.Identifier(pub_name),
+                    table_list,
+                )
+            )
+        else:
+            # Empty publication — tables added later per-schema
+            cur.execute(
+                sql.SQL("CREATE PUBLICATION {} FOR ALL TABLES WITH (publish_via_partition_root = true)").format(
+                    sql.Identifier(pub_name),
+                )
+            )
+
+        cur.execute(
+            sql.SQL("SELECT lsn FROM pg_create_logical_replication_slot({}, 'pgoutput')").format(
+                sql.Literal(slot_name),
+            )
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError(f"pg_create_logical_replication_slot returned no result for slot '{slot_name}'")
+
+        consistent_point: str = row[0]
+        conn.commit()
+
+    logger.info(
+        "Created publication '%s' and slot '%s' at LSN %s",
+        pub_name,
+        slot_name,
+        consistent_point,
+    )
+    return consistent_point
+
+
+def drop_slot_and_publication(
+    conn: psycopg.Connection,
+    slot_name: str,
+    pub_name: str,
+) -> None:
+    """Drop a replication slot and publication. Best-effort — logs and continues on errors."""
+    with conn.cursor() as cur:
+        try:
+            cur.execute(
+                sql.SQL("SELECT pg_drop_replication_slot({})").format(sql.Literal(slot_name)),
+            )
+            conn.commit()
+            logger.info("Dropped replication slot '%s'", slot_name)
+        except psycopg.errors.UndefinedObject:
+            conn.rollback()
+            logger.info("Replication slot '%s' does not exist, skipping drop", slot_name)
+        except Exception:
+            conn.rollback()
+            logger.exception("Failed to drop replication slot '%s'", slot_name)
+
+        try:
+            cur.execute(
+                sql.SQL("DROP PUBLICATION IF EXISTS {}").format(sql.Identifier(pub_name)),
+            )
+            conn.commit()
+            logger.info("Dropped publication '%s'", pub_name)
+        except Exception:
+            conn.rollback()
+            logger.exception("Failed to drop publication '%s'", pub_name)
+
+
+def add_table_to_publication(
+    conn: psycopg.Connection,
+    pub_name: str,
+    schema: str,
+    table: str,
+) -> None:
+    """Add a table to an existing publication."""
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("ALTER PUBLICATION {} ADD TABLE {}.{}").format(
+                sql.Identifier(pub_name),
+                sql.Identifier(schema),
+                sql.Identifier(table),
+            )
+        )
+        conn.commit()
+
+    logger.info("Added table %s.%s to publication '%s'", schema, table, pub_name)
+
+
+def remove_table_from_publication(
+    conn: psycopg.Connection,
+    pub_name: str,
+    schema: str,
+    table: str,
+) -> None:
+    """Remove a table from an existing publication."""
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("ALTER PUBLICATION {} DROP TABLE {}.{}").format(
+                sql.Identifier(pub_name),
+                sql.Identifier(schema),
+                sql.Identifier(table),
+            )
+        )
+        conn.commit()
+
+    logger.info("Removed table %s.%s from publication '%s'", schema, table, pub_name)
+
+
+def get_slot_lag_bytes(conn: psycopg.Connection, slot_name: str) -> int | None:
+    """Get the WAL lag in bytes for a replication slot.
+
+    Returns None if the slot doesn't exist or has no confirmed_flush_lsn.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                "SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn)::bigint "
+                "FROM pg_replication_slots WHERE slot_name = {}"
+            ).format(sql.Literal(slot_name))
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return int(row[0])
+
+
+def slot_exists(conn: psycopg.Connection, slot_name: str) -> bool:
+    """Check if a replication slot exists."""
+    with conn.cursor() as cur:
+        cur.execute(sql.SQL("SELECT 1 FROM pg_replication_slots WHERE slot_name = {}").format(sql.Literal(slot_name)))
+        return cur.fetchone() is not None
+
+
+def publication_exists(conn: psycopg.Connection, pub_name: str) -> bool:
+    """Check if a publication exists."""
+    with conn.cursor() as cur:
+        cur.execute(sql.SQL("SELECT 1 FROM pg_publication WHERE pubname = {}").format(sql.Literal(pub_name)))
+        return cur.fetchone() is not None
