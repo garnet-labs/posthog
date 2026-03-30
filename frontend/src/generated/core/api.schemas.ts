@@ -1604,6 +1604,7 @@ export interface OrganizationApi {
      * @nullable
      */
     readonly is_not_active_reason: string | null
+    readonly usage: unknown | null
 }
 
 /**

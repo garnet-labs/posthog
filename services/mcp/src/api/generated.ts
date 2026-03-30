@@ -18522,6 +18522,7 @@ export namespace Schemas {
        * @nullable
        */
       readonly is_not_active_reason: string | null;
+      readonly usage: unknown | null;
     }
 
     /**
@@ -23263,6 +23264,7 @@ export namespace Schemas {
        * @nullable
        */
       readonly is_not_active_reason?: string | null;
+      readonly usage?: unknown | null;
     }
 
     export interface PatchedOrganizationDomain {
