@@ -164,7 +164,10 @@ PERSONS_COLUMNS = """
     pd.version AS person_distinct_id_version,
     p.version AS person_version,
     toDateTime64(p._timestamp, 6) AS _timestamp,
-    now64(6) AS _inserted_at
+    now64(6) AS _inserted_at,
+    toYear(p._timestamp) AS year,
+    toMonth(p._timestamp) AS month,
+    toDayOfMonth(p._timestamp) AS day
 """
 
 # Expected columns in the duckling's persons table for schema validation
@@ -179,6 +182,9 @@ EXPECTED_DUCKLAKE_PERSONS_COLUMNS = {
     "person_version",
     "_timestamp",
     "_inserted_at",
+    "year",
+    "month",
+    "day",
 }
 
 duckling_events_partitions_def = DynamicPartitionsDefinition(name="duckling_events_backfill")
@@ -233,7 +239,10 @@ CREATE TABLE IF NOT EXISTS {catalog}.posthog.persons (
     person_distinct_id_version BIGINT,
     person_version UBIGINT,
     _timestamp TIMESTAMPTZ,
-    _inserted_at TIMESTAMPTZ
+    _inserted_at TIMESTAMPTZ,
+    year INTEGER,
+    month INTEGER,
+    day INTEGER
 )
 """
 
@@ -458,6 +467,35 @@ def table_exists(
         return False
 
 
+def _ensure_partition_columns_exist(
+    conn: duckdb.DuckDBPyConnection,
+    alias: str,
+    table: str,
+    context: AssetExecutionContext,
+) -> None:
+    """Add year/month/day partition columns to an existing table if missing.
+
+    Existing tables created before partition columns were added to the DDL
+    will lack these columns. This adds them via ALTER TABLE so that
+    column-based partitioning (year, month, day) can be set.
+    """
+    _validate_identifier(alias)
+    _validate_identifier(table)
+
+    result = conn.execute(f"DESCRIBE {alias}.posthog.{table}").fetchall()
+    existing_columns = {row[0] for row in result}
+
+    for col in ("year", "month", "day"):
+        if col not in existing_columns:
+            context.log.info(f"Adding missing partition column '{col}' to {table} table")
+            conn.execute(f"ALTER TABLE {alias}.posthog.{table} ADD COLUMN {col} INTEGER")
+            logger.info(
+                "duckling_partition_column_added",
+                table=table,
+                column=col,
+            )
+
+
 def _set_table_partitioning(
     conn: duckdb.DuckDBPyConnection,
     alias: str,
@@ -534,6 +572,8 @@ def ensure_events_table_exists(
 
         if table_exists(conn, alias, "posthog", "events"):
             context.log.info("Events table already exists in duckling catalog")
+            # Existing tables may lack year/month/day columns — add them if missing
+            _ensure_partition_columns_exist(conn, alias, "events", context)
             # Ensure partitioning is set even on existing tables (idempotent)
             _set_table_partitioning(conn, alias, "events", "year, month, day", context, catalog.team_id)
             return False
@@ -549,6 +589,8 @@ def ensure_events_table_exists(
             # Check if this was a race condition (another worker created the table)
             if table_exists(conn, alias, "posthog", "events"):
                 context.log.info("Events table was created by another worker")
+                # Existing tables may lack year/month/day columns — add them if missing
+                _ensure_partition_columns_exist(conn, alias, "events", context)
                 # Ensure partitioning is set even when another worker created the table
                 _set_table_partitioning(conn, alias, "events", "year, month, day", context, catalog.team_id)
                 return False
@@ -597,12 +639,14 @@ def ensure_persons_table_exists(
 
         if table_exists(conn, alias, "posthog", "persons"):
             context.log.info("Persons table already exists in duckling catalog")
+            # Existing tables may lack year/month/day columns — add them if missing
+            _ensure_partition_columns_exist(conn, alias, "persons", context)
             # Ensure partitioning is set even on existing tables (idempotent)
             _set_table_partitioning(
                 conn,
                 alias,
                 "persons",
-                "year(_timestamp), month(_timestamp)",
+                "year, month, day",
                 context,
                 catalog.team_id,
             )
@@ -619,12 +663,14 @@ def ensure_persons_table_exists(
             # Check if this was a race condition (another worker created the table)
             if table_exists(conn, alias, "posthog", "persons"):
                 context.log.info("Persons table was created by another worker")
+                # Existing tables may lack year/month/day columns — add them if missing
+                _ensure_partition_columns_exist(conn, alias, "persons", context)
                 # Ensure partitioning is set even when another worker created the table
                 _set_table_partitioning(
                     conn,
                     alias,
                     "persons",
-                    "year(_timestamp), month(_timestamp)",
+                    "year, month, day",
                     context,
                     catalog.team_id,
                 )
@@ -640,7 +686,7 @@ def ensure_persons_table_exists(
             conn,
             alias,
             "persons",
-            "year(_timestamp), month(_timestamp)",
+            "year, month, day",
             context,
             catalog.team_id,
         )

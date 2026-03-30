@@ -16,6 +16,7 @@ from posthog.dags.events_backfill_to_duckling import (
     PERSONS_COLUMNS,
     PERSONS_TABLE_DDL,
     _connect_duckdb,
+    _ensure_partition_columns_exist,
     _get_cluster,
     _is_transaction_conflict,
     _set_table_partitioning,
@@ -309,41 +310,23 @@ class TestSetTablePartitioning:
         conn.execute("INSTALL ducklake; LOAD ducklake;")
         conn.execute("ATTACH ':memory:' AS test_catalog (TYPE DUCKLAKE, DATA_PATH ':memory:')")
         conn.execute("CREATE SCHEMA test_catalog.posthog")
-        conn.execute("CREATE TABLE test_catalog.posthog.events (timestamp TIMESTAMP, event VARCHAR)")
+        conn.execute(
+            "CREATE TABLE test_catalog.posthog.events "
+            "(timestamp TIMESTAMP, event VARCHAR, year INTEGER, month INTEGER, day INTEGER)"
+        )
 
         mock_context = MagicMock()
 
         # First call should succeed
-        result1 = _set_table_partitioning(
-            conn,
-            "test_catalog",
-            "events",
-            "year(timestamp), month(timestamp)",
-            mock_context,
-            team_id=123,
-        )
+        result1 = _set_table_partitioning(conn, "test_catalog", "events", "year, month, day", mock_context, team_id=123)
         assert result1 is True
 
         # Second call with same keys should also succeed (idempotent)
-        result2 = _set_table_partitioning(
-            conn,
-            "test_catalog",
-            "events",
-            "year(timestamp), month(timestamp)",
-            mock_context,
-            team_id=123,
-        )
+        result2 = _set_table_partitioning(conn, "test_catalog", "events", "year, month, day", mock_context, team_id=123)
         assert result2 is True
 
         # Third call should also succeed
-        result3 = _set_table_partitioning(
-            conn,
-            "test_catalog",
-            "events",
-            "year(timestamp), month(timestamp)",
-            mock_context,
-            team_id=123,
-        )
+        result3 = _set_table_partitioning(conn, "test_catalog", "events", "year, month, day", mock_context, team_id=123)
         assert result3 is True
 
         conn.close()
@@ -354,18 +337,14 @@ class TestSetTablePartitioning:
         conn.execute("INSTALL ducklake; LOAD ducklake;")
         conn.execute("ATTACH ':memory:' AS test_catalog (TYPE DUCKLAKE, DATA_PATH ':memory:')")
         conn.execute("CREATE SCHEMA test_catalog.posthog")
-        conn.execute("CREATE TABLE test_catalog.posthog.events (timestamp TIMESTAMP, event VARCHAR)")
+        conn.execute(
+            "CREATE TABLE test_catalog.posthog.events "
+            "(timestamp TIMESTAMP, event VARCHAR, year INTEGER, month INTEGER, day INTEGER)"
+        )
 
         mock_context = MagicMock()
 
-        result = _set_table_partitioning(
-            conn,
-            "test_catalog",
-            "events",
-            "year(timestamp), month(timestamp)",
-            mock_context,
-            team_id=123,
-        )
+        result = _set_table_partitioning(conn, "test_catalog", "events", "year, month, day", mock_context, team_id=123)
 
         assert result is True
         mock_context.log.info.assert_any_call("Setting partitioning on events table...")
@@ -377,19 +356,14 @@ class TestSetTablePartitioning:
         conn = duckdb.connect()
         # Don't load ducklake - table won't support SET PARTITIONED BY
         conn.execute("CREATE SCHEMA posthog")
-        conn.execute("CREATE TABLE posthog.events (timestamp TIMESTAMP, event VARCHAR)")
+        conn.execute(
+            "CREATE TABLE posthog.events (timestamp TIMESTAMP, event VARCHAR, year INTEGER, month INTEGER, day INTEGER)"
+        )
 
         mock_context = MagicMock()
 
         # This should fail because regular DuckDB tables don't support SET PARTITIONED BY
-        result = _set_table_partitioning(
-            conn,
-            "memory",
-            "events",
-            "year(timestamp), month(timestamp)",
-            mock_context,
-            team_id=123,
-        )
+        result = _set_table_partitioning(conn, "memory", "events", "year, month, day", mock_context, team_id=123)
 
         assert result is False
         mock_context.log.warning.assert_called()
@@ -401,26 +375,56 @@ class TestSetTablePartitioning:
         mock_context = MagicMock()
 
         with pytest.raises(ValueError) as exc_info:
-            _set_table_partitioning(
-                conn,
-                "test; DROP TABLE",
-                "events",
-                "year(timestamp)",
-                mock_context,
-                team_id=123,
-            )
+            _set_table_partitioning(conn, "test; DROP TABLE", "events", "year, month, day", mock_context, team_id=123)
         assert "Invalid SQL identifier" in str(exc_info.value)
 
         with pytest.raises(ValueError) as exc_info:
-            _set_table_partitioning(
-                conn,
-                "test_catalog",
-                "events'; --",
-                "year(timestamp)",
-                mock_context,
-                team_id=123,
-            )
+            _set_table_partitioning(conn, "test_catalog", "events'; --", "year, month, day", mock_context, team_id=123)
         assert "Invalid SQL identifier" in str(exc_info.value)
+
+        conn.close()
+
+
+class TestEnsurePartitionColumnsExist:
+    def test_adds_missing_columns(self):
+        conn = duckdb.connect()
+        conn.execute("INSTALL ducklake; LOAD ducklake;")
+        conn.execute("ATTACH ':memory:' AS test_catalog (TYPE DUCKLAKE, DATA_PATH ':memory:')")
+        conn.execute("CREATE SCHEMA test_catalog.posthog")
+        conn.execute("CREATE TABLE test_catalog.posthog.events (timestamp TIMESTAMP, event VARCHAR)")
+
+        mock_context = MagicMock()
+
+        # Table starts without year/month/day columns
+        cols_before = {row[0] for row in conn.execute("DESCRIBE test_catalog.posthog.events").fetchall()}
+        assert "year" not in cols_before
+
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+
+        cols_after = {row[0] for row in conn.execute("DESCRIBE test_catalog.posthog.events").fetchall()}
+        assert {"year", "month", "day"}.issubset(cols_after)
+
+        # Calling again is safe (columns already exist)
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+        conn.close()
+
+    def test_noop_when_columns_exist(self):
+        conn = duckdb.connect()
+        conn.execute("INSTALL ducklake; LOAD ducklake;")
+        conn.execute("ATTACH ':memory:' AS test_catalog (TYPE DUCKLAKE, DATA_PATH ':memory:')")
+        conn.execute("CREATE SCHEMA test_catalog.posthog")
+        conn.execute(
+            "CREATE TABLE test_catalog.posthog.events "
+            "(timestamp TIMESTAMP, event VARCHAR, year INTEGER, month INTEGER, day INTEGER)"
+        )
+
+        mock_context = MagicMock()
+
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+
+        # No ALTER TABLE should have been logged
+        for call in mock_context.log.info.call_args_list:
+            assert "Adding missing partition column" not in str(call)
 
         conn.close()
 
