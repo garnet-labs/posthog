@@ -156,6 +156,12 @@ export function generateCleanupSQL(ghostRunIds: string[]): string {
         return '-- No ghost runs to clean up'
     }
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const invalid = ghostRunIds.filter((id) => !uuidRegex.test(id))
+    if (invalid.length > 0) {
+        throw new Error(`Non-UUID ghost run IDs detected, refusing to generate SQL: ${invalid.slice(0, 5).join(', ')}`)
+    }
+
     // Batch into chunks of 1000 to avoid overly large IN clauses
     const chunks: string[][] = []
     for (let i = 0; i < ghostRunIds.length; i += 1000) {
@@ -202,6 +208,19 @@ export function parseCSV(csv: string): LogEntry[] {
         return []
     }
 
+    const expectedColumns = ['team_id', 'run_id', 'workflow_id', 'message', 'timestamp']
+    const headerColumns = header.split(',').map((h) => h.trim().toLowerCase())
+    for (const col of expectedColumns) {
+        if (!headerColumns.includes(col)) {
+            throw new Error(`CSV header missing required column '${col}'. Found: ${headerColumns.join(', ')}`)
+        }
+    }
+
+    const colIdx = Object.fromEntries(expectedColumns.map((col) => [col, headerColumns.indexOf(col)])) as Record<
+        string,
+        number
+    >
+
     const entries: LogEntry[] = []
 
     for (let i = 1; i < lines.length; i++) {
@@ -227,13 +246,13 @@ export function parseCSV(csv: string): LogEntry[] {
         }
         fields.push(current.trim())
 
-        if (fields.length >= 5) {
+        if (fields.length >= expectedColumns.length) {
             entries.push({
-                team_id: fields[0].replace(/,/g, ''),
-                run_id: fields[1],
-                workflow_id: fields[2],
-                message: fields[3],
-                timestamp: fields[4],
+                team_id: fields[colIdx['team_id']].replace(/,/g, ''),
+                run_id: fields[colIdx['run_id']],
+                workflow_id: fields[colIdx['workflow_id']],
+                message: fields[colIdx['message']],
+                timestamp: fields[colIdx['timestamp']],
             })
         }
     }
@@ -297,17 +316,16 @@ if (require.main === module) {
     const csvPath = args.find((a) => !a.startsWith('--') && !(teamsIdx !== -1 && a === args[teamsIdx + 1]))
 
     if (!csvPath) {
-        console.log('Usage: npx ts-node cleanup-ghost-runs.ts <csv-file> [--dry-run] [--teams 79155,110739]')
+        console.log('Usage: npx ts-node cleanup-ghost-runs.ts <csv-file> [--dry-run] [--teams <ids>]')
         console.log('')
         console.log('Options:')
         console.log('  --dry-run           Print summary only, do not write SQL files')
         console.log('  --teams 1,2,3       Only process specific team IDs from the CSV')
         console.log('')
-        console.log('Step 1: Run the ClickHouse query to get the data:')
+        console.log('Step 1: Run the ClickHouse query to get the data (all teams):')
         console.log(getClickHouseQuery())
         console.log('')
-        console.log('  Or for specific teams:')
-        console.log(getClickHouseQuery([79155, 110739]))
+        console.log('  Or for specific teams: pass team IDs to getClickHouseQuery([team1, team2])')
         console.log('')
         console.log('Step 2: Save the result as CSV and run this script with the path')
         process.exit(1)

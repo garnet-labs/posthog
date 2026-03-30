@@ -311,12 +311,16 @@ describe('cleanup-ghost-runs', () => {
     })
 
     describe('generateCleanupSQL', () => {
-        it('generates SQL for ghost run IDs', () => {
-            const sql = generateCleanupSQL(['run-1', 'run-2', 'run-3'])
+        const uuid1 = '019d0523-b5a4-0000-fff1-1a73f4b71910'
+        const uuid2 = '019d0581-c0a6-0000-dac3-748c0751c5e0'
+        const uuid3 = '019d0430-c587-0000-31ef-c4204a48748a'
 
-            expect(sql).toContain("'run-1'")
-            expect(sql).toContain("'run-2'")
-            expect(sql).toContain("'run-3'")
+        it('generates SQL for ghost run IDs', () => {
+            const sql = generateCleanupSQL([uuid1, uuid2, uuid3])
+
+            expect(sql).toContain(`'${uuid1}'`)
+            expect(sql).toContain(`'${uuid2}'`)
+            expect(sql).toContain(`'${uuid3}'`)
             expect(sql).toContain("state = 'completed'")
             expect(sql).toContain("AND state = 'available'")
             expect(sql).toContain('Total ghost runs: 3')
@@ -328,8 +332,12 @@ describe('cleanup-ghost-runs', () => {
         })
 
         it('only updates available jobs', () => {
-            const sql = generateCleanupSQL(['run-1'])
+            const sql = generateCleanupSQL([uuid1])
             expect(sql).toContain("AND state = 'available'")
+        })
+
+        it('rejects non-UUID IDs', () => {
+            expect(() => generateCleanupSQL(['not-a-uuid'])).toThrow('Non-UUID ghost run IDs detected')
         })
     })
 })
