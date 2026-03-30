@@ -280,8 +280,7 @@ export function LemonTable<T extends Record<string, any>>({
         >
             <ScrollableShadows
                 innerClassName={hideScrollbar ? 'hide-scrollbar' : undefined}
-                direction="horizontal"
-                constrainToDirection={!allowContentScroll}
+                direction={allowContentScroll ? 'both' : 'horizontal'}
                 scrollRef={scrollRef}
             >
                 <div className="LemonTable__content">

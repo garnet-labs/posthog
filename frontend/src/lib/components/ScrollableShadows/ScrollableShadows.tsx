@@ -6,7 +6,7 @@ import React, { CSSProperties, MutableRefObject } from 'react'
 
 export type ScrollableShadowsProps = {
     children: React.ReactNode
-    direction: 'horizontal' | 'vertical'
+    direction: 'horizontal' | 'vertical' | 'both'
     className?: string
     innerClassName?: string
     scrollRef?: MutableRefObject<HTMLDivElement | null>
@@ -55,7 +55,8 @@ export const ScrollableShadows = React.forwardRef<HTMLDivElement, ScrollableShad
             ref={ref}
             className={clsx(
                 'ScrollableShadows',
-                `ScrollableShadows--${direction}`,
+                (direction === 'horizontal' || direction === 'both') && 'ScrollableShadows--horizontal',
+                (direction === 'vertical' || direction === 'both') && 'ScrollableShadows--vertical',
                 hideShadows && 'ScrollableShadows--hide-shadows',
                 hideScrollbars && 'ScrollableShadows--hide-scrollbars',
                 className
@@ -78,12 +79,14 @@ export const ScrollableShadows = React.forwardRef<HTMLDivElement, ScrollableShad
                 style={
                     disableScroll
                         ? { overflow: 'hidden' }
-                        : constrainToDirection
-                          ? {
-                                overflowX: direction === 'horizontal' ? undefined : 'hidden',
-                                overflowY: direction === 'vertical' ? undefined : 'hidden',
-                            }
-                          : undefined
+                        : direction === 'both'
+                          ? undefined
+                          : constrainToDirection
+                            ? {
+                                  overflowX: direction === 'horizontal' ? undefined : 'hidden',
+                                  overflowY: direction === 'vertical' ? undefined : 'hidden',
+                              }
+                            : undefined
                 }
             >
                 <ScrollArea.Content className="min-w-0">{children}</ScrollArea.Content>
