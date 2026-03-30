@@ -1,7 +1,8 @@
-import os
 import json
+import os
 import socket
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, OperationalError, transaction
@@ -9,9 +10,13 @@ from django.utils import timezone
 
 import structlog
 from celery import current_task
-from croniter import croniter  # type: ignore[import-untyped]
 from dateutil.relativedelta import relativedelta
 from prometheus_client import Counter
+
+if TYPE_CHECKING:
+    croniter: Any
+else:
+    from croniter import croniter
 
 from posthog.exceptions_capture import capture_exception
 from posthog.models import FeatureFlag, ScheduledChange
