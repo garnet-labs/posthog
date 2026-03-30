@@ -130,7 +130,10 @@ EVENTS_COLUMNS = """
     group4_created_at,
     person_mode,
     historical_migration,
-    NOW() as _inserted_at
+    NOW() as _inserted_at,
+    toYear(timestamp) as year,
+    toMonth(timestamp) as month,
+    toDayOfMonth(timestamp) as day
 """
 
 # Expected columns in the DuckLake events table (for schema validation)
@@ -160,6 +163,9 @@ EXPECTED_DUCKLAKE_COLUMNS = {
     "person_mode",
     "historical_migration",
     "_inserted_at",
+    "year",
+    "month",
+    "day",
 }
 
 

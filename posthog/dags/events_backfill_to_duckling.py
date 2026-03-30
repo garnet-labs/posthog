@@ -131,7 +131,10 @@ EVENTS_COLUMNS = """
     group4_created_at,
     person_mode,
     historical_migration,
-    now64(6) as _inserted_at
+    now64(6) as _inserted_at,
+    toYear(timestamp) as year,
+    toMonth(timestamp) as month,
+    toDayOfMonth(timestamp) as day
 """
 
 BACKFILL_EVENTS_S3_PREFIX = "backfill/events"
@@ -209,7 +212,10 @@ CREATE TABLE IF NOT EXISTS {catalog}.posthog.events (
     group4_created_at TIMESTAMPTZ,
     person_mode VARCHAR,
     historical_migration BOOLEAN,
-    _inserted_at TIMESTAMPTZ
+    _inserted_at TIMESTAMPTZ,
+    year INTEGER,
+    month INTEGER,
+    day INTEGER
 )
 """
 
@@ -469,7 +475,7 @@ def _set_table_partitioning(
         conn: DuckDB connection with catalog attached.
         alias: Catalog alias.
         table: Table name (must be alphanumeric/underscore only).
-        partition_expr: Partition expression (e.g., "year(timestamp), month(timestamp), day(timestamp)").
+        partition_expr: Partition expression (e.g., "year, month, day").
         context: Dagster asset execution context.
         team_id: Team ID for logging.
 
@@ -530,7 +536,7 @@ def ensure_events_table_exists(
             context.log.info("Events table already exists in duckling catalog")
             # Ensure partitioning is set even on existing tables (idempotent)
             _set_table_partitioning(
-                conn, alias, "events", "year(timestamp), month(timestamp), day(timestamp)", context, catalog.team_id
+                conn, alias, "events", "year, month, day", context, catalog.team_id
             )
             return False
 
@@ -547,7 +553,7 @@ def ensure_events_table_exists(
                 context.log.info("Events table was created by another worker")
                 # Ensure partitioning is set even when another worker created the table
                 _set_table_partitioning(
-                    conn, alias, "events", "year(timestamp), month(timestamp), day(timestamp)", context, catalog.team_id
+                    conn, alias, "events", "year, month, day", context, catalog.team_id
                 )
                 return False
             # Real error - log and re-raise
@@ -558,7 +564,7 @@ def ensure_events_table_exists(
 
         # Set partitioning by year/month/day for efficient querying
         _set_table_partitioning(
-            conn, alias, "events", "year(timestamp), month(timestamp), day(timestamp)", context, catalog.team_id
+            conn, alias, "events", "year, month, day", context, catalog.team_id
         )
 
         logger.info(
