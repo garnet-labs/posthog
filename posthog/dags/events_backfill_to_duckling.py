@@ -933,16 +933,19 @@ def delete_events_partition_data(
     alias = "ducklake"
     date_str = partition_date.strftime("%Y-%m-%d")
 
-    # Range predicate enables DuckLake partition pruning.
-    # The table is partitioned by year(timestamp), month(timestamp), day(timestamp).
-    # A half-open range [start_of_day, start_of_next_day) allows DuckDB to prune
-    # to a single day's partition instead of scanning all data files.
+    # The table is partitioned by explicit year, month, day columns.
+    # Include partition column predicates so DuckLake can prune partitions,
+    # plus a timestamp range for correctness on any legacy rows without
+    # partition columns populated.
     next_date_str = (partition_date + timedelta(days=1)).strftime("%Y-%m-%d")
     delete_sql = f"""
     DELETE FROM {alias}.posthog.events
     WHERE team_id = $1
-      AND timestamp >= $2
-      AND timestamp < $3
+      AND year = $2
+      AND month = $3
+      AND day = $4
+      AND timestamp >= $5
+      AND timestamp < $6
     """
 
     last_exception: Exception | None = None
@@ -952,7 +955,10 @@ def delete_events_partition_data(
             configure_cross_account_connection(conn, destinations=[destination])
             attach_catalog(conn, catalog_config, alias=alias)
 
-            result = conn.execute(delete_sql, [team_id, date_str, next_date_str]).fetchone()
+            result = conn.execute(
+                delete_sql,
+                [team_id, partition_date.year, partition_date.month, partition_date.day, date_str, next_date_str],
+            ).fetchone()
             deleted_count = result[0] if result else 0
 
             if deleted_count > 0:
@@ -1037,10 +1043,20 @@ def delete_persons_partition_data(
         delete_sql = f"""
         DELETE FROM {alias}.posthog.persons
         WHERE team_id = $1
-          AND _timestamp >= $2
-          AND _timestamp < $3
+          AND year = $2
+          AND month = $3
+          AND day = $4
+          AND _timestamp >= $5
+          AND _timestamp < $6
         """
-        delete_params = [team_id, date_str, next_date_str]
+        delete_params = [
+            team_id,
+            partition_date.year,
+            partition_date.month,
+            partition_date.day,
+            date_str,
+            next_date_str,
+        ]
 
     last_exception: Exception | None = None
     for attempt in range(MAX_RETRY_ATTEMPTS):

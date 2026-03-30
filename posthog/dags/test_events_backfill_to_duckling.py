@@ -533,16 +533,26 @@ class TestDeleteRangePredicate:
     def test_range_predicate_deletes_correct_rows(self, timestamps, target_date, expected_deleted, expected_remaining):
         conn = duckdb.connect()
         try:
-            conn.execute("CREATE TABLE events (team_id INTEGER, timestamp TIMESTAMPTZ)")
+            conn.execute(
+                "CREATE TABLE events (team_id INTEGER, timestamp TIMESTAMPTZ, year INTEGER, month INTEGER, day INTEGER)"
+            )
             for ts in timestamps:
-                conn.execute("INSERT INTO events VALUES (1, ?)", [ts])
+                dt = (
+                    datetime.strptime(ts, "%Y-%m-%d %H:%M:%S.%f")
+                    if "." in ts
+                    else datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                )
+                conn.execute(
+                    "INSERT INTO events VALUES (1, ?, ?, ?, ?)",
+                    [ts, dt.year, dt.month, dt.day],
+                )
 
-            date_str = target_date
-            next_date_str = (datetime.strptime(target_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+            next_date_str = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
             result = conn.execute(
-                "DELETE FROM events WHERE team_id = $1 AND timestamp >= $2 AND timestamp < $3",
-                [1, date_str, next_date_str],
+                "DELETE FROM events WHERE team_id = $1 AND year = $2 AND month = $3 AND day = $4 AND timestamp >= $5 AND timestamp < $6",
+                [1, target_dt.year, target_dt.month, target_dt.day, target_date, next_date_str],
             ).fetchone()
 
             deleted = result[0] if result else 0
