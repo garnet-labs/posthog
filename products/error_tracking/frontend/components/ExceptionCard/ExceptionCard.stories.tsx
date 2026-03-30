@@ -152,6 +152,38 @@ ExceptionCardSessionTimelineWithMalformedSteps.parameters = sessionTimelineParam
     ])
 )
 
+////////////////////// No session ID
+
+const NO_SESSION_STEPS = [
+    {
+        name: 'Button clicked',
+        type: 'ui.interaction',
+        offset_ms: -2500,
+        properties: { selector: '#submit', text: 'Submit' },
+    },
+    {
+        name: 'API request started',
+        type: 'http',
+        offset_ms: -1200,
+        properties: { method: 'POST', path: '/api/demo' },
+    },
+    {
+        name: 'State updated',
+        offset_ms: -800,
+        properties: { from: 'idle', to: 'submitting' },
+    },
+]
+
+export function ExceptionCardNoSessionWithSteps(): JSX.Element {
+    const event = buildSessionTimelineEvent(NO_SESSION_STEPS, { sessionId: null })
+    return <ExceptionCardSessionTimelineStory event={event} />
+}
+
+export function ExceptionCardNoSessionWithoutSteps(): JSX.Element {
+    const event = buildSessionTimelineEvent(undefined, { sessionId: null })
+    return <ExceptionCardSessionTimelineStory event={event} />
+}
+
 //////////////////// Utils
 
 function ExceptionCardSessionTimelineStory({ event }: { event: ErrorEventType }): JSX.Element {
@@ -235,10 +267,16 @@ function sessionTimelineParameters(event: ErrorEventType): Record<string, any> {
     }
 }
 
-function buildSessionTimelineEvent(exceptionSteps?: any[]): ErrorEventType {
+function buildSessionTimelineEvent(
+    exceptionSteps?: any[],
+    { sessionId = 'session-with-steps' }: { sessionId?: string | null } = {}
+): ErrorEventType {
+    const { $session_id: _dropped, ...baseWithoutSession } = (TEST_EVENTS['javascript_resolved'] as ErrorEventType)
+        .properties as any
+
     const baseProperties = {
-        ...(TEST_EVENTS['javascript_resolved'] as ErrorEventType).properties,
-        $session_id: 'session-with-steps',
+        ...baseWithoutSession,
+        ...(sessionId != null ? { $session_id: sessionId } : {}),
         $lib: 'web',
     }
     return {
