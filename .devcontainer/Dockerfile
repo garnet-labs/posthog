@@ -4,6 +4,12 @@
 # Docker-in-Docker. This Dockerfile installs system deps, uv, Node, and
 # pre-installs Python + JS dependencies for faster startup.
 
+# Builder stage — compile sqlx-cli once, cached as a Docker layer
+FROM rust:1.91 AS sqlx-builder
+RUN cargo install sqlx-cli@0.8.3 --no-default-features --features postgres --locked \
+    && strip /usr/local/cargo/bin/sqlx
+
+# sqlx-cli — pre-compiled in builder stage to avoid cargo install during prebuild
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-22.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -53,6 +59,8 @@ WORKDIR /workspaces/posthog
 # Pre-install Python dependencies (cached layer — rebuilds only when lockfile changes)
 COPY pyproject.toml uv.lock ./
 RUN uv sync
+
+COPY --from=sqlx-builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
 
 # Node dependencies are installed in on-create.sh (pnpm workspace
 # requires the full source tree with all workspace package.json files)
