@@ -749,6 +749,13 @@ def _restore_and_start(
     else:
         warn("ClickHouse restore failed — migrations will recreate tables.")
 
+    # Drop the cached DuckLake catalog — the extension version in the cache
+    # may not match the branch's extension, causing check_ducklake_up to
+    # spin forever. It gets recreated automatically on first boot.
+    db = f"{project}-db-1"
+    run(["docker", "exec", db, "psql", "-U", "posthog", "-c", "DROP DATABASE IF EXISTS ducklake"],
+        check=False, capture=True)
+
     # Now start the app + proxy on top of restored infra
     info("Building and starting app...")
     compose(project, port, worktree_path, "up", "-d", "--build", capture=True)
