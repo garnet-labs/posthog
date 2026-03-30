@@ -2,6 +2,7 @@ from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
+from posthog.hogql_queries.ai.event_taxonomy_query_runner import AI_LARGE_PROPERTIES_BY_EVENT
 from posthog.models import Team
 
 from ee.hogai.chat_agent.query_planner.toolkit import TaxonomyAgentToolkit
@@ -80,8 +81,6 @@ class ReadTaxonomyToolArgs(BaseModel):
 
 def _is_excluded_ai_property(event_name: str, property_name: str) -> bool:
     """Check if a property is excluded from scanning for the given AI event."""
-    from posthog.hogql_queries.ai.event_taxonomy_query_runner import AI_LARGE_PROPERTIES_BY_EVENT
-
     return property_name in AI_LARGE_PROPERTIES_BY_EVENT.get(event_name, ())
 
 

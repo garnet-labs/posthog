@@ -17,7 +17,7 @@ from posthog.hogql.database.schema.channel_type import DEFAULT_CHANNEL_TYPES
 from posthog.clickhouse.query_tagging import Product, tags_context
 from posthog.event_usage import EventSource
 from posthog.hogql_queries.ai.actors_property_taxonomy_query_runner import ActorsPropertyTaxonomyQueryRunner
-from posthog.hogql_queries.ai.event_taxonomy_query_runner import EventTaxonomyQueryRunner
+from posthog.hogql_queries.ai.event_taxonomy_query_runner import AI_LARGE_PROPERTIES_BY_EVENT, EventTaxonomyQueryRunner
 from posthog.hogql_queries.query_runner import ExecutionMode
 from posthog.models import Action, Team
 from posthog.models.group_type_mapping import GroupTypeMapping
@@ -281,8 +281,6 @@ class TaxonomyAgentToolkit:
         return prop_values
 
     def retrieve_event_or_action_property_values(self, event_name_or_action_id: str | int, property_name: str) -> str:
-        from posthog.hogql_queries.ai.event_taxonomy_query_runner import AI_LARGE_PROPERTIES_BY_EVENT
-
         if isinstance(event_name_or_action_id, str):
             excluded = AI_LARGE_PROPERTIES_BY_EVENT.get(event_name_or_action_id, ())
             if property_name in excluded:
