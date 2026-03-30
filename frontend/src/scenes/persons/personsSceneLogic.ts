@@ -14,7 +14,7 @@ import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
 import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
-import { DataTableNode, NodeKind, ProductKey } from '~/queries/schema/schema-general'
+import { ActorsQuery, DataTableNode, NodeKind, ProductKey } from '~/queries/schema/schema-general'
 import { Breadcrumb } from '~/types'
 
 import type { personsSceneLogicType } from './personsSceneLogicType'
@@ -83,9 +83,12 @@ export const personsSceneLogic = kea<personsSceneLogicType>([
         },
         setQuery: async ({ query }, breakpoint) => {
             await breakpoint(500)
-            const searchLength = (query.source as Record<string, any>)?.search?.length ?? 0
-            const filterCount = (query.source as Record<string, any>)?.properties?.length ?? 0
-            eventUsageLogic.actions.reportPersonSearchExecuted(searchLength, filterCount)
+            const source = query.source as ActorsQuery | undefined
+            const searchLength = source?.search?.length ?? 0
+            const filterCount = Array.isArray(source?.properties) ? source.properties.length : 0
+            if (searchLength > 0 || filterCount > 0) {
+                eventUsageLogic.actions.reportPersonSearchExecuted(searchLength, filterCount)
+            }
         },
     }),
 

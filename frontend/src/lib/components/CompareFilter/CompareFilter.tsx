@@ -78,6 +78,10 @@ export function CompareFilter({
             onSelect={(newValue) => {
                 if (newValue === 'compareTo') {
                     updateCompareFilter({ compare: true, compare_to: tentativeCompareTo })
+                    eventUsageLogic.actions.reportInsightComparisonToggled({
+                        enabled: true,
+                        compareTo: tentativeCompareTo,
+                    })
                 }
             }}
             renderButtonContent={(leaf) => {
