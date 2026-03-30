@@ -26,7 +26,7 @@ import {
 import { DataVisualizationNode, InsightVizNode } from '~/queries/schema/schema-general'
 import { QueryContext } from '~/queries/types'
 import { isFunnelsQuery, isHogQLQuery, isInsightVizNode } from '~/queries/utils'
-import { InsightShortId } from '~/types'
+import { ChartDisplayType, InsightShortId } from '~/types'
 
 import { MessageStatus } from '../maxLogic'
 import { visualizationTypeToQuery } from '../utils'
@@ -91,8 +91,10 @@ export const VisualizationArtifactAnswer = React.memo(function VisualizationArti
         return visualizationTypeToQuery(content)
     }, [content])
 
-    // Get the raw query for height calculation
     const rawQuery = content.query
+    const isTableDisplay =
+        isHogQLQuery(rawQuery) ||
+        ('trendsFilter' in rawQuery && rawQuery.trendsFilter?.display === ChartDisplayType.ActionsTable)
 
     if (status !== 'completed') {
         return null
@@ -117,7 +119,12 @@ export const VisualizationArtifactAnswer = React.memo(function VisualizationArti
     return (
         <MessageTemplate type="ai" className="w-full" wrapperClassName="w-full" boxClassName="flex flex-col w-full">
             {!isCollapsed && (
-                <div className={clsx('flex flex-col overflow-auto', isFunnelsQuery(rawQuery) ? 'h-[580px]' : 'h-96')}>
+                <div
+                    className={clsx(
+                        'flex flex-col',
+                        isFunnelsQuery(rawQuery) ? 'max-h-[580px]' : isTableDisplay && 'max-h-96'
+                    )}
+                >
                     <Query query={query} readOnly embedded context={QUERY_CONTEXT_POSTHOG_AI} />
                 </div>
             )}

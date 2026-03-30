@@ -70,6 +70,14 @@
             flex-direction: row;
         }
 
+        .thread & {
+            padding: 0;
+
+            .LineGraph {
+                padding: 0;
+            }
+        }
+
         .InsightVizDisplay__content__left {
             position: relative;
             display: flex;
