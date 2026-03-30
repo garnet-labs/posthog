@@ -60,6 +60,25 @@ async def prep_session_video_asset_activity(
             )
             success = True
             return None
+        # Get session duration from metadata and check minimum threshold
+        team = await Team.objects.aget(id=inputs.team_id)
+        metadata = await database_sync_to_async(SessionReplayEvents().get_metadata)(
+            session_id=inputs.session_id,
+            team=team,
+        )
+        if not metadata:
+            msg = f"No metadata found for session {inputs.session_id}"
+            logger.error(msg, session_id=inputs.session_id, signals_type="session-summaries")
+            raise ValueError(msg)
+        session_duration = metadata["duration"]  # duration is in seconds
+
+        if session_duration < MIN_SESSION_DURATION_FOR_VIDEO_SUMMARY_S:
+            logger.warning(
+                f"Session {inputs.session_id} in team {inputs.team_id} is too short ({session_duration:.2f}s) to summarize, skipping",
+                extra={"session_id": inputs.session_id, "team_id": inputs.team_id, "signals_type": "session-summaries"},
+            )
+            return None
+
         # Check for existing exported asset for this session
         # TODO: Find a way to attach Gemini Files API id to the asset, with an expiration date, so we can reuse it (instead of re-uploading)
         # or remove the video from Files API after processing it (so we don't hit Files API limits)
@@ -82,26 +101,6 @@ async def prep_session_video_asset_activity(
             )
             success = True
             return PrepSessionVideoAssetResult(asset_id=existing_asset.id, needs_export=False)
-
-        # Get session duration from metadata
-        team = await Team.objects.aget(id=inputs.team_id)
-        metadata = await database_sync_to_async(SessionReplayEvents().get_metadata)(
-            session_id=inputs.session_id,
-            team=team,
-        )
-        if not metadata:
-            msg = f"No metadata found for session {inputs.session_id}"
-            logger.error(msg, session_id=inputs.session_id, signals_type="session-summaries")
-            raise ValueError(msg)
-        session_duration = metadata["duration"]  # duration is in seconds
-
-        # Check if session is too short for summarization
-        if session_duration < MIN_SESSION_DURATION_FOR_VIDEO_SUMMARY_S:
-            logger.warning(
-                f"Session {inputs.session_id} in team {inputs.team_id} is too short ({session_duration:.2f}s) to summarize, skipping",
-                extra={"session_id": inputs.session_id, "team_id": inputs.team_id, "signals_type": "session-summaries"},
-            )
-            return None
 
         # Create ExportedAsset record (the actual video rendering happens as a child workflow)
         created_at = now()
