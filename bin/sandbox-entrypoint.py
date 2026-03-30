@@ -190,15 +190,17 @@ def root_phase() -> None:
 
     create_sandbox_user(uid, gid)
 
-    # The worktree's .git file points to a host path that doesn't exist in the
-    # container. The main repo's .git is mounted at /repo.git (read-only).
-    # Parse the worktree name and point GIT_DIR at the right place.
-    # Set these before export_environment() so they're written to
-    # /etc/environment and /etc/profile.d/ for SSH and docker exec shells.
+    # The worktree's .git file points to a host path that doesn't exist in
+    # the container. Fix it by bind-mounting a rewritten .git file that
+    # points at /repo.git (where the main repo's .git is mounted).
+    # This avoids setting GIT_DIR globally, which would poison every
+    # subprocess that runs `git` (uv sync, cargo fetch, etc.).
     gitdir_line = (WORKSPACE / ".git").read_text().strip()
     worktree_name = gitdir_line.rsplit("/", 1)[-1]
-    os.environ["GIT_DIR"] = f"/repo.git/worktrees/{worktree_name}"
-    os.environ["GIT_WORK_TREE"] = str(WORKSPACE)
+    container_gitdir = f"/repo.git/worktrees/{worktree_name}"
+    patched_gitfile = Path("/tmp/sandbox-gitfile")
+    patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
+    run(["mount", "--bind", str(patched_gitfile), str(WORKSPACE / ".git")])
 
     export_environment(uid, gid)
     start_sshd(uid, gid)
@@ -321,10 +323,10 @@ def generate_mprocs_config() -> None:
 
 def _read_jetbrains_data_dir_name() -> str:
     """Read the config directory name from the installed IDE's product-info.json."""
-    import json as _json
+    import json
 
     product_info = Path("/opt/idea/product-info.json")
-    data = _json.loads(product_info.read_text())
+    data = json.loads(product_info.read_text())
     data_dir_name = data["dataDirectoryName"]
     return data_dir_name
 
