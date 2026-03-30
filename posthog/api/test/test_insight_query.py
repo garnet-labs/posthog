@@ -198,3 +198,104 @@ class TestInsight(ClickhouseTestMixin, LicensedTestMixin, APIBaseTest, QueryMatc
 
         listed_insights = self.dashboard_api.list_insights()
         assert listed_insights["count"] == 2
+
+    def test_mcp_create_keeps_wrapped_query(self) -> None:
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/insights/",
+            data={
+                "name": "Wrapped insight",
+                "favorited": False,
+                "saved": True,
+                "query": {
+                    "kind": "InsightVizNode",
+                    "source": {
+                        "kind": "TrendsQuery",
+                        "series": [{"kind": "EventsNode", "event": "$pageview", "name": "$pageview"}],
+                        "dateRange": {"date_from": "-7d"},
+                        "interval": "day",
+                    },
+                },
+            },
+            HTTP_X_POSTHOG_CLIENT="mcp",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.json()["query"]["kind"] == "InsightVizNode"
+
+    def test_mcp_create_wraps_raw_product_analytics_query(self) -> None:
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/insights/",
+            data={
+                "name": "Raw trends insight",
+                "favorited": False,
+                "saved": True,
+                "query": {
+                    "kind": "TrendsQuery",
+                    "series": [{"kind": "EventsNode", "event": "$pageview", "name": "$pageview"}],
+                    "dateRange": {"date_from": "-7d"},
+                    "interval": "day",
+                },
+            },
+            HTTP_X_POSTHOG_CLIENT="mcp",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.json()["query"]["kind"] == "InsightVizNode"
+        assert response.json()["query"]["source"]["kind"] == "TrendsQuery"
+
+    def test_mcp_create_wraps_raw_hogql_query(self) -> None:
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/insights/",
+            data={
+                "name": "Raw HogQL insight",
+                "favorited": False,
+                "saved": True,
+                "query": {
+                    "kind": "HogQLQuery",
+                    "query": "select event from events limit 1",
+                },
+            },
+            HTTP_X_POSTHOG_CLIENT="mcp",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.json()["query"]["kind"] == "DataVisualizationNode"
+        assert response.json()["query"]["source"]["kind"] == "HogQLQuery"
+
+    def test_mcp_create_keeps_wrapped_data_visualization_node(self) -> None:
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/insights/",
+            data={
+                "name": "Wrapped DVN insight",
+                "favorited": False,
+                "saved": True,
+                "query": {
+                    "kind": "DataVisualizationNode",
+                    "source": {"kind": "HogQLQuery", "query": "select event from events limit 1"},
+                },
+            },
+            HTTP_X_POSTHOG_CLIENT="mcp",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.json()["query"]["kind"] == "DataVisualizationNode"
+        assert response.json()["query"]["source"]["kind"] == "HogQLQuery"
+
+    def test_mcp_create_rejects_disallowed_query_kind(self) -> None:
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/insights/",
+            data={
+                "name": "Unsupported insight",
+                "favorited": False,
+                "saved": True,
+                "query": {
+                    "kind": "ErrorTrackingQuery",
+                    "dateRange": {"date_from": "-7d"},
+                    "orderBy": "last_seen",
+                    "volumeResolution": 60,
+                },
+            },
+            HTTP_X_POSTHOG_CLIENT="mcp",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
