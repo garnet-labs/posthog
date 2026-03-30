@@ -667,11 +667,7 @@ export function InboxScene(): JSX.Element {
     if (!isProductAutonomyEnabled) {
         return (
             <div className="flex flex-col items-center justify-center max-w-[50rem] px-4 mx-auto text-center text-balance h-full">
-                <div
-                    className="w-full h-[135px] bg-no-repeat bg-center bg-contain"
-                    // eslint-disable-next-line react/forbid-dom-props
-                    style={{ backgroundImage: 'url(/static/not-found-astrohog.png)' }}
-                />
+                <GraphsHog className="w-36 mb-2" />
                 <h1 className="text-2xl font-bold mt-4 mb-0">Inbox is now available in the PostHog Code desktop app</h1>
                 <p className="text-sm font-semibold italic mt-3 mb-0">
                     PostHog Code brings Inbox and agentic development right to your desktop.
