@@ -213,6 +213,29 @@ ORDER BY event_time DESC;
     return f"http://localhost:8123/play?user=default#{base64.b64encode(sql.encode('utf-8')).decode('utf-8')}"
 
 
+def _ensure_partition_columns_exist(
+    conn: duckdb.DuckDBPyConnection,
+    alias: str,
+    table: str,
+    context: AssetExecutionContext,
+) -> set[str]:
+    """Add year/month/day partition columns to an existing table if missing.
+
+    Returns the current set of column names (including any newly added ones).
+    """
+    result = conn.execute(f"DESCRIBE {alias}.posthog.{table}").fetchall()
+    columns = {row[0] for row in result}
+
+    for col in ("year", "month", "day"):
+        if col not in columns:
+            context.log.info(f"Adding missing partition column '{col}' to {table} table")
+            conn.execute(f"ALTER TABLE {alias}.posthog.{table} ADD COLUMN {col} INTEGER")
+            columns.add(col)
+            logger.info("ducklake_partition_column_added", table=table, column=col)
+
+    return columns
+
+
 def validate_ducklake_schema(context: AssetExecutionContext) -> None:
     """Validate that the DuckLake events table schema matches our export columns.
 
@@ -234,18 +257,7 @@ def validate_ducklake_schema(context: AssetExecutionContext) -> None:
             if alias not in str(exc):
                 raise
 
-        result = conn.execute(f"DESCRIBE {alias}.posthog.events").fetchall()
-        ducklake_columns = {row[0] for row in result}
-
-        # Migrate existing tables: add partition columns if missing
-        partition_cols = {"year", "month", "day"}
-        missing_partition_cols = partition_cols - ducklake_columns
-        for col in ("year", "month", "day"):
-            if col in missing_partition_cols:
-                context.log.info(f"Adding missing partition column '{col}' to events table")
-                conn.execute(f"ALTER TABLE {alias}.posthog.events ADD COLUMN {col} INTEGER")
-                ducklake_columns.add(col)
-                logger.info("ducklake_partition_column_added", table="events", column=col)
+        ducklake_columns = _ensure_partition_columns_exist(conn, alias, "events", context)
 
         missing_in_ducklake = EXPECTED_DUCKLAKE_COLUMNS - ducklake_columns
         if missing_in_ducklake:

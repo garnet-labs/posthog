@@ -8,6 +8,7 @@ from parameterized import parameterized
 from posthog.dags.events_backfill_to_ducklake import (
     EVENTS_COLUMNS,
     EXPECTED_DUCKLAKE_COLUMNS,
+    _ensure_partition_columns_exist,
     get_partition_where_clause,
     get_s3_function_args,
     get_s3_path_for_partition,
@@ -217,6 +218,42 @@ class TestEventsColumnsSchema:
             "day",
         }
         assert EXPECTED_DUCKLAKE_COLUMNS == export_columns
+
+
+class TestEnsurePartitionColumnsExist:
+    def test_adds_missing_columns_and_returns_updated_set(self):
+        conn = duckdb.connect()
+        conn.execute("INSTALL ducklake; LOAD ducklake;")
+        conn.execute("ATTACH ':memory:' AS test_catalog (TYPE DUCKLAKE, DATA_PATH ':memory:')")
+        conn.execute("CREATE SCHEMA test_catalog.posthog")
+        conn.execute("CREATE TABLE test_catalog.posthog.events (uuid VARCHAR, timestamp TIMESTAMP)")
+
+        mock_context = MagicMock()
+
+        columns = _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+
+        assert {"year", "month", "day", "uuid", "timestamp"}.issubset(columns)
+        # Idempotent — calling again returns same result without ALTER TABLE
+        columns2 = _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+        assert columns == columns2
+        conn.close()
+
+    def test_noop_when_columns_exist(self):
+        conn = duckdb.connect()
+        conn.execute("INSTALL ducklake; LOAD ducklake;")
+        conn.execute("ATTACH ':memory:' AS test_catalog (TYPE DUCKLAKE, DATA_PATH ':memory:')")
+        conn.execute("CREATE SCHEMA test_catalog.posthog")
+        conn.execute(
+            "CREATE TABLE test_catalog.posthog.events "
+            "(uuid VARCHAR, timestamp TIMESTAMP, year INTEGER, month INTEGER, day INTEGER)"
+        )
+
+        mock_context = MagicMock()
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+
+        for call in mock_context.log.info.call_args_list:
+            assert "Adding missing partition column" not in str(call)
+        conn.close()
 
 
 class TestValidateDucklakeSchemaAddsMissingPartitionColumns:

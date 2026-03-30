@@ -491,7 +491,7 @@ def _ensure_partition_columns_exist(
             context.log.info(f"Adding missing partition column '{col}' to {table} table")
             conn.execute(f"ALTER TABLE {alias}.posthog.{table} ADD COLUMN {col} INTEGER")
             logger.info(
-                "duckling_partition_column_added",
+                "ducklake_partition_column_added",
                 team_id=team_id,
                 table=table,
                 column=col,
