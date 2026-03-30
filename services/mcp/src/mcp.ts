@@ -28,8 +28,8 @@ import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
 import type { CloudRegion, Context, State, Tool } from '@/tools/types'
 import type { AnalyticsMetadata, WithAnalytics } from '@/ui-apps/types'
 
-function buildInstructions(groupTypes?: GroupType[]): string {
-    return buildInstructionsV2(INSTRUCTIONS_TEMPLATE_V2, guidelines, groupTypes)
+function buildInstructions(groupTypes?: GroupType[], metadata?: string): string {
+    return buildInstructionsV2(INSTRUCTIONS_TEMPLATE_V2, guidelines, groupTypes, metadata)
 }
 
 export type RequestProperties = {
@@ -415,8 +415,9 @@ export class MCP extends McpAgent<Env> {
     async init(): Promise<void> {
         const { features, version, organizationId, projectId, readOnly } = this.requestProperties
 
-        // Pre-seed cache and fetch group types in parallel
+        // Pre-seed cache and fetch group types + metadata in parallel
         const groupTypesPromise = projectId ? this.getOrFetchGroupTypes(projectId) : Promise.resolve(undefined)
+        const metadataPromise = version === 2 ? this.buildMetadataString() : Promise.resolve(undefined)
         if (organizationId) {
             await this.cache.set('orgId', organizationId)
         }
@@ -424,9 +425,9 @@ export class MCP extends McpAgent<Env> {
             await this.cache.set('projectId', projectId)
         }
 
-        // Resolve group types (started above in parallel with cache seeding)
-        const groupTypes = await groupTypesPromise
-        const instructions = version === 2 ? buildInstructions(groupTypes) : INSTRUCTIONS_TEMPLATE_V1
+        // Resolve group types and metadata (started above in parallel with cache seeding)
+        const [groupTypes, metadata] = await Promise.all([groupTypesPromise, metadataPromise])
+        const instructions = version === 2 ? buildInstructions(groupTypes, metadata) : INSTRUCTIONS_TEMPLATE_V1
 
         this.server = new McpServer({ name: 'PostHog', version: '1.0.0' }, { instructions })
 
@@ -465,6 +466,30 @@ export class MCP extends McpAgent<Env> {
         for (const tool of allTools) {
             const typedTool = tool as Tool<z.ZodObject>
             this.registerTool(typedTool, async (params) => typedTool.handler(context, params))
+        }
+    }
+
+    private async buildMetadataString(): Promise<string | undefined> {
+        try {
+            const api = await this.api()
+            const userResult = await api.users().me()
+            if (!userResult.success) {
+                return undefined
+            }
+            const user = userResult.data
+            const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Unknown'
+            const projectName = user.team?.name || 'Unknown'
+            const timezone = user.team?.timezone || 'UTC'
+            const orgName = user.organization?.name || 'Unknown'
+            const now = new Date().toLocaleString('sv-SE', { timeZone: timezone }).replace('T', ' ')
+
+            return [
+                `You are currently in project "${projectName}" (organization: "${orgName}").`,
+                `The user's name is ${fullName} (${user.email}).`,
+                `Project timezone: ${timezone}. Current time: ${now}.`,
+            ].join('\n')
+        } catch {
+            return undefined
         }
     }
 

@@ -13,9 +13,15 @@ export function buildGroupTypesBlock(groupTypes?: GroupType[]): string {
     return `### Group type mapping\n\nGroups aggregate events based on entities, such as organizations or sellers. This project has the following group types. Instead of a group's name, always use its numeric index.\n\n${lines.join('\n')}`
 }
 
-export function buildInstructionsV2(template: string, guidelines: string, groupTypes?: GroupType[]): string {
+export function buildInstructionsV2(
+    template: string,
+    guidelines: string,
+    groupTypes?: GroupType[],
+    metadata?: string
+): string {
     return formatPrompt(template, {
         guidelines: guidelines.trim(),
         group_types: buildGroupTypesBlock(groupTypes),
+        metadata: metadata?.trim() ?? '',
     })
 }
