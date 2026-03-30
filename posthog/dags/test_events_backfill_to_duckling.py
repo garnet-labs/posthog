@@ -74,8 +74,8 @@ class TestGetS3UrlForClickhouse:
             (
                 "duckling-bucket",
                 "us-west-2",
-                "backfill/events/team_id=123/year=2024/month=01/day=15/abc.parquet",
-                "https://duckling-bucket.s3.us-west-2.amazonaws.com/backfill/events/team_id=123/year=2024/month=01/day=15/abc.parquet",
+                "backfill/events/123/2024/01/15/abc.parquet",
+                "https://duckling-bucket.s3.us-west-2.amazonaws.com/backfill/events/123/2024/01/15/abc.parquet",
             ),
         ]
     )
