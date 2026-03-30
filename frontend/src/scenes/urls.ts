@@ -65,6 +65,7 @@ export const urls = {
         endpointName,
         source,
         connectionId,
+        dashboard,
     }: {
         query?: string
         view_id?: string
@@ -74,6 +75,7 @@ export const urls = {
         endpointName?: string
         source?: string
         connectionId?: string
+        dashboard?: number
     } = {}): string => {
         const params = new URLSearchParams()
 
@@ -97,6 +99,10 @@ export const urls = {
 
         if (source) {
             params.set('source', source)
+        }
+
+        if (dashboard) {
+            params.set('dashboard', String(dashboard))
         }
 
         const queryString = params.toString()
@@ -214,7 +220,6 @@ export const urls = {
     debugQuery: (query?: string | Record<string, any>): string =>
         combineUrl('/debug', {}, query ? { q: typeof query === 'string' ? query : JSON.stringify(query) } : {}).url,
     debugHog: (): string => '/debug/hog',
-    debugNotifications: (): string => '/debug/notifications',
 
     moveToPostHogCloud: (): string => '/move-to-cloud',
     heatmaps: (params?: string): string =>
