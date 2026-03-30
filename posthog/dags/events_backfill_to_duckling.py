@@ -472,6 +472,7 @@ def _ensure_partition_columns_exist(
     alias: str,
     table: str,
     context: AssetExecutionContext,
+    team_id: int,
 ) -> None:
     """Add year/month/day partition columns to an existing table if missing.
 
@@ -491,6 +492,7 @@ def _ensure_partition_columns_exist(
             conn.execute(f"ALTER TABLE {alias}.posthog.{table} ADD COLUMN {col} INTEGER")
             logger.info(
                 "duckling_partition_column_added",
+                team_id=team_id,
                 table=table,
                 column=col,
             )
@@ -573,7 +575,7 @@ def ensure_events_table_exists(
         if table_exists(conn, alias, "posthog", "events"):
             context.log.info("Events table already exists in duckling catalog")
             # Existing tables may lack year/month/day columns — add them if missing
-            _ensure_partition_columns_exist(conn, alias, "events", context)
+            _ensure_partition_columns_exist(conn, alias, "events", context, catalog.team_id)
             # Ensure partitioning is set even on existing tables (idempotent)
             _set_table_partitioning(conn, alias, "events", "year, month, day", context, catalog.team_id)
             return False
@@ -590,7 +592,7 @@ def ensure_events_table_exists(
             if table_exists(conn, alias, "posthog", "events"):
                 context.log.info("Events table was created by another worker")
                 # Existing tables may lack year/month/day columns — add them if missing
-                _ensure_partition_columns_exist(conn, alias, "events", context)
+                _ensure_partition_columns_exist(conn, alias, "events", context, catalog.team_id)
                 # Ensure partitioning is set even when another worker created the table
                 _set_table_partitioning(conn, alias, "events", "year, month, day", context, catalog.team_id)
                 return False
@@ -640,7 +642,7 @@ def ensure_persons_table_exists(
         if table_exists(conn, alias, "posthog", "persons"):
             context.log.info("Persons table already exists in duckling catalog")
             # Existing tables may lack year/month/day columns — add them if missing
-            _ensure_partition_columns_exist(conn, alias, "persons", context)
+            _ensure_partition_columns_exist(conn, alias, "persons", context, catalog.team_id)
             # Ensure partitioning is set even on existing tables (idempotent)
             _set_table_partitioning(
                 conn,
@@ -664,7 +666,7 @@ def ensure_persons_table_exists(
             if table_exists(conn, alias, "posthog", "persons"):
                 context.log.info("Persons table was created by another worker")
                 # Existing tables may lack year/month/day columns — add them if missing
-                _ensure_partition_columns_exist(conn, alias, "persons", context)
+                _ensure_partition_columns_exist(conn, alias, "persons", context, catalog.team_id)
                 # Ensure partitioning is set even when another worker created the table
                 _set_table_partitioning(
                     conn,
@@ -681,7 +683,7 @@ def ensure_persons_table_exists(
 
         context.log.info("Successfully created persons table")
 
-        # Set partitioning by year/month of _timestamp for efficient querying
+        # Set partitioning by year/month/day for efficient querying
         _set_table_partitioning(
             conn,
             alias,

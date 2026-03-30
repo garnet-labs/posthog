@@ -399,13 +399,13 @@ class TestEnsurePartitionColumnsExist:
         cols_before = {row[0] for row in conn.execute("DESCRIBE test_catalog.posthog.events").fetchall()}
         assert "year" not in cols_before
 
-        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context, team_id=123)
 
         cols_after = {row[0] for row in conn.execute("DESCRIBE test_catalog.posthog.events").fetchall()}
         assert {"year", "month", "day"}.issubset(cols_after)
 
         # Calling again is safe (columns already exist)
-        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context, team_id=123)
         conn.close()
 
     def test_noop_when_columns_exist(self):
@@ -420,7 +420,7 @@ class TestEnsurePartitionColumnsExist:
 
         mock_context = MagicMock()
 
-        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context)
+        _ensure_partition_columns_exist(conn, "test_catalog", "events", mock_context, team_id=123)
 
         # No ALTER TABLE should have been logged
         for call in mock_context.log.info.call_args_list:

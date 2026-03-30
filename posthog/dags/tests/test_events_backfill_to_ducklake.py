@@ -2,6 +2,7 @@ from datetime import datetime
 
 from unittest.mock import MagicMock, patch
 
+import duckdb
 from parameterized import parameterized
 
 from posthog.dags.events_backfill_to_ducklake import (
@@ -11,6 +12,7 @@ from posthog.dags.events_backfill_to_ducklake import (
     get_s3_function_args,
     get_s3_path_for_partition,
     tags_for_events_partition,
+    validate_ducklake_schema,
 )
 
 
@@ -196,3 +198,62 @@ class TestEventsColumnsSchema:
             "day",
         }
         assert EXPECTED_DUCKLAKE_COLUMNS == export_columns
+
+
+class TestValidateDucklakeSchemaAddsMissingPartitionColumns:
+    @patch("posthog.dags.events_backfill_to_ducklake.DuckLakeStorageConfig")
+    @patch("posthog.dags.events_backfill_to_ducklake.get_config")
+    @patch("posthog.dags.events_backfill_to_ducklake.configure_connection")
+    @patch("posthog.dags.events_backfill_to_ducklake.attach_catalog")
+    def test_adds_partition_columns_to_existing_table(
+        self, mock_attach, mock_configure, mock_get_config, mock_storage_cls
+    ):
+        conn = duckdb.connect()
+        conn.execute("INSTALL ducklake; LOAD ducklake;")
+        conn.execute("ATTACH ':memory:' AS ducklake (TYPE DUCKLAKE, DATA_PATH ':memory:')")
+        conn.execute("CREATE SCHEMA ducklake.posthog")
+        # Create table WITHOUT year/month/day — simulates pre-migration state
+        conn.execute("CREATE TABLE ducklake.posthog.events (uuid VARCHAR, event VARCHAR, timestamp TIMESTAMP)")
+
+        mock_context = MagicMock()
+
+        # Patch duckdb.connect to return our pre-configured connection
+        with patch("posthog.dags.events_backfill_to_ducklake.duckdb.connect", return_value=conn):
+            validate_ducklake_schema(mock_context)
+
+        # Verify columns were added
+        cols = {row[0] for row in conn.execute("DESCRIBE ducklake.posthog.events").fetchall()}
+        assert {"year", "month", "day"}.issubset(cols)
+
+        # Verify migration was logged
+        info_messages = [str(call) for call in mock_context.log.info.call_args_list]
+        assert any("Adding missing partition column 'year'" in msg for msg in info_messages)
+        assert any("Adding missing partition column 'month'" in msg for msg in info_messages)
+        assert any("Adding missing partition column 'day'" in msg for msg in info_messages)
+
+        conn.close()
+
+    @patch("posthog.dags.events_backfill_to_ducklake.DuckLakeStorageConfig")
+    @patch("posthog.dags.events_backfill_to_ducklake.get_config")
+    @patch("posthog.dags.events_backfill_to_ducklake.configure_connection")
+    @patch("posthog.dags.events_backfill_to_ducklake.attach_catalog")
+    def test_skips_migration_when_columns_exist(self, mock_attach, mock_configure, mock_get_config, mock_storage_cls):
+        conn = duckdb.connect()
+        conn.execute("INSTALL ducklake; LOAD ducklake;")
+        conn.execute("ATTACH ':memory:' AS ducklake (TYPE DUCKLAKE, DATA_PATH ':memory:')")
+        conn.execute("CREATE SCHEMA ducklake.posthog")
+        conn.execute(
+            "CREATE TABLE ducklake.posthog.events "
+            "(uuid VARCHAR, event VARCHAR, timestamp TIMESTAMP, year INTEGER, month INTEGER, day INTEGER)"
+        )
+
+        mock_context = MagicMock()
+
+        with patch("posthog.dags.events_backfill_to_ducklake.duckdb.connect", return_value=conn):
+            validate_ducklake_schema(mock_context)
+
+        # No migration messages should be logged
+        info_messages = [str(call) for call in mock_context.log.info.call_args_list]
+        assert not any("Adding missing partition column" in msg for msg in info_messages)
+
+        conn.close()
