@@ -9,7 +9,7 @@ import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
 import { ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
-import { OnboardingStepKey } from '~/types'
+import { OnboardingStepKey, TeamType } from '~/types'
 
 import { availableOnboardingProducts } from '../utils'
 import {
@@ -65,6 +65,9 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
 
         // Show all products toggle
         setShowAllProducts: (show: boolean) => ({ show }),
+
+        // Debug: enable all products and skip onboarding
+        skipWithAllProducts: true,
     }),
 
     reducers({
@@ -243,6 +246,33 @@ export const productSelectionLogic = kea<productSelectionLogicType>([
             actions.setFirstProductOnboarding(productKey)
             actions.setRecommendationSource('simplified')
             actions.handleStartOnboarding()
+        },
+
+        skipWithAllProducts: () => {
+            const allProductKeys = Object.keys(availableOnboardingProducts) as ProductKey[]
+
+            // Register product intents for all products
+            allProductKeys.forEach((productKey) => {
+                actions.addProductIntent({
+                    product_type: productKey,
+                    intent_context: ProductIntentContext.ONBOARDING_PRODUCT_SELECTED_PRIMARY,
+                })
+            })
+
+            // Mark onboarding as completed for all products
+            const completedMap: Record<string, boolean> = {}
+            for (const key of allProductKeys) {
+                completedMap[key] = true
+            }
+            teamLogic.actions.updateCurrentTeam({
+                has_completed_onboarding_for: {
+                    ...values.currentTeam?.has_completed_onboarding_for,
+                    ...completedMap,
+                } as TeamType['has_completed_onboarding_for'],
+            })
+
+            // Navigate to the default page
+            router.actions.push(urls.default())
         },
 
         handleStartOnboarding: () => {

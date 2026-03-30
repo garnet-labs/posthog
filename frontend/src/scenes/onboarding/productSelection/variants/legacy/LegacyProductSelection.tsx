@@ -1,10 +1,11 @@
 import { useActions, useValues } from 'kea'
 
-import { IconArrowRight, IconChevronDown, IconCursor } from '@posthog/icons'
+import { IconArrowRight, IconChevronDown, IconCursor, IconLogomark } from '@posthog/icons'
 import { LemonBanner, LemonButton, LemonCard, LemonLabel, LemonSelect, Link } from '@posthog/lemon-ui'
 
 import { Logomark } from 'lib/brand/Logomark'
 import { getFeatureFlagPayload } from 'lib/logic/featureFlagLogic'
+import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
 import { inviteLogic } from 'scenes/settings/organization/inviteLogic'
 
 import { ProductKey } from '~/queries/schema/schema-general'
@@ -33,6 +34,32 @@ function BrowsingHistoryBanner(): JSX.Element | null {
     )
 }
 
+function DebugSkipOnboardingCard(): JSX.Element | null {
+    const { isDev } = useValues(preflightLogic)
+    const { skipWithAllProducts } = useActions(productSelectionLogic)
+
+    if (!isDev) {
+        return null
+    }
+
+    return (
+        <LemonCard
+            className="p-4 cursor-pointer col-span-full"
+            onClick={() => skipWithAllProducts()}
+            hoverEffect
+            data-attr="debug-skip-onboarding"
+        >
+            <div className="flex flex-col items-center text-center gap-2">
+                <IconLogomark className="text-3xl" />
+                <div>
+                    <div className="font-semibold mb-1">I'm a hog</div>
+                    <p className="text-muted text-sm mb-0">Enable all products and skip onboarding</p>
+                </div>
+            </div>
+        </LemonCard>
+    )
+}
+
 function ChoosePathStep(): JSX.Element {
     const { useCases } = useValues(productSelectionLogic)
     const { selectUseCase, selectPickMyself } = useActions(productSelectionLogic)
@@ -53,6 +80,7 @@ function ChoosePathStep(): JSX.Element {
 
             {/* Use cases grid - 2 rows x 3 columns */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <DebugSkipOnboardingCard />
                 {useCases.map((useCase: UseCaseDefinition) => (
                     <LemonCard
                         key={useCase.key}
