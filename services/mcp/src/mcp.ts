@@ -472,7 +472,7 @@ export class MCP extends McpAgent<Env> {
     }
 
     private async getOrFetchMetadata(): Promise<string | undefined> {
-        const METADATA_TTL_MS = 5 * 60 * 1000 // 5 minutes
+        const METADATA_TTL_MS = 20 * 60 * 1000 // 20 minutes
 
         try {
             const cached = await this.cache.get('metadata')
