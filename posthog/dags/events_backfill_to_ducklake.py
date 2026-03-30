@@ -17,8 +17,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
-import dagster
+from django.conf import settings as django_settings
+
 import duckdb
+import dagster
 import structlog
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
@@ -31,23 +33,13 @@ from dagster import (
     asset,
     define_asset_job,
 )
-from django.conf import settings as django_settings
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from posthog.clickhouse.client.connection import NodeRole, Workload
 from posthog.clickhouse.cluster import get_cluster
 from posthog.clickhouse.query_tagging import tags_context
 from posthog.cloud_utils import is_cloud
-from posthog.dags.common.common import (
-    JobOwners,
-    dagster_tags,
-    settings_with_log_comment,
-)
+from posthog.dags.common.common import JobOwners, dagster_tags, settings_with_log_comment
 from posthog.ducklake.common import attach_catalog, escape, get_config
 from posthog.ducklake.storage import DuckLakeStorageConfig, configure_connection
 from posthog.settings.base_variables import DEBUG
@@ -260,9 +252,7 @@ def validate_ducklake_schema(context: AssetExecutionContext) -> None:
         if extra_in_ducklake:
             # Extra columns in DuckLake are fine - they might come from streaming
             # (e.g., _kafka_* metadata columns)
-            context.log.info(
-                f"DuckLake has additional columns not in our export: {extra_in_ducklake}"
-            )
+            context.log.info(f"DuckLake has additional columns not in our export: {extra_in_ducklake}")
 
         context.log.info(
             f"Schema validation passed. DuckLake has {len(ducklake_columns)} columns, "
@@ -278,9 +268,7 @@ def validate_ducklake_schema(context: AssetExecutionContext) -> None:
         conn.close()
 
 
-def get_partition_where_clause(
-    context: AssetExecutionContext, timestamp_field: str = "timestamp"
-) -> str:
+def get_partition_where_clause(context: AssetExecutionContext, timestamp_field: str = "timestamp") -> str:
     start_incl = context.partition_time_window.start.strftime("%Y-%m-%d")
     end_excl = context.partition_time_window.end.strftime("%Y-%m-%d")
     return f"toDate({timestamp_field}) >= '{start_incl}' AND toDate({timestamp_field}) < '{end_excl}'"
@@ -405,9 +393,7 @@ def export_events_to_s3(
     WHERE {chunk_where}
     SETTINGS s3_truncate_on_insert=1, use_hive_partitioning=0
     """
-        context.log.info(
-            f"[DRY RUN] Would export chunk {chunk_info} with SQL: {safe_sql[:800]}..."
-        )
+        context.log.info(f"[DRY RUN] Would export chunk {chunk_info} with SQL: {safe_sql[:800]}...")
         return []
 
     context.log.info(f"Exporting events chunk {chunk_info} to {s3_path}")
@@ -422,17 +408,11 @@ def export_events_to_s3(
     try:
         _execute_export_with_retry(client, export_sql, settings, chunk_info)
         context.log.info(f"Successfully exported chunk {chunk_info}")
-        logger.info(
-            "export_chunk_success", chunk=team_id_chunk, total_chunks=total_chunks
-        )
+        logger.info("export_chunk_success", chunk=team_id_chunk, total_chunks=total_chunks)
         return [s3_path]
     except Exception:
-        context.log.exception(
-            f"Failed to export chunk {chunk_info} after {MAX_RETRY_ATTEMPTS} attempts"
-        )
-        logger.exception(
-            "export_chunk_failed", chunk=team_id_chunk, total_chunks=total_chunks
-        )
+        context.log.exception(f"Failed to export chunk {chunk_info} after {MAX_RETRY_ATTEMPTS} attempts")
+        logger.exception("export_chunk_failed", chunk=team_id_chunk, total_chunks=total_chunks)
         raise
 
 
@@ -502,9 +482,7 @@ def register_files_with_ducklake(
     Returns the number of files successfully registered.
     """
     if config.skip_ducklake_registration:
-        context.log.info(
-            "Skipping DuckLake registration (skip_ducklake_registration=True)"
-        )
+        context.log.info("Skipping DuckLake registration (skip_ducklake_registration=True)")
         return 0
 
     if not s3_paths:
@@ -512,9 +490,7 @@ def register_files_with_ducklake(
         return 0
 
     if config.dry_run:
-        context.log.info(
-            f"[DRY RUN] Would register {len(s3_paths)} files with DuckLake"
-        )
+        context.log.info(f"[DRY RUN] Would register {len(s3_paths)} files with DuckLake")
         return 0
 
     ducklake_config = get_config()
@@ -529,10 +505,7 @@ def register_files_with_ducklake(
 
         # Check if the DuckLake catalog is already attached in a robust way by querying DuckDB
         existing_catalogs = {
-            row[0]
-            for row in conn.execute(
-                "SELECT catalog_name FROM duckdb_catalog.get_catalogs()"
-            ).fetchall()
+            row[0] for row in conn.execute("SELECT catalog_name FROM duckdb_catalog.get_catalogs()").fetchall()
         }
 
         if alias in existing_catalogs:
@@ -558,9 +531,7 @@ def register_files_with_ducklake(
     finally:
         conn.close()
 
-    context.log.info(
-        f"Registered {registered_count}/{len(s3_paths)} files with DuckLake"
-    )
+    context.log.info(f"Registered {registered_count}/{len(s3_paths)} files with DuckLake")
     logger.info(
         "ducklake_registration_complete",
         registered=registered_count,
@@ -579,14 +550,10 @@ events_backfill_partitioned_config = PartitionedConfig(
 @asset(
     partitions_def=daily_partitions,
     name="events_ducklake_backfill",
-    backfill_policy=BackfillPolicy.multi_run(
-        max_partitions_per_run=MAX_PARTITIONS_PER_RUN
-    ),
+    backfill_policy=BackfillPolicy.multi_run(max_partitions_per_run=MAX_PARTITIONS_PER_RUN),
     tags={"owner": JobOwners.TEAM_DATA_STACK.value, **CONCURRENCY_TAG},
 )
-def events_ducklake_backfill(
-    context: AssetExecutionContext, config: EventsBackfillConfig
-) -> None:
+def events_ducklake_backfill(context: AssetExecutionContext, config: EventsBackfillConfig) -> None:
     """Backfill events from ClickHouse to DuckLake.
 
     This asset:
@@ -631,9 +598,7 @@ def events_ducklake_backfill(
     merged_settings.update(settings_with_log_comment(context))
     if config.clickhouse_settings:
         merged_settings.update(config.clickhouse_settings)
-        context.log.info(
-            f"Using custom ClickHouse settings: {config.clickhouse_settings}"
-        )
+        context.log.info(f"Using custom ClickHouse settings: {config.clickhouse_settings}")
 
     team_id_chunks = max(1, config.team_id_chunks)
     parallel_chunks = min(max(1, config.parallel_chunks), team_id_chunks)
@@ -679,14 +644,9 @@ def events_ducklake_backfill(
         ).result()
 
     if parallel_chunks > 1:
-        context.log.info(
-            f"Exporting {team_id_chunks} chunks with {parallel_chunks} parallel workers"
-        )
+        context.log.info(f"Exporting {team_id_chunks} chunks with {parallel_chunks} parallel workers")
         with ThreadPoolExecutor(max_workers=parallel_chunks) as executor:
-            futures = {
-                executor.submit(export_single_chunk, i): i
-                for i in range(team_id_chunks)
-            }
+            futures = {executor.submit(export_single_chunk, i): i for i in range(team_id_chunks)}
             for future in as_completed(futures):
                 chunk_i = futures[future]
                 try:
@@ -694,9 +654,7 @@ def events_ducklake_backfill(
                     all_s3_paths.extend(paths)
                     context.log.info(f"Completed chunk {chunk_i + 1}/{team_id_chunks}")
                 except Exception:
-                    context.log.exception(
-                        f"Chunk {chunk_i + 1}/{team_id_chunks} failed"
-                    )
+                    context.log.exception(f"Chunk {chunk_i + 1}/{team_id_chunks} failed")
                     raise
     else:
         for chunk_i in range(team_id_chunks):
