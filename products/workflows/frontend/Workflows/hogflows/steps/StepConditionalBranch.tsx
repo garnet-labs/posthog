@@ -23,7 +23,7 @@ export function StepConditionalBranchConfiguration({
     const action = node.data
     const { conditions } = action.config
 
-    const { edgesByActionId, selectedNodeCanBeDeleted } = useValues(hogFlowEditorLogic)
+    const { edgesByActionId } = useValues(hogFlowEditorLogic)
     const { setWorkflowAction, setWorkflowActionEdges } = useActions(hogFlowEditorLogic)
 
     const nodeEdges = edgesByActionId[action.id] ?? []
@@ -43,19 +43,23 @@ export function StepConditionalBranchConfiguration({
 
     const { localNames: localConditionNames, handleNameChange } = useDebouncedNameInputs(conditions, setConditions)
 
-    const [branchEdges, nonBranchEdges] = useMemo(() => {
+    const [branchEdges, nonBranchEdges, continueEdge] = useMemo(() => {
         const branchEdges: HogFlow['edges'] = []
         const nonBranchEdges: HogFlow['edges'] = []
+        let continueEdge: HogFlow['edges'][number] | undefined
 
         nodeEdges?.forEach((edge) => {
             if (edge.type === 'branch' && edge.from === action.id) {
                 branchEdges.push(edge)
             } else {
                 nonBranchEdges.push(edge)
+                if (edge.type === 'continue' && edge.from === action.id) {
+                    continueEdge = edge
+                }
             }
         })
 
-        return [branchEdges.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)), nonBranchEdges]
+        return [branchEdges.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)), nonBranchEdges, continueEdge]
     }, [nodeEdges, action.id])
 
     const addCondition = (): void => {
@@ -97,7 +101,11 @@ export function StepConditionalBranchConfiguration({
                             size="xsmall"
                             icon={<IconX />}
                             onClick={() => removeCondition(index)}
-                            disabledReason={selectedNodeCanBeDeleted ? undefined : 'Clean up branching steps first'}
+                            disabledReason={
+                                branchEdges[index]?.to === continueEdge?.to
+                                    ? undefined
+                                    : 'Remove steps from this branch first'
+                            }
                         />
                     </div>
 
