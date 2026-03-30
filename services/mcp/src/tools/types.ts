@@ -13,11 +13,15 @@ export type SessionState = {
     uuid: string
 }
 
-export type UserMetadata = {
-    projectName: string
-    orgName: string
+export type CachedUser = {
+    distinctId: string
     fullName: string
     email: string
+}
+
+export type CachedOrg = {
+    name: string
+    projectName: string
     timezone: string
 }
 
@@ -33,8 +37,10 @@ export type State = {
 } & Record<PrefixedString<'session'>, SessionState> &
     Record<PrefixedString<'groupTypes'>, GroupType[] | undefined> &
     Record<PrefixedString<'groupTypesFetchedAt'>, number | undefined> &
-    Record<PrefixedString<'metadata'>, UserMetadata | undefined> &
-    Record<PrefixedString<'metadataFetchedAt'>, number | undefined>
+    Record<PrefixedString<'cachedUser'>, CachedUser | undefined> &
+    Record<PrefixedString<'cachedUserFetchedAt'>, number | undefined> &
+    Record<PrefixedString<'cachedOrg'>, CachedOrg | undefined> &
+    Record<PrefixedString<'cachedOrgFetchedAt'>, number | undefined>
 
 export type Env = {
     /**
