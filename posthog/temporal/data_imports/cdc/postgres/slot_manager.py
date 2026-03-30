@@ -33,12 +33,15 @@ def create_slot_and_publication(
                 )
             )
         else:
-            # Empty publication — tables added later per-schema
+            # Empty publication — tables added individually via ALTER PUBLICATION ADD TABLE
             cur.execute(
-                sql.SQL("CREATE PUBLICATION {} FOR ALL TABLES WITH (publish_via_partition_root = true)").format(
+                sql.SQL("CREATE PUBLICATION {}").format(
                     sql.Identifier(pub_name),
                 )
             )
+        # Must commit before creating the slot — PG forbids logical slot
+        # creation in a transaction that has performed writes.
+        conn.commit()
 
         cur.execute(
             sql.SQL("SELECT lsn FROM pg_create_logical_replication_slot({}, 'pgoutput')").format(
