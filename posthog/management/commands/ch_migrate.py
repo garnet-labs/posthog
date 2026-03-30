@@ -1,8 +1,6 @@
 # ruff: noqa: T201 allow print statements
 import re
 import sys
-import subprocess
-from pathlib import Path
 from typing import Any
 
 from django.conf import settings
@@ -91,19 +89,6 @@ class Command(BaseCommand):
             help="Migration number to trial.",
         )
 
-        lint_parser = subparsers.add_parser("lint", help="Lint SQL files with sqlfluff")
-        lint_parser.add_argument(
-            "--fix",
-            action="store_true",
-            default=False,
-            help="Auto-fix lint violations where possible.",
-        )
-        lint_parser.add_argument(
-            "--path",
-            type=str,
-            default=None,
-            help="Lint only SQL files in the given migration directory.",
-        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         subcommand = options.get("subcommand")
@@ -123,8 +108,6 @@ class Command(BaseCommand):
             self.handle_validate(options)
         elif subcommand == "trial":
             self.handle_trial(options)
-        elif subcommand == "lint":
-            self.handle_lint(options)
         else:
             self.print_help("manage.py", "ch_migrate")
 
@@ -481,49 +464,3 @@ class Command(BaseCommand):
         else:
             print(f"\nTrial FAILED for {target_mig['name']}.")
 
-    def handle_lint(self, options: dict[str, Any]) -> None:
-        from posthog.clickhouse.migration_tools.runner import discover_migrations, is_new_style
-
-        fix: bool = options.get("fix", False)
-        path_filter: str | None = options.get("path")
-
-        sql_files: list[Path] = []
-
-        if path_filter:
-            # Lint only the specified directory
-            target = Path(path_filter)
-            if not target.is_dir():
-                print(f"Path {path_filter} is not a directory.")
-                raise SystemExit(1)
-            for sql_file in sorted(target.glob("*.sql")):
-                sql_files.append(sql_file)
-        else:
-            migrations = discover_migrations()
-            new_style = [m for m in migrations if m["style"] == "new" and is_new_style(m["path"])]
-
-            if not new_style:
-                print("No new-style migrations found.")
-                return
-
-            for mig in new_style:
-                mig_dir = mig["path"]
-                for sql_file in sorted(mig_dir.glob("*.sql")):
-                    sql_files.append(sql_file)
-
-        if not sql_files:
-            print("No SQL files found in new-style migrations.")
-            return
-
-        if path_filter:
-            print(f"Linting {len(sql_files)} SQL file(s) in {path_filter}...\n")
-        else:
-            print(f"Linting {len(sql_files)} SQL file(s) across {len(new_style)} migration(s)...\n")
-
-        cmd = ["sqlfluff", "fix" if fix else "lint", "--dialect", "clickhouse"] + [str(f) for f in sql_files]
-        result = subprocess.run(cmd)
-
-        if result.returncode != 0:
-            print(f"\nsqlfluff {'fix' if fix else 'lint'} found violations.")
-            raise SystemExit(result.returncode)
-        else:
-            print("\nAll SQL files passed lint.")

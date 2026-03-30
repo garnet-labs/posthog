@@ -178,20 +178,7 @@ so the legacy `migrate_clickhouse` runner can discover it.
 The bridge file contains an empty `operations = []` list,
 which signals that the migration is handled by `ch_migrate` instead.
 
-## SQL linting
-
-SQL files are linted by [sqlfluff](https://sqlfluff.com/) using the `.sqlfluff`
-config at the repository root. The CI backend workflow runs `sqlfluff lint` on
-every PR that touches `posthog/clickhouse/migrations/`.
-
 ## CI integration
 
-The `ci-backend` workflow runs these checks on PRs that add new-style migrations:
-
-- **`ch_migrate validate --strict`** — static analysis (ON CLUSTER usage, rollback
-  completeness, node role consistency, DROP guards). Runs in CI on every PR.
-- **`ch_migrate lint`** — sqlfluff linting of `.sql` files inside migration
-  directories. Runs in CI on every PR.
-- **`ch_migrate trial`** — sandbox apply/verify/rollback cycle against the CI
-  ClickHouse instance. Runs `bootstrap` first, then `trial` for each new-style
-  migration added in the PR. Timeout: 10 minutes.
+CI integration (validation steps, SQL linting, trial runs) will be added in a
+follow-up PR once the core migration engine is merged.

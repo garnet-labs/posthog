@@ -30,17 +30,6 @@
 - OpenAPI/types: `hogli build:openapi` (regenerate after changing serializers/viewsets)
 - New product: `bin/hogli product:bootstrap <name>`
 - LSP: Pyright is configured against the flox venv. Prefer LSP (`goToDefinition`, `findReferences`, `hover`) over grep when navigating or refactoring Python code.
-- ClickHouse migrations (`ch_migrate`):
-  - `python manage.py ch_migrate plan` — show pending migrations
-  - `python manage.py ch_migrate apply` — apply pending migrations (supports `--upto`, `--force`)
-  - `python manage.py ch_migrate down <number>` — roll back a specific migration
-  - `python manage.py ch_migrate validate <number>` — static analysis of a migration (`--strict` for errors-only)
-  - `python manage.py ch_migrate trial <number>` — sandbox validation (apply, verify, down, verify)
-  - `python manage.py ch_migrate status` — show per-host migration state (`--node` to filter)
-  - `python manage.py ch_migrate lint` — lint SQL files with sqlfluff (`--fix` to auto-fix)
-  - `python manage.py ch_migrate bootstrap` — create tracking table on all nodes
-  - `python manage.py ch_migrate check` — exit non-zero if unapplied new-style migrations exist
-  - New-style migrations use SQL + YAML in `posthog/clickhouse/migrations/NNNN_name/` (manifest.yaml, up.sql, down.sql)
 
 ## Commits and Pull Requests
 
