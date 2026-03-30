@@ -6,6 +6,7 @@ import { useValues } from 'kea'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { trendsDataLogic } from 'scenes/trends/trendsDataLogic'
 
+import { ScrollableShadows } from '../ScrollableShadows/ScrollableShadows'
 import { InsightLegendRow } from './InsightLegendRow'
 
 export interface InsightLegendProps {
@@ -19,8 +20,8 @@ export function InsightLegend({ horizontal, inCardView, readOnly = false }: Insi
     const { indexedResults, hasLegend } = useValues(trendsDataLogic(insightProps))
 
     return hasLegend ? (
-        <div
-            className={clsx('InsightLegendMenu', 'flex overflow-auto border rounded', {
+        <ScrollableShadows
+            className={clsx('InsightLegendMenu', 'flex border rounded', {
                 'InsightLegendMenu--horizontal': horizontal,
                 'InsightLegendMenu--readonly': readOnly,
                 'InsightLegendMenu--in-card-view': inCardView,
@@ -30,6 +31,6 @@ export function InsightLegend({ horizontal, inCardView, readOnly = false }: Insi
                 {indexedResults &&
                     indexedResults.map((item) => <InsightLegendRow key={item.id} item={item} readOnly={readOnly} />)}
             </div>
-        </div>
+        </ScrollableShadows>
     ) : null
 }
