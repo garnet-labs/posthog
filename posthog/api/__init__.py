@@ -106,6 +106,7 @@ from . import (
     advanced_activity_logs,
     alert,
     annotation,
+    anomalies,
     app_metrics,
     async_migration,
     authentication,
@@ -1066,6 +1067,8 @@ register_grandfathered_environment_nested_viewset(
     "environment_alerts",
     ["team_id"],
 )
+
+environments_router.register(r"anomalies", anomalies.AnomalyViewSet, "environment_anomalies", ["team_id"])
 
 projects_router.register(r"search", search.SearchViewSet, "project_search", ["project_id"])
 

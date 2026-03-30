@@ -38,6 +38,7 @@ import { LemonSelectOptions } from '@posthog/lemon-ui'
 import { AccessControlAction } from 'lib/components/AccessControlAction'
 import { ActivityLog } from 'lib/components/ActivityLog/ActivityLog'
 import { Alerts } from 'lib/components/Alerts/views/Alerts'
+import { Anomalies } from 'lib/components/Anomalies/Anomalies'
 import { AppShortcut } from 'lib/components/AppShortcuts/AppShortcut'
 import { keyBinds } from 'lib/components/AppShortcuts/shortcuts'
 import { ObjectTags } from 'lib/components/ObjectTags/ObjectTags'
@@ -770,6 +771,7 @@ export function SavedInsights(): JSX.Element {
     const { currentProjectId } = useValues(projectLogic)
     const summarizeInsight = useSummarizeInsight()
     const showHomeTab = useFeatureFlag('PRODUCT_ANALYTICS_HOME_TAB')
+    const showAnomaliesTab = useFeatureFlag('ANOMALIES_TAB')
     const isAIFirst = useFeatureFlag('AI_FIRST')
 
     const { tab } = filters
@@ -1006,6 +1008,21 @@ export function SavedInsights(): JSX.Element {
                           ]
                         : []),
                     { key: SavedInsightsTabs.All, label: 'Insights' },
+                    ...(showAnomaliesTab
+                        ? [
+                              {
+                                  key: SavedInsightsTabs.Anomalies,
+                                  label: (
+                                      <div className="flex items-center gap-2">
+                                          Anomalies
+                                          <LemonTag type="completion" size="small">
+                                              BETA
+                                          </LemonTag>
+                                      </div>
+                                  ),
+                              },
+                          ]
+                        : []),
                     {
                         key: SavedInsightsTabs.Alerts,
                         label: <div className="flex items-center gap-2">Alerts</div>,
@@ -1021,6 +1038,8 @@ export function SavedInsights(): JSX.Element {
                 <ActivityLog scope={ActivityScope.INSIGHT} />
             ) : tab === SavedInsightsTabs.Alerts ? (
                 <Alerts alertId={alertModalId} />
+            ) : tab === SavedInsightsTabs.Anomalies ? (
+                <Anomalies />
             ) : (
                 <>
                     <SavedInsightsFilters filters={filters} setFilters={setSavedInsightsFilters} />

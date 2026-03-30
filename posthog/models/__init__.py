@@ -14,6 +14,7 @@ from .action.action_step import ActionStep
 from .activity_logging.activity_log import ActivityLog
 from .activity_logging.notification_viewed import NotificationViewed
 from .alert import AlertConfiguration
+from .anomaly import AnomalyScore, InsightAnomalyConfig
 from .annotation import Annotation
 from .async_deletion import AsyncDeletion, DeletionType
 from .async_migration import AsyncMigration, AsyncMigrationError, MigrationStatus
@@ -99,6 +100,8 @@ __all__ = [
     "ApprovalPolicy",
     "ChangeRequest",
     "AlertConfiguration",
+    "AnomalyScore",
+    "InsightAnomalyConfig",
     "Action",
     "ActionStep",
     "ActivityLog",

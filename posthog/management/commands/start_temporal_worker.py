@@ -19,6 +19,10 @@ with workflow.unsafe.imports_passed_through():
 
 from posthog.clickhouse.query_tagging import tag_queries
 from posthog.temporal.ai import AI_ACTIVITIES, AI_WORKFLOWS, SIGNALS_ACTIVITIES, SIGNALS_WORKFLOWS
+from posthog.temporal.anomalies import (
+    ACTIVITIES as ANOMALY_SCORING_ACTIVITIES,
+    WORKFLOWS as ANOMALY_SCORING_WORKFLOWS,
+)
 from posthog.temporal.cleanup_property_definitions import (
     ACTIVITIES as CLEANUP_PROPDEFS_ACTIVITIES,
     WORKFLOWS as CLEANUP_PROPDEFS_WORKFLOWS,
@@ -195,7 +199,8 @@ _task_queue_specs = [
         + SYNC_PERSON_DISTINCT_IDS_WORKFLOWS
         + EXPERIMENTS_WORKFLOWS
         + CLEANUP_PROPDEFS_WORKFLOWS
-        + INGESTION_ACCEPTANCE_TEST_WORKFLOWS,
+        + INGESTION_ACCEPTANCE_TEST_WORKFLOWS
+        + ANOMALY_SCORING_WORKFLOWS,
         PROXY_SERVICE_ACTIVITIES
         + DELETE_PERSONS_ACTIVITIES
         + USAGE_REPORTS_ACTIVITIES
@@ -207,7 +212,8 @@ _task_queue_specs = [
         + SYNC_PERSON_DISTINCT_IDS_ACTIVITIES
         + EXPERIMENTS_ACTIVITIES
         + CLEANUP_PROPDEFS_ACTIVITIES
-        + INGESTION_ACCEPTANCE_TEST_ACTIVITIES,
+        + INGESTION_ACCEPTANCE_TEST_ACTIVITIES
+        + ANOMALY_SCORING_ACTIVITIES,
     ),
     (
         settings.HEALTH_CHECK_TASK_QUEUE,

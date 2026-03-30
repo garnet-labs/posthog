@@ -24,6 +24,7 @@ from posthog.hogql_queries.ai.vector_search_query_runner import LATEST_ACTIONS_E
 from posthog.temporal.ai import SyncVectorsInputs
 from posthog.temporal.ai.sync_vectors import EmbeddingVersion
 from posthog.temporal.ai.video_segment_clustering.schedule import create_video_segment_clustering_coordinator_schedule
+from posthog.temporal.anomalies.schedule import create_anomaly_scoring_schedule, create_anomaly_training_schedule
 from posthog.temporal.common.client import async_connect
 from posthog.temporal.common.schedule import a_create_schedule, a_schedule_exists, a_update_schedule
 from posthog.temporal.ducklake.compaction_types import DucklakeCompactionInput
@@ -374,6 +375,9 @@ schedules = [
     create_ingestion_acceptance_test_schedule,
     create_health_check_schedules,
 ]
+
+schedules.append(create_anomaly_training_schedule)
+schedules.append(create_anomaly_scoring_schedule)
 
 if settings.EE_AVAILABLE:
     schedules.append(create_schedule_all_subscriptions_schedule)
