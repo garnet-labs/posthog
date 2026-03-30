@@ -1,5 +1,7 @@
 from posthog.test.base import BaseTest
 
+from django.core.cache import cache
+
 from parameterized import parameterized
 
 from posthog.hogql_queries.ai.scan_period import (
@@ -7,7 +9,6 @@ from posthog.hogql_queries.ai.scan_period import (
     PROPERTY_CARDINALITY_THRESHOLD,
     SCAN_PERIOD_DAYS,
     TaxonomyVolumeTier,
-    _get_cached_volume_tier_inner,
     get_scan_period_days,
     get_taxonomy_volume_tier,
     should_use_postgres_for_events,
@@ -20,7 +21,7 @@ from products.event_definitions.backend.models.property_definition import Proper
 class TestTaxonomyVolumeTier(BaseTest):
     def setUp(self):
         super().setUp()
-        _get_cached_volume_tier_inner.cache_clear()
+        cache.clear()
 
     def _set_org_usage(self, event_usage: int | None = None, usage: dict | None = None):
         if usage is not None:
@@ -91,7 +92,7 @@ class TestTaxonomyVolumeTier(BaseTest):
 class TestGetScanPeriodDays(BaseTest):
     def setUp(self):
         super().setUp()
-        _get_cached_volume_tier_inner.cache_clear()
+        cache.clear()
 
     def _set_org_usage(self, event_usage: int):
         self.organization.usage = {"events": {"usage": event_usage, "limit": 1_000_000, "todays_usage": 0}}
@@ -117,7 +118,7 @@ class TestGetScanPeriodDays(BaseTest):
 class TestShouldUsePostgresForEvents(BaseTest):
     def setUp(self):
         super().setUp()
-        _get_cached_volume_tier_inner.cache_clear()
+        cache.clear()
 
     def _set_org_usage(self, event_usage: int | None = None):
         if event_usage is not None:

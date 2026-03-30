@@ -1,7 +1,6 @@
 from enum import StrEnum
-from functools import lru_cache
 
-from django.utils import timezone
+from django.core.cache import cache
 
 from posthog.models import Team
 
@@ -13,8 +12,8 @@ from products.event_definitions.backend.models.property_definition import Proper
 EVENT_CARDINALITY_THRESHOLD = 50
 PROPERTY_CARDINALITY_THRESHOLD = 100
 
-# How long to cache the volume tier result (seconds).
-_CACHE_TTL_SECONDS = 300
+_CACHE_TTL_SECONDS = 60 * 60  # 1 hour
+_CACHE_KEY_PREFIX = "taxonomy_volume_tier"
 
 
 class TaxonomyVolumeTier(StrEnum):
@@ -30,50 +29,6 @@ SCAN_PERIOD_DAYS: dict[TaxonomyVolumeTier, int] = {
     TaxonomyVolumeTier.HIGH: 7,
     TaxonomyVolumeTier.EXTRA_HIGH: 3,
 }
-
-
-class TaxonomyScanConfig:
-    """
-    Resolves and caches the taxonomy scan configuration for a team.
-
-    Caches the volume tier per team_id for up to 5 minutes to avoid
-    redundant DB queries (cardinality checks) when multiple taxonomy
-    tools are called in the same conversation turn.
-    """
-
-    def __init__(self, team: Team):
-        self._team = team
-        self._tier: TaxonomyVolumeTier | None = None
-
-    @property
-    def volume_tier(self) -> TaxonomyVolumeTier:
-        if self._tier is None:
-            self._tier = _get_cached_volume_tier(self._team.pk)
-        return self._tier
-
-    @property
-    def scan_period_days(self) -> int:
-        return SCAN_PERIOD_DAYS[self.volume_tier]
-
-    @property
-    def use_postgres_for_events(self) -> bool:
-        return self.volume_tier == TaxonomyVolumeTier.LOW
-
-
-@lru_cache(maxsize=128)
-def _get_cached_volume_tier_inner(team_pk: int, cache_bucket: int) -> TaxonomyVolumeTier:
-    """
-    Cached computation of volume tier. The `cache_bucket` parameter
-    is derived from the current time divided by the TTL, so entries
-    expire naturally as the bucket rolls over.
-    """
-    team = Team.objects.select_related("organization").get(pk=team_pk)
-    return _compute_volume_tier(team)
-
-
-def _get_cached_volume_tier(team_pk: int) -> TaxonomyVolumeTier:
-    bucket = int(timezone.now().timestamp()) // _CACHE_TTL_SECONDS
-    return _get_cached_volume_tier_inner(team_pk, bucket)
 
 
 def _has_high_cardinality(team: Team) -> bool:
@@ -102,14 +57,25 @@ def _compute_volume_tier(team: Team) -> TaxonomyVolumeTier:
     return TaxonomyVolumeTier.EXTRA_HIGH
 
 
-# Module-level convenience functions for callers that don't need the full config object.
 def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:
-    return TaxonomyScanConfig(team).volume_tier
+    """
+    Determine the taxonomy volume tier for a team, cached in Redis for 1 hour.
+    """
+    cache_key = f"{_CACHE_KEY_PREFIX}:{team.pk}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return TaxonomyVolumeTier(cached)
+
+    tier = _compute_volume_tier(team)
+    cache.set(cache_key, tier.value, timeout=_CACHE_TTL_SECONDS)
+    return tier
 
 
 def get_scan_period_days(team: Team) -> int:
-    return TaxonomyScanConfig(team).scan_period_days
+    """Return the ClickHouse scan period in days for the team's volume tier."""
+    return SCAN_PERIOD_DAYS[get_taxonomy_volume_tier(team)]
 
 
 def should_use_postgres_for_events(team: Team) -> bool:
-    return TaxonomyScanConfig(team).use_postgres_for_events
+    """Whether to use Postgres EventDefinition instead of ClickHouse for event listing."""
+    return get_taxonomy_volume_tier(team) == TaxonomyVolumeTier.LOW
