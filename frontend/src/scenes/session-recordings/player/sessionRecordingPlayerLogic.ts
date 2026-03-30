@@ -1482,6 +1482,12 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
         initializePlayerFromStart: () => {
             const initialSegment = values.sessionPlayerData?.segments[0]
             if (initialSegment) {
+                // Ensure currentTimestamp is set before any seek so seekToTime
+                // doesn't early-return due to undefined currentTimestamp
+                if (!values.currentTimestamp) {
+                    actions.setCurrentTimestamp(initialSegment.startTimestamp)
+                }
+
                 // Check for the "t" search param in the url on first load
                 if (!cache.hasInitialized) {
                     cache.hasInitialized = true
@@ -1498,10 +1504,6 @@ export const sessionRecordingPlayerLogic = kea<sessionRecordingPlayerLogicType>(
                     } else {
                         actions.setSkipToFirstMatchingEvent(true)
                     }
-                }
-
-                if (!values.currentTimestamp) {
-                    actions.setCurrentTimestamp(initialSegment.startTimestamp)
                 }
 
                 actions.setCurrentSegment(initialSegment)

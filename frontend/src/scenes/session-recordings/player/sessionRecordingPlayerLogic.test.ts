@@ -326,6 +326,28 @@ describe('sessionRecordingPlayerLogic', () => {
             logic.unmount()
             expect(logic.cache.hasInitialized).toBeFalsy()
         })
+
+        it('clamps out-of-bounds ?t= param to recording end instead of hanging', async () => {
+            // Mock recording: start=1682952380877, end=1682952392745, durationMs=11868
+            const END = 1682952392745
+
+            // Wait for recording data to load first
+            await expectLogic(logic).toDispatchActions([
+                sessionRecordingDataCoordinatorLogic({ sessionRecordingId: '2' }).actionTypes.loadRecordingMetaSuccess,
+                'initializePlayerFromStart',
+            ])
+
+            // Simulate what happens when seekToTime is called with an out-of-bounds
+            // offset (e.g. ?t=999999 → 999,999,000ms). seekToTime clamps via
+            // clamp(start + ms, start, end) and dispatches seekToTimestamp(end).
+            await expectLogic(logic, () => {
+                logic.actions.seekToTime(999_999_000)
+            })
+                .toDispatchActions(['seekToTime', 'seekToTimestamp'])
+                .toFinishAllListeners()
+
+            expect(logic.values.currentTimestamp).toBe(END)
+        })
     })
 
     describe('delete session recording', () => {

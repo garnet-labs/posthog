@@ -314,3 +314,88 @@ class TestImageExporter(APIBaseTest):
             assert call_kwargs["tile_filters_override"] == tile_filters, (
                 "tile_filters_override should match tile filters"
             )
+
+    def test_session_recording_screenshot_export_passes_correct_args(
+        self,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            export_context={
+                "mode": "screenshot",
+                "session_recording_id": "test-session-abc",
+                "timestamp": 87776,
+                "width": 1400,
+                "height": 600,
+                "css_selector": ".replayer-wrapper",
+            },
+        )
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            image_exporter.export_image(exported_asset)
+
+        assert mock_screenshot_asset.called
+        call_args = mock_screenshot_asset.call_args[0]
+        # call_args: (image_path, url_to_render, screenshot_width, wait_for_css_selector, screenshot_height, max_height_pixels)
+        url_to_render = call_args[1]
+        screenshot_width = call_args[2]
+        wait_for_css_selector = call_args[3]
+        screenshot_height = call_args[4]
+
+        assert "t=87776" in url_to_render
+        assert "fullscreen=true" in url_to_render
+        assert "token=" in url_to_render
+        assert wait_for_css_selector == ".replayer-wrapper"
+        assert screenshot_width == 1400
+        assert screenshot_height == 600
+
+    def test_session_recording_screenshot_export_uses_defaults_when_optional_fields_missing(
+        self,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            export_context={
+                "session_recording_id": "test-session-def",
+            },
+        )
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            image_exporter.export_image(exported_asset)
+
+        assert mock_screenshot_asset.called
+        call_args = mock_screenshot_asset.call_args[0]
+        url_to_render = call_args[1]
+        screenshot_width = call_args[2]
+        wait_for_css_selector = call_args[3]
+        screenshot_height = call_args[4]
+
+        assert "t=0" in url_to_render
+        assert wait_for_css_selector == ".replayer-wrapper"
+        assert screenshot_width == 1400
+        assert screenshot_height == 600
+
+    def test_session_recording_export_without_recording_id_raises(
+        self,
+        mock_remove: Any,
+        mock_open: Any,
+        mock_screenshot_asset: Any,
+    ) -> None:
+        exported_asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            export_context={"mode": "screenshot"},
+        )
+
+        with self.settings(OBJECT_STORAGE_ENABLED=False):
+            with self.assertRaises(
+                Exception,
+                msg="Export is missing required dashboard, insight ID, or session_recording_id in export_context",
+            ):
+                image_exporter.export_image(exported_asset)
