@@ -9,8 +9,8 @@ Within each date partition, events are further chunked by team_id to keep file s
 
 S3 path structure: s3://{bucket}/backfill/events/{team_id}/{year}/{month}/{day}/
 
-Uses plain directory segments (not Hive-style key=value) to avoid DuckLake
-interpreting them as partition columns during ducklake_add_data_files.
+Uses hive_partitioning => false when calling ducklake_add_data_files to prevent
+DuckLake from inferring partition columns from the directory structure.
 """
 
 import base64
@@ -281,8 +281,8 @@ def get_s3_path_for_partition(
 
     Path structure: s3://{bucket}/backfill/events/{team_id}/{year}/{month}/{day}/{chunk_id}.parquet
 
-    Uses plain directory segments (not Hive-style key=value) to avoid DuckLake
-    interpreting them as partition columns during ducklake_add_data_files.
+    DuckLake registration uses hive_partitioning => false to prevent partition
+    inference from the directory structure.
     """
     year = date.strftime("%Y")
     month = date.strftime("%m")
@@ -514,7 +514,8 @@ def register_files_with_ducklake(
                 context.log.info(f"Registering file with DuckLake: {s3_path}")
                 # Use escape() to prevent SQL injection
                 conn.execute(
-                    f"CALL ducklake_add_data_files('{alias}', 'events', '{escape(s3_path)}', schema => 'posthog')"
+                    f"CALL ducklake_add_data_files('{alias}', 'events', '{escape(s3_path)}',"
+                    f" schema => 'posthog', hive_partitioning => false)"
                 )
                 registered_count += 1
                 context.log.info(f"Successfully registered: {s3_path}")
