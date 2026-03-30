@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import asyncio
@@ -77,32 +78,30 @@ async def flush_kafka_batch(
         batch_size=batch_size,
     )
 
+    # Time the Kafka flush operation for performance monitoring
+    flush_start_time = time.monotonic()
     await asyncio.to_thread(kafka_producer.flush)
+    flush_duration = time.monotonic() - flush_start_time
 
-    # Check for failures in this batch
-    failed_count = 0
-    for send_result in pending_messages:
-        try:
-            send_result.get(timeout=0)  # Non-blocking check
-        except Exception as e:
-            logger.warning(
-                f"Kafka send result failure: {e}",
-                team_id=team_id,
-                offset=current_offset,
-                error=str(e),
-                exception_type=type(e).__name__,
-            )
-            failed_count += 1
+    # Record flush performance metrics (only when in activity context)
+    try:
+        metric_meter = temporalio.activity.metric_meter()
 
-    if failed_count > 0:
-        logger.error(
-            f"Failed to send {failed_count}/{batch_size} Kafka messages",
-            team_id=team_id,
-            offset=current_offset,
-            failed_count=failed_count,
-            batch_size=batch_size,
+        flush_duration_metric = metric_meter.create_histogram_float(
+            "backfill_kafka_flush_duration_seconds", "Duration of Kafka flush operations in seconds"
         )
-        raise Exception(f"Failed to send {failed_count}/{batch_size} Kafka messages")
+        flush_duration_metric.record(flush_duration, {"team_id": str(team_id)})
+    except RuntimeError:
+        # Not in activity context (e.g., during tests), skip metrics
+        pass
+
+    logger.info(
+        f"Flushed {batch_type}batch in {flush_duration:.3f}s",
+        team_id=team_id,
+        offset=current_offset,
+        batch_size=batch_size,
+        flush_duration_seconds=flush_duration,
+    )
 
     return batch_size
 
@@ -198,7 +197,8 @@ async def backfill_precalculated_person_properties_activity(
 
     logger.info(
         f"Starting person properties precalculation for {len(cohort_ids)} cohorts {cohort_ids}, "
-        f"processing {len(filters)} total filters from cursor {inputs.cursor}"
+        f"processing {len(filters)} total filters from cursor {inputs.cursor} "
+        f"with batch size {inputs.batch_size} ({len(filters)} filters = ~{inputs.batch_size * len(filters)} events per batch)"
     )
 
     async with Heartbeater(details=(f"Processing persons from {inputs.cursor}",)) as heartbeater:
@@ -208,7 +208,9 @@ async def backfill_precalculated_person_properties_activity(
         total_processed = 0
         total_events_produced = 0
         total_flushed = 0
-        FLUSH_BATCH_SIZE = 10_000  # Flush every 10k messages to allow heartbeats
+        # Configure Kafka flush batch size via environment variable
+        FLUSH_BATCH_SIZE = int(os.environ.get("BACKFILL_KAFKA_FLUSH_BATCH_SIZE", "10000"))
+
         pending_kafka_messages = []
 
         # Build optimized query to only fetch needed person properties
@@ -316,49 +318,46 @@ async def backfill_precalculated_person_properties_activity(
                             )
                             matches = False
 
-                        # Send results to all cohorts that use this filter
-                        for cohort_id in filter_obj.cohort_ids:
-                            # Use person_id as distinct_id for backfilling
-                            event = {
-                                "distinct_id": person_id,
-                                "person_id": person_id,
-                                "team_id": inputs.team_id,
-                                "condition": filter_obj.condition_hash,
-                                "matches": matches,
-                                "source": f"cohort_backfill_{cohort_id}",
-                            }
+                        # Send filter result once per person (not per cohort)
+                        event = {
+                            "distinct_id": person_id,
+                            "person_id": person_id,
+                            "team_id": inputs.team_id,
+                            "condition": filter_obj.condition_hash,
+                            "matches": matches,
+                            "source": f"cohort_backfill_{filter_obj.condition_hash}",
+                        }
 
-                            # Produce to Kafka without blocking - collect send results for later flushing
-                            try:
-                                send_result = kafka_producer.produce(
-                                    topic=KAFKA_CDP_CLICKHOUSE_PRECALCULATED_PERSON_PROPERTIES,
-                                    key=event["distinct_id"],
-                                    data=event,
+                        # Produce to Kafka without blocking - collect send results for later flushing
+                        try:
+                            send_result = kafka_producer.produce(
+                                topic=KAFKA_CDP_CLICKHOUSE_PRECALCULATED_PERSON_PROPERTIES,
+                                data=event,
+                            )
+                            pending_kafka_messages.append(send_result)
+                            total_events_produced += 1
+
+                            # Flush in batches to allow heartbeats
+                            if len(pending_kafka_messages) >= FLUSH_BATCH_SIZE:
+                                flushed = await flush_kafka_batch(
+                                    kafka_producer,
+                                    pending_kafka_messages,
+                                    inputs.team_id,
+                                    total_processed,  # Use total processed count
+                                    heartbeater,
+                                    logger,
                                 )
-                                pending_kafka_messages.append(send_result)
-                                total_events_produced += 1
+                                total_flushed += flushed
+                                pending_kafka_messages.clear()
 
-                                # Flush in batches to allow heartbeats
-                                if len(pending_kafka_messages) >= FLUSH_BATCH_SIZE:
-                                    flushed = await flush_kafka_batch(
-                                        kafka_producer,
-                                        pending_kafka_messages,
-                                        inputs.team_id,
-                                        total_processed,  # Use total processed count
-                                        heartbeater,
-                                        logger,
-                                    )
-                                    total_flushed += flushed
-                                    pending_kafka_messages.clear()
-
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to produce Kafka message for distinct_id {event['distinct_id']}: {e}",
-                                    distinct_id=event["distinct_id"],
-                                    person_id=person_id,
-                                    error=str(e),
-                                )
-                                # Continue processing even if Kafka produce fails
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to produce Kafka message for distinct_id {event['distinct_id']}: {e}",
+                                distinct_id=event["distinct_id"],
+                                person_id=person_id,
+                                error=str(e),
+                            )
+                            # Continue processing even if Kafka produce fails
 
         logger.info(f"Processed {batch_count} persons from {inputs.cursor} to {last_person_id}")
         total_processed = batch_count
