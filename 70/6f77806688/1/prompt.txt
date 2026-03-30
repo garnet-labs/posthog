@@ -1,0 +1,11 @@
+can you make lots of API calls to the Endpoints we have in our local server so we have some usage data? should be refresh: force or direct so we avoid the cache
+
+---
+
+how can we trick the collection to think it's a diff time? or should we just edit some rows to be spread across a few days so we can see the charts show useful data?
+
+---
+
+okay nice - now the Usage tab
+
+[Image #1] why do we get the same x axis tick?
