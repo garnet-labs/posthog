@@ -45,19 +45,14 @@ export type ItemRenderer<T extends TimelineItem> = {
     render: React.FC<RendererProps<T>>
 }
 
-/** Configurable time ranges (in hours) for adaptive query expansion. Tried in ascending order; stops at first non-empty result. */
-export type TimeRangeConfig = number[]
-
-export const DEFAULT_TIME_RANGES: TimeRangeConfig = [1, 6, 24]
-
+/**
+ * Paginated loader for timeline items. Each call returns up to `limit` items
+ * before/after the given cursor, within a fixed time window around the center.
+ */
 export type ItemLoader<T extends TimelineItem> = {
-    hasPrevious(index: Dayjs): boolean
-    previousBatch(index: Dayjs, count: number): Promise<T[]>
-
-    hasNext(index: Dayjs): boolean
-    nextBatch(index: Dayjs, count: number): Promise<T[]>
-
-    clear?(): void
+    loadBefore(cursor: Dayjs, limit: number): Promise<T[]>
+    loadAfter(cursor: Dayjs, limit: number): Promise<T[]>
 }
+
 // eslint-disable-next-line import/no-cycle
 export * from './item-collector'

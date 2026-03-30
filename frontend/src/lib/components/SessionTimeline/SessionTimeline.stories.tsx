@@ -74,7 +74,7 @@ function generateMockItems(
 }
 
 /**
- * In-memory mock loader. Simulates async loading with an optional delay.
+ * In-memory mock loader with simple cursor-based pagination.
  */
 class MockLoader implements ItemLoader<MockItem> {
     private items: MockItem[]
@@ -85,28 +85,16 @@ class MockLoader implements ItemLoader<MockItem> {
         this.delayMs = delayMs
     }
 
-    hasPrevious(index: Dayjs): boolean {
-        return this.items.some((item) => item.timestamp.isBefore(index))
-    }
-
-    hasNext(index: Dayjs): boolean {
-        return this.items.some((item) => item.timestamp.isAfter(index))
-    }
-
-    async previousBatch(index: Dayjs, count: number): Promise<MockItem[]> {
+    async loadBefore(cursor: Dayjs, limit: number): Promise<MockItem[]> {
         await this.delay()
-        const before = this.items.filter((item) => item.timestamp.isBefore(index))
-        return before.slice(-count)
+        const before = this.items.filter((item) => item.timestamp.isBefore(cursor))
+        return before.slice(-limit)
     }
 
-    async nextBatch(index: Dayjs, count: number): Promise<MockItem[]> {
+    async loadAfter(cursor: Dayjs, limit: number): Promise<MockItem[]> {
         await this.delay()
-        const after = this.items.filter((item) => item.timestamp.isAfter(index))
-        return after.slice(0, count)
-    }
-
-    clear(): void {
-        // no-op for mock
+        const after = this.items.filter((item) => item.timestamp.isAfter(cursor))
+        return after.slice(0, limit)
     }
 
     private delay(): Promise<void> {

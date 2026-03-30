@@ -2,13 +2,11 @@ import { IconEye } from '@posthog/icons'
 import { Link } from '@posthog/lemon-ui'
 
 import { ErrorTrackingRuntime } from 'lib/components/Errors/types'
-import { getRuntimeFromLib } from 'lib/components/Errors/utils'
-import { dayjs } from 'lib/dayjs'
 
 import { RuntimeIcon } from 'products/error_tracking/frontend/components/RuntimeIcon'
 
-import { ItemCategory, ItemRenderer, TimelineItem } from '..'
-import { BasePreview, EventLoader } from './base'
+import { ItemRenderer, TimelineItem } from '..'
+import { BasePreview } from './base'
 
 export interface PageItem extends TimelineItem {
     payload: {
@@ -33,28 +31,6 @@ export const pageRenderer: ItemRenderer<PageItem> = {
             />
         )
     },
-}
-
-export class PageItemLoader extends EventLoader<PageItem> {
-    select(): string[] {
-        return ['uuid', 'timestamp', 'properties.$current_url', 'properties.$lib']
-    }
-
-    where(): string[] {
-        return ["equals(event, '$pageview')"]
-    }
-
-    buildItem(evt: any): PageItem {
-        return {
-            id: evt[0],
-            category: ItemCategory.PAGE_VIEWS,
-            timestamp: dayjs.utc(evt[1]),
-            payload: {
-                runtime: getRuntimeFromLib(evt[3]),
-                url: evt[2],
-            },
-        } as PageItem
-    }
 }
 
 function getUrlPathname(url: string): string {

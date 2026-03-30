@@ -5,98 +5,103 @@ import { TimeTree } from 'lib/utils/time-tree'
 import { compareTimelineItems, ItemCategory, ItemLoader, ItemRenderer, TimelineItem } from '.'
 
 export class ItemCollector {
-    sessionId: string
-    timestamp: Dayjs
-    beforeCursor: Dayjs
-    afterCursor: Dayjs
-    itemCache: TimeTree<TimelineItem>
-    loaders: Map<ItemCategory, ItemLoader<TimelineItem>> = new Map()
-    renderers: Map<ItemCategory, ItemRenderer<TimelineItem>> = new Map()
+    readonly sessionId: string
+    readonly timestamp: Dayjs
+
+    private beforeCursor: Dayjs
+    private afterCursor: Dayjs
+    private _hasMoreBefore = true
+    private _hasMoreAfter = true
+    private itemCache: TimeTree<TimelineItem>
+
+    private loaders = new Set<ItemLoader<TimelineItem>>()
+    private renderers = new Map<ItemCategory, ItemRenderer<TimelineItem>>()
 
     constructor(sessionId: string, timestamp: Dayjs) {
         this.sessionId = sessionId
         this.timestamp = timestamp
-        this.beforeCursor = this.timestamp
-        this.afterCursor = this.timestamp
+        this.beforeCursor = timestamp
+        this.afterCursor = timestamp
         this.itemCache = new TimeTree<TimelineItem>()
     }
 
+    /**
+     * Register a category with its renderer and loader.
+     * The same loader instance may be shared across categories — it will only be
+     * called once per load (Set deduplicates by identity).
+     */
     addCategory(category: ItemCategory, renderer: ItemRenderer<TimelineItem>, loader: ItemLoader<TimelineItem>): void {
-        this.loaders.set(category, loader)
         this.renderers.set(category, renderer)
+        this.loaders.add(loader)
     }
 
     getAllCategories(): ItemCategory[] {
-        return Array.from(this.loaders.keys())
-    }
-
-    clear(): void {
-        this.beforeCursor = this.timestamp
-        this.afterCursor = this.timestamp
-        this.itemCache = new TimeTree<TimelineItem>()
-
-        this.loaders.forEach((loader) => loader.clear?.())
+        return Array.from(this.renderers.keys())
     }
 
     getRenderer(category: ItemCategory): ItemRenderer<TimelineItem> | undefined {
         return this.renderers.get(category)
     }
 
-    getLoader(category: ItemCategory): ItemLoader<TimelineItem> | undefined {
-        return this.loaders.get(category)
-    }
-
-    getCategories(): ItemCategory[] {
-        return Array.from(this.loaders.keys())
-    }
-
     collectItems(): TimelineItem[] {
         return this.itemCache.getAll()
     }
 
-    hasBefore(categories: ItemCategory[]): boolean {
-        return categories
-            .map((cat) => this.getLoader(cat))
-            .some((loader) => !!loader && loader.hasPrevious(this.beforeCursor))
+    get hasMoreBefore(): boolean {
+        return this._hasMoreBefore
     }
 
-    hasAfter(categories: ItemCategory[]): boolean {
-        return categories
-            .map((cat) => this.getLoader(cat))
-            .some((loader) => !!loader && loader.hasNext(this.afterCursor))
+    get hasMoreAfter(): boolean {
+        return this._hasMoreAfter
     }
 
-    async loadBefore(categories: ItemCategory[], count: number): Promise<void> {
-        const loaders = categories
-            .map((cat) => this.getLoader(cat))
-            .filter((loader): loader is ItemLoader<TimelineItem> => !!loader)
+    clear(): void {
+        this.beforeCursor = this.timestamp
+        this.afterCursor = this.timestamp
+        this._hasMoreBefore = true
+        this._hasMoreAfter = true
+        this.itemCache = new TimeTree<TimelineItem>()
+    }
 
-        const batches = await Promise.all(loaders.map((loader) => loader.previousBatch(this.beforeCursor, count)))
+    async loadBefore(count: number): Promise<void> {
+        if (!this._hasMoreBefore) {
+            return
+        }
 
-        // Merge all items, sort descending (newest first), take closest `count`
+        const loaders = Array.from(this.loaders)
+        const perLoader = Math.max(1, Math.ceil(count / loaders.length))
+
+        const batches = await Promise.all(loaders.map((loader) => loader.loadBefore(this.beforeCursor, perLoader)))
+
         const allItems = batches.flat().sort((a, b) => compareTimelineItems(b, a))
         const selected = allItems.slice(0, count)
 
         if (selected.length > 0) {
             this.beforeCursor = selected[selected.length - 1].timestamp
+        } else {
+            this._hasMoreBefore = false
         }
 
         this.itemCache.add(selected)
     }
 
-    async loadAfter(categories: ItemCategory[], count: number): Promise<void> {
-        const loaders = categories
-            .map((cat) => this.getLoader(cat))
-            .filter((loader): loader is ItemLoader<TimelineItem> => !!loader)
+    async loadAfter(count: number): Promise<void> {
+        if (!this._hasMoreAfter) {
+            return
+        }
 
-        const batches = await Promise.all(loaders.map((loader) => loader.nextBatch(this.afterCursor, count)))
+        const loaders = Array.from(this.loaders)
+        const perLoader = Math.max(1, Math.ceil(count / loaders.length))
 
-        // Merge all items, sort ascending (oldest first), take closest `count`
+        const batches = await Promise.all(loaders.map((loader) => loader.loadAfter(this.afterCursor, perLoader)))
+
         const allItems = batches.flat().sort(compareTimelineItems)
         const selected = allItems.slice(0, count)
 
         if (selected.length > 0) {
             this.afterCursor = selected[selected.length - 1].timestamp
+        } else {
+            this._hasMoreAfter = false
         }
 
         this.itemCache.add(selected)

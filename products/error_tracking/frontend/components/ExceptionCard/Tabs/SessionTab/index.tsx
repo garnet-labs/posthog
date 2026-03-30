@@ -8,14 +8,15 @@ import { EmptyMessage } from 'lib/components/EmptyMessage/EmptyMessage'
 import { errorPropertiesLogic } from 'lib/components/Errors/errorPropertiesLogic'
 import { SessionTimeline, SessionTimelineHandle } from 'lib/components/SessionTimeline/SessionTimeline'
 import { ItemCategory, ItemCollector } from 'lib/components/SessionTimeline/timeline'
-import { CustomItemLoader, customItemRenderer } from 'lib/components/SessionTimeline/timeline/items/custom'
-import { ExceptionItemLoader, exceptionRenderer } from 'lib/components/SessionTimeline/timeline/items/exceptions'
+import { CombinedEventLoader } from 'lib/components/SessionTimeline/timeline/items/combined'
+import { customItemRenderer } from 'lib/components/SessionTimeline/timeline/items/custom'
+import { exceptionRenderer } from 'lib/components/SessionTimeline/timeline/items/exceptions'
 import {
-    ExceptionStepItemLoader,
+    ExceptionStepLoader,
     exceptionStepRenderer,
 } from 'lib/components/SessionTimeline/timeline/items/exceptionSteps'
-import { ConsoleLogItemLoader, consoleLogRenderer } from 'lib/components/SessionTimeline/timeline/items/logs'
-import { PageItemLoader, pageRenderer } from 'lib/components/SessionTimeline/timeline/items/page'
+import { ConsoleLogLoader, consoleLogRenderer } from 'lib/components/SessionTimeline/timeline/items/logs'
+import { pageRenderer } from 'lib/components/SessionTimeline/timeline/items/page'
 import { Dayjs, dayjs } from 'lib/dayjs'
 import {
     TabsPrimitive,
@@ -104,29 +105,29 @@ export function SessionTimelineTab(): JSX.Element {
         }
         const timestampDayJs = dayjs(timestamp).add(1, 'millisecond')
         const collector = new ItemCollector(sessionId, timestampDayJs)
+
+        // Exception steps (in-memory, no API calls)
         if (Array.isArray(properties?.$exception_steps)) {
             collector.addCategory(
                 ItemCategory.EXCEPTION_STEPS,
                 exceptionStepRenderer,
-                new ExceptionStepItemLoader(uuid, dayjs.utc(timestamp), properties)
+                new ExceptionStepLoader(uuid, dayjs.utc(timestamp), properties)
             )
         }
-        collector.addCategory(
-            ItemCategory.ERROR_TRACKING,
-            exceptionRenderer,
-            new ExceptionItemLoader(sessionId, timestampDayJs)
-        )
-        collector.addCategory(ItemCategory.PAGE_VIEWS, pageRenderer, new PageItemLoader(sessionId, timestampDayJs))
-        collector.addCategory(
-            ItemCategory.CUSTOM_EVENTS,
-            customItemRenderer,
-            new CustomItemLoader(sessionId, timestampDayJs)
-        )
+
+        // All event-based categories in a single query
+        const eventLoader = new CombinedEventLoader(sessionId, timestampDayJs)
+        collector.addCategory(ItemCategory.ERROR_TRACKING, exceptionRenderer, eventLoader)
+        collector.addCategory(ItemCategory.PAGE_VIEWS, pageRenderer, eventLoader)
+        collector.addCategory(ItemCategory.CUSTOM_EVENTS, customItemRenderer, eventLoader)
+
+        // Console logs (separate table)
         collector.addCategory(
             ItemCategory.CONSOLE_LOGS,
             consoleLogRenderer,
-            new ConsoleLogItemLoader(sessionId, timestampDayJs)
+            new ConsoleLogLoader(sessionId, timestampDayJs)
         )
+
         return collector
     }, [properties, sessionId, timestamp, uuid])
 

@@ -3,7 +3,6 @@ import { IconList } from '@posthog/icons'
 import { ErrorEventProperties, ErrorTrackingRuntime } from 'lib/components/Errors/types'
 import { getRuntimeFromLib, stringify } from 'lib/components/Errors/utils'
 import { Dayjs, dayjs } from 'lib/dayjs'
-import { TimeTree } from 'lib/utils/time-tree'
 
 import { RuntimeIcon } from 'products/error_tracking/frontend/components/RuntimeIcon'
 
@@ -58,50 +57,28 @@ export const exceptionStepRenderer: ItemRenderer<ExceptionStepItem> = {
     },
 }
 
-export class ExceptionStepItemLoader implements ItemLoader<ExceptionStepItem> {
+/**
+ * In-memory loader for exception steps (derived from event properties, no API calls).
+ */
+export class ExceptionStepLoader implements ItemLoader<ExceptionStepItem> {
     private readonly items: ExceptionStepItem[]
-    private readonly cache = new TimeTree<ExceptionStepItem>()
-    private hydrated = false
 
     constructor(exceptionUuid: string, exceptionTimestamp: Dayjs, properties?: ErrorEventProperties) {
         this.items = buildExceptionStepItems(exceptionUuid, exceptionTimestamp, properties)
     }
 
-    clear(): void {
-        this.cache.clear()
-        this.hydrated = false
+    async loadBefore(cursor: Dayjs, limit: number): Promise<ExceptionStepItem[]> {
+        const before = this.items.filter((item) => item.timestamp.isBefore(cursor))
+        return before.slice(-limit)
     }
 
-    hasPrevious(index: Dayjs): boolean {
-        return this.items.some((item) => item.timestamp.isBefore(index))
-    }
-
-    hasNext(index: Dayjs): boolean {
-        return this.items.some((item) => item.timestamp.isAfter(index))
-    }
-
-    async previousBatch(index: Dayjs, count: number): Promise<ExceptionStepItem[]> {
-        this.hydrate()
-        const all = this.cache.getAll() // sorted ascending
-        const before = all.filter((item) => item.timestamp.isBefore(index))
-        return before.slice(-count)
-    }
-
-    async nextBatch(index: Dayjs, count: number): Promise<ExceptionStepItem[]> {
-        this.hydrate()
-        const all = this.cache.getAll() // sorted ascending
-        const after = all.filter((item) => item.timestamp.isAfter(index))
-        return after.slice(0, count)
-    }
-
-    private hydrate(): void {
-        if (this.hydrated) {
-            return
-        }
-        this.cache.add(this.items)
-        this.hydrated = true
+    async loadAfter(cursor: Dayjs, limit: number): Promise<ExceptionStepItem[]> {
+        const after = this.items.filter((item) => item.timestamp.isAfter(cursor))
+        return after.slice(0, limit)
     }
 }
+
+// ─── Step item builders ──────────────────────────────────────────────────────
 
 function buildExceptionStepItems(
     exceptionUuid: string,
