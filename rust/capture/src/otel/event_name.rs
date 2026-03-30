@@ -46,13 +46,60 @@ const EVENT_CLASSIFIERS: &[EventClassifier] = &[
     },
 ];
 
-pub fn get_event_name(attrs: &serde_json::Map<String, Value>) -> &'static str {
+const AI_ATTRIBUTE_PREFIXES: &[&str] = &["gen_ai.", "pydantic_ai.", "traceloop."];
+
+/// Attribute keys that indicate an AI-related span when no classifier matches.
+/// These are intentionally broad — a false positive (non-AI span ingested as
+/// `$ai_span`) is harmless, while a false negative (real AI span dropped) loses
+/// data. Keys already handled by `EVENT_CLASSIFIERS` are omitted since the
+/// classifier loop runs first.
+const AI_MARKER_KEYS: &[&str] = &[
+    "ai.telemetry.functionId",
+    "agent_name",
+    "final_result",
+    "logfire.json_schema",
+    "logfire.msg",
+    "model_name",
+    "model_request_parameters",
+    "tool_arguments",
+    "tool_response",
+];
+
+fn has_ai_markers(attrs: &serde_json::Map<String, Value>) -> bool {
+    attrs.keys().any(|key| {
+        AI_ATTRIBUTE_PREFIXES
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+            || AI_MARKER_KEYS.contains(&key.as_str())
+    })
+}
+
+/// Lightweight check on raw protobuf attributes to avoid converting irrelevant
+/// spans into JSON. Mirrors the logic in `has_ai_markers` and the classifier
+/// key set.
+pub fn has_ai_attributes_raw(attrs: &[opentelemetry_proto::tonic::common::v1::KeyValue]) -> bool {
+    attrs.iter().any(|kv| {
+        AI_ATTRIBUTE_PREFIXES
+            .iter()
+            .any(|prefix| kv.key.starts_with(prefix))
+            || AI_MARKER_KEYS.contains(&kv.key.as_str())
+            || kv.key == "ai.operationId"
+            || kv.key == "llm.request.type"
+    })
+}
+
+pub fn get_event_name(attrs: &serde_json::Map<String, Value>) -> Option<&'static str> {
     for c in EVENT_CLASSIFIERS {
         if let Some(value) = attrs.get(c.attr_key).and_then(|v| v.as_str()) {
-            return (c.classify)(value);
+            return Some((c.classify)(value));
         }
     }
-    "$ai_span"
+
+    if has_ai_markers(attrs) {
+        Some("$ai_span")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -69,17 +116,17 @@ mod tests {
     fn test_from_gen_ai_operation_name() {
         assert_eq!(
             get_event_name(&attrs_with("gen_ai.operation.name", "chat")),
-            "$ai_generation"
+            Some("$ai_generation")
         );
         assert_eq!(
             get_event_name(&attrs_with("gen_ai.operation.name", "embeddings")),
-            "$ai_embedding"
+            Some("$ai_embedding")
         );
         assert_eq!(
             get_event_name(&attrs_with("gen_ai.operation.name", "unknown")),
-            "$ai_span"
+            Some("$ai_span")
         );
-        assert_eq!(get_event_name(&serde_json::Map::new()), "$ai_span");
+        assert_eq!(get_event_name(&serde_json::Map::new()), None);
     }
 
     #[test]
@@ -97,7 +144,7 @@ mod tests {
         ] {
             assert_eq!(
                 get_event_name(&attrs_with("ai.operationId", op_id)),
-                expected,
+                Some(expected),
                 "ai.operationId={op_id}"
             );
         }
@@ -115,7 +162,7 @@ mod tests {
         ] {
             assert_eq!(
                 get_event_name(&attrs_with("llm.request.type", request_type)),
-                expected,
+                Some(expected),
                 "llm.request.type={request_type}"
             );
         }
@@ -132,6 +179,26 @@ mod tests {
             "ai.operationId".to_string(),
             Value::String("ai.toolCall".to_string()),
         );
-        assert_eq!(get_event_name(&attrs), "$ai_generation");
+        assert_eq!(get_event_name(&attrs), Some("$ai_generation"));
+    }
+
+    #[test]
+    fn test_relevant_ai_markers_default_to_ai_span() {
+        assert_eq!(
+            get_event_name(&attrs_with("gen_ai.request.model", "gpt-4")),
+            Some("$ai_span")
+        );
+        assert_eq!(
+            get_event_name(&attrs_with("logfire.msg", "running 1 tool")),
+            Some("$ai_span")
+        );
+    }
+
+    #[test]
+    fn test_irrelevant_span_returns_none() {
+        assert_eq!(
+            get_event_name(&attrs_with("http.request.method", "POST")),
+            None
+        );
     }
 }

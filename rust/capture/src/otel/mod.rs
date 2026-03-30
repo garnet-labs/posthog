@@ -114,19 +114,49 @@ pub async fn otel_handler(
         e.into_response()
     })?;
 
-    let span_count = count_spans(&request);
+    let raw_span_count = count_spans(&request);
+
+    if raw_span_count == 0 {
+        return Ok(Json(json!({})));
+    }
+
+    // Cap raw spans before doing any expensive attribute conversion. The body
+    // size limit (4 MB) bounds the absolute maximum, but compact protobuf can
+    // pack many spans into that budget.
+    const MAX_RAW_SPANS_PER_REQUEST: usize = 1000;
+    if raw_span_count > MAX_RAW_SPANS_PER_REQUEST {
+        warn!(
+            "OTEL request contains {} raw spans, exceeding limit of {}",
+            raw_span_count, MAX_RAW_SPANS_PER_REQUEST
+        );
+        let err = CaptureError::RequestParsingError(format!(
+            "Too many spans: {raw_span_count} exceeds limit of {MAX_RAW_SPANS_PER_REQUEST}"
+        ));
+        report_internal_error_metrics(err.to_metric_tag(), "otel_validation");
+        return Err(err.into_response());
+    }
+
+    let received_at = Utc::now();
+    let distinct_id = identity::extract_distinct_id(&request);
+    let span_events = fan_out::expand_into_events(&request, &distinct_id);
+    let span_count = span_events.len();
+    let dropped_span_count = raw_span_count - span_count;
     Span::current().record("span_count", span_count);
+
+    if dropped_span_count > 0 {
+        counter!("capture_ai_otel_spans_filtered").increment(dropped_span_count as u64);
+    }
 
     if span_count == 0 {
         return Ok(Json(json!({})));
     }
     if span_count > MAX_SPANS_PER_REQUEST {
         warn!(
-            "OTEL request contains {} spans, exceeding limit of {}",
-            span_count, MAX_SPANS_PER_REQUEST
+            "OTEL request contains {} AI spans, exceeding limit of {} ({} raw spans received)",
+            span_count, MAX_SPANS_PER_REQUEST, raw_span_count
         );
         let err = CaptureError::RequestParsingError(format!(
-            "Too many spans: {span_count} exceeds limit of {MAX_SPANS_PER_REQUEST}"
+            "Too many AI spans: {span_count} exceeds limit of {MAX_SPANS_PER_REQUEST}"
         ));
         report_internal_error_metrics(err.to_metric_tag(), "otel_validation");
         return Err(err.into_response());
@@ -134,14 +164,9 @@ pub async fn otel_handler(
     counter!("capture_ai_otel_spans_received").increment(span_count as u64);
     histogram!("capture_ai_otel_spans_per_request").record(span_count as f64);
 
-    let received_at = Utc::now();
-    let distinct_id = identity::extract_distinct_id(&request);
-
     let client_ip = ip
         .map(|InsecureClientIp(addr)| addr.to_string())
         .unwrap_or_else(|| "127.0.0.1".to_string());
-
-    let span_events = fan_out::expand_into_events(&request, &distinct_id);
     let token = token.to_string();
 
     // All-or-nothing quota check: reject the entire batch if any span is over quota
