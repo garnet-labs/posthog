@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("posthog", "1075_team_snippet_config"),
+        ("posthog", "1076_backfill_feature_enrollment"),
     ]
 
     operations = [
