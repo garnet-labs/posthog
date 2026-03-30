@@ -21,3 +21,7 @@ Unsupported lookup 'organization_memberships' for ForeignKey or join on the fiel
 Exception Location:    /Users/twixes/Developer/posthog/.flox/cache/venv/lib/python3.12/site-packages/django/db/models/sql/query.py, line 1359, in try_transform
 Raised during:    products.signals.backend.views.SignalReportViewSet
 Python Executable:    /Users/twixes/Developer/posthog/.flox/cache/venv/bin/python
+
+---
+
+Clean up these inconsistencies
