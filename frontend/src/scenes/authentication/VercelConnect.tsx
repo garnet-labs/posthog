@@ -110,7 +110,11 @@ export function VercelConnect(): JSX.Element {
             body: JSON.stringify({
                 session: sessionKey,
                 organization_id: selectedOrg,
-                environment_mapping: envMapping,
+                environment_mapping: {
+                    production: envMapping.production,
+                    preview: envMapping.preview || envMapping.production,
+                    development: envMapping.development || envMapping.production,
+                },
             }),
         })
             .then((res) => {
