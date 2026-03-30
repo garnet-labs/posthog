@@ -64,7 +64,10 @@ def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:
     Gated behind the phai-dynamic-taxonomy-scan-period feature flag.
     When disabled, returns MEDIUM (30-day scan, current default behavior).
     """
-    from ee.hogai.utils.feature_flags import is_dynamic_scan_period_enabled
+    try:
+        from ee.hogai.utils.feature_flags import is_dynamic_scan_period_enabled
+    except ImportError:
+        return TaxonomyVolumeTier.MEDIUM
 
     if not is_dynamic_scan_period_enabled(team):
         return TaxonomyVolumeTier.MEDIUM
