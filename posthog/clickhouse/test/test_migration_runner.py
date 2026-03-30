@@ -438,6 +438,29 @@ class TestRollbackSentinel(unittest.TestCase):
         for call in mock_record.call_args_list:
             self.assertNotEqual(call.kwargs.get("step_index"), MIGRATION_COMPLETE_STEP)
 
+    @patch("posthog.clickhouse.migration_tools.runner._record_for_tracking")
+    def test_rollback_that_drops_tracking_table_skips_tracking_writes(self, mock_record: MagicMock) -> None:
+        """Dropping the tracking table should not try to record rollback rows afterward."""
+        cluster = MagicMock()
+        cluster.map_hosts_by_roles.return_value.result.return_value = {("host1", 9000): []}
+
+        rollback_step = _make_step(sql="down.sql")
+        migration = MagicMock()
+        migration.get_rollback_steps.return_value = [
+            (rollback_step, "DROP TABLE IF EXISTS default.clickhouse_schema_migrations"),
+        ]
+
+        success = run_migration_down(
+            cluster=cluster,
+            migration=migration,
+            database="default",
+            migration_number=224,
+            migration_name="0224_ch_migrate_bootstrap",
+        )
+
+        self.assertTrue(success)
+        mock_record.assert_not_called()
+
 
 class TestPerHostRetry(unittest.TestCase):
     """Tests for per-host step-level retry in run_migration_up."""

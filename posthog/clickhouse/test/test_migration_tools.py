@@ -343,6 +343,25 @@ class TestGetPendingMigrations(unittest.TestCase):
         self.assertIn(2, numbers)
 
 
+class TestGetAppliedMigrations(unittest.TestCase):
+    def test_get_applied_migrations_avoids_alias_reuse(self) -> None:
+        from posthog.clickhouse.migration_tools.tracking import get_applied_migrations
+
+        mock_client = MagicMock()
+        mock_client.execute.return_value = [(224, "0224_ch_migrate_bootstrap", "up", "2024-01-01 00:00:00")]
+
+        applied = get_applied_migrations(mock_client, "default")
+
+        sql = mock_client.execute.call_args.args[0]
+        self.assertIn("argMax(direction, applied_at) AS latest_direction", sql)
+        self.assertIn("max(applied_at) AS latest_applied_at", sql)
+        self.assertNotIn("max(applied_at) AS applied_at", sql)
+        self.assertEqual(applied[0]["migration_number"], 224)
+        self.assertEqual(applied[0]["migration_name"], "0224_ch_migrate_bootstrap")
+        self.assertEqual(applied[0]["direction"], "up")
+        self.assertEqual(applied[0]["applied_at"], "2024-01-01 00:00:00")
+
+
 # ---------------------------------------------------------------------------
 # Advisory lock tests
 # ---------------------------------------------------------------------------

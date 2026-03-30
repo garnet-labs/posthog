@@ -162,7 +162,7 @@ def get_applied_migrations(client: Any, database: str) -> list[dict[str, Any]]:
             migration_number,
             migration_name,
             argMax(direction, applied_at) AS latest_direction,
-            max(applied_at) AS applied_at
+            max(applied_at) AS latest_applied_at
         FROM {database}.{TRACKING_TABLE_NAME}
         WHERE success = 1 AND step_index = {MIGRATION_COMPLETE_STEP}
         GROUP BY migration_number, migration_name

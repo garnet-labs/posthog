@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from posthog.clickhouse.migration_tools.manifest import VALID_NODE_ROLES, ManifestStep, MigrationManifest
 from posthog.clickhouse.migration_tools.tracking import (
     MIGRATION_COMPLETE_STEP,
+    TRACKING_TABLE_NAME,
     get_applied_migrations,
     get_step_results,
     record_step,
@@ -357,6 +358,14 @@ def _record_for_tracking(
     tracking_cluster.any_host(_do_record).result()
 
 
+def _drops_tracking_table(sql: str, database: str) -> bool:
+    pattern = (
+        rf"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?"
+        rf"(?:`?{re.escape(database)}`?\.)?`?{TRACKING_TABLE_NAME}`?"
+    )
+    return re.search(pattern, sql, flags=re.IGNORECASE) is not None
+
+
 def run_migration_down(
     cluster: ClickhouseCluster,
     migration: Any,
@@ -375,9 +384,11 @@ def run_migration_down(
     On partial failure: halts, tracking table shows which hosts succeeded.
     """
     steps = migration.get_rollback_steps()
+    tracking_table_dropped = False
 
     for step_index, (step, rendered_sql) in enumerate(steps):
         checksum = compute_checksum(rendered_sql)
+        drops_tracking_table = _drops_tracking_table(rendered_sql, database)
 
         try:
             host_results = execute_migration_step(cluster, step, rendered_sql)
@@ -402,7 +413,7 @@ def run_migration_down(
                 )
             return False
 
-        if not dry_run:
+        if not dry_run and not tracking_table_dropped and not drops_tracking_table:
             for host_key in host_results:
                 _record_for_tracking(
                     database=database,
@@ -416,7 +427,10 @@ def run_migration_down(
                     success=True,
                 )
 
-    if not dry_run:
+        if drops_tracking_table:
+            tracking_table_dropped = True
+
+    if not dry_run and not tracking_table_dropped:
         # Record a rollback-complete sentinel so get_applied_migrations
         # knows the migration was rolled back. The query uses argMax to
         # pick the most recent sentinel direction — if the latest is
