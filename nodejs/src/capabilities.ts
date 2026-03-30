@@ -147,7 +147,7 @@ export function getPluginServerCapabilities(
             return mergeCapabilities(CAPABILITIES_CDP_WORKFLOWS, CAPABILITIES_REALTIME_COHORTS)
 
         // Production modes - granular control for dedicated pods
-        // NOTE: ingestion_v2 and ingestion_v2_testing are handled by IngestionGeneralServer (see index.ts)
+        // NOTE: ingestion_v2 is handled by IngestionGeneralServer (see index.ts)
         case PluginServerMode.recordings_blob_ingestion_v2:
             return {
                 sessionRecordingBlobIngestionV2: true,
@@ -229,7 +229,6 @@ export function getPluginServerCapabilities(
             }
 
         case PluginServerMode.ingestion_v2:
-        case PluginServerMode.ingestion_v2_testing:
         case PluginServerMode.ingestion_v2_combined:
             // These modes are handled by IngestionGeneralServer (see index.ts) and should
             // never reach this function

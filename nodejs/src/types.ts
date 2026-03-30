@@ -168,7 +168,6 @@ export interface PluginServerCapabilities {
     evaluationScheduler?: boolean
     cdpCyclotronV2Janitor?: boolean
     recordingApi?: boolean
-    ingestionV2Testing?: boolean
 }
 
 export type TeamId = Team['id']

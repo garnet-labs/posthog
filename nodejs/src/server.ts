@@ -41,7 +41,7 @@ import { PostgresPersonRepository } from './worker/ingestion/persons/repositorie
 
 /**
  * PluginServer handles CDP, recordings, logs, evaluation scheduler, and local-dev combined modes.
- * Ingestion (ingestion-v2, ingestion-v2-testing) is handled by IngestionGeneralServer — see index.ts.
+ * Ingestion (ingestion-v2) is handled by IngestionGeneralServer — see index.ts.
  */
 export class PluginServer implements NodeServer {
     readonly lifecycle: ServerLifecycle
