@@ -16,6 +16,25 @@ from posthog.dags.events_backfill_to_ducklake import (
 )
 
 
+class _NonClosingProxy:
+    """Proxy that delegates all calls to the wrapped DuckDB connection but ignores close().
+
+    DuckDB connections are C extension objects whose close() attribute is read-only,
+    so we can't patch it directly. This proxy is used in tests to prevent
+    validate_ducklake_schema's finally block from closing a connection that the
+    test still needs.
+    """
+
+    def __init__(self, conn: duckdb.DuckDBPyConnection):
+        self._conn = conn
+
+    def close(self) -> None:
+        pass
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
+
 class TestTagsForEventsPartition:
     @parameterized.expand(
         [
@@ -217,21 +236,23 @@ class TestValidateDucklakeSchemaAddsMissingPartitionColumns:
 
         mock_context = MagicMock()
 
-        # Patch duckdb.connect to return our pre-configured connection
-        with patch("posthog.dags.events_backfill_to_ducklake.duckdb.connect", return_value=conn):
-            validate_ducklake_schema(mock_context)
+        # Use proxy so validate_ducklake_schema's finally block doesn't close our conn
+        proxy = _NonClosingProxy(conn)
+        try:
+            with patch("posthog.dags.events_backfill_to_ducklake.duckdb.connect", return_value=proxy):
+                validate_ducklake_schema(mock_context)
 
-        # Verify columns were added
-        cols = {row[0] for row in conn.execute("DESCRIBE ducklake.posthog.events").fetchall()}
-        assert {"year", "month", "day"}.issubset(cols)
+            # Verify columns were added (conn is still open)
+            cols = {row[0] for row in conn.execute("DESCRIBE ducklake.posthog.events").fetchall()}
+            assert {"year", "month", "day"}.issubset(cols)
 
-        # Verify migration was logged
-        info_messages = [str(call) for call in mock_context.log.info.call_args_list]
-        assert any("Adding missing partition column 'year'" in msg for msg in info_messages)
-        assert any("Adding missing partition column 'month'" in msg for msg in info_messages)
-        assert any("Adding missing partition column 'day'" in msg for msg in info_messages)
-
-        conn.close()
+            # Verify migration was logged
+            info_messages = [str(call) for call in mock_context.log.info.call_args_list]
+            assert any("Adding missing partition column 'year'" in msg for msg in info_messages)
+            assert any("Adding missing partition column 'month'" in msg for msg in info_messages)
+            assert any("Adding missing partition column 'day'" in msg for msg in info_messages)
+        finally:
+            conn.close()
 
     @patch("posthog.dags.events_backfill_to_ducklake.DuckLakeStorageConfig")
     @patch("posthog.dags.events_backfill_to_ducklake.get_config")
@@ -249,11 +270,13 @@ class TestValidateDucklakeSchemaAddsMissingPartitionColumns:
 
         mock_context = MagicMock()
 
-        with patch("posthog.dags.events_backfill_to_ducklake.duckdb.connect", return_value=conn):
-            validate_ducklake_schema(mock_context)
+        proxy = _NonClosingProxy(conn)
+        try:
+            with patch("posthog.dags.events_backfill_to_ducklake.duckdb.connect", return_value=proxy):
+                validate_ducklake_schema(mock_context)
 
-        # No migration messages should be logged
-        info_messages = [str(call) for call in mock_context.log.info.call_args_list]
-        assert not any("Adding missing partition column" in msg for msg in info_messages)
-
-        conn.close()
+            # No migration messages should be logged
+            info_messages = [str(call) for call in mock_context.log.info.call_args_list]
+            assert not any("Adding missing partition column" in msg for msg in info_messages)
+        finally:
+            conn.close()
