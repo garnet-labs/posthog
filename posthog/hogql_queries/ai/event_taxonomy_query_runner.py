@@ -1,3 +1,4 @@
+import re
 from typing import cast
 
 from posthog.schema import (
@@ -19,6 +20,14 @@ from posthog.hogql_queries.ai.utils import TaxonomyCacheMixin
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.models import Action
 
+# Properties that contain large payloads and should not be scanned for sample values,
+# scoped by event type. They are still listed as available properties.
+AI_LARGE_PROPERTIES_BY_EVENT: dict[str, tuple[str, ...]] = {
+    "$ai_span": ("$ai_input_state", "$ai_output_state"),
+    "$ai_generation": ("$ai_input", "$ai_output_choices"),
+    "$ai_embedding": ("$ai_input", "$ai_output_choices"),
+}
+
 
 class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTaxonomyQueryResponse]):
     """
@@ -33,6 +42,12 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
     def __init__(self, *args, settings: HogQLGlobalSettings | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.settings = settings
+
+    def _get_excluded_large_properties(self) -> tuple[str, ...]:
+        """Return properties that should be excluded from scanning for the current event."""
+        if self.query.event and self.query.event in AI_LARGE_PROPERTIES_BY_EVENT:
+            return AI_LARGE_PROPERTIES_BY_EVENT[self.query.event]
+        return ()
 
     def _calculate(self):
         query = self.to_query()
@@ -57,6 +72,19 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
                     sample_count=sample_count,
                 )
             )
+
+        # Append excluded large properties so they still appear in property listings
+        excluded = self._get_excluded_large_properties()
+        scanned_props = {item.property for item in results}
+        for prop in excluded:
+            if prop not in scanned_props:
+                results.append(
+                    EventTaxonomyItem(
+                        property=prop,
+                        sample_values=[],
+                        sample_count=0,
+                    )
+                )
 
         return EventTaxonomyQueryResponse(
             results=results,
@@ -134,6 +162,12 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
             "partial_filter",
             "distinct_id",
         ]
+
+        # Exclude large AI properties from scanning (they are appended separately).
+        # Use anchors to avoid partial matches (e.g. $ai_input must not match $ai_input_tokens).
+        for prop in self._get_excluded_large_properties():
+            omit_list.append(f"^{re.escape(prop)}$")
+
         regex_conditions = "|".join(omit_list)
 
         return ast.Not(
@@ -184,6 +218,21 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
 
     def _get_subquery(self) -> ast.SelectQuery:
         if self.query.properties:
+            excluded = set(self._get_excluded_large_properties())
+            scannable_props = [p for p in self.query.properties if p not in excluded]
+
+            if not scannable_props:
+                # All requested properties are excluded large properties;
+                # return a dummy query that produces no rows so _calculate
+                # can still append them with empty sample values.
+                query = parse_select(
+                    """
+                        SELECT '' AS key, '' AS value, 0 AS count
+                        WHERE 1 = 0
+                    """
+                )
+                return cast(ast.SelectQuery, query)
+
             query = parse_select(
                 """
                     SELECT
@@ -214,7 +263,7 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
                                     ),
                                 ]
                             )
-                            for prop in self.query.properties
+                            for prop in scannable_props
                         ]
                     ),
                     "filter": self._get_subquery_filter(),

@@ -281,6 +281,16 @@ class TaxonomyAgentToolkit:
         return prop_values
 
     def retrieve_event_or_action_property_values(self, event_name_or_action_id: str | int, property_name: str) -> str:
+        from posthog.hogql_queries.ai.event_taxonomy_query_runner import AI_LARGE_PROPERTIES_BY_EVENT
+
+        if isinstance(event_name_or_action_id, str):
+            excluded = AI_LARGE_PROPERTIES_BY_EVENT.get(event_name_or_action_id, ())
+            if property_name in excluded:
+                return (
+                    f"Sample values for {property_name} are not available because values are typically too large to display. "
+                    f"This property contains raw AI model input/output data."
+                )
+
         try:
             property_definition = PropertyDefinition.objects.get(
                 team=self._team, name=property_name, type=PropertyDefinition.Type.EVENT
