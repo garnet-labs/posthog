@@ -13938,6 +13938,8 @@ export namespace Schemas {
       /** @nullable */
       name?: string | null;
       /** @nullable */
+      only_count_matured_users?: boolean | null;
+      /** @nullable */
       response?: ExperimentFunnelMetricResponse;
       series: (EventsNode | ActionsNode)[];
       /** @nullable */
@@ -13988,6 +13990,8 @@ export namespace Schemas {
       metric_type?: ExperimentMeanMetricMetricType;
       /** @nullable */
       name?: string | null;
+      /** @nullable */
+      only_count_matured_users?: boolean | null;
       /** @nullable */
       response?: ExperimentMeanMetricResponse;
       /** @nullable */
@@ -14047,6 +14051,8 @@ export namespace Schemas {
       name?: string | null;
       numerator: EventsNode | ActionsNode | ExperimentDataWarehouseNode;
       /** @nullable */
+      only_count_matured_users?: boolean | null;
+      /** @nullable */
       response?: ExperimentRatioMetricResponse;
       /** @nullable */
       sharedMetricId?: number | null;
@@ -14101,6 +14107,8 @@ export namespace Schemas {
       metric_type?: ExperimentRetentionMetricMetricType;
       /** @nullable */
       name?: string | null;
+      /** @nullable */
+      only_count_matured_users?: boolean | null;
       /** @nullable */
       response?: ExperimentRetentionMetricResponse;
       retention_window_end: number;
@@ -18035,6 +18043,21 @@ export namespace Schemas {
     }
 
     /**
+     * Per-column bucket function overrides, e.g. {"timestamp": "hour"}
+     * @nullable
+     */
+    export type MaterializationPreviewRequestBucketOverrides = {[key: string]: string} | null | null;
+
+    export interface MaterializationPreviewRequest {
+      version?: number;
+      /**
+       * Per-column bucket function overrides, e.g. {"timestamp": "hour"}
+       * @nullable
+       */
+      bucket_overrides?: MaterializationPreviewRequestBucketOverrides;
+    }
+
+    /**
      * * `1` - event
     * `2` - person
     * `3` - group
@@ -19946,6 +19969,11 @@ export namespace Schemas {
     * `monthly` - monthly
     * `yearly` - yearly */
       recurrence_interval?: RecurrenceIntervalEnum | NullEnum | null;
+      /**
+       * @maxLength 100
+       * @nullable
+       */
+      cron_expression?: string | null;
       /** @nullable */
       readonly last_executed_at: string | null;
       /**
@@ -23689,6 +23717,11 @@ export namespace Schemas {
     * `monthly` - monthly
     * `yearly` - yearly */
       recurrence_interval?: RecurrenceIntervalEnum | NullEnum | null;
+      /**
+       * @maxLength 100
+       * @nullable
+       */
+      cron_expression?: string | null;
       /** @nullable */
       readonly last_executed_at?: string | null;
       /**
@@ -32268,6 +32301,10 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    /**
+     * Optional. Sort templates by name when not using `search`. Omit for database default order. Ignored when `search` is set (results stay relevance-ranked). Use `template_name` for A–Z or `-template_name` for Z–A.
+     */
+    ordering?: string;
     };
 
     export type DashboardsListParams = {
