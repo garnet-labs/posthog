@@ -9,7 +9,6 @@ import {
     IconFolder,
     IconFolderOpen,
     IconHome,
-    IconNotification,
     IconCheck,
     IconPencil,
     IconStar,
@@ -17,7 +16,6 @@ import {
 import { Tooltip } from '@posthog/lemon-ui'
 
 import { ScrollableShadows } from 'lib/components/ScrollableShadows/ScrollableShadows'
-import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { Link } from 'lib/lemon-ui/Link'
 import { Spinner } from 'lib/lemon-ui/Spinner/Spinner'
 import { ButtonPrimitive } from 'lib/ui/Button/ButtonPrimitives'
@@ -186,7 +184,7 @@ export function NavTabBrowse(): JSX.Element {
         pathname,
     } = useValues(panelLayoutLogic)
     const { firstTabIsActive } = useValues(sceneLogic)
-    const isProductAutonomyEnabled = useFeatureFlag('PRODUCT_AUTONOMY')
+
     const { recentItems, recentItemsLoading } = useValues(navRecentsLogic)
     const { loadRecentItems } = useActions(navRecentsLogic)
     const { isEditMode, checkedItems } = useValues(inlineEditAppsLogic)
@@ -237,17 +235,6 @@ export function NavTabBrowse(): JSX.Element {
                         data-attr="nav-item-home"
                         onClick={() => posthog.capture('nav item clicked', { item: 'home' })}
                     />
-
-                    {isProductAutonomyEnabled && (
-                        <NavLink
-                            to={urls.inbox()}
-                            label="Inbox"
-                            icon={<IconNotification />}
-                            isCollapsed={isLayoutNavCollapsed}
-                            data-attr="nav-item-inbox"
-                            onClick={() => posthog.capture('nav item clicked', { item: 'inbox' })}
-                        />
-                    )}
 
                     <NavLink
                         to={urls.activity(ActivityTab.ExploreEvents)}

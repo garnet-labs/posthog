@@ -13,7 +13,6 @@ import {
     IconFolderOpen,
     IconGear,
     IconHome,
-    IconNotification,
     IconPeople,
     IconSearch,
     IconShortcut,
@@ -97,7 +96,7 @@ export function PanelLayoutNavBar({ children }: { children: React.ReactNode }): 
     const { firstTabIsActive } = useValues(sceneLogic)
     const { featureFlags } = useValues(featureFlagLogic)
     const { toggleCommand } = useActions(commandLogic)
-    const isProductAutonomyEnabled = useFeatureFlag('PRODUCT_AUTONOMY')
+
     const isNotificationsEnabled = useFeatureFlag('REAL_TIME_NOTIFICATIONS')
 
     function handlePanelTriggerClick(item: PanelLayoutNavIdentifier): void {
@@ -137,9 +136,7 @@ export function PanelLayoutNavBar({ children }: { children: React.ReactNode }): 
         if (itemIdentifier === 'Settings' && currentPath.startsWith('/settings/')) {
             return true
         }
-        if (itemIdentifier === 'Inbox' && currentPath.startsWith('/inbox')) {
-            return true
-        }
+
         if (itemIdentifier === 'Toolbar' && currentPath === '/toolbar') {
             return true
         }
@@ -202,18 +199,6 @@ export function PanelLayoutNavBar({ children }: { children: React.ReactNode }): 
             collapsedTooltip: 'Activity',
             documentationUrl: 'https://posthog.com/docs/data/events',
         },
-        ...(isProductAutonomyEnabled
-            ? [
-                  {
-                      identifier: 'Inbox',
-                      label: 'Inbox',
-                      icon: <IconNotification />,
-                      to: urls.inbox(),
-                      onClick: () => handleStaticNavbarItemClick(urls.inbox(), true),
-                      collapsedTooltip: 'Inbox',
-                  },
-              ]
-            : []),
         ...(featureFlags[FEATURE_FLAGS.CUSTOM_PRODUCTS_SIDEBAR] === 'test'
             ? []
             : [

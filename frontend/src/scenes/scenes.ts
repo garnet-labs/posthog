@@ -286,7 +286,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.Inbox]: {
         projectBased: true,
         name: 'Inbox',
-        description: 'Actionable reports automatically generated from user session analysis and other signals.',
     },
     [Scene.Heatmap]: {
         projectBased: true,
@@ -945,7 +944,6 @@ export const routes: Record<string, [Scene | string, string]> = {
     [urls.coupons(':campaign')]: [Scene.Coupons, 'coupons'],
     [urls.health()]: [Scene.Health, 'health'],
     [urls.inbox()]: [Scene.Inbox, 'inbox'],
-    [urls.inbox(':reportId')]: [Scene.Inbox, 'inbox'],
     [urls.pipelineStatus()]: [Scene.PipelineStatus, 'pipelineStatus'],
     [urls.sdkDoctor()]: [Scene.SdkDoctor, 'sdkDoctor'],
     [urls.exports()]: [Scene.Exports, 'exports'],
