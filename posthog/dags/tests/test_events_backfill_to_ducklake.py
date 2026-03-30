@@ -96,10 +96,7 @@ class TestGetS3FunctionArgs:
             "https://bucket.s3.us-east-1.amazonaws.com/path/file.parquet",
             is_local=False,
         )
-        assert (
-            args
-            == "'https://bucket.s3.us-east-1.amazonaws.com/path/file.parquet', 'Parquet'"
-        )
+        assert args == "'https://bucket.s3.us-east-1.amazonaws.com/path/file.parquet', 'Parquet'"
         assert safe_args == args
 
     def test_local_mode_redacts_credentials(self):
@@ -130,10 +127,7 @@ class TestGetPartitionWhereClause:
 
         result = get_partition_where_clause(mock_context)
 
-        assert (
-            result
-            == "toDate(timestamp) >= '2025-01-15' AND toDate(timestamp) < '2025-01-16'"
-        )
+        assert result == "toDate(timestamp) >= '2025-01-15' AND toDate(timestamp) < '2025-01-16'"
 
     def test_custom_timestamp_field(self):
         mock_context = MagicMock()
@@ -142,10 +136,7 @@ class TestGetPartitionWhereClause:
 
         result = get_partition_where_clause(mock_context, timestamp_field="created_at")
 
-        assert (
-            result
-            == "toDate(created_at) >= '2025-01-15' AND toDate(created_at) < '2025-01-16'"
-        )
+        assert result == "toDate(created_at) >= '2025-01-15' AND toDate(created_at) < '2025-01-16'"
 
 
 class TestEventsColumnsSchema:
