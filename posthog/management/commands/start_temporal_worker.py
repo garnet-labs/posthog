@@ -19,6 +19,10 @@ with workflow.unsafe.imports_passed_through():
 
 from posthog.clickhouse.query_tagging import tag_queries
 from posthog.temporal.ai import AI_ACTIVITIES, AI_WORKFLOWS
+from posthog.temporal.ai.video_segment_clustering import (
+    VIDEO_SEGMENT_CLUSTERING_ACTIVITIES,
+    VIDEO_SEGMENT_CLUSTERING_WORKFLOWS,
+)
 from posthog.temporal.cleanup_property_definitions import (
     ACTIVITIES as CLEANUP_PROPDEFS_ACTIVITIES,
     WORKFLOWS as CLEANUP_PROPDEFS_WORKFLOWS,
@@ -251,8 +255,14 @@ _task_queue_specs = [
     ),
     (
         settings.VIDEO_EXPORT_TASK_QUEUE,
-        VIDEO_EXPORT_WORKFLOWS + SIGNALS_PRODUCT_WORKFLOWS + DATA_IMPORT_EMIT_SIGNALS_WORKFLOWS,
-        VIDEO_EXPORT_ACTIVITIES + SIGNALS_PRODUCT_ACTIVITIES + DATA_IMPORT_EMIT_SIGNALS_ACTIVITIES,
+        VIDEO_EXPORT_WORKFLOWS
+        + VIDEO_SEGMENT_CLUSTERING_WORKFLOWS
+        + SIGNALS_PRODUCT_WORKFLOWS
+        + DATA_IMPORT_EMIT_SIGNALS_WORKFLOWS,
+        VIDEO_EXPORT_ACTIVITIES
+        + VIDEO_SEGMENT_CLUSTERING_ACTIVITIES
+        + SIGNALS_PRODUCT_ACTIVITIES
+        + DATA_IMPORT_EMIT_SIGNALS_ACTIVITIES,
     ),
     (
         settings.SESSION_REPLAY_TASK_QUEUE,
