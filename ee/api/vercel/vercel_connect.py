@@ -328,7 +328,7 @@ class VercelConnectLinkViewSet(viewsets.GenericViewSet):
         preview_id: int,
         development_id: int,
     ) -> list[dict]:
-        from posthog.models.utils import absolute_uri
+        from posthog.utils import absolute_uri
 
         prod_team = teams_by_id[production_id]
         preview_team = teams_by_id[preview_id]
