@@ -22,6 +22,8 @@ export type State = {
     clientName: string | undefined
     aiConsentGiven: boolean | undefined
     aiConsentFetchedAt: number | undefined
+    metadata: string | undefined
+    metadataFetchedAt: number | undefined
 } & Record<PrefixedString<'session'>, SessionState> &
     Record<PrefixedString<'groupTypes'>, GroupType[] | undefined> &
     Record<PrefixedString<'groupTypesFetchedAt'>, number | undefined>
