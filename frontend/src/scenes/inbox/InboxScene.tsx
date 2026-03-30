@@ -666,7 +666,7 @@ export function InboxScene(): JSX.Element {
 
     if (!isProductAutonomyEnabled) {
         return (
-            <div className="flex flex-col items-center max-w-[50rem] px-4 mx-auto mt-24 text-center text-balance">
+            <div className="flex flex-col items-center justify-center max-w-[50rem] px-4 mx-auto text-center text-balance h-full">
                 <div
                     className="w-full h-[135px] bg-no-repeat bg-center bg-contain"
                     // eslint-disable-next-line react/forbid-dom-props
