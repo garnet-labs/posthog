@@ -43,6 +43,7 @@ async def prep_session_video_asset_activity(
     """Prepare session video export: find or create ExportedAsset record."""
     start_time = time.monotonic()
     success = False
+    team: Team | None = None
     try:
         # Check if a video-based summary already exists for this session
         existing_summary = await database_sync_to_async(
@@ -137,7 +138,8 @@ async def prep_session_video_asset_activity(
         raise
     finally:
         duration_seconds = time.monotonic() - start_time
-        team = await Team.objects.aget(id=inputs.team_id)
+        if team is None:
+            team = await Team.objects.aget(id=inputs.team_id)
         capture_session_summary_timing(
             user_distinct_id=inputs.user_distinct_id_to_log,
             team=team,
