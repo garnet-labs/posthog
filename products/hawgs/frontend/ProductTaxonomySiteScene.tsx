@@ -35,10 +35,13 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
         () => [...new Set((siteDetail?.pages ?? []).flatMap((p) => p.related_products))].sort(),
         [siteDetail?.pages]
     )
-    const allFeatures = useMemo(
-        () => [...new Set((siteDetail?.pages ?? []).flatMap((p) => p.related_features))].sort(),
-        [siteDetail?.pages]
-    )
+    const availableFeatures = useMemo(() => {
+        if (!productFilter) {
+            return [...new Set((siteDetail?.pages ?? []).flatMap((p) => p.related_features))].sort()
+        }
+        const productFeatures = (siteDetail?.products ?? []).find((p) => p.name === productFilter)
+        return (productFeatures?.features ?? []).map((f) => f.name).sort()
+    }, [siteDetail, productFilter])
 
     const filteredPages = useMemo(() => {
         return (siteDetail?.pages ?? []).filter((p) => {
@@ -174,7 +177,7 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
                     },
                     {
                         key: 'pages',
-                        label: `Pages${siteDetail ? ` (${filteredPages.length}/${siteDetail.pages.length})` : ''}`,
+                        label: `Pages${siteDetail ? ` (${siteDetail.pages.length})` : ''}`,
                         content: (
                             <div className="flex flex-col gap-2">
                                 <div className="flex items-center gap-3 justify-between">
@@ -183,7 +186,10 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
                                             size="small"
                                             placeholder="All products"
                                             value={productFilter}
-                                            onChange={setProductFilter}
+                                            onChange={(v) => {
+                                                setProductFilter(v)
+                                                setFeatureFilter(null)
+                                            }}
                                             options={[
                                                 { value: null, label: 'All products' },
                                                 ...allProducts.map((p) => ({ value: p, label: p })),
@@ -197,7 +203,7 @@ function ProductTaxonomySiteScene({ domain }: ProductTaxonomySiteLogicProps): JS
                                             onChange={setFeatureFilter}
                                             options={[
                                                 { value: null, label: 'All features' },
-                                                ...allFeatures.map((f) => ({ value: f, label: f })),
+                                                ...availableFeatures.map((f) => ({ value: f, label: f })),
                                             ]}
                                             allowClear
                                         />
