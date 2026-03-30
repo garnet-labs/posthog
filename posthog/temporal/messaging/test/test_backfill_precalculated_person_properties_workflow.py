@@ -281,8 +281,8 @@ class TestBackfillPrecalculatedPersonPropertiesActivity:
     """Tests for the main backfill activity function."""
 
     @pytest.mark.asyncio
-    async def test_multi_cohort_processing_with_correct_source_attribution(self):
-        """Should process multiple cohorts and attribute events to correct cohort sources."""
+    async def test_multi_cohort_processing_with_condition_hash_sources(self):
+        """Should process multiple cohorts and attribute events to condition hash sources."""
         # Set up test data
         person_data = [
             {
@@ -475,8 +475,8 @@ class TestBackfillPrecalculatedPersonPropertiesActivity:
         assert person_2_distinct_ids == {"person_2"}  # Uses person_id as distinct_id for backfilling
 
     @pytest.mark.asyncio
-    async def test_shared_condition_across_multiple_cohorts(self):
-        """Should evaluate a shared condition once and emit results to multiple cohorts."""
+    async def test_shared_condition_emits_single_event_with_condition_hash(self):
+        """Should evaluate a shared condition once and emit a single event with condition hash as source."""
         # Set up test data
         person_data = [
             {

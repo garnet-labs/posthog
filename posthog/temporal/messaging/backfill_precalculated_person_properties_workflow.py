@@ -60,7 +60,7 @@ async def flush_kafka_batch(
     logger,
     is_final: bool = False,
 ) -> int:
-    """Flush a batch of Kafka messages and check for failures.
+    """Flush a batch of Kafka messages.
 
     Returns the number of messages flushed.
     """
@@ -88,7 +88,7 @@ async def flush_kafka_batch(
         metric_meter = temporalio.activity.metric_meter()
 
         flush_duration_metric = metric_meter.create_histogram_float(
-            "backfill_kafka_flush_duration_seconds", "Duration of Kafka flush operations in seconds"
+            "backfill_kafka_flush_duration_seconds", "Duration of Kafka flush operations in seconds", unit="seconds"
         )
         flush_duration_metric.record(flush_duration, {"team_id": str(team_id)})
     except RuntimeError:
@@ -209,7 +209,20 @@ async def backfill_precalculated_person_properties_activity(
         total_events_produced = 0
         total_flushed = 0
         # Configure Kafka flush batch size via environment variable
-        FLUSH_BATCH_SIZE = int(os.environ.get("BACKFILL_KAFKA_FLUSH_BATCH_SIZE", "10000"))
+        try:
+            FLUSH_BATCH_SIZE = int(os.environ.get("BACKFILL_KAFKA_FLUSH_BATCH_SIZE", "10000"))
+            if FLUSH_BATCH_SIZE <= 0:
+                logger.warning(
+                    f"Invalid BACKFILL_KAFKA_FLUSH_BATCH_SIZE={FLUSH_BATCH_SIZE}, using default 10000",
+                    team_id=inputs.team_id,
+                )
+                FLUSH_BATCH_SIZE = 10000
+        except ValueError:
+            logger.warning(
+                f"Invalid BACKFILL_KAFKA_FLUSH_BATCH_SIZE={os.environ.get('BACKFILL_KAFKA_FLUSH_BATCH_SIZE')}, using default 10000",
+                team_id=inputs.team_id,
+            )
+            FLUSH_BATCH_SIZE = 10000
 
         pending_kafka_messages = []
 
@@ -302,7 +315,7 @@ async def backfill_precalculated_person_properties_activity(
                         },
                     }
 
-                    # Evaluate each filter once per person and send results to all cohorts that use it
+                    # Evaluate each filter once per person
                     for filter_obj in filters:
                         try:
                             bytecode_result = await asyncio.to_thread(
@@ -318,7 +331,7 @@ async def backfill_precalculated_person_properties_activity(
                             )
                             matches = False
 
-                        # Send filter result once per person (not per cohort)
+                        # Send filter result with condition hash as source
                         event = {
                             "distinct_id": person_id,
                             "person_id": person_id,
