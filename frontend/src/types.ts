@@ -387,6 +387,8 @@ export interface NotificationSettings {
     data_pipeline_error_threshold?: number
     project_api_key_exposed?: boolean
     materialized_view_sync_failed?: boolean
+    web_analytics_weekly_digest: boolean
+    web_analytics_weekly_digest_project_enabled?: Record<string, boolean>
 }
 
 export interface InAppNotification {
