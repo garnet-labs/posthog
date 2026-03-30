@@ -172,7 +172,7 @@ class Resolver(CloningVisitor):
             )
 
     def _find_clickhouse_unsupported_join_on_expr(self, expr: ast.Expr) -> ast.Expr | None:
-        if isinstance(expr, ast.And | ast.Or):
+        if isinstance(expr, (ast.And, ast.Or)):
             for inner_expr in expr.exprs:
                 unsupported_expr = self._find_clickhouse_unsupported_join_on_expr(inner_expr)
                 if unsupported_expr is not None:
@@ -183,9 +183,12 @@ class Resolver(CloningVisitor):
             return expr
 
         if isinstance(expr, ast.Not):
-            return self._find_clickhouse_unsupported_join_on_expr(expr.expr)
+            return expr
 
         if isinstance(expr, ast.IsDistinctFrom):
+            return expr
+
+        if isinstance(expr, ast.BetweenExpr):
             return expr
 
         return None

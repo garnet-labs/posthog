@@ -789,28 +789,38 @@ class TestResolver(BaseTest):
         assert isinstance(node.select_from.next_join.constraint, ast.JoinConstraint)
         assert node.select_from.next_join.constraint.constraint_type == "USING"
 
-    def test_clickhouse_join_on_non_equality_guard(self):
-        node = self._select("SELECT * FROM (SELECT 1 AS x) AS a LEFT JOIN (SELECT 2 AS y) AS b ON b.y >= a.x")
+    @parameterized.expand(
+        [
+            ["gte", "b.y >= a.x"],
+            ["lte", "b.y <= a.x"],
+            ["gt", "b.y > a.x"],
+            ["lt", "b.y < a.x"],
+            ["neq", "b.y != a.x"],
+            ["not_expr", "NOT a.x"],
+            ["between", "a.x BETWEEN b.y AND b.y"],
+        ]
+    )
+    def test_clickhouse_join_on_non_equality_guard(self, _name: str, predicate: str):
+        node = self._select(f"SELECT a.x FROM (SELECT 1 AS x) AS a LEFT JOIN (SELECT 2 AS y) AS b ON {predicate}")
 
         with self.assertRaises(QueryError) as error:
             resolve_types(node, self.context, dialect="clickhouse")
 
-        self.assertEqual(
+        self.assertIn(
+            "ClickHouse dialect only supports equality predicates",
             str(error.exception),
-            "ClickHouse dialect only supports equality predicates in JOIN ... ON clauses. "
-            "Move non-equality conditions to WHERE, or use an ASOF JOIN when appropriate.",
         )
 
     def test_clickhouse_asof_join_allows_non_equality_guard(self):
         node = self._select(
-            "SELECT * FROM (SELECT 1 AS x, now() AS ts) AS a "
+            "SELECT a.x FROM (SELECT 1 AS x, now() AS ts) AS a "
             "ASOF LEFT JOIN (SELECT 1 AS y, now() AS ts) AS b ON a.x = b.y AND a.ts >= b.ts"
         )
 
         resolved = cast(ast.SelectQuery, resolve_types(node, self.context, dialect="clickhouse"))
         assert isinstance(resolved.select_from, ast.JoinExpr)
         assert isinstance(resolved.select_from.next_join, ast.JoinExpr)
-        assert resolved.select_from.next_join.join_type == "ASOF LEFT JOIN"
+        assert resolved.select_from.next_join.join_type == "LEFT ASOF JOIN"
 
     @override_settings(PERSON_ON_EVENTS_OVERRIDE=False, PERSON_ON_EVENTS_V2_OVERRIDE=False)
     @pytest.mark.usefixtures("unittest_snapshot")
