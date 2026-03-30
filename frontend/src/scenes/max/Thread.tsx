@@ -133,7 +133,7 @@ export function Thread({ className }: { className?: string }): JSX.Element | nul
     return (
         <div
             className={cn(
-                '@container/thread flex flex-col items-stretch w-full max-w-180 self-center gap-1.5 grow mx-auto',
+                '@container/thread thread flex flex-col items-stretch w-full max-w-180 self-center gap-1.5 grow mx-auto',
                 className
             )}
         >
