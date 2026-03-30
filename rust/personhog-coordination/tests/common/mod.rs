@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,6 +76,7 @@ pub fn start_coordinator_named(
             rebalance_debounce_interval: Duration::from_millis(100),
         },
         strategy,
+        None,
     );
     let token = cancel.child_token();
     tokio::spawn(async move { coordinator.run(token).await })
@@ -104,6 +107,7 @@ pub fn start_pod_with_lease_ttl(
             ..Default::default()
         },
         Arc::new(handler),
+        None,
     );
     let token = cancel.child_token();
     tokio::spawn(async move { pod.run(token).await });
@@ -129,6 +133,7 @@ pub fn start_pod_blocking(
             ..Default::default()
         },
         Arc::new(handler),
+        None,
     );
     let token = cancel.child_token();
     tokio::spawn(async move { pod.run(token).await });
@@ -148,6 +153,7 @@ pub fn start_coordinator_with_debounce(
             ..Default::default()
         },
         strategy,
+        None,
     );
     let token = cancel.child_token();
     tokio::spawn(async move { coordinator.run(token).await })
@@ -167,6 +173,7 @@ pub fn start_pod_slow(
             ..Default::default()
         },
         Arc::new(handler),
+        None,
     );
     let token = cancel.child_token();
     tokio::spawn(async move { pod.run(token).await });
