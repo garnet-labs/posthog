@@ -59,6 +59,7 @@ async def flush_kafka_batch(
     heartbeater,
     logger,
     is_final: bool = False,
+    flush_duration_metric=None,
 ) -> int:
     """Flush a batch of Kafka messages.
 
@@ -83,17 +84,9 @@ async def flush_kafka_batch(
     await asyncio.to_thread(kafka_producer.flush)
     flush_duration = time.monotonic() - flush_start_time
 
-    # Record flush performance metrics (only when in activity context)
-    try:
-        metric_meter = temporalio.activity.metric_meter()
-
-        flush_duration_metric = metric_meter.create_histogram_float(
-            "backfill_kafka_flush_duration_seconds", "Duration of Kafka flush operations in seconds", unit="seconds"
-        )
+    # Record flush performance metrics if metric is provided
+    if flush_duration_metric:
         flush_duration_metric.record(flush_duration, {"team_id": str(team_id)})
-    except RuntimeError:
-        # Not in activity context (e.g., during tests), skip metrics
-        pass
 
     logger.info(
         f"Flushed {batch_type}batch in {flush_duration:.3f}s",
@@ -190,6 +183,17 @@ async def backfill_precalculated_person_properties_activity(
     filters, person_properties = storage_result
     logger.info(f"Loaded {len(filters)} filters from storage key: {inputs.filter_storage_key}")
 
+    # Early abort if no filters to process
+    if not filters:
+        logger.info("No filters found for real-time cohorts, aborting backfill")
+        return BackfillPrecalculatedPersonPropertiesResult(
+            persons_processed=0,
+            events_produced=0,
+            events_flushed=0,
+            last_person_id=None,
+            duration_seconds=0.0,
+        )
+
     if person_properties:
         logger.info(f"Detected {len(person_properties)} unique person properties in use: {person_properties}")
     else:
@@ -225,6 +229,17 @@ async def backfill_precalculated_person_properties_activity(
             FLUSH_BATCH_SIZE = 10000
 
         pending_kafka_messages = []
+
+        # Create metric once for activity
+        flush_duration_metric = None
+        try:
+            metric_meter = temporalio.activity.metric_meter()
+            flush_duration_metric = metric_meter.create_histogram_float(
+                "backfill_kafka_flush_duration_seconds", "Duration of Kafka flush operations in seconds", unit="seconds"
+            )
+        except RuntimeError:
+            # Not in activity context (e.g., during tests), skip metrics
+            pass
 
         # Build optimized query to only fetch needed person properties
         MAX_OPTIMIZED_PROPERTIES = 100  # Safety limit to avoid query complexity issues
@@ -359,6 +374,7 @@ async def backfill_precalculated_person_properties_activity(
                                     total_processed,  # Use total processed count
                                     heartbeater,
                                     logger,
+                                    flush_duration_metric=flush_duration_metric,
                                 )
                                 total_flushed += flushed
                                 pending_kafka_messages.clear()
@@ -391,6 +407,7 @@ async def backfill_precalculated_person_properties_activity(
                 heartbeater,
                 logger,
                 is_final=True,
+                flush_duration_metric=flush_duration_metric,
             )
             total_flushed += flushed
             pending_kafka_messages.clear()

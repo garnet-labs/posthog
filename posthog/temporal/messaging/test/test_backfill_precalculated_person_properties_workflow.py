@@ -657,6 +657,35 @@ class TestBackfillPrecalculatedPersonPropertiesActivity:
                 assert "Redis payload may have expired" in str(error)
                 assert inputs.filter_storage_key in str(error)
 
+    @pytest.mark.asyncio
+    async def test_no_filters_aborts_early(self):
+        """Should abort early and return zero results when no filters are found."""
+        inputs = BackfillPrecalculatedPersonPropertiesInputs(
+            team_id=1,
+            filter_storage_key="backfill_person_properties_filters:team_1_empty",
+            cohort_ids=[100],
+            batch_size=1000,
+        )
+
+        # Mock get_filters_and_properties to return empty filters list
+        with patch(
+            "posthog.temporal.messaging.backfill_precalculated_person_properties_workflow.get_filters_and_properties"
+        ) as mock_get_filters_and_properties:
+            mock_get_filters_and_properties.return_value = ([], [])  # Empty filters and properties
+
+            # Mock asyncio.to_thread to just call the function directly for testing
+            with patch("asyncio.to_thread") as mock_to_thread:
+                mock_to_thread.side_effect = lambda func, *args: func(*args)
+
+                result = await backfill_precalculated_person_properties_activity(inputs)
+
+                # Should return zero results without processing
+                assert result.persons_processed == 0
+                assert result.events_produced == 0
+                assert result.events_flushed == 0
+                assert result.last_person_id is None
+                assert result.duration_seconds == 0.0
+
     def test_property_names_with_backticks_generate_safe_query(self):
         """Should generate safe SQL queries when property names contain backticks or other dangerous characters."""
         # Test property names that could potentially break SQL queries
