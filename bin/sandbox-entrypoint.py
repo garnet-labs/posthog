@@ -184,9 +184,22 @@ def root_phase() -> None:
 
     SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
     Path("/tmp/sandbox-cache").mkdir(parents=True, exist_ok=True)
+    # Start interactive shells in the workspace, not the dotfiles-only home dir.
+    (SANDBOX_HOME / ".bashrc").write_text(f"cd {WORKSPACE}\n")
     run(["chown", f"{uid}:{gid}", str(SANDBOX_HOME), "/tmp/sandbox-cache"])
 
     create_sandbox_user(uid, gid)
+
+    # The worktree's .git file points to a host path that doesn't exist in the
+    # container. The main repo's .git is mounted at /repo.git (read-only).
+    # Parse the worktree name and point GIT_DIR at the right place.
+    # Set these before export_environment() so they're written to
+    # /etc/environment and /etc/profile.d/ for SSH and docker exec shells.
+    gitdir_line = (WORKSPACE / ".git").read_text().strip()
+    worktree_name = gitdir_line.rsplit("/", 1)[-1]
+    os.environ["GIT_DIR"] = f"/repo.git/worktrees/{worktree_name}"
+    os.environ["GIT_WORK_TREE"] = str(WORKSPACE)
+
     export_environment(uid, gid)
     start_sshd(uid, gid)
     copy_claude_auth(uid, gid)
@@ -411,15 +424,6 @@ def user_phase() -> None:
         }
     )
     Path("/cache/cargo-target").mkdir(parents=True, exist_ok=True)
-
-    # The worktree's .git file points to a host path that doesn't exist in the
-    # container. The main repo's .git is mounted at /repo.git (read-only).
-    # Parse the worktree name and point GIT_DIR at the right place.
-    # e.g. "gitdir: /home/user/workspace/posthog/.git/worktrees/my-branch"
-    gitdir_line = (WORKSPACE / ".git").read_text().strip()
-    worktree_name = gitdir_line.rsplit("/", 1)[-1]
-    os.environ["GIT_DIR"] = f"/repo.git/worktrees/{worktree_name}"
-    os.environ["GIT_WORK_TREE"] = str(WORKSPACE)
     os.chdir(WORKSPACE)
 
     install_geoip()
