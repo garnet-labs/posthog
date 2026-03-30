@@ -13,6 +13,14 @@ export type SessionState = {
     uuid: string
 }
 
+export type UserMetadata = {
+    projectName: string
+    orgName: string
+    fullName: string
+    email: string
+    timezone: string
+}
+
 export type State = {
     projectId: string | undefined
     orgId: string | undefined
@@ -22,11 +30,11 @@ export type State = {
     clientName: string | undefined
     aiConsentGiven: boolean | undefined
     aiConsentFetchedAt: number | undefined
-    metadata: string | undefined
-    metadataFetchedAt: number | undefined
 } & Record<PrefixedString<'session'>, SessionState> &
     Record<PrefixedString<'groupTypes'>, GroupType[] | undefined> &
-    Record<PrefixedString<'groupTypesFetchedAt'>, number | undefined>
+    Record<PrefixedString<'groupTypesFetchedAt'>, number | undefined> &
+    Record<PrefixedString<'metadata'>, UserMetadata | undefined> &
+    Record<PrefixedString<'metadataFetchedAt'>, number | undefined>
 
 export type Env = {
     /**

@@ -25,7 +25,7 @@ import { registerResources } from '@/resources'
 import { registerUiAppResources } from '@/resources/ui-apps'
 import INSTRUCTIONS_TEMPLATE_V1 from '@/templates/instructions-v1.md'
 import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
-import type { CloudRegion, Context, State, Tool } from '@/tools/types'
+import type { CloudRegion, Context, State, Tool, UserMetadata } from '@/tools/types'
 import type { AnalyticsMetadata, WithAnalytics } from '@/ui-apps/types'
 
 function buildInstructions(groupTypes?: GroupType[], metadata?: string): string {
@@ -58,8 +58,6 @@ export class MCP extends McpAgent<Env> {
         clientName: undefined,
         aiConsentGiven: undefined,
         aiConsentFetchedAt: undefined,
-        metadata: undefined,
-        metadataFetchedAt: undefined,
     }
 
     _cache: DurableObjectCache<State> | undefined
@@ -472,32 +470,38 @@ export class MCP extends McpAgent<Env> {
     }
 
     private async getOrFetchMetadata(): Promise<string | undefined> {
-        const METADATA_TTL_MS = 20 * 60 * 1000 // 20 minutes
+        const METADATA_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
         try {
-            const cached = await this.cache.get('metadata')
-            const fetchedAt = await this.cache.get('metadataFetchedAt')
+            const orgId = await this.cache.get('orgId')
+            const distinctId = await this.cache.get('distinctId')
+            const cacheKey = `metadata:${orgId ?? 'unknown'}:${distinctId ?? 'unknown'}` as const
+            const fetchedAtKey = `metadataFetchedAt:${orgId ?? 'unknown'}:${distinctId ?? 'unknown'}` as const
+
+            const cached = await this.cache.get(cacheKey)
+            const fetchedAt = await this.cache.get(fetchedAtKey)
             const isStale = !fetchedAt || Date.now() - fetchedAt > METADATA_TTL_MS
 
             if (cached !== undefined && !isStale) {
-                return cached
+                return this.formatMetadata(cached)
             }
 
             if (cached !== undefined) {
                 // Stale — revalidate in background, return cached immediately
                 this.ctx.waitUntil(
-                    this.fetchAndCacheMetadata().catch((error) => {
+                    this.fetchAndCacheMetadata(cacheKey, fetchedAtKey).catch((error) => {
                         getPostHogClient(!!CUSTOM_API_BASE_URL).captureException(error, undefined, {
                             tag: 'max_ai',
                             context: 'metadata_background_revalidation',
                         })
                     })
                 )
-                return cached
+                return this.formatMetadata(cached)
             }
 
             // No cache — fetch synchronously
-            return await this.fetchAndCacheMetadata()
+            const data = await this.fetchAndCacheMetadata(cacheKey, fetchedAtKey)
+            return data ? this.formatMetadata(data) : undefined
         } catch (error) {
             getPostHogClient(!!CUSTOM_API_BASE_URL).captureException(error, undefined, {
                 tag: 'max_ai',
@@ -507,31 +511,40 @@ export class MCP extends McpAgent<Env> {
         }
     }
 
-    private async fetchAndCacheMetadata(): Promise<string | undefined> {
+    private formatMetadata(data: UserMetadata): string {
+        return [
+            `You are currently in project "${data.projectName}" (organization: "${data.orgName}").`,
+            `The user's name is ${data.fullName} (${data.email}).`,
+            `Project timezone: ${data.timezone}.`,
+        ].join('\n')
+    }
+
+    private async fetchAndCacheMetadata(
+        cacheKey: `metadata:${string}`,
+        fetchedAtKey: `metadataFetchedAt:${string}`
+    ): Promise<UserMetadata | undefined> {
         const api = await this.api()
         const userResult = await api.users().me()
         if (!userResult.success) {
             return undefined
         }
         const user = userResult.data
-        const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Unknown'
-        const projectName = user.team?.name || 'Unknown'
-        const timezone = user.team?.timezone || 'UTC'
-        const orgName = user.organization?.name || 'Unknown'
 
-        const metadata = [
-            `You are currently in project "${projectName}" (organization: "${orgName}").`,
-            `The user's name is ${fullName} (${user.email}).`,
-            `Project timezone: ${timezone}.`,
-        ].join('\n')
+        const data: UserMetadata = {
+            projectName: user.team?.name || 'Unknown',
+            orgName: user.organization?.name || 'Unknown',
+            fullName: [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Unknown',
+            email: user.email,
+            timezone: user.team?.timezone || 'UTC',
+        }
 
-        await this.cache.set('metadata', metadata)
-        await this.cache.set('metadataFetchedAt', Date.now())
-        return metadata
+        await this.cache.set(cacheKey, data)
+        await this.cache.set(fetchedAtKey, Date.now())
+        return data
     }
 
     private async getOrFetchGroupTypes(projectId: string): Promise<GroupType[] | undefined> {
-        const GROUP_TYPES_TTL_MS = 5 * 60 * 1000 // 5 minutes
+        const GROUP_TYPES_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
         try {
             const cached = await this.cache.get(`groupTypes:${projectId}`)
