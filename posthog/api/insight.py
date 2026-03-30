@@ -1030,7 +1030,8 @@ class MCPInsightSerializer(InsightSerializer):
                 exclude_none=True, mode="json"
             )
         except PydanticValidationError as exc:
-            raise serializers.ValidationError(f"This query can't be saved: {str(exc)}")
+            details = "; ".join(f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in exc.errors())
+            raise serializers.ValidationError(f"This query can't be saved: {details}")
 
 
 @extend_schema_view(
