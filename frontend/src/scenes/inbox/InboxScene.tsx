@@ -672,10 +672,9 @@ export function InboxScene(): JSX.Element {
                     // eslint-disable-next-line react/forbid-dom-props
                     style={{ backgroundImage: 'url(/static/not-found-astrohog.png)' }}
                 />
-                <h1 className="text-2xl font-bold mt-4 mb-0">Inbox is available in the PostHog Code desktop app</h1>
-                <p className="text-sm font-semibold italic mt-3 mb-0">Your proactive analytics companion awaits.</p>
-                <p className="text-sm mt-3 mb-0">
-                    PostHog Code brings Inbox and more powerful features right to your desktop.
+                <h1 className="text-2xl font-bold mt-4 mb-0">Inbox is now available in the PostHog Code desktop app</h1>
+                <p className="text-sm font-semibold italic mt-3 mb-0">
+                    PostHog Code brings Inbox and agentic development right to your desktop.
                 </p>
                 <div className="flex justify-center mt-4">
                     <LemonButton
