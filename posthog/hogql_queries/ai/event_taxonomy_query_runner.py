@@ -50,6 +50,21 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
         return ()
 
     def _calculate(self):
+        # If all requested properties are excluded large properties, skip the query entirely.
+        excluded = self._get_excluded_large_properties()
+        if self.query.properties and excluded:
+            scannable = [p for p in self.query.properties if p not in set(excluded)]
+            if not scannable:
+                return EventTaxonomyQueryResponse(
+                    results=[
+                        EventTaxonomyItem(property=prop, sample_values=[], sample_count=0)
+                        for prop in self.query.properties
+                    ],
+                    timings=self.timings.to_list(),
+                    hogql="",
+                    modifiers=self.modifiers,
+                )
+
         query = self.to_query()
         hogql = to_printed_hogql(query, self.team)
 
@@ -220,18 +235,6 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
         if self.query.properties:
             excluded = set(self._get_excluded_large_properties())
             scannable_props = [p for p in self.query.properties if p not in excluded]
-
-            if not scannable_props:
-                # All requested properties are excluded large properties;
-                # return a dummy query that produces no rows so _calculate
-                # can still append them with empty sample values.
-                query = parse_select(
-                    """
-                        SELECT '' AS key, '' AS value, 0 AS count
-                        WHERE 1 = 0
-                    """
-                )
-                return cast(ast.SelectQuery, query)
 
             query = parse_select(
                 """
