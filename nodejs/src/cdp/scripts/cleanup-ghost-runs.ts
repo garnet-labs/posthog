@@ -48,8 +48,8 @@ interface GhostRunResult {
  * Returns the ClickHouse query to extract workflow trigger/resume data
  * for the incident window. Run this on ClickHouse and save the result as CSV.
  */
-export function getClickHouseQuery(teamIds: number[]): string {
-    const teamIdList = teamIds.join(', ')
+export function getClickHouseQuery(teamIds?: number[]): string {
+    const teamFilter = teamIds?.length ? `  AND team_id IN (${teamIds.join(', ')})` : ''
     return `
 SELECT
     team_id,
@@ -61,7 +61,7 @@ FROM log_entries
 WHERE timestamp BETWEEN '2026-03-18 00:00:00' AND '2026-03-31 00:00:00'
   AND log_source = 'hog_flow'
   AND message LIKE '%[Event:%'
-  AND team_id IN (${teamIdList})
+${teamFilter}
 ORDER BY team_id, message, instance_id
 `
 }
@@ -244,14 +244,21 @@ export function parseCSV(csv: string): LogEntry[] {
 /**
  * Main cleanup function. Takes a CSV file path and outputs cleanup SQL.
  */
-export function processCleanup(csvPath: string): {
+export function processCleanup(
+    csvPath: string,
+    filterTeamIds?: number[]
+): {
     results: GhostRunResult[]
     allGhostRunIds: string[]
     sql: string
     summary: string
 } {
     const csv = fs.readFileSync(csvPath, 'utf-8')
-    const entries = parseCSV(csv)
+    let entries = parseCSV(csv)
+    if (filterTeamIds?.length) {
+        const teamSet = new Set(filterTeamIds.map(String))
+        entries = entries.filter((e) => teamSet.has(e.team_id))
+    }
     const results = identifyGhostRuns(entries)
 
     const allGhostRunIds = results.flatMap((r) => r.ghostRunIds)
@@ -283,26 +290,38 @@ export function processCleanup(csvPath: string): {
 
 // CLI entrypoint
 if (require.main === module) {
-    const csvPath = process.argv[2]
+    const args = process.argv.slice(2)
+    const dryRun = args.includes('--dry-run')
+    const teamsIdx = args.indexOf('--teams')
+    const teamIds = teamsIdx !== -1 ? args[teamsIdx + 1]?.split(',').map(Number) : undefined
+    const csvPath = args.find((a) => !a.startsWith('--') && !(teamsIdx !== -1 && a === args[teamsIdx + 1]))
+
     if (!csvPath) {
-        console.log('Usage: npx ts-node cleanup-ghost-runs.ts <csv-file>')
+        console.log('Usage: npx ts-node cleanup-ghost-runs.ts <csv-file> [--dry-run] [--teams 79155,110739]')
+        console.log('')
+        console.log('Options:')
+        console.log('  --dry-run           Print summary only, do not write SQL files')
+        console.log('  --teams 1,2,3       Only process specific team IDs from the CSV')
         console.log('')
         console.log('Step 1: Run the ClickHouse query to get the data:')
-        console.log(
-            getClickHouseQuery([
-                277932, 281194, 240217, 243819, 78051, 47337, 110739, 262324, 70616, 103207, 73108, 122682, 118319,
-                81505, 163576, 76160, 127158, 189310, 106363, 105711, 224119, 121623,
-            ])
-        )
+        console.log(getClickHouseQuery())
+        console.log('')
+        console.log('  Or for specific teams:')
+        console.log(getClickHouseQuery([79155, 110739]))
         console.log('')
         console.log('Step 2: Save the result as CSV and run this script with the path')
         process.exit(1)
     }
 
-    const { summary, sql, allGhostRunIds } = processCleanup(csvPath)
+    const { summary, sql, allGhostRunIds } = processCleanup(csvPath, teamIds)
 
     console.log(summary)
     console.log('')
+
+    if (dryRun) {
+        console.log('Dry run - no files written.')
+        process.exit(0)
+    }
 
     // Write SQL to file
     const sqlPath = path.join(path.dirname(csvPath), 'ghost-run-cleanup.sql')
