@@ -1,1 +1,1 @@
-1077_alter_integration_kind
+1078_alter_integration_kind
