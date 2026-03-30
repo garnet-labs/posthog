@@ -14,7 +14,6 @@ export const WEB_ANALYTICS_PRE_AGGREGATED_ALLOWED_EVENT_PROPERTIES = [
     '$geoip_city_name',
     '$geoip_subdivision_1_code',
     '$geoip_subdivision_1_name',
-    '$geoip_time_zone',
     '$pathname',
     'metadata.loggedIn',
     'metadata.backend',

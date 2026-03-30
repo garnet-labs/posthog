@@ -767,3 +767,61 @@ class TestWebStatsPreAggregated(WebAnalyticsPreAggregatedTestBase):
     # NOTE: test_include_host_consistency_between_preagg_and_regular is not included because
     # pre-aggregated tables have a known limitation where PAGE breakdown doesn't return mid-session pages.
     # The non-pre-aggregated version works correctly - see test_web_stats_table.py for full coverage.
+
+    @parameterized.expand(
+        [
+            ("geoip_time_zone", EventPropertyFilter(key="$geoip_time_zone", value="America/New_York", operator=PropertyOperator.EXACT)),
+            ("browser_version", EventPropertyFilter(key="$browser_version", value="120", operator=PropertyOperator.EXACT)),
+            ("os_version", EventPropertyFilter(key="$os_version", value="14", operator=PropertyOperator.EXACT)),
+            ("geoip_country_name", EventPropertyFilter(key="$geoip_country_name", value="United States", operator=PropertyOperator.EXACT)),
+        ]
+    )
+    def test_unsupported_properties_disable_preaggregated_tables(self, _name, prop_filter):
+        now = datetime(2025, 1, 31, 12, 0, 0, tzinfo=UTC)
+        date_from = now - timedelta(days=7)
+
+        query = WebStatsTableQuery(
+            dateRange=DateRange(date_from=date_from.isoformat(), date_to=now.isoformat()),
+            properties=[prop_filter],
+            breakdownBy=WebStatsBreakdown.DEVICE_TYPE,
+        )
+
+        runner = MagicMock()
+        runner.query = query
+        runner.team = self.team
+        runner.modifiers = HogQLQueryModifiers(useWebAnalyticsPreAggregatedTables=True, convertToProjectTimezone=False)
+
+        mock_date_range = MagicMock()
+        mock_date_range.date_from.return_value = date_from
+        mock_date_range.date_to.return_value = now
+        runner.query_date_range = mock_date_range
+        runner.query_compare_to_date_range = None
+
+        builder = StatsTablePreAggregatedQueryBuilder(runner)
+        self.assertFalse(builder.can_use_preaggregated_tables())
+
+    def test_person_property_filter_disables_preaggregated_tables(self):
+        from posthog.schema import PersonPropertyFilter
+
+        now = datetime(2025, 1, 31, 12, 0, 0, tzinfo=UTC)
+        date_from = now - timedelta(days=7)
+
+        query = WebStatsTableQuery(
+            dateRange=DateRange(date_from=date_from.isoformat(), date_to=now.isoformat()),
+            properties=[PersonPropertyFilter(key="email", value="test@example.com", operator=PropertyOperator.EXACT)],
+            breakdownBy=WebStatsBreakdown.DEVICE_TYPE,
+        )
+
+        runner = MagicMock()
+        runner.query = query
+        runner.team = self.team
+        runner.modifiers = HogQLQueryModifiers(useWebAnalyticsPreAggregatedTables=True, convertToProjectTimezone=False)
+
+        mock_date_range = MagicMock()
+        mock_date_range.date_from.return_value = date_from
+        mock_date_range.date_to.return_value = now
+        runner.query_date_range = mock_date_range
+        runner.query_compare_to_date_range = None
+
+        builder = StatsTablePreAggregatedQueryBuilder(runner)
+        self.assertFalse(builder.can_use_preaggregated_tables())

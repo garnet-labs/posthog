@@ -32,7 +32,10 @@ class WebAnalyticsPreAggregatedQueryBuilder:
         query = self.runner.query
 
         for prop in query.properties:
-            if hasattr(prop, "type") and prop.type == "cohort":
+            prop_type = getattr(prop, "type", None)
+            # Only event and session property filters are supported on pre-aggregated tables.
+            # Cohort and person filters require person-level data that isn't available.
+            if prop_type not in ("event", "session"):
                 return False
             if hasattr(prop, "key") and prop.key not in self.supported_props_filters:
                 return False
