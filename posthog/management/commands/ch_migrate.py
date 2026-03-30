@@ -89,7 +89,6 @@ class Command(BaseCommand):
             help="Migration number to trial.",
         )
 
-
     def handle(self, *args: Any, **options: Any) -> None:
         subcommand = options.get("subcommand")
         if subcommand == "bootstrap":
@@ -463,4 +462,3 @@ class Command(BaseCommand):
             print(f"\nTrial PASSED for {target_mig['name']}.")
         else:
             print(f"\nTrial FAILED for {target_mig['name']}.")
-
