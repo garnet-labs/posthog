@@ -286,7 +286,8 @@ class TaxonomyAgentToolkit:
             if property_name in excluded:
                 return (
                     f"Sample values for {property_name} are not available because values are typically too large to display. "
-                    f"This property contains raw AI model input/output data."
+                    f"This property contains raw AI model input/output data. "
+                    f"Use a SQL query to retrieve a sample if needed."
                 )
 
         try:

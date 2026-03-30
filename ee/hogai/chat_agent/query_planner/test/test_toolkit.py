@@ -311,6 +311,7 @@ class TestTaxonomyAgentToolkit(ClickhouseTestMixin, APIBaseTest):
         result = toolkit.retrieve_event_or_action_property_values("$ai_generation", "$ai_input")
         self.assertIn("too large to display", result)
         self.assertIn("$ai_input", result)
+        self.assertIn("SQL query", result)
 
         result = toolkit.retrieve_event_or_action_property_values("$ai_generation", "$ai_output_choices")
         self.assertIn("too large to display", result)
