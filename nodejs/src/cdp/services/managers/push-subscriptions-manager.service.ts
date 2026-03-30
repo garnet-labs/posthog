@@ -10,6 +10,7 @@ import { HogFunctionType } from '../../types'
 import { EncryptedFields } from '../../utils/encryption-utils'
 
 export type FcmErrorDetail = { '@type'?: string; errorCode?: string }
+export type ApnsErrorResponse = { reason?: string }
 
 const getDistinctIdsForSamePersonCounter = new Counter({
     name: 'cdp_push_subscription_get_distinct_ids_for_same_person_total',
@@ -20,30 +21,20 @@ export type PushSubscriptionGetArgs = {
     teamId: number
     distinctId: string
     platform?: 'android' | 'ios'
-    fcmProjectId?: string
-    provider?: 'fcm' | 'apns'
+    integrationId?: number
 }
 
 const toKey = (args: PushSubscriptionGetArgs): string => {
-    // Use JSON encoding to safely handle distinctIds containing colons or other special characters
-    return JSON.stringify([
-        args.teamId,
-        args.distinctId,
-        args.platform ?? 'all',
-        args.fcmProjectId ?? 'all',
-        args.provider ?? 'all',
-    ])
+    return JSON.stringify([args.teamId, args.distinctId, args.platform ?? 'all', args.integrationId ?? 'all'])
 }
 
 const fromKey = (key: string): PushSubscriptionGetArgs => {
-    // Parse JSON-encoded key to safely handle distinctIds containing colons or other special characters
-    const [teamId, distinctId, platform, fcmProjectId, provider] = parseJSON(key)
+    const [teamId, distinctId, platform, integrationId] = parseJSON(key)
     return {
         teamId: parseInt(teamId),
         distinctId,
         platform: platform === 'all' ? undefined : (platform as 'android' | 'ios'),
-        fcmProjectId: fcmProjectId === 'all' ? undefined : fcmProjectId,
-        provider: provider === 'all' ? undefined : (provider as 'fcm' | 'apns'),
+        integrationId: integrationId === 'all' ? undefined : Number(integrationId),
     }
 }
 
@@ -54,12 +45,11 @@ type PushSubscriptionRow = {
     distinct_id: string
     token: string
     platform: 'android' | 'ios'
-    provider: 'fcm' | 'apns'
+    integration_id: number
     is_active: boolean
     last_successfully_used_at: string | null
     created_at: string
     updated_at: string
-    fcm_project_id: string | null
 }
 
 export type PushSubscription = {
@@ -68,19 +58,30 @@ export type PushSubscription = {
     distinct_id: string
     token: string
     platform: 'android' | 'ios'
-    provider: 'fcm' | 'apns'
+    integration_id: number
     is_active: boolean
     last_successfully_used_at: string | null
     created_at: string
     updated_at: string
-    fcm_project_id: string | null
 }
 
 export type PushSubscriptionInputToLoad = {
     distinctId: string
-    fcmProjectId: string
+    integrationId: number
     platform?: 'android' | 'ios'
 }
+
+const SELECT_COLUMNS = `
+    id,
+    team_id,
+    distinct_id,
+    token,
+    platform,
+    integration_id,
+    is_active,
+    last_successfully_used_at,
+    created_at,
+    updated_at`
 
 export class PushSubscriptionsManagerService {
     private lazyLoader: LazyLoader<PushSubscription[]>
@@ -110,18 +111,7 @@ export class PushSubscriptionsManagerService {
     }
 
     public async getById(teamId: number, subscriptionId: string): Promise<PushSubscription | null> {
-        const queryString = `SELECT
-                id,
-                team_id,
-                distinct_id,
-                token,
-                platform,
-                provider,
-                is_active,
-                last_successfully_used_at,
-                created_at,
-                updated_at,
-                fcm_project_id
+        const queryString = `SELECT ${SELECT_COLUMNS}
             FROM workflows_pushsubscription
             WHERE id = $1 AND team_id = $2 AND is_active = true
             LIMIT 1`
@@ -140,20 +130,22 @@ export class PushSubscriptionsManagerService {
             return null
         }
 
-        const decryptedToken = this.encryptedFields.decrypt(row.token, { ignoreDecryptionErrors: true }) ?? row.token
+        return this.rowToSubscription(row)
+    }
 
+    private rowToSubscription(row: PushSubscriptionRow): PushSubscription {
+        const decryptedToken = this.encryptedFields.decrypt(row.token, { ignoreDecryptionErrors: true }) ?? row.token
         return {
             id: row.id,
             team_id: row.team_id,
             distinct_id: row.distinct_id,
             token: decryptedToken,
             platform: row.platform,
-            provider: row.provider,
+            integration_id: row.integration_id,
             is_active: row.is_active,
             last_successfully_used_at: row.last_successfully_used_at,
             created_at: row.created_at,
             updated_at: row.updated_at,
-            fcm_project_id: row.fcm_project_id,
         }
     }
 
@@ -173,32 +165,16 @@ export class PushSubscriptionsManagerService {
                 params.push(args.platform)
             }
 
-            if (args.provider) {
-                conditionParts.push(`provider = $${paramIdx++}`)
-                params.push(args.provider)
-            }
-
-            if (args.fcmProjectId) {
-                conditionParts.push(`(fcm_project_id = $${paramIdx++} OR fcm_project_id IS NULL)`)
-                params.push(args.fcmProjectId)
+            if (args.integrationId) {
+                conditionParts.push(`integration_id = $${paramIdx++}`)
+                params.push(args.integrationId)
             }
 
             conditionParts.push('is_active = true')
             conditions.push(`(${conditionParts.join(' AND ')})`)
         }
 
-        const queryString = `SELECT
-                id,
-                team_id,
-                distinct_id,
-                token,
-                platform,
-                provider,
-                is_active,
-                last_successfully_used_at,
-                created_at,
-                updated_at,
-                fcm_project_id
+        const queryString = `SELECT ${SELECT_COLUMNS}
             FROM workflows_pushsubscription
             WHERE ${conditions.join(' OR ')}
             ORDER BY last_successfully_used_at DESC NULLS LAST, created_at DESC`
@@ -219,36 +195,18 @@ export class PushSubscriptionsManagerService {
         }
 
         for (const row of subscriptionRows) {
-            // Find matching keys (could match multiple)
             for (const key of ids) {
                 const args = fromKey(key)
                 const matchesPlatform = !args.platform || args.platform === row.platform
-                const matchesProvider = !args.provider || args.provider === row.provider
-                const matchesAppId =
-                    !args.fcmProjectId || args.fcmProjectId === row.fcm_project_id || row.fcm_project_id === null
+                const matchesIntegration = !args.integrationId || args.integrationId === row.integration_id
 
                 if (
                     args.teamId === row.team_id &&
                     args.distinctId === row.distinct_id &&
                     matchesPlatform &&
-                    matchesProvider &&
-                    matchesAppId
+                    matchesIntegration
                 ) {
-                    const decryptedToken =
-                        this.encryptedFields.decrypt(row.token, { ignoreDecryptionErrors: true }) ?? row.token
-                    result[key].push({
-                        id: row.id,
-                        team_id: row.team_id,
-                        distinct_id: row.distinct_id,
-                        token: decryptedToken,
-                        platform: row.platform,
-                        provider: row.provider,
-                        is_active: row.is_active,
-                        last_successfully_used_at: row.last_successfully_used_at,
-                        created_at: row.created_at,
-                        updated_at: row.updated_at,
-                        fcm_project_id: row.fcm_project_id,
-                    })
+                    result[key].push(this.rowToSubscription(row))
                 }
             }
         }
@@ -303,15 +261,15 @@ export class PushSubscriptionsManagerService {
         )
     }
 
-    public async updateTokenLifecycle(
+    public async updateFcmTokenLifecycle(
         teamId: number,
-        fcmToken: string,
+        token: string,
         status: number | undefined,
         errorDetails: FcmErrorDetail[] | undefined
     ): Promise<void> {
         if (status && status >= 200 && status < 300) {
             try {
-                await this.updateLastSuccessfullyUsedAtByToken(teamId, fcmToken)
+                await this.updateLastSuccessfullyUsedAtByToken(teamId, token)
             } catch (error) {
                 logger.warn('Failed to update last_successfully_used_at for FCM token', { teamId, error })
             }
@@ -320,7 +278,7 @@ export class PushSubscriptionsManagerService {
 
         if (status === 404) {
             try {
-                await this.deactivateByTokens([fcmToken], 'unregistered token', teamId)
+                await this.deactivateByTokens([token], 'unregistered token', teamId)
                 logger.info('Deactivated push subscription token due to 404 (unregistered token)', { teamId })
             } catch (error) {
                 logger.warn('Failed to deactivate push subscription token', { teamId, error })
@@ -336,7 +294,7 @@ export class PushSubscriptionsManagerService {
             )
             if (isInvalidArgument) {
                 try {
-                    await this.deactivateByTokens([fcmToken], 'invalid token', teamId)
+                    await this.deactivateByTokens([token], 'invalid token', teamId)
                     logger.info('Deactivated push subscription token due to 400 INVALID_ARGUMENT (invalid token)', {
                         teamId,
                     })
@@ -347,14 +305,52 @@ export class PushSubscriptionsManagerService {
         }
     }
 
+    public async updateApnsTokenLifecycle(
+        teamId: number,
+        token: string,
+        status: number | undefined,
+        errorResponse: ApnsErrorResponse | undefined
+    ): Promise<void> {
+        if (status && status >= 200 && status < 300) {
+            try {
+                await this.updateLastSuccessfullyUsedAtByToken(teamId, token)
+            } catch (error) {
+                logger.warn('Failed to update last_successfully_used_at for APNS token', { teamId, error })
+            }
+            return
+        }
+
+        const reason = errorResponse?.reason
+        // APNS returns 410 for expired/unregistered tokens
+        if (status === 410 || reason === 'Unregistered' || reason === 'ExpiredProviderToken') {
+            try {
+                await this.deactivateByTokens([token], 'unregistered token', teamId)
+                logger.info('Deactivated APNS token due to unregistered/expired status', { teamId, status, reason })
+            } catch (error) {
+                logger.warn('Failed to deactivate APNS token', { teamId, error })
+            }
+            return
+        }
+
+        // APNS returns 400 for bad device tokens
+        if (status === 400 && (reason === 'BadDeviceToken' || reason === 'DeviceTokenNotForTopic')) {
+            try {
+                await this.deactivateByTokens([token], 'invalid token', teamId)
+                logger.info('Deactivated APNS token due to bad device token', { teamId, reason })
+            } catch (error) {
+                logger.warn('Failed to deactivate APNS token', { teamId, error })
+            }
+        }
+    }
+
     public async getDistinctIdsForSamePerson(teamId: number, distinctId: string): Promise<string[]> {
         getDistinctIdsForSamePersonCounter.inc()
         const queryString = `SELECT DISTINCT distinct_id
             FROM posthog_persondistinctid
-            WHERE team_id = $1 
+            WHERE team_id = $1
               AND person_id = (
-                  SELECT person_id 
-                  FROM posthog_persondistinctid 
+                  SELECT person_id
+                  FROM posthog_persondistinctid
                   WHERE team_id = $1 AND distinct_id = $2
                   LIMIT 1
               )`
@@ -373,8 +369,7 @@ export class PushSubscriptionsManagerService {
         teamId: number,
         distinctIds: string[],
         platform?: 'android' | 'ios',
-        fcmProjectId?: string,
-        provider?: 'fcm' | 'apns'
+        integrationId?: number
     ): Promise<PushSubscription | null> {
         if (distinctIds.length === 0) {
             return null
@@ -383,34 +378,19 @@ export class PushSubscriptionsManagerService {
         const placeholders = distinctIds.map((_, idx) => `$${idx + 2}`).join(', ')
         let paramIndex = distinctIds.length + 2
         const platformFilter = platform ? `AND platform = $${paramIndex++}` : ''
-        const providerFilter = provider ? `AND provider = $${paramIndex++}` : ''
-        const appIdFilter = fcmProjectId ? `AND (fcm_project_id = $${paramIndex++} OR fcm_project_id IS NULL)` : ''
+        const integrationFilter = integrationId ? `AND integration_id = $${paramIndex++}` : ''
 
         const params: any[] = [teamId, ...distinctIds]
         if (platform) {
             params.push(platform)
         }
-        if (provider) {
-            params.push(provider)
-        }
-        if (fcmProjectId) {
-            params.push(fcmProjectId)
+        if (integrationId) {
+            params.push(integrationId)
         }
 
-        const queryString = `SELECT
-                id,
-                team_id,
-                distinct_id,
-                token,
-                platform,
-                provider,
-                is_active,
-                last_successfully_used_at,
-                created_at,
-                updated_at,
-                fcm_project_id
+        const queryString = `SELECT ${SELECT_COLUMNS}
             FROM workflows_pushsubscription
-            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${platformFilter} ${providerFilter} ${appIdFilter}
+            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${platformFilter} ${integrationFilter}
             ORDER BY last_successfully_used_at DESC NULLS LAST, created_at DESC
             LIMIT 1`
 
@@ -428,29 +408,14 @@ export class PushSubscriptionsManagerService {
             return null
         }
 
-        const decryptedToken = this.encryptedFields.decrypt(row.token, { ignoreDecryptionErrors: true }) ?? row.token
-
-        return {
-            id: row.id,
-            team_id: row.team_id,
-            distinct_id: row.distinct_id,
-            token: decryptedToken,
-            platform: row.platform,
-            provider: row.provider,
-            is_active: row.is_active,
-            last_successfully_used_at: row.last_successfully_used_at,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            fcm_project_id: row.fcm_project_id,
-        }
+        return this.rowToSubscription(row)
     }
 
     public async findSubscriptionsByPersonDistinctIds(
         teamId: number,
         distinctIds: string[],
         platform?: 'android' | 'ios',
-        fcmProjectId?: string,
-        provider?: 'fcm' | 'apns'
+        integrationId?: number
     ): Promise<PushSubscription[]> {
         if (distinctIds.length === 0) {
             return []
@@ -459,34 +424,19 @@ export class PushSubscriptionsManagerService {
         const placeholders = distinctIds.map((_, idx) => `$${idx + 2}`).join(', ')
         let paramIndex = distinctIds.length + 2
         const platformFilter = platform ? `AND platform = $${paramIndex++}` : ''
-        const providerFilter = provider ? `AND provider = $${paramIndex++}` : ''
-        const appIdFilter = fcmProjectId ? `AND (fcm_project_id = $${paramIndex++} OR fcm_project_id IS NULL)` : ''
+        const integrationFilter = integrationId ? `AND integration_id = $${paramIndex++}` : ''
 
         const params: any[] = [teamId, ...distinctIds]
         if (platform) {
             params.push(platform)
         }
-        if (provider) {
-            params.push(provider)
-        }
-        if (fcmProjectId) {
-            params.push(fcmProjectId)
+        if (integrationId) {
+            params.push(integrationId)
         }
 
-        const queryString = `SELECT
-                id,
-                team_id,
-                distinct_id,
-                token,
-                platform,
-                provider,
-                is_active,
-                last_successfully_used_at,
-                created_at,
-                updated_at,
-                fcm_project_id
+        const queryString = `SELECT ${SELECT_COLUMNS}
             FROM workflows_pushsubscription
-            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${platformFilter} ${providerFilter} ${appIdFilter}
+            WHERE team_id = $1 AND distinct_id IN (${placeholders}) AND is_active = true ${platformFilter} ${integrationFilter}
             ORDER BY last_successfully_used_at DESC NULLS LAST, created_at DESC`
 
         const { rows } = await this.postgres.query<PushSubscriptionRow>(
@@ -496,23 +446,7 @@ export class PushSubscriptionsManagerService {
             'findSubscriptionsByPersonDistinctIds'
         )
 
-        return rows.map((row) => {
-            const decryptedToken =
-                this.encryptedFields.decrypt(row.token, { ignoreDecryptionErrors: true }) ?? row.token
-            return {
-                id: row.id,
-                team_id: row.team_id,
-                distinct_id: row.distinct_id,
-                token: decryptedToken,
-                platform: row.platform,
-                provider: row.provider,
-                is_active: row.is_active,
-                last_successfully_used_at: row.last_successfully_used_at,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-                fcm_project_id: row.fcm_project_id,
-            }
-        })
+        return rows.map((row) => this.rowToSubscription(row))
     }
 
     public async updateDistinctId(teamId: number, subscriptionId: string, newDistinctId: string): Promise<void> {
@@ -537,16 +471,14 @@ export class PushSubscriptionsManagerService {
         }
 
         const returnInputs: Record<string, { value: string | null }> = {}
-        const provider = 'fcm' as const
 
-        const entries = Object.entries(inputsToLoad).map(([key, { distinctId, fcmProjectId, platform }]) => ({
+        const entries = Object.entries(inputsToLoad).map(([key, { distinctId, integrationId, platform }]) => ({
             inputKey: key,
             getArgs: {
                 teamId: hogFunction.team_id,
                 distinctId,
                 platform,
-                fcmProjectId,
-                provider,
+                integrationId,
             },
         }))
 
@@ -573,8 +505,7 @@ export class PushSubscriptionsManagerService {
                         hogFunction.team_id,
                         relatedDistinctIds,
                         getArgs.platform,
-                        getArgs.fcmProjectId,
-                        provider
+                        getArgs.integrationId
                     )
 
                     subscription = personSubscriptions.shift() ?? null

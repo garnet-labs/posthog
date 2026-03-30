@@ -147,11 +147,13 @@ export class HogInputsService {
             return {}
         }
 
-        const fcmProjectId = getFcmProjectIdForPush(integrationInputs)
+        // Find the integration ID from the resolved integration inputs.
+        // Push subscriptions are scoped to the integration that registered them.
+        const integrationId = getIntegrationIdForPush(integrationInputs)
 
         const pushSubscriptionPairs: Record<
             string,
-            { distinctId: string; fcmProjectId: string; platform?: 'android' | 'ios' }
+            { distinctId: string; integrationId: number; platform?: 'android' | 'ios' }
         > = {}
         for (const [key, { rawValue, schema }] of Object.entries(inputsToLoad)) {
             let resolvedValue: unknown = rawValue
@@ -172,9 +174,18 @@ export class HogInputsService {
                 })
                 continue
             }
+            if (integrationId === null) {
+                logger.warn('🦔', '[HogInputsService] No push integration found for push subscription input', {
+                    hogFunctionId: hogFunction.id,
+                    hogFunctionName: hogFunction.name,
+                    teamId: hogFunction.team_id,
+                    inputKey: key,
+                })
+                continue
+            }
             pushSubscriptionPairs[key] = {
                 distinctId: resolvedValue,
-                fcmProjectId,
+                integrationId,
                 platform: schema.platform,
             }
         }
@@ -323,22 +334,19 @@ export const formatLiquidInput = (
     return value
 }
 
-export function getFcmProjectIdForPush(
+/**
+ * Finds the integration ID from resolved integration inputs for push subscription scoping.
+ * Looks for the $integration_id set during integration loading.
+ * Works for both Firebase and APNS integrations.
+ */
+export function getIntegrationIdForPush(
     integrationInputs: Record<string, { value: Record<string, any> | null }>
-): string {
-    const firebaseAccountInput = integrationInputs['firebase_account']
-    if (!firebaseAccountInput?.value) {
-        throw new Error(
-            `firebase_account integration is required for push subscription inputs but was not found. ` +
-                `Please configure the firebase_account integration in your hog function.`
-        )
+): number | null {
+    for (const input of Object.values(integrationInputs)) {
+        const integrationId = input?.value?.$integration_id
+        if (typeof integrationId === 'number') {
+            return integrationId
+        }
     }
-    const fcmProjectId = (firebaseAccountInput.value as { key_info?: { project_id?: string } })?.key_info?.project_id
-    if (!fcmProjectId) {
-        throw new Error(
-            `FCM project ID (project_id) not found in firebase_account integration. ` +
-                `Please ensure the Firebase service account key contains a valid project_id.`
-        )
-    }
-    return fcmProjectId
+    return null
 }

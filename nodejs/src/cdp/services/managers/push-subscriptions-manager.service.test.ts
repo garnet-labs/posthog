@@ -17,15 +17,32 @@ describe('PushSubscriptionsManagerService', () => {
         let team: Team
         let manager: PushSubscriptionsManagerService
         let hogFunction: HogFunctionType
+        let fcmIntegrationId: number
+        let apnsIntegrationId: number
+
+        const insertIntegration = async (
+            teamId: number,
+            kind: 'firebase' | 'apns',
+            config: Record<string, any> = {}
+        ): Promise<number> => {
+            const result = await hub.postgres.query<{ id: number }>(
+                PostgresUse.COMMON_WRITE,
+                `INSERT INTO posthog_integration (team_id, kind, config, sensitive_config, created_at, created_by_id)
+                 VALUES ($1, $2, $3, '{}'::jsonb, NOW(), NULL)
+                 RETURNING id`,
+                [teamId, kind, JSON.stringify(config)],
+                'insertIntegration'
+            )
+            return result.rows[0].id
+        }
 
         const insertPushSubscription = async (
             teamId: number,
             distinctId: string,
             token: string,
             platform: 'android' | 'ios',
-            isActive: boolean = true,
-            provider: 'fcm' | 'apns' = 'fcm',
-            fcmProjectId: string | null = null
+            integrationId: number,
+            isActive: boolean = true
         ): Promise<void> => {
             const id = randomUUID()
             const encryptedToken = hub.encryptedFields.encrypt(token)
@@ -33,11 +50,11 @@ describe('PushSubscriptionsManagerService', () => {
 
             await hub.postgres.query(
                 PostgresUse.COMMON_WRITE,
-                `INSERT INTO workflows_pushsubscription 
-                 (id, team_id, distinct_id, token, token_hash, platform, provider, fcm_project_id, is_active, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+                `INSERT INTO workflows_pushsubscription
+                 (id, team_id, distinct_id, token, token_hash, platform, integration_id, is_active, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
                  RETURNING *`,
-                [id, teamId, distinctId, encryptedToken, tokenHash, platform, provider, fcmProjectId, isActive],
+                [id, teamId, distinctId, encryptedToken, tokenHash, platform, integrationId, isActive],
                 'insertPushSubscription'
             )
         }
@@ -80,6 +97,12 @@ describe('PushSubscriptionsManagerService', () => {
                 inputs: {},
                 inputs_schema: [],
             })
+            fcmIntegrationId = await insertIntegration(team.id, 'firebase', { project_id: 'test-project' })
+            apnsIntegrationId = await insertIntegration(team.id, 'apns', {
+                bundle_id: 'com.example.app',
+                team_id: 'APPLE_TEAM',
+                key_id: 'KEY123',
+            })
         })
 
         afterEach(async () => {
@@ -93,17 +116,18 @@ describe('PushSubscriptionsManagerService', () => {
             expect(result).toEqual({})
         })
 
-        it('resolves distinct_id to FCM token for active subscription', async () => {
+        it('resolves distinct_id to token for active subscription scoped by integration', async () => {
             const distinctId = 'user-123'
             const matchingToken = 'fcm-token-abc123'
             const nonMatchingToken = 'fcm-token-xyz789'
-            await insertPushSubscription(team.id, distinctId, matchingToken, 'android', true, 'fcm', 'test-project')
-            await insertPushSubscription(team.id, distinctId, nonMatchingToken, 'android', true, 'fcm', 'other-project')
+            const otherIntegrationId = await insertIntegration(team.id, 'firebase', { project_id: 'other-project' })
+            await insertPushSubscription(team.id, distinctId, matchingToken, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctId, nonMatchingToken, 'android', otherIntegrationId)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -119,16 +143,16 @@ describe('PushSubscriptionsManagerService', () => {
             const token1 = 'fcm-token-first'
             const token2 = 'fcm-token-second'
             const token3 = 'fcm-token-third'
-            await insertPushSubscription(team.id, distinctId, token1, 'android', true, 'fcm', 'test-project')
-            await insertPushSubscription(team.id, distinctId, token2, 'android', true, 'fcm', 'test-project')
-            await insertPushSubscription(team.id, distinctId, token3, 'android', true, 'fcm', 'test-project')
+            await insertPushSubscription(team.id, distinctId, token1, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctId, token2, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctId, token3, 'android', fcmIntegrationId)
 
             const deactivateSpy = jest.spyOn(manager, 'deactivateByIds').mockResolvedValue(undefined)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -145,12 +169,12 @@ describe('PushSubscriptionsManagerService', () => {
         it('returns null for inactive subscription', async () => {
             const distinctId = 'user-123'
             const token = 'fcm-token-abc123'
-            await insertPushSubscription(team.id, distinctId, token, 'android', false, 'fcm', 'test-project')
+            await insertPushSubscription(team.id, distinctId, token, 'android', fcmIntegrationId, false)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -163,12 +187,12 @@ describe('PushSubscriptionsManagerService', () => {
         it('returns null for subscription from different team', async () => {
             const distinctId = 'user-123'
             const token = 'fcm-token-abc123'
-            await insertPushSubscription(999, distinctId, token, 'android', true, 'fcm', 'test-project')
+            await insertPushSubscription(999, distinctId, token, 'android', fcmIntegrationId)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -181,14 +205,14 @@ describe('PushSubscriptionsManagerService', () => {
         it('filters by platform when specified', async () => {
             const distinctId = 'user-123'
             const androidToken = 'fcm-token-android'
-            const iosToken = 'fcm-token-ios'
-            await insertPushSubscription(team.id, distinctId, androidToken, 'android', true, 'fcm', 'test-project')
-            await insertPushSubscription(team.id, distinctId, iosToken, 'ios', true, 'apns')
+            const iosToken = 'apns-token-ios'
+            await insertPushSubscription(team.id, distinctId, androidToken, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctId, iosToken, 'ios', apnsIntegrationId)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -206,12 +230,12 @@ describe('PushSubscriptionsManagerService', () => {
             const personId = await insertPerson(team.id)
             await insertPersonDistinctId(team.id, personId, originalDistinctId)
             await insertPersonDistinctId(team.id, personId, newDistinctId)
-            await insertPushSubscription(team.id, originalDistinctId, token, 'android', true, 'fcm', 'test-project')
+            await insertPushSubscription(team.id, originalDistinctId, token, 'android', fcmIntegrationId)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId: newDistinctId,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -239,15 +263,15 @@ describe('PushSubscriptionsManagerService', () => {
             const personId = await insertPerson(team.id)
             await insertPersonDistinctId(team.id, personId, distinctIdA)
             await insertPersonDistinctId(team.id, personId, distinctIdB)
-            await insertPushSubscription(team.id, distinctIdB, tokenB1, 'android', true, 'fcm', 'test-project')
-            await insertPushSubscription(team.id, distinctIdB, tokenB2, 'android', true, 'fcm', 'test-project')
+            await insertPushSubscription(team.id, distinctIdB, tokenB1, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctIdB, tokenB2, 'android', fcmIntegrationId)
 
             const deactivateSpy = jest.spyOn(manager, 'deactivateByIds').mockResolvedValue(undefined)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId: distinctIdA,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }
@@ -259,51 +283,63 @@ describe('PushSubscriptionsManagerService', () => {
             expect(deactivatedIds).toHaveLength(1)
         })
 
-        it('handles multiple push subscription inputs', async () => {
+        it('handles multiple push subscription inputs for FCM and APNS', async () => {
             const distinctId1 = 'user-1'
             const distinctId2 = 'user-2'
-            const token1 = 'fcm-token-1'
-            const token2 = 'fcm-token-2'
-            await insertPushSubscription(team.id, distinctId1, token1, 'android', true, 'fcm', 'test-project')
-            await insertPushSubscription(team.id, distinctId2, token2, 'ios', true, 'apns')
+            const fcmToken = 'fcm-token-1'
+            const apnsToken = 'apns-token-1'
+            await insertPushSubscription(team.id, distinctId1, fcmToken, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctId2, apnsToken, 'ios', apnsIntegrationId)
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 android_token: {
                     distinctId: distinctId1,
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
                 ios_token: {
                     distinctId: distinctId2,
-                    fcmProjectId: 'test-project',
+                    integrationId: apnsIntegrationId,
                     platform: 'ios',
                 },
             }
             const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
             expect(result).toEqual({
-                android_token: { value: token1 },
-                ios_token: { value: token2 },
+                android_token: { value: fcmToken },
+                ios_token: { value: apnsToken },
             })
         })
 
-        it('filters by provider (fcm) so only FCM token is returned when user has both FCM and APNS subscriptions', async () => {
+        it('scopes subscriptions by integration_id so FCM and APNS do not cross-match', async () => {
             const distinctId = 'user-123'
             const fcmToken = 'fcm-token-abc123'
             const apnsToken = 'apns-token-xyz789'
 
-            await insertPushSubscription(team.id, distinctId, fcmToken, 'android', true, 'fcm', 'app-123')
-            await insertPushSubscription(team.id, distinctId, apnsToken, 'ios', true, 'apns')
+            await insertPushSubscription(team.id, distinctId, fcmToken, 'android', fcmIntegrationId)
+            await insertPushSubscription(team.id, distinctId, apnsToken, 'ios', apnsIntegrationId)
 
-            const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
+            const fcmResult = await manager.loadPushSubscriptions(hogFunction, {
                 push_subscription: {
                     distinctId,
-                    fcmProjectId: 'app-123',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
-            }
-            const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
-            expect(result).toEqual({
+            })
+            expect(fcmResult).toEqual({
                 push_subscription: { value: fcmToken },
+            })
+
+            manager.clear()
+
+            const apnsResult = await manager.loadPushSubscriptions(hogFunction, {
+                push_subscription: {
+                    distinctId,
+                    integrationId: apnsIntegrationId,
+                    platform: 'ios',
+                },
+            })
+            expect(apnsResult).toEqual({
+                push_subscription: { value: apnsToken },
             })
         })
 
@@ -311,7 +347,7 @@ describe('PushSubscriptionsManagerService', () => {
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
                     distinctId: 'non-existent-user',
-                    fcmProjectId: 'test-project',
+                    integrationId: fcmIntegrationId,
                     platform: 'android',
                 },
             }

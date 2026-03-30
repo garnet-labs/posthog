@@ -9,36 +9,31 @@ import { closeHub, createHub } from '~/utils/db/hub'
 import { createHogExecutionGlobals, createHogFunction, insertIntegration } from '../_tests/fixtures'
 import { compileHog } from '../templates/compiler'
 import { HogFunctionInvocationGlobals, HogFunctionType } from '../types'
-import { HogInputsService, formatHogInput, getFcmProjectIdForPush } from './hog-inputs.service'
+import { HogInputsService, formatHogInput, getIntegrationIdForPush } from './hog-inputs.service'
 
-describe('getFcmProjectIdForPush', () => {
-    it('throws when firebase_account or value is missing', () => {
-        expect(() => getFcmProjectIdForPush({})).toThrow(
-            /firebase_account integration is required for push subscription inputs but was not found/
-        )
-        expect(() => getFcmProjectIdForPush({ firebase_account: { value: null } })).toThrow(
-            /firebase_account integration is required for push subscription inputs but was not found/
-        )
+describe('getIntegrationIdForPush', () => {
+    it('returns null when no integration inputs are present', () => {
+        expect(getIntegrationIdForPush({})).toBeNull()
+        expect(getIntegrationIdForPush({ push_provider: { value: null } })).toBeNull()
     })
 
-    it('throws when project_id is missing in firebase_account', () => {
-        expect(() =>
-            getFcmProjectIdForPush({
-                firebase_account: { value: {} },
-            })
-        ).toThrow(/FCM project ID \(project_id\) not found in firebase_account integration/)
-        expect(() =>
-            getFcmProjectIdForPush({
-                firebase_account: { value: { key_info: {} } },
-            })
-        ).toThrow(/FCM project ID \(project_id\) not found in firebase_account integration/)
+    it('returns null when integration has no $integration_id', () => {
+        expect(getIntegrationIdForPush({ push_provider: { value: { key_id: 'abc' } } })).toBeNull()
     })
 
-    it('returns project_id when firebase_account has key_info.project_id', () => {
-        const result = getFcmProjectIdForPush({
-            firebase_account: { value: { key_info: { project_id: 'my-project' } } },
+    it('returns $integration_id from a resolved integration input', () => {
+        const result = getIntegrationIdForPush({
+            push_provider: { value: { $integration_id: 42, key_id: 'abc' } },
         })
-        expect(result).toBe('my-project')
+        expect(result).toBe(42)
+    })
+
+    it('returns the first $integration_id when multiple integrations are present', () => {
+        const result = getIntegrationIdForPush({
+            firebase_account: { value: { $integration_id: 10 } },
+            apns_account: { value: { $integration_id: 20 } },
+        })
+        expect(result).toBe(10)
     })
 })
 
@@ -279,7 +274,7 @@ describe('Hog Inputs', () => {
             )
         })
 
-        it('throws when push subscription input exists but firebase_account integration is missing', async () => {
+        it('resolves push subscription inputs without a valid integration', async () => {
             const hogFunction = createHogFunction({
                 id: 'hog-function-1',
                 team_id: team.id,
@@ -287,12 +282,12 @@ describe('Hog Inputs', () => {
                 enabled: true,
                 type: 'destination',
                 inputs: {
-                    firebase_account: { value: 999 },
+                    push_provider: { value: 999 },
                     push_subscription: { value: 'user-123' },
                 },
                 inputs_schema: [
                     {
-                        key: 'firebase_account',
+                        key: 'push_provider',
                         type: 'integration',
                     },
                     {
@@ -303,9 +298,8 @@ describe('Hog Inputs', () => {
                 ],
             })
 
-            await expect(hogInputsService.buildInputs(hogFunction, globals)).rejects.toThrow(
-                /firebase_account integration is required for push subscription inputs but was not found/
-            )
+            const inputs = await hogInputsService.buildInputs(hogFunction, globals)
+            expect(inputs.push_subscription).toEqual({ value: null })
         })
     })
 })

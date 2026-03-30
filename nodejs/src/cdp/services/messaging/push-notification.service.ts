@@ -1,3 +1,4 @@
+import { createSign } from 'crypto'
 import { Counter } from 'prom-client'
 
 import { instrumented } from '~/common/tracing/tracing-utils'
@@ -12,7 +13,11 @@ import { CyclotronJobInvocationHogFunction, CyclotronJobInvocationResult, Integr
 import { createAddLogFunction } from '../../utils'
 import { createInvocationResult } from '../../utils/invocation-utils'
 import { IntegrationManagerService } from '../managers/integration-manager.service'
-import { FcmErrorDetail, PushSubscriptionsManagerService } from '../managers/push-subscriptions-manager.service'
+import {
+    ApnsErrorResponse,
+    FcmErrorDetail,
+    PushSubscriptionsManagerService,
+} from '../managers/push-subscriptions-manager.service'
 
 const pushNotificationSentCounter = new Counter({
     name: 'push_notification_sent_total',
@@ -77,7 +82,7 @@ export class PushNotificationService {
             app_source_id: invocation.parentRunId ?? invocation.functionId,
             instance_id: invocation.state.actionId || invocation.id,
             metric_kind: 'other',
-            metric_name: 'sendPushNotification' as const,
+            metric_name: 'push_sent' as const,
             count: 1,
         })
 
@@ -103,8 +108,7 @@ export class PushNotificationService {
         const subscriptions = await this.pushSubscriptionsManager.get({
             teamId,
             distinctId: params.distinctId,
-            fcmProjectId: projectId,
-            provider: 'fcm',
+            integrationId: params.integrationId,
         })
 
         if (subscriptions.length === 0) {
@@ -165,7 +169,12 @@ export class PushNotificationService {
                 const error = errorBody?.error as { details?: FcmErrorDetail[] } | undefined
                 errorDetails = error?.details
             }
-            await this.pushSubscriptionsManager.updateTokenLifecycle(teamId, subscription.token, status, errorDetails)
+            await this.pushSubscriptionsManager.updateFcmTokenLifecycle(
+                teamId,
+                subscription.token,
+                status,
+                errorDetails
+            )
 
             if (!fetchResponse || (status && status >= 400)) {
                 const message = `Push notification to device ${subscription.id} failed with status ${status ?? '(none)'}.${fetchError ? ` Error: ${fetchError.message}.` : ''}`
@@ -184,13 +193,189 @@ export class PushNotificationService {
         addLog('info', `Push notification sent via FCM to ${sentCount}/${subscriptions.length} device(s)`)
     }
 
-    private executeApns(
-        _result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>,
-        _params: CyclotronInvocationQueueParametersSendPushNotificationType,
-        _integration: IntegrationType
+    private async executeApns(
+        result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>,
+        params: CyclotronInvocationQueueParametersSendPushNotificationType,
+        integration: IntegrationType
     ): Promise<void> {
-        // TODO: Implement APNS direct delivery (requires HTTP/2)
-        throw new Error('Direct APNS delivery is not yet supported. Use FCM to deliver to iOS devices.')
+        const addLog = createAddLogFunction(result.logs)
+        const payload = params.payload
+        const teamId = result.invocation.teamId
+
+        const signingKey = integration.sensitive_config.signing_key
+        const keyId = integration.config.key_id
+        const appleTeamId = integration.config.team_id
+        const bundleId = integration.config.bundle_id
+        if (!signingKey || !keyId || !appleTeamId || !bundleId) {
+            throw new Error('APNS integration is missing required fields: signing_key, key_id, team_id, or bundle_id')
+        }
+
+        const subscriptions = await this.pushSubscriptionsManager.get({
+            teamId,
+            distinctId: params.distinctId,
+            integrationId: params.integrationId,
+        })
+
+        if (subscriptions.length === 0) {
+            addLog('warn', `No active APNS device tokens found for distinct_id: ${params.distinctId}`)
+            return
+        }
+
+        const jwt = this.generateApnsJwt(appleTeamId, keyId, signingKey)
+        const templateId = result.invocation.hogFunction.template_id ?? 'unknown'
+        let sentCount = 0
+
+        for (const subscription of subscriptions) {
+            const apnsPayload = this.buildApnsPayload(payload)
+            const url = `https://api.push.apple.com/3/device/${subscription.token}`
+
+            const headers: Record<string, string> = {
+                Authorization: `bearer ${jwt}`,
+                'apns-topic': bundleId,
+                'apns-push-type': 'alert',
+            }
+            if (payload.collapseKey) {
+                headers['apns-collapse-id'] = payload.collapseKey
+            }
+            if (payload.ttlSeconds !== undefined) {
+                headers['apns-expiration'] = String(Math.floor(Date.now() / 1000) + payload.ttlSeconds)
+            }
+            if (payload.apns?.interruptionLevel) {
+                headers['apns-priority'] = payload.apns.interruptionLevel === 'passive' ? '5' : '10'
+            }
+
+            const fetchParams: FetchOptions = {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(apnsPayload),
+            }
+
+            if (params.timeoutMs !== undefined) {
+                fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
+            }
+
+            const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
+                url,
+                fetchParams,
+                templateId,
+            })
+
+            result.invocation.state.timings.push({
+                kind: 'async_function',
+                duration_ms: fetchDuration,
+            })
+
+            let body: unknown = undefined
+            try {
+                body = await fetchResponse?.text()
+                if (typeof body === 'string' && body.length > 0) {
+                    try {
+                        body = parseJSON(body)
+                    } catch (_e) {
+                        // Pass through
+                    }
+                }
+            } catch (e) {
+                addLog('error', `Failed to parse response body: ${e.message}`)
+            }
+
+            const status = fetchResponse?.status
+            const errorResponse: ApnsErrorResponse | undefined =
+                body && typeof body === 'object' ? (body as ApnsErrorResponse) : undefined
+            await this.pushSubscriptionsManager.updateApnsTokenLifecycle(
+                teamId,
+                subscription.token,
+                status,
+                errorResponse
+            )
+
+            if (!fetchResponse || (status && status >= 400)) {
+                const reason = errorResponse?.reason ? ` Reason: ${errorResponse.reason}.` : ''
+                const message = `Push notification to device ${subscription.id} failed with status ${status ?? '(none)'}.${reason}${fetchError ? ` Error: ${fetchError.message}.` : ''}`
+                addLog('error', message)
+                continue
+            }
+
+            sentCount++
+        }
+
+        if (sentCount === 0) {
+            throw new Error(`Push notification failed for all ${subscriptions.length} device(s)`)
+        }
+
+        pushNotificationSentCounter.labels({ platform: 'apns' }).inc(sentCount)
+        addLog('info', `Push notification sent via APNS to ${sentCount}/${subscriptions.length} device(s)`)
+    }
+
+    private generateApnsJwt(teamId: string, keyId: string, signingKey: string): string {
+        const header = Buffer.from(JSON.stringify({ alg: 'ES256', kid: keyId })).toString('base64url')
+        const now = Math.floor(Date.now() / 1000)
+        const claims = Buffer.from(JSON.stringify({ iss: teamId, iat: now })).toString('base64url')
+        const signingInput = `${header}.${claims}`
+        const sign = createSign('SHA256')
+        sign.update(signingInput)
+        const signature = sign.sign(signingKey, 'base64url')
+        return `${signingInput}.${signature}`
+    }
+
+    private buildApnsPayload(payload: PushNotificationPayloadType): Record<string, unknown> {
+        const alert: Record<string, unknown> = { title: payload.title }
+        if (payload.body) {
+            alert.body = payload.body
+        }
+        if (payload.apns?.subtitle) {
+            alert.subtitle = payload.apns.subtitle
+        }
+        if (payload.image) {
+            // Image delivery on APNS requires a notification service extension on the client.
+            // We set mutable-content and pass the URL in a custom key for the extension to download.
+            alert['launch-image'] = payload.image
+        }
+
+        const aps: Record<string, unknown> = { alert }
+
+        if (payload.apns) {
+            if (payload.apns.sound) {
+                aps.sound = payload.apns.sound
+            }
+            if (payload.apns.badge !== undefined) {
+                aps.badge = payload.apns.badge
+            }
+            if (payload.apns.category) {
+                aps.category = payload.apns.category
+            }
+            if (payload.apns.threadId) {
+                aps['thread-id'] = payload.apns.threadId
+            }
+            if (payload.apns.interruptionLevel) {
+                aps['interruption-level'] = payload.apns.interruptionLevel
+            }
+            if (payload.apns.relevanceScore !== undefined) {
+                aps['relevance-score'] = payload.apns.relevanceScore
+            }
+            if (payload.apns.contentAvailable) {
+                aps['content-available'] = 1
+            }
+            if (payload.apns.mutableContent || payload.image) {
+                aps['mutable-content'] = 1
+            }
+            if (payload.apns.targetContentId) {
+                aps['target-content-id'] = payload.apns.targetContentId
+            }
+        } else if (payload.image) {
+            aps['mutable-content'] = 1
+        }
+
+        const result: Record<string, unknown> = { aps }
+
+        if (payload.data) {
+            Object.assign(result, payload.data)
+        }
+        if (payload.image) {
+            result['image_url'] = payload.image
+        }
+
+        return result
     }
 
     private buildFcmMessage(token: string, payload: PushNotificationPayloadType): Record<string, unknown> {

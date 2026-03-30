@@ -65,7 +65,8 @@ describe('PushNotificationService', () => {
         pushSubscriptionsManager = {
             updateLastSuccessfullyUsedAtByToken: jest.fn().mockResolvedValue(undefined),
             deactivateByTokens: jest.fn().mockResolvedValue(undefined),
-            updateTokenLifecycle: jest.fn().mockResolvedValue(undefined),
+            updateFcmTokenLifecycle: jest.fn().mockResolvedValue(undefined),
+            updateApnsTokenLifecycle: jest.fn().mockResolvedValue(undefined),
         } as any
 
         fetchUtils = {
@@ -152,10 +153,10 @@ describe('PushNotificationService', () => {
             expect(result.logs.map((log) => log.message)).toContain(
                 'FCM token not found in inputs, skipping FCM response handling'
             )
-            expect(pushSubscriptionsManager.updateTokenLifecycle).not.toHaveBeenCalled()
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).not.toHaveBeenCalled()
         })
 
-        it('handles successful response (200) and calls updateTokenLifecycle', async () => {
+        it('handles successful response (200) and calls updateFcmTokenLifecycle', async () => {
             const token = 'test-fcm-token-123'
             const invocation = createSendPushNotificationInvocation(token)
             mockTrackedFetch.mockResolvedValue({
@@ -170,10 +171,10 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateTokenLifecycle).toHaveBeenCalledWith(1, token, 200, undefined)
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 200, undefined)
         })
 
-        it('handles 404 response and calls updateTokenLifecycle (deactivate)', async () => {
+        it('handles 404 response and calls updateFcmTokenLifecycle (deactivate)', async () => {
             const token = 'test-fcm-token-123'
             const invocation = createSendPushNotificationInvocation(token)
             mockTrackedFetch.mockResolvedValue({
@@ -188,10 +189,10 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateTokenLifecycle).toHaveBeenCalledWith(1, token, 404, undefined)
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 404, undefined)
         })
 
-        it('handles 400 with INVALID_ARGUMENT and passes error details to updateTokenLifecycle', async () => {
+        it('handles 400 with INVALID_ARGUMENT and passes error details to updateFcmTokenLifecycle', async () => {
             const token = 'test-fcm-token-123'
             const responseBody = {
                 error: {
@@ -217,7 +218,7 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateTokenLifecycle).toHaveBeenCalledWith(
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(
                 1,
                 token,
                 400,
@@ -225,7 +226,7 @@ describe('PushNotificationService', () => {
             )
         })
 
-        it('handles 400 with empty error details and calls updateTokenLifecycle', async () => {
+        it('handles 400 with empty error details and calls updateFcmTokenLifecycle', async () => {
             const token = 'test-fcm-token-123'
             const responseBody = {
                 error: {
@@ -246,10 +247,10 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateTokenLifecycle).toHaveBeenCalledWith(1, token, 400, [])
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 400, [])
         })
 
-        it('handles other status codes and still calls updateTokenLifecycle', async () => {
+        it('handles other status codes and still calls updateFcmTokenLifecycle', async () => {
             const token = 'test-fcm-token-123'
             const invocation = createSendPushNotificationInvocation(token)
             mockTrackedFetch.mockResolvedValue({
@@ -264,7 +265,7 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateTokenLifecycle).toHaveBeenCalledWith(1, token, 500, undefined)
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 500, undefined)
         })
 
         it('schedules retry when response is retriable', async () => {
