@@ -481,32 +481,12 @@ export class MCP extends McpAgent<Env> {
             const projectName = user.team?.name || 'Unknown'
             const timezone = user.team?.timezone || 'UTC'
             const orgName = user.organization?.name || 'Unknown'
-            const now = new Date().toLocaleString('sv-SE', { timeZone: timezone }).replace('T', ' ')
 
-            const lines = [
+            return [
                 `You are currently in project "${projectName}" (organization: "${orgName}").`,
                 `The user's name is ${fullName} (${user.email}).`,
-                `Project timezone: ${timezone}. Current time: ${now}.`,
-            ]
-
-            const usage = user.organization?.usage
-            if (usage) {
-                type UsageResource = { usage?: number | null; limit?: number | null; todays_usage?: number | null }
-                const volumeLines: string[] = []
-                for (const [key, data] of Object.entries(usage) as [string, UsageResource][]) {
-                    if (data?.usage != null) {
-                        const limitStr = data.limit != null ? `, limit: ${data.limit.toLocaleString()}` : ''
-                        const todayStr =
-                            data.todays_usage != null ? `, today: ${data.todays_usage.toLocaleString()}` : ''
-                        volumeLines.push(`  - ${key}: ${data.usage.toLocaleString()}${limitStr}${todayStr}`)
-                    }
-                }
-                if (volumeLines.length > 0) {
-                    lines.push(`\nData volume (current billing period):\n${volumeLines.join('\n')}`)
-                }
-            }
-
-            return lines.join('\n')
+                `Project timezone: ${timezone}.`,
+            ].join('\n')
         } catch {
             return undefined
         }

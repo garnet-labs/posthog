@@ -77,15 +77,13 @@ Prefer query wrappers when the user's question maps to a supported insight type.
 
 #### Available insight query tools
 
-| Tool | Use case | Key constraint |
-|------|----------|----------------|
-| `query-trends` | Time series, aggregations, formulas, comparisons | Default: last 30d, supports multiple series |
-| `query-funnel` | Conversion rates, drop-off analysis, time to convert | Requires at least 2 steps |
-| `query-retention` | User return patterns over time | Requires target (start) and returning events |
-| `query-stickiness` | Engagement frequency (how many days users do X) | No breakdowns supported |
-| `query-paths` | User navigation flows and sequences | Specify includeEventTypes |
-| `query-lifecycle` | New, returning, resurrecting, dormant user composition | Single event only, no math aggregation |
-| `query-traces-list` | LLM/AI trace listing and inspection | For AI observability data |
+`query-trends` | Time series, aggregations, formulas, comparisons | Default: last 30d, supports multiple series
+`query-funnel` | Conversion rates, drop-off analysis, time to convert | Requires at least 2 steps
+`query-retention` | User return patterns over time | Requires target (start) and returning events
+`query-stickiness` | Engagement frequency (how many days users do X) | No breakdowns supported
+`query-paths` | User navigation flows and sequences | Specify includeEventTypes
+`query-lifecycle` | New, returning, resurrecting, dormant user composition | Single event only, no math aggregation
+`query-traces-list` | LLM/AI trace listing and inspection | For AI observability data
 
 #### Choosing the right query tool
 
@@ -117,29 +115,6 @@ If the required events or properties do not exist, inform the user immediately i
 5. Optionally save as an insight with `insight-create-from-query` or add to a dashboard.
 
 For complex investigations, combine multiple query types. For example, use `query-trends` to identify when a metric changed, then `query-funnel` to check if conversion was affected, then `query-trends` with breakdowns to isolate the segment.
-
-### Data volume discovery
-
-The project context above includes data volume for the current billing period (events, recordings, etc.) from the organization's usage summary. Use this to calibrate time ranges and understand data density without running extra queries.
-
-For more granular breakdowns (e.g., daily volume or per-event volume), use SQL:
-
-```sql
--- Total events in the last 24 hours
-SELECT count() FROM events WHERE timestamp >= now() - INTERVAL 1 DAY
-
--- Event volume by day for the last 7 days
-SELECT toStartOfDay(timestamp) AS day, count() AS event_count
-FROM events
-WHERE timestamp >= now() - INTERVAL 7 DAY
-GROUP BY day ORDER BY day DESC
-
--- Top events by volume
-SELECT event, count() AS cnt
-FROM events
-WHERE timestamp >= now() - INTERVAL 7 DAY
-GROUP BY event ORDER BY cnt DESC LIMIT 20
-```
 
 ### URL patterns
 

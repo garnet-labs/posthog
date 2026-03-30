@@ -18,7 +18,6 @@ export interface ApiUser {
     organization: {
         id: string
         name: string
-        usage?: Record<string, { usage?: number | null; limit?: number | null; todays_usage?: number | null }> | null
     }
 }
 
