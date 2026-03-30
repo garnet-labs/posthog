@@ -60,7 +60,15 @@ def _compute_volume_tier(team: Team) -> TaxonomyVolumeTier:
 def get_taxonomy_volume_tier(team: Team) -> TaxonomyVolumeTier:
     """
     Determine the taxonomy volume tier for a team, cached in Redis for 1 hour.
+
+    Gated behind the phai-dynamic-taxonomy-scan-period feature flag.
+    When disabled, returns MEDIUM (30-day scan, current default behavior).
     """
+    from ee.hogai.utils.feature_flags import is_dynamic_scan_period_enabled
+
+    if not is_dynamic_scan_period_enabled(team):
+        return TaxonomyVolumeTier.MEDIUM
+
     cache_key = f"{_CACHE_KEY_PREFIX}:{team.pk}"
     cached = cache.get(cache_key)
     if cached is not None:

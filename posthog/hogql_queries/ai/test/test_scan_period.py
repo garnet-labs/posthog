@@ -1,4 +1,5 @@
 from posthog.test.base import BaseTest
+from unittest.mock import patch
 
 from django.core.cache import cache
 
@@ -17,7 +18,13 @@ from posthog.hogql_queries.ai.scan_period import (
 from products.event_definitions.backend.models.event_definition import EventDefinition
 from products.event_definitions.backend.models.property_definition import PropertyDefinition
 
+_FEATURE_FLAG_PATCH = patch(
+    "posthog.hogql_queries.ai.scan_period.is_dynamic_scan_period_enabled",
+    return_value=True,
+)
 
+
+@_FEATURE_FLAG_PATCH
 class TestTaxonomyVolumeTier(BaseTest):
     def setUp(self):
         super().setUp()
@@ -89,6 +96,7 @@ class TestTaxonomyVolumeTier(BaseTest):
         self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
 
 
+@_FEATURE_FLAG_PATCH
 class TestVolumeTierCaching(BaseTest):
     def setUp(self):
         super().setUp()
@@ -123,6 +131,7 @@ class TestVolumeTierCaching(BaseTest):
         self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.HIGH)
 
 
+@_FEATURE_FLAG_PATCH
 class TestGetScanPeriodDays(BaseTest):
     def setUp(self):
         super().setUp()
@@ -149,6 +158,7 @@ class TestGetScanPeriodDays(BaseTest):
             self.assertIn(tier, SCAN_PERIOD_DAYS)
 
 
+@_FEATURE_FLAG_PATCH
 class TestShouldUsePostgresForEvents(BaseTest):
     def setUp(self):
         super().setUp()
@@ -181,3 +191,53 @@ class TestShouldUsePostgresForEvents(BaseTest):
         for i in range(EVENT_CARDINALITY_THRESHOLD + 1):
             EventDefinition.objects.create(team=self.team, name=f"event_{i}")
         self.assertFalse(should_use_postgres_for_events(self.team))
+
+
+class TestFeatureFlagGating(BaseTest):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    def _set_org_usage(self, event_usage: int):
+        self.organization.usage = {"events": {"usage": event_usage, "limit": 1_000_000, "todays_usage": 0}}
+        self.organization.save(update_fields=["usage"])
+
+    @patch(
+        "posthog.hogql_queries.ai.scan_period.is_dynamic_scan_period_enabled",
+        return_value=False,
+    )
+    def test_flag_disabled_returns_medium_regardless_of_volume(self, _mock):
+        self._set_org_usage(event_usage=50_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+        self._set_org_usage(event_usage=100_000_000)
+        cache.clear()
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.MEDIUM)
+
+    @patch(
+        "posthog.hogql_queries.ai.scan_period.is_dynamic_scan_period_enabled",
+        return_value=False,
+    )
+    def test_flag_disabled_uses_30_day_scan(self, _mock):
+        self._set_org_usage(event_usage=100_000_000)
+        self.assertEqual(get_scan_period_days(self.team), 30)
+
+    @patch(
+        "posthog.hogql_queries.ai.scan_period.is_dynamic_scan_period_enabled",
+        return_value=False,
+    )
+    def test_flag_disabled_never_uses_postgres(self, _mock):
+        self._set_org_usage(event_usage=50_000)
+        self.assertFalse(should_use_postgres_for_events(self.team))
+
+    @patch(
+        "posthog.hogql_queries.ai.scan_period.is_dynamic_scan_period_enabled",
+        return_value=True,
+    )
+    def test_flag_enabled_respects_volume_tier(self, _mock):
+        self._set_org_usage(event_usage=50_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.LOW)
+
+        cache.clear()
+        self._set_org_usage(event_usage=100_000_000)
+        self.assertEqual(get_taxonomy_volume_tier(self.team), TaxonomyVolumeTier.EXTRA_HIGH)
