@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "54ef84d4a7b0",
+  "strategy": "manual-commit",
+  "branch": "signals/reviewer-ui-and-tasks-fixes",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/54/ef84d4a7b0/0/metadata.json",
+      "transcript": "/54/ef84d4a7b0/0/full.jsonl",
+      "content_hash": "/54/ef84d4a7b0/0/content_hash.txt",
+      "prompt": "/54/ef84d4a7b0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 105,
+    "cache_creation_tokens": 267872,
+    "cache_read_tokens": 6318930,
+    "output_tokens": 23804,
+    "api_call_count": 91
+  }
+}
