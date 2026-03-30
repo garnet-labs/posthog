@@ -1503,7 +1503,6 @@ class ApplePushIntegration:
         if not all([signing_key, key_id, team_id_apple, bundle_id]):
             raise ValidationError("All APNS fields are required: signing_key, key_id, team_id_apple, bundle_id")
 
-
         integration, created = Integration.objects.update_or_create(
             team_id=team_id,
             kind="apns",
@@ -1523,7 +1522,6 @@ class ApplePushIntegration:
         if created and created_by is not None:
             integration.created_by = created_by
             integration.save(update_fields=["created_by"])
-
 
         if integration.errors:
             integration.errors = ""
