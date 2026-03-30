@@ -2,7 +2,6 @@ from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
-from posthog.hogql_queries.ai.event_taxonomy_query_runner import AI_LARGE_PROPERTIES_BY_EVENT
 from posthog.models import Team
 
 from ee.hogai.chat_agent.query_planner.toolkit import TaxonomyAgentToolkit
@@ -79,11 +78,6 @@ class ReadTaxonomyToolArgs(BaseModel):
     query: ReadTaxonomyQuery = Field(..., discriminator="kind")
 
 
-def _is_excluded_ai_property(event_name: str, property_name: str) -> bool:
-    """Check if a property is excluded from scanning for the given AI event."""
-    return property_name in AI_LARGE_PROPERTIES_BY_EVENT.get(event_name, ())
-
-
 def execute_taxonomy_query(query: ReadTaxonomyQuery, toolkit: TaxonomyAgentToolkit, team: Team) -> str:
     """
     Execute a taxonomy query and return the result.
@@ -96,11 +90,6 @@ def execute_taxonomy_query(query: ReadTaxonomyQuery, toolkit: TaxonomyAgentToolk
         case ReadEventProperties():
             return toolkit.retrieve_event_or_action_properties(query.event_name)
         case ReadEventSamplePropertyValues():
-            if _is_excluded_ai_property(query.event_name, query.property_name):
-                return (
-                    f"Sample values for {query.property_name} are not available because values are typically too large "
-                    f"to display. This property contains raw AI model input/output data."
-                )
             return toolkit.retrieve_event_or_action_property_values(query.event_name, query.property_name)
         case ReadActionProperties():
             return toolkit.retrieve_event_or_action_properties(query.action_id)
