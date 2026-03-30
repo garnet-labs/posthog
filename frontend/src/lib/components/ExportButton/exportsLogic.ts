@@ -7,6 +7,7 @@ import { TriggerExportProps, downloadBlob, downloadExportedAsset } from 'lib/com
 import { dayjs } from 'lib/dayjs'
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
 import { delay } from 'lib/utils'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { newInternalTab } from 'lib/utils/newInternalTab'
 import { SessionRecordingPlayerMode } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 import { urls } from 'scenes/urls'
@@ -82,6 +83,12 @@ export const exportsLogic = kea<exportsLogicType>([
 
     listeners(({ actions }) => ({
         startExport: async ({ exportData }) => {
+            eventUsageLogic.actions.reportInsightExportStarted({
+                insightId: exportData.insight,
+                exportFormat: exportData.export_format,
+                source: exportData.dashboard ? 'dashboard' : 'insight_page',
+            })
+
             if (isLocalExport(exportData.export_context)) {
                 try {
                     const blob = new Blob([exportData.export_context.localData], {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { IconPlusSmall, IconTrash } from '@posthog/icons'
 import { LemonButton, LemonInput } from '@posthog/lemon-ui'
 
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
 import { TrendsFormulaNode } from '~/queries/schema/schema-general'
@@ -53,6 +54,12 @@ export function TrendsFormula({ insightProps }: EditorFilterProps): JSX.Element 
         if (filledValues.length === 0) {
             return
         }
+
+        const totalFormulaLength = filledValues.reduce((acc, v) => acc + v.formula.length, 0)
+        eventUsageLogic.actions.reportFormulaApplied({
+            formulaLength: totalFormulaLength,
+            seriesCount: filledValues.length,
+        })
 
         // Always use formulaNodes for consistency
         updateInsightFilter({

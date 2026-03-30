@@ -96,6 +96,12 @@ export const sharingLogic = kea<sharingLogicType>([
             if (props.dashboardId) {
                 eventUsageLogic.actions.reportDashboardShareToggled(enabled)
             }
+            if (props.insightShortId) {
+                eventUsageLogic.actions.reportInsightSharedViaLink({
+                    insightShortId: props.insightShortId,
+                    shareMethod: 'toggle_sharing',
+                })
+            }
         },
         setIsEnabledSuccess: () => {
             if (props.dashboardId) {

@@ -4,6 +4,7 @@ import { IconCalendar } from '@posthog/icons'
 
 import { DateFilter } from 'lib/components/DateFilter/DateFilter'
 import { dateMapping } from 'lib/utils'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
@@ -28,6 +29,12 @@ export function InsightDateFilter({ disabled }: InsightDateFilterProps): JSX.Ele
             disabled={disabled}
             disabledReason={editingDisabledReason}
             onChange={(date_from, date_to, explicit_date) => {
+                const isRelative = typeof date_from === 'string' && date_from.startsWith('-')
+                eventUsageLogic.actions.reportInsightDateRangeChanged({
+                    dateFrom: date_from,
+                    dateTo: date_to,
+                    isRelative,
+                })
                 // Prevent debouncing when toggling the exact time range toggle as it glitches the animation
                 const ignoreDebounce = dateRange?.explicitDate !== explicit_date
                 updateDateRange({ date_from, date_to, explicitDate: explicit_date }, ignoreDebounce)

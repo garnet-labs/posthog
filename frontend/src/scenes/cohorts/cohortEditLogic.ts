@@ -362,6 +362,11 @@ export const cohortEditLogic = kea<cohortEditLogicType>([
                             cohort = await api.cohorts.create(cohortFormData as Partial<CohortType>)
                             cohortsModel.actions.cohortCreated(cohort)
                             globalSetupLogic.findMounted()?.actions.markTaskAsCompleted(SetupTaskId.SetUpCohorts)
+                            eventUsageLogic.actions.reportCohortCreatedFrontend(
+                                cohort.is_static ? 'static' : 'dynamic',
+                                cohort.filters?.properties?.values?.length ?? 0,
+                                'cohorts_page'
+                            )
                         }
                     } catch (error: any) {
                         breakpoint()

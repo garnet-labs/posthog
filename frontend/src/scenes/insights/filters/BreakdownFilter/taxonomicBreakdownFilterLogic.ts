@@ -11,6 +11,7 @@ import {
     TaxonomicFilterValue,
 } from 'lib/components/TaxonomicFilter/types'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 import { keyForInsightLogicProps } from 'scenes/insights/sharedUtils'
 
@@ -231,6 +232,13 @@ export const taxonomicBreakdownFilterLogic = kea<taxonomicBreakdownFilterLogicTy
     listeners(({ props, values, actions }) => ({
         addBreakdown: ({ breakdown, taxonomicGroup }) => {
             const breakdownType = taxonomicFilterTypeToPropertyFilterType(taxonomicGroup.type) as BreakdownType
+            eventUsageLogic.actions.reportBreakdownApplied({
+                breakdownType: breakdownType || 'event',
+                queryKind:
+                    props.insightProps.cachedInsight?.query?.source?.kind ??
+                    props.insightProps.cachedInsight?.query?.kind,
+                isMultiple: values.isMultipleBreakdownsEnabled && !!values.breakdownFilter.breakdowns?.length,
+            })
             const propertyDefinitionType = propertyFilterTypeToPropertyDefinitionType(breakdownType)
             const isHistogramable =
                 !!values.getPropertyDefinition(breakdown, propertyDefinitionType)?.is_numerical && props.isTrends

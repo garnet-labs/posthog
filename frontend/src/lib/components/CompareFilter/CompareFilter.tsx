@@ -6,6 +6,7 @@ import { LemonSelect } from '@posthog/lemon-ui'
 import { RollingDateRangeFilter } from 'lib/components/DateFilter/RollingDateRangeFilter'
 import { useWindowSize } from 'lib/hooks/useWindowSize'
 import { dateFromToText } from 'lib/utils'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 
 import { CompareFilter as CompareFilterType } from '~/queries/schema/schema-general'
 
@@ -103,8 +104,13 @@ export function CompareFilter({
             onChange={(value) => {
                 if (value === 'none') {
                     updateCompareFilter({ compare: false, compare_to: undefined })
+                    eventUsageLogic.actions.reportInsightComparisonToggled({ enabled: false })
                 } else if (value === 'previous') {
                     updateCompareFilter({ compare: true, compare_to: undefined })
+                    eventUsageLogic.actions.reportInsightComparisonToggled({
+                        enabled: true,
+                        compareTo: 'previous_period',
+                    })
                 }
             }}
             data-attr="compare-filter"

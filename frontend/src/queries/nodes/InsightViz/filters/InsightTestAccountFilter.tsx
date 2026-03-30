@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 
 import { TestAccountFilterSwitch } from 'lib/components/TestAccountFiltersSwitch'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { filterTestAccountsDefaultsLogic } from 'scenes/settings/environment/filterTestAccountDefaultsLogic'
 import { teamLogic } from 'scenes/teamLogic'
 
@@ -24,6 +25,10 @@ export function InsightTestAccountFilter({
         <TestAccountFilterSwitch
             checked={hasFilters ? !!query.filterTestAccounts : false}
             onChange={(checked: boolean) => {
+                eventUsageLogic.actions.reportInsightTestAccountFilterToggled({
+                    enabled: checked,
+                    queryKind: query.kind,
+                })
                 setQuery({ ...query, filterTestAccounts: checked })
                 setLocalDefault(checked)
             }}

@@ -243,6 +243,19 @@ export const insightLogic: LogicWrapper<insightLogicType> = kea<insightLogicType
                         beforeUpdates[key] = values.savedInsight[key as keyof QueryBasedInsightModel]
                     }
 
+                    if ('description' in metadataUpdate) {
+                        const previousDescription = values.savedInsight.description ?? ''
+                        const newDescription = metadataUpdate.description ?? ''
+                        eventUsageLogic.actions.reportInsightDescriptionEdited({
+                            insightId: values.insight.id,
+                            insightShortId: values.insight.short_id,
+                            queryKind: values.insight.query?.source?.kind ?? values.insight.query?.kind,
+                            previousLength: previousDescription.length,
+                            newLength: newDescription.length,
+                            hasDescription: newDescription.length > 0,
+                        })
+                    }
+
                     const response = await insightsApi.update(values.insight.id as number, metadataUpdate)
                     await breakpoint(300)
 
@@ -734,6 +747,12 @@ export const insightLogic: LogicWrapper<insightLogicType> = kea<insightLogicType
                 }
             }
             const newInsight = await insightsApi.duplicate(insightToDuplicate)
+            eventUsageLogic.actions.reportInsightDuplicated({
+                sourceInsightId: insightToDuplicate.id,
+                sourceInsightShortId: insightToDuplicate.short_id,
+                queryKind: insightToDuplicate.query?.source?.kind ?? insightToDuplicate.query?.kind,
+                newInsightShortId: newInsight.short_id,
+            })
             for (const logic of savedInsightsLogic.findAllMounted()) {
                 logic.actions.addInsight(newInsight)
             }

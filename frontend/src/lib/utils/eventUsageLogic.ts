@@ -34,7 +34,10 @@ import {
     isFunnelsQuery,
     isInsightQueryNode,
     isInsightVizNode,
+    isLifecycleQuery,
     isNodeWithSource,
+    isPathsQuery,
+    isRetentionQuery,
     isStickinessQuery,
     isTrendsQuery,
 } from '~/queries/utils'
@@ -239,6 +242,31 @@ function sanitizeQuery(query: Node | null): Record<string, string | number | boo
         // funnels
         payload.funnel_viz_type = isFunnelsQuery(querySource) ? querySource.funnelsFilter?.funnelVizType : undefined
         payload.funnel_order_type = isFunnelsQuery(querySource) ? querySource.funnelsFilter?.funnelOrderType : undefined
+
+        // retention
+        if (isRetentionQuery(querySource)) {
+            payload.retention_type = querySource.retentionFilter?.retentionType
+            payload.retention_period = querySource.retentionFilter?.period
+            payload.total_intervals = querySource.retentionFilter?.totalIntervals
+        }
+
+        // paths
+        if (isPathsQuery(querySource)) {
+            payload.path_type = querySource.pathsFilter?.includeEventTypes?.join(',')
+            payload.step_limit = querySource.pathsFilter?.stepLimit
+            payload.has_exclusions = (querySource.pathsFilter?.excludeEvents?.length ?? 0) > 0
+            payload.edge_limit = querySource.pathsFilter?.edgeLimit
+        }
+
+        // lifecycle
+        if (isLifecycleQuery(querySource)) {
+            payload.toggled_lifecycles = querySource.lifecycleFilter?.toggledLifecycles?.join(',')
+        }
+
+        // stickiness
+        if (isStickinessQuery(querySource)) {
+            payload.has_stickiness_criteria = !!querySource.stickinessFilter?.stickinessCriteria
+        }
     }
 
     return objectClean(payload)
@@ -256,6 +284,59 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
             params,
         }),
         reportPersonsModalSearched: (params: { teamId?: number | null; actorType?: string }) => ({ params }),
+        // person list and tabs
+        reportPersonListViewed: true,
+        reportPersonSearchExecuted: (searchLength: number, filterCount: number) => ({ searchLength, filterCount }),
+        reportPersonActivityTabViewed: (tabName: string) => ({ tabName }),
+        // cohort created (frontend)
+        reportCohortCreatedFrontend: (
+            cohortType: 'static' | 'dynamic',
+            filterGroupCount: number,
+            source: 'cohorts_page' | 'persons_page' | 'insight'
+        ) => ({ cohortType, filterGroupCount, source }),
+        // insight lifecycle events
+        reportInsightExportStarted: (props: {
+            insightId?: number
+            insightShortId?: InsightShortId
+            queryKind?: string
+            exportFormat: string
+            source: 'insight_page' | 'dashboard'
+        }) => props,
+        reportInsightDuplicated: (props: {
+            sourceInsightId?: number
+            sourceInsightShortId?: InsightShortId
+            queryKind?: string
+            newInsightShortId?: InsightShortId
+        }) => props,
+        reportInsightDescriptionEdited: (props: {
+            insightId?: number
+            insightShortId?: InsightShortId
+            queryKind?: string
+            previousLength: number
+            newLength: number
+            hasDescription: boolean
+        }) => props,
+        reportInsightSharedViaLink: (props: {
+            insightShortId?: InsightShortId
+            queryKind?: string
+            shareMethod: 'toggle_sharing' | 'copy_link'
+        }) => props,
+        // general UX events
+        reportBreakdownApplied: (props: { breakdownType: string; queryKind?: string; isMultiple: boolean }) => props,
+        reportInsightComparisonToggled: (props: { enabled: boolean; compareTo?: string; queryKind?: string }) => props,
+        reportFormulaApplied: (props: { formulaLength: number; seriesCount: number; queryKind?: string }) => props,
+        reportSamplingFactorChanged: (props: {
+            oldFactor?: number | null
+            newFactor?: number | null
+            queryKind?: string
+        }) => props,
+        reportInsightDateRangeChanged: (props: {
+            dateFrom?: string | null
+            dateTo?: string | null
+            isRelative: boolean
+            queryKind?: string
+        }) => props,
+        reportInsightTestAccountFilterToggled: (props: { enabled: boolean; queryKind?: string }) => props,
         // timing
         reportTimeToSeeData: (payload: TimeToSeeDataPayload) => ({ payload }),
         reportGroupTypeDetailDashboardCreated: () => ({}),
@@ -2372,6 +2453,113 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
                 item_type: itemType,
                 item_name: itemName,
                 is_ai_first: isAIFirst,
+            })
+        },
+        // person list and tabs
+        reportPersonListViewed: () => {
+            posthog.capture('person list viewed')
+        },
+        reportPersonSearchExecuted: async ({ searchLength, filterCount }, breakpoint) => {
+            await breakpoint(500)
+            posthog.capture('person search executed', {
+                search_length: searchLength,
+                filter_count: filterCount,
+            })
+        },
+        reportPersonActivityTabViewed: ({ tabName }) => {
+            posthog.capture('person activity tab viewed', { tab_name: tabName })
+        },
+        // cohort created (frontend)
+        reportCohortCreatedFrontend: ({ cohortType, filterGroupCount, source }) => {
+            posthog.capture('cohort created frontend', {
+                cohort_type: cohortType,
+                filter_group_count: filterGroupCount,
+                source,
+            })
+        },
+        // insight lifecycle events
+        reportInsightExportStarted: ({ insightId, insightShortId, queryKind, exportFormat, source }) => {
+            posthog.capture('insight export started', {
+                insight_id: insightId,
+                insight_short_id: insightShortId,
+                query_kind: queryKind,
+                export_format: exportFormat,
+                source,
+            })
+        },
+        reportInsightDuplicated: ({ sourceInsightId, sourceInsightShortId, queryKind, newInsightShortId }) => {
+            posthog.capture('insight duplicated', {
+                source_insight_id: sourceInsightId,
+                source_insight_short_id: sourceInsightShortId,
+                query_kind: queryKind,
+                new_insight_short_id: newInsightShortId,
+            })
+        },
+        reportInsightDescriptionEdited: ({
+            insightId,
+            insightShortId,
+            queryKind,
+            previousLength,
+            newLength,
+            hasDescription,
+        }) => {
+            posthog.capture('insight description edited', {
+                insight_id: insightId,
+                insight_short_id: insightShortId,
+                query_kind: queryKind,
+                previous_length: previousLength,
+                new_length: newLength,
+                has_description: hasDescription,
+            })
+        },
+        reportInsightSharedViaLink: ({ insightShortId, queryKind, shareMethod }) => {
+            posthog.capture('insight shared via link', {
+                insight_short_id: insightShortId,
+                query_kind: queryKind,
+                share_method: shareMethod,
+            })
+        },
+        // general UX events
+        reportBreakdownApplied: ({ breakdownType, queryKind, isMultiple }) => {
+            posthog.capture('breakdown applied', {
+                breakdown_type: breakdownType,
+                query_kind: queryKind,
+                is_multiple: isMultiple,
+            })
+        },
+        reportInsightComparisonToggled: ({ enabled, compareTo, queryKind }) => {
+            posthog.capture('insight comparison toggled', {
+                enabled,
+                compare_to: compareTo,
+                query_kind: queryKind,
+            })
+        },
+        reportFormulaApplied: ({ formulaLength, seriesCount, queryKind }) => {
+            posthog.capture('formula applied', {
+                formula_length: formulaLength,
+                series_count: seriesCount,
+                query_kind: queryKind,
+            })
+        },
+        reportSamplingFactorChanged: ({ oldFactor, newFactor, queryKind }) => {
+            posthog.capture('sampling factor changed', {
+                old_factor: oldFactor,
+                new_factor: newFactor,
+                query_kind: queryKind,
+            })
+        },
+        reportInsightDateRangeChanged: ({ dateFrom, dateTo, isRelative, queryKind }) => {
+            posthog.capture('insight date range changed', {
+                date_from: dateFrom,
+                date_to: dateTo,
+                is_relative: isRelative,
+                query_kind: queryKind,
+            })
+        },
+        reportInsightTestAccountFilterToggled: ({ enabled, queryKind }) => {
+            posthog.capture('insight test account filter toggled', {
+                enabled,
+                query_kind: queryKind,
             })
         },
     })),
