@@ -83,6 +83,14 @@ Press `/` to enter search mode, type a query, then press `enter` to keep highlig
 Use `↵` and `⇧↵` to jump to the next/previous match.
 Press `esc` to clear the active search.
 
+### Interactive input mode
+
+When a process outputs a prompt without a trailing newline (e.g. Python's `input()` or a shell prompt), phrocs automatically detects it and captures keystrokes. Type your response and press `enter` to send the input to the process.
+
+- Navigation keys (`j`/`k`, `↑`/`↓`, scroll, `tab`, etc.) continue to work normally
+- Your typed input appears inline after the process output with a cursor
+- Press `backspace` to delete characters
+
 ### Info panel
 
 Press `i` to replace the output pane with detailed info about the selected process:
