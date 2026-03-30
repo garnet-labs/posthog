@@ -1,0 +1,17 @@
+@posthog/hogql/database/schema/system.py I'd like to find a way for these postgres tables to have a join with other tables
+
+so that I can have endpoints_endpoint table be the way we guard endpoints_endpointversion with team_id. 
+
+the endpointversion table does not have the team_id field, but it has the endpoint_id as FK that we can get the team_id from. i'd like to avoid having to denormalize the table.
+
+---
+
+okay - i think that makes sense to an extent. 
+
+let's do something similar, but if possible not create a subclass, but branch off in postgresTable?
+
+and we just want to set this mechanism up in this first PR - we'll deal with the endpoints-specific things in a subsequent PR
+
+---
+
+run them regularly - i started the dev server
