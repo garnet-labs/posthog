@@ -1,4 +1,5 @@
 import { actions, afterMount, connect, kea, listeners, path, props, reducers, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
 import { router } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
 
@@ -174,6 +175,7 @@ export const maxLogic = kea<maxLogicType>([
             uiContext,
         }), // used by maxThreadLogic to start a conversation
         scrollThreadToBottom: (behavior?: 'instant' | 'smooth') => ({ behavior }),
+        setCurrentConversation: (conversation: ConversationDetail) => ({ conversation }),
         openConversation: (conversationId: string) => ({ conversationId }),
         setConversationId: (conversationId: string) => ({ conversationId }),
         startNewConversation: true,
@@ -264,6 +266,19 @@ export const maxLogic = kea<maxLogicType>([
         autoRun: [false as boolean, { setAutoRun: (_, { autoRun }) => autoRun, startNewConversation: () => false }],
     }),
 
+    loaders({
+        currentConversation: [
+            null as ConversationDetail | null,
+            {
+                loadConversation: async (conversationId: string) => {
+                    return await api.conversations.get(conversationId)
+                },
+                startNewConversation: () => null,
+                setCurrentConversation: (_, { conversation }) => conversation,
+            },
+        ],
+    }),
+
     selectors({
         tabId: [() => [(_, props) => props?.tabId || ''], (tabId) => tabId],
         onAcceptSessionFilters: [
@@ -274,10 +289,10 @@ export const maxLogic = kea<maxLogicType>([
             (cb: ((filters: RecordingUniversalFilters) => void) | null) => cb,
         ],
         conversation: [
-            (s) => [s.conversationHistory, s.conversationId],
-            (conversationHistory, conversationId) => {
-                if (conversationId) {
-                    return conversationHistory.find((c) => c.id === conversationId) ?? null
+            (s) => [s.currentConversation, s.conversationId],
+            (currentConversation, conversationId): ConversationDetail | null => {
+                if (conversationId && currentConversation?.id === conversationId) {
+                    return currentConversation
                 }
                 return null
             },
@@ -309,9 +324,9 @@ export const maxLogic = kea<maxLogicType>([
         ],
 
         conversationLoading: [
-            (s) => [s.conversationHistory, s.conversationHistoryLoading, s.conversationId, s.conversation],
-            (conversationHistory, conversationHistoryLoading, conversationId, conversation) => {
-                return !conversationHistory.length && conversationHistoryLoading && !!conversationId && !conversation
+            (s) => [s.currentConversationLoading, s.conversationId, s.conversation],
+            (currentConversationLoading, conversationId, conversation) => {
+                return currentConversationLoading && !!conversationId && !conversation
             },
         ],
 
@@ -325,15 +340,15 @@ export const maxLogic = kea<maxLogicType>([
         ],
 
         chatTitle: [
-            (s) => [s.conversationId, s.conversation, s.conversationHistoryVisible],
-            (conversationId, conversation, conversationHistoryVisible) => {
+            (s) => [s.conversationId, s.conversation, s.conversationHistoryVisible, s.conversationHistory],
+            (conversationId, conversation, conversationHistoryVisible, conversationHistory) => {
                 if (conversationHistoryVisible) {
                     return CHAT_TITLE_HISTORY
                 }
 
-                // Existing conversation or the first generation is in progress
                 if (conversationId || conversation) {
-                    return conversation?.title ?? CHAT_TITLE_NEW
+                    const title = conversation?.title ?? conversationHistory.find((c) => c.id === conversationId)?.title
+                    return title ?? CHAT_TITLE_NEW
                 }
 
                 return null
@@ -441,23 +456,14 @@ export const maxLogic = kea<maxLogicType>([
         },
 
         loadConversationHistorySuccess: ({ payload }) => {
-            // Don't update the thread if:
-            // - the current chat is not a chat with ID
-            // - the current chat is a temp chat
-            // - we have explicitly marked we're in an autorun conversation
             if (!values.conversationId || values.autoRun || payload?.doNotUpdateCurrentThread) {
                 return
             }
 
-            const conversation = values.conversation
-
-            // If the user has opened a conversation from a direct link, we verify that the conversation exists
-            // after the history has been loaded.
-            if (conversation) {
-                actions.scrollThreadToBottom('instant')
+            if (!values.conversation) {
+                actions.loadConversation(values.conversationId)
             } else {
-                // If the conversation is not found, retrieve once the conversation status and reset if 404.
-                actions.pollConversation(values.conversationId, 0, 0)
+                actions.scrollThreadToBottom('instant')
             }
         },
 
@@ -490,8 +496,8 @@ export const maxLogic = kea<maxLogicType>([
             }
 
             if (conversation && conversation.status === ConversationStatus.Idle) {
+                actions.setCurrentConversation(conversation)
                 actions.prependOrReplaceConversation(conversation)
-                actions.scrollThreadToBottom('instant')
             } else {
                 actions.pollConversation(conversationId, currentRecursionDepth + 1)
             }
@@ -514,14 +520,7 @@ export const maxLogic = kea<maxLogicType>([
 
         openConversation({ conversationId }) {
             actions.setConversationId(conversationId)
-
-            const conversation = values.conversationHistory.find((c) => c.id === conversationId)
-
-            if (conversation) {
-                actions.scrollThreadToBottom('instant')
-            } else if (!values.conversationHistoryLoading) {
-                actions.pollConversation(conversationId, 0, 200)
-            }
+            actions.loadConversation(conversationId)
 
             if (values.conversationHistoryVisible) {
                 actions.toggleConversationHistory(false)
@@ -928,40 +927,17 @@ export const RESEARCH_SUGGESTIONS_DATA: readonly SuggestionGroup[] = [
 ]
 
 /**
- * Merges a new conversation into the conversation history.
+ * Merges a conversation into the list, replacing an existing entry or inserting sorted by date.
  */
-export function mergeConversationHistory(
-    state: ConversationDetail[],
-    newConversation: ConversationDetail | Conversation
-): ConversationDetail[] {
+export function mergeConversationList(state: Conversation[], newConversation: Conversation): Conversation[] {
     const index = state.findIndex((c) => c.id === newConversation.id)
     if (index !== -1) {
-        return [...state.slice(0, index), mergeConversations(newConversation, state[index]), ...state.slice(index + 1)]
+        return [...state.slice(0, index), { ...state[index], ...newConversation }, ...state.slice(index + 1)]
     }
 
-    // Insert and make sure it's sorted by date
-    return [mergeConversations(newConversation), ...state].sort((a, b) => {
+    return [newConversation, ...state].sort((a, b) => {
         const dateA = a.updated_at ? dayjs(a.updated_at).valueOf() : 0
         const dateB = b.updated_at ? dayjs(b.updated_at).valueOf() : 0
         return dateB - dateA
     })
-}
-
-/**
- * Stream returns a `Conversation` object, which doesn't have a `messages` property.
- * However, when we load the conversation history, we get `ConversationDetail` objects.
- * This function merges the two types so that we can use the same logic for both.
- */
-export function mergeConversations(
-    newObj: Conversation | ConversationDetail,
-    oldObj?: ConversationDetail
-): ConversationDetail {
-    if ('messages' in newObj) {
-        return newObj
-    }
-
-    return {
-        ...newObj,
-        messages: oldObj?.messages ?? [],
-    }
 }

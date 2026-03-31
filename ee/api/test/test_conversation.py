@@ -511,17 +511,15 @@ class TestConversation(APIBaseTest):
         Conversation.objects.create(user=self.user, team=self.team, title=None, type=Conversation.Type.ASSISTANT)
         Conversation.objects.create(user=self.user, team=self.team, title="Tool call", type=Conversation.Type.TOOL_CALL)
 
-        with patch("langgraph.graph.state.CompiledStateGraph.aget_state", new_callable=AsyncMock):
-            response = self.client.get(f"/api/environments/{self.team.id}/conversations/")
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = self.client.get(f"/api/environments/{self.team.id}/conversations/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-            # Only one conversation should be returned (the one with title and type ASSISTANT)
-            results = response.json()["results"]
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0]["id"], str(conversation1.id))
-            self.assertEqual(results[0]["title"], "Conversation 1")
-            self.assertIn("messages", results[0])
-            self.assertIn("status", results[0])
+        results = response.json()["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], str(conversation1.id))
+        self.assertEqual(results[0]["title"], "Conversation 1")
+        self.assertNotIn("messages", results[0])
+        self.assertIn("status", results[0])
 
     def test_list_conversations_only_returns_own_conversations(self):
         """Test that listing conversations only returns the current user's conversations"""

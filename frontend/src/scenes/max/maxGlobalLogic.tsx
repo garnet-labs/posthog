@@ -13,11 +13,11 @@ import { sceneLogic } from 'scenes/sceneLogic'
 import { urls } from 'scenes/urls'
 
 import { sidePanelStateLogic } from '~/layout/navigation-3000/sidepanel/sidePanelStateLogic'
-import { Conversation, ConversationDetail, SidePanelTab } from '~/types'
+import { Conversation, SidePanelTab } from '~/types'
 
 import { TOOL_DEFINITIONS, ToolRegistration } from './max-constants'
 import type { maxGlobalLogicType } from './maxGlobalLogicType'
-import { maxLogic, mergeConversationHistory } from './maxLogic'
+import { maxLogic, mergeConversationList } from './maxLogic'
 
 // Keep this stored across all projects, only display this once per device
 const AI_LIABILITY_NOTICE_STORAGE_KEY = 'posthog_ai_liability_notice_dismissed'
@@ -93,14 +93,14 @@ export const maxGlobalLogic = kea<maxGlobalLogicType>([
         acceptDataProcessing: (testOnlyOverride?: boolean) => ({ testOnlyOverride }),
         registerTool: (tool: ToolRegistration) => ({ tool }),
         deregisterTool: (key: string) => ({ key }),
-        prependOrReplaceConversation: (conversation: ConversationDetail | Conversation) => ({ conversation }),
+        prependOrReplaceConversation: (conversation: Conversation) => ({ conversation }),
         dismissLiabilityNotice: true,
         dismissDataProcessing: true,
     }),
 
-    loaders(({ values }) => ({
+    loaders(() => ({
         conversationHistory: [
-            [] as ConversationDetail[],
+            [] as Conversation[],
             {
                 loadConversationHistory: async (
                     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Used for conversation restoration
@@ -112,20 +112,6 @@ export const maxGlobalLogic = kea<maxGlobalLogicType>([
                     const response = await api.conversations.list()
                     return response.results
                 },
-
-                loadConversation: async (conversationId: string) => {
-                    const response = await api.conversations.get(conversationId)
-                    const itemIndex = values.conversationHistory.findIndex((c) => c.id === conversationId)
-
-                    if (itemIndex !== -1) {
-                        return [
-                            ...values.conversationHistory.slice(0, itemIndex),
-                            response,
-                            ...values.conversationHistory.slice(itemIndex + 1),
-                        ]
-                    }
-                    return [response, ...values.conversationHistory]
-                },
             },
         ],
     })),
@@ -133,7 +119,7 @@ export const maxGlobalLogic = kea<maxGlobalLogicType>([
     reducers({
         conversationHistory: {
             prependOrReplaceConversation: (state, { conversation }) => {
-                return mergeConversationHistory(state, conversation)
+                return mergeConversationList(state, conversation)
             },
         },
         registeredToolMap: [

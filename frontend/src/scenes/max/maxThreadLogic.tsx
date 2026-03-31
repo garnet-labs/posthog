@@ -125,7 +125,11 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
 
         // New messages have been added since we last updated the thread
         if (!values.streamingActive && props.conversation.messages.length > values.threadMessageCount) {
+            const wasEmpty = values.threadMessageCount === 0
             actions.setThread(updateMessagesWithCompletedStatus(props.conversation.messages))
+            if (wasEmpty) {
+                actions.scrollThreadToBottom('instant')
+            }
         }
 
         // Check if the meta fields like the `status` field have changed
@@ -161,10 +165,11 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
                 'decrActiveStreamingThreads',
                 'setConversationId',
                 'setAutoRun',
-                'loadConversationHistorySuccess',
+                'loadConversation',
+                'loadConversationSuccess',
+                'setCurrentConversation',
+                'scrollThreadToBottom',
             ],
-            maxGlobalLogic,
-            ['loadConversation'],
         ],
     })),
 
@@ -1132,31 +1137,14 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
             }
         },
 
-        loadConversationHistorySuccess: ({ conversationHistory, payload }) => {
-            // payload is an object with doNotUpdateCurrentThread for loadConversationHistory,
-            // but it's a string (conversationId) for loadConversation
-            const doNotUpdate = typeof payload === 'object' && payload?.doNotUpdateCurrentThread
-            if (doNotUpdate || values.autoRun || values.streamingActive) {
-                return
-            }
-            // Don't auto-reconnect if there's a pending form
-            if (values.multiQuestionFormPending) {
-                return
-            }
-            const conversation = conversationHistory.find((c) => c.id === values.conversationId)
-            if (!conversation) {
-                return
-            }
-
-            // Sync conversation data
-            actions.setConversation(conversation)
-
-            if (conversation.status === ConversationStatus.InProgress) {
-                setTimeout(() => {
-                    actions.reconnectToStream()
-                }, 0)
-            }
+        loadConversationSuccess: ({ currentConversation }) => {
+            syncLoadedConversation(currentConversation, values, actions)
         },
+
+        setCurrentConversation: ({ conversation }) => {
+            syncLoadedConversation(conversation, values, actions)
+        },
+
         selectCommand: ({ command }) => {
             if (command.arg) {
                 actions.setQuestion(command.name + ' ')
@@ -2063,6 +2051,28 @@ function parseResponse<T>(response: string): T | null | undefined {
 
 function removeConversationMessages({ messages, ...conversation }: ConversationDetail): Conversation {
     return conversation
+}
+
+function syncLoadedConversation(
+    conversation: ConversationDetail | null,
+    values: Pick<
+        maxThreadLogicType['values'],
+        'autoRun' | 'streamingActive' | 'multiQuestionFormPending' | 'conversationId'
+    >,
+    actions: Pick<maxThreadLogicType['actions'], 'setConversation' | 'reconnectToStream'>
+): void {
+    if (!conversation || values.autoRun || values.streamingActive) {
+        return
+    }
+    if (values.multiQuestionFormPending || conversation.id !== values.conversationId) {
+        return
+    }
+    actions.setConversation(removeConversationMessages(conversation))
+    if (conversation.status === ConversationStatus.InProgress) {
+        setTimeout(() => {
+            actions.reconnectToStream()
+        }, 0)
+    }
 }
 
 /**
