@@ -454,13 +454,13 @@ class HogQLParserVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by HogQLParser#ColumnExprAliasImplicit.
-    def visitColumnExprAliasImplicit(self, ctx:HogQLParser.ColumnExprAliasImplicitContext):
+    # Visit a parse tree produced by HogQLParser#ColumnExprSelectValue.
+    def visitColumnExprSelectValue(self, ctx:HogQLParser.ColumnExprSelectValueContext):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by HogQLParser#ColumnExprSelectValue.
-    def visitColumnExprSelectValue(self, ctx:HogQLParser.ColumnExprSelectValueContext):
+    # Visit a parse tree produced by HogQLParser#ColumnExprAliasImplicit.
+    def visitColumnExprAliasImplicit(self, ctx:HogQLParser.ColumnExprAliasImplicitContext):
         return self.visitChildren(ctx)
 
 

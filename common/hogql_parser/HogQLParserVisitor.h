@@ -197,9 +197,9 @@ public:
 
     virtual std::any visitColumnExprAliasBefore(HogQLParser::ColumnExprAliasBeforeContext *context) = 0;
 
-    virtual std::any visitColumnExprAliasImplicit(HogQLParser::ColumnExprAliasImplicitContext *context) = 0;
-
     virtual std::any visitColumnExprSelectValue(HogQLParser::ColumnExprSelectValueContext *context) = 0;
+
+    virtual std::any visitColumnExprAliasImplicit(HogQLParser::ColumnExprAliasImplicitContext *context) = 0;
 
     virtual std::any visitColumnExprColumnsAll(HogQLParser::ColumnExprColumnsAllContext *context) = 0;
 

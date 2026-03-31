@@ -587,8 +587,8 @@ void hogqlparserParserInitialize() {
   	1,0,0,0,1090,1091,1,0,0,0,1091,1094,1,0,0,0,1092,1090,1,0,0,0,1093,1095,
   	5,144,0,0,1094,1093,1,0,0,0,1094,1095,1,0,0,0,1095,143,1,0,0,0,1096,1097,
   	3,208,104,0,1097,1098,5,143,0,0,1098,1099,3,146,73,0,1099,1105,1,0,0,
-  	0,1100,1101,3,146,73,0,1101,1102,3,206,103,0,1102,1105,1,0,0,0,1103,1105,
-  	3,146,73,0,1104,1096,1,0,0,0,1104,1100,1,0,0,0,1104,1103,1,0,0,0,1105,
+  	0,1100,1105,3,146,73,0,1101,1102,3,146,73,0,1102,1103,3,206,103,0,1103,
+  	1105,1,0,0,0,1104,1096,1,0,0,0,1104,1100,1,0,0,0,1104,1101,1,0,0,0,1105,
   	145,1,0,0,0,1106,1107,6,73,-1,0,1107,1109,5,12,0,0,1108,1110,3,146,73,
   	0,1109,1108,1,0,0,0,1109,1110,1,0,0,0,1110,1116,1,0,0,0,1111,1112,5,123,
   	0,0,1112,1113,3,146,73,0,1113,1114,5,102,0,0,1114,1115,3,146,73,0,1115,
@@ -8994,20 +8994,20 @@ HogQLParser::SelectColumnExprContext* HogQLParser::selectColumnExpr() {
     }
 
     case 2: {
-      _localctx = _tracker.createInstance<HogQLParser::ColumnExprAliasImplicitContext>(_localctx);
+      _localctx = _tracker.createInstance<HogQLParser::ColumnExprSelectValueContext>(_localctx);
       enterOuterAlt(_localctx, 2);
       setState(1100);
       columnExpr(0);
-      setState(1101);
-      alias();
       break;
     }
 
     case 3: {
-      _localctx = _tracker.createInstance<HogQLParser::ColumnExprSelectValueContext>(_localctx);
+      _localctx = _tracker.createInstance<HogQLParser::ColumnExprAliasImplicitContext>(_localctx);
       enterOuterAlt(_localctx, 3);
-      setState(1103);
+      setState(1101);
       columnExpr(0);
+      setState(1102);
+      alias();
       break;
     }
 

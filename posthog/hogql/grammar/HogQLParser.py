@@ -504,9 +504,9 @@ def serializedATN():
         0,0,1089,1092,1,0,0,0,1090,1088,1,0,0,0,1090,1091,1,0,0,0,1091,1094,
         1,0,0,0,1092,1090,1,0,0,0,1093,1095,5,144,0,0,1094,1093,1,0,0,0,
         1094,1095,1,0,0,0,1095,143,1,0,0,0,1096,1097,3,208,104,0,1097,1098,
-        5,143,0,0,1098,1099,3,146,73,0,1099,1105,1,0,0,0,1100,1101,3,146,
-        73,0,1101,1102,3,206,103,0,1102,1105,1,0,0,0,1103,1105,3,146,73,
-        0,1104,1096,1,0,0,0,1104,1100,1,0,0,0,1104,1103,1,0,0,0,1105,145,
+        5,143,0,0,1098,1099,3,146,73,0,1099,1105,1,0,0,0,1100,1105,3,146,
+        73,0,1101,1102,3,146,73,0,1102,1103,3,206,103,0,1103,1105,1,0,0,
+        0,1104,1096,1,0,0,0,1104,1100,1,0,0,0,1104,1101,1,0,0,0,1105,145,
         1,0,0,0,1106,1107,6,73,-1,0,1107,1109,5,12,0,0,1108,1110,3,146,73,
         0,1109,1108,1,0,0,0,1109,1110,1,0,0,0,1110,1116,1,0,0,0,1111,1112,
         5,123,0,0,1112,1113,3,146,73,0,1113,1114,5,102,0,0,1114,1115,3,146,
@@ -7822,19 +7822,19 @@ class HogQLParser ( Parser ):
                 pass
 
             elif la_ == 2:
-                localctx = HogQLParser.ColumnExprAliasImplicitContext(self, localctx)
+                localctx = HogQLParser.ColumnExprSelectValueContext(self, localctx)
                 self.enterOuterAlt(localctx, 2)
                 self.state = 1100
                 self.columnExpr(0)
-                self.state = 1101
-                self.alias()
                 pass
 
             elif la_ == 3:
-                localctx = HogQLParser.ColumnExprSelectValueContext(self, localctx)
+                localctx = HogQLParser.ColumnExprAliasImplicitContext(self, localctx)
                 self.enterOuterAlt(localctx, 3)
-                self.state = 1103
+                self.state = 1101
                 self.columnExpr(0)
+                self.state = 1102
+                self.alias()
                 pass
 
 

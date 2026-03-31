@@ -371,11 +371,11 @@ public:
     return visitChildren(ctx);
   }
 
-  virtual std::any visitColumnExprAliasImplicit(HogQLParser::ColumnExprAliasImplicitContext *ctx) override {
+  virtual std::any visitColumnExprSelectValue(HogQLParser::ColumnExprSelectValueContext *ctx) override {
     return visitChildren(ctx);
   }
 
-  virtual std::any visitColumnExprSelectValue(HogQLParser::ColumnExprSelectValueContext *ctx) override {
+  virtual std::any visitColumnExprAliasImplicit(HogQLParser::ColumnExprAliasImplicitContext *ctx) override {
     return visitChildren(ctx);
   }
 

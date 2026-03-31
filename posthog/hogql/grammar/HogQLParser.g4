@@ -194,8 +194,8 @@ columnExprList: columnExpr (COMMA columnExpr)* COMMA?;
 selectColumnExprList: selectColumnExpr (COMMA selectColumnExpr)* COMMA?;
 selectColumnExpr
     : identifier COLON columnExpr                                                   # ColumnExprAliasBefore
-    | columnExpr alias                                                              # ColumnExprAliasImplicit
     | columnExpr                                                                    # ColumnExprSelectValue
+    | columnExpr alias                                                              # ColumnExprAliasImplicit
     ;
 columnExpr
     : CASE caseExpr=columnExpr? (WHEN whenExpr=columnExpr THEN thenExpr=columnExpr)+ (ELSE elseExpr=columnExpr)? END          # ColumnExprCase
