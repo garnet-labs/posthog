@@ -707,19 +707,7 @@ class TestEventTaxonomyQueryRunner(ClickhouseTestMixin, APIBaseTest):
                 self.assertEqual(item.sample_values, ["gpt-4"])
 
     def test_ai_large_properties_all_excluded_returns_empty_scan(self):
-        _create_person(
-            distinct_ids=["person1"],
-            properties={"email": "person1@example.com"},
-            team=self.team,
-        )
-        _create_event(
-            event="$ai_generation",
-            distinct_id="person1",
-            properties={"$ai_input": '{"test": "data"}', "$ai_output_choices": "[1,2,3]"},
-            team=self.team,
-        )
-
-        # When all requested properties are excluded
+        # When all requested properties are excluded, the runner early-returns without querying
         response = EventTaxonomyQueryRunner(
             team=self.team,
             query=EventTaxonomyQuery(event="$ai_generation", properties=["$ai_input", "$ai_output_choices"]),
