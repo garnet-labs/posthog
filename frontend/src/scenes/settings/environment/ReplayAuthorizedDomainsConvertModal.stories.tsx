@@ -42,7 +42,7 @@ type Story = StoryObj<{ snapshot: AuthorizedDomainsMigrationSnapshot }>
 
 export const Default: Story = {
     render: ({ snapshot }) => (
-        <BindLogic logic={replayAuthorizedDomainsMigrationModalLogic}>
+        <BindLogic logic={replayAuthorizedDomainsMigrationModalLogic} props={{}}>
             <MigrationModalStoryHost snapshot={snapshot} />
         </BindLogic>
     ),

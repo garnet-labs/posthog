@@ -27,7 +27,7 @@ jest.mock('lib/components/AuthorizedUrlList/AuthorizedUrlList', () => ({
 
 function renderModalWithSnapshot(snapshot: AuthorizedDomainsMigrationSnapshot): ReturnType<typeof render> {
     const view = render(
-        <BindLogic logic={replayAuthorizedDomainsMigrationModalLogic}>
+        <BindLogic logic={replayAuthorizedDomainsMigrationModalLogic} props={{}}>
             <ReplayAuthorizedDomainsConvertModal />
         </BindLogic>
     )
@@ -49,7 +49,7 @@ describe('Replay authorized domains migration UI', () => {
 
     beforeEach(() => {
         initKeaTests()
-        captureSpy = jest.spyOn(posthog, 'capture').mockImplementation(() => {})
+        captureSpy = jest.spyOn(posthog, 'capture').mockImplementation(() => undefined)
     })
 
     afterEach(() => {
