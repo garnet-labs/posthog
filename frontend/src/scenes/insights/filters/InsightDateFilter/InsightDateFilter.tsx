@@ -30,7 +30,8 @@ export function InsightDateFilter({ disabled }: InsightDateFilterProps): JSX.Ele
             disabledReason={editingDisabledReason}
             onChange={(date_from, date_to, explicit_date) => {
                 const isRelative =
-                    typeof date_from === 'string' && (date_from.startsWith('-') || date_from.endsWith('Start'))
+                    date_from == null ||
+                    (typeof date_from === 'string' && (date_from.startsWith('-') || date_from.endsWith('Start')))
                 eventUsageLogic.actions.reportInsightDateRangeChanged({
                     dateFrom: date_from,
                     dateTo: date_to,

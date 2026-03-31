@@ -243,8 +243,11 @@ export const insightLogic: LogicWrapper<insightLogicType> = kea<insightLogicType
                         beforeUpdates[key] = values.savedInsight[key as keyof QueryBasedInsightModel]
                     }
 
+                    const response = await insightsApi.update(values.insight.id as number, metadataUpdate)
+                    await breakpoint(300)
+
                     if ('description' in metadataUpdate) {
-                        const previousDescription = values.savedInsight.description ?? ''
+                        const previousDescription = beforeUpdates.description ?? ''
                         const newDescription = metadataUpdate.description ?? ''
                         eventUsageLogic.actions.reportInsightDescriptionEdited({
                             insightId: values.insight.id,
@@ -256,9 +259,6 @@ export const insightLogic: LogicWrapper<insightLogicType> = kea<insightLogicType
                             hasDescription: newDescription.length > 0,
                         })
                     }
-
-                    const response = await insightsApi.update(values.insight.id as number, metadataUpdate)
-                    await breakpoint(300)
 
                     actions.reloadSavedInsights()
                     dashboardsModel.findMounted()?.actions.updateDashboardInsight(response)

@@ -304,7 +304,7 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
         reportInsightSharedViaLink: (props: {
             insightShortId?: InsightShortId
             queryKind?: string
-            shareMethod: 'toggle_sharing' | 'copy_link'
+            shareMethod: 'toggle_sharing'
         }) => props,
         reportBreakdownApplied: (props: { breakdownType: string; queryKind?: string; breakdownCount: number }) => props,
         reportInsightComparisonToggled: (props: { enabled: boolean; compareTo?: string; queryKind?: string }) => props,
