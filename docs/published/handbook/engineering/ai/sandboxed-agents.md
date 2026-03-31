@@ -70,19 +70,20 @@ task = Task.create_and_run(
 
 ### Parameters
 
-| Parameter              | Required | Description                                                                |
-| ---------------------- | -------- | -------------------------------------------------------------------------- |
-| `team`                 | Yes      | The team this task belongs to                                              |
-| `title`                | Yes      | Human-readable task title                                                  |
-| `description`          | Yes      | Detailed description of what the agent should do                           |
-| `origin_product`       | Yes      | Which product created this task (see `Task.OriginProduct` choices)         |
-| `user_id`              | Yes      | User ID — used for feature flag validation and creating the scoped API key |
-| `repository`           | Yes      | GitHub repo in `org/repo` format (e.g., `posthog/posthog-js`)              |
-| `posthog_mcp_scopes`   | No       | Scope preset or explicit scope list (default: `"full"`)                    |
-| `create_pr`            | No       | Whether the agent should create a PR (default: `True`)                     |
-| `mode`                 | No       | Execution mode (default: `"background"`)                                   |
-| `slack_thread_context` | No       | Slack thread context for agents triggered from Slack                       |
-| `start_workflow`       | No       | Whether to start the Temporal workflow immediately (default: `True`)       |
+| Parameter              | Required | Description                                                                                                                                                         |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `team`                 | Yes      | The team this task belongs to                                                                                                                                       |
+| `title`                | Yes      | Human-readable task title                                                                                                                                           |
+| `description`          | Yes      | Detailed description of what the agent should do                                                                                                                    |
+| `origin_product`       | Yes      | Which product created this task (see `Task.OriginProduct` choices)                                                                                                  |
+| `user_id`              | Yes      | User ID — used for feature flag validation and creating the scoped API key                                                                                          |
+| `repository`           | Yes      | GitHub repo in `org/repo` format (e.g., `posthog/posthog-js`)                                                                                                       |
+| `posthog_mcp_scopes`   | No       | Scope preset or explicit scope list (default: `"full"`)                                                                                                             |
+| `create_pr`            | No       | Whether the agent should create a PR (default: `True`)                                                                                                              |
+| `internal`             | No       | Mark this task as internal so it's hidden from the list endpoint by default (default: `False`). Use the `internal=true` query parameter to retrieve internal tasks. |
+| `mode`                 | No       | Execution mode (default: `"background"`)                                                                                                                            |
+| `slack_thread_context` | No       | Slack thread context for agents triggered from Slack                                                                                                                |
+| `start_workflow`       | No       | Whether to start the Temporal workflow immediately (default: `True`)                                                                                                |
 
 ### Adding a new origin product
 
