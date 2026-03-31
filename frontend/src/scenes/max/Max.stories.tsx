@@ -365,14 +365,17 @@ export const ThreadWithConversationLoading: StoryFn = () => {
     useStorybookMocks({
         get: {
             '/api/environments/:team_id/conversations/': (_req, _res, ctx) => [ctx.delay('infinite')],
+            [`/api/environments/:team_id/conversations/${CONVERSATION_ID}/`]: (_req, _res, ctx) => [
+                ctx.delay('infinite'),
+            ],
         },
     })
 
-    const { setConversationId } = useActions(maxLogic({ tabId: 'storybook' }))
+    const { openConversation } = useActions(maxLogic({ tabId: 'storybook' }))
 
     useEffect(() => {
-        setConversationId(CONVERSATION_ID)
-    }, [setConversationId])
+        openConversation(CONVERSATION_ID)
+    }, [openConversation])
 
     return <Template />
 }
@@ -386,14 +389,78 @@ export const ThreadWithEmptyConversation: StoryFn = () => {
     useStorybookMocks({
         get: {
             '/api/environments/:team_id/conversations/': () => [200, conversationList],
+            '/api/environments/:team_id/conversations/empty/': () => [
+                200,
+                {
+                    id: 'empty',
+                    status: 'idle',
+                    title: 'Counting users chatting from USA',
+                    created_at: '2025-04-29T17:44:21.654307Z',
+                    updated_at: '2025-04-29T17:44:29.184791Z',
+                    user: MOCK_DEFAULT_BASIC_USER,
+                    messages: [],
+                },
+            ],
         },
     })
 
-    const { setConversationId } = useActions(maxLogic({ tabId: 'storybook' }))
+    const { openConversation } = useActions(maxLogic({ tabId: 'storybook' }))
 
     useEffect(() => {
-        setConversationId('empty')
-    }, [setConversationId])
+        openConversation('empty')
+    }, [openConversation])
+
+    return <Template />
+}
+
+const POEM_CONVERSATION = {
+    id: 'poem',
+    status: 'idle',
+    title: 'Writing poems',
+    created_at: '2025-04-29T17:44:21.654307Z',
+    updated_at: '2025-04-29T17:44:29.184791Z',
+    user: MOCK_DEFAULT_BASIC_USER,
+    messages: [
+        { content: 'write a poem', id: 'human-1', type: 'human' },
+        {
+            content: 'In the world of data, where numbers dance,\nPostHog stands ready, to give insights a chance.',
+            id: 'ai-1',
+            meta: null,
+            tool_calls: [],
+            type: 'ai',
+        },
+        { content: 'write another poem', id: 'human-2', type: 'human' },
+        {
+            content: 'In the forest of files, where hedgehogs roam,\nA platform was born, a digital home.',
+            id: 'ai-2',
+            meta: null,
+            tool_calls: [],
+            type: 'ai',
+        },
+        { content: 'write another poem', id: 'human-3', type: 'human' },
+        {
+            content: 'So join the adventure, in this digital bog,\nWhere files find a home, with PostHog!',
+            id: 'ai-3',
+            meta: null,
+            tool_calls: [],
+            type: 'ai',
+        },
+    ],
+}
+
+export const ThreadOpenedFromHistory: StoryFn = () => {
+    useStorybookMocks({
+        get: {
+            '/api/environments/:team_id/conversations/': () => [200, conversationList],
+            '/api/environments/:team_id/conversations/poem/': () => [200, POEM_CONVERSATION],
+        },
+    })
+
+    const { openConversation } = useActions(maxLogic({ tabId: 'storybook' }))
+
+    useEffect(() => {
+        openConversation('poem')
+    }, [openConversation])
 
     return <Template />
 }
@@ -439,12 +506,11 @@ export const SharedThread: StoryFn = () => {
         },
     })
 
-    const { setConversationId } = useActions(maxLogic({ tabId: 'storybook' }))
+    const { openConversation } = useActions(maxLogic({ tabId: 'storybook' }))
 
     useEffect(() => {
-        // Simulate loading a shared conversation via URL parameter
-        setConversationId(sharedConversationId)
-    }, [setConversationId])
+        openConversation(sharedConversationId)
+    }, [openConversation])
 
     return <Template />
 }
@@ -462,11 +528,11 @@ export const ThreadWithInProgressConversation: StoryFn = () => {
         },
     })
 
-    const { setConversationId } = useActions(maxLogic({ tabId: 'storybook' }))
+    const { openConversation } = useActions(maxLogic({ tabId: 'storybook' }))
 
     useEffect(() => {
-        setConversationId('in_progress')
-    }, [setConversationId])
+        openConversation('in_progress')
+    }, [openConversation])
 
     return <Template sidePanel />
 }
@@ -637,6 +703,7 @@ export const ThreadScrollsToBottomOnNewMessages: StoryFn = () => {
     useStorybookMocks({
         get: {
             '/api/environments/:team_id/conversations/': () => [200, conversationList],
+            '/api/environments/:team_id/conversations/poem/': () => [200, POEM_CONVERSATION],
         },
         post: {
             '/api/environments/:team_id/conversations/': (_, res, ctx) =>
@@ -645,14 +712,14 @@ export const ThreadScrollsToBottomOnNewMessages: StoryFn = () => {
     })
 
     const { conversation } = useValues(maxLogic({ tabId: 'storybook' }))
-    const { setConversationId } = useActions(maxLogic({ tabId: 'storybook' }))
+    const { openConversation } = useActions(maxLogic({ tabId: 'storybook' }))
     const logic = maxThreadLogic({ conversationId: 'poem', conversation, tabId: 'storybook' })
     const { threadRaw } = useValues(logic)
     const { askMax } = useActions(logic)
 
     useEffect(() => {
-        setConversationId('poem')
-    }, [setConversationId])
+        openConversation('poem')
+    }, [openConversation])
 
     const messagesSet = threadRaw.length > 0
     useEffect(() => {

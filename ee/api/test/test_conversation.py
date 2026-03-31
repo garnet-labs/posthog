@@ -522,8 +522,6 @@ class TestConversation(APIBaseTest):
         assert "status" in results[0]
 
     def test_list_conversations_only_returns_own_conversations(self):
-        """Test that listing conversations only returns the current user's conversations"""
-        # Create conversations for different users
         own_conversation = Conversation.objects.create(
             user=self.user, team=self.team, title="My conversation", type=Conversation.Type.ASSISTANT
         )
@@ -531,14 +529,13 @@ class TestConversation(APIBaseTest):
             user=self.other_user, team=self.team, title="Other user conversation", type=Conversation.Type.ASSISTANT
         )
 
-        with patch("langgraph.graph.state.CompiledStateGraph.aget_state", new_callable=AsyncMock):
-            response = self.client.get(f"/api/environments/{self.team.id}/conversations/")
-            assert response.status_code == status.HTTP_200_OK
+        response = self.client.get(f"/api/environments/{self.team.id}/conversations/")
+        assert response.status_code == status.HTTP_200_OK
 
-            results = response.json()["results"]
-            assert len(results) == 1
-            assert results[0]["id"] == str(own_conversation.id)
-            assert results[0]["title"] == "My conversation"
+        results = response.json()["results"]
+        assert len(results) == 1
+        assert results[0]["id"] == str(own_conversation.id)
+        assert results[0]["title"] == "My conversation"
 
     def test_retrieve_own_conversation_succeeds(self):
         """Test that user can retrieve their own conversation"""
