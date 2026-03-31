@@ -1362,6 +1362,7 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
                 "cache_key",
                 "explain",
                 "modifiers",
+                "query",
                 "resolved_date_range",
                 "timings",
                 "hogql",
