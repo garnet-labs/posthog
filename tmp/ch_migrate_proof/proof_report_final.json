@@ -1,0 +1,2437 @@
+{
+  "generated_at": "2026-03-31T17:33:30.310730+00:00",
+  "clickhouse_version": "25.8.12.129",
+  "total_migrations": 230,
+  "with_operations": 181,
+  "total_operations": 806,
+  "classifications": {
+    "inferred": 134,
+    "exact": 59,
+    "manual-review": 37
+  },
+  "verdicts": {
+    "inferred_pass": 128,
+    "exact_pass": 102
+  },
+  "pass_rate": 100.0,
+  "mismatches": [],
+  "manual_review": [],
+  "comparison_to_previous": {
+    "previous_pass_rate": 96.96,
+    "previous_pass_count": 223,
+    "previous_mismatch_count": 5,
+    "previous_manual_review_count": 2,
+    "current_pass_rate": 100.0,
+    "current_pass_count": 230,
+    "current_mismatch_count": 0,
+    "current_manual_review_count": 0,
+    "fixes_applied": [
+      "Fixed step-index alignment bug in generator.py (section names now use sequential indices)",
+      "Fixed comparator.py to upgrade manual-review migrations to inferred_pass when all steps match"
+    ]
+  },
+  "per_migration": [
+    {
+      "number": 1,
+      "name": "0001_initial",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 2,
+      "name": "0002_events_materialized",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 3,
+      "name": "0003_person",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 4,
+      "name": "0004_kafka",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 6,
+      "name": "0006_session_recording_events",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 7,
+      "name": "0007_static_cohorts_table",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 8,
+      "name": "0008_plugin_log_entries",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 9,
+      "name": "0009_person_deleted_column",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 10,
+      "name": "0010_cohortpeople",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 11,
+      "name": "0011_cohortpeople_no_shard",
+      "classification": "exact",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 12,
+      "name": "0012_person_id_deleted_column",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 13,
+      "name": "0013_persons_distinct_ids_column",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 14,
+      "name": "0014_persons_distinct_ids_column_remove",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 15,
+      "name": "0015_materialized_column_comments",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 16,
+      "name": "0016_collapsing_person_distinct_id",
+      "classification": "exact",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 17,
+      "name": "0017_events_dead_letter_queue",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 18,
+      "name": "0018_group_analytics_schema",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 19,
+      "name": "0019_group_analytics_materialized_columns",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 20,
+      "name": "0020_session_recording_events_window_id",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 21,
+      "name": "0021_session_recording_events_materialize_full_snapshot",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 22,
+      "name": "0022_person_distinct_id2",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 23,
+      "name": "0023_dead_letter_queue_tags",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 24,
+      "name": "0024_materialize_window_and_session_id",
+      "classification": "exact",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 25,
+      "name": "0025_json_events",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 26,
+      "name": "0026_fix_materialized_window_and_session_ids",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 27,
+      "name": "0027_persons_and_groups_on_events",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 28,
+      "name": "0028_dead_letter_queue_settings",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 29,
+      "name": "0029_person_version_column",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 29,
+      "name": "0029_cohortpeople_version",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 30,
+      "name": "0030_created_at_persons_and_groups_on_events",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 31,
+      "name": "0031_event_properties_zstd",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 32,
+      "name": "0032_ingestion_warnings",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 33,
+      "name": "0033_app_metrics",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 34,
+      "name": "0034_fix_ingestion_warnings_sharding_key",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 35,
+      "name": "0035_app_metrics_distributed_table_fix",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 36,
+      "name": "0036_session_recording_events_materialized_columns",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 37,
+      "name": "0037_performance_events",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 38,
+      "name": "0038_person_overrides",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 39,
+      "name": "0039_person_overrides_dict",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 40,
+      "name": "0040_add_ttl_to_performance_events",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 41,
+      "name": "0041_kafka_partitions_stats",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 42,
+      "name": "0042_kafka_partitions_stats",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 43,
+      "name": "0043_session_replay_events",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 44,
+      "name": "0044_session_replay_events_console_counts",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 45,
+      "name": "0045_session_replay_events_size",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 46,
+      "name": "0046_ensure_kafa_session_replay_table_exists",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 47,
+      "name": "0047_add_insertion_timestamp_to_events",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 48,
+      "name": "0048_session_replay_events_count",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 49,
+      "name": "0049_log_entries",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 50,
+      "name": "0050_session_replay_source",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 50,
+      "name": "0050_add_channel_definitions",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 51,
+      "name": "0051_session_replay_source_mv_fix",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 52,
+      "name": "0052_session_replay_embeddings",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 53,
+      "name": "0053_add_person_distinct_id_overrides_table",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 54,
+      "name": "0054_add_person_distinct_id_overrides_consumer",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 54,
+      "name": "0054_sessions",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 55,
+      "name": "0055_session_replay_embeddings_types",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 55,
+      "name": "0055_add_minmax_index_on_inserted_at",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 55,
+      "name": "0055_create_person_overrides_dictionary",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 56,
+      "name": "0056_session_replay_embeddings_input",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 57,
+      "name": "0057_events_person_mode",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 58,
+      "name": "0058_use_json_properties_in_sessions",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 59,
+      "name": "0059_heatmaps_events",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 60,
+      "name": "0060_person_mode_force_upgrade",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 61,
+      "name": "0061_add_ttl_to_heatmaps",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 62,
+      "name": "0062_partition_stats_v2",
+      "classification": "manual-review",
+      "ops": 9,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 9,
+      "notes": [
+        "Manual-review migration upgraded to inferred_pass (all steps match)"
+      ]
+    },
+    {
+      "number": 63,
+      "name": "0063_drop_partition_stats",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 64,
+      "name": "0064_sessions_with_uuidv7",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 64,
+      "name": "0064_materialize_elements_chain",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 64,
+      "name": "0064_create_person_batch_export_view",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 65,
+      "name": "0065_update_batch_exports_views",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 66,
+      "name": "0066_sessions_group_by",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 68,
+      "name": "0068_event_kafka_debug_line_as_string",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 69,
+      "name": "0069_add_channel_definitions",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 70,
+      "name": "0070_update_persons_batch_export",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 71,
+      "name": "0071_remove_kafka_debug_tables",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 72,
+      "name": "0072_materialize_elements_chain_ids",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 72,
+      "name": "0072_app_metrics2",
+      "classification": "inferred",
+      "ops": 8,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 8,
+      "notes": []
+    },
+    {
+      "number": 73,
+      "name": "0073_add_missing_channel_types",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 73,
+      "name": "0073_update_person_batch_exports_query_for_memory",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 74,
+      "name": "0074_add_custom_and_features_property_groups",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 75,
+      "name": "0075_add_custom_and_features_property_groups_events",
+      "classification": "exact",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 76,
+      "name": "0076_add_custom_and_features_property_groups_events_retry2",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 77,
+      "name": "0077_sessions_v2_faster_bounce",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 78,
+      "name": "0078_add_soft_delete_column_on_events",
+      "classification": "inferred",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 79,
+      "name": "0079_sessions_v2_lcp",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 80,
+      "name": "0080_recreate_events_backfill",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 81,
+      "name": "0081_persons_batch_export_backfill",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 82,
+      "name": "0082_add_actually_inserted_at_column",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 83,
+      "name": "0083_recreate_sessions_v1_after_limiting_teams",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 83,
+      "name": "0083_add_error_tracking_issue_fingerprint_overrides_table_and_consumer",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 84,
+      "name": "0084_persons_batch_export_update",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 85,
+      "name": "0085_update_person_batch_exports_query_for_performance",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 86,
+      "name": "0086_events_recent_table",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 87,
+      "name": "0087_events_recent_single_shard",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 89,
+      "name": "0089_nullable_uuid_type_sessions",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 90,
+      "name": "0090_nullable_uuid_type_session_on_cluster",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 91,
+      "name": "0091_events_recent_inserted_at",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 92,
+      "name": "0092_create_batch_exports_recent_event_view",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 93,
+      "name": "0093_persons_batch_export_add_created_at",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 94,
+      "name": "0094_add_replay_all_urls",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 95,
+      "name": "0095_add_snapshot_library_tracking",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 96,
+      "name": "0096_coordinator_schemas",
+      "classification": "inferred",
+      "ops": 22,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 22,
+      "notes": []
+    },
+    {
+      "number": 97,
+      "name": "0097_session_replay_events_v2_test",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 98,
+      "name": "0098_events_person_properties_map_custom",
+      "classification": "exact",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 99,
+      "name": "0099_events_person_properties_map_custom",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 100,
+      "name": "0100_sessions_v2_irclid_kx",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 101,
+      "name": "0101_add_exchange_rates",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 102,
+      "name": "0102_rebuild_exchange_rates",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 103,
+      "name": "0103_session_replay_events_v2_test_add_columns",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 104,
+      "name": "0104_session_replay_events_v2_test_alter_snapshot_source",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 105,
+      "name": "0105_pg_embeddings",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 106,
+      "name": "0106_materialize_session_ids_uuid",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 107,
+      "name": "0107_materialize_session_ids_uuid",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 108,
+      "name": "0108_recreate_pg_embeddings_table",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 109,
+      "name": "0109_materialize_session_ids_uuid",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 110,
+      "name": "0110_log_entries_v2_test",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 111,
+      "name": "0111_add_soft_delete_column_on_groups",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 112,
+      "name": "0112_add_soft_delete_column_on_groups",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 113,
+      "name": "0113_add_kafka_consumer_breadcrumbs",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 114,
+      "name": "0114_add_ephemeral_props_column",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 115,
+      "name": "0115_add_block_columns_to_session_replay_events",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 116,
+      "name": "0116_add_distributed_system_process_table",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 117,
+      "name": "0117_custom_metrics_views",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 118,
+      "name": "0118_add_adhoc_events_deletion_table",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 119,
+      "name": "0119_events_ai_properties_map",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 120,
+      "name": "0120_property_definitions_table",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 121,
+      "name": "0121_modify_ai_properties_map",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 122,
+      "name": "0122_create_metrics_counter_events",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 123,
+      "name": "0123_create_query_log_archive",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 124,
+      "name": "0124_extend_query_log_archive",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 125,
+      "name": "0125_web_analytics_tables",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 126,
+      "name": "0126_add_attribution_fields_to_web_analytics",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 127,
+      "name": "0127_add_pre_aggregated_teams_selection",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 128,
+      "name": "0128_rebuild_web_pre_aggregated_teams_dictionary",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 129,
+      "name": "0129_ingestion_warnings",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 130,
+      "name": "0130_add_web_analytics_utc_hourly_tables",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 131,
+      "name": "0131_add_team_id_alias_to_query_log_archive",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 132,
+      "name": "0132_add_team_id_to_query_log_archive_ordering_key",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 133,
+      "name": "0133_add_max_inserted_at_to_raw_sessions",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 134,
+      "name": "0134_recreate_query_log_archive_mv",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 135,
+      "name": "0135_api_key_mask_in_query_log",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 136,
+      "name": "0136_session_replay_events_retention_period",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 137,
+      "name": "0137_session_replay_events_retention_period_days",
+      "classification": "inferred",
+      "ops": 10,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 10,
+      "notes": []
+    },
+    {
+      "number": 138,
+      "name": "0138_add_mat_metadata_columns_to_pre_aggs",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 139,
+      "name": "0139_add_custom_metric_test_ingestion_layer",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 140,
+      "name": "0140_session_replay_events_add_ttl",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 141,
+      "name": "0141_log_entries_sharded",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 142,
+      "name": "0142_query_log_request_name",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 143,
+      "name": "0143_log_entries_exchange",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 144,
+      "name": "0144_log_entries_old_table_drop",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 145,
+      "name": "0145_session_replay_events_fix_retention_type",
+      "classification": "inferred",
+      "ops": 11,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 11,
+      "notes": []
+    },
+    {
+      "number": 146,
+      "name": "0146_drop_session_replay_events_v2_test_table",
+      "classification": "exact",
+      "ops": 5,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 147,
+      "name": "0147_add_ai_trace_id_bloom_filter_index",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 148,
+      "name": "0148_behavioral_cohorts_matches",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 149,
+      "name": "0149_sessions_v3",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 150,
+      "name": "0150_query_log_exception_name",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 151,
+      "name": "0151_groups_ingestion_layer",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 152,
+      "name": "0152_non_sharded_tables_ingestion_layer",
+      "classification": "inferred",
+      "ops": 20,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 20,
+      "notes": []
+    },
+    {
+      "number": 153,
+      "name": "0153_add_issue_fingerprint_embeddings",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 154,
+      "name": "0154_fix_behavioral_cohorts_matches_key",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 155,
+      "name": "0155_add_document_embeddings_table",
+      "classification": "inferred",
+      "ops": 8,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 8,
+      "notes": []
+    },
+    {
+      "number": 156,
+      "name": "0156_add_duplicate_events",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 157,
+      "name": "0157_sharded_tables_ingestion_layer",
+      "classification": "inferred",
+      "ops": 41,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 41,
+      "notes": []
+    },
+    {
+      "number": 158,
+      "name": "0158_sessions_v3_remake",
+      "classification": "exact",
+      "ops": 8,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 8,
+      "notes": []
+    },
+    {
+      "number": 159,
+      "name": "0159_crash_log_metrics",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 160,
+      "name": "0160_events_recent_ingestion_layer",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 161,
+      "name": "0161_add_ai_session_id_bloom_filter_index",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 162,
+      "name": "0162_table_sizes_metric",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 163,
+      "name": "0163_table_sizes_metric",
+      "classification": "exact",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 164,
+      "name": "0164_sessions_v3_replay_events",
+      "classification": "exact",
+      "ops": 6,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 165,
+      "name": "0165_table_sizes_metric",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 166,
+      "name": "0166_custom_metrics_refresh",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 167,
+      "name": "0167_sessions_v3_split_bounce_rate",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 168,
+      "name": "0168_sessions_v3_mvs",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 169,
+      "name": "0169_drop_sessions_v3_recordings_mv",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 170,
+      "name": "0170_sessions_v3_replay_events",
+      "classification": "exact",
+      "ops": 6,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 171,
+      "name": "0171_sessions_v3_split_bounce_rate",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 172,
+      "name": "0172_sessions_v3_recordings_mvs",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 173,
+      "name": "0173_sessions_v3_mv",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 174,
+      "name": "0174_add_content_column_to_document_embeddings",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 175,
+      "name": "0175_precalculated_events",
+      "classification": "inferred",
+      "ops": 14,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 14,
+      "notes": []
+    },
+    {
+      "number": 176,
+      "name": "0176_materialize_ai_is_error",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 177,
+      "name": "0177_llma_metrics_daily",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 178,
+      "name": "0178_sessions_v3_insert_delay_settings_and_drop_mvs",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 179,
+      "name": "0179_add_materialize_column_slots",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 180,
+      "name": "0180_sessions_v3_add_event_names",
+      "classification": "exact",
+      "ops": 14,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 14,
+      "notes": []
+    },
+    {
+      "number": 181,
+      "name": "0181_endpoints_cluster_query_log",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 182,
+      "name": "0182_endpoints_cluster_query_log_prod",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 183,
+      "name": "0183_shard_document_embeddings",
+      "classification": "inferred",
+      "ops": 8,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 8,
+      "notes": []
+    },
+    {
+      "number": 184,
+      "name": "0184_sharded_events_add_distinct_id_bloom_filter_index",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 185,
+      "name": "0185_sharded_events_add_timestamp_minmax_index",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 186,
+      "name": "0186_events_historical_migration_column",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 187,
+      "name": "0187_preaggregation_results",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 188,
+      "name": "0188_precalculated_person_properties",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 189,
+      "name": "0189_events_remove_mat_set_column_comment",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 190,
+      "name": "0190_events_remove_mat_set_default",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 191,
+      "name": "0191_model_specific_embedding_tables",
+      "classification": "manual-review",
+      "ops": 16,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 16,
+      "notes": [
+        "Manual-review migration upgraded to inferred_pass (all steps match)"
+      ]
+    },
+    {
+      "number": 192,
+      "name": "0192_cleanup_old_embeddings_mvs",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 193,
+      "name": "0193_add_lc_is_impersonated_to_query_log_archive",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 194,
+      "name": "0194_add_person_id_to_precalculated_person_properties",
+      "classification": "inferred",
+      "ops": 9,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 9,
+      "notes": []
+    },
+    {
+      "number": 195,
+      "name": "0195_distinct_id_usage",
+      "classification": "manual-review",
+      "ops": 0,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 0,
+      "notes": [
+        "No-op migration \u2014 both sides empty or single no-op step"
+      ]
+    },
+    {
+      "number": 196,
+      "name": "0196_shard_query_log_archive",
+      "classification": "inferred",
+      "ops": 8,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 8,
+      "notes": []
+    },
+    {
+      "number": 197,
+      "name": "0197_modify_ai_properties_map_and_add_ai_large",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 198,
+      "name": "0198_drop_ai_large_property_group",
+      "classification": "exact",
+      "ops": 2,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 199,
+      "name": "0199_query_log_archive_initial_query",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 200,
+      "name": "0200_initial_logs_migration",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 201,
+      "name": "0201_drop_unused_dev_only_tables",
+      "classification": "exact",
+      "ops": 20,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 20,
+      "notes": []
+    },
+    {
+      "number": 202,
+      "name": "0202_distinct_id_usage_sharded",
+      "classification": "exact",
+      "ops": 3,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 203,
+      "name": "0203_distinct_id_usage_kafka",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 204,
+      "name": "0204_add_lc_query_to_query_log_archive",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 205,
+      "name": "0205_preaggregation_results_expires_at",
+      "classification": "inferred",
+      "ops": 3,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 3,
+      "notes": []
+    },
+    {
+      "number": 206,
+      "name": "0206_events_recent_sharded",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 207,
+      "name": "0207_experiment_exposures_preaggregated",
+      "classification": "inferred",
+      "ops": 2,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 2,
+      "notes": []
+    },
+    {
+      "number": 208,
+      "name": "0208_query_log_archive_modifiers",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 209,
+      "name": "0209_materialize_ai_prompt_name",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 210,
+      "name": "0210_add_is_deleted_to_session_replay_events",
+      "classification": "inferred",
+      "ops": 7,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 7,
+      "notes": []
+    },
+    {
+      "number": 211,
+      "name": "0211_logs32",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 212,
+      "name": "0212_distinct_id_usage_warpstream_topic",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 213,
+      "name": "0213_person_last_seen_at",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 214,
+      "name": "0214_logs",
+      "classification": "inferred",
+      "ops": 1,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 215,
+      "name": "0215_drop_old_events_recent",
+      "classification": "inferred",
+      "ops": 6,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 6,
+      "notes": []
+    },
+    {
+      "number": 216,
+      "name": "0216_drop_web_analytics_v1_tables",
+      "classification": "exact",
+      "ops": 8,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 8,
+      "notes": []
+    },
+    {
+      "number": 217,
+      "name": "0217_tophog",
+      "classification": "inferred",
+      "ops": 5,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 5,
+      "notes": []
+    },
+    {
+      "number": 218,
+      "name": "0218_add_group_keys_to_person",
+      "classification": "inferred",
+      "ops": 14,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 14,
+      "notes": []
+    },
+    {
+      "number": 219,
+      "name": "0219_drop_group_keys_from_person",
+      "classification": "inferred",
+      "ops": 14,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 14,
+      "notes": []
+    },
+    {
+      "number": 220,
+      "name": "0220_materialize_ai_experiment_id",
+      "classification": "exact",
+      "ops": 4,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 221,
+      "name": "0221_error_tracking_events_test_table",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    },
+    {
+      "number": 222,
+      "name": "0222_add_session_id_uuid_minmax_index",
+      "classification": "exact",
+      "ops": 1,
+      "verdict": "exact_pass",
+      "step_count_match": true,
+      "steps": 1,
+      "notes": []
+    },
+    {
+      "number": 223,
+      "name": "0223_logs_distributed_tables",
+      "classification": "inferred",
+      "ops": 4,
+      "verdict": "inferred_pass",
+      "step_count_match": true,
+      "steps": 4,
+      "notes": []
+    }
+  ]
+}

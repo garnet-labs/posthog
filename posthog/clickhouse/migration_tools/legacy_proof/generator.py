@@ -170,8 +170,8 @@ def generate_artifact(extraction: ExtractionResult) -> GeneratedArtifact:
     up_sections: list[str] = []
     use_sections = len(extraction.operations) > 1
 
-    for op in extraction.operations:
-        section_name = f"step_{op.index}"
+    for seq_idx, op in enumerate(extraction.operations):
+        section_name = f"step_{seq_idx}"
         sql_ref = f"up.sql#{section_name}" if use_sections else "up.sql"
 
         step: dict = {

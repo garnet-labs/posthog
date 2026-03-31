@@ -286,6 +286,117 @@ class TestTemplatizeSQL:
         assert result == "SELECT 1"
 
 
+class TestMultiOpStepAlignment:
+    """Test that multi-op migrations with non-sequential op.index values produce correct step alignment."""
+
+    def test_four_op_companion_table_pattern(self):
+        """Simulate the 4-op companion table pattern (drop MV, alter sharded, alter distributed, recreate MV).
+
+        When the extractor skips some operations (no _sql), op.index values may have gaps
+        (e.g., [0, 1, 4, 5]). The generator must produce sequential section names (step_0..step_3)
+        so the comparator can match them correctly.
+        """
+        from posthog.clickhouse.migration_tools.legacy_proof.comparator import ComparisonVerdict, compare_migration
+        from posthog.clickhouse.migration_tools.legacy_proof.extractor import ExtractedOperation, ExtractionResult
+        from posthog.clickhouse.migration_tools.legacy_proof.generator import generate_artifact
+
+        # Simulate extraction with non-sequential indices (gap at 2, 3)
+        extraction = ExtractionResult(
+            migration_number=9999,
+            migration_name="9999_test_alignment",
+            file_path="test.py",
+            classification="inferred",
+            operations=[
+                ExtractedOperation(
+                    index=0,
+                    sql="DROP TABLE IF EXISTS events_json_mv ON CLUSTER 'posthog'",
+                    node_roles=["data"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
+                ExtractedOperation(
+                    index=1,
+                    sql="ALTER TABLE sharded_events ADD COLUMN IF NOT EXISTS person_id UUID",
+                    node_roles=["data"],
+                    sharded=True,
+                    is_alter_on_replicated_table=False,
+                ),
+                ExtractedOperation(
+                    index=4,  # Gap! Simulates skipped operations at indices 2,3
+                    sql="ALTER TABLE events ADD COLUMN IF NOT EXISTS person_id UUID",
+                    node_roles=["data"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
+                ExtractedOperation(
+                    index=5,
+                    sql="CREATE MATERIALIZED VIEW events_json_mv TO events AS SELECT * FROM kafka_events_json",
+                    node_roles=["data"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
+            ],
+        )
+
+        artifact = generate_artifact(extraction)
+
+        # Verify sections are sequential (step_0 through step_3)
+        assert "-- @section: step_0" in artifact.up_sql
+        assert "-- @section: step_1" in artifact.up_sql
+        assert "-- @section: step_2" in artifact.up_sql
+        assert "-- @section: step_3" in artifact.up_sql
+        # Should NOT have step_4 or step_5
+        assert "step_4" not in artifact.up_sql
+        assert "step_5" not in artifact.up_sql
+
+        # Now compare — all 4 steps should match
+        comparison = compare_migration(extraction, artifact)
+        assert comparison.step_count_match is True
+        assert len(comparison.step_comparisons) == 4
+        for step_cmp in comparison.step_comparisons:
+            assert step_cmp.normalized_sql_match is True, (
+                f"Step {step_cmp.step_index} SQL mismatch: "
+                f"legacy={step_cmp.legacy_sql[:60]}... "
+                f"generated={step_cmp.generated_sql[:60]}..."
+            )
+        assert comparison.verdict in (ComparisonVerdict.EXACT_PASS, ComparisonVerdict.INFERRED_PASS)
+
+    def test_manual_review_upgrade_when_all_match(self):
+        """Manual-review classified migrations should upgrade to inferred_pass when all steps match."""
+        from posthog.clickhouse.migration_tools.legacy_proof.comparator import ComparisonVerdict, compare_migration
+        from posthog.clickhouse.migration_tools.legacy_proof.extractor import ExtractedOperation, ExtractionResult
+        from posthog.clickhouse.migration_tools.legacy_proof.generator import generate_artifact
+
+        extraction = ExtractionResult(
+            migration_number=9998,
+            migration_name="9998_test_manual_upgrade",
+            file_path="test.py",
+            classification="manual-review",
+            warnings=["Contains loop(s) building operations dynamically"],
+            operations=[
+                ExtractedOperation(
+                    index=0,
+                    sql="CREATE TABLE foo (id UInt64) ENGINE = MergeTree()",
+                    node_roles=["data"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
+                ExtractedOperation(
+                    index=1,
+                    sql="CREATE TABLE bar (id UInt64) ENGINE = MergeTree()",
+                    node_roles=["data"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
+            ],
+        )
+
+        artifact = generate_artifact(extraction)
+        comparison = compare_migration(extraction, artifact)
+        assert comparison.verdict == ComparisonVerdict.INFERRED_PASS
+        assert any("upgraded" in note.lower() for note in comparison.notes)
+
+
 class TestCheckpointEras:
     """Test checkpoint era definitions cover the full range."""
 

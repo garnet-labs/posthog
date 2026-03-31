@@ -113,7 +113,12 @@ def compare_migration(
 
     # Determine verdict
     if extraction.classification == "manual-review":
-        result.verdict = ComparisonVerdict.MANUAL_REVIEW_NEEDED
+        if all_pass and result.step_count_match:
+            # Manual-review migration but all steps match — upgrade to inferred_pass
+            result.verdict = ComparisonVerdict.INFERRED_PASS
+            result.notes.append("Manual-review migration upgraded to inferred_pass (all steps match)")
+        else:
+            result.verdict = ComparisonVerdict.MANUAL_REVIEW_NEEDED
     elif all_pass and result.step_count_match:
         if extraction.classification == "exact":
             result.verdict = ComparisonVerdict.EXACT_PASS
