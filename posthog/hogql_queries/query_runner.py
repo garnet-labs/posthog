@@ -88,8 +88,8 @@ from posthog.clickhouse.client.limit import (
     get_org_app_concurrency_limit,
 )
 from posthog.clickhouse.query_tagging import get_query_tag_value, tag_queries
-from posthog.errors import classify_query_error, clickhouse_error_type
-from posthog.event_usage import AnalyticsProps, groups, report_user_or_team_action
+from posthog.errors import QueryErrorCategory, classify_query_error, clickhouse_error_type
+from posthog.event_usage import AnalyticsProps, groups
 from posthog.exceptions_capture import capture_exception
 from posthog.hogql_queries.query_cache import count_query_cache_hit
 from posthog.hogql_queries.query_cache_base import QueryCacheManagerBase
@@ -100,6 +100,8 @@ from posthog.models import Team, User
 from posthog.models.team import WeekStartDay
 from posthog.rbac.user_access_control import UserAccessControlError
 from posthog.schema_helpers import to_dict
+from posthog.slo.context import SloSpec, slo_operation
+from posthog.slo.types import SloArea, SloOperation
 from posthog.utils import generate_cache_key, get_from_dict_or_attr, to_json
 
 logger = structlog.get_logger(__name__)
@@ -1221,15 +1223,21 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
         cache_key = self.get_cache_key()
 
         with posthoganalytics.new_context():
+            query_type = getattr(self.query, "kind", "Other")
+            distinct_id = str(user.distinct_id) if user else str(self.team.id)
+
             posthoganalytics.tag("cache_key", cache_key)
-            posthoganalytics.tag("query_type", getattr(self.query, "kind", "Other"))
+            posthoganalytics.tag("query_type", query_type)
 
             if insight_id:
                 posthoganalytics.tag("insight_id", str(insight_id))
             if dashboard_id:
                 posthoganalytics.tag("dashboard_id", str(dashboard_id))
+
+            product_key: str | None = None
             if tags := getattr(self.query, "tags", None):
                 if tags.productKey:
+                    product_key = tags.productKey
                     posthoganalytics.tag("product_key", tags.productKey)
                     tag_queries(product=tags.productKey)
                 if tags.scene:
@@ -1239,117 +1247,127 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
             tag_queries(execution_mode=execution_mode.value)
             tag_queries(cache_key=cache_key)
 
-            # Abort early if the user doesn't have access to the query runner
-            # We'll proceed as usual if there's no user connected to this request
-            # We're capturing the error for analytics purposes, but we reraise the same one
-            if user is not None:
+            with slo_operation(
+                spec=SloSpec(
+                    distinct_id=distinct_id,
+                    area=SloArea.ANALYTIC_PLATFORM,
+                    operation=SloOperation.QUERY,
+                    team_id=self.team.id,
+                    resource_id=self.query_id,
+                ),
+                properties={
+                    "query_type": query_type,
+                    "execution_mode": execution_mode.value,
+                    "insight_id": insight_id,
+                    "dashboard_id": dashboard_id,
+                    "product_key": product_key,
+                },
+            ) as slo:
                 try:
-                    self.validate_query_runner_access(user)
-                except UserAccessControlError as error:
-                    posthoganalytics.capture(
-                        distinct_id=user.distinct_id,
-                        event="query access control error",
-                        properties={
-                            "query_runner": self.__class__.__name__,
-                            "query_id": self.query_id,
-                            "insight_id": insight_id,
-                            "dashboard_id": dashboard_id,
-                            "execution_mode": execution_mode.value,
-                            "query_type": getattr(self.query, "kind", "Other"),
-                            "resource": error.resource,
-                            "required_level": error.required_level,
-                            "resource_id": error.resource_id,
-                            "cache_key": cache_key,
-                        },
-                    )
-
-                    raise
-
-            trigger: str | None = get_query_tag_value("trigger")
-
-            self.query_id = query_id or self.query_id
-            self._cache_age_override = cache_age_seconds
-            CachedResponse: type[CR] = self.cached_response_type
-            cache_manager = get_query_cache_manager(
-                team=self.team,
-                cache_key=cache_key,
-                insight_id=insight_id,
-                dashboard_id=dashboard_id,
-            )
-
-            if execution_mode == ExecutionMode.CALCULATE_ASYNC_ALWAYS:
-                # We should always kick off async calculation and disregard the cache
-                return QueryStatusResponse(
-                    query_status=self.enqueue_async_calculation(
-                        refresh_requested=True,
-                        cache_manager=cache_manager,
-                        user=user,
-                        analytics_props=analytics_props,
-                    )
-                )
-            elif execution_mode != ExecutionMode.CALCULATE_BLOCKING_ALWAYS:
-                # Let's look in the cache first
-                results = self.handle_cache_and_async_logic(
-                    execution_mode=execution_mode,
-                    cache_manager=cache_manager,
-                    user=user,
-                    analytics_props=analytics_props,
-                )
-                if results:
-                    cache_tracking_props = {}
-                    if isinstance(results, CachedResponse):
-                        if (not trigger or not trigger.startswith("warming")) and results.query_metadata:
-                            log_event_usage_from_query_metadata(
-                                results.query_metadata,
-                                team_id=self.team.id,
-                                user_id=user.id if user else None,
+                    # Abort early if the user doesn't have access to the query runner
+                    # We'll proceed as usual if there's no user connected to this request
+                    # We're capturing the error for analytics purposes, but we reraise the same one
+                    if user is not None:
+                        try:
+                            self.validate_query_runner_access(user)
+                        except UserAccessControlError as error:
+                            posthoganalytics.capture(
+                                distinct_id=user.distinct_id,
+                                event="query access control error",
+                                properties={
+                                    "query_runner": self.__class__.__name__,
+                                    "query_id": self.query_id,
+                                    "insight_id": insight_id,
+                                    "dashboard_id": dashboard_id,
+                                    "execution_mode": execution_mode.value,
+                                    "query_type": query_type,
+                                    "resource": error.resource,
+                                    "required_level": error.required_level,
+                                    "resource_id": error.resource_id,
+                                    "cache_key": cache_key,
+                                },
                             )
 
-                        last_refresh = last_refresh_from_cached_result(results)
-                        cache_tracking_props = {
-                            "is_cache_stale": self._is_stale(last_refresh=last_refresh),
-                            "calculation_trigger": results.calculation_trigger,
-                            "cache_age_seconds": round((datetime.now(UTC) - last_refresh).total_seconds(), 2)
-                            if last_refresh
-                            else None,
-                            "last_refresh": last_refresh.isoformat() if last_refresh else None,
-                        }
+                            raise
 
-                    query_executed_props = {
-                        "insight_id": insight_id,
-                        "dashboard_id": dashboard_id,
-                        "execution_mode": execution_mode.value,
-                        "query_type": getattr(self.query, "kind", "Other"),
-                        "cache_key": cache_key,
-                        "cache_hit": True if isinstance(results, CachedResponse) else False,
-                        "response_time_ms": round((perf_counter() - start_time) * 1000, 2),
-                        **cache_tracking_props,
-                    }
-                    report_user_or_team_action(
-                        "query executed",
-                        query_executed_props,
-                        user=user,
+                    trigger: str | None = get_query_tag_value("trigger")
+
+                    self.query_id = query_id or self.query_id
+                    self._cache_age_override = cache_age_seconds
+                    CachedResponse: type[CR] = self.cached_response_type
+                    cache_manager = get_query_cache_manager(
                         team=self.team,
-                        organization=self.team.organization,
-                        analytics_props=analytics_props,
+                        cache_key=cache_key,
+                        insight_id=insight_id,
+                        dashboard_id=dashboard_id,
                     )
 
-                    return results
+                    if execution_mode == ExecutionMode.CALCULATE_ASYNC_ALWAYS:
+                        slo.tag(execution_path="async_dispatched", cache_hit=False)
+                        return QueryStatusResponse(
+                            query_status=self.enqueue_async_calculation(
+                                refresh_requested=True,
+                                cache_manager=cache_manager,
+                                user=user,
+                                analytics_props=analytics_props,
+                            )
+                        )
+                    elif execution_mode != ExecutionMode.CALCULATE_BLOCKING_ALWAYS:
+                        results = self.handle_cache_and_async_logic(
+                            execution_mode=execution_mode,
+                            cache_manager=cache_manager,
+                            user=user,
+                            analytics_props=analytics_props,
+                        )
+                        if results:
+                            is_cache_hit = isinstance(results, CachedResponse)
 
-            def execute_blocking():
-                return self._execute_and_cache_blocking(
-                    cache_key=cache_key,
-                    cache_manager=cache_manager,
-                    execution_mode=execution_mode,
-                    insight_id=insight_id,
-                    dashboard_id=dashboard_id,
-                    trigger=trigger,
-                    user=user,
-                    start_time=start_time,
-                    analytics_props=analytics_props,
-                )
+                            if is_cache_hit:
+                                if (not trigger or not trigger.startswith("warming")) and results.query_metadata:
+                                    log_event_usage_from_query_metadata(
+                                        results.query_metadata,
+                                        team_id=self.team.id,
+                                        user_id=user.id if user else None,
+                                    )
 
-            return execute_blocking()
+                                last_refresh = last_refresh_from_cached_result(results)
+                                cache_age = (
+                                    round((datetime.now(UTC) - last_refresh).total_seconds(), 2)
+                                    if last_refresh
+                                    else None
+                                )
+                            else:
+                                cache_age = None
+
+                            slo.tag(
+                                execution_path="cache_hit" if is_cache_hit else "cache_miss",
+                                cache_hit=is_cache_hit,
+                                cache_age_seconds=cache_age,
+                                calculation_trigger=getattr(results, "calculation_trigger", None),
+                            )
+                            return results
+
+                    slo.tag(execution_path="blocking", cache_hit=False, calculation_trigger=trigger)
+                    return self._execute_and_cache_blocking(
+                        cache_key=cache_key,
+                        cache_manager=cache_manager,
+                        execution_mode=execution_mode,
+                        insight_id=insight_id,
+                        dashboard_id=dashboard_id,
+                        trigger=trigger,
+                        user=user,
+                        start_time=start_time,
+                        analytics_props=analytics_props,
+                    )
+                except Exception as exc:
+                    error_category = classify_query_error(exc)
+                    # User errors and rate limits are not system failures —
+                    # count them as success for SLO purposes but tag for visibility
+                    if error_category in (QueryErrorCategory.USER_ERROR, QueryErrorCategory.RATE_LIMITED):
+                        slo.succeed(execution_path="error", error_category=error_category.value)
+                    else:
+                        slo.fail(execution_path="error", error_category=error_category.value)
+                    raise
 
     def _execute_and_cache_blocking(
         self,
@@ -1429,27 +1447,6 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                 # Set target_age to None in that case
                 target_age=target_age,
             )
-
-        query_executed_props = {
-            "insight_id": insight_id,
-            "dashboard_id": dashboard_id,
-            "cache_hit": False,
-            "cache_key": cache_key,
-            "calculation_trigger": trigger,
-            "execution_mode": execution_mode.value,
-            "query_type": query_type,
-            "response_time_ms": round((perf_counter() - start_time) * 1000, 2),
-            "query_duration_ms": query_duration_ms,
-            "has_error": has_error,
-        }
-        report_user_or_team_action(
-            "query executed",
-            query_executed_props,
-            user=user,
-            team=self.team,
-            organization=self.team.organization,
-            analytics_props=analytics_props,
-        )
 
         return CachedResponse(**fresh_response_dict)
 
