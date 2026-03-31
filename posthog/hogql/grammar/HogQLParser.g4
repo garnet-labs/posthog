@@ -66,7 +66,7 @@ limitAndOffsetClauseOptional
 selectStmt:
     with=withClause?
     SELECT DISTINCT? topClause?
-    columns=selectColumnExprList
+    columns=selectColumnExprListBeforeFrom
     from=fromClause?
     arrayJoinClause?
     prewhereClause?
@@ -178,6 +178,7 @@ columnTypeCastExpr
     ;
 columnTypeCastIdentifier
     : IDENTIFIER
+    | QUOTED_IDENTIFIER
     | interval
     | keywordForTypeCast
     ;
@@ -191,11 +192,16 @@ keywordForTypeCast
     | ZONE
     ;
 columnExprList: columnExpr (COMMA columnExpr)* COMMA?;
+selectColumnExprListBeforeFrom
+    : selectColumnExpr (COMMA selectColumnExpr)* COMMA                                 # SelectColumnExprListBeforeFromTrailingComma
+    | selectColumnExprList                                                              # SelectColumnExprListBeforeFromPlain
+    ;
 selectColumnExprList: selectColumnExpr (COMMA selectColumnExpr)* COMMA?;
 selectColumnExpr
     : identifier COLON columnExpr                                                   # ColumnExprAliasBefore
+    | FROM implicitAlias                                                             # ColumnExprInvalidFromImplicitAlias
     | columnExpr                                                                    # ColumnExprSelectValue
-    | columnExpr alias                                                              # ColumnExprAliasImplicit
+    | columnExpr implicitAlias                                                      # ColumnExprAliasImplicit
     ;
 columnExpr
     : CASE caseExpr=columnExpr? (WHEN whenExpr=columnExpr THEN thenExpr=columnExpr)+ (ELSE elseExpr=columnExpr)? END          # ColumnExprCase
@@ -395,8 +401,20 @@ keyword
 keywordForAlias
     : DATE | FIRST | ID | KEY
     ;
-alias: IDENTIFIER | keywordForAlias;  // |interval| can't be an alias, otherwise 'INTERVAL 1 SOMETHING' becomes ambiguous.
-identifier: IDENTIFIER | interval | keyword;
+keywordForImplicitAlias
+    : ASCENDING
+    | COHORT
+    | DATE
+    | DESCENDING
+    | FINAL
+    | ID
+    | RETURN
+    | TOP
+    | TOTALS
+    ;
+alias: IDENTIFIER | QUOTED_IDENTIFIER | keywordForAlias;  // |interval| can't be an alias, otherwise 'INTERVAL 1 SOMETHING' becomes ambiguous.
+implicitAlias: IDENTIFIER | QUOTED_IDENTIFIER | keywordForImplicitAlias;
+identifier: IDENTIFIER | QUOTED_IDENTIFIER | interval | keyword;
 enumValue: string EQ_SINGLE numberLiteral;
 placeholder: LBRACE columnExpr RBRACE;
 
