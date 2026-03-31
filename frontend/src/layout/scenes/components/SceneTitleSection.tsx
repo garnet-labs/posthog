@@ -210,7 +210,7 @@ type SceneMainTitleProps = {
     maxToolProps?: Omit<UseMaxToolOptions, 'active'>
     /** Max character length for the description field */
     descriptionMaxLength?: number
-    /** Rendered after the product icon and before the scene name (e.g. favorite/star control). */
+    /** Rendered after the product icon and before the scene name. No wrapper — supply layout (e.g. a span) if needed. */
     beforeName?: ReactNode
 }
 
@@ -328,11 +328,7 @@ export function SceneTitleSection({
                                 >
                                     {icon}
                                 </span>
-                                {beforeName ? (
-                                    <span className="flex shrink-0 items-center self-start @2xl/main-content:self-center">
-                                        {beforeName}
-                                    </span>
-                                ) : null}
+                                {beforeName}
                                 <SceneName
                                     name={name}
                                     isLoading={isLoading}

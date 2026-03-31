@@ -46,11 +46,13 @@ export function DashboardHeader(): JSX.Element | null {
                 }}
                 beforeName={
                     dashboard ? (
-                        <DashboardStarToggle
-                            dashboardId={dashboard.id}
-                            name={dashboard.name}
-                            dataAttr="dashboard-header-star-toggle"
-                        />
+                        <span className="flex shrink-0 items-center self-start @2xl/main-content:self-center">
+                            <DashboardStarToggle
+                                dashboardId={dashboard.id}
+                                name={dashboard.name}
+                                dataAttr="dashboard-header-star-toggle"
+                            />
+                        </span>
                     ) : undefined
                 }
                 onNameChange={(value) => {

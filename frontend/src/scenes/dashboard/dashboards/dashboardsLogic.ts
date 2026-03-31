@@ -48,16 +48,15 @@ export const DEFAULT_FILTERS: DashboardsFilters = {
 }
 
 export function starredDashboardIdsFromShortcuts(shortcutData: { type?: string; ref?: string | null }[]): Set<number> {
-    const ids = new Set<number>()
-    for (const s of shortcutData) {
-        if (s.type === 'dashboard' && s.ref) {
-            const id = parseInt(s.ref, 10)
-            if (!Number.isNaN(id)) {
-                ids.add(id)
+    return new Set(
+        shortcutData.flatMap((s) => {
+            if (s.type !== 'dashboard' || !s.ref) {
+                return []
             }
-        }
-    }
-    return ids
+            const id = parseInt(s.ref, 10)
+            return Number.isNaN(id) ? [] : [id]
+        })
+    )
 }
 
 /**

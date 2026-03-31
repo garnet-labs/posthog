@@ -10,26 +10,26 @@ import { FileSystemEntry } from '~/queries/schema/schema-general'
 
 import { buildDashboardShortcutFileEntry } from './dashboardShortcutEntry'
 
+export const DASHBOARD_FAVORITE_TOGGLE_DATA_ATTR_ID = 'dashboard-favorite-toggle'
+
 export function dashboardShortcutIdForDashboard(
     shortcutData: FileSystemEntry[],
     dashboardId: number
 ): string | undefined {
-    for (const s of shortcutData) {
-        if (s.type === 'dashboard' && s.ref) {
-            const nid = parseInt(s.ref, 10)
-            if (!Number.isNaN(nid) && nid === dashboardId) {
-                return s.id
-            }
+    const match = shortcutData.find((s) => {
+        if (s.type !== 'dashboard' || !s.ref) {
+            return false
         }
-    }
-    return undefined
+        const nid = parseInt(s.ref, 10)
+        return !Number.isNaN(nid) && nid === dashboardId
+    })
+    return match?.id
 }
 
 export interface DashboardStarToggleProps {
     dashboardId: number
     /** Display name for shortcut label in starred list */
     name: string | null | undefined
-    /** `data-attr` for analytics, e.g. `dashboards-list-star-toggle` or `dashboard-header-star-toggle` */
     dataAttr: string
 }
 
@@ -56,12 +56,13 @@ export function DashboardStarToggle({ dashboardId, name, dataAttr }: DashboardSt
         const pending = shortcutId
             ? deleteShortcut(shortcutId)
             : addShortcutItem(buildDashboardShortcutFileEntry(dashboardId, name))
-        void Promise.resolve(pending as PromiseLike<unknown>).finally(() => setBusy(false))
+        void Promise.resolve(pending).finally(() => setBusy(false))
     }
 
     return (
         <LemonButton
             data-attr={dataAttr}
+            data-attr-id={DASHBOARD_FAVORITE_TOGGLE_DATA_ATTR_ID}
             data-dashboard-id={dashboardId}
             data-starred={isStarred}
             loading={busy}
