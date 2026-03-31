@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("posthog", "1079_event_filter_config"),
+        ("posthog", "1080_alertcheck_triggered_metadata"),
     ]
 
     operations = [
