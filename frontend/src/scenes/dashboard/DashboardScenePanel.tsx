@@ -61,8 +61,9 @@ export function DashboardScenePanel(): JSX.Element | null {
         canEditDashboard,
         isSavingTags,
         currentLayoutSize,
-        isPinned,
         asDashboardTemplate,
+        dashboardFavoritesExperimentVariant,
+        isPinned,
         effectiveEditBarFilters,
         effectiveDashboardVariableOverrides,
         tiles,
@@ -119,7 +120,9 @@ export function DashboardScenePanel(): JSX.Element | null {
                                 Copy to another project
                             </ButtonPrimitive>
                         )}
-                        <ScenePin dataAttrKey={RESOURCE_TYPE} onClick={togglePinned} isPinned={isPinned} />
+                        {dashboardFavoritesExperimentVariant !== 'test' && (
+                            <ScenePin dataAttrKey={RESOURCE_TYPE} onClick={togglePinned} isPinned={isPinned} />
+                        )}
                         <SceneFullscreen
                             dataAttrKey={RESOURCE_TYPE}
                             onClick={() => {

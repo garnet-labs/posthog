@@ -20,7 +20,8 @@ export const DASHBOARD_CANNOT_EDIT_MESSAGE =
     "You don't have edit permissions for this dashboard. Ask a dashboard collaborator with edit access to add you."
 
 export function DashboardHeader(): JSX.Element | null {
-    const { dashboard, dashboardLoading, dashboardMode, canEditDashboard } = useValues(dashboardLogic)
+    const { dashboard, dashboardLoading, dashboardMode, canEditDashboard, dashboardFavoritesExperimentVariant } =
+        useValues(dashboardLogic)
     const { setDashboardMode, loadDashboard } = useActions(dashboardLogic)
     const { updateDashboard } = useActions(dashboardsModel)
 
@@ -45,7 +46,7 @@ export function DashboardHeader(): JSX.Element | null {
                     type: sceneConfigurations[Scene.Dashboard].iconType || 'default_icon_type',
                 }}
                 beforeName={
-                    dashboard ? (
+                    dashboard && dashboardFavoritesExperimentVariant === 'test' ? (
                         <span className="flex shrink-0 items-center self-start @2xl/main-content:self-center">
                             <DashboardStarToggle
                                 dashboardId={dashboard.id}

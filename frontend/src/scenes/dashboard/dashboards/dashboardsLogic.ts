@@ -1,7 +1,8 @@
 import Fuse from 'fuse.js'
-import { actions, afterMount, connect, kea, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 
+import { FEATURE_FLAGS } from 'lib/constants'
 import { Sorting } from 'lib/lemon-ui/LemonTable/sorting'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { tabAwareActionToUrl } from 'lib/logic/scenes/tabAwareActionToUrl'
@@ -16,6 +17,8 @@ import { dashboardsModel } from '~/models/dashboardsModel'
 import { tagsModel } from '~/models/tagsModel'
 import { ActivityScope, Breadcrumb, DashboardBasicType } from '~/types'
 
+import type { DashboardFavoritesExperimentVariant } from '../dashboardFavoritesExperiment'
+import { getDashboardFavoritesExperimentVariant } from '../dashboardFavoritesExperiment'
 import type { dashboardsLogicType } from './dashboardsLogicType'
 
 export enum DashboardsTab {
@@ -83,6 +86,67 @@ export function compareDashboardsListDefaultOrder(
         return nameDiff
     }
     return a.id - b.id
+}
+
+/** Pin-only list order for control (starred shortcuts ignored). */
+export function compareDashboardsListPinOnlyOrder(a: DashboardBasicType, b: DashboardBasicType): number {
+    const tier = (d: DashboardBasicType): number => (d.pinned ? 0 : 1)
+    const tierDiff = tier(a) - tier(b)
+    if (tierDiff !== 0) {
+        return tierDiff
+    }
+    const nameDiff = (a.name ?? 'Untitled').localeCompare(b.name ?? 'Untitled')
+    if (nameDiff !== 0) {
+        return nameDiff
+    }
+    return a.id - b.id
+}
+
+export function compareDashboardsListForExperiment(
+    a: DashboardBasicType,
+    b: DashboardBasicType,
+    starredIds: Set<number>,
+    experimentVariant: DashboardFavoritesExperimentVariant
+): number {
+    if (experimentVariant === 'control') {
+        return compareDashboardsListPinOnlyOrder(a, b)
+    }
+    const sa = starredIds.has(a.id)
+    const sb = starredIds.has(b.id)
+    if (sa !== sb) {
+        return sa ? -1 : 1
+    }
+    const nameDiff = (a.name ?? 'Untitled').localeCompare(b.name ?? 'Untitled')
+    if (nameDiff !== 0) {
+        return nameDiff
+    }
+    return a.id - b.id
+}
+
+function clampDashboardsSceneToFavoritesExperiment(
+    variant: DashboardFavoritesExperimentVariant,
+    currentTab: DashboardsTab,
+    filters: DashboardsFilters,
+    actions: {
+        setCurrentTab: (t: DashboardsTab) => void
+        setFilters: (f: Partial<DashboardsFilters>) => void
+    }
+): void {
+    if (variant === 'test') {
+        if (currentTab === DashboardsTab.Pinned) {
+            actions.setCurrentTab(DashboardsTab.All)
+        }
+        if (filters.pinned) {
+            actions.setFilters({ pinned: false })
+        }
+    } else {
+        if (currentTab === DashboardsTab.Starred) {
+            actions.setCurrentTab(DashboardsTab.All)
+        }
+        if (filters.starred) {
+            actions.setFilters({ starred: false })
+        }
+    }
 }
 
 export type DashboardFuse = Fuse<DashboardBasicType> // This is exported for kea-typegen
@@ -157,6 +221,13 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
     }),
 
     selectors({
+        dashboardFavoritesExperimentVariant: [
+            (s) => [s.featureFlags],
+            (featureFlags) =>
+                getDashboardFavoritesExperimentVariant(
+                    featureFlags[FEATURE_FLAGS.DASHBOARD_FAVORITES_PINNED_VS_STARRED]
+                ),
+        ],
         isFiltering: [
             (s) => [s.filters],
             (filters) => {
@@ -202,8 +273,9 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
                 s.currentTab,
                 s.user,
                 s.shortcutData,
+                s.dashboardFavoritesExperimentVariant,
             ],
-            (dashboards, filters, fuse, currentTab, user, shortcutData) => {
+            (dashboards, filters, fuse, currentTab, user, shortcutData, dashboardFavoritesExperimentVariant) => {
                 const starredIds = starredDashboardIdsFromShortcuts(shortcutData ?? [])
                 let haystack = dashboards
                 if (filters.search) {
@@ -232,7 +304,9 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
                 if (filters.tags && filters.tags.length > 0) {
                     haystack = haystack.filter((d) => filters.tags?.some((tag) => d.tags?.includes(tag)))
                 }
-                return [...haystack].sort((a, b) => compareDashboardsListDefaultOrder(a, b, starredIds))
+                return [...haystack].sort((a, b) =>
+                    compareDashboardsListForExperiment(a, b, starredIds, dashboardFavoritesExperimentVariant)
+                )
             },
         ],
 
@@ -306,7 +380,19 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
             actions.setFilters({ search })
         },
     })),
-    afterMount(() => {
+    listeners(({ actions, values }) => ({
+        [featureFlagLogic.actionTypes.setFeatureFlags]: () => {
+            const variant = getDashboardFavoritesExperimentVariant(
+                values.featureFlags[FEATURE_FLAGS.DASHBOARD_FAVORITES_PINNED_VS_STARRED]
+            )
+            clampDashboardsSceneToFavoritesExperiment(variant, values.currentTab, values.filters, actions)
+        },
+    })),
+    afterMount(({ actions, values }) => {
         projectTreeDataLogic.actions.loadShortcuts()
+        const variant = getDashboardFavoritesExperimentVariant(
+            values.featureFlags[FEATURE_FLAGS.DASHBOARD_FAVORITES_PINNED_VS_STARRED]
+        )
+        clampDashboardsSceneToFavoritesExperiment(variant, values.currentTab, values.filters, actions)
     }),
 ])

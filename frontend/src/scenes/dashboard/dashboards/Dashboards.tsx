@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { useMemo } from 'react'
 
 import { LemonButton } from '@posthog/lemon-ui'
 
@@ -37,22 +38,28 @@ export const scene: SceneExport = {
 export function Dashboards(): JSX.Element {
     const { dashboardsLoading, nameSortedDashboards } = useValues(dashboardsModel)
     const { setCurrentTab } = useActions(dashboardsLogic)
-    const { currentTab } = useValues(dashboardsLogic)
+    const { currentTab, dashboardFavoritesExperimentVariant } = useValues(dashboardsLogic)
     const { showNewDashboardModal } = useActions(newDashboardLogic)
 
-    const enabledTabs: LemonTab<DashboardsTab>[] = [
-        {
-            key: DashboardsTab.All,
-            label: 'All dashboards',
-        },
-        { key: DashboardsTab.Starred, label: 'Starred' },
-        { key: DashboardsTab.Yours, label: 'My dashboards' },
-        { key: DashboardsTab.Pinned, label: 'Pinned' },
-        {
-            key: DashboardsTab.Templates,
-            label: 'Templates',
-        },
-    ]
+    const enabledTabs: LemonTab<DashboardsTab>[] = useMemo(() => {
+        const tabs: LemonTab<DashboardsTab>[] = [
+            {
+                key: DashboardsTab.All,
+                label: 'All dashboards',
+            },
+            { key: DashboardsTab.Starred, label: 'Starred' },
+            { key: DashboardsTab.Yours, label: 'My dashboards' },
+            { key: DashboardsTab.Pinned, label: 'Pinned' },
+            {
+                key: DashboardsTab.Templates,
+                label: 'Templates',
+            },
+        ]
+        if (dashboardFavoritesExperimentVariant === 'test') {
+            return tabs.filter((t) => t.key !== DashboardsTab.Pinned)
+        }
+        return tabs.filter((t) => t.key !== DashboardsTab.Starred)
+    }, [dashboardFavoritesExperimentVariant])
 
     return (
         <SceneContent>

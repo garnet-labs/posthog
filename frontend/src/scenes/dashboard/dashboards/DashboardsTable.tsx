@@ -16,6 +16,7 @@ import { Link } from 'lib/lemon-ui/Link'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { accessLevelSatisfied } from 'lib/utils/accessControlUtils'
 import { DashboardEventSource } from 'lib/utils/eventUsageLogic'
+import type { DashboardFavoritesExperimentVariant } from 'scenes/dashboard/dashboardFavoritesExperiment'
 import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
 import { dashboardsLogic } from 'scenes/dashboard/dashboards/dashboardsLogic'
 import { deleteDashboardLogic } from 'scenes/dashboard/deleteDashboardLogic'
@@ -36,6 +37,47 @@ import {
 import { DASHBOARD_CANNOT_EDIT_MESSAGE } from '../DashboardHeader'
 import { DashboardStarToggle } from '../DashboardStarToggle'
 import { DashboardsFiltersBar } from './DashboardsFiltersBar'
+
+function dashboardsFavoritesColumn({
+    dashboardFavoritesExperimentVariant,
+    unpinDashboard,
+    pinDashboard,
+}: {
+    dashboardFavoritesExperimentVariant: DashboardFavoritesExperimentVariant
+    unpinDashboard: (id: number, source: DashboardEventSource) => void
+    pinDashboard: (id: number, source: DashboardEventSource) => void
+}): LemonTableColumn<DashboardType, keyof DashboardType | undefined> {
+    const isTest = dashboardFavoritesExperimentVariant === 'test'
+
+    return {
+        width: 0,
+        dataIndex: 'pinned',
+        render: function RenderStarAndPin(_, record: DashboardType) {
+            const { id, name, pinned } = record
+            return (
+                <div className="flex items-center gap-px">
+                    {isTest ? (
+                        <DashboardStarToggle dashboardId={id} name={name} dataAttr="dashboards-list-star-toggle" />
+                    ) : (
+                        <LemonButton
+                            data-attr="dashboards-list-pin-toggle"
+                            data-dashboard-id={id}
+                            data-pinned={!!pinned}
+                            size="small"
+                            onClick={
+                                pinned
+                                    ? () => unpinDashboard(id, DashboardEventSource.DashboardsList)
+                                    : () => pinDashboard(id, DashboardEventSource.DashboardsList)
+                            }
+                            tooltip={pinned ? 'Unpin dashboard' : 'Pin dashboard'}
+                            icon={pinned ? <IconPinFilled /> : <IconPin />}
+                        />
+                    )}
+                </div>
+            )
+        },
+    }
+}
 
 export function DashboardsTableContainer(): JSX.Element {
     const { dashboardsLoading } = useValues(dashboardsModel)
@@ -59,38 +101,21 @@ export function DashboardsTable({
 }: DashboardsTableProps): JSX.Element {
     const { unpinDashboard, pinDashboard } = useActions(dashboardsModel)
     const { tableSortingChanged } = useActions(dashboardsLogic)
-    const { tableSorting, dashboardsTableEmptyState } = useValues(dashboardsLogic)
+    const { tableSorting, dashboardsTableEmptyState, dashboardFavoritesExperimentVariant } = useValues(dashboardsLogic)
     const { currentTeam } = useValues(teamLogic)
     const { showDuplicateDashboardModal } = useActions(duplicateDashboardLogic)
     const { showDeleteDashboardModal } = useActions(deleteDashboardLogic)
     const { openMoveToModal } = useActions(moveToLogic)
     const { itemsByRef } = useValues(projectTreeDataLogic)
 
+    const favoritesColumn = dashboardsFavoritesColumn({
+        dashboardFavoritesExperimentVariant,
+        unpinDashboard,
+        pinDashboard,
+    })
+
     const columns: LemonTableColumns<DashboardType> = [
-        {
-            width: 0,
-            dataIndex: 'pinned',
-            render: function RenderStarAndPin(pinned, { id, name }) {
-                return (
-                    <div className="flex items-center gap-px">
-                        <DashboardStarToggle dashboardId={id} name={name} dataAttr="dashboards-list-star-toggle" />
-                        <LemonButton
-                            data-attr="dashboards-list-pin-toggle"
-                            data-dashboard-id={id}
-                            data-pinned={pinned}
-                            size="small"
-                            onClick={
-                                pinned
-                                    ? () => unpinDashboard(id, DashboardEventSource.DashboardsList)
-                                    : () => pinDashboard(id, DashboardEventSource.DashboardsList)
-                            }
-                            tooltip={pinned ? 'Unpin dashboard' : 'Pin dashboard'}
-                            icon={pinned ? <IconPinFilled /> : <IconPin />}
-                        />
-                    </div>
-                )
-            },
-        },
+        favoritesColumn,
         {
             title: 'Name',
             dataIndex: 'name',

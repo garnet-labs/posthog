@@ -13,7 +13,8 @@ interface DashboardsFiltersBarProps {
 }
 
 export function DashboardsFiltersBar({ extraActions }: DashboardsFiltersBarProps): JSX.Element {
-    const { filters, currentTab, filteredTags, tagSearch, showTagPopover } = useValues(dashboardsLogic)
+    const { filters, currentTab, filteredTags, tagSearch, showTagPopover, dashboardFavoritesExperimentVariant } =
+        useValues(dashboardsLogic)
     const { setFilters, setTagSearch, setShowTagPopover, setSearch } = useActions(dashboardsLogic)
 
     const debouncedSetSearch = useDebouncedCallback((value: string) => {
@@ -47,7 +48,7 @@ export function DashboardsFiltersBar({ extraActions }: DashboardsFiltersBarProps
             <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
                     <span className="shrink-0">Filter to:</span>
-                    {currentTab !== DashboardsTab.Pinned && (
+                    {dashboardFavoritesExperimentVariant !== 'test' && currentTab !== DashboardsTab.Pinned && (
                         <LemonButton
                             active={filters.pinned}
                             type="secondary"
@@ -58,7 +59,7 @@ export function DashboardsFiltersBar({ extraActions }: DashboardsFiltersBarProps
                             Pinned
                         </LemonButton>
                     )}
-                    {currentTab !== DashboardsTab.Starred && (
+                    {dashboardFavoritesExperimentVariant === 'test' && currentTab !== DashboardsTab.Starred && (
                         <LemonButton
                             active={filters.starred}
                             type="secondary"

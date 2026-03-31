@@ -81,6 +81,7 @@ import {
 import { getResponseBytes, sortDayJsDates } from '../insights/utils'
 import { filterVariablesReferencedInQuery } from '../insights/utils/queryUtils'
 import { teamLogic } from '../teamLogic'
+import { getDashboardFavoritesExperimentVariant } from './dashboardFavoritesExperiment'
 import { BreakdownColorConfig } from './DashboardInsightColorsModal'
 import type { dashboardLogicType } from './dashboardLogicType'
 import { dashboardQuickFiltersLogic } from './dashboardQuickFiltersLogic'
@@ -1128,6 +1129,13 @@ export const dashboardLogic = kea<dashboardLogicType>([
                 const hasSSESupport = typeof EventSource !== 'undefined'
                 return hasFeatureFlag && hasSSESupport
             },
+        ],
+        dashboardFavoritesExperimentVariant: [
+            (s) => [s.featureFlags],
+            (featureFlags) =>
+                getDashboardFavoritesExperimentVariant(
+                    featureFlags[FEATURE_FLAGS.DASHBOARD_FAVORITES_PINNED_VS_STARRED]
+                ),
         ],
         canAutoPreview: [
             (s) => [s.dashboard],

@@ -5,6 +5,8 @@ import { expectLogic, truth } from 'kea-test-utils'
 
 import {
     compareDashboardsListDefaultOrder,
+    compareDashboardsListForExperiment,
+    compareDashboardsListPinOnlyOrder,
     DashboardsTab,
     dashboardsLogic,
 } from 'scenes/dashboard/dashboards/dashboardsLogic'
@@ -338,5 +340,26 @@ describe('compareDashboardsListDefaultOrder', () => {
         ]
         const sorted = [...dashboards].sort((a, b) => compareDashboardsListDefaultOrder(a, b, starred))
         expect(sorted.map((d) => d.id)).toEqual([1, 2, 3, 4, 6, 5])
+    })
+})
+
+describe('compareDashboardsListForExperiment', () => {
+    it('control uses pin-only order and ignores starred shortcuts', () => {
+        const starred = new Set([2])
+        const a = listOrderRow(1, 'Z', true)
+        const b = listOrderRow(2, 'A', false)
+        expect(compareDashboardsListForExperiment(a, b, starred, 'control')).toBe(
+            compareDashboardsListPinOnlyOrder(a, b)
+        )
+    })
+
+    it('test sorts starred first then name (ignores pin)', () => {
+        const starred = new Set([2])
+        expect(
+            compareDashboardsListForExperiment(listOrderRow(2, 'Z', true), listOrderRow(1, 'A', true), starred, 'test')
+        ).toBeLessThan(0)
+        expect(
+            compareDashboardsListForExperiment(listOrderRow(1, 'A', true), listOrderRow(2, 'Z', false), starred, 'test')
+        ).toBeGreaterThan(0)
     })
 })
