@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
-import React, { useLayoutEffect, useMemo, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
     IconBrain,
@@ -833,6 +833,8 @@ function AssistantMessageForm({ form, linksOnly }: AssistantMessageFormProps): J
     )
 }
 
+const MAX_COLLAPSED_CONTENT_HEIGHT = 240 // px – keeps plan/thinking compact on small screens
+
 interface PlanningAnswerProps {
     toolCall: EnhancedToolCall
     isLastPlanningMessage?: boolean
@@ -840,9 +842,15 @@ interface PlanningAnswerProps {
 
 function PlanningAnswer({ toolCall, isLastPlanningMessage = true }: PlanningAnswerProps): JSX.Element {
     const [isExpanded, setIsExpanded] = useState(isLastPlanningMessage)
+    const [isFullHeight, setIsFullHeight] = useState(false)
+    const [needsExpansion, setNeedsExpansion] = useState(false)
+    const stepsRef = useRef<HTMLDivElement>(null)
 
     useLayoutEffect(() => {
         setIsExpanded(isLastPlanningMessage)
+        if (!isLastPlanningMessage) {
+            setIsFullHeight(false)
+        }
     }, [isLastPlanningMessage])
 
     // Extract planning steps from tool call args
@@ -863,6 +871,12 @@ function PlanningAnswer({ toolCall, isLastPlanningMessage = true }: PlanningAnsw
     const completedCount = steps.filter((step) => step.status === 'completed').length
     const totalCount = steps.length
     const hasMultipleSteps = steps.length > 1
+
+    useEffect(() => {
+        if (stepsRef.current && isExpanded) {
+            setNeedsExpansion(stepsRef.current.scrollHeight > MAX_COLLAPSED_CONTENT_HEIGHT)
+        }
+    }, [isExpanded, steps])
 
     return (
         <div className="flex flex-col text-xs">
@@ -892,34 +906,51 @@ function PlanningAnswer({ toolCall, isLastPlanningMessage = true }: PlanningAnsw
                 </div>
             </div>
             {isExpanded && (
-                <div className="mt-1.5 space-y-1.5 border-l-2 border-border-secondary pl-3.5 ml-2">
-                    {steps.map((step, index) => {
-                        const isCompleted = step.status === 'completed'
-                        const isInProgress = step.status === 'in_progress'
+                <>
+                    <div
+                        ref={stepsRef}
+                        className={clsx(
+                            'mt-1.5 space-y-1.5 border-l-2 border-border-secondary pl-3.5 ml-2',
+                            !isFullHeight && 'max-h-60 overflow-y-auto'
+                        )}
+                    >
+                        {steps.map((step, index) => {
+                            const isCompleted = step.status === 'completed'
+                            const isInProgress = step.status === 'in_progress'
 
-                        return (
-                            <div key={index} className="flex items-start gap-2 animate-fade-in">
-                                <span className="flex-shrink-0">
-                                    <LemonCheckbox checked={isCompleted} disabled size="xsmall" />
-                                </span>
-                                <span
-                                    className={clsx(
-                                        'leading-relaxed',
-                                        isCompleted && 'text-muted line-through',
-                                        isInProgress && 'font-medium'
-                                    )}
-                                >
-                                    {step.description}
-                                    {isInProgress && (
-                                        <ShimmeringContent>
-                                            <span className="text-muted ml-1">(in progress)</span>
-                                        </ShimmeringContent>
-                                    )}
-                                </span>
-                            </div>
-                        )
-                    })}
-                </div>
+                            return (
+                                <div key={index} className="flex items-start gap-2 animate-fade-in">
+                                    <span className="flex-shrink-0">
+                                        <LemonCheckbox checked={isCompleted} disabled size="xsmall" />
+                                    </span>
+                                    <span
+                                        className={clsx(
+                                            'leading-relaxed',
+                                            isCompleted && 'text-muted line-through',
+                                            isInProgress && 'font-medium'
+                                        )}
+                                    >
+                                        {step.description}
+                                        {isInProgress && (
+                                            <ShimmeringContent>
+                                                <span className="text-muted ml-1">(in progress)</span>
+                                            </ShimmeringContent>
+                                        )}
+                                    </span>
+                                </div>
+                            )
+                        })}
+                    </div>
+                    {needsExpansion && (
+                        <button
+                            onClick={() => setIsFullHeight(!isFullHeight)}
+                            className="text-xs text-muted hover:text-default flex items-center gap-0.5 ml-2 pl-3.5 mt-1 cursor-pointer"
+                        >
+                            {isFullHeight ? <IconCollapse /> : <IconExpand />}
+                            <span>{isFullHeight ? 'Collapse' : 'Expand'}</span>
+                        </button>
+                    )}
+                </>
             )}
         </div>
     )
@@ -1002,10 +1033,23 @@ function AssistantActionComponent({
     const [isSubstepsExpanded, setIsSubstepsExpanded] = useState(showSubstepsChevron && !(isCompleted || isFailed))
     const [showToolCallJson, setShowToolCallJson] = useState(false)
     const [showResultJson, setShowResultJson] = useState(false)
+    const [isFullHeight, setIsFullHeight] = useState(false)
+    const [needsExpansion, setNeedsExpansion] = useState(false)
+    const substepsRef = useRef<HTMLDivElement>(null)
 
     useLayoutEffect(() => {
-        setIsSubstepsExpanded(showSubstepsChevron && !(isCompleted || isFailed))
+        const newExpanded = showSubstepsChevron && !(isCompleted || isFailed)
+        setIsSubstepsExpanded(newExpanded)
+        if (!newExpanded) {
+            setIsFullHeight(false)
+        }
     }, [showSubstepsChevron, isCompleted, isFailed])
+
+    useEffect(() => {
+        if (substepsRef.current && isSubstepsExpanded) {
+            setNeedsExpansion(substepsRef.current.scrollHeight > MAX_COLLAPSED_CONTENT_HEIGHT)
+        }
+    }, [isSubstepsExpanded, substeps])
 
     let markdownContent = <MarkdownMessage id={id} content={content} />
     const result = toolCall?.result
@@ -1073,32 +1117,48 @@ function AssistantActionComponent({
                 </div>
             </div>
             {isSubstepsExpanded && substeps && substeps.length > 0 && (
-                <div
-                    className={clsx(
-                        'space-y-1 border-l-2 border-border-secondary',
-                        icon && 'pl-3.5 ml-[calc(0.775rem)]'
-                    )}
-                >
-                    {substeps.map((substep, substepIndex) => {
-                        const isCurrentSubstep = substepIndex === substeps.length - 1
-                        const isCompletedSubstep = substepIndex < substeps.length - 1 || isCompleted
+                <>
+                    <div
+                        ref={substepsRef}
+                        className={clsx(
+                            'space-y-1 border-l-2 border-border-secondary',
+                            icon && 'pl-3.5 ml-[calc(0.775rem)]',
+                            !isFullHeight && 'max-h-60 overflow-y-auto'
+                        )}
+                    >
+                        {substeps.map((substep, substepIndex) => {
+                            const isCurrentSubstep = substepIndex === substeps.length - 1
+                            const isCompletedSubstep = substepIndex < substeps.length - 1 || isCompleted
 
-                        return (
-                            <div key={substepIndex} className="animate-fade-in">
-                                <MarkdownMessage
-                                    id={id}
-                                    className={clsx(
-                                        'leading-relaxed',
-                                        isFailed && 'text-danger',
-                                        !isFailed && isCompletedSubstep && 'text-muted',
-                                        !isFailed && isCurrentSubstep && !isCompleted && 'text-secondary'
-                                    )}
-                                    content={handleThreeDots(substep ?? '', true)}
-                                />
-                            </div>
-                        )
-                    })}
-                </div>
+                            return (
+                                <div key={substepIndex} className="animate-fade-in">
+                                    <MarkdownMessage
+                                        id={id}
+                                        className={clsx(
+                                            'leading-relaxed',
+                                            isFailed && 'text-danger',
+                                            !isFailed && isCompletedSubstep && 'text-muted',
+                                            !isFailed && isCurrentSubstep && !isCompleted && 'text-secondary'
+                                        )}
+                                        content={handleThreeDots(substep ?? '', true)}
+                                    />
+                                </div>
+                            )
+                        })}
+                    </div>
+                    {needsExpansion && (
+                        <button
+                            onClick={() => setIsFullHeight(!isFullHeight)}
+                            className={clsx(
+                                'text-xs text-muted hover:text-default flex items-center gap-0.5 mt-1 cursor-pointer',
+                                icon && 'ml-[calc(0.775rem)] pl-3.5'
+                            )}
+                        >
+                            {isFullHeight ? <IconCollapse /> : <IconExpand />}
+                            <span>{isFullHeight ? 'Collapse' : 'Expand'}</span>
+                        </button>
+                    )}
+                </>
             )}
             {widget}
             {/* Render summarize_sessions UI payload outside accordion so "Open report" is always visible */}
