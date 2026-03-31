@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { TrashIcon } from 'lucide-react'
 
 import { Button } from './button'
+import { Kbd } from './kbd'
 
 const meta = {
     title: 'Primitives/Button',
@@ -52,6 +53,32 @@ export const WithIcons = {
             </Button>
             <Button variant="link">
                 <TrashIcon /> Link
+            </Button>
+        </div>
+    ),
+} satisfies Story
+export const WithKBD = {
+    render: () => (
+        <div className="flex flex-wrap gap-2">
+            <Button variant="default">
+                Default
+                <Kbd>⌘A</Kbd>
+            </Button>
+            <Button variant="outline">
+                Outline
+                <Kbd>⌘B</Kbd>
+            </Button>
+            <Button variant="destructive">
+                Destructive
+                <Kbd>⌘C</Kbd>
+            </Button>
+            <Button variant="ghost">
+                Ghost
+                <Kbd>⌘D</Kbd>
+            </Button>
+            <Button variant="link">
+                Link
+                <Kbd>⌘E</Kbd>
             </Button>
         </div>
     ),

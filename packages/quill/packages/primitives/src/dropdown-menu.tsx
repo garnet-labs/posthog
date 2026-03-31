@@ -92,7 +92,7 @@ function DropdownMenuItem({
                 "group/dropdown-menu-item relative flex cursor-default items-center text-xs/relaxed outline-hidden select-none data-inset:ps-7.5 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
                 className
             )}
-            render={<Button variant={variant} className="w-full font-normal" left />}
+            render={<Button variant={variant} className="w-full font-normal [&_kbd]:ml-auto" left />}
             {...props}
         />
     )

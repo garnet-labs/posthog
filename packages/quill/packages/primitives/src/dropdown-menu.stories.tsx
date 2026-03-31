@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { Copy, MoreVertical, Pencil, TrashIcon } from 'lucide-react'
+import { Copy, ExpandIcon, Folder, MoreVertical, Pencil, TrashIcon } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from './button'
@@ -17,6 +17,7 @@ import {
     DropdownMenuRadioItem,
     DropdownMenuRadioGroup,
 } from './dropdown-menu'
+import { Kbd } from './kbd'
 
 const meta = {
     title: 'Primitives/DropdownMenu',
@@ -30,6 +31,7 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {
     render: () => {
         const [open, setOpen] = useState(true)
+        const [subOpen, setSubOpen] = useState(true)
         return (
             <DropdownMenu open={open} onOpenChange={setOpen}>
                 <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>Click me</DropdownMenuTrigger>
@@ -38,6 +40,7 @@ export const Default: Story = {
                         <DropdownMenuItem>
                             <Copy />
                             Copy
+                            <Kbd>⌘C</Kbd>
                         </DropdownMenuItem>
                         <DropdownMenuItem>
                             <Pencil />
@@ -49,15 +52,20 @@ export const Default: Story = {
                         </DropdownMenuItem>
                     </DropdownMenuGroup>
                     <DropdownMenuSeparator />
-                    <DropdownMenuSub>
+                    <DropdownMenuSub open={subOpen} onOpenChange={setSubOpen}>
                         <DropdownMenuSubTrigger>
                             <MoreVertical />
                             More
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
                             <DropdownMenuItem>
-                                <Copy />
-                                Copy
+                                <Folder />
+                                Open in folder
+                                <Kbd>⌘O</Kbd>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                                <ExpandIcon />
+                                Expand
                             </DropdownMenuItem>
                         </DropdownMenuSubContent>
                     </DropdownMenuSub>
