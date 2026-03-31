@@ -223,6 +223,11 @@ class EndpointVersion(models.Model):
                 f"Query type '{query_kind}' cannot be materialized. Supported types: {supported}",
             )
 
+        # Block compare mode — materialization can't reconstruct doubled series
+        compare_filter = self.query.get("compareFilter") or {}
+        if compare_filter.get("compare"):
+            return False, "Compare mode is not supported for materialized endpoints."
+
         if self.query.get("variables"):
             from products.endpoints.backend.materialization import analyze_variables_for_materialization
 
