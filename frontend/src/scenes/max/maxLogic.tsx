@@ -473,6 +473,14 @@ export const maxLogic = kea<maxLogicType>([
             }
         },
 
+        loadConversationFailure: ({ error }) => {
+            // If the conversation is not found, it may be a race condition where the conversation is still
+            // being created on the backend. Poll for it to handle this case gracefully.
+            if (error?.status === 404 && values.conversationId) {
+                actions.pollConversation(values.conversationId, 0, 200)
+            }
+        },
+
         /**
          * Polls the conversation status until it's idle or reaches a max recursion depth.
          */
