@@ -5,6 +5,7 @@ from typing import Any, Optional, Self, Union, cast
 from django.db import connection, models
 from django.db.models import Manager, QuerySet
 from django.db.models.functions import Coalesce
+from django.db.models.query import RawQuerySet
 from django.shortcuts import get_object_or_404
 
 from loginas.utils import is_impersonated_session
@@ -142,9 +143,9 @@ class PropertyDefinitionQuerySerializer(serializers.Serializer):
             try:
                 parsed = json.loads(tags)
                 if not isinstance(parsed, list) or not all(isinstance(t, str) for t in parsed):
-                    raise ValidationError("`tags` must be a JSON-encoded list of strings")
+                    raise ValidationError({"tags": "`tags` must be a JSON-encoded list of strings"})
             except (json.JSONDecodeError, TypeError):
-                raise ValidationError("`tags` must be valid JSON")
+                raise ValidationError({"tags": "`tags` must be valid JSON"})
 
         return super().validate(attrs)
 
@@ -630,6 +631,13 @@ class PropertyDefinitionViewSet(
         for (key, val) in CORE_FILTER_DEFINITIONS_BY_GROUP["groups"].items()
         if val.get("virtual", False)
     ]
+
+    def prefetch_tagged_items_if_available(self, queryset: QuerySet) -> QuerySet:
+        # RawQuerySet doesn't support prefetch_related properly — the serializer
+        # falls back to fetching tags via tagged_items when prefetched_tags is absent
+        if isinstance(queryset, RawQuerySet):
+            return queryset
+        return super().prefetch_tagged_items_if_available(queryset)
 
     def dangerously_get_queryset(self):
         with tracer.start_as_current_span("property_definitions_get_queryset") as span:
