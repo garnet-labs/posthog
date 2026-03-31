@@ -54,6 +54,7 @@ function VercelEnvMappingEditor({
     const [mapping, setMapping] = useState<EnvMapping>(envMapping)
     const [saving, setSaving] = useState(false)
     const [dirty, setDirty] = useState(false)
+    const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
         setMapping(envMapping)
@@ -67,6 +68,7 @@ function VercelEnvMappingEditor({
 
     const handleSave = (): void => {
         setSaving(true)
+        setError(null)
         fetch(`/api/organizations/@current/integrations/${integration.id}/environment-mapping/`, {
             method: 'PATCH',
             headers: {
@@ -85,7 +87,7 @@ function VercelEnvMappingEditor({
                 }
                 setDirty(false)
             })
-            .catch(() => {})
+            .catch(() => setError('Failed to save environment mapping'))
             .finally(() => setSaving(false))
     }
 
@@ -109,6 +111,7 @@ function VercelEnvMappingEditor({
                     />
                 </div>
             ))}
+            {error && <p className="text-danger text-xs">{error}</p>}
             {dirty && (
                 <LemonButton type="primary" size="small" loading={saving} onClick={handleSave}>
                     Save mapping
