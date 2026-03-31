@@ -44,6 +44,7 @@
     'last_refresh',
     'refresh_attempt',
     'refreshing',
+    'team',
   ])
 # ---
 # name: TestVisitorFieldSnapshots.test_excluded_fields_EarlyAccessFeature
@@ -574,6 +575,8 @@
     'refreshing',
     'save',
     'sort_tiles_by_layout',
+    'team',
+    'team_id',
     'text_id',
   ])
 # ---

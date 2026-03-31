@@ -3202,6 +3202,74 @@
           "row_count": null,
           "type": "system"
       },
+      "system.dashboard_tiles": {
+          "fields": {
+              "id": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "id",
+                  "id": null,
+                  "name": "id",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "integer"
+              },
+              "dashboard_id": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "dashboard_id",
+                  "id": null,
+                  "name": "dashboard_id",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "integer"
+              },
+              "insight_id": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "insight_id",
+                  "id": null,
+                  "name": "insight_id",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "integer"
+              },
+              "deleted": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "deleted",
+                  "id": null,
+                  "name": "deleted",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "expression"
+              },
+              "color": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "color",
+                  "id": null,
+                  "name": "color",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
+              },
+              "layouts": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "layouts",
+                  "id": null,
+                  "name": "layouts",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "json"
+              }
+          },
+          "id": "system.dashboard_tiles",
+          "name": "system.dashboard_tiles",
+          "row_count": null,
+          "type": "system"
+      },
       "system.dashboards": {
           "fields": {
               "id": {
@@ -7549,6 +7617,74 @@
           },
           "id": "system.cohorts",
           "name": "system.cohorts",
+          "row_count": null,
+          "type": "system"
+      },
+      "system.dashboard_tiles": {
+          "fields": {
+              "id": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "id",
+                  "id": null,
+                  "name": "id",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "integer"
+              },
+              "dashboard_id": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "dashboard_id",
+                  "id": null,
+                  "name": "dashboard_id",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "integer"
+              },
+              "insight_id": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "insight_id",
+                  "id": null,
+                  "name": "insight_id",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "integer"
+              },
+              "deleted": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "deleted",
+                  "id": null,
+                  "name": "deleted",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "expression"
+              },
+              "color": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "color",
+                  "id": null,
+                  "name": "color",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
+              },
+              "layouts": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "layouts",
+                  "id": null,
+                  "name": "layouts",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "json"
+              }
+          },
+          "id": "system.dashboard_tiles",
+          "name": "system.dashboard_tiles",
           "row_count": null,
           "type": "system"
       },
