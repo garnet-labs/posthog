@@ -6,7 +6,7 @@ import { BindLogic, useActions, useValues } from 'kea'
 import { CSSProperties, useEffect, useState } from 'react'
 import { List, useListRef } from 'react-window'
 
-import { IconArchive, IconCheck, IconPlus, IconSearch } from '@posthog/icons'
+import { IconArchive, IconCheck, IconPin, IconPinFilled, IconPlus, IconSearch } from '@posthog/icons'
 import { LemonDivider, LemonTag } from '@posthog/lemon-ui'
 
 import { AutoSizer } from 'lib/components/AutoSizer'
@@ -297,7 +297,7 @@ function InfiniteListSkeletonItem({
     )
 }
 
-const InfiniteListRow = ({
+export const InfiniteListRow = ({
     index: rowIndex,
     style,
     results,
@@ -435,11 +435,18 @@ const InfiniteListRow = ({
 
     if (item && itemGroup) {
         const isDisabledItem = itemGroup?.getIsDisabled?.(item) ?? false
+        const isPinnable = !canSelectItem(listGroupType, dataWarehousePopoverFields) && !isDisabledItem
         const isCrossGroupItem = !!group.isLocalOnly && itemGroup.type !== listGroupType
         const itemHasRecentContext = hasRecentContext(item)
         const recentGroup = itemHasRecentContext
             ? taxonomicGroups.find((g) => g.type === TaxonomicFilterGroupType.RecentFilters)
             : undefined
+        const shouldShowPinIcon = isPinnable && (isHighlighted || isCurrentRowPinned)
+        const pinIcon = isCurrentRowPinned ? (
+            <IconPinFilled className="size-4 text-warning" />
+        ) : (
+            <IconPin className="size-4 text-secondary" />
+        )
 
         const { listGroupType: resolvedListGroupType, itemGroup: resolvedItemGroup } = resolveItemRendering({
             item,
@@ -483,6 +490,15 @@ const InfiniteListRow = ({
                     <LemonTag size="small" type="highlight">
                         {itemHasRecentContext ? `${itemGroup.name} - recent` : itemGroup.name}
                     </LemonTag>
+                )}
+                {isPinnable && (
+                    <div
+                        className="taxonomic-list-row-pin"
+                        data-attr={`pin-row-${listGroupType}-${rowIndex}`}
+                        aria-hidden="true"
+                    >
+                        {shouldShowPinIcon ? pinIcon : null}
+                    </div>
                 )}
             </div>
         )
