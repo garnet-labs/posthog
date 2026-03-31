@@ -1,5 +1,6 @@
 import uuid
 import asyncio
+import datetime as dt
 import dataclasses
 from typing import Any, Optional
 
@@ -175,7 +176,29 @@ async def import_data_activity_sync(inputs: ImportDataActivityInputs) -> Pipelin
                     )
             except CDCHandledExternally:
                 await logger.ainfo("Schema is in CDC streaming mode — handled by CDCExtractionWorkflow, skipping")
-                return PipelineResult(should_trigger_cdp_producer=False, consumer_manages_job_status=True)
+                # Mark the job as non-billable so it doesn't clutter the Syncs tab
+                from products.data_warehouse.backend.models import ExternalDataJob
+
+                await database_sync_to_async_pool(ExternalDataJob.objects.filter(id=job_inputs.run_id).update)(
+                    billable=False, status=ExternalDataJob.Status.COMPLETED, finished_at=dt.datetime.now(dt.UTC)
+                )
+
+                # Pause the per-schema schedule — CDCExtractionWorkflow handles this
+                # schema now. The schedule is unpaused if the schema transitions back
+                # to snapshot mode (e.g., after a TRUNCATE or re-enable after grace period).
+                try:
+                    from products.data_warehouse.backend.data_load.service import pause_external_data_schedule
+
+                    await database_sync_to_async_pool(pause_external_data_schedule)(str(inputs.schema_id))
+                    await logger.ainfo("Paused per-schema schedule for CDC streaming schema")
+                except Exception:
+                    await logger.awarning("Failed to pause per-schema schedule for CDC streaming schema")
+
+                return PipelineResult(
+                    should_trigger_cdp_producer=False,
+                    consumer_manages_job_status=True,
+                    skip_post_import_activities=True,
+                )
 
             return await _run(
                 job_inputs=job_inputs,
