@@ -16,7 +16,7 @@ import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 import { keyForInsightLogicProps } from 'scenes/insights/sharedUtils'
 
 import { propertyDefinitionsModel } from '~/models/propertyDefinitionsModel'
-import { Breakdown, BreakdownFilter } from '~/queries/schema/schema-general'
+import { Breakdown, BreakdownFilter, InsightVizNode } from '~/queries/schema/schema-general'
 import { BreakdownType, ChartDisplayType, InsightLogicProps } from '~/types'
 
 import type { taxonomicBreakdownFilterLogicType } from './taxonomicBreakdownFilterLogicType'
@@ -235,7 +235,7 @@ export const taxonomicBreakdownFilterLogic = kea<taxonomicBreakdownFilterLogicTy
             eventUsageLogic.actions.reportBreakdownApplied({
                 breakdownType: breakdownType || 'event',
                 queryKind:
-                    props.insightProps.cachedInsight?.query?.source?.kind ??
+                    (props.insightProps.cachedInsight?.query as InsightVizNode)?.source?.kind ??
                     props.insightProps.cachedInsight?.query?.kind,
                 breakdownCount: (values.breakdownFilter.breakdowns?.length ?? 0) + 1,
             })

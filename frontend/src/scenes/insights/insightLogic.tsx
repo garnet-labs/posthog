@@ -41,7 +41,7 @@ import { dashboardsModel } from '~/models/dashboardsModel'
 import { groupsModel } from '~/models/groupsModel'
 import { insightsModel } from '~/models/insightsModel'
 import { tagsModel } from '~/models/tagsModel'
-import { DashboardFilter, HogQLVariable, Node, TileFilters } from '~/queries/schema/schema-general'
+import { DashboardFilter, HogQLVariable, InsightVizNode, Node, TileFilters } from '~/queries/schema/schema-general'
 import {
     isFunnelsQuery,
     isLifecycleQuery,
@@ -249,7 +249,8 @@ export const insightLogic: LogicWrapper<insightLogicType> = kea<insightLogicType
                         eventUsageLogic.actions.reportInsightDescriptionEdited({
                             insightId: values.insight.id,
                             insightShortId: values.insight.short_id,
-                            queryKind: values.insight.query?.source?.kind ?? values.insight.query?.kind,
+                            queryKind:
+                                (values.insight.query as InsightVizNode)?.source?.kind ?? values.insight.query?.kind,
                             previousLength: previousDescription.length,
                             newLength: newDescription.length,
                             hasDescription: newDescription.length > 0,
@@ -750,7 +751,7 @@ export const insightLogic: LogicWrapper<insightLogicType> = kea<insightLogicType
             eventUsageLogic.actions.reportInsightDuplicated({
                 sourceInsightId: insightToDuplicate.id,
                 sourceInsightShortId: insightToDuplicate.short_id,
-                queryKind: insightToDuplicate.query?.source?.kind ?? insightToDuplicate.query?.kind,
+                queryKind: (insightToDuplicate.query as InsightVizNode)?.source?.kind ?? insightToDuplicate.query?.kind,
                 newInsightShortId: newInsight.short_id,
             })
             for (const logic of savedInsightsLogic.findAllMounted()) {
