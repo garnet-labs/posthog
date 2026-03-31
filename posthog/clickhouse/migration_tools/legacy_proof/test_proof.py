@@ -7,23 +7,15 @@ reporting pipeline WITHOUT requiring a live ClickHouse instance.
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
 
-import pytest
-
+from posthog.clickhouse.migration_tools.legacy_proof.normalizer import normalize_node_roles, normalize_sql
 from posthog.clickhouse.migration_tools.legacy_proof.standalone_extract import (
     StandaloneOp,
     StandaloneResult,
     _classify_source,
-    generate_down_sql,
     generate_manifest_yaml,
     generate_up_sql,
 )
-from posthog.clickhouse.migration_tools.legacy_proof.normalizer import (
-    normalize_node_roles,
-    normalize_sql,
-)
-
 
 # --- Classification tests ---
 
@@ -38,7 +30,7 @@ class TestClassifySource:
         assert cls == "exact"
 
     def test_exact_empty_ops(self):
-        source = 'operations = []'
+        source = "operations = []"
         cls, warns = _classify_source(source)
         assert cls == "exact"
         assert any("no-op" in w.lower() or "empty" in w.lower() for w in warns)
@@ -147,7 +139,9 @@ class TestGenerateManifest:
             file_path="test.py",
             classification="exact",
             operations=[
-                StandaloneOp(index=0, sql="SELECT 1", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False),
+                StandaloneOp(
+                    index=0, sql="SELECT 1", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False
+                ),
             ],
         )
         manifest = generate_manifest_yaml(result)
@@ -162,8 +156,16 @@ class TestGenerateManifest:
             file_path="test.py",
             classification="inferred",
             operations=[
-                StandaloneOp(index=0, sql="SELECT 1", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False),
-                StandaloneOp(index=1, sql="SELECT 2", node_roles=["coordinator"], sharded=False, is_alter_on_replicated_table=False),
+                StandaloneOp(
+                    index=0, sql="SELECT 1", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False
+                ),
+                StandaloneOp(
+                    index=1,
+                    sql="SELECT 2",
+                    node_roles=["coordinator"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
             ],
         )
         manifest = generate_manifest_yaml(result)
@@ -179,7 +181,9 @@ class TestGenerateManifest:
             file_path="test.py",
             classification="exact",
             operations=[
-                StandaloneOp(index=0, sql="ALTER TABLE t", node_roles=["data"], sharded=True, is_alter_on_replicated_table=True),
+                StandaloneOp(
+                    index=0, sql="ALTER TABLE t", node_roles=["data"], sharded=True, is_alter_on_replicated_table=True
+                ),
             ],
         )
         manifest = generate_manifest_yaml(result)
@@ -208,7 +212,13 @@ class TestGenerateUpSql:
             migration_name="0001_test",
             file_path="test.py",
             operations=[
-                StandaloneOp(index=0, sql="CREATE TABLE posthog.events (id UInt64)", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False),
+                StandaloneOp(
+                    index=0,
+                    sql="CREATE TABLE posthog.events (id UInt64)",
+                    node_roles=["data"],
+                    sharded=False,
+                    is_alter_on_replicated_table=False,
+                ),
             ],
         )
         up_sql = generate_up_sql(result, "posthog", "posthog", "")
@@ -221,8 +231,12 @@ class TestGenerateUpSql:
             migration_name="0002_test",
             file_path="test.py",
             operations=[
-                StandaloneOp(index=0, sql="SELECT 1", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False),
-                StandaloneOp(index=1, sql="SELECT 2", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False),
+                StandaloneOp(
+                    index=0, sql="SELECT 1", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False
+                ),
+                StandaloneOp(
+                    index=1, sql="SELECT 2", node_roles=["data"], sharded=False, is_alter_on_replicated_table=False
+                ),
             ],
         )
         up_sql = generate_up_sql(result, "posthog", "posthog", "")

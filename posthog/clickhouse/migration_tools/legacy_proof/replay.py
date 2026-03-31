@@ -17,10 +17,10 @@ NOT modify the production database.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import logging
 import re
+import json
+import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -143,13 +143,9 @@ def run_replay(
     if mode == "single" and single is not None:
         files = [f for f in files if int(_MIGRATION_PY_RE.match(f.name).group(1)) == single]
     elif mode == "batch" and batch_start is not None and batch_end is not None:
-        files = [
-            f for f in files if batch_start <= int(_MIGRATION_PY_RE.match(f.name).group(1)) <= batch_end
-        ]
+        files = [f for f in files if batch_start <= int(_MIGRATION_PY_RE.match(f.name).group(1)) <= batch_end]
     elif mode == "upgrade" and checkpoint_migration is not None:
-        files = [
-            f for f in files if int(_MIGRATION_PY_RE.match(f.name).group(1)) > checkpoint_migration
-        ]
+        files = [f for f in files if int(_MIGRATION_PY_RE.match(f.name).group(1)) > checkpoint_migration]
 
     report.total_migrations = len(files)
 
@@ -248,8 +244,8 @@ def _execute_legacy_migration(client, migration_file: Path, database: str) -> No
     Extracts SQL from the migration's operations and runs them in order,
     substituting the proof database name.
     """
-    import importlib.util
     import warnings
+    import importlib.util
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
@@ -329,7 +325,7 @@ def _execute_generated_migration(client, artifact_dir: Path, database: str) -> N
         sql_sections[0] = up_sql_resolved.strip()
 
     steps = manifest.get("steps", [])
-    for step_idx, step in enumerate(steps):
+    for step_idx, _step in enumerate(steps):
         sql = sql_sections.get(step_idx, "")
         if not sql or sql.startswith("SELECT 1"):
             continue

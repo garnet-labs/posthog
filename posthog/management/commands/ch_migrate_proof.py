@@ -128,9 +128,7 @@ class Command(BaseCommand):
                 files = [
                     f
                     for f in sorted(mdir.iterdir())
-                    if f.is_file()
-                    and _RE.match(f.name)
-                    and int(_RE.match(f.name).group(1)) == options["single"]
+                    if f.is_file() and _RE.match(f.name) and int(_RE.match(f.name).group(1)) == options["single"]
                 ]
                 results = [extract_single(f) for f in files]
                 mode = f"single migration {options['single']:04d}"

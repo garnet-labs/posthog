@@ -8,12 +8,7 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
-
-from posthog.clickhouse.migration_tools.legacy_proof.normalizer import (
-    normalize_node_roles,
-    normalize_sql,
-)
+from posthog.clickhouse.migration_tools.legacy_proof.normalizer import normalize_node_roles, normalize_sql
 
 
 class TestNormalizeSQL:
