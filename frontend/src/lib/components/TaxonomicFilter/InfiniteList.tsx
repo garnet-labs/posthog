@@ -234,6 +234,37 @@ const canSelectItem = (
     )
 }
 
+export function getInitialPinnedRowIndex({
+    results,
+    taxonomicGroups,
+    group,
+    listGroupType,
+    groupType,
+    value,
+    isActiveTab,
+}: Pick<InfiniteListRowProps, 'results' | 'taxonomicGroups' | 'group' | 'listGroupType' | 'groupType' | 'value'> & {
+    isActiveTab: boolean
+}): number | null {
+    if (
+        !isActiveTab ||
+        listGroupType !== TaxonomicFilterGroupType.DataWarehouse ||
+        groupType !== TaxonomicFilterGroupType.DataWarehouse ||
+        value == null
+    ) {
+        return null
+    }
+
+    const selectedIndex = results.findIndex((result) => {
+        if (isSkeletonItem(result)) {
+            return false
+        }
+
+        return getItemGroup(result, taxonomicGroups, group)?.getValue?.(result) === value
+    })
+
+    return selectedIndex >= 0 ? selectedIndex : null
+}
+
 interface InfiniteListRowProps {
     results: (TaxonomicDefinitionTypes | SkeletonItem)[]
     taxonomicGroups: TaxonomicFilterGroup[]
@@ -622,6 +653,7 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
     const { onRowsRendered, setIndex, expand, updateRemoteItem } = useActions(infiniteListLogic)
     const [highlightedItemElement, setHighlightedItemElement] = useState<HTMLDivElement | null>(null)
     const [pinnedRowIndex, setPinnedRowIndex] = useState<number | null>(null)
+    const [hasAppliedInitialPin, setHasAppliedInitialPin] = useState(false)
     const isActiveTab = listGroupType === activeTab
     const listRef = useListRef(null)
     const trimmedSearchQuery = searchQuery.trim()
@@ -638,6 +670,7 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
 
     useEffect(() => {
         setPinnedRowIndex(null)
+        setHasAppliedInitialPin(false)
     }, [searchQuery, activeTab, listGroupType, showPopover])
 
     useEffect(() => {
@@ -659,6 +692,41 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
         isLoading,
         totalListCount,
         showSuggestedFiltersEmptyState,
+    ])
+
+    useEffect(() => {
+        if (hasAppliedInitialPin || pinnedRowIndex !== null) {
+            return
+        }
+
+        const initialPinnedRowIndex = getInitialPinnedRowIndex({
+            results,
+            taxonomicGroups,
+            group,
+            listGroupType,
+            groupType,
+            value,
+            isActiveTab,
+        })
+
+        if (initialPinnedRowIndex === null) {
+            return
+        }
+
+        setIndex(initialPinnedRowIndex)
+        setPinnedRowIndex(initialPinnedRowIndex)
+        setHasAppliedInitialPin(true)
+    }, [
+        hasAppliedInitialPin,
+        pinnedRowIndex,
+        results,
+        taxonomicGroups,
+        group,
+        listGroupType,
+        groupType,
+        value,
+        isActiveTab,
+        setIndex,
     ])
 
     return (
