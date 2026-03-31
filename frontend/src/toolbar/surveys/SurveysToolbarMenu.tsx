@@ -1,12 +1,11 @@
 import { useActions, useValues } from 'kea'
 
-import { LemonBadge } from '@posthog/lemon-ui'
+import { LemonBadge, LemonSkeleton } from '@posthog/lemon-ui'
 
 import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
 import { IconOpenInNew } from 'lib/lemon-ui/icons'
 import { LemonInput } from 'lib/lemon-ui/LemonInput'
 import { Link } from 'lib/lemon-ui/Link'
-import { Spinner } from 'lib/lemon-ui/Spinner'
 import { urls } from 'scenes/urls'
 
 import { ToolbarMenu } from '~/toolbar/bar/ToolbarMenu'
@@ -91,8 +90,13 @@ export function SurveysToolbarMenu(): JSX.Element {
             <ToolbarMenu.Body>
                 <div className="mt-1">
                     {allSurveysLoading ? (
-                        <div className="flex justify-center py-4">
-                            <Spinner className="text-2xl" />
+                        <div className="space-y-3 py-1">
+                            {Array.from({ length: 3 }).map((_, i) => (
+                                <div key={i} className="space-y-1.5 py-1">
+                                    <LemonSkeleton className="h-4 w-3/4" />
+                                    <LemonSkeleton className="h-3 w-1/2" />
+                                </div>
+                            ))}
                         </div>
                     ) : filteredSurveys.length > 0 ? (
                         filteredSurveys.map((survey: Survey) => <SurveyRow key={survey.id} survey={survey} />)

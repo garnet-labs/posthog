@@ -1,5 +1,4 @@
-import Fuse from 'fuse.js'
-import { actions, kea, path, reducers, selectors } from 'kea'
+import { actions, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
 import { toolbarFetch } from '~/toolbar/toolbarConfigLogic'
@@ -27,21 +26,28 @@ export const surveysToolbarLogic = kea<surveysToolbarLogicType>([
 
     actions({
         setSearchTerm: (searchTerm: string) => ({ searchTerm }),
+        debouncedSearch: true,
         showButtonSurveys: true,
         hideButtonSurveys: true,
     }),
 
-    loaders(() => ({
+    loaders(({ values }) => ({
         allSurveys: [
             [] as Survey[],
             {
                 loadSurveys: async () => {
-                    const response = await toolbarFetch('/api/projects/@current/surveys/')
+                    const params = new URLSearchParams()
+                    if (values.searchTerm) {
+                        params.set('search', values.searchTerm)
+                    }
+                    const url = `/api/projects/@current/surveys/${params.toString() ? `?${params}` : ''}`
+                    const response = await toolbarFetch(url)
                     if (!response.ok) {
                         return []
                     }
                     const data = await response.json()
-                    return data.results ?? data
+                    const surveys: Survey[] = data.results ?? data
+                    return surveys.filter((s) => !s.archived)
                 },
             },
         ],
@@ -57,20 +63,13 @@ export const surveysToolbarLogic = kea<surveysToolbarLogicType>([
     }),
 
     selectors({
-        filteredSurveys: [
-            (s) => [s.searchTerm, s.allSurveys],
-            (searchTerm, allSurveys): Survey[] => {
-                const nonArchived = allSurveys.filter((s: Survey) => !s.archived)
-                if (!searchTerm) {
-                    return nonArchived
-                }
-                return new Fuse(nonArchived, {
-                    threshold: 0.3,
-                    keys: ['name'],
-                })
-                    .search(searchTerm)
-                    .map(({ item }) => item)
-            },
-        ],
+        filteredSurveys: [(s) => [s.allSurveys], (allSurveys): Survey[] => allSurveys],
     }),
+
+    listeners(({ actions }) => ({
+        setSearchTerm: async (_, breakpoint) => {
+            await breakpoint(300)
+            actions.loadSurveys()
+        },
+    })),
 ])
