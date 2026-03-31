@@ -32,11 +32,11 @@ class StepComparison:
     """Comparison result for a single step."""
 
     step_index: int
-    sql_match: bool
-    normalized_sql_match: bool
-    role_match: bool
-    sharded_match: bool
-    alter_replicated_match: bool
+    sql_match: bool = False
+    normalized_sql_match: bool = False
+    role_match: bool = False
+    sharded_match: bool = False
+    alter_replicated_match: bool = False
     legacy_sql: str = ""
     generated_sql: str = ""
     legacy_roles: list[str] = field(default_factory=list)
