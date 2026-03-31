@@ -302,11 +302,14 @@ just agent + MCP calls): **0.5 vCPU, 1 GB RAM, 5-minute keep-alive**.
 
 Modal pricing (per-second billing, [modal.com/pricing](https://modal.com/pricing)):
 
-| Resource              | Rate           | 5 min cost                                     |
-| --------------------- | -------------- | ---------------------------------------------- |
-| CPU                   | $0.074/vCPU-hr | 0.5 vCPU x 300s x ($0.074/3600) = **$0.00308** |
-| Memory                | $0.026/GiB-hr  | 1 GiB x 300s x ($0.026/3600) = **$0.00217**    |
-| **Total per sandbox** |                | **$0.00525** (~0.5 cents)                      |
+- CPU: $0.00003942/physical-core/sec (1 physical core = 2 vCPU)
+- Memory: $0.00000672/GiB/sec
+
+| Resource                    | Calculation                              | 5 min cost                |
+| --------------------------- | ---------------------------------------- | ------------------------- |
+| CPU (0.5 vCPU = 0.25 cores) | 0.25 cores x 300s x $0.00003942/core/sec | **$0.00296**              |
+| Memory (1 GiB)              | 1 GiB x 300s x $0.00000672/GiB/sec       | **$0.00202**              |
+| **Total per sandbox**       |                                          | **$0.00497** (~0.5 cents) |
 
 **Single conversation:** One 5-minute keep-alive window costs ~**$0.005**.
 If the user sends follow-up messages within the window, no additional sandbox cost
@@ -315,16 +318,16 @@ for 2-3 windows = **$0.01-0.015** in sandbox compute.
 
 **At scale (10,000 conversations/day):**
 
-| Scenario                          | Assumption                                  | Daily cost              | Monthly cost (30d)        |
-| --------------------------------- | ------------------------------------------- | ----------------------- | ------------------------- |
-| Single window                     | Each convo uses 1x 5min keep-alive          | $52.50                  | **$1,575**                |
-| Multi-turn (avg 2 windows)        | Users send follow-ups, extending keep-alive | $105                    | **$3,150**                |
-| Pre-warm pool (50 hot sandboxes)  | 50 sandboxes kept warm continuously 24h     | $6.30/day pool overhead | **$189** pool + per-convo |
-| Pre-warm + 10k convos (2 windows) | Pool + actual usage                         | $111.30                 | **$3,339**                |
+| Scenario                          | Assumption                                  | Daily cost               | Monthly cost (30d)          |
+| --------------------------------- | ------------------------------------------- | ------------------------ | --------------------------- |
+| Single window                     | Each convo uses 1x 5min keep-alive          | $49.70                   | **$1,491**                  |
+| Multi-turn (avg 2 windows)        | Users send follow-ups, extending keep-alive | $99.40                   | **$2,982**                  |
+| Pre-warm pool (50 hot sandboxes)  | 50 sandboxes kept warm continuously 24h     | $71.60/day pool overhead | **$2,148** pool + per-convo |
+| Pre-warm + 10k convos (2 windows) | Pool + actual usage                         | $171                     | **$5,130**                  |
 
 **Key takeaway:** Keep-alive is cheap at ~0.5 cents per conversation.
-The pre-warm pool of 50 sandboxes adds only ~$6/day.
-At 10k conversations/day, the total sandbox compute is ~$3k-3.5k/month --
+The pre-warm pool of 50 sandboxes adds ~$72/day ($2.1k/month).
+At 10k conversations/day, the total sandbox compute is ~$3k-5k/month --
 modest compared to LLM inference costs for the same volume.
 
 **Comparison to current architecture:** Current in-process execution has zero marginal
