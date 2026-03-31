@@ -278,3 +278,120 @@ export function getDefaultIngestionConsumerConfig(): IngestionConsumerConfig {
         PLUGIN_SERVER_EVENTS_INGESTION_PIPELINE: null,
     }
 }
+
+// =============================================================================
+// Kafka producer config
+// Maps to rdkafka producer settings. Field names match env var names so that
+// overrideWithEnv() populates them automatically from the environment.
+// Empty string means "not set" — the zod schema in kafka-producer-config.ts
+// provides sensible defaults for required fields.
+// =============================================================================
+
+export type IngestionProducerConfig = {
+    KAFKA_PRODUCER_METADATA_BROKER_LIST: string
+    KAFKA_PRODUCER_SECURITY_PROTOCOL: string
+    KAFKA_PRODUCER_SASL_MECHANISMS: string
+    KAFKA_PRODUCER_SASL_USERNAME: string
+    KAFKA_PRODUCER_SASL_PASSWORD: string
+    KAFKA_PRODUCER_COMPRESSION_CODEC: string
+    KAFKA_PRODUCER_LINGER_MS: string
+    KAFKA_PRODUCER_BATCH_SIZE: string
+    KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_MESSAGES: string
+    KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_KBYTES: string
+    KAFKA_PRODUCER_ENABLE_SSL_CERTIFICATE_VERIFICATION: string
+    KAFKA_PRODUCER_ENABLE_IDEMPOTENCE: string
+    KAFKA_PRODUCER_MESSAGE_MAX_BYTES: string
+    KAFKA_PRODUCER_BATCH_NUM_MESSAGES: string
+    KAFKA_PRODUCER_STICKY_PARTITIONING_LINGER_MS: string
+    KAFKA_PRODUCER_TOPIC_METADATA_REFRESH_INTERVAL_MS: string
+    KAFKA_PRODUCER_METADATA_MAX_AGE_MS: string
+    KAFKA_PRODUCER_RETRIES: string
+    KAFKA_PRODUCER_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION: string
+}
+
+export function getDefaultIngestionProducerConfig(): IngestionProducerConfig {
+    return {
+        KAFKA_PRODUCER_METADATA_BROKER_LIST: '',
+        KAFKA_PRODUCER_SECURITY_PROTOCOL: '',
+        KAFKA_PRODUCER_SASL_MECHANISMS: '',
+        KAFKA_PRODUCER_SASL_USERNAME: '',
+        KAFKA_PRODUCER_SASL_PASSWORD: '',
+        KAFKA_PRODUCER_COMPRESSION_CODEC: '',
+        KAFKA_PRODUCER_LINGER_MS: '',
+        KAFKA_PRODUCER_BATCH_SIZE: '',
+        KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_MESSAGES: '',
+        KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_KBYTES: '',
+        KAFKA_PRODUCER_ENABLE_SSL_CERTIFICATE_VERIFICATION: '',
+        KAFKA_PRODUCER_ENABLE_IDEMPOTENCE: '',
+        KAFKA_PRODUCER_MESSAGE_MAX_BYTES: '',
+        KAFKA_PRODUCER_BATCH_NUM_MESSAGES: '',
+        KAFKA_PRODUCER_STICKY_PARTITIONING_LINGER_MS: '',
+        KAFKA_PRODUCER_TOPIC_METADATA_REFRESH_INTERVAL_MS: '',
+        KAFKA_PRODUCER_METADATA_MAX_AGE_MS: '',
+        KAFKA_PRODUCER_RETRIES: '',
+        KAFKA_PRODUCER_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION: '',
+    }
+}
+
+// =============================================================================
+// Ingestion output overrides
+// Per-output topic and producer overrides for the analytics ingestion pipeline.
+// Field names match env var names so that overrideWithEnv() populates them
+// automatically. Empty string means "use the default from the output definition".
+// =============================================================================
+
+export type IngestionOutputOverridesConfig = {
+    INGESTION_OUTPUT_EVENTS_PRODUCER: string
+    INGESTION_OUTPUT_EVENTS_TOPIC: string
+    INGESTION_OUTPUT_AI_EVENTS_PRODUCER: string
+    INGESTION_OUTPUT_AI_EVENTS_TOPIC: string
+    INGESTION_OUTPUT_HEATMAPS_PRODUCER: string
+    INGESTION_OUTPUT_HEATMAPS_TOPIC: string
+    INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: string
+    INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: string
+    INGESTION_OUTPUT_DLQ_PRODUCER: string
+    INGESTION_OUTPUT_DLQ_TOPIC: string
+    INGESTION_OUTPUT_OVERFLOW_PRODUCER: string
+    INGESTION_OUTPUT_OVERFLOW_TOPIC: string
+    INGESTION_OUTPUT_ASYNC_PRODUCER: string
+    INGESTION_OUTPUT_ASYNC_TOPIC: string
+    INGESTION_OUTPUT_GROUPS_PRODUCER: string
+    INGESTION_OUTPUT_GROUPS_TOPIC: string
+    INGESTION_OUTPUT_PERSONS_PRODUCER: string
+    INGESTION_OUTPUT_PERSONS_TOPIC: string
+    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: string
+    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: string
+    INGESTION_OUTPUT_APP_METRICS_PRODUCER: string
+    INGESTION_OUTPUT_APP_METRICS_TOPIC: string
+    INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: string
+    INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: string
+}
+
+export function getDefaultIngestionOutputOverridesConfig(): IngestionOutputOverridesConfig {
+    return {
+        INGESTION_OUTPUT_EVENTS_PRODUCER: '',
+        INGESTION_OUTPUT_EVENTS_TOPIC: '',
+        INGESTION_OUTPUT_AI_EVENTS_PRODUCER: '',
+        INGESTION_OUTPUT_AI_EVENTS_TOPIC: '',
+        INGESTION_OUTPUT_HEATMAPS_PRODUCER: '',
+        INGESTION_OUTPUT_HEATMAPS_TOPIC: '',
+        INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: '',
+        INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: '',
+        INGESTION_OUTPUT_DLQ_PRODUCER: '',
+        INGESTION_OUTPUT_DLQ_TOPIC: '',
+        INGESTION_OUTPUT_OVERFLOW_PRODUCER: '',
+        INGESTION_OUTPUT_OVERFLOW_TOPIC: '',
+        INGESTION_OUTPUT_ASYNC_PRODUCER: '',
+        INGESTION_OUTPUT_ASYNC_TOPIC: '',
+        INGESTION_OUTPUT_GROUPS_PRODUCER: '',
+        INGESTION_OUTPUT_GROUPS_TOPIC: '',
+        INGESTION_OUTPUT_PERSONS_PRODUCER: '',
+        INGESTION_OUTPUT_PERSONS_TOPIC: '',
+        INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: '',
+        INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: '',
+        INGESTION_OUTPUT_APP_METRICS_PRODUCER: '',
+        INGESTION_OUTPUT_APP_METRICS_TOPIC: '',
+        INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: '',
+        INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: '',
+    }
+}

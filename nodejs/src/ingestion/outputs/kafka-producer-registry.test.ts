@@ -16,16 +16,8 @@ const TEST_CONFIG_MAP: Record<TestProducer, Partial<Record<AllowedConfigKey, str
 }
 
 describe('KafkaProducerRegistry', () => {
-    const OLD_ENV = process.env
-
     beforeEach(() => {
-        jest.resetModules()
-        process.env = { ...OLD_ENV }
         jest.mocked(KafkaProducerWrapper.createWithConfig).mockReset()
-    })
-
-    afterAll(() => {
-        process.env = OLD_ENV
     })
 
     function mockCreateWithConfig(): void {
@@ -33,16 +25,17 @@ describe('KafkaProducerRegistry', () => {
         jest.mocked(KafkaProducerWrapper.createWithConfig).mockResolvedValue(mockProducer)
     }
 
-    function createRegistry(): KafkaProducerRegistry<TestProducer> {
-        return new KafkaProducerRegistry('rack1', TEST_CONFIG_MAP)
+    function createRegistry(
+        config: Record<string, string | number | boolean | null | undefined> = {}
+    ): KafkaProducerRegistry<TestProducer> {
+        return new KafkaProducerRegistry('rack1', TEST_CONFIG_MAP, config)
     }
 
     describe('getProducer', () => {
-        it('creates a producer with config from env vars', async () => {
-            process.env.TEST_ALPHA_BROKER = 'alpha:9092'
+        it('creates a producer with config values', async () => {
             mockCreateWithConfig()
 
-            const registry = createRegistry()
+            const registry = createRegistry({ TEST_ALPHA_BROKER: 'alpha:9092' })
             await registry.getProducer('ALPHA')
 
             expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledTimes(1)

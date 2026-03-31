@@ -55,3 +55,40 @@ export function getDefaultErrorTrackingConsumerConfig(): ErrorTrackingConsumerCo
         INGESTION_LANE: null,
     }
 }
+
+// =============================================================================
+// Error tracking output overrides
+// Per-output topic and producer overrides for the error tracking pipeline.
+// Field names match env var names so that overrideWithEnv() populates them
+// automatically. Empty string means "use the default from the output definition".
+//
+// Note: ERROR_TRACKING_CONSUMER_OUTPUT_TOPIC, ERROR_TRACKING_CONSUMER_DLQ_TOPIC,
+// and ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC are already in ErrorTrackingConsumerConfig
+// and serve double duty as output topic overrides.
+// =============================================================================
+
+export type ErrorTrackingOutputOverridesConfig = {
+    ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER: string
+    ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER: string
+    ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_TOPIC: string
+    ERROR_TRACKING_OUTPUT_DLQ_PRODUCER: string
+    ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER: string
+    ERROR_TRACKING_OUTPUT_APP_METRICS_PRODUCER: string
+    ERROR_TRACKING_OUTPUT_APP_METRICS_TOPIC: string
+    ERROR_TRACKING_OUTPUT_LOG_ENTRIES_PRODUCER: string
+    ERROR_TRACKING_OUTPUT_LOG_ENTRIES_TOPIC: string
+}
+
+export function getDefaultErrorTrackingOutputOverridesConfig(): ErrorTrackingOutputOverridesConfig {
+    return {
+        ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER: '',
+        ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER: '',
+        ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_TOPIC: '',
+        ERROR_TRACKING_OUTPUT_DLQ_PRODUCER: '',
+        ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER: '',
+        ERROR_TRACKING_OUTPUT_APP_METRICS_PRODUCER: '',
+        ERROR_TRACKING_OUTPUT_APP_METRICS_TOPIC: '',
+        ERROR_TRACKING_OUTPUT_LOG_ENTRIES_PRODUCER: '',
+        ERROR_TRACKING_OUTPUT_LOG_ENTRIES_TOPIC: '',
+    }
+}

@@ -20,23 +20,25 @@ function redactConfig(config: ProducerGlobalConfig): Record<string, unknown> {
  * Typed producer registry that creates and caches Kafka producers by name.
  *
  * Generic over `P` so the set of valid producer names is known at compile time.
- * Each producer name maps to an env var config map via the `configMaps` constructor arg.
+ * Each producer name maps to a config field map via the `configMaps` constructor arg.
+ * The `config` object provides the actual values for those fields.
  * Safe for concurrent calls — caches the in-flight promise to prevent duplicate creation.
  *
- * @see `getProducerConfig()` for how env var maps are parsed into rdkafka config.
+ * @see `getProducerConfig()` for how config field maps are parsed into rdkafka config.
  */
 export class KafkaProducerRegistry<P extends string> {
     private producers: Map<P, Promise<KafkaProducerWrapper>> = new Map()
 
     constructor(
         private kafkaClientRack: string | undefined,
-        private configMaps: Record<P, Partial<Record<AllowedConfigKey, string>>>
+        private configMaps: Record<P, Partial<Record<AllowedConfigKey, string>>>,
+        private config: Record<string, string | number | boolean | null | undefined>
     ) {}
 
     /**
      * Get or create a producer by its typed name.
      *
-     * Returns a cached producer if one exists, otherwise creates it from the env var config map.
+     * Returns a cached producer if one exists, otherwise creates it from the config field map.
      *
      * @param name - The producer name to look up or create.
      */
@@ -52,7 +54,7 @@ export class KafkaProducerRegistry<P extends string> {
     }
 
     private async createProducer(name: P): Promise<KafkaProducerWrapper> {
-        const config = getProducerConfig(this.configMaps[name])
+        const config = getProducerConfig(this.configMaps[name], this.config)
         logger.info('📝', `Creating producer "${name}"`, { config: redactConfig(config) })
         return KafkaProducerWrapper.createWithConfig(this.kafkaClientRack, config)
     }

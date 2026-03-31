@@ -21,6 +21,8 @@ import { PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/analytics/config
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
+    IngestionOutputOverridesConfig,
+    IngestionProducerConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
     PersonHogConfig,
@@ -60,6 +62,8 @@ import { BaseServerConfig, CleanupResources, NodeServer, ServerLifecycle } from 
  */
 export type IngestionGeneralServerConfig = BaseServerConfig &
     IngestionConsumerConfig &
+    IngestionProducerConfig &
+    IngestionOutputOverridesConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
     DatabaseConnectionConfig &
@@ -195,11 +199,13 @@ export class IngestionGeneralServer implements NodeServer {
             // here if a broker is down and the pod never becomes healthy.
             this.ingestionProducerRegistry = new KafkaProducerRegistry(
                 this.config.KAFKA_CLIENT_RACK,
-                PRODUCER_CONFIG_MAP
+                PRODUCER_CONFIG_MAP,
+                this.config
             )
             const ingestionOutputs = await resolveIngestionOutputs(
                 this.ingestionProducerRegistry,
-                INGESTION_OUTPUT_DEFINITIONS
+                INGESTION_OUTPUT_DEFINITIONS,
+                this.config
             )
             const clickhouseGroupRepository = new ClickhouseGroupRepository(ingestionOutputs)
 

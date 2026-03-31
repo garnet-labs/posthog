@@ -3,17 +3,6 @@ import { KafkaProducerRegistry } from './kafka-producer-registry'
 import { IngestionOutputDefinition, resolveIngestionOutputs } from './resolver'
 
 describe('resolveIngestionOutputs', () => {
-    const OLD_ENV = process.env
-
-    beforeEach(() => {
-        jest.resetModules()
-        process.env = { ...OLD_ENV }
-    })
-
-    afterAll(() => {
-        process.env = OLD_ENV
-    })
-
     type TestProducer = 'PRIMARY' | 'SECONDARY'
 
     function createMockProducer(): KafkaProducerWrapper {
@@ -42,14 +31,14 @@ describe('resolveIngestionOutputs', () => {
         events: {
             defaultTopic: 'clickhouse_events',
             defaultProducerName: 'PRIMARY',
-            producerOverrideEnvVar: 'TEST_EVENTS_PRODUCER',
-            topicOverrideEnvVar: 'TEST_EVENTS_TOPIC',
+            producerOverrideField: 'TEST_EVENTS_PRODUCER',
+            topicOverrideField: 'TEST_EVENTS_TOPIC',
         },
         ai_events: {
             defaultTopic: 'clickhouse_ai_events',
             defaultProducerName: 'PRIMARY',
-            producerOverrideEnvVar: 'TEST_AI_EVENTS_PRODUCER',
-            topicOverrideEnvVar: 'TEST_AI_EVENTS_TOPIC',
+            producerOverrideField: 'TEST_AI_EVENTS_PRODUCER',
+            topicOverrideField: 'TEST_AI_EVENTS_TOPIC',
         },
     }
 
@@ -57,7 +46,7 @@ describe('resolveIngestionOutputs', () => {
         const producer = createMockProducer()
         const registry = createMockRegistry({ PRIMARY: producer })
 
-        const outputs = await resolveIngestionOutputs(registry, testDefinitions)
+        const outputs = await resolveIngestionOutputs(registry, testDefinitions, {})
 
         expect(registry.getProducer).toHaveBeenCalledWith('PRIMARY')
 
@@ -68,12 +57,13 @@ describe('resolveIngestionOutputs', () => {
         })
     })
 
-    it('overrides topic from env var', async () => {
-        process.env.TEST_EVENTS_TOPIC = 'custom_events_topic'
+    it('overrides topic from config', async () => {
         const producer = createMockProducer()
         const registry = createMockRegistry({ PRIMARY: producer })
 
-        const outputs = await resolveIngestionOutputs(registry, testDefinitions)
+        const outputs = await resolveIngestionOutputs(registry, testDefinitions, {
+            TEST_EVENTS_TOPIC: 'custom_events_topic',
+        })
 
         await outputs.queueMessages('events', [{ value: Buffer.from('test') }])
         expect(producer.queueMessages).toHaveBeenCalledWith({
@@ -83,11 +73,12 @@ describe('resolveIngestionOutputs', () => {
     })
 
     it('topic override only affects the overridden output', async () => {
-        process.env.TEST_EVENTS_TOPIC = 'custom_events_topic'
         const producer = createMockProducer()
         const registry = createMockRegistry({ PRIMARY: producer })
 
-        const outputs = await resolveIngestionOutputs(registry, testDefinitions)
+        const outputs = await resolveIngestionOutputs(registry, testDefinitions, {
+            TEST_EVENTS_TOPIC: 'custom_events_topic',
+        })
 
         await outputs.queueMessages('ai_events', [{ value: Buffer.from('test') }])
         expect(producer.queueMessages).toHaveBeenCalledWith({
@@ -96,13 +87,14 @@ describe('resolveIngestionOutputs', () => {
         })
     })
 
-    it('overrides producer from env var', async () => {
-        process.env.TEST_EVENTS_PRODUCER = 'SECONDARY'
+    it('overrides producer from config', async () => {
         const primary = createMockProducer()
         const secondary = createMockProducer()
         const registry = createMockRegistry({ PRIMARY: primary, SECONDARY: secondary })
 
-        const outputs = await resolveIngestionOutputs(registry, testDefinitions)
+        const outputs = await resolveIngestionOutputs(registry, testDefinitions, {
+            TEST_EVENTS_PRODUCER: 'SECONDARY',
+        })
 
         expect(registry.getProducer).toHaveBeenCalledWith('SECONDARY')
 
@@ -112,12 +104,13 @@ describe('resolveIngestionOutputs', () => {
     })
 
     it('producer override only affects the overridden output', async () => {
-        process.env.TEST_EVENTS_PRODUCER = 'SECONDARY'
         const primary = createMockProducer()
         const secondary = createMockProducer()
         const registry = createMockRegistry({ PRIMARY: primary, SECONDARY: secondary })
 
-        const outputs = await resolveIngestionOutputs(registry, testDefinitions)
+        const outputs = await resolveIngestionOutputs(registry, testDefinitions, {
+            TEST_EVENTS_PRODUCER: 'SECONDARY',
+        })
 
         await outputs.queueMessages('ai_events', [{ value: Buffer.from('test') }])
         expect(primary.queueMessages).toHaveBeenCalledTimes(1)
@@ -127,14 +120,16 @@ describe('resolveIngestionOutputs', () => {
     it('throws when producer creation fails', async () => {
         const registry = createMockRegistry({})
 
-        await expect(resolveIngestionOutputs(registry, testDefinitions)).rejects.toThrow('Unknown producer: PRIMARY')
+        await expect(resolveIngestionOutputs(registry, testDefinitions, {})).rejects.toThrow(
+            'Unknown producer: PRIMARY'
+        )
     })
 
     it('resolves all outputs in parallel', async () => {
         const producer = createMockProducer()
         const registry = createMockRegistry({ PRIMARY: producer })
 
-        await resolveIngestionOutputs(registry, testDefinitions)
+        await resolveIngestionOutputs(registry, testDefinitions, {})
 
         expect(registry.getProducer).toHaveBeenCalledTimes(2)
     })
@@ -142,9 +137,27 @@ describe('resolveIngestionOutputs', () => {
     it('resolves empty definitions', async () => {
         const registry = createMockRegistry({})
 
-        const outputs = await resolveIngestionOutputs(registry, {})
+        const outputs = await resolveIngestionOutputs(registry, {}, {})
 
         expect(registry.getProducer).not.toHaveBeenCalled()
         expect(await outputs.checkHealth()).toEqual([])
+    })
+
+    it('treats empty string overrides as unset', async () => {
+        const producer = createMockProducer()
+        const registry = createMockRegistry({ PRIMARY: producer })
+
+        const outputs = await resolveIngestionOutputs(registry, testDefinitions, {
+            TEST_EVENTS_TOPIC: '',
+            TEST_EVENTS_PRODUCER: '',
+        })
+
+        expect(registry.getProducer).toHaveBeenCalledWith('PRIMARY')
+
+        await outputs.queueMessages('events', [{ value: Buffer.from('test') }])
+        expect(producer.queueMessages).toHaveBeenCalledWith({
+            topic: 'clickhouse_events',
+            messages: [{ value: Buffer.from('test') }],
+        })
     })
 })

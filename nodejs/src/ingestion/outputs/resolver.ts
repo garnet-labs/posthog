@@ -4,37 +4,45 @@ import { KafkaProducerRegistry } from './kafka-producer-registry'
 /**
  * Static definition of an ingestion output.
  *
- * Specifies the default topic and producer, plus env var names for overriding each at deploy time.
+ * Specifies the default topic and producer, plus config field names for
+ * overriding each at deploy time. The field names match env var names so
+ * that overrideWithEnv() populates them automatically from the environment.
  */
 export interface IngestionOutputDefinition<P extends string> {
     defaultTopic: string
     defaultProducerName: P
-    /** Env var name to override the producer for this output. */
-    producerOverrideEnvVar: string
-    /** Env var name to override the topic for this output. */
-    topicOverrideEnvVar: string
+    /** Config field name to override the producer for this output. */
+    producerOverrideField: string
+    /** Config field name to override the topic for this output. */
+    topicOverrideField: string
 }
 
 /**
  * One-time factory that builds an `IngestionOutputs` from static definitions and a producer registry.
  *
- * For each output, resolves the producer (with env var override) and topic (with env var override).
+ * For each output, resolves the producer (with config override) and topic (with config override).
  * All producers are resolved in parallel. Throws if any producer creation fails.
  *
  * @param registry - The producer registry to resolve producers from.
  * @param definitions - Static output definitions keyed by output name.
+ * @param config - The server config object to read override values from.
  * @returns A fully resolved `IngestionOutputs` instance ready for use by pipeline steps.
  */
 export async function resolveIngestionOutputs<O extends string, P extends string>(
     registry: KafkaProducerRegistry<P>,
-    definitions: Record<O, IngestionOutputDefinition<P>>
+    definitions: Record<O, IngestionOutputDefinition<P>>,
+    config: Record<string, string | number | boolean | null | undefined>
 ): Promise<IngestionOutputs<O>> {
     const promises: Promise<{ outputName: O; config: IngestionOutput }>[] = []
 
     for (const outputName in definitions) {
         const definition = definitions[outputName]
-        const producerName = (process.env[definition.producerOverrideEnvVar] ?? definition.defaultProducerName) as P
-        const topic = process.env[definition.topicOverrideEnvVar] ?? definition.defaultTopic
+        const producerOverride = config[definition.producerOverrideField]
+        const producerName = (
+            producerOverride && producerOverride !== '' ? producerOverride : definition.defaultProducerName
+        ) as P
+        const topicOverride = config[definition.topicOverrideField]
+        const topic = topicOverride && topicOverride !== '' ? String(topicOverride) : definition.defaultTopic
 
         // getProducer throws if the producer is not found, so all keys of O
         // are guaranteed to be present in the result or the call fails.

@@ -40,31 +40,36 @@ const producerConfigSchema = z.object({
     'max.in.flight.requests.per.connection': z.coerce.number().default(5),
 })
 
-/** The rdkafka config keys that can be set via env vars. */
+/** The rdkafka config keys that can be configured. */
 export type AllowedConfigKey = keyof z.input<typeof producerConfigSchema>
 
 /**
- * Build an rdkafka producer config from environment variables.
+ * Build an rdkafka producer config from a config object.
  *
- * Takes a map of rdkafka config keys to env var names, reads each env var,
- * and parses the values through the zod schema. Missing env vars fall back
- * to schema defaults. Invalid values throw.
+ * Takes a map of rdkafka config keys to config field names, plus the server
+ * config object. Looks up each field name in the config object, filters out
+ * empty/missing values, and parses the result through the zod schema. Missing
+ * values fall back to schema defaults. Invalid values throw.
  *
- * @param envVarMap - Maps rdkafka config keys (e.g. `linger.ms`) to
- *   env var names (e.g. `KAFKA_PRODUCER_LINGER_MS`).
+ * @param configFieldMap - Maps rdkafka config keys (e.g. `linger.ms`) to
+ *   config field names (e.g. `KAFKA_PRODUCER_LINGER_MS`).
+ * @param config - The server config object to read values from.
  * @returns A fully typed `ProducerGlobalConfig` with `client.id` set to the hostname.
  */
-export function getProducerConfig(envVarMap: Partial<Record<AllowedConfigKey, string>>): ProducerGlobalConfig {
-    const envValues: Record<string, string> = {}
-    for (const configKey in envVarMap) {
-        const envVar = envVarMap[configKey as AllowedConfigKey]!
-        const value = process.env[envVar]
-        if (value) {
-            envValues[configKey] = value
+export function getProducerConfig(
+    configFieldMap: Partial<Record<AllowedConfigKey, string>>,
+    config: Record<string, string | number | boolean | null | undefined>
+): ProducerGlobalConfig {
+    const values: Record<string, string> = {}
+    for (const configKey in configFieldMap) {
+        const fieldName = configFieldMap[configKey as AllowedConfigKey]!
+        const value = config[fieldName]
+        if (value !== undefined && value !== null && value !== '') {
+            values[configKey] = String(value)
         }
     }
 
-    const parsed = producerConfigSchema.parse(envValues)
+    const parsed = producerConfigSchema.parse(values)
 
     return { 'client.id': hostname(), ...parsed }
 }

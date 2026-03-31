@@ -13,12 +13,13 @@ import { defaultConfig } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import {
     DatabaseConnectionConfig,
+    IngestionProducerConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
 } from '../ingestion/config'
-import { ErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
+import { ErrorTrackingConsumerConfig, ErrorTrackingOutputOverridesConfig } from '../ingestion/error-tracking/config'
 import { ERROR_TRACKING_OUTPUT_DEFINITIONS } from '../ingestion/error-tracking/config/outputs'
 import { PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/error-tracking/config/producers'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
@@ -50,6 +51,8 @@ import { BaseServerConfig, CleanupResources, NodeServer, ServerLifecycle } from 
  */
 export type ErrorTrackingServerConfig = BaseServerConfig &
     ErrorTrackingConsumerConfig &
+    ErrorTrackingOutputOverridesConfig &
+    IngestionProducerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
     DatabaseConnectionConfig &
@@ -106,9 +109,17 @@ export class ErrorTrackingServer implements NodeServer {
         logger.info('👍', 'Postgres Router ready')
 
         logger.info('🤔', 'Connecting to Kafka...')
-        this.producerRegistry = new KafkaProducerRegistry(this.config.KAFKA_CLIENT_RACK, PRODUCER_CONFIG_MAP)
+        this.producerRegistry = new KafkaProducerRegistry(
+            this.config.KAFKA_CLIENT_RACK,
+            PRODUCER_CONFIG_MAP,
+            this.config
+        )
         this.kafkaMetricsProducer = await KafkaProducerWrapper.create(this.config.KAFKA_CLIENT_RACK)
-        const outputs = await resolveIngestionOutputs(this.producerRegistry, ERROR_TRACKING_OUTPUT_DEFINITIONS)
+        const outputs = await resolveIngestionOutputs(
+            this.producerRegistry,
+            ERROR_TRACKING_OUTPUT_DEFINITIONS,
+            this.config
+        )
         logger.info('👍', 'Kafka ready')
 
         logger.info('🤔', 'Connecting to ingestion Redis...')

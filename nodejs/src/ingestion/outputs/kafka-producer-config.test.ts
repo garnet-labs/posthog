@@ -12,19 +12,8 @@ const TEST_CONFIG_MAP: Partial<Record<AllowedConfigKey, string>> = {
 }
 
 describe('getProducerConfig', () => {
-    const OLD_ENV = process.env
-
-    beforeEach(() => {
-        jest.resetModules()
-        process.env = { ...OLD_ENV }
-    })
-
-    afterAll(() => {
-        process.env = OLD_ENV
-    })
-
-    it('returns defaults when no env vars are set', () => {
-        const config = getProducerConfig(TEST_CONFIG_MAP)
+    it('returns defaults when no config values are set', () => {
+        const config = getProducerConfig(TEST_CONFIG_MAP, {})
 
         expect(config).toEqual({
             'client.id': hostname(),
@@ -42,12 +31,12 @@ describe('getProducerConfig', () => {
         })
     })
 
-    it('overrides defaults with env vars', () => {
-        process.env.TEST_BROKER = 'broker1:9092,broker2:9092'
-        process.env.TEST_COMPRESSION = 'gzip'
-        process.env.TEST_LINGER = '50'
-
-        const config = getProducerConfig(TEST_CONFIG_MAP)
+    it('overrides defaults with config values', () => {
+        const config = getProducerConfig(TEST_CONFIG_MAP, {
+            TEST_BROKER: 'broker1:9092,broker2:9092',
+            TEST_COMPRESSION: 'gzip',
+            TEST_LINGER: '50',
+        })
 
         expect(config['metadata.broker.list']).toBe('broker1:9092,broker2:9092')
         expect(config['compression.codec']).toBe('gzip')
@@ -55,46 +44,60 @@ describe('getProducerConfig', () => {
     })
 
     it('coerces numeric values', () => {
-        process.env.TEST_LINGER = '100'
-        process.env.TEST_BATCH_SIZE = '4194304'
-
-        const config = getProducerConfig(TEST_CONFIG_MAP)
+        const config = getProducerConfig(TEST_CONFIG_MAP, {
+            TEST_LINGER: '100',
+            TEST_BATCH_SIZE: '4194304',
+        })
 
         expect(config['linger.ms']).toBe(100)
         expect(config['batch.size']).toBe(4194304)
     })
 
     it('parses boolean values', () => {
-        process.env.TEST_SSL_VERIFY = 'false'
-
-        const config = getProducerConfig(TEST_CONFIG_MAP)
+        const config = getProducerConfig(TEST_CONFIG_MAP, {
+            TEST_SSL_VERIFY: 'false',
+        })
 
         expect(config['enable.ssl.certificate.verification']).toBe(false)
     })
 
     it('throws on invalid enum values', () => {
-        process.env.TEST_SECURITY_PROTOCOL = 'invalid_protocol'
-
-        expect(() => getProducerConfig(TEST_CONFIG_MAP)).toThrow()
+        expect(() =>
+            getProducerConfig(TEST_CONFIG_MAP, {
+                TEST_SECURITY_PROTOCOL: 'invalid_protocol',
+            })
+        ).toThrow()
     })
 
     it('throws on invalid boolean values', () => {
-        process.env.TEST_SSL_VERIFY = 'maybe'
-
-        expect(() => getProducerConfig(TEST_CONFIG_MAP)).toThrow()
+        expect(() =>
+            getProducerConfig(TEST_CONFIG_MAP, {
+                TEST_SSL_VERIFY: 'maybe',
+            })
+        ).toThrow()
     })
 
     it('always sets client.id to hostname', () => {
-        const config = getProducerConfig(TEST_CONFIG_MAP)
+        const config = getProducerConfig(TEST_CONFIG_MAP, {})
 
         expect(config['client.id']).toBe(hostname())
     })
 
-    it('ignores env vars not in the config map', () => {
-        process.env.TEST_UNKNOWN_SETTING = 'value'
-
-        const config = getProducerConfig(TEST_CONFIG_MAP)
+    it('ignores config fields not in the config map', () => {
+        const config = getProducerConfig(TEST_CONFIG_MAP, {
+            TEST_UNKNOWN_SETTING: 'value',
+        })
 
         expect(config).not.toHaveProperty('unknown.setting')
+    })
+
+    it('treats empty string values as unset', () => {
+        const config = getProducerConfig(TEST_CONFIG_MAP, {
+            TEST_BROKER: '',
+            TEST_LINGER: '',
+        })
+
+        expect(config['metadata.broker.list']).toBe('kafka:9092')
+        expect(config['linger.ms']).toBe(20)
     })
 })

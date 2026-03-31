@@ -12,9 +12,13 @@ import { EncryptedFields } from './cdp/utils/encryption-utils'
 import type { CommonConfig } from './common/config'
 import { InternalCaptureService } from './common/services/internal-capture'
 import { InternalFetchService } from './common/services/internal-fetch'
-import type { IngestionConsumerConfig } from './ingestion/config'
+import type {
+    IngestionConsumerConfig,
+    IngestionOutputOverridesConfig,
+    IngestionProducerConfig,
+} from './ingestion/config'
 import type { CookielessManager } from './ingestion/cookieless/cookieless-manager'
-import type { ErrorTrackingConsumerConfig } from './ingestion/error-tracking/config'
+import type { ErrorTrackingConsumerConfig, ErrorTrackingOutputOverridesConfig } from './ingestion/error-tracking/config'
 import { KafkaProducerWrapper } from './kafka/producer'
 import type { LogsIngestionConsumerConfig, TracesIngestionConsumerConfig } from './logs-ingestion/config'
 import type { SessionRecordingApiConfig, SessionRecordingConfig } from './session-recording/config'
@@ -43,10 +47,12 @@ export {
 export {
     IngestionConsumerConfig,
     IngestionLane,
+    IngestionOutputOverridesConfig,
+    IngestionProducerConfig,
     PersonBatchWritingDbWriteMode,
     PersonBatchWritingMode,
 } from './ingestion/config'
-export { ErrorTrackingConsumerConfig } from './ingestion/error-tracking/config'
+export { ErrorTrackingConsumerConfig, ErrorTrackingOutputOverridesConfig } from './ingestion/error-tracking/config'
 export { LogsIngestionConsumerConfig } from './logs-ingestion/config'
 export { SessionRecordingApiConfig, SessionRecordingConfig } from './session-recording/config'
 
@@ -115,9 +121,12 @@ export interface PluginsServerConfig
     extends CommonConfig,
         CdpConfig,
         IngestionConsumerConfig,
+        IngestionProducerConfig,
+        IngestionOutputOverridesConfig,
         LogsIngestionConsumerConfig,
         TracesIngestionConsumerConfig,
         ErrorTrackingConsumerConfig,
+        ErrorTrackingOutputOverridesConfig,
         SessionRecordingConfig,
         SessionRecordingApiConfig {}
 

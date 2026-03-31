@@ -1,7 +1,14 @@
 import { getDefaultCdpConfig } from '../cdp/config'
 import { getDefaultCommonConfig } from '../common/config'
-import { getDefaultIngestionConsumerConfig } from '../ingestion/config'
-import { getDefaultErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
+import {
+    getDefaultIngestionConsumerConfig,
+    getDefaultIngestionOutputOverridesConfig,
+    getDefaultIngestionProducerConfig,
+} from '../ingestion/config'
+import {
+    getDefaultErrorTrackingConsumerConfig,
+    getDefaultErrorTrackingOutputOverridesConfig,
+} from '../ingestion/error-tracking/config'
 import {
     getDefaultLogsIngestionConsumerConfig,
     getDefaultTracesIngestionConsumerConfig,
@@ -20,9 +27,12 @@ export function getDefaultConfig(): PluginsServerConfig {
         ...getDefaultCommonConfig(),
         ...getDefaultCdpConfig(),
         ...getDefaultIngestionConsumerConfig(),
+        ...getDefaultIngestionProducerConfig(),
+        ...getDefaultIngestionOutputOverridesConfig(),
         ...getDefaultLogsIngestionConsumerConfig(),
         ...getDefaultTracesIngestionConsumerConfig(),
         ...getDefaultErrorTrackingConsumerConfig(),
+        ...getDefaultErrorTrackingOutputOverridesConfig(),
         ...getDefaultSessionRecordingConfig(),
         ...getDefaultSessionRecordingApiConfig(),
     }

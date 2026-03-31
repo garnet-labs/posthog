@@ -1,8 +1,8 @@
 import type { AllowedConfigKey } from '../outputs'
 
 /**
- * DEFAULT uses the existing KAFKA_PRODUCER_* env vars — backwards compatible
- * with all existing deployments including dev and hobby.
+ * DEFAULT uses the KAFKA_PRODUCER_* config fields from IngestionProducerConfig.
+ * Values are populated from env vars via overrideWithEnv().
  */
 export const DEFAULT_PRODUCER = 'DEFAULT' as const
 export type DefaultProducer = typeof DEFAULT_PRODUCER
@@ -11,8 +11,9 @@ export type DefaultProducer = typeof DEFAULT_PRODUCER
 export type ProducerName = DefaultProducer
 
 /**
- * Mapping from rdkafka config key to env var name for each producer.
- * Each producer has a fixed set of env vars — no dynamic scanning.
+ * Mapping from rdkafka config key to config field name for each producer.
+ * The config field names match env var names so that overrideWithEnv()
+ * populates them automatically from the environment.
  */
 export const PRODUCER_CONFIG_MAP: Record<ProducerName, Partial<Record<AllowedConfigKey, string>>> = {
     [DEFAULT_PRODUCER]: {
