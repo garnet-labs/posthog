@@ -83,6 +83,26 @@ describe('TaxonomicPopover', () => {
         })
     })
 
+    it('keeps the dropdown open while close is blocked', async () => {
+        renderPopover({
+            closeBlocked: true,
+        })
+
+        await userEvent.click(screen.getByText('Please select'))
+
+        await waitFor(() => {
+            expect(screen.getByTestId('prop-filter-events-1')).toBeInTheDocument()
+        })
+
+        await userEvent.click(document.body)
+
+        expect(screen.getByTestId('prop-filter-events-1')).toBeInTheDocument()
+
+        await userEvent.keyboard('{Escape}')
+
+        expect(screen.getByTestId('prop-filter-events-1')).toBeInTheDocument()
+    })
+
     describe('TaxonomicStringPopover', () => {
         function renderStringPopover(
             props: Partial<React.ComponentProps<typeof TaxonomicStringPopover>> = {}

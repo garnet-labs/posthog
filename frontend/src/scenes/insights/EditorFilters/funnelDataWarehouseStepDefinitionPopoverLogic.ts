@@ -1,3 +1,4 @@
+import equal from 'fast-deep-equal'
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import posthog from 'posthog-js'
 
@@ -105,10 +106,22 @@ export const funnelDataWarehouseStepDefinitionPopoverLogic = kea<funnelDataWareh
                     ? localDefinition
                     : getDataWarehouseItemWithFieldDefaults(table, selectedItemMeta),
         ],
+        defaultDefinition: [
+            (s, p) => [p.table, s.selectedItemMeta],
+            (table, selectedItemMeta) => getDataWarehouseItemWithFieldDefaults(table, selectedItemMeta),
+        ],
         activeFieldValue: [
             (s) => [s.scopedLocalDefinition, s.activeFieldKey],
             (scopedLocalDefinition, activeFieldKey) =>
                 (scopedLocalDefinition as Partial<Record<FunnelFieldKey, string | undefined>>)[activeFieldKey],
+        ],
+        hasUnsavedChanges: [
+            (s) => [s.defaultDefinition, s.scopedLocalDefinition],
+            (defaultDefinition, scopedLocalDefinition) =>
+                !equal(
+                    Object.fromEntries(EDITABLE_FIELD_ORDER.map((key) => [key, defaultDefinition[key]])),
+                    Object.fromEntries(EDITABLE_FIELD_ORDER.map((key) => [key, scopedLocalDefinition[key]]))
+                ),
         ],
         previewTable: [
             (_, p) => [p.table],

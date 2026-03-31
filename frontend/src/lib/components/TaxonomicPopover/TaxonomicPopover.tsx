@@ -1,5 +1,5 @@
 import { Placement } from '@floating-ui/react'
-import { Ref, forwardRef, useEffect, useState } from 'react'
+import { Ref, createContext, forwardRef, useCallback, useContext, useEffect, useState } from 'react'
 
 import { IconX } from '@posthog/icons'
 
@@ -18,6 +18,20 @@ import { LocalFilter } from 'scenes/insights/filters/ActionFilter/entityFilterLo
 import { MaxContextTaxonomicFilterOption } from 'scenes/max/maxTypes'
 
 import { AnyDataNode, DatabaseSchemaField } from '~/queries/schema/schema-general'
+
+const TaxonomicPopoverCloseBlockContext = createContext<((blocked: boolean) => void) | null>(null)
+
+export function useTaxonomicPopoverCloseBlocker(blocked: boolean): void {
+    const setCloseBlocked = useContext(TaxonomicPopoverCloseBlockContext)
+
+    useEffect(() => {
+        setCloseBlocked?.(blocked)
+
+        return () => {
+            setCloseBlocked?.(false)
+        }
+    }, [blocked, setCloseBlocked])
+}
 
 export interface TaxonomicPopoverProps<ValueType extends TaxonomicFilterValue = TaxonomicFilterValue> extends Omit<
     LemonButtonProps,
@@ -40,6 +54,7 @@ export interface TaxonomicPopoverProps<ValueType extends TaxonomicFilterValue = 
     allowClear?: boolean
     style?: React.CSSProperties
     closeOnChange?: boolean
+    closeBlocked?: boolean
     excludedProperties?: ExcludedProperties
     selectedProperties?: SelectedProperties
     metadataSource?: AnyDataNode
@@ -79,6 +94,7 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
         placeholderClass,
         allowClear = false,
         closeOnChange = true,
+        closeBlocked = false,
         excludedProperties,
         selectedProperties,
         metadataSource,
@@ -97,8 +113,15 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
 ): JSX.Element {
     const [localValue, setLocalValue] = useState<ValueType>(value || ('' as ValueType))
     const [visible, setVisible] = useState(false)
+    const [internalCloseBlocked, setInternalCloseBlocked] = useState(false)
 
     const isClearButtonShown = allowClear && !!localValue
+    const isCloseBlocked = closeBlocked || internalCloseBlocked
+    const requestClose = useCallback((): void => {
+        if (!isCloseBlocked) {
+            setVisible(false)
+        }
+    }, [isCloseBlocked])
 
     const buttonPropsFinal: Omit<LemonButtonProps, 'sideAction' | 'sideIcon'> = buttonPropsRest
     buttonPropsFinal.children = localValue ? (
@@ -106,7 +129,13 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
     ) : placeholder || placeholderClass ? (
         <span className={placeholderClass}>{placeholder}</span>
     ) : null
-    buttonPropsFinal.onClick = () => setVisible(!visible)
+    buttonPropsFinal.onClick = () => {
+        if (visible) {
+            requestClose()
+        } else {
+            setVisible(true)
+        }
+    }
     if (!buttonPropsFinal.type) {
         buttonPropsFinal.type = 'secondary'
     }
@@ -120,39 +149,46 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
         }
     }, [value]) // oxlint-disable-line react-hooks/exhaustive-deps
 
+    useEffect(() => {
+        if (!visible && internalCloseBlocked) {
+            setInternalCloseBlocked(false)
+        }
+    }, [visible, internalCloseBlocked])
+
     return (
         <LemonDropdown
             overlay={
-                <TaxonomicFilter
-                    groupType={groupType}
-                    value={value}
-                    filter={filter}
-                    onChange={({ type }, payload, item) => {
-                        onChange?.(payload as ValueType, type, item)
-                        if (closeOnChange) {
-                            setVisible(false)
-                        }
-                    }}
-                    taxonomicGroupTypes={groupTypes ?? [groupType]}
-                    eventNames={eventNames}
-                    schemaColumns={schemaColumns}
-                    metadataSource={metadataSource}
-                    excludedProperties={excludedProperties}
-                    selectedProperties={selectedProperties}
-                    showNumericalPropsOnly={showNumericalPropsOnly}
-                    dataWarehousePopoverFields={dataWarehousePopoverFields}
-                    maxContextOptions={maxContextOptions}
-                    allowNonCapturedEvents={allowNonCapturedEvents}
-                    definitionPopoverRenderer={definitionPopoverRenderer}
-                    width={width}
-                />
+                <TaxonomicPopoverCloseBlockContext.Provider value={setInternalCloseBlocked}>
+                    <TaxonomicFilter
+                        groupType={groupType}
+                        value={value}
+                        filter={filter}
+                        onChange={({ type }, payload, item) => {
+                            onChange?.(payload as ValueType, type, item)
+                            if (closeOnChange) {
+                                setVisible(false)
+                            }
+                        }}
+                        onClose={requestClose}
+                        taxonomicGroupTypes={groupTypes ?? [groupType]}
+                        eventNames={eventNames}
+                        schemaColumns={schemaColumns}
+                        metadataSource={metadataSource}
+                        excludedProperties={excludedProperties}
+                        selectedProperties={selectedProperties}
+                        showNumericalPropsOnly={showNumericalPropsOnly}
+                        dataWarehousePopoverFields={dataWarehousePopoverFields}
+                        maxContextOptions={maxContextOptions}
+                        allowNonCapturedEvents={allowNonCapturedEvents}
+                        definitionPopoverRenderer={definitionPopoverRenderer}
+                        width={width}
+                    />
+                </TaxonomicPopoverCloseBlockContext.Provider>
             }
             matchWidth={false}
             actionable
             visible={visible}
-            onClickOutside={() => {
-                setVisible(false)
-            }}
+            onClickOutside={requestClose}
             placement={placement}
         >
             {isClearButtonShown ? (

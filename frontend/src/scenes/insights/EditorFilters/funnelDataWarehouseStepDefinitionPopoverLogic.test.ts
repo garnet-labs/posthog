@@ -94,4 +94,55 @@ describe('funnelDataWarehouseStepDefinitionPopoverLogic', () => {
             })
         )
     })
+
+    it('tracks unsaved staged field changes separately from the committed selection', () => {
+        const table = {
+            id: 'warehouse-table-id',
+            name: 'warehouse_table',
+            type: 'data_warehouse' as const,
+            format: 'Parquet',
+            url_pattern: '',
+            fields: {
+                id: createField('id', 'integer'),
+                created_at: createField('created_at', 'datetime'),
+                person_id: createField('person_id', 'string'),
+            },
+        } satisfies DataWarehouseTableForInsight
+
+        const popoverDefinitionLogic = definitionPopoverLogic.build({
+            type: TaxonomicFilterGroupType.DataWarehouse,
+            selectedItemMeta: {
+                table_name: 'warehouse_table',
+                id_field: 'id',
+                timestamp_field: 'created_at',
+                aggregation_target_field: 'person_id',
+            },
+        })
+        popoverDefinitionLogic.mount()
+        popoverDefinitionLogic.actions.setDefinition(table)
+
+        const logic = funnelDataWarehouseStepDefinitionPopoverLogic.build({
+            table,
+            group: { type: TaxonomicFilterGroupType.DataWarehouse } as any,
+            dataWarehousePopoverFields: [
+                { key: 'id_field', label: 'Unique ID' },
+                { key: 'timestamp_field', label: 'Timestamp' },
+                { key: 'aggregation_target_field', label: 'Aggregation target', allowHogQL: true },
+            ],
+            selectedItemMeta: popoverDefinitionLogic.props.selectedItemMeta,
+            onSelectItem: jest.fn(),
+            insightProps: { dashboardItemId: undefined } as any,
+        })
+        logic.mount()
+
+        expect((logic.values as Record<string, any>).hasUnsavedChanges).toBe(false)
+
+        logic.actions.setLocalDefinition({
+            timestamp_field: 'custom_timestamp',
+        } as Partial<DataWarehouseTableForInsight>)
+        expect((logic.values as Record<string, any>).hasUnsavedChanges).toBe(true)
+
+        logic.actions.setLocalDefinition({ timestamp_field: 'created_at' } as Partial<DataWarehouseTableForInsight>)
+        expect((logic.values as Record<string, any>).hasUnsavedChanges).toBe(false)
+    })
 })

@@ -6,6 +6,7 @@ import { HogQLDropdown } from 'lib/components/HogQLDropdown/HogQLDropdown'
 import { DatabaseTablePreview } from 'lib/components/TablePreview/DatabaseTablePreview'
 import { taxonomicFilterLogic } from 'lib/components/TaxonomicFilter/taxonomicFilterLogic'
 import { DefinitionPopoverRendererProps, TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
+import { useTaxonomicPopoverCloseBlocker } from 'lib/components/TaxonomicPopover/TaxonomicPopover'
 import { DataWarehouseTableForInsight } from 'scenes/data-warehouse/types'
 import { urls } from 'scenes/urls'
 
@@ -62,12 +63,15 @@ function FunnelDataWarehouseStepDefinitionPopoverContent({
         activeFieldIsHogQL,
         isAggregatingByGroup,
         isAggregatingByHogQL,
+        hasUnsavedChanges,
         linkedTables,
         previewTable,
         previewExpressionColumns,
         previewSelectedKey,
-    } = useValues(logic)
+    } = useValues(logic) as Record<string, any> & { hasUnsavedChanges: boolean }
     const { setActiveFieldKey, selectTable, setLocalDefinition } = useActions(logic)
+
+    useTaxonomicPopoverCloseBlocker(hasUnsavedChanges)
 
     return (
         <div className="flex flex-col">
