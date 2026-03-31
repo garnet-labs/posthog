@@ -162,11 +162,11 @@ def should_send_notification(
             return False
 
         if team_id is not None:
-            project_settings: dict[str, Any] | None = settings.get(
+            digest_project_settings: dict[str, Any] | None = settings.get(
                 _DIGEST_PROJECT_SETTING_KEYS[notification_type], None
             )
-            if project_settings is not None:
-                return project_settings.get(str(team_id), False)
+            if digest_project_settings is not None:
+                return digest_project_settings.get(str(team_id), False)
 
         return True
 

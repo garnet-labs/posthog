@@ -56,7 +56,7 @@ def get_overview_for_team(team: Team) -> dict:
         item = items_by_key.get(key)
         if item:
             current = item.value or 0
-            previous = item.previous or 0
+            previous = item.previous
             result[output_key] = {
                 "current": current,
                 "previous": previous,
@@ -80,7 +80,7 @@ def get_overview_for_team(team: Team) -> dict:
     duration_item = items_by_key.get("session duration")
     if duration_item:
         current_duration = duration_item.value or 0
-        prev_duration = duration_item.previous or 0
+        prev_duration = duration_item.previous
         result["avg_session_duration"] = {
             "current": _format_duration(current_duration),
             "previous": _format_duration(prev_duration),
@@ -123,22 +123,22 @@ def get_top_pages(team: Team, limit: int = 5) -> list[dict]:
         )
         runner = WebStatsTableQueryRunner(team=team, query=query)
         response = runner.calculate()
+
+        if not response.results:
+            return []
+
+        return [
+            {
+                "host": "",
+                "path": row[0] or "",
+                "visitors": row[1][0],
+                "pageviews": row[2][0],
+            }
+            for row in response.results
+        ]
     except Exception:
         logger.exception("failed to query top pages", team_id=team.pk)
         return []
-
-    if not response.results:
-        return []
-
-    return [
-        {
-            "host": "",
-            "path": row[0] or "",
-            "visitors": row[1][0],
-            "pageviews": row[2][0],
-        }
-        for row in response.results
-    ]
 
 
 def get_top_sources(team: Team, limit: int = 5) -> list[dict]:
@@ -156,21 +156,21 @@ def get_top_sources(team: Team, limit: int = 5) -> list[dict]:
         )
         runner = WebStatsTableQueryRunner(team=team, query=query)
         response = runner.calculate()
+
+        if not response.results:
+            return []
+
+        return [
+            {
+                "source": row[0] or "",
+                "visitors": row[1][0],
+            }
+            for row in response.results
+            if row[0]
+        ]
     except Exception:
         logger.exception("failed to query top sources", team_id=team.pk)
         return []
-
-    if not response.results:
-        return []
-
-    return [
-        {
-            "source": row[0] or "",
-            "visitors": row[1][0],
-        }
-        for row in response.results
-        if row[0]
-    ]
 
 
 def get_goals_for_team(team: Team, limit: int = 5) -> list[dict]:

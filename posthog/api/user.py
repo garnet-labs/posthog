@@ -278,6 +278,12 @@ class UserSerializer(serializers.ModelSerializer):
             **(instance.partial_notification_settings or {}),
         }
 
+        _dict_notification_keys = (
+            "project_weekly_digest_disabled",
+            "error_tracking_weekly_digest_project_enabled",
+            "web_analytics_weekly_digest_project_enabled",
+        )
+
         for key, value in notification_settings.items():
             if key not in Notifications.__annotations__:
                 raise serializers.ValidationError(
@@ -287,11 +293,6 @@ class UserSerializer(serializers.ModelSerializer):
 
             expected_type = Notifications.__annotations__[key]
 
-            _dict_notification_keys = (
-                "project_weekly_digest_disabled",
-                "error_tracking_weekly_digest_project_enabled",
-                "web_analytics_weekly_digest_project_enabled",
-            )
             if key in _dict_notification_keys:
                 if not isinstance(value, dict):
                     raise serializers.ValidationError(
