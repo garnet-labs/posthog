@@ -1,3 +1,5 @@
+from typing import Any
+
 from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -118,7 +120,7 @@ class OrganizationIntegrationViewSet(
         ) or integration.config.get("credentials", {}).get("access_token")
         if access_token and integration.integration_id:
             all_same = production_id == preview_id == development_id
-            secrets = [
+            secrets: list[dict[str, Any]] = [
                 {
                     "name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
                     "value": production_team.api_token,
