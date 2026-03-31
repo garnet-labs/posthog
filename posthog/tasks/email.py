@@ -1,7 +1,7 @@
 import uuid
 import datetime
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, cast
 from urllib.parse import quote
 
 from django.conf import settings
@@ -162,8 +162,9 @@ def should_send_notification(
             return False
 
         if team_id is not None:
-            digest_project_settings: dict[str, Any] | None = settings.get(
-                _DIGEST_PROJECT_SETTING_KEYS[notification_type], None
+            digest_project_settings: dict[str, Any] | None = cast(
+                dict[str, Any] | None,
+                settings.get(_DIGEST_PROJECT_SETTING_KEYS[notification_type], None),
             )
             if digest_project_settings is not None:
                 return digest_project_settings.get(str(team_id), False)
