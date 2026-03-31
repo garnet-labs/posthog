@@ -25,7 +25,9 @@ from posthog.temporal.data_imports.sources.postgres.postgres import (
     get_connection_metadata as get_postgres_connection_metadata,
     get_foreign_keys as get_postgres_foreign_keys,
     get_postgres_row_count,
+    get_primary_key_columns,
     get_schemas as get_postgres_schemas,
+    pg_connection,
     postgres_source,
 )
 
@@ -39,36 +41,6 @@ PostgresErrors = {
     "timeout expired": "Connection timed out. Does your database have our IP addresses allowed?",
     "SSL/TLS connection is required": "SSL/TLS connection is required but your database does not support it. Please enable SSL/TLS on your PostgreSQL server.",
 }
-
-
-def _get_tables_with_primary_keys(
-    host: str,
-    port: int,
-    user: str,
-    password: str,
-    database: str,
-    schema: str,
-    table_names: list[str],
-) -> set[str]:
-    """Return the set of table names that have a primary key constraint."""
-    if not table_names:
-        return set()
-
-    import psycopg
-
-    try:
-        with psycopg.connect(
-            host=host, port=port, user=user, password=password, dbname=database, connect_timeout=15
-        ) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT DISTINCT table_name FROM information_schema.table_constraints "
-                    "WHERE constraint_type = 'PRIMARY KEY' AND table_schema = %s AND table_name = ANY(%s)",
-                    (schema, table_names),
-                )
-                return {row[0] for row in cur.fetchall()}
-    except Exception:
-        return set()
 
 
 @SourceRegistry.register
@@ -216,15 +188,14 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             else:
                 row_counts = {}
 
-            tables_with_pks = _get_tables_with_primary_keys(
+            with pg_connection(
                 host=host,
                 port=port,
                 user=config.user,
                 password=config.password,
                 database=config.database,
-                schema=config.schema,
-                table_names=list(db_schemas.keys()),
-            )
+            ) as conn:
+                tables_with_pks = set(get_primary_key_columns(conn, config.schema, list(db_schemas.keys())).keys())
 
         for table_name, columns in db_schemas.items():
             incremental_field_tuples = filter_postgres_incremental_fields(columns)

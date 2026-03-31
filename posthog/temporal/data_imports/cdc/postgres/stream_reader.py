@@ -16,6 +16,7 @@ from psycopg import sql
 
 from posthog.temporal.data_imports.cdc.postgres.decoder import PgOutputDecoder
 from posthog.temporal.data_imports.cdc.types import ChangeEvent
+from posthog.temporal.data_imports.sources.postgres.postgres import get_primary_key_columns
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class PgCDCStreamReader:
             password=self._params.password,
             sslmode=self._params.sslmode,
             connect_timeout=15,
+            autocommit=True,
             sslrootcert="/tmp/no.txt",
             sslcert="/tmp/no.txt",
             sslkey="/tmp/no.txt",
@@ -107,6 +109,15 @@ class PgCDCStreamReader:
             cur.execute(query)
 
         logger.info("Advanced slot %s to position %s", self._params.slot_name, position)
+
+    def get_primary_key_columns(self, schema_name: str, table_names: list[str]) -> dict[str, list[str]]:
+        """Query information_schema for PK columns of the given tables.
+
+        Returns a dict of table_name → list of PK column names.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        return get_primary_key_columns(self._conn, schema_name, table_names)
 
     @property
     def truncated_tables(self) -> list[str]:
