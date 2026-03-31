@@ -3,7 +3,6 @@ use crate::unordered_steps::AggregateFunnelRowUnordered;
 use crate::PropVal;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::iter::repeat;
 use uuid::Uuid;
 
@@ -36,7 +35,7 @@ pub struct Args {
     pub value: Vec<Event>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Result(
     pub i8,
     pub PropVal,
@@ -44,6 +43,11 @@ pub struct Result(
     pub Vec<Vec<Uuid>>,
     pub u32,
 );
+
+#[derive(Serialize)]
+pub struct Output {
+    pub result: Vec<Result>,
+}
 
 struct Vars {
     // The furthest step we've made it to, 1 indexed
@@ -67,27 +71,25 @@ pub const DEFAULT_ENTERED_TIMESTAMP: EnteredTimestamp = EnteredTimestamp {
     steps: 0,
 };
 
-pub fn process_line(line: &str) -> Value {
-    let args = parse_args(line);
+pub fn process_args(args: Args) -> Output {
     if args.funnel_order_type == "unordered" {
         let mut aggregate_funnel_row = AggregateFunnelRowUnordered {
             results: Vec::with_capacity(args.prop_vals.len()),
             breakdown_step: Option::None,
         };
-        let result = aggregate_funnel_row.calculate_funnel_from_user_events(&args);
-        return json!({ "result": result });
+        let result = aggregate_funnel_row
+            .calculate_funnel_from_user_events(&args)
+            .clone();
+        return Output { result };
     }
     let mut aggregate_funnel_row = AggregateFunnelRow {
         results: Vec::with_capacity(args.prop_vals.len()),
         breakdown_step: Option::None,
     };
-    let result = aggregate_funnel_row.calculate_funnel_from_user_events(&args);
-    json!({ "result": result })
-}
-
-#[inline(always)]
-fn parse_args(line: &str) -> Args {
-    serde_json::from_str(line).expect("Invalid JSON input")
+    let result = aggregate_funnel_row
+        .calculate_funnel_from_user_events(&args)
+        .clone();
+    Output { result }
 }
 
 impl AggregateFunnelRow {

@@ -3,7 +3,6 @@ use crate::unordered_trends::AggregateFunnelRowUnordered;
 use crate::PropVal;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -50,6 +49,11 @@ pub enum Exclusion {
 #[derive(Serialize)]
 pub struct ResultStruct(pub u64, pub i8, pub PropVal, pub Uuid);
 
+#[derive(Serialize)]
+pub struct Output {
+    pub result: Vec<ResultStruct>,
+}
+
 pub struct MaxStep {
     pub step: usize,
     pub timestamp: f64,
@@ -78,22 +82,22 @@ const DEFAULT_ENTERED_TIMESTAMP: EnteredTimestamp = EnteredTimestamp {
     excluded: false,
 };
 
-pub fn process_line(line: &str) -> Value {
-    let args = parse_args(line);
+pub fn process_args(args: Args) -> Output {
     if args.funnel_order_type == "unordered" {
         let mut aggregate_funnel_row = AggregateFunnelRowUnordered {
             breakdown_step: Option::None,
         };
         let result = aggregate_funnel_row.calculate_funnel_from_user_events(&args);
-        return json!({ "result": result });
+        return Output { result };
     }
     let mut aggregate_funnel_row = AggregateFunnelRow {
         breakdown_step: Option::None,
     };
     let result: Vec<ResultStruct> = aggregate_funnel_row.calculate_funnel_from_user_events(&args);
-    json!({ "result": result })
+    Output { result }
 }
 
+#[cfg(test)]
 #[inline(always)]
 fn parse_args(line: &str) -> Args {
     serde_json::from_str(line).unwrap_or_else(|e| {

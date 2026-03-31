@@ -32,7 +32,7 @@
             <type>Array(Tuple(Nullable(Float64), UUID, Nullable(String), Array(Int8)))</type>
             <name>value</name>
         </argument>
-        <format>JSONEachRow</format>
+        <format>RowBinary</format>
         <command>aggregate_funnel steps</command>
         <lifetime>600</lifetime>
     </function>
