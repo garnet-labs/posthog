@@ -295,6 +295,43 @@ Even warm starts have overhead vs current in-process execution.
 | MCP tool call | ~50ms (in-process) | <100ms | With in-house MCP      |
 | First token   | ~1-2s              | <3s    | Including context prep |
 
+### Keep-alive cost analysis (Modal)
+
+Using a reduced sandbox spec for Max conversations (no repo cloning, no code execution --
+just agent + MCP calls): **0.5 vCPU, 1 GB RAM, 5-minute keep-alive**.
+
+Modal pricing (per-second billing, [modal.com/pricing](https://modal.com/pricing)):
+
+| Resource              | Rate           | 5 min cost                                     |
+| --------------------- | -------------- | ---------------------------------------------- |
+| CPU                   | $0.074/vCPU-hr | 0.5 vCPU x 300s x ($0.074/3600) = **$0.00308** |
+| Memory                | $0.026/GiB-hr  | 1 GiB x 300s x ($0.026/3600) = **$0.00217**    |
+| **Total per sandbox** |                | **$0.00525** (~0.5 cents)                      |
+
+**Single conversation:** One 5-minute keep-alive window costs ~**$0.005**.
+If the user sends follow-up messages within the window, no additional sandbox cost
+(just extends the timer). A typical multi-turn conversation might keep alive
+for 2-3 windows = **$0.01-0.015** in sandbox compute.
+
+**At scale (10,000 conversations/day):**
+
+| Scenario                          | Assumption                                  | Daily cost              | Monthly cost (30d)        |
+| --------------------------------- | ------------------------------------------- | ----------------------- | ------------------------- |
+| Single window                     | Each convo uses 1x 5min keep-alive          | $52.50                  | **$1,575**                |
+| Multi-turn (avg 2 windows)        | Users send follow-ups, extending keep-alive | $105                    | **$3,150**                |
+| Pre-warm pool (50 hot sandboxes)  | 50 sandboxes kept warm continuously 24h     | $6.30/day pool overhead | **$189** pool + per-convo |
+| Pre-warm + 10k convos (2 windows) | Pool + actual usage                         | $111.30                 | **$3,339**                |
+
+**Key takeaway:** Keep-alive is cheap at ~0.5 cents per conversation.
+The pre-warm pool of 50 sandboxes adds only ~$6/day.
+At 10k conversations/day, the total sandbox compute is ~$3k-3.5k/month --
+modest compared to LLM inference costs for the same volume.
+
+**Comparison to current architecture:** Current in-process execution has zero marginal
+compute cost per conversation (Django process is already running). The sandbox model
+adds ~$0.005-0.015 per conversation in compute overhead, which is negligible relative
+to the ~$0.10-1.00+ LLM cost per conversation (depending on tool calls and context size).
+
 ---
 
 ## Phase 5: Quality & personality
