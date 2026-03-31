@@ -27,7 +27,6 @@ export const Default: Story = {
         <div className="flex flex-col gap-2">
             <div>
                 <Button onClick={() => toast({ title: 'Hello world' })}>Show toast</Button>
-
             </div>
             <div className="flex flex-col gap-2 max-w-[360px]">
                 <ToastCard
