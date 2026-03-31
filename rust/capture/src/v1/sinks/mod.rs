@@ -1,3 +1,7 @@
+pub mod event;
+pub mod sink;
 pub mod types;
 
-pub use types::Destination;
+pub use event::Event;
+pub use sink::{KafkaSink, Sink};
+pub use types::{Destination, KafkaResult, Outcome, SinkConfig, SinkResult};
