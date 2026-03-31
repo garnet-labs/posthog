@@ -166,6 +166,25 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
                 })
             },
         ],
+        /** LemonTable empty copy: tab-only empty (e.g. Starred) must not say "filters" when `isFiltering` is false. */
+        dashboardsTableEmptyState: [
+            (s) => [s.currentTab, s.isFiltering],
+            (currentTab: DashboardsTab, isFiltering: boolean) => {
+                if (isFiltering) {
+                    return 'No dashboards matching your filters!'
+                }
+                if (currentTab === DashboardsTab.Starred) {
+                    return 'No starred dashboards yet. Star one from the All dashboards tab to see it here.'
+                }
+                if (currentTab === DashboardsTab.Pinned) {
+                    return 'No pinned dashboards.'
+                }
+                if (currentTab === DashboardsTab.Yours) {
+                    return 'No dashboards created by you.'
+                }
+                return 'No dashboards matching your filters!'
+            },
+        ],
         filteredTags: [
             (s) => [s.tags, s.tagSearch],
             (tags, search) => {

@@ -1,5 +1,5 @@
 import { useActions, useValues } from 'kea'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
 import { IconStar, IconStarFilled } from '@posthog/icons'
 
@@ -34,13 +34,8 @@ export interface DashboardStarToggleProps {
 }
 
 export function DashboardStarToggle({ dashboardId, name, dataAttr }: DashboardStarToggleProps): JSX.Element {
-    const { shortcutData } = useValues(projectTreeDataLogic)
+    const { shortcutData, shortcutDataLoading } = useValues(projectTreeDataLogic)
     const { addShortcutItem, deleteShortcut } = useActions(projectTreeDataLogic)
-    const [busy, setBusy] = useState(false)
-
-    useEffect(() => {
-        projectTreeDataLogic.actions.loadShortcuts()
-    }, [])
 
     const shortcutId = useMemo(
         () => dashboardShortcutIdForDashboard(shortcutData, dashboardId),
@@ -49,14 +44,14 @@ export function DashboardStarToggle({ dashboardId, name, dataAttr }: DashboardSt
     const isStarred = !!shortcutId
 
     const onClick = (): void => {
-        if (busy) {
+        if (shortcutDataLoading) {
             return
         }
-        setBusy(true)
-        const pending = shortcutId
-            ? deleteShortcut(shortcutId)
-            : addShortcutItem(buildDashboardShortcutFileEntry(dashboardId, name))
-        void Promise.resolve(pending).finally(() => setBusy(false))
+        if (shortcutId) {
+            deleteShortcut(shortcutId)
+        } else {
+            addShortcutItem(buildDashboardShortcutFileEntry(dashboardId, name))
+        }
     }
 
     return (
@@ -65,7 +60,6 @@ export function DashboardStarToggle({ dashboardId, name, dataAttr }: DashboardSt
             data-attr-id={DASHBOARD_FAVORITE_TOGGLE_DATA_ATTR_ID}
             data-dashboard-id={dashboardId}
             data-starred={isStarred}
-            loading={busy}
             size="small"
             onClick={onClick}
             tooltip={isStarred ? 'Remove from starred' : 'Add to starred'}

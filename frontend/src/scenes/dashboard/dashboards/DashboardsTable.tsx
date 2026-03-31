@@ -1,5 +1,4 @@
 import { useActions, useValues } from 'kea'
-import { useMemo } from 'react'
 
 import { IconHome, IconLock, IconPin, IconPinFilled, IconShare } from '@posthog/icons'
 
@@ -18,11 +17,7 @@ import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { accessLevelSatisfied } from 'lib/utils/accessControlUtils'
 import { DashboardEventSource } from 'lib/utils/eventUsageLogic'
 import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
-import {
-    compareDashboardsListDefaultOrder,
-    dashboardsLogic,
-    starredDashboardIdsFromShortcuts,
-} from 'scenes/dashboard/dashboards/dashboardsLogic'
+import { dashboardsLogic } from 'scenes/dashboard/dashboards/dashboardsLogic'
 import { deleteDashboardLogic } from 'scenes/dashboard/deleteDashboardLogic'
 import { duplicateDashboardLogic } from 'scenes/dashboard/duplicateDashboardLogic'
 import { teamLogic } from 'scenes/teamLogic'
@@ -64,13 +59,12 @@ export function DashboardsTable({
 }: DashboardsTableProps): JSX.Element {
     const { unpinDashboard, pinDashboard } = useActions(dashboardsModel)
     const { tableSortingChanged } = useActions(dashboardsLogic)
-    const { tableSorting } = useValues(dashboardsLogic)
+    const { tableSorting, dashboardsTableEmptyState } = useValues(dashboardsLogic)
     const { currentTeam } = useValues(teamLogic)
     const { showDuplicateDashboardModal } = useActions(duplicateDashboardLogic)
     const { showDeleteDashboardModal } = useActions(deleteDashboardLogic)
     const { openMoveToModal } = useActions(moveToLogic)
-    const { itemsByRef, shortcutData } = useValues(projectTreeDataLogic)
-    const starredIds = useMemo(() => starredDashboardIdsFromShortcuts(shortcutData ?? []), [shortcutData])
+    const { itemsByRef } = useValues(projectTreeDataLogic)
 
     const columns: LemonTableColumns<DashboardType> = [
         {
@@ -138,7 +132,7 @@ export function DashboardsTable({
                     />
                 )
             },
-            sorter: (a, b) => compareDashboardsListDefaultOrder(a, b, starredIds),
+            sorter: (a, b) => (a.name ?? 'Untitled').localeCompare(b.name ?? 'Untitled'),
         },
         {
             title: 'Tags',
@@ -274,7 +268,7 @@ export function DashboardsTable({
                 loading={dashboardsLoading}
                 defaultSorting={tableSorting}
                 onSort={tableSortingChanged}
-                emptyState="No dashboards matching your filters!"
+                emptyState={dashboardsTableEmptyState}
                 nouns={['dashboard', 'dashboards']}
             />
         </>
