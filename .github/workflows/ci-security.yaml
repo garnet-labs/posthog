@@ -52,6 +52,8 @@ jobs:
                     --error \
                     --metrics=off \
                     --verbose \
+                    --jobs auto \
+                    --include="*.py" \
                     common/ ee/ posthog/ products/
 
     semgrep-go:
