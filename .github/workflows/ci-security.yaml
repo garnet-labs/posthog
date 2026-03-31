@@ -52,7 +52,7 @@ jobs:
                     --error \
                     --metrics=off \
                     --verbose \
-                    --jobs auto \
+                    --jobs 2 \
                     --include="*.py" \
                     common/ ee/ posthog/ products/
 
