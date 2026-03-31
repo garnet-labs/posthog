@@ -9,18 +9,17 @@ export function recordingDomainEntryToUrlTrigger(domainEntry: string): UrlTrigge
     if (!trimmed) {
         return null
     }
-    let parsed: URL
-    try {
-        parsed = new URL(trimmed)
-    } catch {
+    const match = /^(https?:\/\/)(.+)$/.exec(trimmed)
+    if (!match) {
         return null
     }
-    if (parsed.username || parsed.password) {
+    const protocol = match[1]
+    const host = match[2].replace(/\/+$/, '')
+    if (!host) {
         return null
     }
-    const protocolAndSlashes = `${parsed.protocol}//`
-    const hostPattern = escapeRegExp(parsed.host).replace(/\\\*/g, '.*')
-    const pattern = `^${protocolAndSlashes}${hostPattern}(?:$|[/?#][\\s\\S]*)?$`
+    const hostPattern = escapeRegExp(host).replace(/\\\*/g, '.*')
+    const pattern = `^${protocol}${hostPattern}(?:[/?#:][\\s\\S]*)?$`
     try {
         new RegExp(pattern)
     } catch {

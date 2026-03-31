@@ -27,7 +27,7 @@ const meta: Meta = {
     decorators: [
         mswDecorator({
             patch: {
-                '/api/environments/:id/': async (req, res, ctx) => {
+                '/api/environments/:team_id/': async (req, res, ctx) => {
                     const body = await req.json()
                     return res(ctx.json({ ...MOCK_DEFAULT_TEAM, ...body }))
                 },

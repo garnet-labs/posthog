@@ -8,37 +8,44 @@ import {
 } from './recordingDomainToUrlTrigger'
 
 describe('recordingDomainEntryToUrlTrigger', () => {
-    it('maps a fixed host to a regex that allows any path, query, or hash', () => {
-        const t = recordingDomainEntryToUrlTrigger('https://posthog.com')
-        expect(t).toEqual({
-            url: '^https://posthog\\.com(?:$|[/?#][\\s\\S]*)?$',
+    it.each([
+        ['https://posthog.com', '^https://posthog\\.com(?:[/?#:][\\s\\S]*)?$'],
+        ['https://*.blah.com', '^https://.*\\.blah\\.com(?:[/?#:][\\s\\S]*)?$'],
+        ['http://localhost:3000', '^http://localhost:3000(?:[/?#:][\\s\\S]*)?$'],
+        ['https://app.example.com:8443', '^https://app\\.example\\.com:8443(?:[/?#:][\\s\\S]*)?$'],
+        ['https://*.example.com:9090', '^https://.*\\.example\\.com:9090(?:[/?#:][\\s\\S]*)?$'],
+    ])('converts %s to regex %s', (domain, expectedPattern) => {
+        expect(recordingDomainEntryToUrlTrigger(domain)).toEqual({
+            url: expectedPattern,
             matching: 'regex',
         })
-        expect(t?.url && new RegExp(t.url).test('https://posthog.com')).toBe(true)
-        expect(t?.url && new RegExp(t.url).test('https://posthog.com/')).toBe(true)
-        expect(t?.url && new RegExp(t.url).test('https://posthog.com/pricing')).toBe(true)
-        expect(t?.url && new RegExp(t.url).test('https://posthog.com?ref=1')).toBe(true)
-        expect(t?.url && new RegExp(t.url).test('https://posthog.com#x')).toBe(true)
     })
 
-    it('maps *.hostname like authorized domains (wildcard only in host)', () => {
-        const t = recordingDomainEntryToUrlTrigger('https://*.blah.com')
-        expect(t).toEqual({
-            url: '^https://.*\\.blah\\.com(?:$|[/?#][\\s\\S]*)?$',
-            matching: 'regex',
-        })
-        expect(t?.url && new RegExp(t.url).test('https://app.blah.com/path')).toBe(true)
-        expect(t?.url && new RegExp(t.url).test('https://blah.com/')).toBe(false)
+    it.each([
+        ['https://posthog.com', 'https://posthog.com', true],
+        ['https://posthog.com', 'https://posthog.com/', true],
+        ['https://posthog.com', 'https://posthog.com/pricing', true],
+        ['https://posthog.com', 'https://posthog.com?ref=1', true],
+        ['https://posthog.com', 'https://posthog.com#x', true],
+        ['https://posthog.com', 'https://posthog.computer', false],
+        ['https://*.blah.com', 'https://app.blah.com/path', true],
+        ['https://*.blah.com', 'https://blah.com/', false],
+        ['http://localhost:3000', 'http://localhost:3000/', true],
+        ['http://localhost:3000', 'http://localhost:30001', false],
+        ['https://app.example.com', 'https://app.example.com:8443/page', true],
+        ['https://app.example.com:8443', 'https://app.example.com:8443/path', true],
+        ['https://app.example.com:8443', 'https://app.example.com:9999/path', false],
+        ['https://app.example.com:8443', 'https://app.example.com/path', false],
+        ['https://*.example.com:9090', 'https://staging.example.com:9090/', true],
+        ['https://*.example.com:9090', 'https://staging.example.com:1111/', false],
+    ])('regex from %s matches %s => %s', (domain, url, expected) => {
+        const t = recordingDomainEntryToUrlTrigger(domain)
+        expect(t).not.toBeNull()
+        expect(new RegExp(t!.url).test(url)).toBe(expected)
     })
 
-    it('preserves http and ports', () => {
-        const t = recordingDomainEntryToUrlTrigger('http://localhost:3000')
-        expect(t?.url && new RegExp(t.url).test('http://localhost:3000/')).toBe(true)
-    })
-
-    it('returns null for invalid input', () => {
-        expect(recordingDomainEntryToUrlTrigger('')).toBe(null)
-        expect(recordingDomainEntryToUrlTrigger('not a url')).toBe(null)
+    it.each([[''], ['not a url'], ['ftp://nope.com']])('returns null for invalid input %s', (domain) => {
+        expect(recordingDomainEntryToUrlTrigger(domain)).toBeNull()
     })
 })
 
@@ -46,14 +53,14 @@ describe('mergeNewUrlTriggersIntoExisting', () => {
     it('dedupes against existing triggers', () => {
         const existing = [
             {
-                url: '^https://posthog\\.com(?:$|[/?#][\\s\\S]*)?$',
+                url: '^https://posthog\\.com(?:[/?#:][\\s\\S]*)?$',
                 matching: 'regex' as const,
             },
         ]
         const merged = mergeNewUrlTriggersIntoExisting(
             [
-                { url: '^https://posthog\\.com(?:$|[/?#][\\s\\S]*)?$', matching: 'regex' },
-                { url: '^https://other\\.com(?:$|[/?#][\\s\\S]*)?$', matching: 'regex' },
+                { url: '^https://posthog\\.com(?:[/?#:][\\s\\S]*)?$', matching: 'regex' },
+                { url: '^https://other\\.com(?:[/?#:][\\s\\S]*)?$', matching: 'regex' },
             ],
             existing
         )
