@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 import typing
+import datetime as dt
 import dataclasses
 
 from django.db import close_old_connections
@@ -19,10 +20,10 @@ import structlog
 from temporalio import activity
 
 from posthog.temporal.data_imports.cdc.batcher import ChangeEventBatcher
-from posthog.temporal.data_imports.cdc.postgres.stream_reader import PgCDCConnectionParams, PgCDCStreamReader
 from posthog.temporal.data_imports.pipelines.pipeline_v3.kafka.common import SyncTypeLiteral
 from posthog.temporal.data_imports.pipelines.pipeline_v3.kafka.producer import KafkaBatchProducer
 from posthog.temporal.data_imports.pipelines.pipeline_v3.s3.writer import S3BatchWriter
+from posthog.temporal.data_imports.sources.postgres.cdc.stream_reader import PgCDCConnectionParams, PgCDCStreamReader
 
 from products.data_warehouse.backend.models import ExternalDataJob, ExternalDataSchema, ExternalDataSource
 
@@ -177,8 +178,36 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
     params = _get_pg_connection_params(source)
     reader = PgCDCStreamReader(params)
 
+    created_jobs: list[ExternalDataJob] = []
+
+    # Mark CDC schemas as Running at the start
+    for schema in cdc_schemas:
+        schema.status = ExternalDataSchema.Status.RUNNING
+        schema.save(update_fields=["status", "updated_at"])
+
     try:
         reader.connect()
+
+        # Build PK map from schema metadata (stored at source creation)
+        pk_columns_by_table: dict[str, list[str]] = {}
+        for schema in cdc_schemas:
+            stored_pks = schema.sync_type_config.get("primary_key_columns", [])
+            if stored_pks:
+                pk_columns_by_table[schema.name] = stored_pks
+
+        # Fall back to information_schema for any tables missing PKs
+        missing_pk_tables = [t for t in cdc_table_names if t not in pk_columns_by_table]
+        if missing_pk_tables:
+            db_schema = (source.job_inputs or {}).get("schema", "public")
+            queried_pks = reader.get_primary_key_columns(db_schema, missing_pk_tables)
+            pk_columns_by_table.update(queried_pks)
+            # Persist discovered PKs to avoid re-querying
+            for schema in cdc_schemas:
+                if schema.name in queried_pks:
+                    schema.sync_type_config["primary_key_columns"] = queried_pks[schema.name]
+                    schema.save(update_fields=["sync_type_config", "updated_at"])
+
+        log.info("pk_columns_loaded", tables=list(pk_columns_by_table.keys()))
 
         batcher = ChangeEventBatcher()
         last_position: str | None = None
@@ -195,10 +224,27 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
             event_count += 1
 
         log.info("wal_changes_read", event_count=event_count, tables=batcher.table_names)
-
-        if batcher.event_count == 0 and last_position is None:
+        if event_count == 0:
+            now = dt.datetime.now(tz=dt.UTC)
+            for schema in cdc_schemas:
+                schema.status = ExternalDataSchema.Status.COMPLETED
+                schema.latest_error = None
+                schema.last_synced_at = now
+                schema.save(update_fields=["status", "latest_error", "last_synced_at", "updated_at"])
             log.info("no_wal_changes")
             return
+
+        # Detect PK changes from decoder's Relation messages
+        for table_name in batcher.table_names:
+            decoder_pks = reader._decoder.get_key_columns(table_name)
+            stored_pks = pk_columns_by_table.get(table_name, [])
+            if decoder_pks and decoder_pks != stored_pks:
+                log.warning("pk_columns_changed", table=table_name, old=stored_pks, new=decoder_pks)
+                pk_columns_by_table[table_name] = decoder_pks
+                schema = schema_by_name.get(table_name)
+                if schema is not None:
+                    schema.sync_type_config["primary_key_columns"] = decoder_pks
+                    schema.save(update_fields=["sync_type_config", "updated_at"])
 
         # Check for truncated tables — mark for re-snapshot
         for table_name in reader.truncated_tables:
@@ -209,6 +255,15 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 schema.sync_type_config.pop("cdc_last_log_position", None)
                 schema.initial_sync_complete = False
                 schema.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
+                # Unpause the per-schema ExternalDataJobWorkflow schedule so
+                # the initial snapshot can run again
+                try:
+                    from products.data_warehouse.backend.data_load.service import unpause_external_data_schedule
+
+                    unpause_external_data_schedule(str(schema.id))
+                    log.info("unpaused_schema_schedule_for_resnapshot", schema_id=str(schema.id))
+                except Exception:
+                    log.warning("failed_to_unpause_schema_schedule", schema_id=str(schema.id))
         reader.clear_truncated_tables()
 
         # Flush deferred runs for schemas that just transitioned to streaming
@@ -236,6 +291,7 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 workflow_run_id=activity.info().workflow_run_id,
                 pipeline_version=ExternalDataJob.PipelineVersion.V2,
             )
+            created_jobs.append(job)
 
             run_uuid = str(uuid.uuid4())
             s3_writer = S3BatchWriter(
@@ -256,6 +312,8 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 cdc_mode=schema.cdc_mode,
             )
 
+            key_columns = pk_columns_by_table.get(table_name, [])
+
             if schema.cdc_mode == "streaming":
                 producer = KafkaBatchProducer(
                     team_id=inputs.team_id,
@@ -266,6 +324,7 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                     sync_type=typing.cast(SyncTypeLiteral, "cdc"),
                     run_uuid=run_uuid,
                     logger=log,
+                    primary_keys=key_columns or None,
                 )
                 producer.send_batch_notification(
                     batch_result=batch_result,
@@ -276,6 +335,11 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                     schema_path=schema_path,
                 )
                 producer.flush()
+
+                # Don't mark job as COMPLETED here — the Kafka consumer will
+                # mark it after successfully loading data into DeltaLake.
+                job.rows_synced = pa_table.num_rows
+                job.save(update_fields=["rows_synced", "updated_at"])
 
             elif schema.cdc_mode == "snapshot":
                 # Defer Kafka notification — store run metadata
@@ -288,6 +352,7 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                         "schema_path": schema_path,
                         "total_batches": 1,
                         "total_rows": pa_table.num_rows,
+                        "primary_keys": key_columns or None,
                         "batch_results": [
                             {
                                 "s3_path": batch_result.s3_path,
@@ -302,21 +367,48 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 schema.save(update_fields=["sync_type_config", "updated_at"])
                 log.info("cdc_batch_deferred", table=table_name, run_uuid=run_uuid)
 
+                # For snapshot mode, the Kafka message is deferred so the consumer
+                # won't process it yet. Mark the job as completed here since there's
+                # nothing else to do until the schema transitions to streaming.
+                job.rows_synced = pa_table.num_rows
+                job.status = ExternalDataJob.Status.COMPLETED
+                job.finished_at = dt.datetime.now(tz=dt.UTC)
+                job.save(update_fields=["rows_synced", "status", "finished_at", "updated_at"])
+
         # Advance slot after successful S3 writes
         if last_position is not None:
             reader.confirm_position(last_position)
             log.info("slot_advanced", position=last_position)
 
-            # Update per-schema cdc_last_log_position
+            # Update per-schema cdc_last_log_position (skip schemas reset to snapshot mode)
             for schema in cdc_schemas:
+                if schema.sync_type_config.get("cdc_mode") == "snapshot":
+                    continue
                 schema.sync_type_config["cdc_last_log_position"] = last_position
                 schema.save(update_fields=["sync_type_config", "updated_at"])
 
-    except Exception:
+    except Exception as exc:
         log.exception("cdc_extract_failed")
+        for job in created_jobs:
+            if job.status == ExternalDataJob.Status.RUNNING:
+                job.status = ExternalDataJob.Status.FAILED
+                job.latest_error = str(exc)[:1000]
+                job.finished_at = dt.datetime.now(tz=dt.UTC)
+                job.save(update_fields=["status", "latest_error", "finished_at", "updated_at"])
+        for schema in cdc_schemas:
+            schema.status = ExternalDataSchema.Status.FAILED
+            schema.latest_error = str(exc)[:1000]
+            schema.save(update_fields=["status", "latest_error", "updated_at"])
         raise
     finally:
         reader.close()
+
+    now = dt.datetime.now(tz=dt.UTC)
+    for schema in cdc_schemas:
+        schema.status = ExternalDataSchema.Status.COMPLETED
+        schema.latest_error = None
+        schema.last_synced_at = now
+        schema.save(update_fields=["status", "latest_error", "last_synced_at", "updated_at"])
 
     log.info("cdc_extract_completed", event_count=event_count)
 
@@ -326,7 +418,7 @@ def validate_cdc_prerequisites_activity(inputs: ValidateCDCPrerequisitesInput) -
     """Validate CDC prerequisites for a source. Returns list of error messages."""
     import psycopg
 
-    from posthog.temporal.data_imports.cdc.postgres.prerequisite_validator import validate_cdc_prerequisites
+    from posthog.temporal.data_imports.sources.postgres.cdc.prerequisite_validator import validate_cdc_prerequisites
 
     close_old_connections()
 
@@ -375,7 +467,10 @@ def cleanup_orphan_slots_activity() -> None:
     """
     import psycopg
 
-    from posthog.temporal.data_imports.cdc.postgres.slot_manager import drop_slot_and_publication, get_slot_lag_bytes
+    from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import (
+        drop_slot_and_publication,
+        get_slot_lag_bytes,
+    )
 
     close_old_connections()
 

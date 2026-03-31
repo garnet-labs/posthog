@@ -14,9 +14,9 @@ from dataclasses import dataclass
 import psycopg
 from psycopg import sql
 
-from posthog.temporal.data_imports.cdc.postgres.decoder import PgOutputDecoder
 from posthog.temporal.data_imports.cdc.types import ChangeEvent
-from posthog.temporal.data_imports.sources.postgres.postgres import get_primary_key_columns
+from posthog.temporal.data_imports.sources.postgres.cdc.decoder import PgOutputDecoder
+from posthog.temporal.data_imports.sources.postgres.postgres import _connect_to_postgres, get_primary_key_columns
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +46,13 @@ class PgCDCStreamReader:
         self._decoder = PgOutputDecoder()
 
     def connect(self) -> None:
-        self._conn = psycopg.connect(
+        self._conn = _connect_to_postgres(
             host=self._params.host,
             port=self._params.port,
-            dbname=self._params.database,
+            database=self._params.database,
             user=self._params.user,
             password=self._params.password,
-            sslmode=self._params.sslmode,
-            connect_timeout=15,
             autocommit=True,
-            sslrootcert="/tmp/no.txt",
-            sslcert="/tmp/no.txt",
-            sslkey="/tmp/no.txt",
         )
 
     def read_changes(self, from_position: str | None = None) -> Iterator[ChangeEvent]:

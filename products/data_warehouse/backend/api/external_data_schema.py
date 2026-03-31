@@ -391,7 +391,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         """Best-effort add/remove a table from the CDC publication."""
         import psycopg
 
-        from posthog.temporal.data_imports.cdc.postgres.slot_manager import (
+        from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import (
             add_table_to_publication,
             remove_table_from_publication,
         )

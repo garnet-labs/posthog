@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from posthog.temporal.data_imports.cdc.postgres.position import PgLSN
 from posthog.temporal.data_imports.cdc.types import ChangeEvent
+from posthog.temporal.data_imports.sources.postgres.cdc.position import PgLSN
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +309,13 @@ class PgOutputDecoder:
                 self._truncated_tables.append(relation.table_name)
 
     # --- Helpers ---
+
+    def get_key_columns(self, table_name: str) -> list[str]:
+        """Return column names that are part of the replica identity key for a table."""
+        for relation in self._relations.values():
+            if relation.table_name == table_name:
+                return [col.name for col in relation.columns if col.flags & 1]
+        return []
 
     def _get_relation(self, relation_id: int) -> Relation | None:
         relation = self._relations.get(relation_id)

@@ -64,6 +64,72 @@ def _make_schema(name, cdc_mode="streaming", source=None, schema_id=None):
     return schema
 
 
+# Shared patch decorator for CDC activity tests
+_CDC_ACTIVITY_PATCHES = [
+    "posthog.temporal.data_imports.cdc.activities.close_old_connections",
+    "posthog.temporal.data_imports.cdc.activities.ExternalDataJob",
+    "posthog.temporal.data_imports.cdc.activities.ExternalDataSource",
+    "posthog.temporal.data_imports.cdc.activities._get_cdc_schemas",
+    "posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader",
+    "posthog.temporal.data_imports.cdc.activities.S3BatchWriter",
+    "posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer",
+    "posthog.temporal.data_imports.cdc.activities.activity",
+]
+
+
+def _setup_mocks(
+    mock_activity,
+    MockProducer,
+    MockS3Writer,
+    MockReader,
+    mock_get_schemas,
+    MockSourceModel,
+    MockJob,
+    mock_close_conns,
+    source,
+    schemas,
+    events,
+):
+    """Wire up the standard mocks for CDC activity tests."""
+    MockSourceModel.objects.get.return_value = source
+    mock_get_schemas.return_value = schemas
+
+    mock_reader = MagicMock()
+    mock_reader.read_changes.return_value = iter(events)
+    mock_reader.truncated_tables = []
+    mock_reader._decoder = MagicMock()
+    mock_reader._decoder.get_key_columns.return_value = []
+    MockReader.return_value = mock_reader
+
+    mock_s3 = MagicMock()
+    mock_batch_result = MagicMock()
+    mock_batch_result.s3_path = "s3://bucket/data/part-0000.parquet"
+    mock_batch_result.row_count = len(events)
+    mock_batch_result.byte_size = 512
+    mock_batch_result.batch_index = 0
+    mock_batch_result.timestamp_ns = 123456
+    mock_s3.write_batch.return_value = mock_batch_result
+    mock_s3.write_schema.return_value = "s3://bucket/schema.json"
+    mock_s3.get_data_folder.return_value = "s3://bucket/data/"
+    MockS3Writer.return_value = mock_s3
+
+    mock_producer = MagicMock()
+    MockProducer.return_value = mock_producer
+
+    mock_job = MagicMock()
+    mock_job.id = uuid.uuid4()
+    MockJob.objects.create.return_value = mock_job
+    MockJob.PipelineVersion.V2 = "v2-non-dlt"
+    MockJob.Status.RUNNING = "Running"
+    MockJob.Status.COMPLETED = "Completed"
+    MockJob.Status.FAILED = "Failed"
+
+    mock_activity.heartbeat = MagicMock()
+    mock_activity.info.return_value = MagicMock(workflow_id="wf-1", workflow_run_id="run-1")
+
+    return mock_reader, mock_s3, mock_producer, mock_job
+
+
 class TestGetPgConnectionParams:
     def test_extracts_params_from_job_inputs(self):
         source = _make_source()
@@ -195,44 +261,25 @@ class TestCDCExtractActivity:
         mock_activity,
     ):
         source = _make_source()
-        MockSourceModel.objects.get.return_value = source
-
         schema = _make_schema("users", cdc_mode="streaming", source=source)
-        mock_get_schemas.return_value = [schema]
-
         events = [
             _make_event(op="I", table="users", position="0/100", columns={"id": 1, "name": "Alice"}),
             _make_event(op="U", table="users", position="0/200", columns={"id": 1, "name": "Bob"}),
         ]
 
-        mock_reader = MagicMock()
-        mock_reader.read_changes.return_value = iter(events)
-        mock_reader.truncated_tables = []
-        MockReader.return_value = mock_reader
-
-        mock_s3 = MagicMock()
-        mock_batch_result = MagicMock()
-        mock_batch_result.s3_path = "s3://bucket/data/part-0000.parquet"
-        mock_batch_result.row_count = 2
-        mock_batch_result.byte_size = 512
-        mock_batch_result.batch_index = 0
-        mock_batch_result.timestamp_ns = 123456
-        mock_s3.write_batch.return_value = mock_batch_result
-        mock_s3.write_schema.return_value = "s3://bucket/schema.json"
-        mock_s3.get_data_folder.return_value = "s3://bucket/data/"
-        MockS3Writer.return_value = mock_s3
-
-        mock_producer = MagicMock()
-        MockProducer.return_value = mock_producer
-
-        mock_job = MagicMock()
-        mock_job.id = uuid.uuid4()
-        MockJob.objects.create.return_value = mock_job
-        MockJob.PipelineVersion.V2 = "v2-non-dlt"
-        MockJob.Status.RUNNING = "Running"
-
-        mock_activity.heartbeat = MagicMock()
-        mock_activity.info.return_value = MagicMock(workflow_id="wf-1", workflow_run_id="run-1")
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
 
         inputs = CDCExtractInput(team_id=1, source_id=source.id)
         cdc_extract_activity(inputs)
@@ -243,6 +290,56 @@ class TestCDCExtractActivity:
         mock_producer.flush.assert_called_once()
         mock_reader.confirm_position.assert_called_once_with("0/200")
         mock_reader.close.assert_called_once()
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_streaming_job_not_marked_completed_by_activity(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        """For streaming schemas, the activity should NOT mark the job as COMPLETED.
+        The Kafka consumer marks it after loading to DeltaLake."""
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        events = [_make_event(op="I", table="users", position="0/100")]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Job should have rows_synced updated but NOT status set to COMPLETED
+        mock_job.save.assert_called()
+        save_calls = mock_job.save.call_args_list
+        # The save for the streaming job should only update rows_synced
+        streaming_save = save_calls[0]
+        assert "rows_synced" in streaming_save.kwargs.get("update_fields", [])
+        assert "status" not in streaming_save.kwargs.get("update_fields", [])
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
@@ -264,37 +361,22 @@ class TestCDCExtractActivity:
         mock_activity,
     ):
         source = _make_source()
-        MockSourceModel.objects.get.return_value = source
-
         schema = _make_schema("users", cdc_mode="snapshot", source=source)
-        mock_get_schemas.return_value = [schema]
-
         events = [_make_event(op="I", table="users", position="0/100")]
-        mock_reader = MagicMock()
-        mock_reader.read_changes.return_value = iter(events)
-        mock_reader.truncated_tables = []
-        MockReader.return_value = mock_reader
 
-        mock_s3 = MagicMock()
-        mock_batch_result = MagicMock()
-        mock_batch_result.s3_path = "s3://bucket/data/part-0000.parquet"
-        mock_batch_result.row_count = 1
-        mock_batch_result.byte_size = 256
-        mock_batch_result.batch_index = 0
-        mock_batch_result.timestamp_ns = 123456
-        mock_s3.write_batch.return_value = mock_batch_result
-        mock_s3.write_schema.return_value = "s3://bucket/schema.json"
-        mock_s3.get_data_folder.return_value = "s3://bucket/data/"
-        MockS3Writer.return_value = mock_s3
-
-        mock_job = MagicMock()
-        mock_job.id = uuid.uuid4()
-        MockJob.objects.create.return_value = mock_job
-        MockJob.PipelineVersion.V2 = "v2-non-dlt"
-        MockJob.Status.RUNNING = "Running"
-
-        mock_activity.heartbeat = MagicMock()
-        mock_activity.info.return_value = MagicMock(workflow_id="wf-1", workflow_run_id="run-1")
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
 
         inputs = CDCExtractInput(team_id=1, source_id=source.id)
         cdc_extract_activity(inputs)
@@ -313,6 +395,54 @@ class TestCDCExtractActivity:
 
         # Slot still advanced
         mock_reader.confirm_position.assert_called_once_with("0/100")
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_snapshot_job_marked_completed_by_activity(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        """For snapshot schemas, the activity SHOULD mark the job as COMPLETED
+        since there's no Kafka consumer to process it."""
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="snapshot", source=source)
+        events = [_make_event(op="I", table="users", position="0/100")]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Job should be marked COMPLETED for snapshot mode
+        mock_job.save.assert_called()
+        save_calls = mock_job.save.call_args_list
+        snapshot_save = save_calls[0]
+        assert "status" in snapshot_save.kwargs.get("update_fields", [])
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
@@ -344,6 +474,39 @@ class TestCDCExtractActivity:
         # No S3 writes, no Kafka, no slot advance
         mock_reader.confirm_position.assert_not_called()
         mock_reader.close.assert_called_once()
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_no_changes_sets_schema_completed(
+        self,
+        mock_close_conns,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        mock_activity,
+    ):
+        source = _make_source()
+        MockSourceModel.objects.get.return_value = source
+
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        mock_get_schemas.return_value = [schema]
+
+        mock_reader = MagicMock()
+        mock_reader.read_changes.return_value = iter([])
+        mock_reader.truncated_tables = []
+        MockReader.return_value = mock_reader
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Schema should be set to COMPLETED even with no changes
+        schema.save.assert_called()
+        assert schema.status == "Completed"
+        assert schema.latest_error is None
+        assert schema.last_synced_at is not None
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
@@ -387,43 +550,25 @@ class TestCDCExtractActivity:
         mock_activity,
     ):
         source = _make_source()
-        MockSourceModel.objects.get.return_value = source
-
         schema = _make_schema("users", cdc_mode="streaming", source=source)
-        mock_get_schemas.return_value = [schema]
-
         events = [
             _make_event(op="I", table="users", position="0/100"),
             _make_event(op="I", table="other_table", position="0/200"),
         ]
-        mock_reader = MagicMock()
-        mock_reader.read_changes.return_value = iter(events)
-        mock_reader.truncated_tables = []
-        MockReader.return_value = mock_reader
 
-        mock_s3 = MagicMock()
-        mock_batch_result = MagicMock()
-        mock_batch_result.s3_path = "s3://path"
-        mock_batch_result.row_count = 1
-        mock_batch_result.byte_size = 100
-        mock_batch_result.batch_index = 0
-        mock_batch_result.timestamp_ns = 0
-        mock_s3.write_batch.return_value = mock_batch_result
-        mock_s3.write_schema.return_value = None
-        mock_s3.get_data_folder.return_value = "s3://data/"
-        MockS3Writer.return_value = mock_s3
-
-        mock_producer = MagicMock()
-        MockProducer.return_value = mock_producer
-
-        mock_job = MagicMock()
-        mock_job.id = uuid.uuid4()
-        MockJob.objects.create.return_value = mock_job
-        MockJob.PipelineVersion.V2 = "v2-non-dlt"
-        MockJob.Status.RUNNING = "Running"
-
-        mock_activity.heartbeat = MagicMock()
-        mock_activity.info.return_value = MagicMock(workflow_id="wf-1", workflow_run_id="run-1")
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
 
         inputs = CDCExtractInput(team_id=1, source_id=source.id)
         cdc_extract_activity(inputs)
@@ -464,3 +609,250 @@ class TestCDCExtractActivity:
             cdc_extract_activity(inputs)
 
         mock_reader.close.assert_called_once()
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_schema_status_set_to_failed_on_error(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        events = [_make_event(op="I", table="users", position="0/100")]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        # Make S3 write fail
+        mock_s3.write_batch.side_effect = RuntimeError("S3 write failed")
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+
+        with pytest.raises(RuntimeError, match="S3 write failed"):
+            cdc_extract_activity(inputs)
+
+        # Schema should be marked as FAILED
+        assert schema.status == "Failed"
+        assert "S3 write failed" in schema.latest_error
+
+        # Slot should NOT have been advanced
+        mock_reader.confirm_position.assert_not_called()
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_cdc_last_log_position_updated_per_schema(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        events = [
+            _make_event(op="I", table="users", position="0/100"),
+            _make_event(op="U", table="users", position="0/200"),
+        ]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # cdc_last_log_position should be updated to the last event's position
+        assert schema.sync_type_config["cdc_last_log_position"] == "0/200"
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_kafka_message_has_cdc_sync_type(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        events = [_make_event(op="I", table="users", position="0/100")]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # KafkaBatchProducer should be created with sync_type="cdc"
+        MockProducer.assert_called_once()
+        call_kwargs = MockProducer.call_args.kwargs
+        assert call_kwargs["sync_type"] == "cdc"
+
+    @patch("posthog.temporal.data_imports.cdc.activities.unpause_external_data_schedule", create=True)
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_truncate_sets_snapshot_mode(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+        mock_unpause,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        events = [_make_event(op="I", table="users", position="0/100")]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        # Simulate a truncate for the "users" table
+        mock_reader.truncated_tables = ["users"]
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Schema should be set back to snapshot mode
+        assert schema.sync_type_config["cdc_mode"] == "snapshot"
+        assert schema.initial_sync_complete is False
+        assert "cdc_last_log_position" not in schema.sync_type_config
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_multi_table_events_grouped_correctly(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        users_schema = _make_schema("users", cdc_mode="streaming", source=source)
+        orders_schema = _make_schema("orders", cdc_mode="streaming", source=source)
+        events = [
+            _make_event(op="I", table="users", position="0/100", columns={"id": 1, "name": "Alice"}),
+            _make_event(op="I", table="orders", position="0/200", columns={"id": 10, "total": 99}),
+            _make_event(op="U", table="users", position="0/300", columns={"id": 1, "name": "Bob"}),
+        ]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [users_schema, orders_schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Should have 2 S3 writes (one for users, one for orders)
+        assert mock_s3.write_batch.call_count == 2
+
+        # Should have 2 Kafka producers (one for each table)
+        assert MockProducer.call_count == 2
+
+        # Slot should advance to the last event's position
+        mock_reader.confirm_position.assert_called_once_with("0/300")

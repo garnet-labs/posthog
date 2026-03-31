@@ -873,7 +873,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
         )
 
         if management_mode == "posthog":
-            from posthog.temporal.data_imports.cdc.postgres.slot_manager import create_slot_and_publication
+            from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import create_slot_and_publication
 
             try:
                 with source_impl.with_ssh_tunnel(source_config) as (host, port):
@@ -905,7 +905,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 )
 
         elif management_mode == "self_managed":
-            from posthog.temporal.data_imports.cdc.postgres.slot_manager import publication_exists, slot_exists
+            from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import publication_exists, slot_exists
 
             try:
                 with source_impl.with_ssh_tunnel(source_config) as (host, port):
@@ -950,7 +950,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
         """Best-effort add a table to the CDC publication during source creation."""
         import psycopg
 
-        from posthog.temporal.data_imports.cdc.postgres.slot_manager import add_table_to_publication
+        from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import add_table_to_publication
 
         try:
             with source_impl.with_ssh_tunnel(source_config) as (host, port):

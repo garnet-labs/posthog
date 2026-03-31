@@ -12,7 +12,7 @@ from typing import Literal
 import psycopg
 from psycopg import sql
 
-from posthog.temporal.data_imports.cdc.postgres.slot_manager import publication_exists, slot_exists
+from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import publication_exists, slot_exists
 
 logger = logging.getLogger(__name__)
 

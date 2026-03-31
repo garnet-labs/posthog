@@ -69,6 +69,7 @@ def _connect_to_postgres(
     user: str,
     password: str,
     require_ssl: bool = False,
+    **kwargs: Any,
 ) -> psycopg.Connection:
     sslmode = _get_sslmode(require_ssl)
     try:
@@ -83,6 +84,7 @@ def _connect_to_postgres(
             sslrootcert="/tmp/no.txt",
             sslcert="/tmp/no.txt",
             sslkey="/tmp/no.txt",
+            **kwargs,
         )
     except psycopg.OperationalError as e:
         if require_ssl and "SSL" in str(e):

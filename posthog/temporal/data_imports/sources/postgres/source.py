@@ -277,7 +277,7 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
         """
         import psycopg
 
-        from posthog.temporal.data_imports.cdc.postgres.prerequisite_validator import validate_cdc_prerequisites
+        from posthog.temporal.data_imports.sources.postgres.cdc.prerequisite_validator import validate_cdc_prerequisites
 
         try:
             with self.with_ssh_tunnel(config) as (host, port):

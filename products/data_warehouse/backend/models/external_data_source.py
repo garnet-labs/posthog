@@ -138,7 +138,7 @@ class ExternalDataSource(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
         try:
             import psycopg
 
-            from posthog.temporal.data_imports.cdc.postgres.slot_manager import drop_slot_and_publication
+            from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import drop_slot_and_publication
 
             conn = psycopg.connect(
                 host=job_inputs.get("host", ""),

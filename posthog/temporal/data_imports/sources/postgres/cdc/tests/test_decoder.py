@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from parameterized import parameterized
 
-from posthog.temporal.data_imports.cdc.postgres.decoder import (
+from posthog.temporal.data_imports.sources.postgres.cdc.decoder import (
     _OID_BOOL,
     _OID_FLOAT8,
     _OID_INT4,

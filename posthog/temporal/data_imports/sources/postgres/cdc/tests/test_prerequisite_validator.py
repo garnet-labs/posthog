@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from posthog.temporal.data_imports.cdc.postgres.prerequisite_validator import validate_cdc_prerequisites
+from posthog.temporal.data_imports.sources.postgres.cdc.prerequisite_validator import validate_cdc_prerequisites
 
 
 def _mock_conn(query_results: list[tuple[str, list[tuple]]]):
