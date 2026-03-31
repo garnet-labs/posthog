@@ -87,21 +87,25 @@ def build_and_send_digest_for_org_op(context: dagster.OpExecutionContext, org_id
         if not should_send_notification(user, NotificationSetting.WEB_ANALYTICS_WEEKLY_DIGEST.value):
             continue
 
-        if auto_select_project_for_user(user, org.id, team_digest_data):
+        # Filter to teams the user can access before auto-select so it doesn't pick an
+        # inaccessible project which would leave every other team defaulting to disabled.
+        user_perms = UserPermissions(user)
+        accessible_team_data: dict[int, dict] = {}
+        for team_id, data in team_digest_data.items():
+            team = data["team"]
+            if user_perms.team(team).effective_membership_level_for_parent_membership(org, membership) is not None:
+                accessible_team_data[team_id] = data
+
+        if auto_select_project_for_user(user, org.id, accessible_team_data):
             user.refresh_from_db(fields=["partial_notification_settings"])
 
         user_team_sections = []
         disabled_team_names = []
-        user_perms = UserPermissions(user)
-        for team_id, data in team_digest_data.items():
-            team = data["team"]
-            if user_perms.team(team).effective_membership_level_for_parent_membership(org, membership) is None:
-                continue
-
+        for team_id, data in accessible_team_data.items():
             if should_send_notification(user, NotificationSetting.WEB_ANALYTICS_WEEKLY_DIGEST.value, team_id):
                 user_team_sections.append(data)
             else:
-                disabled_team_names.append(team.name)
+                disabled_team_names.append(data["team"].name)
 
         if not user_team_sections:
             continue
