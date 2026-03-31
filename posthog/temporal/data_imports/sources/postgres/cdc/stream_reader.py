@@ -122,6 +122,15 @@ class PgCDCStreamReader:
     def clear_truncated_tables(self) -> None:
         self._decoder.clear_truncated_tables()
 
+    @property
+    def last_commit_end_lsn(self) -> str | None:
+        """End LSN of the most recently committed transaction.
+
+        Non-None even when only TRUNCATE messages were decoded (no ChangeEvents).
+        Use this to advance the slot when event_count == 0 but truncates occurred.
+        """
+        return self._decoder.last_commit_end_lsn
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()

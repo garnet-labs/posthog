@@ -543,9 +543,11 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                                         <>
                                                             <Tooltip
                                                                 title={
-                                                                    schema.incremental
-                                                                        ? 'Sync incremental data since the last run.'
-                                                                        : 'Sync all data.'
+                                                                    schema.sync_type === 'cdc'
+                                                                        ? 'Trigger a CDC extraction run now.'
+                                                                        : schema.incremental
+                                                                          ? 'Sync incremental data since the last run.'
+                                                                          : 'Sync all data.'
                                                                 }
                                                             >
                                                                 <LemonButton
@@ -557,9 +559,27 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                                                     onClick={() => reloadSchema(schema)}
                                                                     disabledReason={disabledReason}
                                                                 >
-                                                                    Sync now
+                                                                    {schema.sync_type === 'cdc'
+                                                                        ? 'Sync CDC now'
+                                                                        : 'Sync now'}
                                                                 </LemonButton>
                                                             </Tooltip>
+                                                            {schema.sync_type === 'cdc' && (
+                                                                <Tooltip title="Re-snapshot the full table and replay all CDC changes on top. Use this to recover from a corrupted or out-of-sync table.">
+                                                                    <LemonButton
+                                                                        type="tertiary"
+                                                                        size="xsmall"
+                                                                        fullWidth
+                                                                        key={`resync-data-warehouse-schema-${schema.id}`}
+                                                                        id="data-warehouse-schema-resync"
+                                                                        onClick={() => resyncSchema(schema)}
+                                                                        status="danger"
+                                                                        disabledReason={disabledReason}
+                                                                    >
+                                                                        Full resync
+                                                                    </LemonButton>
+                                                                </Tooltip>
+                                                            )}
                                                             {schema.incremental && (
                                                                 <Tooltip title="Completely resync incrementally loaded data. Only recommended if there is an issue with data quality in previously imported data.">
                                                                     <LemonButton

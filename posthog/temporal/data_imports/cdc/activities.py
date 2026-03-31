@@ -224,15 +224,6 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
             event_count += 1
 
         log.info("wal_changes_read", event_count=event_count, tables=batcher.table_names)
-        if event_count == 0:
-            now = dt.datetime.now(tz=dt.UTC)
-            for schema in cdc_schemas:
-                schema.status = ExternalDataSchema.Status.COMPLETED
-                schema.latest_error = None
-                schema.last_synced_at = now
-                schema.save(update_fields=["status", "latest_error", "last_synced_at", "updated_at"])
-            log.info("no_wal_changes")
-            return
 
         # Detect PK changes from decoder's Relation messages
         for table_name in batcher.table_names:
@@ -246,8 +237,13 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                     schema.sync_type_config["primary_key_columns"] = decoder_pks
                     schema.save(update_fields=["sync_type_config", "updated_at"])
 
-        # Check for truncated tables — mark for re-snapshot
-        for table_name in reader.truncated_tables:
+        # Check for truncated tables — mark for re-snapshot.
+        # This must happen before the event_count == 0 early return: a TRUNCATE
+        # produces no ChangeEvents, so a truncate-only batch would otherwise be
+        # silently ignored and the slot never advanced.
+        truncated_tables = list(reader.truncated_tables)
+        reader.clear_truncated_tables()
+        for table_name in truncated_tables:
             schema = schema_by_name.get(table_name)
             if schema is not None:
                 log.warning("truncate_detected", table=table_name, schema_id=str(schema.id))
@@ -264,7 +260,23 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                     log.info("unpaused_schema_schedule_for_resnapshot", schema_id=str(schema.id))
                 except Exception:
                     log.warning("failed_to_unpause_schema_schedule", schema_id=str(schema.id))
-        reader.clear_truncated_tables()
+
+        if event_count == 0:
+            # No DML events. If there were truncates, advance the slot past them so
+            # they don't replay on the next run; otherwise nothing to do.
+            if truncated_tables:
+                truncate_end_lsn = reader.last_commit_end_lsn
+                if truncate_end_lsn is not None:
+                    reader.confirm_position(truncate_end_lsn)
+                    log.info("slot_advanced_past_truncate", position=truncate_end_lsn)
+            now = dt.datetime.now(tz=dt.UTC)
+            for schema in cdc_schemas:
+                schema.status = ExternalDataSchema.Status.COMPLETED
+                schema.latest_error = None
+                schema.last_synced_at = now
+                schema.save(update_fields=["status", "latest_error", "last_synced_at", "updated_at"])
+            log.info("no_wal_changes")
+            return
 
         # Flush deferred runs for schemas that just transitioned to streaming
         for schema in cdc_schemas:

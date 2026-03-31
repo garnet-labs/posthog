@@ -504,6 +504,13 @@ class ExternalDataSchemaViewset(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
         instance.sync_type_config.update({"reset_pipeline": True})
 
+        if instance.is_cdc:
+            # Reset CDC state so the next run does a full re-snapshot
+            instance.sync_type_config["cdc_mode"] = "snapshot"
+            instance.sync_type_config.pop("cdc_last_log_position", None)
+            instance.sync_type_config.pop("cdc_deferred_runs", None)
+            instance.initial_sync_complete = False
+
         try:
             trigger_external_data_workflow(instance)
         except temporalio.service.RPCError as e:

@@ -95,6 +95,7 @@ class PgOutputDecoder:
         self._tx_buffer: list[ChangeEvent] = []
         self._tx_timestamp: datetime | None = None
         self._truncated_tables: list[str] = []
+        self._last_commit_end_lsn: str | None = None
 
     def decode_message(self, data: bytes, lsn: str) -> list[ChangeEvent]:
         """Decode a single pgoutput binary message.
@@ -135,6 +136,15 @@ class PgOutputDecoder:
     def clear_truncated_tables(self) -> None:
         self._truncated_tables.clear()
 
+    @property
+    def last_commit_end_lsn(self) -> str | None:
+        """End LSN of the most recently committed transaction.
+
+        Set even for truncate-only transactions (which yield no ChangeEvents).
+        Use this to advance the slot when no DML events were produced.
+        """
+        return self._last_commit_end_lsn
+
     # --- Message handlers ---
 
     def _handle_begin(self, payload: bytes) -> None:
@@ -154,6 +164,7 @@ class PgOutputDecoder:
         """
         # end_lsn starts at byte 9: flags(1) + commit_lsn(8)
         end_lsn = PgLSN.from_bytes(payload[9:17]).serialize()
+        self._last_commit_end_lsn = end_lsn
         events = [dataclass_replace(e, position_serialized=end_lsn) for e in self._tx_buffer]
         self._tx_buffer.clear()
         self._tx_timestamp = None

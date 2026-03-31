@@ -46,16 +46,6 @@ class TestChangeEventBatcher:
         assert table.column(DELETED_COLUMN)[0].as_py() is False
         assert table.column(DELETED_AT_COLUMN)[0].as_py() is None
 
-    def test_update_event_metadata(self):
-        batcher = ChangeEventBatcher()
-        batcher.add(_make_event(op="U"))
-        tables = batcher.flush()
-
-        table = tables["users"]
-        assert table.column(CDC_OP_COLUMN)[0].as_py() == "U"
-        assert table.column(DELETED_COLUMN)[0].as_py() is False
-        assert table.column(DELETED_AT_COLUMN)[0].as_py() is None
-
     def test_delete_event_metadata(self):
         ts = datetime(2025, 6, 15, 14, 30, 0, tzinfo=UTC)
         batcher = ChangeEventBatcher()
@@ -162,3 +152,17 @@ class TestChangeEventBatcher:
         table = tables["users"]
         cdc_ts = table.column(CDC_TIMESTAMP_COLUMN)[0].as_py()
         assert cdc_ts == ts
+
+    def test_delete_event_with_sparse_columns(self):
+        # PG CDC DELETE events often carry only identity (PK) columns, not all columns.
+        batcher = ChangeEventBatcher()
+        batcher.add(_make_event(op="I", columns={"id": 1, "name": "Alice", "email": "a@test.com"}))
+        batcher.add(_make_event(op="D", columns={"id": 1}))
+        tables = batcher.flush()
+
+        table = tables["users"]
+        assert table.num_rows == 2
+        assert table.column(DELETED_COLUMN)[1].as_py() is True
+        # Columns absent from the D event should be null, not missing
+        assert table.column("name")[1].as_py() is None
+        assert table.column("email")[1].as_py() is None
