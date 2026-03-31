@@ -55,7 +55,7 @@ export function TrendsFormula({ insightProps }: EditorFilterProps): JSX.Element 
             return
         }
 
-        eventUsageLogic.actions.reportFormulaApplied({
+        eventUsageLogic.actions.reportFormulaUpdated({
             seriesCount: filledValues.length,
         })
 

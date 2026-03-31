@@ -308,7 +308,7 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
         }) => props,
         reportBreakdownApplied: (props: { breakdownType: string; queryKind?: string; breakdownCount: number }) => props,
         reportInsightComparisonToggled: (props: { enabled: boolean; compareTo?: string; queryKind?: string }) => props,
-        reportFormulaApplied: (props: { seriesCount: number; queryKind?: string }) => props,
+        reportFormulaUpdated: (props: { seriesCount: number; queryKind?: string }) => props,
         reportInsightDateRangeChanged: (props: {
             dateFrom?: string | null
             dateTo?: string | null
@@ -2489,8 +2489,8 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
                 query_kind: queryKind,
             })
         },
-        reportFormulaApplied: ({ seriesCount, queryKind }) => {
-            posthog.capture('formula applied', {
+        reportFormulaUpdated: ({ seriesCount, queryKind }) => {
+            posthog.capture('formula updated', {
                 series_count: seriesCount,
                 query_kind: queryKind,
             })
