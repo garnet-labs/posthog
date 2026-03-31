@@ -1525,7 +1525,7 @@ class ApplePushIntegration:
 
         if integration.errors:
             integration.errors = ""
-            integration.save()
+            integration.save(update_fields=["errors"])
 
         return integration
 
