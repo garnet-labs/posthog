@@ -11,6 +11,7 @@ class DashboardTileVisitor(
         "last_refresh",
         "refreshing",
         "refresh_attempt",
+        "team",
     ],
     friendly_name="Dashboard tile",
     user_facing=False,

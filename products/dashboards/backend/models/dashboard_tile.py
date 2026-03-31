@@ -77,6 +77,7 @@ class DashboardTile(models.Model):
         related_name="dashboard_tiles",
         null=True,
     )
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, db_index=False)
 
     # Tile layout and style
     layouts = models.JSONField(default=dict)
@@ -98,7 +99,10 @@ class DashboardTile(models.Model):
     objects_including_soft_deleted: models.Manager["DashboardTile"] = models.Manager()
 
     class Meta:
-        indexes = [models.Index(fields=["filters_hash"], name="query_by_filters_hash_idx")]
+        indexes = [
+            models.Index(fields=["filters_hash"], name="query_by_filters_hash_idx"),
+            models.Index(fields=["team_id"], name="posthog_dashboardtile_team_idx"),
+        ]
         constraints = [
             UniqueConstraint(
                 fields=["dashboard", "insight"],
@@ -123,6 +127,9 @@ class DashboardTile(models.Model):
         db_table = "posthog_dashboardtile"
 
     def save(self, *args, **kwargs) -> None:
+        if self.dashboard_id is not None:
+            self.team_id = self.dashboard.team_id
+
         if self.insight is not None:
             has_no_filters_hash = self.filters_hash is None
             if has_no_filters_hash and self.insight.filters != {}:
@@ -217,6 +224,7 @@ class DashboardTile(models.Model):
 
         DashboardTile.objects.create(
             dashboard=dashboard,
+            team_id=dashboard.team_id,
             insight=self.insight,
             text=self.text,
             button_tile=self.button_tile,
