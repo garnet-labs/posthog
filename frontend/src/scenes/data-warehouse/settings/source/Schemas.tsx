@@ -9,6 +9,7 @@ import {
     LemonInput,
     LemonModal,
     LemonSelect,
+    LemonSelectOption,
     LemonSkeleton,
     LemonSwitch,
     LemonTable,
@@ -301,29 +302,35 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                         className: 'px-1',
                         isHidden: isDirectQuerySource,
                         render: function RenderFrequency(_, schema) {
+                            const isCdc = schema.sync_type === 'cdc'
+                            const cdcOptions: LemonSelectOption<DataWarehouseSyncInterval>[] = [
+                                { value: '1min', label: '1 min' },
+                                { value: '5min', label: '5 mins' },
+                            ]
+                            const standardOptions: LemonSelectOption<DataWarehouseSyncInterval>[] = [
+                                { value: '15min', label: '15 mins' },
+                                { value: '30min', label: '30 mins' },
+                                { value: '1hour', label: '1 hour' },
+                                { value: '6hour', label: '6 hours' },
+                                { value: '12hour', label: '12 hours' },
+                                { value: '24hour', label: 'Daily' },
+                                { value: '7day', label: 'Weekly' },
+                                { value: '30day', label: 'Monthly' },
+                            ]
                             return (
                                 <SourceEditorAction source={source}>
                                     <LemonSelect
                                         className="my-1"
                                         size="xsmall"
                                         disabled={!schema.should_sync}
-                                        value={schema.sync_frequency || '6hour'}
+                                        value={schema.sync_frequency || (isCdc ? '5min' : '6hour')}
                                         onChange={(value) =>
                                             updateSchema({
                                                 ...schema,
                                                 sync_frequency: value as DataWarehouseSyncInterval,
                                             })
                                         }
-                                        options={[
-                                            { value: '15min' as DataWarehouseSyncInterval, label: '15 mins' },
-                                            { value: '30min' as DataWarehouseSyncInterval, label: '30 mins' },
-                                            { value: '1hour' as DataWarehouseSyncInterval, label: '1 hour' },
-                                            { value: '6hour' as DataWarehouseSyncInterval, label: '6 hours' },
-                                            { value: '12hour' as DataWarehouseSyncInterval, label: '12 hours' },
-                                            { value: '24hour' as DataWarehouseSyncInterval, label: 'Daily' },
-                                            { value: '7day' as DataWarehouseSyncInterval, label: 'Weekly' },
-                                            { value: '30day' as DataWarehouseSyncInterval, label: 'Monthly' },
-                                        ]}
+                                        options={isCdc ? [...cdcOptions, ...standardOptions] : standardOptions}
                                     />
                                 </SourceEditorAction>
                             )

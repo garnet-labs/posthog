@@ -5595,6 +5595,7 @@ export interface SimpleExternalDataSourceSchema {
     label: string | null
     should_sync: boolean
     last_synced_at?: Dayjs
+    sync_type?: 'full_refresh' | 'incremental' | 'append' | 'webhook' | 'cdc' | null
 }
 
 export type SchemaIncrementalFieldsResponse = {
@@ -5850,6 +5851,7 @@ export type BatchExportService =
 export type BatchExportInterval = 'hour' | 'day' | 'week' | 'every 5 minutes' | 'every 15 minutes'
 
 export type DataWarehouseSyncInterval =
+    | '1min'
     | '5min'
     | '15min'
     | '30min'

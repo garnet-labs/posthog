@@ -247,75 +247,68 @@ function CDCConfigSection(): JSX.Element {
     const [managementMode, setManagementMode] = React.useState<'posthog' | 'self_managed'>('posthog')
 
     return (
-        <div className="deprecated-space-y-4 mt-4">
-            <LemonField name="cdc_enabled" label="Change data capture (CDC)">
-                {({ onChange }) => (
-                    <>
-                        <p className="text-xs text-secondary mb-2">
-                            CDC captures inserts, updates, and deletes via PostgreSQL logical replication.
-                        </p>
-                        <LemonSwitch
-                            checked={cdcEnabled}
-                            onChange={(checked) => {
-                                setCdcEnabled(checked)
-                                onChange(checked)
-                                sourceWizardLogic.actions.setSourceConnectionDetailsValue(
-                                    ['payload', 'cdc_enabled'],
-                                    checked
-                                )
-                            }}
-                        />
-                    </>
-                )}
-            </LemonField>
-
-            {cdcEnabled && (
-                <>
-                    <LemonField name="cdc_management_mode" label="Slot management">
-                        {({ onChange }) => (
-                            <LemonRadio
-                                value={managementMode}
-                                onChange={(newValue) => {
-                                    const mode = newValue as 'posthog' | 'self_managed'
-                                    setManagementMode(mode)
-                                    onChange(mode)
-                                    sourceWizardLogic.actions.setSourceConnectionDetailsValue(
-                                        ['payload', 'cdc_management_mode'],
-                                        mode
-                                    )
+        <Group name="payload">
+            <div className="deprecated-space-y-4 mt-4">
+                <LemonField name="cdc_enabled" label="Change data capture (CDC)">
+                    {({ onChange }) => (
+                        <>
+                            <p className="text-xs text-secondary mb-2">
+                                CDC captures inserts, updates, and deletes via PostgreSQL logical replication.
+                            </p>
+                            <LemonSwitch
+                                checked={cdcEnabled}
+                                onChange={(checked) => {
+                                    setCdcEnabled(checked)
+                                    onChange(checked)
                                 }}
-                                options={[
-                                    {
-                                        value: 'posthog',
-                                        label: (
-                                            <div>
-                                                <div>PostHog-managed</div>
-                                                <div className="text-xs text-secondary">
-                                                    PostHog creates and manages the replication slot and publication.
-                                                    Requires a database user with REPLICATION privileges.
-                                                </div>
-                                            </div>
-                                        ),
-                                    },
-                                    {
-                                        value: 'self_managed',
-                                        label: (
-                                            <div>
-                                                <div>Self-managed</div>
-                                                <div className="text-xs text-secondary">
-                                                    You manage your own replication slot and publication. PostHog only
-                                                    needs SELECT access.
-                                                </div>
-                                            </div>
-                                        ),
-                                    },
-                                ]}
                             />
-                        )}
-                    </LemonField>
+                        </>
+                    )}
+                </LemonField>
 
-                    {managementMode === 'self_managed' && (
-                        <Group name="payload">
+                {cdcEnabled && (
+                    <>
+                        <LemonField name="cdc_management_mode" label="Slot management">
+                            {({ onChange }) => (
+                                <LemonRadio
+                                    value={managementMode}
+                                    onChange={(newValue) => {
+                                        const mode = newValue as 'posthog' | 'self_managed'
+                                        setManagementMode(mode)
+                                        onChange(mode)
+                                    }}
+                                    options={[
+                                        {
+                                            value: 'posthog',
+                                            label: (
+                                                <div>
+                                                    <div>PostHog-managed</div>
+                                                    <div className="text-xs text-secondary">
+                                                        PostHog creates and manages the replication slot and
+                                                        publication. Requires a database user with REPLICATION
+                                                        privileges.
+                                                    </div>
+                                                </div>
+                                            ),
+                                        },
+                                        {
+                                            value: 'self_managed',
+                                            label: (
+                                                <div>
+                                                    <div>Self-managed</div>
+                                                    <div className="text-xs text-secondary">
+                                                        You manage your own replication slot and publication. PostHog
+                                                        only needs SELECT access.
+                                                    </div>
+                                                </div>
+                                            ),
+                                        },
+                                    ]}
+                                />
+                            )}
+                        </LemonField>
+
+                        {managementMode === 'self_managed' && (
                             <div className="deprecated-space-y-4">
                                 <LemonField name="cdc_slot_name" label="Replication slot name">
                                     {({ value, onChange }) => (
@@ -344,11 +337,11 @@ SELECT pg_create_logical_replication_slot('posthog_slot', 'pgoutput');`}
                                     </pre>
                                 </LemonBanner>
                             </div>
-                        </Group>
-                    )}
-                </>
-            )}
-        </div>
+                        )}
+                    </>
+                )}
+            </div>
+        </Group>
     )
 }
 
