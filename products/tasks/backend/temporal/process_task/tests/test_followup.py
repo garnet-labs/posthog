@@ -27,6 +27,8 @@ def _mock_get_context(_input) -> TaskProcessingContext:
         task_id="task-1",
         run_id="run-1",
         team_id=1,
+        team_uuid="test-team-uuid",
+        organization_id="test-org-id",
         github_integration_id=1,
         repository="org/repo",
         distinct_id="user-1",
