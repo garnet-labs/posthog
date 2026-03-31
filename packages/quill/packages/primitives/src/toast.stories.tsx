@@ -122,7 +122,6 @@ export const WithAction: Story = {
                         toast.success({
                             title: 'Event deleted',
                             description: 'The event has been removed.',
-                            timeout: 5000,
                             onClose: () => setDeleted(false),
                             action: {
                                 label: 'Undo',
@@ -180,7 +179,6 @@ export const UpdateToast: Story = {
                         title: 'Upload complete',
                         description: 'Your file has been uploaded.',
                         type: 'success',
-                        timeout: 0,
 
                     })
                 }, 2000)
@@ -206,7 +204,6 @@ export const Anchored: Story = {
             anchoredToast({
                 description: 'Copied!',
                 anchor: buttonRef.current,
-                timeout: 2000,
                 onClose: () => setCopied(false),
             })
         }
