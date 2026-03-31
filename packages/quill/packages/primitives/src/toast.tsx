@@ -75,7 +75,7 @@ const ToastCard = React.forwardRef<HTMLDivElement, ToastCardProps>(
                     />
                 )}
                 <div className={cn("flex items-center gap-3", onDismiss && "pr-8")}>
-                    {icon && <span className="shrink-0">{icon}</span>}
+                    {icon && <span className={cn("shrink-0 self-start mt-1", !toastTitle && toastDescription && 'mt-0')}>{icon}</span>}
                     <div className="flex-1 min-w-0">
                         {toastTitle && (
                             <div className="text-xs font-medium leading-snug">{toastTitle}</div>
@@ -98,7 +98,7 @@ const ToastCard = React.forwardRef<HTMLDivElement, ToastCardProps>(
                     </div>
                 )}
                 {onDismiss && (
-                    <Button variant="ghost" size="icon-sm" className="absolute top-2 right-2" onClick={onDismiss}>
+                    <Button variant="ghost" size="icon-sm" className={cn("absolute top-2 right-2", !toastTitle && toastDescription && "top-1.5")} onClick={onDismiss}>
                         <XIcon className="size-3.5" />
                     </Button>
                 )}
