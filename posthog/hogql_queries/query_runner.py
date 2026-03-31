@@ -1238,7 +1238,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
             if tags := getattr(self.query, "tags", None):
                 if tags.productKey:
                     product_key = tags.productKey
-                    posthoganalytics.tag("product_key", tags.productKey)
+                    posthoganalytics.tag("product_key", product_key)
                     tag_queries(product=tags.productKey)
                 if tags.scene:
                     posthoganalytics.tag("scene", tags.scene)
@@ -1303,6 +1303,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                     )
 
                     if execution_mode == ExecutionMode.CALCULATE_ASYNC_ALWAYS:
+                        # We should always kick off async calculation and disregard the cache
                         slo.tag(execution_path="async_dispatched", cache_hit=False)
                         return QueryStatusResponse(
                             query_status=self.enqueue_async_calculation(
@@ -1313,6 +1314,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                             )
                         )
                     elif execution_mode != ExecutionMode.CALCULATE_BLOCKING_ALWAYS:
+                        # Let's look in the cache first
                         results = self.handle_cache_and_async_logic(
                             execution_mode=execution_mode,
                             cache_manager=cache_manager,
@@ -1320,9 +1322,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                             analytics_props=analytics_props,
                         )
                         if results:
-                            is_cache_hit = isinstance(results, CachedResponse)
-
-                            if is_cache_hit:
+                            if isinstance(results, CachedResponse):
                                 if (not trigger or not trigger.startswith("warming")) and results.query_metadata:
                                     log_event_usage_from_query_metadata(
                                         results.query_metadata,
@@ -1331,20 +1331,18 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                                     )
 
                                 last_refresh = last_refresh_from_cached_result(results)
-                                cache_age = (
-                                    round((datetime.now(UTC) - last_refresh).total_seconds(), 2)
+                                slo.tag(
+                                    execution_path="cache_hit",
+                                    cache_hit=True,
+                                    is_cache_stale=self._is_stale(last_refresh=last_refresh),
+                                    calculation_trigger=results.calculation_trigger,
+                                    cache_age_seconds=round((datetime.now(UTC) - last_refresh).total_seconds(), 2)
                                     if last_refresh
-                                    else None
+                                    else None,
                                 )
                             else:
-                                cache_age = None
+                                slo.tag(execution_path="cache_miss", cache_hit=False)
 
-                            slo.tag(
-                                execution_path="cache_hit" if is_cache_hit else "cache_miss",
-                                cache_hit=is_cache_hit,
-                                cache_age_seconds=cache_age,
-                                calculation_trigger=getattr(results, "calculation_trigger", None),
-                            )
                             return results
 
                     slo.tag(execution_path="blocking", cache_hit=False, calculation_trigger=trigger)

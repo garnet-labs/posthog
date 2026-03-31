@@ -141,7 +141,7 @@ def slo_operation(
             handle.completion_properties.setdefault("error_type", type(exc).__name__)
             handle.completion_properties.setdefault("error_message", str(exc))
             handle.completion_properties.setdefault("error_origin", _build_error_origin(exc))
-            outcome = SloOutcome.FAILURE
+            outcome = handle.outcome_override or SloOutcome.FAILURE
             raise
         finally:
             completion_properties = {**base_properties, **handle.completion_properties} or None

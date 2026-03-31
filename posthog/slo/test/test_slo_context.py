@@ -248,6 +248,26 @@ def test_slo_operation_restores_outer_slo_when_nested(
     assert mock_emit_slo_completed.call_count == 2
 
 
+@patch("posthog.slo.context.emit_slo_completed")
+@patch("posthog.slo.context.emit_slo_started")
+def test_slo_operation_succeed_before_raise_respects_override(
+    mock_emit_slo_started: MagicMock, mock_emit_slo_completed: MagicMock
+) -> None:
+    spec = _build_spec()
+
+    with pytest.raises(RuntimeError, match="user error"):
+        with slo_operation(spec=spec) as slo:
+            slo.succeed(execution_path="error", error_category="user_error")
+            raise RuntimeError("user error")
+
+    mock_emit_slo_completed.assert_called_once()
+    completed_kwargs = mock_emit_slo_completed.call_args.kwargs
+    assert completed_kwargs["properties"].outcome == SloOutcome.SUCCESS
+    assert completed_kwargs["extra_properties"]["execution_path"] == "error"
+    assert completed_kwargs["extra_properties"]["error_category"] == "user_error"
+    assert completed_kwargs["extra_properties"]["error_type"] == "RuntimeError"
+
+
 @pytest.mark.asyncio
 @patch("posthog.slo.context.emit_slo_completed")
 @patch("posthog.slo.context.emit_slo_started")
