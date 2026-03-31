@@ -143,6 +143,7 @@ const Component = ({
         <div className="flex flex-1 flex-col h-full" data-attr="notebook-node-query">
             <BindLogic logic={insightLogic} props={insightLogicProps}>
                 {isInsightViz ? (
+                    // Insight viz fills the node height and doesn't need scrolling
                     queryComponent
                 ) : (
                     <ScrollableShadows direction="vertical" className="flex-1">
