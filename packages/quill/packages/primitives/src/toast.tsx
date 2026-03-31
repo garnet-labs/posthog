@@ -1,9 +1,10 @@
 import { Toast } from '@base-ui/react/toast'
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon, XIcon } from 'lucide-react'
+import { CircleCheckIcon, InfoIcon, OctagonXIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { Button } from './button'
 import { cn } from './lib/utils'
+import { Spinner } from './spinner'
 
 // ── Global manager ────────────────────────────────────────────────────
 type ToastActionData = {
@@ -37,7 +38,7 @@ const toastIconMap: Record<ToastType, React.ReactNode> = {
     info: <InfoIcon className="size-6 bg-info/50 text-info-foreground p-1 rounded-sm" />,
     warning: <TriangleAlertIcon className="size-6 bg-warning/50 text-warning-foreground p-1 rounded-sm" />,
     error: <OctagonXIcon className="size-6 bg-destructive/50 text-destructive-foreground p-1 rounded-sm" />,
-    loading: <Loader2Icon className="size-6 animate-spin text-foreground/60 p-1 rounded-sm" />,
+    loading: <Spinner className="size-6 text-foreground/60 p-1 rounded-sm" />,
 }
 
 // ── ToastCard ─────────────────────────────────────────────────────────
@@ -319,4 +320,5 @@ anchoredToast.dismiss = (id: string): void => {
     anchoredToastManager.close(id)
 }
 
-export { ToastProvider, ToastCard, toast, toastIconMap, anchoredToast, toastManager, anchoredToastManager, type ToastCardProps, type ToastOptions, type AnchoredToastOptions, type ToastType }
+export { anchoredToast, anchoredToastManager, toast, ToastCard, toastIconMap, toastManager, ToastProvider, type AnchoredToastOptions, type ToastCardProps, type ToastOptions, type ToastType }
+

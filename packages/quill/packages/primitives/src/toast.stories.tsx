@@ -1,10 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { CopyIcon, CheckIcon, InfoIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { Button } from './button'
-import { ToastProvider, toast, anchoredToast, ToastCard, toastIconMap } from './toast'
-import { Toast } from '@base-ui/react'
+import { anchoredToast, toast, ToastCard, toastIconMap, ToastProvider } from './toast'
 
 const meta = {
     title: 'Primitives/Toast',

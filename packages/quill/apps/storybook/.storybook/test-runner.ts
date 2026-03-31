@@ -24,18 +24,9 @@ module.exports = {
 
         await waitForPageReady(page)
 
-        // Stop animations for consistent snapshots
+        // Add class for snapshot-safe styling (animations disabled via CSS)
         await page.evaluate(() => {
-            const style = document.createElement('style')
-            style.textContent = `
-                *, *::before, *::after {
-                    animation-duration: 0s !important;
-                    animation-delay: 0s !important;
-                    transition-duration: 0s !important;
-                    transition-delay: 0s !important;
-                }
-            `
-            document.head.appendChild(style)
+            document.body.classList.add('storybook-test-runner')
         })
 
         // Wait for content to stabilize
