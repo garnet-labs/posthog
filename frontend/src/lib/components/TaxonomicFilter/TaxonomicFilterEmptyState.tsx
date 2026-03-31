@@ -6,6 +6,7 @@ import { IconOpenSidebar, IconPlus } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
+import { Spinner } from 'lib/lemon-ui/Spinner/Spinner'
 import { getProjectEventExistence } from 'lib/utils/getAppContext'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
@@ -72,9 +73,26 @@ const EmptyState = ({ title, description, action, docsUrl, hog: Hog, groupType }
 
 type Props = {
     groupType: TaxonomicFilterGroupType
+    isLoading?: boolean
 }
 
-const DataWarehouseEmptyState = (): JSX.Element => {
+const DataWarehouseLoadingState = (): JSX.Element => {
+    return (
+        <div className="flex flex-col items-center p-8 mt-4 w-full text-center">
+            <Spinner className="text-3xl" />
+            <h2 className="mt-4 text-lg font-semibold">Loading data warehouse tables</h2>
+            <p className="mt-2 text-sm text-secondary">
+                This list will populate once your connected data warehouse tables have loaded.
+            </p>
+        </div>
+    )
+}
+
+const DataWarehouseEmptyState = ({ isLoading = false }: { isLoading?: boolean }): JSX.Element => {
+    if (isLoading) {
+        return <DataWarehouseLoadingState />
+    }
+
     return (
         <EmptyState
             title="Connect external data"
@@ -150,10 +168,21 @@ const EMPTY_STATES: Partial<Record<TaxonomicFilterGroupType, () => JSX.Element>>
 
 export const taxonomicFilterGroupTypesWithEmptyStates = Object.keys(EMPTY_STATES) as TaxonomicFilterGroupType[]
 
-export const TaxonomicFilterEmptyState = (props: Props): JSX.Element => {
-    const EmptyState = EMPTY_STATES[props.groupType]
+export const TaxonomicFilterEmptyState = ({ groupType, isLoading = false }: Props): JSX.Element => {
+    const EmptyState = EMPTY_STATES[groupType]
 
     if (EmptyState) {
+        if (
+            isLoading &&
+            [
+                TaxonomicFilterGroupType.DataWarehouse,
+                TaxonomicFilterGroupType.DataWarehouseProperties,
+                TaxonomicFilterGroupType.DataWarehousePersonProperties,
+            ].includes(groupType)
+        ) {
+            return <DataWarehouseEmptyState isLoading />
+        }
+
         return <EmptyState />
     }
 
