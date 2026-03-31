@@ -123,6 +123,11 @@ def is_time_series_trends_insight(insight: Insight) -> tuple[bool, TrendsQuery |
 
 
 def is_anomalies_enabled_for_team(team: Any) -> bool:
+    from django.conf import settings
+
+    if settings.DEBUG:
+        return True
+
     return posthoganalytics.feature_enabled(
         FEATURE_FLAG_KEY,
         str(team.uuid),

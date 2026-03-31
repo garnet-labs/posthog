@@ -14,6 +14,8 @@ class InsightAnomalyConfig(UUIDTModel):
     Absence means the insight hasn't been picked up for scoring yet.
     """
 
+    created_at = models.DateTimeField(auto_now_add=True)
+
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
     insight = models.OneToOneField("posthog.Insight", on_delete=models.CASCADE, related_name="anomaly_config")
 
@@ -41,6 +43,8 @@ class InsightAnomalyConfig(UUIDTModel):
 
 class AnomalyScore(UUIDTModel):
     """Individual anomaly scoring result for a single data point in a series."""
+
+    created_at = models.DateTimeField(auto_now_add=True)
 
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
     insight = models.ForeignKey("posthog.Insight", on_delete=models.CASCADE, related_name="anomaly_scores")
