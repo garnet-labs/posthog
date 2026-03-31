@@ -1,7 +1,7 @@
 import '../../panel-layout/ProjectTree/defaultTree'
 
 import { useActions, useValues } from 'kea'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useDebouncedCallback } from 'use-debounce'
 
 import {
@@ -210,6 +210,8 @@ type SceneMainTitleProps = {
     maxToolProps?: Omit<UseMaxToolOptions, 'active'>
     /** Max character length for the description field */
     descriptionMaxLength?: number
+    /** Rendered after the product icon and before the scene name (e.g. favorite/star control). */
+    beforeName?: ReactNode
 }
 
 export function SceneTitleSection({
@@ -233,6 +235,7 @@ export function SceneTitleSection({
     isGeneratingMetadata,
     maxToolProps,
     descriptionMaxLength,
+    beforeName,
 }: SceneMainTitleProps): JSX.Element | null {
     const { breadcrumbs } = useValues(breadcrumbsLogic)
     const { zenMode } = useValues(navigation3000Logic)
@@ -325,6 +328,11 @@ export function SceneTitleSection({
                                 >
                                     {icon}
                                 </span>
+                                {beforeName ? (
+                                    <span className="flex shrink-0 items-center self-start @2xl/main-content:self-center">
+                                        {beforeName}
+                                    </span>
+                                ) : null}
                                 <SceneName
                                     name={name}
                                     isLoading={isLoading}

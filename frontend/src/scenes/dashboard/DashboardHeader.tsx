@@ -14,6 +14,7 @@ import { EditModeActions, FullscreenModeActions, ViewModeActions } from './Dashb
 import { DashboardLoadAction, dashboardLogic } from './dashboardLogic'
 import { DashboardModals } from './DashboardModals'
 import { DashboardScenePanel } from './DashboardScenePanel'
+import { DashboardStarToggle } from './DashboardStarToggle'
 
 export const DASHBOARD_CANNOT_EDIT_MESSAGE =
     "You don't have edit permissions for this dashboard. Ask a dashboard collaborator with edit access to add you."
@@ -43,6 +44,15 @@ export function DashboardHeader(): JSX.Element | null {
                 resourceType={{
                     type: sceneConfigurations[Scene.Dashboard].iconType || 'default_icon_type',
                 }}
+                beforeName={
+                    dashboard ? (
+                        <DashboardStarToggle
+                            dashboardId={dashboard.id}
+                            name={dashboard.name}
+                            dataAttr="dashboard-header-star-toggle"
+                        />
+                    ) : undefined
+                }
                 onNameChange={(value) => {
                     updateDashboard({ id: dashboard?.id, name: value, allowUndo: true })
                 }}

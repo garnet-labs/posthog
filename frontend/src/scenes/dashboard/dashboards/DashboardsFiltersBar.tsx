@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { useDebouncedCallback } from 'use-debounce'
 
-import { IconChevronDown, IconPin, IconPinFilled, IconShare } from '@posthog/icons'
+import { IconChevronDown, IconPin, IconPinFilled, IconShare, IconStar, IconStarFilled } from '@posthog/icons'
 import { LemonInput, Popover } from '@posthog/lemon-ui'
 
 import { MemberSelect } from 'lib/components/MemberSelect'
@@ -31,31 +31,43 @@ export function DashboardsFiltersBar({ extraActions }: DashboardsFiltersBarProps
     }
 
     return (
-        <div className="flex justify-between gap-2 flex-wrap mb-4">
-            <LemonInput
-                type="search"
-                placeholder="Search for dashboards"
-                onChange={(value) => {
-                    setFilters({ search: value })
-                    debouncedSetSearch(value)
-                }}
-                value={filters.search}
-            />
-            <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                    <span>Filter to:</span>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            <div className="min-w-60 max-w-100 flex-1">
+                <LemonInput
+                    type="search"
+                    placeholder="Search for dashboards"
+                    fullWidth
+                    onChange={(value) => {
+                        setFilters({ search: value })
+                        debouncedSetSearch(value)
+                    }}
+                    value={filters.search}
+                />
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
+                    <span className="shrink-0">Filter to:</span>
                     {currentTab !== DashboardsTab.Pinned && (
-                        <div className="flex items-center gap-2">
-                            <LemonButton
-                                active={filters.pinned}
-                                type="secondary"
-                                size="small"
-                                onClick={() => setFilters({ pinned: !filters.pinned })}
-                                icon={filters.pinned ? <IconPinFilled /> : <IconPin />}
-                            >
-                                Pinned
-                            </LemonButton>
-                        </div>
+                        <LemonButton
+                            active={filters.pinned}
+                            type="secondary"
+                            size="small"
+                            onClick={() => setFilters({ pinned: !filters.pinned })}
+                            icon={filters.pinned ? <IconPinFilled /> : <IconPin />}
+                        >
+                            Pinned
+                        </LemonButton>
+                    )}
+                    {currentTab !== DashboardsTab.Starred && (
+                        <LemonButton
+                            active={filters.starred}
+                            type="secondary"
+                            size="small"
+                            onClick={() => setFilters({ starred: !filters.starred })}
+                            icon={filters.starred ? <IconStarFilled className="text-warning" /> : <IconStar />}
+                        >
+                            Starred
+                        </LemonButton>
                     )}
                     <Popover
                         visible={showTagPopover}
@@ -133,21 +145,19 @@ export function DashboardsFiltersBar({ extraActions }: DashboardsFiltersBarProps
                             )}
                         </LemonButton>
                     </Popover>
-                    <div className="flex items-center gap-2">
-                        <LemonButton
-                            active={filters.shared}
-                            type="secondary"
-                            size="small"
-                            onClick={() => setFilters({ shared: !filters.shared })}
-                            icon={<IconShare />}
-                        >
-                            Shared
-                        </LemonButton>
-                    </div>
+                    <LemonButton
+                        active={filters.shared}
+                        type="secondary"
+                        size="small"
+                        onClick={() => setFilters({ shared: !filters.shared })}
+                        icon={<IconShare />}
+                    >
+                        Shared
+                    </LemonButton>
                 </div>
                 {currentTab !== DashboardsTab.Yours && (
-                    <div className="flex items-center gap-2">
-                        <span>Created by:</span>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
+                        <span className="shrink-0">Created by:</span>
                         <MemberSelect
                             value={filters.createdBy === 'All users' ? null : filters.createdBy}
                             onChange={(user) => setFilters({ createdBy: user?.uuid || 'All users' })}

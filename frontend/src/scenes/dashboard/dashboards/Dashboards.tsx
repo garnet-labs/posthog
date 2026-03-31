@@ -35,9 +35,9 @@ export const scene: SceneExport = {
 }
 
 export function Dashboards(): JSX.Element {
-    const { dashboardsLoading } = useValues(dashboardsModel)
+    const { dashboardsLoading, nameSortedDashboards } = useValues(dashboardsModel)
     const { setCurrentTab } = useActions(dashboardsLogic)
-    const { dashboards, currentTab, isFiltering } = useValues(dashboardsLogic)
+    const { currentTab } = useValues(dashboardsLogic)
     const { showNewDashboardModal } = useActions(newDashboardLogic)
 
     const enabledTabs: LemonTab<DashboardsTab>[] = [
@@ -45,6 +45,7 @@ export function Dashboards(): JSX.Element {
             key: DashboardsTab.All,
             label: 'All dashboards',
         },
+        { key: DashboardsTab.Starred, label: 'Starred' },
         { key: DashboardsTab.Yours, label: 'My dashboards' },
         { key: DashboardsTab.Pinned, label: 'Pinned' },
         {
@@ -101,9 +102,7 @@ export function Dashboards(): JSX.Element {
             <div>
                 {currentTab === DashboardsTab.Templates ? (
                     <DashboardTemplatesTable />
-                ) : dashboardsLoading || dashboards.length > 0 || isFiltering ? (
-                    <DashboardsTableContainer />
-                ) : (
+                ) : !dashboardsLoading && nameSortedDashboards.length === 0 ? (
                     <ProductIntroduction
                         productName="Dashboards"
                         thingName="dashboard"
@@ -117,6 +116,8 @@ export function Dashboards(): JSX.Element {
                         contentClassName="max-w-[1000px]"
                         actionElementOverride={<FeaturedTemplatesChooser />}
                     />
+                ) : (
+                    <DashboardsTableContainer />
                 )}
             </div>
         </SceneContent>

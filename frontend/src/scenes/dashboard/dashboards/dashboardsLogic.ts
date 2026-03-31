@@ -1,5 +1,5 @@
 import Fuse from 'fuse.js'
-import { actions, connect, kea, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, path, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 
 import { Sorting } from 'lib/lemon-ui/LemonTable/sorting'
@@ -11,6 +11,7 @@ import { objectClean } from 'lib/utils'
 import { userLogic } from 'scenes/userLogic'
 
 import { SIDE_PANEL_CONTEXT_KEY, SidePanelSceneContext } from '~/layout/navigation-3000/sidepanel/types'
+import { projectTreeDataLogic } from '~/layout/panel-layout/ProjectTree/projectTreeDataLogic'
 import { dashboardsModel } from '~/models/dashboardsModel'
 import { tagsModel } from '~/models/tagsModel'
 import { ActivityScope, Breadcrumb, DashboardBasicType } from '~/types'
@@ -21,9 +22,11 @@ export enum DashboardsTab {
     All = 'all',
     Yours = 'yours',
     Pinned = 'pinned',
+    Starred = 'starred',
     Templates = 'templates',
 }
 
+/** Default: Name ascending — same four-tier order as `compareDashboardsListDefaultOrder` (id tie-break for duplicate titles). */
 const DEFAULT_SORTING: Sorting = { columnKey: 'name', order: 1 }
 
 export interface DashboardsFilters {
@@ -31,6 +34,7 @@ export interface DashboardsFilters {
     createdBy: string
     pinned: boolean
     shared: boolean
+    starred: boolean
     tags?: string[]
 }
 
@@ -39,7 +43,47 @@ export const DEFAULT_FILTERS: DashboardsFilters = {
     createdBy: 'All users',
     pinned: false,
     shared: false,
+    starred: false,
     tags: [],
+}
+
+export function starredDashboardIdsFromShortcuts(shortcutData: { type?: string; ref?: string | null }[]): Set<number> {
+    const ids = new Set<number>()
+    for (const s of shortcutData) {
+        if (s.type === 'dashboard' && s.ref) {
+            const id = parseInt(s.ref, 10)
+            if (!Number.isNaN(id)) {
+                ids.add(id)
+            }
+        }
+    }
+    return ids
+}
+
+/**
+ * Dashboards list order (then title A–Z within a tier; duplicate titles tie-break by id):
+ * starred+pinned → starred+unpinned → non-starred+pinned → non-starred+unpinned.
+ */
+export function compareDashboardsListDefaultOrder(
+    a: DashboardBasicType,
+    b: DashboardBasicType,
+    starredIds: Set<number>
+): number {
+    const tier = (d: DashboardBasicType): number => {
+        if (starredIds.has(d.id)) {
+            return d.pinned ? 0 : 1
+        }
+        return d.pinned ? 2 : 3
+    }
+    const tierDiff = tier(a) - tier(b)
+    if (tierDiff !== 0) {
+        return tierDiff
+    }
+    const nameDiff = (a.name ?? 'Untitled').localeCompare(b.name ?? 'Untitled')
+    if (nameDiff !== 0) {
+        return nameDiff
+    }
+    return a.id - b.id
 }
 
 export type DashboardFuse = Fuse<DashboardBasicType> // This is exported for kea-typegen
@@ -48,7 +92,16 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
     path(['scenes', 'dashboard', 'dashboardsLogic']),
     tabAwareScene(),
     connect(() => ({
-        values: [userLogic, ['user'], featureFlagLogic, ['featureFlags'], tagsModel, ['tags']],
+        values: [
+            userLogic,
+            ['user'],
+            featureFlagLogic,
+            ['featureFlags'],
+            tagsModel,
+            ['tags'],
+            projectTreeDataLogic,
+            ['shortcutData'],
+        ],
     })),
     actions({
         setCurrentTab: (tab: DashboardsTab) => ({ tab }),
@@ -67,9 +120,11 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
             DEFAULT_SORTING,
             { persist: true },
             {
-                tableSortingChanged: (_, { sorting }) => sorting || DEFAULT_SORTING,
+                tableSortingChanged: (_state: Sorting | null, { sorting }: { sorting: Sorting | null }) =>
+                    sorting ?? null,
             },
-        ],
+            // Kea's generated reducer typing is Sorting-only; null clears column sort (dataSource order from `compareDashboardsListDefaultOrder`).
+        ] as any,
         currentTab: [
             DashboardsTab.All as DashboardsTab,
             {
@@ -122,8 +177,16 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
             },
         ],
         dashboards: [
-            (s) => [dashboardsModel.selectors.nameSortedDashboards, s.filters, s.fuse, s.currentTab, s.user],
-            (dashboards, filters, fuse, currentTab, user) => {
+            (s) => [
+                dashboardsModel.selectors.nameSortedDashboards,
+                s.filters,
+                s.fuse,
+                s.currentTab,
+                s.user,
+                s.shortcutData,
+            ],
+            (dashboards, filters, fuse, currentTab, user, shortcutData) => {
+                const starredIds = starredDashboardIdsFromShortcuts(shortcutData ?? [])
                 let haystack = dashboards
                 if (filters.search) {
                     haystack = fuse.search(filters.search).map((result) => result.item)
@@ -131,8 +194,14 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
                 if (currentTab === DashboardsTab.Pinned) {
                     haystack = haystack.filter((d) => d.pinned)
                 }
+                if (currentTab === DashboardsTab.Starred) {
+                    haystack = haystack.filter((d) => starredIds.has(d.id))
+                }
                 if (filters.pinned) {
                     haystack = haystack.filter((d) => d.pinned)
+                }
+                if (filters.starred) {
+                    haystack = haystack.filter((d) => starredIds.has(d.id))
                 }
                 if (filters.shared) {
                     haystack = haystack.filter((d) => d.is_shared)
@@ -145,7 +214,7 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
                 if (filters.tags && filters.tags.length > 0) {
                     haystack = haystack.filter((d) => filters.tags?.some((tag) => d.tags?.includes(tag)))
                 }
-                return haystack
+                return [...haystack].sort((a, b) => compareDashboardsListDefaultOrder(a, b, starredIds))
             },
         ],
 
@@ -208,11 +277,18 @@ export const dashboardsLogic = kea<dashboardsLogicType>([
     })),
     tabAwareUrlToAction(({ actions }) => ({
         '/dashboard': (_, searchParams) => {
-            const tab = (searchParams['tab'] as DashboardsTab | undefined) || DashboardsTab.All
+            const rawTab = searchParams['tab']
+            const tab =
+                typeof rawTab === 'string' && (Object.values(DashboardsTab) as string[]).includes(rawTab)
+                    ? (rawTab as DashboardsTab)
+                    : DashboardsTab.All
             actions.setCurrentTab(tab)
 
             const search = typeof searchParams['search'] === 'string' ? searchParams['search'] : ''
             actions.setFilters({ search })
         },
     })),
+    afterMount(() => {
+        projectTreeDataLogic.actions.loadShortcuts()
+    }),
 ])

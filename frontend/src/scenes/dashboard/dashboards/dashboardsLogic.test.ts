@@ -3,15 +3,20 @@ import { MOCK_DEFAULT_USER } from 'lib/api.mock'
 import { router } from 'kea-router'
 import { expectLogic, truth } from 'kea-test-utils'
 
-import { DashboardsTab, dashboardsLogic } from 'scenes/dashboard/dashboards/dashboardsLogic'
+import {
+    compareDashboardsListDefaultOrder,
+    DashboardsTab,
+    dashboardsLogic,
+} from 'scenes/dashboard/dashboards/dashboardsLogic'
 import { sceneLogic } from 'scenes/sceneLogic'
 import { Scene } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
 
+import { projectTreeDataLogic } from '~/layout/panel-layout/ProjectTree/projectTreeDataLogic'
 import { useMocks } from '~/mocks/jest'
 import { dashboardsModel } from '~/models/dashboardsModel'
 import { initKeaTests } from '~/test/init'
-import { AppContext, DashboardType, UserBasicType } from '~/types'
+import { AppContext, DashboardBasicType, DashboardType, UserBasicType } from '~/types'
 
 import dashboardJson from '../__mocks__/dashboard.json'
 
@@ -70,6 +75,7 @@ describe('dashboardsLogic', () => {
         initKeaTests()
 
         dashboardsModel.mount()
+        projectTreeDataLogic.mount()
         await expectLogic(dashboardsModel).toDispatchActions(['loadDashboardsSuccess'])
         sceneLogic({ scenes }).mount()
         sceneLogic.actions.setTabs([
@@ -101,6 +107,14 @@ describe('dashboardsLogic', () => {
             dashboards: truth((dashboards: DashboardType[]) => {
                 return dashboards.length === 5 && dashboards.every((d) => d.created_by?.uuid === 'USER_UUID')
             }),
+        })
+    })
+
+    it('shows no dashboards on starred tab when there are no shortcuts', async () => {
+        expectLogic(logic, () => {
+            logic.actions.setCurrentTab(DashboardsTab.Starred)
+        }).toMatchValues({
+            dashboards: [],
         })
     })
 
@@ -220,5 +234,109 @@ describe('dashboardsLogic', () => {
         await expectLogic(logic).toMatchValues({
             filters: expect.objectContaining({ search: 'needle' }),
         })
+    })
+
+    it('defaults invalid tab URL param to All', async () => {
+        logic.unmount()
+        router.actions.push(urls.dashboards(), { tab: 'not-a-real-tab' })
+        logic = dashboardsLogic({ tabId: '1' })
+        logic.mount()
+
+        await expectLogic(logic).toMatchValues({
+            currentTab: DashboardsTab.All,
+        })
+    })
+})
+
+function listOrderRow(id: number, name: string, pinned = false): DashboardBasicType {
+    return { id, name, pinned } as DashboardBasicType
+}
+
+describe('compareDashboardsListDefaultOrder', () => {
+    it('orders starred+pinned before starred+unpinned', () => {
+        const starred = new Set([1, 2])
+        expect(
+            compareDashboardsListDefaultOrder(listOrderRow(1, 'Z', true), listOrderRow(2, 'A', false), starred)
+        ).toBeLessThan(0)
+        expect(
+            compareDashboardsListDefaultOrder(listOrderRow(2, 'A', false), listOrderRow(1, 'Z', true), starred)
+        ).toBeGreaterThan(0)
+    })
+
+    it('orders starred+unpinned before non-starred+pinned (even when non-starred name sorts earlier)', () => {
+        const starred = new Set([1])
+        expect(
+            compareDashboardsListDefaultOrder(listOrderRow(1, 'Z', false), listOrderRow(2, 'A', true), starred)
+        ).toBeLessThan(0)
+        expect(
+            compareDashboardsListDefaultOrder(listOrderRow(2, 'A', true), listOrderRow(1, 'Z', false), starred)
+        ).toBeGreaterThan(0)
+    })
+
+    it('orders non-starred+pinned before non-starred+unpinned (even when unpinned name sorts earlier)', () => {
+        const empty = new Set<number>()
+        expect(
+            compareDashboardsListDefaultOrder(
+                listOrderRow(10, 'Web Vitals', true),
+                listOrderRow(20, 'Landing Pages Report', false),
+                empty
+            )
+        ).toBeLessThan(0)
+        expect(
+            compareDashboardsListDefaultOrder(
+                listOrderRow(20, 'Landing Pages Report', false),
+                listOrderRow(10, 'Web Vitals', true),
+                empty
+            )
+        ).toBeGreaterThan(0)
+    })
+
+    it.each([['Alpha', 'Beta', -1] as const, ['Beta', 'Alpha', 1] as const, ['same', 'same', 0] as const])(
+        'within starred+pinned tier sorts by name then id (%s vs %s)',
+        (aName, bName, sign) => {
+            const starred = new Set([1, 2])
+            const a = listOrderRow(1, aName, true)
+            const b = listOrderRow(2, bName, true)
+            const cmp = compareDashboardsListDefaultOrder(a, b, starred)
+            if (sign < 0) {
+                expect(cmp).toBeLessThan(0)
+            } else if (sign > 0) {
+                expect(cmp).toBeGreaterThan(0)
+            } else {
+                expect(cmp).toBeLessThan(0)
+            }
+        }
+    )
+
+    it('ties duplicate title in the same tier by id', () => {
+        const empty = new Set<number>()
+        expect(
+            compareDashboardsListDefaultOrder(
+                listOrderRow(4, 'API usage metrics', true),
+                listOrderRow(7, 'API usage metrics', true),
+                empty
+            )
+        ).toBeLessThan(0)
+        expect(
+            compareDashboardsListDefaultOrder(
+                listOrderRow(9, 'API usage metrics', false),
+                listOrderRow(8, 'API usage metrics', false),
+                empty
+            )
+        ).toBeGreaterThan(0)
+    })
+
+    it('regression: multi-tier list sorts into 0→1→2→3 then A–Z within tier', () => {
+        const starred = new Set([1, 2, 3])
+        const dashboards = [
+            listOrderRow(5, 'Zebra unpinned', false),
+            listOrderRow(3, 'Starred unpinned', false),
+            listOrderRow(6, 'Aardvark unpinned', false),
+            listOrderRow(2, 'Starred pinned B', true),
+            listOrderRow(1, 'Starred pinned A', true),
+            listOrderRow(4, 'Pinned only', true),
+        ]
+        const sorted = [...dashboards].sort((a, b) => compareDashboardsListDefaultOrder(a, b, starred))
+        expect(sorted.map((d) => d.id)).toEqual([1, 2, 3, 4, 6, 5])
     })
 })

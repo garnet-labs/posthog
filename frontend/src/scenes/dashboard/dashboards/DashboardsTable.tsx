@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { useMemo } from 'react'
 
 import { IconHome, IconLock, IconPin, IconPinFilled, IconShare } from '@posthog/icons'
 
@@ -17,14 +18,18 @@ import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { accessLevelSatisfied } from 'lib/utils/accessControlUtils'
 import { DashboardEventSource } from 'lib/utils/eventUsageLogic'
 import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
-import { dashboardsLogic } from 'scenes/dashboard/dashboards/dashboardsLogic'
+import {
+    compareDashboardsListDefaultOrder,
+    dashboardsLogic,
+    starredDashboardIdsFromShortcuts,
+} from 'scenes/dashboard/dashboards/dashboardsLogic'
 import { deleteDashboardLogic } from 'scenes/dashboard/deleteDashboardLogic'
 import { duplicateDashboardLogic } from 'scenes/dashboard/duplicateDashboardLogic'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
 import { projectTreeDataLogic } from '~/layout/panel-layout/ProjectTree/projectTreeDataLogic'
-import { dashboardsModel, nameCompareFunction } from '~/models/dashboardsModel'
+import { dashboardsModel } from '~/models/dashboardsModel'
 import {
     AccessControlLevel,
     AccessControlResourceType,
@@ -34,6 +39,7 @@ import {
 } from '~/types'
 
 import { DASHBOARD_CANNOT_EDIT_MESSAGE } from '../DashboardHeader'
+import { DashboardStarToggle } from '../DashboardStarToggle'
 import { DashboardsFiltersBar } from './DashboardsFiltersBar'
 
 export function DashboardsTableContainer(): JSX.Element {
@@ -63,24 +69,31 @@ export function DashboardsTable({
     const { showDuplicateDashboardModal } = useActions(duplicateDashboardLogic)
     const { showDeleteDashboardModal } = useActions(deleteDashboardLogic)
     const { openMoveToModal } = useActions(moveToLogic)
-    const { itemsByRef } = useValues(projectTreeDataLogic)
+    const { itemsByRef, shortcutData } = useValues(projectTreeDataLogic)
+    const starredIds = useMemo(() => starredDashboardIdsFromShortcuts(shortcutData ?? []), [shortcutData])
 
     const columns: LemonTableColumns<DashboardType> = [
         {
             width: 0,
             dataIndex: 'pinned',
-            render: function Render(pinned, { id }) {
+            render: function RenderStarAndPin(pinned, { id, name }) {
                 return (
-                    <LemonButton
-                        size="small"
-                        onClick={
-                            pinned
-                                ? () => unpinDashboard(id, DashboardEventSource.DashboardsList)
-                                : () => pinDashboard(id, DashboardEventSource.DashboardsList)
-                        }
-                        tooltip={pinned ? 'Unpin dashboard' : 'Pin dashboard'}
-                        icon={pinned ? <IconPinFilled /> : <IconPin />}
-                    />
+                    <div className="flex items-center gap-px">
+                        <DashboardStarToggle dashboardId={id} name={name} dataAttr="dashboards-list-star-toggle" />
+                        <LemonButton
+                            data-attr="dashboards-list-pin-toggle"
+                            data-dashboard-id={id}
+                            data-pinned={pinned}
+                            size="small"
+                            onClick={
+                                pinned
+                                    ? () => unpinDashboard(id, DashboardEventSource.DashboardsList)
+                                    : () => pinDashboard(id, DashboardEventSource.DashboardsList)
+                            }
+                            tooltip={pinned ? 'Unpin dashboard' : 'Pin dashboard'}
+                            icon={pinned ? <IconPinFilled /> : <IconPin />}
+                        />
+                    </div>
                 )
             },
         },
@@ -88,6 +101,7 @@ export function DashboardsTable({
             title: 'Name',
             dataIndex: 'name',
             width: '40%',
+            className: 'min-w-60',
             render: function Render(_, { id, name, description, is_shared, user_access_level }) {
                 const isPrimary = id === currentTeam?.primary_dashboard
                 const canEditDashboard = accessLevelSatisfied(
@@ -124,7 +138,7 @@ export function DashboardsTable({
                     />
                 )
             },
-            sorter: nameCompareFunction,
+            sorter: (a, b) => compareDashboardsListDefaultOrder(a, b, starredIds),
         },
         {
             title: 'Tags',
