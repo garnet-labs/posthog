@@ -82,12 +82,12 @@ import MCPServerSettings from './environment/MCPServerSettings'
 import { PathCleaningFiltersConfig } from './environment/PathCleaningFiltersConfig'
 import { PersonDisplayNameProperties } from './environment/PersonDisplayNameProperties'
 import { PostHogCodeSlackIntegration } from './environment/PostHogCodeSlackIntegration'
+import { ReplayAuthorizedDomains } from './environment/ReplayAuthorizedDomains'
 import { ReplayIntegrations } from './environment/ReplayIntegrations'
 import { SDKSetupInstructions } from './environment/SDKSetupInstructions'
 import {
     CanvasCaptureSettings,
     LogCaptureSettings,
-    ReplayAuthorizedDomains,
     ReplayDataRetentionSettings,
     ReplayGeneral,
     ReplayMaskingSettings,

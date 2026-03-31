@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react'
 
 import { IconCalendar, IconCheck, IconClock, IconHourglass, IconInfinity, IconInfo } from '@posthog/icons'
 import {
-    LemonBanner,
     LemonDialog,
     LemonSegmentedButton,
     LemonSegmentedButtonOption,
@@ -14,8 +13,6 @@ import {
 } from '@posthog/lemon-ui'
 
 // import { AccessControlAction } from 'lib/components/AccessControlAction'
-import { AuthorizedUrlList } from 'lib/components/AuthorizedUrlList/AuthorizedUrlList'
-import { AuthorizedUrlListType } from 'lib/components/AuthorizedUrlList/authorizedUrlListLogic'
 import { RestrictionScope, useRestrictedArea } from 'lib/components/RestrictedArea'
 import { SESSION_RECORDING_OPT_OUT_SURVEY_ID, TeamMembershipLevel } from 'lib/constants'
 import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
@@ -253,31 +250,6 @@ export function ReplayNetworkHeadersPayloads(): JSX.Element {
                         : restrictedReason
                 }
                 loading={currentTeamLoading}
-            />
-        </div>
-    )
-}
-
-/**
- * @deprecated use ReplayTriggers instead, this is only presented to teams that have these settings set
- * @class
- */
-export function ReplayAuthorizedDomains(): JSX.Element {
-    return (
-        <div className="gap-y-2">
-            <LemonBanner type="warning">
-                <strong>This setting is now deprecated and cannot be updated.</strong> Instead we recommend deleting the
-                domains below and using URL triggers in your recording conditions to control which domains you record.
-            </LemonBanner>
-            <p>
-                Domains and wildcard subdomains are allowed (e.g. <code>https://*.example.com</code>). However,
-                wildcarded top-level domains cannot be used (for security reasons).
-            </p>
-            <AuthorizedUrlList
-                type={AuthorizedUrlListType.RECORDING_DOMAINS}
-                showLaunch={false}
-                allowAdd={false}
-                displaySuggestions={false}
             />
         </div>
     )
