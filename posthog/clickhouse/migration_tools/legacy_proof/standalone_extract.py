@@ -16,6 +16,7 @@ import re
 import ast
 import sys
 import json
+import types
 import logging
 import warnings
 import importlib
@@ -49,15 +50,40 @@ class StandaloneResult:
     error: str | None = None
 
 
-def _minimal_django_setup():
-    """Set up Django using real PostHog settings but without database connections.
+class _PermissiveModule(types.ModuleType):
+    """A module stub that returns a no-op callable for any missing attribute.
 
-    PostHog's AppConfig (posthog/apps.py) has module-level imports that pull
-    in posthog.tasks and posthog.models, creating circular import failures
-    during Django's app loading phase. We solve this by injecting a stub
-    posthog.apps module into sys.modules BEFORE Django tries to import it.
-    The stub has a minimal AppConfig with no module-level side effects and
-    a no-op ready().
+    Used to break circular import chains during proof extraction. When
+    code does ``from posthog.tasks.tasks import some_function``, the stub
+    returns a no-op instead of raising ImportError.
+    """
+
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return lambda *a, **kw: None
+
+
+def _make_permissive_stub(name: str, is_package: bool = False) -> types.ModuleType:
+    """Create a permissive stub module and register it in sys.modules."""
+    mod = _PermissiveModule(name)
+    if is_package:
+        mod.__path__ = [str(Path(name.replace(".", "/")).resolve())]
+    sys.modules[name] = mod
+    return mod
+
+
+def _minimal_django_setup():
+    """Set up Django by stubbing modules that cause circular imports.
+
+    PostHog's import graph has deep circular dependencies:
+      posthog.models → batch_exports.models → posthog.clickhouse.client
+      → execute_async → posthog.tasks → posthog.models (CIRCULAR)
+
+    We break these cycles by injecting permissive stub modules for
+    ``posthog.clickhouse.client``, ``posthog.tasks``, and ``posthog.apps``
+    BEFORE calling ``django.setup()``. After setup completes (models loaded),
+    we re-import the real ``connection`` and ``migration_tools`` modules.
     """
     os.environ.setdefault("SECRET_KEY", "standalone-proof-key")
     os.environ.setdefault("DEBUG", "1")
@@ -67,14 +93,22 @@ def _minimal_django_setup():
     os.environ.setdefault("CLICKHOUSE_DATABASE", "posthog")
     os.environ.setdefault("CLICKHOUSE_CLUSTER", "posthog")
     os.environ["SKIP_ASYNC_MIGRATIONS_SETUP"] = "1"
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "posthog.settings")
+    os.environ["DJANGO_SETTINGS_MODULE"] = "posthog.settings"
 
-    import types
+    # Stub posthog.clickhouse.client and its submodules to break the
+    # batch_exports → client → execute_async → tasks → models cycle.
+    stub_client = _make_permissive_stub("posthog.clickhouse.client", is_package=True)
+    _make_permissive_stub("posthog.clickhouse.client.execute")
+    _make_permissive_stub("posthog.clickhouse.client.execute_async")
 
+    # Stub posthog.tasks to prevent tasks → models cycle.
+    _make_permissive_stub("posthog.tasks", is_package=True)
+    _make_permissive_stub("posthog.tasks.tasks")
+
+    # Stub posthog.apps to prevent module-level side effects in its ready().
     from django.apps import AppConfig
 
-    # Create a stub module that replaces posthog.apps
-    stub_module = types.ModuleType("posthog.apps")
+    stub_apps_mod = types.ModuleType("posthog.apps")
 
     class _ProofPostHogConfig(AppConfig):
         name = "posthog"
@@ -82,15 +116,24 @@ def _minimal_django_setup():
         default_auto_field = "django.db.models.BigAutoField"
 
         def ready(self):
-            pass  # No DB-dependent initialization
+            pass
 
-    stub_module.PostHogConfig = _ProofPostHogConfig
-    stub_module.__file__ = "<proof-stub>"
-    sys.modules["posthog.apps"] = stub_module
+    stub_apps_mod.PostHogConfig = _ProofPostHogConfig
+    sys.modules["posthog.apps"] = stub_apps_mod
 
+    # Now django.setup() can proceed — circular imports are broken.
     import django
 
     django.setup()
+
+    # Re-import the real modules we need (now that model registry is ready).
+    from posthog.clickhouse.client import connection
+
+    stub_client.connection = connection
+
+    from posthog.clickhouse.client import migration_tools
+
+    stub_client.migration_tools = migration_tools
 
 
 def _classify_source(source: str) -> tuple[str, list[str]]:
@@ -106,8 +149,10 @@ def _classify_source(source: str) -> tuple[str, list[str]]:
     imports_sql_modules = False
     is_empty_ops = False
     has_run_sql = False
+    has_run_python = False
 
     for node in ast.walk(tree):
+        # Handle both plain assignment and annotated assignment (e.g. operations: list[Never] = [])
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "operations":
@@ -116,6 +161,11 @@ def _classify_source(source: str) -> tuple[str, list[str]]:
                         has_settings_conditional = True
                     if isinstance(node.value, ast.List) and len(node.value.elts) == 0:
                         is_empty_ops = True
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == "operations":
+                has_operations = True
+                if node.value is not None and isinstance(node.value, ast.List) and len(node.value.elts) == 0:
+                    is_empty_ops = True
 
         if isinstance(node, (ast.For, ast.While)):
             has_loops = True
@@ -125,14 +175,24 @@ def _classify_source(source: str) -> tuple[str, list[str]]:
                 imports_sql_modules = True
 
         if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id == "run_sql_with_exceptions":
+            func = node.func
+            # run_sql_with_exceptions(...)
+            if isinstance(func, ast.Name) and func.id == "run_sql_with_exceptions":
                 has_run_sql = True
+            # migrations.RunPython(...)
+            elif isinstance(func, ast.Attribute) and func.attr == "RunPython":
+                has_run_python = True
 
     if not has_operations:
         return "manual-review", ["No 'operations' variable found"]
-    if is_empty_ops:
+    if is_empty_ops and not has_loops:
         return "exact", ["Empty operations list (no-op migration)"]
+    if has_run_python and not has_run_sql:
+        return "manual-review", ["Contains RunPython operations (not SQL-based)"]
     if has_loops:
+        # Loops with run_sql_with_exceptions are still deterministic
+        if has_run_sql:
+            return "inferred", ["Loop-based run_sql_with_exceptions calls"]
         return "manual-review", ["Contains loop(s) building operations dynamically"]
     if has_settings_conditional:
         return "manual-review", ["Operations list uses conditional expression"]
