@@ -108,6 +108,22 @@ dashboards: PostgresTable = PostgresTable(
     },
 )
 
+dashboard_tiles: PostgresTable = PostgresTable(
+    name="dashboard_tiles",
+    postgres_table_name="posthog_dashboardtile",
+    access_scope="dashboard",
+    fields={
+        "id": IntegerDatabaseField(name="id"),
+        "team_id": IntegerDatabaseField(name="team_id"),
+        "dashboard_id": IntegerDatabaseField(name="dashboard_id"),
+        "insight_id": IntegerDatabaseField(name="insight_id", nullable=True),
+        "_deleted": BooleanDatabaseField(name="deleted", hidden=True),
+        "deleted": ExpressionField(name="deleted", expr=ast.Call(name="toInt", args=[ast.Field(chain=["_deleted"])])),
+        "color": StringDatabaseField(name="color", nullable=True),
+        "layouts": StringJSONDatabaseField(name="layouts"),
+    },
+)
+
 insights: PostgresTable = PostgresTable(
     name="insights",
     postgres_table_name="posthog_dashboarditem",
@@ -553,6 +569,7 @@ class SystemTables(TableNode):
         "annotations": TableNode(name="annotations", table=annotations),
         "cohort_calculation_history": TableNode(name="cohort_calculation_history", table=cohort_calculation_history),
         "cohorts": TableNode(name="cohorts", table=cohorts),
+        "dashboard_tiles": TableNode(name="dashboard_tiles", table=dashboard_tiles),
         "dashboards": TableNode(name="dashboards", table=dashboards),
         "data_modeling_jobs": TableNode(name="data_modeling_jobs", table=data_modeling_jobs),
         "data_modeling_views": TableNode(name="data_modeling_views", table=data_modeling_views),
