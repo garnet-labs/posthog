@@ -456,10 +456,16 @@ export const maxLogic = kea<maxLogicType>([
         },
 
         loadConversationHistorySuccess: ({ payload }) => {
+            // Don't update the thread if:
+            // - the current chat is not a chat with ID
+            // - the current chat is a temp chat
+            // - we have explicitly marked we're in an autorun conversation
             if (!values.conversationId || values.autoRun || payload?.doNotUpdateCurrentThread) {
                 return
             }
 
+            // If the user has opened a conversation from a direct link, we verify that the conversation exists
+            // after the history has been loaded.
             if (!values.conversation) {
                 actions.loadConversation(values.conversationId)
             } else {
