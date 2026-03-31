@@ -10,6 +10,8 @@ This guide explains how to create isolated PostHog development environments usin
 > You should have Flox installed and be able to run `hogli start`
 > (PostHog's developer CLI, available inside the Flox environment) before proceeding.
 
+> **Alternative:** If you need truly isolated environments with separate databases, consider using [sandboxes](./developing-locally#extra-sandbox-development-environments) instead. Sandboxes run each branch in its own Docker stack with independent Postgres, ClickHouse, and Redis instances.
+
 **Key Benefits:**
 
 - Work on multiple branches simultaneously with isolated environments
@@ -17,7 +19,7 @@ This guide explains how to create isolated PostHog development environments usin
 - Quick switching between features, bug fixes, and PR reviews
 - Standard `hogli start` command works in each worktree
 
-> **Important:** Only one PostHog instance (`hogli start`) can run at a time since they all use the same ports. The workflow focuses on quickly stopping one instance and starting another.
+> **Important:** Only one PostHog instance (`hogli start`) can run at a time with this approach since they all use the same ports. If you need to run multiple instances simultaneously, use [sandboxes](./developing-locally#extra-sandbox-development-environments) instead – each sandbox gets its own port allocation.
 
 ## Prerequisites
 
