@@ -529,6 +529,7 @@ def _create_tile_for_text(
     DashboardTile.objects.create(
         text=text,
         dashboard=dashboard,
+        team_id=dashboard.team_id,
         layouts=layouts,
         color=color,
         transparent_background=transparent_background,
@@ -555,6 +556,7 @@ def _create_tile_for_button(
     DashboardTile.objects.create(
         button_tile=button_tile,
         dashboard=dashboard,
+        team_id=dashboard.team_id,
         layouts=layouts,
         color=color,
         transparent_background=transparent_background,
@@ -582,6 +584,7 @@ def _create_tile_for_insight(
     DashboardTile.objects.create(
         insight=insight,
         dashboard=dashboard,
+        team_id=dashboard.team_id,
         layouts=layouts,
         color=color,
     )
@@ -901,6 +904,7 @@ def create_group_type_mapping_detail_dashboard(group_type_mapping, user) -> Dash
         tile = DashboardTile.objects.create(
             insight=insight,
             dashboard=dashboard,
+            team_id=dashboard.team_id,
             layouts={
                 "sm": {"h": 5, "w": 6, "x": x, "y": y, "minH": 1, "minW": 1},
                 "xs": {"h": 5, "w": 1, "x": 0, "y": 0, "minH": 1, "minW": 1},

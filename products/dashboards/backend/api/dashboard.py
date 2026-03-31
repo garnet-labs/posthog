@@ -249,6 +249,7 @@ class DashboardTileSerializer(serializers.ModelSerializer):
             "last_refresh",
             "refreshing",
             "refresh_attempt",
+            "team",
         ]
         read_only_fields = ["id", "insight"]
         depth = 1
@@ -554,6 +555,7 @@ class DashboardSerializer(DashboardMetadataSerializer):
 
             DashboardTile.objects.create(
                 dashboard=dashboard,
+                team_id=dashboard.team_id,
                 insight=insight,
                 layouts=existing_tile.layouts,
                 color=existing_tile.color,
@@ -573,6 +575,7 @@ class DashboardSerializer(DashboardMetadataSerializer):
             text = cast(Text, text_serializer.instance)
             DashboardTile.objects.create(
                 dashboard=dashboard,
+                team_id=dashboard.team_id,
                 text=text,
                 layouts=existing_tile.layouts,
                 color=existing_tile.color,
@@ -592,6 +595,7 @@ class DashboardSerializer(DashboardMetadataSerializer):
             button_tile = cast(ButtonTile, button_tile_serializer.instance)
             DashboardTile.objects.create(
                 dashboard=dashboard,
+                team_id=dashboard.team_id,
                 button_tile=button_tile,
                 layouts=existing_tile.layouts,
                 color=existing_tile.color,
@@ -703,7 +707,7 @@ class DashboardSerializer(DashboardMetadataSerializer):
         return DashboardTile.objects.update_or_create(
             id=tile_data.get("id", None),
             dashboard=instance,
-            defaults={**tile_defaults, **extra_defaults, "dashboard": instance},
+            defaults={**tile_defaults, **extra_defaults, "dashboard": instance, "team_id": instance.team_id},
         )
 
     @staticmethod
