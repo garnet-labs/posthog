@@ -665,10 +665,6 @@ export class HogExecutorService {
             fetchParams.body = params.body
         }
 
-        if (params.timeoutMs !== undefined) {
-            fetchParams.timeoutMs = Math.min(params.timeoutMs, MAX_FETCH_TIMEOUT_MS)
-        }
-
         const { fetchError, fetchResponse, fetchDuration } = await cdpTrackedFetch({
             url: params.url,
             fetchParams,

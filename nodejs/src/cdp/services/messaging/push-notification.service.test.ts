@@ -2,13 +2,9 @@ import { HOG_EXAMPLES, HOG_FILTERS_EXAMPLES, HOG_INPUTS_EXAMPLES } from '~/cdp/_
 import { createExampleInvocation, createHogFunction } from '~/cdp/_tests/fixtures'
 import { CyclotronJobInvocationHogFunction } from '~/cdp/types'
 
-import { HogInputsService } from '../hog-inputs.service'
+import { IntegrationManagerService } from '../managers/integration-manager.service'
 import { PushSubscriptionsManagerService } from '../managers/push-subscriptions-manager.service'
-import {
-    PushNotificationFetchUtils,
-    PushNotificationService,
-    PushNotificationServiceHub,
-} from './push-notification.service'
+import { PushNotificationFetchUtils, PushNotificationService } from './push-notification.service'
 
 const fcmUrl = 'https://fcm.googleapis.com/v1/projects/test-project/messages:send'
 
@@ -45,24 +41,18 @@ const createSendPushNotificationInvocation = (token: string | null | undefined):
 
 describe('PushNotificationService', () => {
     let service: PushNotificationService
-    let hub: PushNotificationServiceHub
-    let hogInputsService: HogInputsService
+    let integrationManager: IntegrationManagerService
     let pushSubscriptionsManager: PushSubscriptionsManagerService
     let fetchUtils: PushNotificationFetchUtils
 
     const mockTrackedFetch = jest.fn()
-    const mockIsFetchResponseRetriable = jest.fn()
 
     beforeEach(() => {
-        hub = {
-            CDP_FETCH_RETRIES: 3,
-            CDP_FETCH_BACKOFF_BASE_MS: 1000,
-            CDP_FETCH_BACKOFF_MAX_MS: 10000,
-        }
-        hogInputsService = {
-            loadIntegrationInputs: jest.fn().mockResolvedValue({}),
+        integrationManager = {
+            get: jest.fn().mockResolvedValue(undefined),
         } as any
         pushSubscriptionsManager = {
+            get: jest.fn().mockResolvedValue([]),
             updateLastSuccessfullyUsedAtByToken: jest.fn().mockResolvedValue(undefined),
             deactivateByTokens: jest.fn().mockResolvedValue(undefined),
             updateFcmTokenLifecycle: jest.fn().mockResolvedValue(undefined),
@@ -71,11 +61,10 @@ describe('PushNotificationService', () => {
 
         fetchUtils = {
             trackedFetch: mockTrackedFetch,
-            isFetchResponseRetriable: mockIsFetchResponseRetriable,
             maxFetchTimeoutMs: 10000,
         }
 
-        service = new PushNotificationService(hub, hogInputsService, pushSubscriptionsManager, fetchUtils)
+        service = new PushNotificationService(integrationManager, pushSubscriptionsManager, fetchUtils)
     })
 
     afterEach(() => {
@@ -271,7 +260,6 @@ describe('PushNotificationService', () => {
         it('schedules retry when response is retriable', async () => {
             const token = 'test-fcm-token-123'
             const invocation = createSendPushNotificationInvocation(token)
-            mockIsFetchResponseRetriable.mockReturnValue(true)
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -293,7 +281,6 @@ describe('PushNotificationService', () => {
         it('sets result.error when retries exhausted and not retriable', async () => {
             const token = 'test-fcm-token-123'
             const invocation = createSendPushNotificationInvocation(token)
-            mockIsFetchResponseRetriable.mockReturnValue(false)
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {

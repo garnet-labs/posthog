@@ -86,7 +86,7 @@ describe('PushSubscriptionsManagerService', () => {
         beforeEach(async () => {
             await resetTestDatabase()
             hub = await createHub()
-            team = await getFirstTeam(hub)
+            team = await getFirstTeam(hub.postgres)
             manager = new PushSubscriptionsManagerService(hub.postgres, hub.encryptedFields)
             hogFunction = createHogFunction({
                 id: 'hog-function-1',

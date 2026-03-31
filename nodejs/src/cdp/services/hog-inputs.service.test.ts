@@ -10,6 +10,8 @@ import { createHogExecutionGlobals, createHogFunction, insertIntegration } from 
 import { compileHog } from '../templates/compiler'
 import { HogFunctionInvocationGlobals, HogFunctionType } from '../types'
 import { HogInputsService, formatHogInput, getIntegrationIdForPush } from './hog-inputs.service'
+import { PushSubscriptionsManagerService } from './managers/push-subscriptions-manager.service'
+import { RecipientTokensService } from './messaging/recipient-tokens.service'
 
 describe('getIntegrationIdForPush', () => {
     it('returns null when no integration inputs are present', () => {
@@ -70,7 +72,13 @@ describe('Hog Inputs', () => {
             },
         })
 
-        hogInputsService = new HogInputsService(hub.integrationManager, hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+        const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+        const pushSubscriptionsManager = new PushSubscriptionsManagerService(hub.postgres, hub.encryptedFields)
+        hogInputsService = new HogInputsService(
+            hub.integrationManager,
+            recipientTokensService,
+            pushSubscriptionsManager
+        )
     })
 
     afterEach(async () => {
