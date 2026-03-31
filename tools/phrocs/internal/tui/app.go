@@ -106,7 +106,6 @@ type Model struct {
 	width  int
 	height int
 	ready  bool
-	isDark bool
 
 	mouseScrollSpeed int
 	hideHelp         bool // hide_keymap_window from config
@@ -127,7 +126,6 @@ func New(mgr *process.Manager, cfg *config.Config, logger *log.Logger) Model {
 		servicesOffset:   0,
 		focusedPane:      focusServices,
 		viewportAtBottom: true,
-		isDark:           true,
 		mouseScrollSpeed: cfg.MouseScrollSpeed,
 		hideHelp:         cfg.HideKeymapWindow,
 		procListWidth:    cfg.ProcListWidth,
@@ -167,8 +165,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.BackgroundColorMsg:
-		m.isDark = msg.IsDark()
-		m.help.Styles = helpStyles(m.isDark)
+		isDark := msg.IsDark()
+		m.help.Styles = help.DefaultStyles(isDark)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd

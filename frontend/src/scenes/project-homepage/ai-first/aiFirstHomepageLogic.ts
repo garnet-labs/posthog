@@ -82,9 +82,9 @@ export const aiFirstHomepageLogic = kea<aiFirstHomepageLogicType>([
             dashboardsModel,
             ['pinnedDashboards', 'dashboardsLoading'],
             recentItemsModel,
-            ['recents as cachedRecents', 'recentsHasLoaded'],
+            ['recents as cachedRecents', 'recentsLoading'],
             projectTreeDataLogic,
-            ['shortcutData as cachedStarred', 'shortcutDataHasLoaded'],
+            ['shortcutData as cachedStarred'],
         ],
         actions: [
             maxLogic({ tabId: HOMEPAGE_TAB_ID }),
@@ -156,15 +156,12 @@ export const aiFirstHomepageLogic = kea<aiFirstHomepageLogicType>([
             (s) => [s.cachedRecents],
             (cachedRecents): FileSystemEntry[] => cachedRecents.slice(0, GRID_LIMIT),
         ],
-        recentItemsLoading: [(s) => [s.recentsHasLoaded], (recentsHasLoaded): boolean => !recentsHasLoaded],
+        recentItemsLoading: [(s) => [s.recentsLoading], (recentsLoading): boolean => recentsLoading],
         starredItems: [
             (s) => [s.cachedStarred],
             (cachedStarred): FileSystemEntry[] => cachedStarred.filter((e) => e.type !== 'folder').slice(0, GRID_LIMIT),
         ],
-        starredItemsLoading: [
-            (s) => [s.shortcutDataHasLoaded],
-            (shortcutDataHasLoaded): boolean => !shortcutDataHasLoaded,
-        ],
+        starredItemsLoading: [() => [], (): boolean => false],
         mode: [(s) => [s.layoutState], (layoutState): HomepageMode => layoutState.mode],
         animationPhase: [(s) => [s.layoutState], (layoutState): AnimationPhase => layoutState.animationPhase],
         pinnedDashboardItems: [

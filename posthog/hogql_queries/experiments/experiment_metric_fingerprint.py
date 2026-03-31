@@ -18,16 +18,11 @@ METRIC_FIELDS_TO_IGNORE: set[str] = {
     "name",
     "kind",
     "fingerprint",
-    "only_count_matured_users",
 }
 
 
 def compute_metric_fingerprint(
-    metric: dict,
-    start_date: Any,
-    stats_method: str | None = None,
-    exposure_criteria: dict | None = None,
-    only_count_matured_users: bool = False,
+    metric: dict, start_date: Any, stats_method: str | None = None, exposure_criteria: dict | None = None
 ) -> str:
     """
     Compute fingerprint for a metric.
@@ -55,7 +50,7 @@ def compute_metric_fingerprint(
     if stats_method is None:
         stats_method = "bayesian"
 
-    fingerprint_data: dict[str, Any] = {
+    fingerprint_data = {
         "metric": clean_metric,
         "start_date": start_date_str,
         "stats_method": stats_method,
@@ -63,9 +58,6 @@ def compute_metric_fingerprint(
 
     if exposure_criteria:
         fingerprint_data["exposure_criteria"] = exposure_criteria
-
-    if only_count_matured_users:
-        fingerprint_data["only_count_matured_users"] = True
 
     # Create deterministic JSON string with sorted keys at all levels
     json_str = json.dumps(fingerprint_data, sort_keys=True, separators=(",", ":"))

@@ -1,3 +1,6 @@
+import { LemonCheckbox } from '@posthog/lemon-ui'
+
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonInput } from 'lib/lemon-ui/LemonInput'
 import { LemonRadio } from 'lib/lemon-ui/LemonRadio'
 import { LemonSelect, LemonSelectOption } from 'lib/lemon-ui/LemonSelect'
@@ -15,6 +18,8 @@ export function ExperimentMetricConversionWindowFilter({
     metric: ExperimentMetric
     handleSetMetric: (newMetric: ExperimentMetric) => void
 }): JSX.Element {
+    const showMaturedUsersOption = useFeatureFlag('EXPERIMENTS_MATURED_USERS_FILTER')
+
     const options: LemonSelectOption<FunnelConversionWindowTimeUnit>[] = Object.keys(TIME_INTERVAL_BOUNDS).map(
         (unit) => ({
             label: capitalizeFirstLetter(pluralize(metric.conversion_window ?? 72, unit, `${unit}s`, false)),
@@ -53,6 +58,8 @@ export function ExperimentMetricConversionWindowFilter({
                             conversion_window: value === 'experiment_duration' ? undefined : 14,
                             conversion_window_unit:
                                 value === 'experiment_duration' ? undefined : FunnelConversionWindowTimeUnit.Day,
+                            only_count_matured_users:
+                                value === 'experiment_duration' ? undefined : metric.only_count_matured_users,
                         })
                     }
                     options={[
@@ -67,27 +74,46 @@ export function ExperimentMetricConversionWindowFilter({
                     ]}
                 />
                 {metric.conversion_window_unit !== undefined && (
-                    <div className="flex items-center gap-2">
-                        <LemonInput
-                            type="number"
-                            className="max-w-20"
-                            fullWidth={false}
-                            min={intervalBounds[0]}
-                            max={intervalBounds[1]}
-                            value={metric.conversion_window || 1}
-                            onChange={(value) => {
-                                handleSetMetric({ ...metric, conversion_window: value || undefined })
-                            }}
-                        />
-                        <LemonSelect
-                            dropdownMatchSelectWidth={false}
-                            value={metric.conversion_window_unit}
-                            onChange={(value) =>
-                                handleSetMetric({ ...metric, conversion_window_unit: value || undefined })
-                            }
-                            options={options}
-                        />
-                    </div>
+                    <>
+                        <div className="flex items-center gap-2">
+                            <LemonInput
+                                type="number"
+                                className="max-w-20"
+                                fullWidth={false}
+                                min={intervalBounds[0]}
+                                max={intervalBounds[1]}
+                                value={metric.conversion_window || 1}
+                                onChange={(value) => {
+                                    handleSetMetric({ ...metric, conversion_window: value || undefined })
+                                }}
+                            />
+                            <LemonSelect
+                                dropdownMatchSelectWidth={false}
+                                value={metric.conversion_window_unit}
+                                onChange={(value) =>
+                                    handleSetMetric({ ...metric, conversion_window_unit: value || undefined })
+                                }
+                                options={options}
+                            />
+                        </div>
+                        {showMaturedUsersOption && (
+                            <div className="flex items-center gap-2">
+                                <LemonCheckbox
+                                    label="Only count matured users"
+                                    checked={metric.only_count_matured_users ?? false}
+                                    onChange={(checked) =>
+                                        handleSetMetric({
+                                            ...metric,
+                                            only_count_matured_users: checked || undefined,
+                                        })
+                                    }
+                                />
+                                <span className="text-muted text-xs">
+                                    Exclude users from calculations until their full conversion window has elapsed.
+                                </span>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </SceneSection>

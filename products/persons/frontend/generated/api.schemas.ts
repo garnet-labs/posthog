@@ -481,18 +481,6 @@ export const PersonsBatchByDistinctIdsCreateFormat = {
     Json: 'json',
 } as const
 
-export type PersonsBatchByUuidsCreateParams = {
-    format?: PersonsBatchByUuidsCreateFormat
-}
-
-export type PersonsBatchByUuidsCreateFormat =
-    (typeof PersonsBatchByUuidsCreateFormat)[keyof typeof PersonsBatchByUuidsCreateFormat]
-
-export const PersonsBatchByUuidsCreateFormat = {
-    Csv: 'csv',
-    Json: 'json',
-} as const
-
 export type PersonsBulkDeleteCreateParams = {
     format?: PersonsBulkDeleteCreateFormat
 }

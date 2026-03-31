@@ -685,13 +685,6 @@ export const projectTreeDataLogic = kea<projectTreeDataLogicType>([
                 },
             },
         ],
-        shortcutDataHasLoaded: [
-            false,
-            {
-                loadShortcutsSuccess: () => true,
-                loadShortcutsFailure: () => true,
-            },
-        ],
     }),
     selectors({
         savedItems: [
