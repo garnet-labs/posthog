@@ -144,6 +144,54 @@ You can now change PostHog in any way you want. See [Project structure](./projec
 
 By default, `hogli start` runs a minimal set of services (enough for product analytics). To customize which services start, run `hogli dev:setup` which lets you select intents based on the products you're working on. Your choices are saved and used automatically by `hogli start`.
 
+## Option 2: Isolated sandboxes
+
+If you need to run multiple branches simultaneously or want fully isolated environments, use the sandbox tool. Each sandbox gets its own Docker Compose project with independent infrastructure.
+
+### Creating a sandbox
+
+```bash
+./bin/sandbox create my-feature-branch
+```
+
+This creates a git worktree, allocates a unique port, and boots all required services. The sandbox is accessible at `http://localhost:{port}`.
+
+### Customizing sandbox services with intents
+
+Just like `hogli dev:setup`, sandboxes support the `--intents` flag to control which services boot:
+
+```bash
+./bin/sandbox create my-feature-branch --intents session_replay,tracing
+```
+
+Available intents include `product_analytics` (default), `session_replay`, `error_tracking`, `feature_flags`, `experiments`, `llm_analytics`, `web_analytics`, `surveys`, `data_warehouse`, `pipelines`, `tracing`, and more. See `devenv/intent-map.yaml` for the full list.
+
+Intents are resolved through the same capability system used by `hogli` – each intent maps to capabilities, which map to Docker Compose profiles in `docker-compose.profiles.yml`.
+
+### Managing sandboxes
+
+```bash
+# List all sandboxes
+./bin/sandbox list
+
+# Stop a sandbox (preserves state)
+./bin/sandbox stop my-feature-branch
+
+# Start a stopped sandbox
+./bin/sandbox start my-feature-branch
+
+# Open VS Code attached to the sandbox
+./bin/sandbox code my-feature-branch
+
+# Open a shell in the sandbox
+./bin/sandbox shell my-feature-branch
+
+# Destroy a sandbox
+./bin/sandbox destroy my-feature-branch
+```
+
+Run `./bin/sandbox --help` for the full command reference.
+
 ### Manual setup
 
 If you need to set up without Flox, see the [manual development setup](./manual-dev-setup) guide.
@@ -203,7 +251,7 @@ If you get `Configuration property "enable.ssl.certificate.verification" not sup
 **pyproject.toml parse warnings**
 When running `uv sync`, you may see a `Failed to parse` warning related to `pyproject.toml`. This is usually harmless – if you see the `Activate with:` line at the end, your environment was created successfully.
 
-## Option 2: Developing with Codespaces
+## Option 3: Developing with Codespaces
 
 This is a faster option to get up and running if you can't or don't want to set up locally.
 GitHub Codespaces gives you a cloud-hosted dev environment with all dependencies pre-installed.
