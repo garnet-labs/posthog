@@ -58,6 +58,8 @@ import {
     PropertyFilterType,
     PropertyGroupFilter,
     PropertyGroupFilterValue,
+    Survey,
+    SurveyEventProperties,
     TeamType,
 } from '~/types'
 
@@ -669,6 +671,23 @@ export const hogFunctionConfigurationLogic = kea<hogFunctionConfigurationLogicTy
                 },
             },
         ],
+
+        survey: [
+            null as Survey | null,
+            {
+                loadSurvey: async () => {
+                    const surveyId = values.surveyIdFromFilters
+                    if (!surveyId) {
+                        return null
+                    }
+                    try {
+                        return await api.surveys.get(surveyId)
+                    } catch {
+                        return null
+                    }
+                },
+            },
+        ],
     })),
     forms(({ values, props, asyncActions }) => ({
         configuration: {
@@ -727,6 +746,20 @@ export const hogFunctionConfigurationLogic = kea<hogFunctionConfigurationLogicTy
     })),
     selectors(() => ({
         logicProps: [() => [(_, props) => props], (props: HogFunctionConfigurationLogicProps) => props],
+        surveyIdFromFilters: [
+            (s) => [s.configuration],
+            (configuration): string | null => {
+                for (const event of configuration?.filters?.events ?? []) {
+                    const prop = (event.properties as AnyPropertyFilter[] | undefined)?.find(
+                        (p) => p.key === SurveyEventProperties.SURVEY_ID && 'value' in p && p.value
+                    )
+                    if (prop) {
+                        return String(prop.value)
+                    }
+                }
+                return null
+            },
+        ],
         type: [
             (s) => [s.configuration, s.hogFunction],
             (configuration, hogFunction) => configuration?.type ?? hogFunction?.type ?? 'loading',
@@ -1473,6 +1506,13 @@ export const hogFunctionConfigurationLogic = kea<hogFunctionConfigurationLogicTy
                     actions: [],
                     data_warehouse: [],
                 })
+            }
+        },
+        surveyIdFromFilters: (surveyId) => {
+            if (surveyId) {
+                actions.loadSurvey()
+            } else {
+                actions.loadSurveySuccess(null)
             }
         },
     })),
