@@ -184,7 +184,7 @@ def should_send_notification(
     # The below typeerror is ignored because we're currently handling the notification
     # types above, so technically it's unreachable. However if another is added but
     # not handled in this function, we want this as a fallback.
-    return True  # type: ignore
+    return True
 
 
 def should_send_pipeline_error_notification(
