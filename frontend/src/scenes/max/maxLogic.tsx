@@ -473,6 +473,14 @@ export const maxLogic = kea<maxLogicType>([
             }
         },
 
+        loadConversationSuccess: ({ currentConversation }) => {
+            // Keep the history list in sync so title lookups and the sidebar reflect the loaded conversation,
+            // including shared conversations that were never in the user's own history list.
+            if (currentConversation) {
+                actions.prependOrReplaceConversation(currentConversation)
+            }
+        },
+
         loadConversationFailure: ({ error }) => {
             // If the conversation is not found, it may be a race condition where the conversation is still
             // being created on the backend. Poll for it to handle this case gracefully.
