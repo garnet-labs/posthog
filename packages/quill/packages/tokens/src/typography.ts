@@ -11,7 +11,7 @@ function rem(px: number): string {
 }
 
 export const fontSize = {
-    xss: [rem(10), { lineHeight: rem(12) }], // 0.6875rem (11px)
+    xxs: [rem(10), { lineHeight: rem(12) }], // 0.6875rem (11px)
     xs: [rem(12), { lineHeight: rem(16) }], // 0.75rem (12px)
     sm: [rem(14), { lineHeight: rem(14) }], // 0.875rem (14px)
     base: [rem(16), { lineHeight: rem(24) }], // 1rem (16px)

@@ -110,7 +110,20 @@ export {
 } from './field'
 export { Input } from './input'
 export { InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupInput, InputGroupTextarea } from './input-group'
-export { Item, ItemCheckbox, ItemMenuItem, ItemMedia } from './item'
+export {
+    Item,
+    ItemCheckbox,
+    ItemMenuItem,
+    ItemMedia,
+    ItemContent,
+    ItemActions,
+    ItemGroup,
+    ItemSeparator,
+    ItemTitle,
+    ItemDescription,
+    ItemHeader,
+    ItemFooter,
+} from './item'
 export { Kbd, KbdGroup, KbdText } from './kbd'
 export { Label } from './label'
 export {
@@ -150,7 +163,7 @@ export { Separator } from './separator'
 export { Skeleton } from './skeleton'
 export { SkeletonText } from './skeleton-text'
 export { Slider } from './slider'
-export { Toaster } from './sonner'
+export { ToastProvider, ToastCard, toast, anchoredToast, toastManager, anchoredToastManager, type ToastCardProps, type ToastOptions, type AnchoredToastOptions, type ToastType } from './toast'
 export { Spinner } from './spinner'
 export { Switch } from './switch'
 export { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs'
