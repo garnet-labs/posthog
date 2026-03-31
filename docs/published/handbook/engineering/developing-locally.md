@@ -518,12 +518,63 @@ hogli build:openapi
 
 See the [Type system guide](type-system) for details on how type generation works and best practices for documenting your API.
 
+## Extra: Sandbox development environments
+
+Sandboxes let you spin up a fully isolated PostHog stack per branch – each gets its own Postgres, ClickHouse, Kafka, and Redis. This is useful for:
+
+- Testing a teammate's PR without switching branches
+- Giving AI assistants (like Claude Code) their own environment
+- Running multiple branches simultaneously without port conflicts
+
+### Quick start
+
+```bash
+bin/sandbox create my-branch       # Create sandbox (~1-2 min, first run ~5 min)
+bin/sandbox shell my-branch        # Open mprocs UI
+bin/sandbox list                   # List all sandboxes and ports
+bin/sandbox destroy my-branch      # Clean up
+```
+
+The app runs at `http://localhost:<port>` (ports are allocated automatically starting from 48001). Login: `test@posthog.com` / `12345678`.
+
+### IDE support
+
+**VS Code:**
+
+```bash
+bin/sandbox code my-branch         # Opens VS Code attached to the container
+```
+
+**PyCharm / IntelliJ:**
+
+```bash
+bin/sandbox idea my-branch         # Requires JetBrains Gateway
+```
+
+**Claude Code:** Attach to the sandbox shell, press `Ctrl-b c` for a new tmux window, then run `claude`.
+
+### Other commands
+
+```bash
+bin/sandbox start my-branch        # Start a stopped sandbox
+bin/sandbox stop my-branch         # Stop a sandbox (preserves state)
+bin/sandbox logs my-branch         # Tail logs from a sandbox
+bin/sandbox rebuild-cache          # Rebuild the database cache from master
+bin/sandbox nuke                   # Destroy all sandboxes and clear the cache
+```
+
+### Troubleshooting
+
+Run `bin/sandbox nuke` to clear all sandboxes and rebuild the cache if things get stuck.
+
 ## Extra: Working on multiple branches simultaneously
 
-If you frequently switch between features, bug fixes, and PR reviews, the
-[isolated development with Flox](./flox-multi-instance-workflow) guide shows
-how to use Git worktrees with per-worktree Flox environments for fast context
-switching.
+There are two approaches for working on multiple branches:
+
+1. **Sandboxes** – Fully isolated Docker stacks per branch. See [sandbox development environments](#extra-sandbox-development-environments) above.
+2. **Flox worktrees** – Shared Docker services with isolated environments per worktree. See [isolated development with Flox](./flox-multi-instance-workflow).
+
+Choose sandboxes when you need truly parallel environments (e.g., testing PRs, AI assistants). Choose Flox worktrees for faster context switching during daily development.
 
 ## Extra: Working with the data warehouse
 
