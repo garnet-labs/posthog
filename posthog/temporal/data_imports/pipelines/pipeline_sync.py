@@ -180,7 +180,7 @@ async def validate_schema_and_update_table(
                     table_created.format = table_params["format"]
                     table_created.url_pattern = new_url_pattern
                     table_created.queryable_folder = queryable_folder
-                    if incremental_or_append:
+                    if incremental_or_append or external_data_schema.is_cdc:
                         table_created.row_count = table_created.get_count()
                     else:
                         table_created.row_count = row_count

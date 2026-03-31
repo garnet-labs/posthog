@@ -210,7 +210,7 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
         log.info("pk_columns_loaded", tables=list(pk_columns_by_table.keys()))
 
         batcher = ChangeEventBatcher()
-        last_position: str | None = None
+        last_end_lsn: str | None = None
         event_count = 0
 
         for event in reader.read_changes():
@@ -220,7 +220,7 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 continue
 
             batcher.add(event)
-            last_position = event.position_serialized
+            last_end_lsn = event.position_serialized
             event_count += 1
 
         log.info("wal_changes_read", event_count=event_count, tables=batcher.table_names)
@@ -376,15 +376,15 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 job.save(update_fields=["rows_synced", "status", "finished_at", "updated_at"])
 
         # Advance slot after successful S3 writes
-        if last_position is not None:
-            reader.confirm_position(last_position)
-            log.info("slot_advanced", position=last_position)
+        if last_end_lsn is not None:
+            reader.confirm_position(last_end_lsn)
+            log.info("slot_advanced", position=last_end_lsn)
 
             # Update per-schema cdc_last_log_position (skip schemas reset to snapshot mode)
             for schema in cdc_schemas:
                 if schema.sync_type_config.get("cdc_mode") == "snapshot":
                     continue
-                schema.sync_type_config["cdc_last_log_position"] = last_position
+                schema.sync_type_config["cdc_last_log_position"] = last_end_lsn
                 schema.save(update_fields=["sync_type_config", "updated_at"])
 
     except Exception as exc:

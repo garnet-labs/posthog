@@ -22,7 +22,11 @@ from __future__ import annotations
 
 import struct
 import logging
-from dataclasses import dataclass, field
+from dataclasses import (
+    dataclass,
+    field,
+    replace as dataclass_replace,
+)
 from datetime import UTC, datetime
 from typing import Any
 
@@ -89,7 +93,6 @@ class PgOutputDecoder:
     def __init__(self) -> None:
         self._relations: dict[int, Relation] = {}
         self._tx_buffer: list[ChangeEvent] = []
-        self._tx_commit_lsn: str | None = None
         self._tx_timestamp: datetime | None = None
         self._truncated_tables: list[str] = []
 
@@ -136,22 +139,23 @@ class PgOutputDecoder:
 
     def _handle_begin(self, payload: bytes) -> None:
         """B message: final_lsn(8) + timestamp(8) + xid(4)"""
-        final_lsn = PgLSN.from_bytes(payload[0:8])
         timestamp_us = struct.unpack("!q", payload[8:16])[0]
         # xid = struct.unpack("!I", payload[16:20])[0]  # not needed
 
-        self._tx_commit_lsn = final_lsn.serialize()
         self._tx_timestamp = _pg_timestamp_to_datetime(timestamp_us)
         self._tx_buffer.clear()
 
     def _handle_commit(self, payload: bytes) -> list[ChangeEvent]:
         """C message: flags(1) + commit_lsn(8) + end_lsn(8) + timestamp(8)
 
-        Flushes the transaction buffer.
+        Flushes the transaction buffer. Events are stamped with end_lsn — the
+        byte immediately after the commit record — so that confirm_position()
+        advances past this transaction, not just to its start.
         """
-        events = list(self._tx_buffer)
+        # end_lsn starts at byte 9: flags(1) + commit_lsn(8)
+        end_lsn = PgLSN.from_bytes(payload[9:17]).serialize()
+        events = [dataclass_replace(e, position_serialized=end_lsn) for e in self._tx_buffer]
         self._tx_buffer.clear()
-        self._tx_commit_lsn = None
         self._tx_timestamp = None
         return events
 
@@ -217,7 +221,7 @@ class PgOutputDecoder:
             ChangeEvent(
                 operation="I",
                 table_name=relation.table_name,
-                position_serialized=self._tx_commit_lsn or lsn,
+                position_serialized=lsn,
                 timestamp=self._tx_timestamp or datetime.now(tz=UTC),
                 columns=columns,
             )
@@ -254,7 +258,7 @@ class PgOutputDecoder:
             ChangeEvent(
                 operation="U",
                 table_name=relation.table_name,
-                position_serialized=self._tx_commit_lsn or lsn,
+                position_serialized=lsn,
                 timestamp=self._tx_timestamp or datetime.now(tz=UTC),
                 columns=columns,
             )
@@ -284,7 +288,7 @@ class PgOutputDecoder:
             ChangeEvent(
                 operation="D",
                 table_name=relation.table_name,
-                position_serialized=self._tx_commit_lsn or lsn,
+                position_serialized=lsn,
                 timestamp=self._tx_timestamp or datetime.now(tz=UTC),
                 columns=columns,
             )

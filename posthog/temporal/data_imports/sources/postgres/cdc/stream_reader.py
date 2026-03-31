@@ -52,7 +52,6 @@ class PgCDCStreamReader:
             database=self._params.database,
             user=self._params.user,
             password=self._params.password,
-            autocommit=True,
         )
 
     def read_changes(self, from_position: str | None = None) -> Iterator[ChangeEvent]:
@@ -102,6 +101,7 @@ class PgCDCStreamReader:
 
         with self._conn.cursor() as cur:
             cur.execute(query)
+        self._conn.commit()
 
         logger.info("Advanced slot %s to position %s", self._params.slot_name, position)
 
