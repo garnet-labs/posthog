@@ -119,6 +119,20 @@ The agent harness receives rich context without needing PostHog DB access.
    include precalculated context in the first `user_message` as a system_reminder block
 3. Port prompt templates from `ee/hogai/context/prompts.py` to the new format
 
+**Large context / attached files -- S3 offloading:**
+
+Precalculated context and user-attached files (CSVs, screenshots, logs, etc.) can exceed
+what's practical to inline in a system_reminder. Above a configurable threshold (e.g., 32 KB),
+context payloads should be stored on S3 and passed to the sandbox as presigned URLs.
+
+- Django uploads the context blob to S3 (`s3://<bucket>/conversations/<convo_id>/context/<hash>`)
+- The agent-server message includes the presigned URL instead of inline content
+- The harness fetches the content from S3 on startup (fast -- same region, internal network)
+- TTL on presigned URLs matches sandbox TTL (30 min) to avoid dangling access
+- Attached files (images, CSVs) follow the same path -- uploaded to S3 by Django,
+  URL passed to sandbox, agent reads via presigned URL or file written into sandbox filesystem
+- This keeps the agent-server JSON-RPC messages small and avoids Temporal payload size limits
+
 ### 1b. Modes -> deprecated, replaced by tool search
 
 **Current:** 7 modes (PRODUCT_ANALYTICS, SQL, SESSION_REPLAY, ERROR_TRACKING, FLAGS, SURVEY, LLM_ANALYTICS)
