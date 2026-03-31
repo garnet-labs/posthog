@@ -20,10 +20,12 @@ import {
 } from '@posthog/icons'
 import { LemonBanner, LemonDivider, LemonTag, Link, Tooltip } from '@posthog/lemon-ui'
 
+import { SESSION_SUMMARY_FEEDBACK_SURVEY_ID } from 'lib/constants'
 import { usePageVisibility } from 'lib/hooks/usePageVisibility'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { Spinner } from 'lib/lemon-ui/Spinner'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
+import { InternalMultipleChoiceSurvey } from 'scenes/session-recordings/components/InternalSurvey/InternalMultipleChoiceSurvey'
 import { playerMetaLogic } from 'scenes/session-recordings/player/player-meta/playerMetaLogic'
 import { sessionRecordingPlayerLogic } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 import { urls } from 'scenes/urls'
@@ -504,30 +506,37 @@ function SessionSummaryFeedback(): JSX.Element {
     const { logicProps } = useValues(sessionRecordingPlayerLogic)
     const { summaryHasHadFeedback } = useValues(playerMetaLogic(logicProps))
     const { sessionSummaryFeedback } = useActions(playerMetaLogic(logicProps))
+    const [showSurvey, setShowSurvey] = useState(false)
 
     return (
-        <div className="text-right mb-2 mt-4">
-            <p>Is this a good summary?</p>
-            <div className="flex flex-row gap-2 justify-end">
-                <LemonButton
-                    size="xsmall"
-                    type="primary"
-                    icon={<IconThumbsUp />}
-                    disabledReason={summaryHasHadFeedback ? 'Thanks for your feedback!' : undefined}
-                    onClick={() => {
-                        sessionSummaryFeedback('good')
-                    }}
-                />
-                <LemonButton
-                    size="xsmall"
-                    type="primary"
-                    icon={<IconThumbsDown />}
-                    disabledReason={summaryHasHadFeedback ? 'Thanks for your feedback!' : undefined}
-                    onClick={() => {
-                        sessionSummaryFeedback('bad')
-                    }}
-                />
+        <div className="mb-2 mt-4">
+            <div className="text-right">
+                <p>Is this a good summary?</p>
+                <div className="flex flex-row gap-2 justify-end">
+                    <LemonButton
+                        size="xsmall"
+                        type="primary"
+                        icon={<IconThumbsUp />}
+                        disabledReason={summaryHasHadFeedback ? 'Thanks for your feedback!' : undefined}
+                        onClick={() => {
+                            sessionSummaryFeedback('good')
+                        }}
+                    />
+                    <LemonButton
+                        size="xsmall"
+                        type="primary"
+                        icon={<IconThumbsDown />}
+                        disabledReason={summaryHasHadFeedback ? 'Thanks for your feedback!' : undefined}
+                        onClick={() => {
+                            sessionSummaryFeedback('bad')
+                            setShowSurvey(true)
+                        }}
+                    />
+                </div>
             </div>
+            {showSurvey && SESSION_SUMMARY_FEEDBACK_SURVEY_ID && (
+                <InternalMultipleChoiceSurvey surveyId={SESSION_SUMMARY_FEEDBACK_SURVEY_ID} />
+            )}
         </div>
     )
 }
