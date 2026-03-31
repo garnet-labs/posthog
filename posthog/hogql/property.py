@@ -1133,6 +1133,138 @@ def action_to_expr(action: Action, events_alias: Optional[str] = None) -> ast.Ex
         return ast.Or(exprs=or_queries)
 
 
+def action_steps_to_expr(steps: list[dict], team: Team, events_alias: Optional[str] = None) -> ast.Expr:
+    """
+    Convert action steps (as dictionaries from the query schema) to a HogQL expression.
+    This is used for previewing action matches without saving the action.
+    """
+    if len(steps) == 0:
+        return ast.Constant(value=True)
+
+    or_queries = []
+    for step in steps:
+        exprs: list[ast.Expr] = []
+        event = step.get("event")
+        if event:
+            exprs.append(parse_expr("event = {event}", {"event": ast.Constant(value=event)}))
+
+        if event == AUTOCAPTURE_EVENT:
+            selector = step.get("selector")
+            if selector:
+                exprs.append(selector_to_expr(selector))
+            tag_name = step.get("tag_name")
+            if tag_name is not None:
+                exprs.append(tag_name_to_expr(tag_name))
+            href = step.get("href")
+            if href is not None:
+                href_matching = step.get("href_matching")
+                if href_matching == "regex":
+                    exprs.append(
+                        ast.CompareOperation(
+                            op=ast.CompareOperationOp.Regex,
+                            left=ast.Field(chain=["elements_chain_href"]),
+                            right=ast.Constant(value=href),
+                        )
+                    )
+                elif href_matching == "contains":
+                    exprs.append(
+                        ast.CompareOperation(
+                            op=ast.CompareOperationOp.ILike,
+                            left=ast.Field(chain=["elements_chain_href"]),
+                            right=ast.Constant(value=f"%{href}%"),
+                        )
+                    )
+                else:
+                    exprs.append(
+                        ast.CompareOperation(
+                            op=ast.CompareOperationOp.Eq,
+                            left=ast.Field(chain=["elements_chain_href"]),
+                            right=ast.Constant(value=href),
+                        )
+                    )
+            text = step.get("text")
+            if text is not None:
+                text_matching = step.get("text_matching")
+                if text_matching == "regex":
+                    exprs.append(
+                        parse_expr(
+                            "arrayExists(x -> x =~ {value}, elements_chain_texts)",
+                            {"value": ast.Constant(value=text)},
+                        )
+                    )
+                elif text_matching == "contains":
+                    exprs.append(
+                        parse_expr(
+                            "arrayExists(x -> x ilike {value}, elements_chain_texts)",
+                            {"value": ast.Constant(value=f"%{text}%")},
+                        )
+                    )
+                else:
+                    exprs.append(
+                        parse_expr(
+                            "arrayExists(x -> x = {value}, elements_chain_texts)",
+                            {"value": ast.Constant(value=text)},
+                        )
+                    )
+
+        url = step.get("url")
+        if url:
+            url_matching = step.get("url_matching")
+            if url_matching == "exact":
+                expr = ast.CompareOperation(
+                    op=ast.CompareOperationOp.Eq,
+                    left=ast.Field(
+                        chain=(
+                            [events_alias, "properties", "$current_url"]
+                            if events_alias
+                            else ["properties", "$current_url"]
+                        )
+                    ),
+                    right=ast.Constant(value=url),
+                )
+            elif url_matching == "regex":
+                expr = ast.CompareOperation(
+                    op=ast.CompareOperationOp.Regex,
+                    left=ast.Field(
+                        chain=(
+                            [events_alias, "properties", "$current_url"]
+                            if events_alias
+                            else ["properties", "$current_url"]
+                        )
+                    ),
+                    right=ast.Constant(value=url),
+                )
+            else:
+                expr = ast.CompareOperation(
+                    op=ast.CompareOperationOp.Like,
+                    left=ast.Field(
+                        chain=(
+                            [events_alias, "properties", "$current_url"]
+                            if events_alias
+                            else ["properties", "$current_url"]
+                        )
+                    ),
+                    right=ast.Constant(value=f"%{url}%"),
+                )
+            exprs.append(expr)
+
+        properties = step.get("properties")
+        if properties:
+            exprs.append(property_to_expr(properties, team))
+
+        if len(exprs) == 1:
+            or_queries.append(exprs[0])
+        elif len(exprs) > 1:
+            or_queries.append(ast.And(exprs=exprs))
+        else:
+            or_queries.append(ast.Constant(value=True))
+
+    if len(or_queries) == 1:
+        return or_queries[0]
+    else:
+        return ast.Or(exprs=or_queries)
+
+
 def entity_to_expr(entity: RetentionEntity, team: Team) -> ast.Expr:
     if entity.type == TREND_FILTER_TYPE_ACTIONS and entity.id is not None:
         # action

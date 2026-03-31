@@ -3,6 +3,7 @@ import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 import { beforeUnload, router, urlToAction } from 'kea-router'
 import { CombinedLocation } from 'kea-router/lib/utils'
+import { subscriptions } from 'kea-subscriptions'
 
 import api from 'lib/api'
 import { SetupTaskId, globalSetupLogic } from 'lib/components/ProductSetup'
@@ -15,6 +16,9 @@ import { urls } from 'scenes/urls'
 import { deleteFromTree, getLastNewFolder, refreshTreeItem } from '~/layout/panel-layout/ProjectTree/projectTreeLogic'
 import { actionsModel } from '~/models/actionsModel'
 import { tagsModel } from '~/models/tagsModel'
+import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
+import { performQuery } from '~/queries/query'
+import { EventsQueryResponse, NodeKind } from '~/queries/schema/schema-general'
 import { ActionStepType, ActionType } from '~/types'
 
 import type { actionEditLogicType } from './actionEditLogicType'
@@ -57,12 +61,29 @@ export const actionEditLogic = kea<actionEditLogicType>([
         actionAlreadyExists: (actionId: number | null) => ({ actionId }),
         deleteAction: true,
         migrateToHogFunction: true,
+        loadMatchingEventsPreview: (steps: ActionStepType[]) => ({ steps }),
+        setMatchingEventsPreview: (response: EventsQueryResponse | null) => ({ response }),
+        setMatchingEventsPreviewLoading: (loading: boolean) => ({ loading }),
     }),
     reducers({
         createNew: [
             false,
             {
                 setCreateNew: (_, { createNew }) => createNew,
+            },
+        ],
+        matchingEventsPreview: [
+            null as EventsQueryResponse | null,
+            {
+                setMatchingEventsPreview: (_, { response }) => response,
+            },
+        ],
+        matchingEventsPreviewLoading: [
+            false,
+            {
+                setMatchingEventsPreviewLoading: (_, { loading }) => loading,
+                loadMatchingEventsPreview: () => true,
+                setMatchingEventsPreview: () => false,
             },
         ],
     }),
@@ -200,6 +221,36 @@ export const actionEditLogic = kea<actionEditLogicType>([
                 lemonToast.error(`Error deleting action: ${e.detail}`)
             }
         },
+        loadMatchingEventsPreview: async ({ steps }, breakpoint) => {
+            // Debounce 500ms to avoid excessive queries while typing
+            await breakpoint(500)
+
+            if (!steps || steps.length === 0) {
+                actions.setMatchingEventsPreview(null)
+                return
+            }
+
+            // Filter out steps that have no meaningful filter criteria
+            const validSteps = steps.filter((step) => step.event)
+            if (validSteps.length === 0) {
+                actions.setMatchingEventsPreview(null)
+                return
+            }
+
+            try {
+                const response = await performQuery<EventsQueryResponse>({
+                    kind: NodeKind.EventsQuery,
+                    select: defaultDataTableColumns(NodeKind.EventsQuery),
+                    actionSteps: validSteps,
+                    after: '-24h',
+                    limit: 20,
+                })
+                actions.setMatchingEventsPreview(response)
+            } catch {
+                // Silently fail on preview errors
+                actions.setMatchingEventsPreview(null)
+            }
+        },
     })),
 
     afterMount(({ actions, props }) => {
@@ -254,6 +305,15 @@ export const actionEditLogic = kea<actionEditLogicType>([
         message: 'Leave action?\nChanges you made will be discarded.',
         onConfirm: () => {
             logic.actions.resetAction()
+        },
+    })),
+
+    subscriptions(({ actions }) => ({
+        action: (action: ActionType | null) => {
+            // Load matching events preview when action steps change
+            if (action?.steps && action.steps.length > 0) {
+                actions.loadMatchingEventsPreview(action.steps)
+            }
         },
     })),
 ])

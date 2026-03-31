@@ -4,6 +4,7 @@ import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { ConversionGoalSchema } from 'scenes/web-analytics/tabs/marketing-analytics/utils'
 
 import {
+    ActionStepType,
     AnyFilterLike,
     AnyGroupScopeFilter,
     AnyPersonScopeFilter,
@@ -874,6 +875,10 @@ export interface EventsQuery extends DataNode<EventsQueryResponse> {
      * Show events matching a given action
      */
     actionId?: integer
+    /**
+     * Show events matching the given action steps (for previewing unsaved actions)
+     */
+    actionSteps?: ActionStepType[]
     /** Show events for a given person */
     personId?: string
     /** Only fetch events that happened before this timestamp */

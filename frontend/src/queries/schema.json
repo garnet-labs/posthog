@@ -27,6 +27,78 @@
             "required": ["actionId"],
             "type": "object"
         },
+        "ActionStepStringMatching": {
+            "description": "Sync with nodejs/src/types.ts",
+            "enum": ["contains", "exact", "regex"],
+            "type": "string"
+        },
+        "ActionStepType": {
+            "additionalProperties": false,
+            "properties": {
+                "event": {
+                    "type": ["string", "null"]
+                },
+                "href": {
+                    "type": ["string", "null"]
+                },
+                "href_matching": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/ActionStepStringMatching"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": "ActionStepStringMatching.Exact"
+                },
+                "name": {
+                    "type": ["string", "null"]
+                },
+                "properties": {
+                    "items": {
+                        "$ref": "#/definitions/AnyPropertyFilter"
+                    },
+                    "type": "array"
+                },
+                "selector": {
+                    "type": ["string", "null"]
+                },
+                "tag_name": {
+                    "deprecated": "Only `selector` should be used now.",
+                    "type": "string"
+                },
+                "text": {
+                    "type": ["string", "null"]
+                },
+                "text_matching": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/ActionStepStringMatching"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": "StringMatching.Exact"
+                },
+                "url": {
+                    "type": ["string", "null"]
+                },
+                "url_matching": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/ActionStepStringMatching"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": "StringMatching.Contains"
+                }
+            },
+            "type": "object"
+        },
         "ActionsNode": {
             "additionalProperties": false,
             "properties": {
@@ -14911,6 +14983,13 @@
                 "actionId": {
                     "$ref": "#/definitions/integer",
                     "description": "Show events matching a given action"
+                },
+                "actionSteps": {
+                    "description": "Show events matching the given action steps (for previewing unsaved actions)",
+                    "items": {
+                        "$ref": "#/definitions/ActionStepType"
+                    },
+                    "type": "array"
                 },
                 "after": {
                     "description": "Only fetch events that happened after this timestamp",
@@ -32373,6 +32452,13 @@
                 "actionId": {
                     "$ref": "#/definitions/integer",
                     "description": "Show events matching a given action"
+                },
+                "actionSteps": {
+                    "description": "Show events matching the given action steps (for previewing unsaved actions)",
+                    "items": {
+                        "$ref": "#/definitions/ActionStepType"
+                    },
+                    "type": "array"
                 },
                 "after": {
                     "description": "Only fetch events that happened after this timestamp",

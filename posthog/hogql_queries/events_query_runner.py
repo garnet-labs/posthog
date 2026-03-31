@@ -13,7 +13,13 @@ from posthog.schema import CachedEventsQueryResponse, DashboardFilter, EventsQue
 from posthog.hogql import ast
 from posthog.hogql.ast import Alias
 from posthog.hogql.parser import parse_expr, parse_order_expr, parse_select
-from posthog.hogql.property import action_to_expr, has_aggregation, map_virtual_properties, property_to_expr
+from posthog.hogql.property import (
+    action_steps_to_expr,
+    action_to_expr,
+    has_aggregation,
+    map_virtual_properties,
+    property_to_expr,
+)
 from posthog.hogql.query import execute_hogql_query
 
 from posthog.api.element import ElementSerializer
@@ -201,6 +207,16 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                         if not action.steps:
                             raise Exception("Action does not have any match groups")
                         where_exprs.append(action_to_expr(action))
+                if self.query.actionSteps:
+                    with self.timings.measure("action_steps"):
+                        # Convert action steps from schema to dicts for processing
+                        steps = [
+                            step.model_dump() if hasattr(step, "model_dump") else step
+                            for step in self.query.actionSteps
+                        ]
+                        if not steps:
+                            raise Exception("Action steps cannot be empty")
+                        where_exprs.append(action_steps_to_expr(steps, self.team))
                 if self.query.personId:
                     with self.timings.measure("person_id"):
                         person: Person | None = get_person_by_pk_or_uuid(self.team.pk, self.query.personId)

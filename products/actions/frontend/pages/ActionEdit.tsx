@@ -56,7 +56,7 @@ export function ActionEdit({ action: loadedAction, id, actionLoading }: ActionEd
     }
     const { isComplete } = useValues(actionLogic({ id }))
     const logic = actionEditLogic(logicProps)
-    const { action, actionChanged } = useValues(logic)
+    const { action, actionChanged, matchingEventsPreview, matchingEventsPreviewLoading } = useValues(logic)
     const { submitAction, deleteAction, setActionValue, setAction } = useActions(logic)
 
     // Sync the loaded action prop with the logic's internal state
@@ -309,14 +309,54 @@ export function ActionEdit({ action: loadedAction, id, actionLoading }: ActionEd
             <SceneDivider />
             <ActionHogFunctions />
             <SceneDivider />
+            <SceneSection
+                className="@container"
+                title="Matching events preview"
+                description={
+                    <>
+                        This is a preview of <strong>recent</strong> events that would match this action based on the
+                        current match groups.
+                    </>
+                }
+            >
+                {matchingEventsPreviewLoading ? (
+                    <div className="flex items-center">
+                        <Spinner className="mr-4" />
+                        Loading preview...
+                    </div>
+                ) : matchingEventsPreview && matchingEventsPreview.results.length > 0 ? (
+                    <Query
+                        query={{
+                            kind: NodeKind.DataTableNode,
+                            source: {
+                                kind: NodeKind.EventsQuery,
+                                select: defaultDataTableColumns(NodeKind.EventsQuery),
+                                actionSteps: action.steps,
+                                after: '-24h',
+                            },
+                            full: false,
+                            showEventFilter: false,
+                            showPropertyFilter: false,
+                        }}
+                    />
+                ) : (
+                    <div className="text-secondary">
+                        {action.steps && action.steps.length > 0 && action.steps.some((step) => step.event)
+                            ? 'No matching events found in the last 24 hours.'
+                            : 'Define match groups to see matching events.'}
+                    </div>
+                )}
+            </SceneSection>
             {id && (
                 <>
+                    <SceneDivider />
                     <SceneSection
                         className="@container"
                         title="Matching events"
                         description={
                             <>
-                                This is the list of <strong>recent</strong> events that match this action.
+                                This is the list of <strong>recent</strong> events that match this{' '}
+                                <strong>saved</strong> action.
                             </>
                         }
                     >
