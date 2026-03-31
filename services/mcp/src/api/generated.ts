@@ -7028,10 +7028,10 @@ export namespace Schemas {
     * `in_progress` - In progress
     * `canceling` - Canceling
      */
-    export type ConversationStatusEnum = typeof ConversationStatusEnum[keyof typeof ConversationStatusEnum];
+    export type Status782Enum = typeof Status782Enum[keyof typeof Status782Enum];
 
 
-    export const ConversationStatusEnum = {
+    export const Status782Enum = {
       Idle: 'idle',
       InProgress: 'in_progress',
       Canceling: 'canceling',
@@ -7043,10 +7043,10 @@ export namespace Schemas {
     * `deep_research` - Deep research
     * `slack` - Slack
      */
-    export type ConversationTypeEnum = typeof ConversationTypeEnum[keyof typeof ConversationTypeEnum];
+    export type Type95dEnum = typeof Type95dEnum[keyof typeof Type95dEnum];
 
 
-    export const ConversationTypeEnum = {
+    export const Type95dEnum = {
       Assistant: 'assistant',
       ToolCall: 'tool_call',
       DeepResearch: 'deep_research',
@@ -7055,7 +7055,7 @@ export namespace Schemas {
 
     export interface Conversation {
       readonly id: string;
-      readonly status: ConversationStatusEnum;
+      readonly status: Status782Enum;
       /**
        * Title of the conversation.
        * @nullable
@@ -7066,7 +7066,7 @@ export namespace Schemas {
       readonly created_at: string | null;
       /** @nullable */
       readonly updated_at: string | null;
-      readonly type: ConversationTypeEnum;
+      readonly type: Type95dEnum;
       /**
        * Whether this conversation was created during an impersonated session (e.g., by support agents). Internal conversations are hidden from customers.
        * @nullable
@@ -7092,6 +7092,37 @@ export namespace Schemas {
     Combines metadata from conversation.approval_decisions with payload from checkpoint
     interrupts (single source of truth for payload data). */
       readonly pending_approvals: readonly ConversationPendingApprovalsItem[];
+    }
+
+    export interface ConversationMinimal {
+      readonly id: string;
+      readonly status: Status782Enum;
+      /**
+       * Title of the conversation.
+       * @nullable
+       */
+      readonly title: string | null;
+      readonly user: UserBasic;
+      /** @nullable */
+      readonly created_at: string | null;
+      /** @nullable */
+      readonly updated_at: string | null;
+      readonly type: Type95dEnum;
+      /**
+       * Whether this conversation was created during an impersonated session (e.g., by support agents). Internal conversations are hidden from customers.
+       * @nullable
+       */
+      readonly is_internal: boolean | null;
+      /**
+       * Unique key for Slack thread: '{workspace_id}:{channel}:{thread_ts}'
+       * @nullable
+       */
+      readonly slack_thread_key: string | null;
+      /**
+       * Slack workspace subdomain (e.g. 'posthog' for posthog.slack.com)
+       * @nullable
+       */
+      readonly slack_workspace_domain: string | null;
     }
 
     export type ConversionGoalFilter1Kind = typeof ConversionGoalFilter1Kind[keyof typeof ConversionGoalFilter1Kind];
@@ -18737,13 +18768,13 @@ export namespace Schemas {
       results: Comment[];
     }
 
-    export interface PaginatedConversationList {
+    export interface PaginatedConversationMinimalList {
       count: number;
       /** @nullable */
       next?: string | null;
       /** @nullable */
       previous?: string | null;
-      results: Conversation[];
+      results: ConversationMinimal[];
     }
 
     export interface PaginatedCoreEventList {
@@ -21442,7 +21473,7 @@ export namespace Schemas {
 
     export interface PatchedConversation {
       readonly id?: string;
-      readonly status?: ConversationStatusEnum;
+      readonly status?: Status782Enum;
       /**
        * Title of the conversation.
        * @nullable
@@ -21453,7 +21484,7 @@ export namespace Schemas {
       readonly created_at?: string | null;
       /** @nullable */
       readonly updated_at?: string | null;
-      readonly type?: ConversationTypeEnum;
+      readonly type?: Type95dEnum;
       /**
        * Whether this conversation was created during an impersonated session (e.g., by support agents). Internal conversations are hidden from customers.
        * @nullable
