@@ -27,6 +27,8 @@ from psycopg import sql
 if TYPE_CHECKING:
     from posthog.ducklake.models import DuckgresServer, DuckLakeCatalog
 
+DUCKLAKE_CATALOG_RESET_ENV_VAR = "POSTHOG_ALLOW_DUCKLAKE_CATALOG_RESET"
+
 DEFAULTS: dict[str, str] = {
     "DUCKLAKE_RDS_HOST": "localhost",
     "DUCKLAKE_RDS_PORT": "5432",
@@ -74,6 +76,11 @@ def is_dev_mode() -> bool:
         return USE_LOCAL_SETUP
     except ImportError:
         return True
+
+
+def is_ducklake_catalog_reset_allowed() -> bool:
+    """Allow destructive catalog resets only when local startup opted in explicitly."""
+    return is_dev_mode() and os.getenv(DUCKLAKE_CATALOG_RESET_ENV_VAR) == "1"
 
 
 def _get_config_from_env_strict() -> dict[str, str]:
@@ -312,6 +319,9 @@ def _read_catalog_version(config: dict[str, str]) -> str | None:
 
 def _drop_and_recreate_catalog(config: dict[str, str]) -> None:
     """Drop and recreate the DuckLake catalog DB. Dev-only."""
+    if not is_ducklake_catalog_reset_allowed():
+        raise RuntimeError(f"DuckLake catalog reset requires local dev opt-in via {DUCKLAKE_CATALOG_RESET_ENV_VAR}=1")
+
     target_db, conn_kwargs = _get_maintenance_conn_kwargs(config)
     with psycopg.connect(**conn_kwargs) as conn:
         with conn.cursor() as cur:
@@ -349,9 +359,14 @@ def initialize_ducklake(config: dict[str, str] | None = None, *, alias: str = "d
         try:
             attach_catalog(conn, config, alias=alias)
             attached = True
-        except duckdb.NotImplementedException:
+        except duckdb.NotImplementedException as exc:
             if not is_dev_mode():
                 raise
+            if not is_ducklake_catalog_reset_allowed():
+                raise RuntimeError(
+                    "DuckLake catalog reset is disabled. "
+                    f"Set {DUCKLAKE_CATALOG_RESET_ENV_VAR}=1 to allow local catalog recreation."
+                ) from exc
             old_version = _read_catalog_version(config) or "unknown"
             db_name = config.get("DUCKLAKE_RDS_DATABASE", "ducklake")
             _logger.warning(
@@ -407,6 +422,7 @@ __all__ = [
     "get_ducklake_data_path",
     "ensure_ducklake_catalog",
     "initialize_ducklake",
+    "is_ducklake_catalog_reset_allowed",
     "parse_postgres_dsn",
     "is_dev_mode",
     "run_smoke_check",
