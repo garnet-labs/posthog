@@ -484,6 +484,8 @@ def sync_old_schemas_with_new_schemas(
 def sync_frequency_to_sync_frequency_interval(frequency: str) -> timedelta | None:
     if frequency == "never":
         return None
+    if frequency == "1min":
+        return timedelta(minutes=1)
     if frequency == "5min":
         return timedelta(minutes=5)
     if frequency == "15min":
@@ -509,6 +511,8 @@ def sync_frequency_to_sync_frequency_interval(frequency: str) -> timedelta | Non
 def sync_frequency_interval_to_sync_frequency(sync_frequency_interval: timedelta | None) -> str | None:
     if sync_frequency_interval is None:
         return None
+    if sync_frequency_interval == timedelta(minutes=1):
+        return "1min"
     if sync_frequency_interval == timedelta(minutes=5):
         return "5min"
     if sync_frequency_interval == timedelta(minutes=15):

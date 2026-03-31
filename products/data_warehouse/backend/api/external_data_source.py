@@ -712,6 +712,26 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
 
         active_schemas: list[ExternalDataSchema] = []
 
+        # Pre-fetch PK column names for CDC tables
+        pk_columns_by_table: dict[str, list[str]] = {}
+        if cdc_enabled and source_type_model == ExternalDataSourceType.POSTGRES:
+            cdc_table_names = [
+                s.get("name") for s in payload_schemas if s.get("sync_type") == "cdc" and s.get("should_sync", False)
+            ]
+            if cdc_table_names:
+                from posthog.temporal.data_imports.sources.postgres.source import _get_primary_key_columns
+
+                with source.with_ssh_tunnel(source_config) as (host, port):
+                    pk_columns_by_table = _get_primary_key_columns(
+                        host=host,
+                        port=port,
+                        user=source_config.user,
+                        password=source_config.password,
+                        database=source_config.database,
+                        schema=source_config.schema,
+                        table_names=cdc_table_names,
+                    )
+
         # Create all ExternalDataSchema objects and enable syncing for active schemas
         for schema in payload_schemas:
             sync_type = schema.get("sync_type")
@@ -758,6 +778,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             elif is_cdc_schema:
                 sync_type_config = {
                     "cdc_mode": "snapshot",
+                    "primary_key_columns": pk_columns_by_table.get(schema_name, []),
                     "schema_metadata": schema_metadata,
                 }
             else:
@@ -877,7 +898,10 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 logger.exception("Failed to create CDC slot and publication", error=str(e))
                 return Response(
                     status=status.HTTP_400_BAD_REQUEST,
-                    data={"message": f"Failed to create replication slot: {e}"},
+                    data={
+                        "message": f"Failed to create replication slot: {e}",
+                        "detail": str(e),
+                    },
                 )
 
         elif management_mode == "self_managed":
