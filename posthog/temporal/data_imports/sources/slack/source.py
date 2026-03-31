@@ -1,20 +1,25 @@
 from typing import TYPE_CHECKING, Optional, cast
 
+import posthoganalytics
+
 if TYPE_CHECKING:
     from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
 
 from posthog.schema import (
     ExternalDataSourceType as SchemaExternalDataSourceType,
     SourceConfig,
+    SourceFieldInputConfig,
+    SourceFieldInputConfigType,
     SourceFieldOauthConfig,
 )
 
+from posthog.exceptions_capture import capture_exception
 from posthog.temporal.data_imports.pipelines.pipeline.typings import SourceInputs, SourceResponse
 from posthog.temporal.data_imports.sources.common.base import FieldType, SimpleSource, WebhookSource
 from posthog.temporal.data_imports.sources.common.mixins import OAuthMixin
 from posthog.temporal.data_imports.sources.common.registry import SourceRegistry
 from posthog.temporal.data_imports.sources.common.schema import SourceSchema
-from posthog.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
+from posthog.temporal.data_imports.sources.common.webhook_s3 import WAREHOUSE_WEBHOOK_FLAG, WebhookSourceManager
 from posthog.temporal.data_imports.sources.generated_configs import SlackSourceConfig
 from posthog.temporal.data_imports.sources.slack.settings import ENDPOINTS, messages_endpoint_config
 from posthog.temporal.data_imports.sources.slack.slack import (
@@ -24,6 +29,36 @@ from posthog.temporal.data_imports.sources.slack.slack import (
 )
 
 from products.data_warehouse.backend.types import ExternalDataSourceType
+
+
+def _is_webhook_feature_flag_enabled(team_id: int) -> bool:
+    from posthog.models import Team
+
+    try:
+        team = Team.objects.only("uuid", "organization_id").get(id=team_id)
+    except Team.DoesNotExist:
+        return False
+
+    try:
+        enabled = posthoganalytics.feature_enabled(
+            WAREHOUSE_WEBHOOK_FLAG,
+            str(team.uuid),
+            groups={
+                "organization": str(team.organization_id),
+                "project": str(team.id),
+            },
+            group_properties={
+                "organization": {"id": str(team.organization_id)},
+                "project": {"id": str(team.id)},
+            },
+            only_evaluate_locally=False,
+            send_feature_flag_events=False,
+        )
+
+        return bool(enabled)
+    except Exception as e:
+        capture_exception(e)
+        return False
 
 
 @SourceRegistry.register
@@ -37,6 +72,14 @@ class SlackSource(SimpleSource[SlackSourceConfig], WebhookSource[SlackSourceConf
         from posthog.temporal.data_imports.sources.slack.webhook_template import template
 
         return template
+
+    @property
+    def webhook_resource_map(self) -> dict[str, str]:
+        # Slack channel IDs are used as both schema names and webhook event keys,
+        # so this is an identity mapping. We return an empty dict and rely on the
+        # fallback in get_or_create_webhook_hog_function that defaults to using
+        # the schema name as the object type.
+        return {}
 
     def get_webhook_source_manager(self, inputs: SourceInputs) -> WebhookSourceManager:
         return WebhookSourceManager(inputs, inputs.logger)
@@ -60,6 +103,27 @@ class SlackSource(SimpleSource[SlackSourceConfig], WebhookSource[SlackSourceConf
                         kind="slack",
                         requiredScopes="channels:read groups:read channels:history groups:history users:read users:read.email reactions:read",
                     )
+                ],
+            ),
+            webhookSetupCaption="""To set up the webhook manually:
+
+1. Go to your [Slack App Settings](https://api.slack.com/apps) and select your app
+2. Click **Event Subscriptions** in the left sidebar and toggle it on
+3. Paste the webhook URL shown below into the **Request URL** field
+4. Under **Subscribe to bot events**, add the events: `message.channels`, `message.groups`
+5. Click **Save Changes**
+
+Once saved, copy the **Signing Secret** from **Basic Information > App Credentials** and add it to your source configuration for signature verification.""",
+            webhookFields=cast(
+                list[FieldType],
+                [
+                    SourceFieldInputConfig(
+                        name="signing_secret",
+                        label="Signing secret",
+                        type=SourceFieldInputConfigType.PASSWORD,
+                        required=True,
+                        placeholder="",
+                    ),
                 ],
             ),
         )
@@ -95,6 +159,7 @@ class SlackSource(SimpleSource[SlackSourceConfig], WebhookSource[SlackSourceConf
             raise ValueError("Slack access token not found")
 
         msg_config = messages_endpoint_config()
+        webhook_flag_enabled = _is_webhook_feature_flag_enabled(team_id)
         channels = get_channels(access_token)
         for ch in channels:
             if ch["id"] in ENDPOINTS:
@@ -104,6 +169,7 @@ class SlackSource(SimpleSource[SlackSourceConfig], WebhookSource[SlackSourceConf
                     name=ch["id"],
                     label=ch["name"],
                     supports_incremental=len(msg_config.incremental_fields) > 0,
+                    supports_webhooks=webhook_flag_enabled,
                     supports_append=len(msg_config.incremental_fields) > 0,
                     incremental_fields=msg_config.incremental_fields,
                 )

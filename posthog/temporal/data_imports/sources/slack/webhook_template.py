@@ -11,7 +11,7 @@ template: HogFunctionTemplateDC = HogFunctionTemplateDC(
     category=["Data warehouse"],
     code_language="hog",
     code="""\
-if(request.method != 'POST') {
+if (request.method != 'POST') {
   return {
     'httpResponse': {
       'status': 405,
@@ -61,9 +61,38 @@ if (body.type = 'url_verification') {
 }
 
 // Only process event_callback types
-if (body.type = 'event_callback') {
-  produceToWarehouseWebhooks(request.body)
-}""",
+if (body.type != 'event_callback') {
+  return {
+    'httpResponse': {
+      'status': 200,
+      'body': 'Not an event_callback, skipping'
+    }
+  }
+}
+
+let channelId := body.event?.channel
+
+if (empty(channelId)) {
+  return {
+    'httpResponse': {
+      'status': 200,
+      'body': 'No channel found in event, skipping'
+    }
+  }
+}
+
+let schemaId := inputs.schema_mapping?.[channelId]
+
+if (empty(schemaId)) {
+  return {
+    'httpResponse': {
+      'status': 200,
+      'body': f'No schema mapping for channel: {channelId}, skipping'
+    }
+  }
+}
+
+produceToWarehouseWebhooks(request.body, schemaId)""",
     inputs_schema=[
         {
             "type": "string",
@@ -84,18 +113,22 @@ if (body.type = 'event_callback') {
             "secret": False,
         },
         {
-            "type": "string",
-            "key": "schema_id",
-            "label": "Schema ID",
+            "type": "json",
+            "key": "schema_mapping",
+            "label": "Schema mapping",
+            "description": "Maps Slack channel IDs to ExternalDataSchema IDs",
             "required": True,
-            "description": "The ExternalDataSchema ID to link webhook data to.",
+            "secret": False,
+            "hidden": True,
         },
         {
             "type": "string",
-            "key": "source_type",
-            "label": "Source type",
+            "key": "source_id",
+            "label": "Source ID",
+            "description": "The ExternalDataSource ID this webhook is associated with",
             "required": True,
-            "description": "The source type for this webhook.",
+            "secret": False,
+            "hidden": True,
         },
     ],
 )
