@@ -9,12 +9,14 @@ from hogli.manifest import MANIFEST_FILE, get_manifest
 
 def get_bin_scripts() -> set[str]:
     """Get all executable scripts in scripts_dir (excludes entry points and config)."""
-    scripts_dir = get_manifest().scripts_dir
+    manifest = get_manifest()
+    scripts_dir = manifest.scripts_dir
     if not scripts_dir.exists():
         return set()
 
-    # Exclude these from the manifest check (entry points, config files, etc)
-    excluded = {"hogli", "mprocs.yaml", "mprocs-test.yaml", "sandbox-entrypoint.py"}
+    # Exclude files listed in config.scripts_exclude (entry points, config files, etc)
+    default_excluded = {"hogli"}
+    excluded = set(manifest.config.get("scripts_exclude", [])) | default_excluded
 
     scripts = set()
     for f in scripts_dir.iterdir():

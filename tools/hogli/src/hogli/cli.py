@@ -18,7 +18,7 @@ import click
 
 from hogli import telemetry
 from hogli.command_types import BinScriptCommand, CompositeCommand, DirectCommand, HogliCommand
-from hogli.manifest import REPO_ROOT, get_category_for_command, get_manifest, load_manifest
+from hogli.manifest import get_category_for_command, get_manifest, load_manifest
 
 
 class CategorizedGroup(click.Group):
@@ -348,32 +348,24 @@ def _import_custom_commands() -> None:
 _import_custom_commands()
 
 
-def _infer_process_manager(command: str | None) -> str | None:
-    """Infer the active process manager for telemetry."""
-    pm = os.environ.get("HOGLI_PROCESS_MANAGER")
-    if pm:
-        return os.path.basename(pm)
-
-    if command == "start":
-        return "mprocs" if "--mprocs" in sys.argv[2:] else "phrocs"
-
-    return None
-
-
 def _env_properties(command: str | None = None) -> dict[str, Any]:
     """Static environment properties shared across telemetry events."""
+    from hogli.hooks import get_telemetry_property_hooks
+
     ci_env_vars = ("CI", "GITHUB_ACTIONS", "JENKINS_URL", "GITLAB_CI", "CIRCLECI", "BUILDKITE")
-    return {
+    props: dict[str, Any] = {
         "terminal_width": shutil.get_terminal_size().columns,
         "os": platform.system(),
         "arch": platform.machine(),
         "python_version": platform.python_version(),
         "is_ci": any(os.environ.get(v) for v in ci_env_vars),
-        "has_devenv_config": (REPO_ROOT / ".posthog" / ".generated" / "mprocs.yaml").exists(),
-        "in_flox": os.environ.get("FLOX_ENV") is not None,
-        "is_worktree": (REPO_ROOT / ".git").is_file(),
-        "process_manager": _infer_process_manager(command),
     }
+    for hook in get_telemetry_property_hooks():
+        try:
+            props.update(hook(command))
+        except Exception:
+            pass
+    return props
 
 
 def _fire_telemetry(ctx: click.Context, exit_code: int) -> None:

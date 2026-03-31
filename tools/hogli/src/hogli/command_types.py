@@ -177,45 +177,19 @@ def _run_prechecks(prechecks: list[dict[str, Any]], yes: bool = False) -> bool:
     """Run prechecks and prompt user if issues are found.
 
     Returns True if prechecks passed or user chose to continue, False if user aborted.
+    Handlers are registered via hogli.hooks.register_precheck().
     """
+    from hogli.hooks import get_precheck_handler
+
     for check in prechecks:
         check_type = check.get("type")
-
-        if check_type == "migrations":
-            # Check for orphaned migrations (in DB but not in code)
-            # Pending migrations are fine - they'll be applied by manage.py migrate
-            try:
-                try:
-                    from posthog_hogli.migrations import _compute_migration_diff, _get_cached_migration
-                except ModuleNotFoundError:
-                    from hogli.migrations import (  # type: ignore[attr-defined]
-                        _compute_migration_diff,
-                        _get_cached_migration,
-                    )
-
-                diff = _compute_migration_diff()
-
-                if diff.orphaned:
-                    click.echo()
-                    click.secho("⚠️  Orphaned migrations detected!", fg="yellow", bold=True)
-                    click.echo("These migrations are applied in the DB but don't exist in code.")
-                    click.echo("They were likely applied on another branch.\n")
-
-                    for m in diff.orphaned:
-                        cached = "cached" if _get_cached_migration(m.app, m.name) else "not cached"
-                        click.echo(f"    {m.app}: {m.name} ({cached})")
-                    click.echo()
-
-                    click.echo("Run 'hogli migrations:sync' to roll them back.\n")
-
-                    if not yes:
-                        if not click.confirm("Continue anyway?", default=False):
-                            click.echo("Aborted. Run 'hogli migrations:sync' first.")
-                            return False
-
-            except Exception as e:
-                # Don't block start if migration check fails (e.g., DB not running)
-                click.secho(f"⚠️  Could not check migrations: {e}", fg="yellow", err=True)
+        handler = get_precheck_handler(check_type) if check_type else None
+        if handler is None:
+            click.secho(f"\u26a0\ufe0f  Unknown precheck type: {check_type}", fg="yellow", err=True)
+            continue
+        result = handler(check, yes)
+        if result is False:
+            return False
 
     return True
 

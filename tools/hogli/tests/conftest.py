@@ -1,13 +1,8 @@
-"""Shared test fixtures for hogli tests."""
-
-import os
+"""Shared test fixtures for hogli framework tests."""
 
 import pytest
 
 from hogli import telemetry
-
-# Must be set before any Django-related imports during test collection
-os.environ["DJANGO_SKIP_MIGRATIONS"] = "true"
 
 
 @pytest.fixture(autouse=True)

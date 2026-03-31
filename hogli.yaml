@@ -1,5 +1,9 @@
 config:
     commands_dir: common/posthog_hogli
+    scripts_exclude:
+        - mprocs.yaml
+        - mprocs-test.yaml
+        - sandbox-entrypoint.py
 
 metadata:
     categories:

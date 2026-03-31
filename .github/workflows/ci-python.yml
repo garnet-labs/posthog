@@ -171,12 +171,19 @@ jobs:
               run: |
                   pytest tools/hogli/tests -v --junitxml=junit-hogli.xml
 
+            - name: Run hogli extension tests
+              shell: bash
+              run: |
+                  pytest common/posthog_hogli/tests -v --junitxml=junit-hogli-ext.xml
+
             - name: Upload test results
               uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
               if: always()
               with:
                   name: junit-results-hogli
-                  path: junit-hogli.xml
+                  path: |
+                      junit-hogli.xml
+                      junit-hogli-ext.xml
 
             - name: Run dependency detection script tests
               shell: bash
