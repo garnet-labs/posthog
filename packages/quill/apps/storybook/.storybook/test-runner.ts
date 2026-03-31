@@ -1,10 +1,12 @@
-import type { Page } from '@playwright/test'
-import type { TestContext, TestRunnerConfig } from '@storybook/test-runner'
+import type { TestRunnerConfig } from '@storybook/test-runner'
 import { getStoryContext } from '@storybook/test-runner'
 import { toMatchImageSnapshot } from 'jest-image-snapshot'
 import path from 'path'
 
 type SnapshotTheme = 'light' | 'dark'
+// Use inline types to avoid playwright-core version conflicts in the monorepo
+type Page = any
+type TestContext = any
 
 const customSnapshotsDir = path.resolve(__dirname, '../__snapshots__')
 
