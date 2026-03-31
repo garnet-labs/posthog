@@ -280,14 +280,6 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
             params,
         }),
         reportPersonsModalSearched: (params: { teamId?: number | null; actorType?: string }) => ({ params }),
-        reportPersonListViewed: true,
-        reportPersonSearchExecuted: (searchLength: number, filterCount: number) => ({ searchLength, filterCount }),
-        reportPersonActivityTabViewed: (tabName: string) => ({ tabName }),
-        reportCohortCreatedFrontend: (
-            cohortType: 'static' | 'dynamic',
-            filterGroupCount: number,
-            source: 'cohorts_page' | 'persons_page' | 'insight'
-        ) => ({ cohortType, filterGroupCount, source }),
         reportInsightExportStarted: (props: {
             insightId?: number
             insightShortId?: InsightShortId
@@ -314,14 +306,9 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
             queryKind?: string
             shareMethod: 'toggle_sharing' | 'copy_link'
         }) => props,
-        reportBreakdownApplied: (props: { breakdownType: string; queryKind?: string; isMultiple: boolean }) => props,
+        reportBreakdownApplied: (props: { breakdownType: string; queryKind?: string; breakdownCount: number }) => props,
         reportInsightComparisonToggled: (props: { enabled: boolean; compareTo?: string; queryKind?: string }) => props,
-        reportFormulaApplied: (props: { formulaLength: number; seriesCount: number; queryKind?: string }) => props,
-        reportSamplingFactorChanged: (props: {
-            oldFactor?: number | null
-            newFactor?: number | null
-            queryKind?: string
-        }) => props,
+        reportFormulaApplied: (props: { seriesCount: number; queryKind?: string }) => props,
         reportInsightDateRangeChanged: (props: {
             dateFrom?: string | null
             dateTo?: string | null
@@ -2447,26 +2434,6 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
                 is_ai_first: isAIFirst,
             })
         },
-        reportPersonListViewed: () => {
-            posthog.capture('person list viewed')
-        },
-        reportPersonSearchExecuted: async ({ searchLength, filterCount }, breakpoint) => {
-            await breakpoint(500)
-            posthog.capture('person search executed', {
-                search_length: searchLength,
-                filter_count: filterCount,
-            })
-        },
-        reportPersonActivityTabViewed: ({ tabName }) => {
-            posthog.capture('person activity tab viewed', { tab_name: tabName })
-        },
-        reportCohortCreatedFrontend: ({ cohortType, filterGroupCount, source }) => {
-            posthog.capture('cohort created frontend', {
-                cohort_type: cohortType,
-                filter_group_count: filterGroupCount,
-                source,
-            })
-        },
         reportInsightExportStarted: ({ insightId, insightShortId, queryKind, exportFormat, source }) => {
             posthog.capture('insight export started', {
                 insight_id: insightId,
@@ -2508,11 +2475,11 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
                 share_method: shareMethod,
             })
         },
-        reportBreakdownApplied: ({ breakdownType, queryKind, isMultiple }) => {
+        reportBreakdownApplied: ({ breakdownType, queryKind, breakdownCount }) => {
             posthog.capture('breakdown applied', {
                 breakdown_type: breakdownType,
                 query_kind: queryKind,
-                is_multiple: isMultiple,
+                breakdown_count: breakdownCount,
             })
         },
         reportInsightComparisonToggled: ({ enabled, compareTo, queryKind }) => {
@@ -2522,17 +2489,9 @@ export const eventUsageLogic = kea<eventUsageLogicType>([
                 query_kind: queryKind,
             })
         },
-        reportFormulaApplied: ({ formulaLength, seriesCount, queryKind }) => {
+        reportFormulaApplied: ({ seriesCount, queryKind }) => {
             posthog.capture('formula applied', {
-                formula_length: formulaLength,
                 series_count: seriesCount,
-                query_kind: queryKind,
-            })
-        },
-        reportSamplingFactorChanged: ({ oldFactor, newFactor, queryKind }) => {
-            posthog.capture('sampling factor changed', {
-                old_factor: oldFactor,
-                new_factor: newFactor,
                 query_kind: queryKind,
             })
         },

@@ -1,5 +1,5 @@
 import equal from 'fast-deep-equal'
-import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, connect, kea, listeners, path, reducers, selectors } from 'kea'
 
 import { lemonToast } from '@posthog/lemon-ui'
 
@@ -7,14 +7,13 @@ import api from 'lib/api'
 import { tabAwareActionToUrl } from 'lib/logic/scenes/tabAwareActionToUrl'
 import { tabAwareScene } from 'lib/logic/scenes/tabAwareScene'
 import { tabAwareUrlToAction } from 'lib/logic/scenes/tabAwareUrlToAction'
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { sceneConfigurations } from 'scenes/scenes'
 import { Scene } from 'scenes/sceneTypes'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
 import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
-import { ActorsQuery, DataTableNode, NodeKind, ProductKey } from '~/queries/schema/schema-general'
+import { DataTableNode, NodeKind, ProductKey } from '~/queries/schema/schema-general'
 import { Breadcrumb } from '~/types'
 
 import type { personsSceneLogicType } from './personsSceneLogicType'
@@ -81,15 +80,6 @@ export const personsSceneLogic = kea<personsSceneLogicType>([
             await api.persons.resetPersonDistinctId(distinct_id)
             lemonToast.success('Distinct ID reset. It may take a few minutes to process.')
         },
-        setQuery: async ({ query }, breakpoint) => {
-            await breakpoint(500)
-            const source = query.source as ActorsQuery | undefined
-            const searchLength = source?.search?.length ?? 0
-            const filterCount = Array.isArray(source?.properties) ? source.properties.length : 0
-            if (searchLength > 0 || filterCount > 0) {
-                eventUsageLogic.actions.reportPersonSearchExecuted(searchLength, filterCount)
-            }
-        },
     }),
 
     selectors({
@@ -109,10 +99,6 @@ export const personsSceneLogic = kea<personsSceneLogicType>([
                 },
             ],
         ],
-    }),
-
-    afterMount(() => {
-        eventUsageLogic.actions.reportPersonListViewed()
     }),
 
     tabAwareActionToUrl(({ values }) => ({

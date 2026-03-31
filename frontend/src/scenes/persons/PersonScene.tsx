@@ -19,7 +19,6 @@ import { SpinnerOverlay } from 'lib/lemon-ui/Spinner/Spinner'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { isMobile, pluralize } from 'lib/utils'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { openInAdminPanel } from 'lib/utils/person-actions'
 import { RelatedGroups } from 'scenes/groups/RelatedGroups'
 import { NotebookSelectButton } from 'scenes/notebooks/NotebookSelectButton/NotebookSelectButton'
@@ -261,7 +260,6 @@ export function PersonScene(): JSX.Element | null {
             <LemonTabs
                 activeKey={currentTab}
                 onChange={(tab) => {
-                    eventUsageLogic.actions.reportPersonActivityTabViewed(tab)
                     navigateToTab(tab as PersonsTabType)
                 }}
                 data-attr="persons-tabs"

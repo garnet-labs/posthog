@@ -2,7 +2,6 @@ import { useActions, useValues } from 'kea'
 
 import { LemonBanner } from '@posthog/lemon-ui'
 
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
 import { InsightLogicProps } from '~/types'
@@ -29,11 +28,6 @@ export function SamplingDeprecationNotice({ insightProps }: SamplingDeprecationN
                 <button
                     className="text-link font-semibold"
                     onClick={() => {
-                        eventUsageLogic.actions.reportSamplingFactorChanged({
-                            oldFactor: querySource.samplingFactor,
-                            newFactor: null,
-                            queryKind: querySource?.kind,
-                        })
                         updateQuerySource({ samplingFactor: null })
                     }}
                 >

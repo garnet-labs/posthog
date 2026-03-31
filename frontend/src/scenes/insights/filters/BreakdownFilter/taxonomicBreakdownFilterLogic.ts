@@ -237,7 +237,7 @@ export const taxonomicBreakdownFilterLogic = kea<taxonomicBreakdownFilterLogicTy
                 queryKind:
                     props.insightProps.cachedInsight?.query?.source?.kind ??
                     props.insightProps.cachedInsight?.query?.kind,
-                isMultiple: values.isMultipleBreakdownsEnabled && !!values.breakdownFilter.breakdowns?.length,
+                breakdownCount: (values.breakdownFilter.breakdowns?.length ?? 0) + 1,
             })
             const propertyDefinitionType = propertyFilterTypeToPropertyDefinitionType(breakdownType)
             const isHistogramable =
