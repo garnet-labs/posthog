@@ -6,7 +6,12 @@
  * overflow in MCP clients.
  */
 
+import { z } from 'zod'
+
 export type ContentDetail = 'none' | 'preview' | 'full'
+
+/** Shared zod schema for property filters used by trace tools */
+export const AnyPropertyFilter = z.record(z.string(), z.unknown())
 
 const PREVIEW_HEAD = 300
 const PREVIEW_TAIL = 300
@@ -112,6 +117,10 @@ export function processTraceResults(results: unknown, contentDetail: ContentDeta
 
     if (Array.isArray(results)) {
         return results.map((trace) => processTrace(trace as TraceResult, contentDetail))
+    }
+
+    if (results !== null && typeof results === 'object') {
+        return processTrace(results as TraceResult, contentDetail)
     }
 
     return results

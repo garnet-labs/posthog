@@ -8,9 +8,7 @@ import { z } from 'zod'
 
 import type { Context, ToolBase } from '@/tools/types'
 
-import { type ContentDetail, processTraceResults } from './traceContentProcessor'
-
-const AnyPropertyFilter = z.record(z.string(), z.unknown())
+import { AnyPropertyFilter, type ContentDetail, processTraceResults } from './traceContentProcessor'
 
 const schema = z.object({
     traceId: z.string().describe('The trace ID to retrieve ($ai_trace_id value shared by all events in a trace)'),

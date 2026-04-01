@@ -9,9 +9,7 @@ import { z } from 'zod'
 
 import type { Context, ToolBase } from '@/tools/types'
 
-import { processTraceResults } from './traceContentProcessor'
-
-const AnyPropertyFilter = z.record(z.string(), z.unknown())
+import { AnyPropertyFilter, processTraceResults } from './traceContentProcessor'
 
 const schema = z.object({
     dateRange: z
