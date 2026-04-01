@@ -1174,6 +1174,35 @@ export interface AssistantTracesQuery {
     randomOrder?: boolean
 }
 
+/**
+ * Retrieve a single LLM trace by its trace ID. Returns the full trace including
+ * all child events (generations, spans, embeddings, feedback, metrics), total
+ * latency, token usage, costs, and input/output state.
+ *
+ * Use `query-llm-traces-list` first to find trace IDs, then this tool to
+ * inspect a specific trace in detail.
+ */
+export interface AssistantTraceQuery {
+    kind: NodeKind.TraceQuery
+
+    /**
+     * The trace ID to retrieve. This is the `$ai_trace_id` property value
+     * shared by all events in a trace.
+     */
+    traceId: string
+
+    /**
+     * Date range for the query. Required — traces outside this range won't be found.
+     */
+    dateRange?: AssistantDateRangeFilter
+
+    /**
+     * Property filters to narrow results within the trace.
+     * @default []
+     */
+    properties?: AssistantPropertyFilter[]
+}
+
 export interface AssistantHogQLQuery {
     kind: NodeKind.HogQLQuery
     /** SQL SELECT statement to execute. Mostly standard ClickHouse SQL with PostHog-specific additions. */

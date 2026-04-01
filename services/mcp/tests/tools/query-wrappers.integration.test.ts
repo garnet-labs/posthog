@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import type { ApiClient } from '@/api/client'
 import { GENERATED_TOOLS } from '@/tools/generated/query-wrappers'
+import queryLLMTrace from '@/tools/llmAnalytics/queryLLMTrace'
+import queryLLMTracesList from '@/tools/llmAnalytics/queryLLMTracesList'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
 
 import {
@@ -220,11 +222,8 @@ describe('Query Wrapper Integration Tests', { concurrent: false }, () => {
     })
 
     describe('query-llm-traces-list', () => {
-        it('should execute a traces query and return formatted results', async () => {
-            const tool = getToolByName(
-                GENERATED_TOOLS as Record<string, () => ToolBase<ZodObjectAny>>,
-                'query-llm-traces-list'
-            )
+        it('should execute a traces query and return results with content stripped', async () => {
+            const tool = queryLLMTracesList()
             const result = (await tool.handler(context, {
                 dateRange: { date_from: '-7d' },
                 limit: 10,
@@ -232,8 +231,20 @@ describe('Query Wrapper Integration Tests', { concurrent: false }, () => {
 
             expect(result).toHaveProperty('results')
             expect(result).toHaveProperty('_posthogUrl')
-            // TracesQuery may not have a formatter — result could be string or JSON fallback
-            expect(result.results !== undefined).toBe(true)
+        })
+    })
+
+    describe('query-llm-trace', () => {
+        it('should execute a single trace query and return results', async () => {
+            const tool = queryLLMTrace()
+            const result = (await tool.handler(context, {
+                traceId: '00000000-0000-0000-0000-000000000000',
+                dateRange: { date_from: '-7d' },
+                contentDetail: 'none',
+            })) as any
+
+            expect(result).toHaveProperty('results')
+            expect(result).toHaveProperty('_posthogUrl')
         })
     })
 

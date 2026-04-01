@@ -5451,6 +5451,46 @@ class AssistantStringOrBooleanValuePropertyFilter(BaseModel):
     )
 
 
+class AssistantTraceQuery(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    dateRange: AssistantDateRange | AssistantDurationRange | None = Field(
+        default=None,
+        description=("Date range for the query. Required — traces outside this range won't be found."),
+    )
+    kind: Literal["TraceQuery"] = "TraceQuery"
+    properties: (
+        list[
+            AssistantCohortPropertyFilter
+            | AssistantHogQLPropertyFilter
+            | AssistantFlagPropertyFilter
+            | AssistantGenericPropertyFilter1
+            | AssistantGenericPropertyFilter2
+            | AssistantGenericPropertyFilter3
+            | AssistantGenericPropertyFilter4
+            | AssistantGenericPropertyFilter5
+            | AssistantGroupPropertyFilter1
+            | AssistantGroupPropertyFilter2
+            | AssistantGroupPropertyFilter3
+            | AssistantGroupPropertyFilter4
+            | AssistantGroupPropertyFilter5
+            | AssistantElementPropertyFilter1
+            | AssistantElementPropertyFilter2
+            | AssistantElementPropertyFilter3
+            | AssistantElementPropertyFilter4
+            | AssistantElementPropertyFilter5
+        ]
+        | None
+    ) = Field(default=[], description="Property filters to narrow results within the trace.")
+    traceId: str = Field(
+        ...,
+        description=(
+            "The trace ID to retrieve. This is the `$ai_trace_id` property value shared by all events in a trace."
+        ),
+    )
+
+
 class AssistantTracesQuery(BaseModel):
     model_config = ConfigDict(
         extra="forbid",

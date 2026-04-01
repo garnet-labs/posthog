@@ -2898,6 +2898,34 @@
             "required": ["type", "content", "tool_call_id"],
             "type": "object"
         },
+        "AssistantTraceQuery": {
+            "additionalProperties": false,
+            "description": "Retrieve a single LLM trace by its trace ID. Returns the full trace including all child events (generations, spans, embeddings, feedback, metrics), total latency, token usage, costs, and input/output state.\n\nUse `query-llm-traces-list` first to find trace IDs, then this tool to inspect a specific trace in detail.",
+            "properties": {
+                "dateRange": {
+                    "$ref": "#/definitions/AssistantDateRangeFilter",
+                    "description": "Date range for the query. Required — traces outside this range won't be found."
+                },
+                "kind": {
+                    "const": "TraceQuery",
+                    "type": "string"
+                },
+                "properties": {
+                    "default": [],
+                    "description": "Property filters to narrow results within the trace.",
+                    "items": {
+                        "$ref": "#/definitions/AssistantPropertyFilter"
+                    },
+                    "type": "array"
+                },
+                "traceId": {
+                    "description": "The trace ID to retrieve. This is the `$ai_trace_id` property value shared by all events in a trace.",
+                    "type": "string"
+                }
+            },
+            "required": ["kind", "traceId"],
+            "type": "object"
+        },
         "AssistantTracesQuery": {
             "additionalProperties": false,
             "description": "Query LLM traces to inspect AI/LLM usage. Returns a list of traces with latency, token usage, costs, errors, and other metadata. Use for AI observability — debugging slow generations, investigating errors, analyzing token spend, and auditing LLM behavior.\n\nThis is a listing tool, not a visualization/insight tool. It does not support series, breakdowns, or math aggregations. Use property filters and dateRange to narrow results.",
