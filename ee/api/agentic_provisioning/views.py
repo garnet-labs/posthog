@@ -238,10 +238,19 @@ def account_requests(request: Request) -> Response:
 
     region = (configuration.get("region") or "US").upper()
 
+    requested_team_id = configuration.get("team_id")
+    if requested_team_id is not None:
+        try:
+            requested_team_id = int(requested_team_id)
+        except (ValueError, TypeError):
+            requested_team_id = None
+
     existing_user = User.objects.filter(email=email).first()
 
     if existing_user:
-        return _handle_existing_user(request_id, existing_user, confirmation_secret, scopes, stripe_account_id, region)
+        return _handle_existing_user(
+            request_id, existing_user, confirmation_secret, scopes, stripe_account_id, region, requested_team_id
+        )
 
     return _handle_new_user(request_id, data, email, scopes, stripe_account_id, region)
 
@@ -253,31 +262,71 @@ def _handle_existing_user(
     scopes: list[str],
     stripe_account_id: str = "",
     region: str = "US",
+    team_id: int | None = None,
 ) -> Response:
+    team = _resolve_team_for_existing_user(user, team_id)
+    if team is None:
+        _capture_provisioning_event("account_request", "error", error_code="team_resolution_failed")
+        return Response(
+            {
+                "id": request_id,
+                "type": "error",
+                "error": {"code": "team_resolution_failed", "message": "Could not resolve a project for this user"},
+            },
+            status=400,
+        )
+
+    code = secrets.token_urlsafe(32)
     cache.set(
-        f"{PENDING_AUTH_CACHE_PREFIX}{confirmation_secret}",
+        f"{AUTH_CODE_CACHE_PREFIX}{code}",
         {
-            "email": user.email,
-            "scopes": scopes,
+            "user_id": user.id,
+            "org_id": str(team.organization_id),
+            "team_id": team.id,
             "stripe_account_id": stripe_account_id,
+            "scopes": scopes,
             "region": region,
         },
-        timeout=PENDING_AUTH_TTL_SECONDS,
+        timeout=AUTH_CODE_TTL_SECONDS,
     )
 
-    _capture_provisioning_event("account_request", "existing_user", region=region)
+    _capture_provisioning_event("account_request", "existing_user", region=region, team_id=team.id)
 
-    authorize_url = _build_authorize_url(confirmation_secret, scopes)
-    return Response(
-        {
-            "id": request_id,
-            "type": "requires_auth",
-            "requires_auth": {
-                "type": "redirect",
-                "redirect": {"url": authorize_url},
-            },
-        }
-    )
+    return Response({"id": request_id, "type": "oauth", "oauth": {"code": code}})
+
+
+def _resolve_team_for_existing_user(user: User, requested_team_id: int | None = None) -> Team | None:
+    """Pick a team for an existing user during email-based account linking.
+
+    If requested_team_id is provided and the user has access, use it.
+    Otherwise auto-select: single non-demo team → use it, only demo teams →
+    create a new project, multiple teams → create a new project in the first org.
+    """
+    memberships = list(user.organization_memberships.select_related("organization").all())
+    if not memberships:
+        return None
+
+    org_ids = [m.organization_id for m in memberships]
+
+    if requested_team_id is not None:
+        try:
+            team = Team.objects.get(id=requested_team_id, is_demo=False)
+        except Team.DoesNotExist:
+            return None
+        if team.organization_id not in org_ids:
+            return None
+        return team
+
+    non_demo_teams = list(Team.objects.filter(organization_id__in=org_ids, is_demo=False))
+
+    if len(non_demo_teams) == 1:
+        return non_demo_teams[0]
+
+    organization = memberships[0].organization
+    if not non_demo_teams:
+        return Team.objects.create_with_data(initiating_user=user, organization=organization)
+
+    return Team.objects.create_with_data(initiating_user=user, organization=organization)
 
 
 def _handle_new_user(
@@ -550,6 +599,8 @@ def _exchange_authorization_code(request: Request) -> Response:
 
     account_id = str(code_data.get("org_id", ""))
 
+    available_teams = _get_available_teams_for_user(user)
+
     _capture_provisioning_event("token_exchange", "success", grant_type="authorization_code")
 
     return Response(
@@ -561,6 +612,7 @@ def _exchange_authorization_code(request: Request) -> Response:
             "account": {
                 "id": account_id,
                 "payment_credentials": "provider",
+                "available_teams": available_teams,
             },
         }
     )
@@ -963,6 +1015,21 @@ def _get_stripe_oauth_app():
         redirect_uris="https://localhost",
         algorithm="RS256",
     )
+
+
+def _get_available_teams_for_user(user: User) -> list[dict[str, Any]]:
+    """Return the user's non-demo teams for inclusion in the token exchange response."""
+    org_ids = list(user.organization_memberships.values_list("organization_id", flat=True))
+    teams = Team.objects.filter(organization_id__in=org_ids, is_demo=False).select_related("organization")
+    return [
+        {
+            "id": team.id,
+            "name": team.name,
+            "organization_id": str(team.organization_id),
+            "organization_name": team.organization.name if team.organization else "",
+        }
+        for team in teams
+    ]
 
 
 def _region_to_host(region: str) -> str:
