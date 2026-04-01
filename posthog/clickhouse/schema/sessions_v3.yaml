@@ -66,3 +66,19 @@ tables:
         sharding_key: 'cityHash64(session_id_v7)'
         on_nodes: ALL
         columns: inherit sharded_raw_sessions_v3
+
+    raw_sessions_v3_mv:
+        engine: MaterializedView
+        source: sharded_events
+        target: writable_raw_sessions_v3
+        select: "SELECT ... FROM {{ database }}.sharded_events"
+        on_nodes: DATA
+        columns: []
+
+    raw_sessions_v3_recordings_mv:
+        engine: MaterializedView
+        source: sharded_session_replay_events
+        target: writable_raw_sessions_v3
+        select: "SELECT ... FROM {{ database }}.sharded_session_replay_events"
+        on_nodes: DATA
+        columns: []

@@ -79,6 +79,39 @@ tables:
         on_nodes: COORDINATOR
         columns: inherit sharded_log_entries
 
+    # Original Kafka table (non-sharded pipeline)
+    kafka_log_entries:
+        engine: Kafka
+        on_nodes: ALL
+        settings:
+            kafka_broker_list: __from_settings__
+            kafka_topic_list: log_entries
+            kafka_group_name: log_entries
+            kafka_format: JSONEachRow
+        columns:
+            - name: team_id
+              type: UInt64
+            - name: log_source
+              type: LowCardinality(String)
+            - name: log_source_id
+              type: String
+            - name: instance_id
+              type: String
+            - name: timestamp
+              type: "DateTime64(6, 'UTC')"
+            - name: level
+              type: LowCardinality(String)
+            - name: message
+              type: String
+
+    log_entries_mv:
+        engine: MaterializedView
+        source: kafka_log_entries
+        target: log_entries
+        select: "SELECT team_id, log_source, log_source_id, instance_id, timestamp, level, message, _timestamp, _offset FROM {{ database }}.kafka_log_entries"
+        on_nodes: ALL
+        columns: []
+
     kafka_log_entries_v3:
         engine: Kafka
         on_nodes: INGESTION_EVENTS

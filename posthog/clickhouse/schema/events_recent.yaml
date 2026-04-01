@@ -84,6 +84,13 @@ tables:
         on_nodes: ALL
         columns: inherit sharded_events_recent
 
+    distributed_events_recent:
+        engine: Distributed
+        source: sharded_events_recent
+        sharding_key: 'sipHash64(distinct_id)'
+        on_nodes: ALL
+        columns: inherit sharded_events_recent
+
     events_recent_json_mv:
         engine: MaterializedView
         source: sharded_events
