@@ -618,6 +618,14 @@ snapshots:
         hash: v1.k794b7964.d7bfff95fbd893d2e15503003b904c5ca48985ec758c4526cb2172241fdc327d.x0Umc9eEH2rF4lUO4irmDcXCMk0SdKk4JrimrT3WbZY
     components-playerinspector--default--light:
         hash: v1.k794b7964.d60e6f4d889711702ac3eb71ba983c60a193431f8a198e7bbd87c8f7a8d2fcea.y1Nf0G2vsa6hL04EcSVGwfbcH7POpDqQik_VJi7KF0g
+    components-playerinspector--with-logs-filter--dark:
+        hash: v1.k794b7964.31653da5b54e21f6d92dd5bef4af410c27174485eb7252a68325be1da4da1a8d.WGz40etsHk8izfvc1VmbaYtzekKhKx8dE6rSlOya_8A
+    components-playerinspector--with-logs-filter--light:
+        hash: v1.k794b7964.4cac043bac8d280326cea547ebc1c01a1547956b27413f4768bb47ab780169a8.A31nEQIDVY4j4vz2nn9BanN0iNh7_x_wRSK4bE4n7aw
+    components-playerinspector--with-logs-filter-upsell--dark:
+        hash: v1.k794b7964.e2911846bfa178410b335ddd7a648eff65fdfd7d505d5ed63c227fb49ea35efb.dYtYhoq_Sunl1e9MkzhUUpr0msBQzfV8bVfbi-dspKI
+    components-playerinspector--with-logs-filter-upsell--light:
+        hash: v1.k794b7964.53e866eca609fbb8f94b146e2a0d04b9bd2415946ee254f9fa994881c9d5d1fd.4i5esWNggnX8MczI0dTMHrN9I4oPcTZVDnmA4x2dwo4
     components-playerinspector-itemcomment--annotation-comment--dark:
         hash: v1.k794b7964.d2eaad42c4d74ab148ba3075a6260d7aeda90562fbfdb49738afcc37fddacd73.DqxeQtB6IVGsvji5psBPT4qyAC-3MAkB4svhAvYak7w
     components-playerinspector-itemcomment--annotation-comment--light:
@@ -715,9 +723,9 @@ snapshots:
     components-playerinspector-itemlog--log-with-grouped-items--light:
         hash: v1.k794b7964.efe815d5e388a09a15272cff9b3859260cd762e31e36c522a0490a50a953bbed.9ITrEG8q1EZ4rhCzEtJNmVXIhS7nF4FpHkalOaz4JE8
     components-playerinspector-itemlog--log-with-long-body--dark:
-        hash: v1.k794b7964.ca4ed1afedbda983c09cd745383e386962c224af5a6837553d5f189b7878521e.ELV4Gkw3QNiK5ocnQ9fcomk7kSLJT9NKNnYlX-uCzlA
+        hash: v1.k794b7964.84ee27423ef7a80998960b884e2ef3499f1047a291e88430219f367f2a90de44.MakBITw7NSXP_d5CLrj37leB4m8XEjkOgNUGPerTnSE
     components-playerinspector-itemlog--log-with-long-body--light:
-        hash: v1.k794b7964.d0d290f488f3ba4a6fe9f6ef83af2ea363d31af75b4dfb6ef80564d416f56d7c.8kUgAZrNIk4JtzLTJNHobYZckKdohMe8x87s1UQLYAo
+        hash: v1.k794b7964.68faeacc00553aab748a0468dd8483f602eb42e61b059c566705682794ebefdb.4u_AlyeU-ZMb5nvZEojtRswMPOMeHL8Ma6flVup7Lns
     components-playerinspector-itemlog--log-with-no-attributes--dark:
         hash: v1.k794b7964.48b33f242196a95b0c30ef250131f971f45af42fe561b9d7914cbe0b7b271627.h6yU2SV__QciOIquLWppgp3zL3T1v05cPSTgBX7JHkI
     components-playerinspector-itemlog--log-with-no-attributes--light:
