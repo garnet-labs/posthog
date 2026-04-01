@@ -961,6 +961,7 @@ export function mergeConversations(
     }
 
     return {
+        ...oldObj,
         ...newObj,
         messages: oldObj?.messages ?? [],
     }
