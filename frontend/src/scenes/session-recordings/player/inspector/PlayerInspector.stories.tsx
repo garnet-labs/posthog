@@ -19,6 +19,7 @@ const meta: Meta = {
     decorators: [
         mswDecorator({
             get: {
+                '/api/environments/:team_id/logs/has_logs/': { hasLogs: true },
                 '/api/projects/:team_id/comments': {
                     count: 1,
                     results: [
@@ -82,6 +83,91 @@ const meta: Meta = {
 
                     // default to an empty response or we duplicate information
                     return res(ctx.json({ results: [] }))
+                },
+                '/api/environments/:team_id/logs/query/': (_req, res, ctx) => {
+                    return res(
+                        ctx.json({
+                            results: [
+                                {
+                                    uuid: 'log-001',
+                                    trace_id: 'trace-abc-001',
+                                    span_id: 'span-001',
+                                    body: 'Handling incoming request POST /api/capture',
+                                    attributes: {
+                                        'http.method': 'POST',
+                                        'http.url': '/api/capture',
+                                        session_id: '12345',
+                                    },
+                                    timestamp: '2023-08-11T12:03:40.000Z',
+                                    observed_timestamp: '2023-08-11T12:03:40.000Z',
+                                    severity_text: 'info',
+                                    severity_number: 9,
+                                    level: 'info',
+                                    resource_attributes: { 'service.name': 'capture-service' },
+                                    instrumentation_scope: 'capture-service',
+                                    event_name: '',
+                                },
+                                {
+                                    uuid: 'log-002',
+                                    trace_id: 'trace-abc-002',
+                                    span_id: 'span-002',
+                                    body: 'Rate limit check: 85% of quota used',
+                                    attributes: {
+                                        api_key: 'phc_***',
+                                        usage_percent: '85',
+                                        session_id: '12345',
+                                    },
+                                    timestamp: '2023-08-11T12:03:45.000Z',
+                                    observed_timestamp: '2023-08-11T12:03:45.000Z',
+                                    severity_text: 'warn',
+                                    severity_number: 13,
+                                    level: 'warn',
+                                    resource_attributes: { 'service.name': 'rate-limiter' },
+                                    instrumentation_scope: 'rate-limiter',
+                                    event_name: '',
+                                },
+                                {
+                                    uuid: 'log-003',
+                                    trace_id: 'trace-abc-003',
+                                    span_id: 'span-003',
+                                    body: 'Failed to process event batch: kafka producer timeout',
+                                    attributes: {
+                                        'error.type': 'KafkaProducerTimeout',
+                                        'batch.size': '500',
+                                        session_id: '12345',
+                                    },
+                                    timestamp: '2023-08-11T12:04:10.000Z',
+                                    observed_timestamp: '2023-08-11T12:04:10.000Z',
+                                    severity_text: 'error',
+                                    severity_number: 17,
+                                    level: 'error',
+                                    resource_attributes: { 'service.name': 'event-processor' },
+                                    instrumentation_scope: 'event-processor',
+                                    event_name: '',
+                                },
+                                {
+                                    uuid: 'log-004',
+                                    trace_id: 'trace-abc-004',
+                                    span_id: 'span-004',
+                                    body: 'Session data persisted successfully',
+                                    attributes: {
+                                        session_id: '12345',
+                                        'db.operation': 'INSERT',
+                                    },
+                                    timestamp: '2023-08-11T12:04:30.000Z',
+                                    observed_timestamp: '2023-08-11T12:04:30.000Z',
+                                    severity_text: 'debug',
+                                    severity_number: 5,
+                                    level: 'debug',
+                                    resource_attributes: { 'service.name': 'session-store' },
+                                    instrumentation_scope: 'session-store',
+                                    event_name: '',
+                                },
+                            ],
+                            hasMore: false,
+                            maxExportableLogs: 10000,
+                        })
+                    )
                 },
             },
             patch: {
