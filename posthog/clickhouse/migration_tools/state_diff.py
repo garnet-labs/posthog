@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from posthog.clickhouse.migration_tools.desired_state import ColumnDef, DesiredState, DesiredTable
-from posthog.clickhouse.migration_tools.schema_introspect import ColumnSchema, TableSchema
+from posthog.clickhouse.migration_tools.schema_introspect import TableSchema
 
 
 @dataclass

@@ -28,7 +28,7 @@ def generate_plan_text(diffs: list[StateDiff]) -> str:
     if not diffs:
         return "No changes. Infrastructure is up to date."
 
-    lines: list[str] = ["ch_migrate reconcile plan:\n"]
+    lines: list[str] = ["ch_migrate plan:\n"]
 
     creates = 0
     destroys = 0

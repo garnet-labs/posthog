@@ -1,3 +1,5 @@
+"""Live schema introspection and drift detection. Shared by both migration approaches."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

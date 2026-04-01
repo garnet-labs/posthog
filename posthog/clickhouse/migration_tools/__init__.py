@@ -1,1 +1,1 @@
-# ClickHouse manifest-driven migration engine.
+# ClickHouse desired-state reconciliation engine.

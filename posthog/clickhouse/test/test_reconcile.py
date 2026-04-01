@@ -399,6 +399,7 @@ class TestPlanGeneratorHumanReadable(unittest.TestCase):
         self.assertIn("old_mv", plan)
         self.assertIn("new_table", plan)
         self.assertIn("Plan:", plan)
+        self.assertIn("ch_migrate plan:", plan)
 
     def test_no_changes_plan(self) -> None:
         plan = generate_plan_text([])

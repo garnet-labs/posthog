@@ -26,13 +26,13 @@ def run_sql_with_exceptions(
     """Execute SQL on each node with role/shard routing.
 
     .. deprecated::
-        Use manifest.yaml with ``ch_migrate`` instead.
+        Use desired-state YAML with ``ch_migrate reconcile`` instead.
         See ``posthog/clickhouse/migrations/README.md``.
     """
     import warnings
 
     warnings.warn(
-        "run_sql_with_exceptions is deprecated. Use manifest.yaml with ch_migrate. "
+        "run_sql_with_exceptions is deprecated. Use desired-state YAML with ch_migrate reconcile. "
         "See posthog/clickhouse/migrations/README.md",
         DeprecationWarning,
         stacklevel=2,

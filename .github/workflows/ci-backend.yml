@@ -830,32 +830,19 @@ jobs:
                     sqlx migrate info --source rust/persons_migrations/
                   python manage.py makemigrations --check --dry-run
 
-            - name: Check CH migrations
-              run: |
-                  # Same as above, except now for CH looking at files that were added in posthog/clickhouse/migrations/
-                  git diff --name-status origin/master..HEAD | grep "A\sposthog/clickhouse/migrations/" | grep -v README | awk '{print $2}' | python manage.py test_ch_migrations_are_safe
-
-            - name: Validate, lint, and trial new-style CH migrations
+            - name: Validate ClickHouse schema changes
               if: steps.changes.outputs.backend == 'true'
-              timeout-minutes: 10
+              timeout-minutes: 5
               run: |
-                  NEW_DIRS=$(git diff --name-status origin/master..HEAD \
-                    | grep "A.*posthog/clickhouse/migrations/.*/manifest.yaml" \
-                    | awk '{print $2}' \
-                    | xargs -I{} dirname {} \
-                    | sort -u || true)
-                  if [ -z "$NEW_DIRS" ]; then
-                    echo "No new-style CH migrations to check."
+                  CHANGED=$(git diff --name-only origin/master..HEAD -- posthog/clickhouse/schema/ | head -1)
+                  if [ -z "$CHANGED" ]; then
+                    echo "No ClickHouse schema changes to validate."
                     exit 0
                   fi
-                  python manage.py ch_migrate bootstrap
-                  for dir in $NEW_DIRS; do
-                    NUM=$(basename "$dir" | grep -oE '^[0-9]+')
-                    echo "=== Migration $NUM ==="
-                    python manage.py ch_migrate validate "$NUM" --strict
-                    python manage.py ch_migrate lint --path "$dir"
-                    python manage.py ch_migrate trial "$NUM"
-                  done
+                  echo "Validating ClickHouse schema changes..."
+                  python manage.py ch_migrate lint
+                  python manage.py ch_migrate plan
+
 
             - name: Install pnpm
               uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0

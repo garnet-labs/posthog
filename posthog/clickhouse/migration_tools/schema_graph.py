@@ -1,3 +1,5 @@
+"""Table ecosystem graph — models cross-cluster relationships. Used by reconcile and validator."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -1,7 +1,0 @@
-description: 'Bootstrap ch_migrate tracking table on all nodes'
-steps:
-    - sql: 'up.sql#create_tracking'
-      node_roles: [ALL]
-rollback:
-    - sql: 'down.sql#drop_tracking'
-      node_roles: [ALL]

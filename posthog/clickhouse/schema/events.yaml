@@ -1,7 +1,7 @@
 # Desired-state schema for the events ecosystem.
 # Edit this file to declare the desired schema, then run:
-#   python manage.py ch_migrate reconcile plan --schema-dir posthog/clickhouse/schema/
-#   python manage.py ch_migrate reconcile apply --schema-dir posthog/clickhouse/schema/
+#   python manage.py ch_migrate plan
+#   python manage.py ch_migrate apply
 
 ecosystem: events
 cluster: main
