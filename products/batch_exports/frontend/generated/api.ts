@@ -11,7 +11,9 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
 import type {
     BatchExportApi,
     BatchExportBackfillApi,
+    BatchExportBackfillCreateApi,
     BatchExportRunApi,
+    BatchExportUnpauseApi,
     BatchExportsBackfillsListParams,
     BatchExportsList2Params,
     BatchExportsListParams,
@@ -170,14 +172,11 @@ export const getBatchExportsPauseCreateUrl = (organizationId: string, id: string
 export const batchExportsPauseCreate = async (
     organizationId: string,
     id: string,
-    batchExportApi: NonReadonly<BatchExportApi>,
     options?: RequestInit
 ): Promise<void> => {
     return apiMutator<void>(getBatchExportsPauseCreateUrl(organizationId, id), {
         ...options,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(batchExportApi),
     })
 }
 
@@ -209,14 +208,14 @@ export const getBatchExportsUnpauseCreateUrl = (organizationId: string, id: stri
 export const batchExportsUnpauseCreate = async (
     organizationId: string,
     id: string,
-    batchExportApi: NonReadonly<BatchExportApi>,
+    batchExportUnpauseApi: BatchExportUnpauseApi,
     options?: RequestInit
 ): Promise<void> => {
     return apiMutator<void>(getBatchExportsUnpauseCreateUrl(organizationId, id), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(batchExportApi),
+        body: JSON.stringify(batchExportUnpauseApi),
     })
 }
 
@@ -342,14 +341,14 @@ export const getBatchExportsBackfillsCreateUrl = (projectId: string, batchExport
 export const batchExportsBackfillsCreate = async (
     projectId: string,
     batchExportId: string,
-    batchExportBackfillApi: NonReadonly<BatchExportBackfillApi>,
+    batchExportBackfillCreateApi: BatchExportBackfillCreateApi,
     options?: RequestInit
 ): Promise<BatchExportBackfillApi> => {
     return apiMutator<BatchExportBackfillApi>(getBatchExportsBackfillsCreateUrl(projectId, batchExportId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(batchExportBackfillApi),
+        body: JSON.stringify(batchExportBackfillCreateApi),
     })
 }
 
@@ -591,17 +590,10 @@ export const getBatchExportsPauseCreate2Url = (projectId: string, id: string) =>
     return `/api/projects/${projectId}/batch_exports/${id}/pause/`
 }
 
-export const batchExportsPauseCreate2 = async (
-    projectId: string,
-    id: string,
-    batchExportApi: NonReadonly<BatchExportApi>,
-    options?: RequestInit
-): Promise<void> => {
+export const batchExportsPauseCreate2 = async (projectId: string, id: string, options?: RequestInit): Promise<void> => {
     return apiMutator<void>(getBatchExportsPauseCreate2Url(projectId, id), {
         ...options,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(batchExportApi),
     })
 }
 
@@ -633,14 +625,14 @@ export const getBatchExportsUnpauseCreate2Url = (projectId: string, id: string) 
 export const batchExportsUnpauseCreate2 = async (
     projectId: string,
     id: string,
-    batchExportApi: NonReadonly<BatchExportApi>,
+    batchExportUnpauseApi: BatchExportUnpauseApi,
     options?: RequestInit
 ): Promise<void> => {
     return apiMutator<void>(getBatchExportsUnpauseCreate2Url(projectId, id), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(batchExportApi),
+        body: JSON.stringify(batchExportUnpauseApi),
     })
 }
 
