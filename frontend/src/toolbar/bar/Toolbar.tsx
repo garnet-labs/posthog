@@ -323,7 +323,7 @@ export function ToolbarInfoMenu(): JSX.Element | null {
     const showProductTours = inStorybook() || inStorybookTestRunner() || productToursFlag
 
     const surveysFlag = useToolbarFeatureFlag('surveys-toolbar')
-    const showSurveys = inStorybook() || inStorybookTestRunner() || surveysFlag
+    const showSurveys = surveysFlag
 
     const content = minimized ? null : visibleMenu === 'flags' ? (
         <FlagsToolbarMenu />
@@ -397,7 +397,7 @@ export function Toolbar(): JSX.Element | null {
     const showProductTours = inStorybook() || inStorybookTestRunner() || productToursFlag
 
     const surveysFlag = useToolbarFeatureFlag('surveys-toolbar')
-    const showSurveys = inStorybook() || inStorybookTestRunner() || surveysFlag
+    const showSurveys = surveysFlag
 
     useEffect(() => {
         setElement(ref.current)

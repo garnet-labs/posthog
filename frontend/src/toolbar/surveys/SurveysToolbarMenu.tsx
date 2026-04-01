@@ -26,7 +26,6 @@ const SURVEY_TYPE_LABELS: Record<SurveyType, string> = {
 const STATUS_COLORS: Record<string, 'primary' | 'muted' | 'danger'> = {
     active: 'primary',
     draft: 'muted',
-    stopped: 'danger',
     complete: 'muted',
 }
 
@@ -68,7 +67,7 @@ function SurveyRow({ survey }: { survey: Survey }): JSX.Element {
 }
 
 export function SurveysToolbarMenu(): JSX.Element {
-    const { searchTerm, filteredSurveys, allSurveysLoading } = useValues(surveysToolbarLogic)
+    const { searchTerm, allSurveys, allSurveysLoading } = useValues(surveysToolbarLogic)
     const { setSearchTerm, loadSurveys } = useActions(surveysToolbarLogic)
 
     useOnMountEffect(() => {
@@ -98,8 +97,8 @@ export function SurveysToolbarMenu(): JSX.Element {
                                 </div>
                             ))}
                         </div>
-                    ) : filteredSurveys.length > 0 ? (
-                        filteredSurveys.map((survey: Survey) => <SurveyRow key={survey.id} survey={survey} />)
+                    ) : allSurveys.length > 0 ? (
+                        allSurveys.map((survey: Survey) => <SurveyRow key={survey.id} survey={survey} />)
                     ) : (
                         <div className="text-muted text-sm text-center py-4">
                             {searchTerm ? 'No matching surveys found.' : 'No surveys found in this project.'}

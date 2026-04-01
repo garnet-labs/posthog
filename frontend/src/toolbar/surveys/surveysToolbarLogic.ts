@@ -1,4 +1,4 @@
-import { actions, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, kea, listeners, path, reducers } from 'kea'
 import { loaders } from 'kea-loaders'
 
 import { toolbarFetch } from '~/toolbar/toolbarConfigLogic'
@@ -6,7 +6,7 @@ import { Survey } from '~/types'
 
 import type { surveysToolbarLogicType } from './surveysToolbarLogicType'
 
-export type SurveyStatus = 'draft' | 'active' | 'stopped' | 'complete'
+export type SurveyStatus = 'draft' | 'active' | 'complete'
 
 export function getSurveyStatus(survey: Survey): SurveyStatus {
     if (!survey.start_date) {
@@ -14,9 +14,6 @@ export function getSurveyStatus(survey: Survey): SurveyStatus {
     }
     if (survey.end_date) {
         return 'complete'
-    }
-    if (survey.archived) {
-        return 'stopped'
     }
     return 'active'
 }
@@ -26,7 +23,6 @@ export const surveysToolbarLogic = kea<surveysToolbarLogicType>([
 
     actions({
         setSearchTerm: (searchTerm: string) => ({ searchTerm }),
-        debouncedSearch: true,
         showButtonSurveys: true,
         hideButtonSurveys: true,
     }),
@@ -37,17 +33,17 @@ export const surveysToolbarLogic = kea<surveysToolbarLogicType>([
             {
                 loadSurveys: async () => {
                     const params = new URLSearchParams()
+                    params.set('archived', 'false')
                     if (values.searchTerm) {
                         params.set('search', values.searchTerm)
                     }
-                    const url = `/api/projects/@current/surveys/${params.toString() ? `?${params}` : ''}`
+                    const url = `/api/projects/@current/surveys/?${params}`
                     const response = await toolbarFetch(url)
                     if (!response.ok) {
                         return []
                     }
                     const data = await response.json()
-                    const surveys: Survey[] = data.results ?? data
-                    return surveys.filter((s) => !s.archived)
+                    return data.results ?? data
                 },
             },
         ],
@@ -60,10 +56,6 @@ export const surveysToolbarLogic = kea<surveysToolbarLogicType>([
                 setSearchTerm: (_, { searchTerm }) => searchTerm,
             },
         ],
-    }),
-
-    selectors({
-        filteredSurveys: [(s) => [s.allSurveys], (allSurveys): Survey[] => allSurveys],
     }),
 
     listeners(({ actions }) => ({
