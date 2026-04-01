@@ -5437,7 +5437,7 @@ snapshots:
     scenes-app-settings-environment--settings-environment-product-analytics--light:
         hash: v1.k794b7964.46551b2f98dd4cc3c4ea37b15e922bdf192428c0636f11c2d8ac8e6ea1b183b9.InY5w78UnDqn13HAbork-taDr1GTOvoxDZPHF7hMvY0
     scenes-app-settings-environment--settings-environment-replay--dark:
-        hash: v1.k794b7964.72c08ab9ab6132a32c72f425ee7ca1d9e5b5e6d212f9df16c0dcf01b9ce6d973.LpXwTTcbC6pWPxjVUdjUGIULIDzzdpEzPdm45wdqYVE
+        hash: v1.k794b7964.37a121d2e5503253b9bbeec9710d5c75320d98c24ccd2a80f3c51f88264dc7b7.76aKe9OS7DJYIbqhvqlDrycnWBZRjBhz_kovyr0VCGs
     scenes-app-settings-environment--settings-environment-replay--light:
         hash: v1.k794b7964.f581ca8bbb7b38c24f01123fc7e27eff6d9ea89c29919a938bce2db0059ee5c6.Vk5Cpv_3NSrmTl36-NQhMxWbgeC3tWVyM7gjmBaK8Yw
     scenes-app-settings-environment--settings-environment-revenue-analytics--dark:
@@ -5509,7 +5509,7 @@ snapshots:
     scenes-app-settings-project--settings-project-product-analytics--light:
         hash: v1.k794b7964.46551b2f98dd4cc3c4ea37b15e922bdf192428c0636f11c2d8ac8e6ea1b183b9.PSMqZX-iGOEpJBMWQHzfPPijhwv9EXVV2JBARof9K-c
     scenes-app-settings-project--settings-project-replay--dark:
-        hash: v1.k794b7964.72c08ab9ab6132a32c72f425ee7ca1d9e5b5e6d212f9df16c0dcf01b9ce6d973.VOhraH8DIjWCBUTsc1-nW5aJtJi7Pph4xOb8czYI8Uo
+        hash: v1.k794b7964.37a121d2e5503253b9bbeec9710d5c75320d98c24ccd2a80f3c51f88264dc7b7.0Y3OBAg__UvhQXT0x6W0wJNTayGsq1e7jLQW3qwMPk4
     scenes-app-settings-project--settings-project-replay--light:
         hash: v1.k794b7964.f581ca8bbb7b38c24f01123fc7e27eff6d9ea89c29919a938bce2db0059ee5c6.m2_ZxU_yvRTKjzyYv5IkUJuFwdrs1Xvux6pI7h6OcQA
     scenes-app-settings-project--settings-project-surveys--dark:
