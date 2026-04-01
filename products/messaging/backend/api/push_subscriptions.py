@@ -6,6 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.request import Request
 
+from posthog.api.utils import get_token
 from posthog.exceptions import generate_exception_response
 from posthog.models.integration import Integration
 from posthog.models.team.team import Team
@@ -77,8 +78,8 @@ def push_subscriptions(request: Request):
             ),
         )
 
-    api_key = data.get("api_key")
-    if not api_key:
+    token = get_token(data, request)
+    if not token:
         return cors_response(
             request,
             generate_exception_response(
@@ -90,7 +91,7 @@ def push_subscriptions(request: Request):
             ),
         )
 
-    team = Team.objects.get_team_from_cache_or_token(api_key)
+    team = Team.objects.get_team_from_cache_or_token(token)
     if not team:
         return cors_response(
             request,
