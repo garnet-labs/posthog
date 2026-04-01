@@ -1058,33 +1058,141 @@ class TestProcessScheduledChanges(APIBaseTest, QueryMatchingTest):
         error_message = str(context.exception)
         self.assertIn("don't match variant keys", error_message)
 
-    def test_failure_reason_truncation_preserves_json(self) -> None:
-        """Test that failure reason truncation preserves valid JSON structure"""
-        # This test verifies the simple truncation approach used in process_scheduled_changes
-        failure_context = {
-            "error": "A" * 500,  # Very long error message
-            "error_type": "ValidationError",
-            "error_classification": "unrecoverable",
-        }
+    def test_failure_reason_truncation_with_long_error_message(self) -> None:
+        """Test that failure reason is truncated when error message is very long"""
+        from unittest.mock import patch
 
-        # Apply the same logic as in process_scheduled_changes
-        error_msg = str(failure_context.get("error", ""))
-        if len(error_msg) > 300:
-            failure_context["error"] = error_msg[:297] + "..."
+        feature_flag = FeatureFlag.objects.create(
+            name="Long Error Flag",
+            key="long-error-flag",
+            active=False,
+            filters={"groups": []},
+            team=self.team,
+            created_by=self.user,
+        )
 
-        failure_json = json.dumps(failure_context)
-        final_result = failure_json[:400] if len(failure_json) > 400 else failure_json
+        scheduled_change = ScheduledChange.objects.create(
+            team=self.team,
+            record_id=feature_flag.id,
+            model_name="FeatureFlag",
+            payload={"operation": "update_status", "value": True},
+            scheduled_at=(datetime.now(UTC) - timedelta(seconds=30)),
+            created_by=self.user,
+        )
 
-        # Verify it's valid JSON
-        parsed = json.loads(final_result)
-        self.assertIsInstance(parsed, dict)
+        # Mock the dispatcher to raise an error with a very long message
+        very_long_error_message = "A" * 500  # 500 characters
+        with patch.object(FeatureFlag, "scheduled_changes_dispatcher") as mock_dispatcher:
+            mock_dispatcher.side_effect = Exception(very_long_error_message)
+            process_scheduled_changes()
 
-        # Verify important fields are preserved
-        self.assertEqual(parsed["error_type"], "ValidationError")
-        self.assertEqual(parsed["error_classification"], "unrecoverable")
+        # Refresh and check the failure reason was truncated
+        updated_scheduled_change = ScheduledChange.objects.get(id=scheduled_change.id)
+        self.assertIsNotNone(updated_scheduled_change.failure_reason)
+        failure_reason = updated_scheduled_change.failure_reason
+        assert failure_reason is not None  # For mypy
+        self.assertLessEqual(len(failure_reason), 400)
 
-        # Verify error message is truncated with ellipsis
-        self.assertTrue(parsed["error"].endswith("..."))
+        # Should still be valid JSON
+        failure_data = json.loads(failure_reason)
+        self.assertIn("error", failure_data)
+        self.assertEqual(failure_data["error_type"], "Exception")
+
+        # If truncated, should end with "..."
+        if len(failure_reason) == 400:
+            self.assertTrue(failure_reason.endswith("..."))
+
+    def test_failure_reason_truncation_with_long_context(self) -> None:
+        """Test that failure reason is truncated when entire JSON context is too long"""
+        from unittest.mock import patch
+
+        feature_flag = FeatureFlag.objects.create(
+            name="Long Context Flag",
+            key="long-context-flag",
+            active=False,
+            filters={"groups": []},
+            team=self.team,
+            created_by=self.user,
+        )
+
+        scheduled_change = ScheduledChange.objects.create(
+            team=self.team,
+            record_id=feature_flag.id,
+            model_name="FeatureFlag",
+            payload={"operation": "update_status", "value": True},
+            scheduled_at=(datetime.now(UTC) - timedelta(seconds=30)),
+            created_by=self.user,
+        )
+
+        # Mock current_task and hostname to make the context very long
+        with (
+            patch("posthog.tasks.process_scheduled_changes.current_task") as mock_task,
+            patch("os.getenv") as mock_getenv,
+            patch("socket.gethostname") as mock_hostname,
+            patch.object(FeatureFlag, "scheduled_changes_dispatcher") as mock_dispatcher,
+        ):
+            # Set up mocks to create a large context
+            mock_request = type("Request", (), {})()
+            mock_request.id = "a" * 100  # Long task ID
+            mock_request.hostname = "b" * 100  # Long hostname
+            mock_task.request = mock_request
+            mock_getenv.return_value = "c" * 100  # Long hostname from env
+            mock_hostname.return_value = "d" * 100  # Long hostname from socket
+
+            mock_dispatcher.side_effect = Exception("Regular error message")
+            process_scheduled_changes()
+
+        # Check the failure reason was truncated
+        updated_scheduled_change = ScheduledChange.objects.get(id=scheduled_change.id)
+        self.assertIsNotNone(updated_scheduled_change.failure_reason)
+        failure_reason = updated_scheduled_change.failure_reason
+        assert failure_reason is not None  # For mypy
+        self.assertLessEqual(len(failure_reason), 400)
+
+        # If truncated, should end with "..."
+        if len(failure_reason) == 400:
+            self.assertTrue(failure_reason.endswith("..."))
+
+    def test_failure_reason_normal_length_not_truncated(self) -> None:
+        """Test that normal length failure reasons are not truncated"""
+        from unittest.mock import patch
+
+        feature_flag = FeatureFlag.objects.create(
+            name="Normal Error Flag",
+            key="normal-error-flag",
+            active=False,
+            filters={"groups": []},
+            team=self.team,
+            created_by=self.user,
+        )
+
+        scheduled_change = ScheduledChange.objects.create(
+            team=self.team,
+            record_id=feature_flag.id,
+            model_name="FeatureFlag",
+            payload={"operation": "update_status", "value": True},
+            scheduled_at=(datetime.now(UTC) - timedelta(seconds=30)),
+            created_by=self.user,
+        )
+
+        # Mock dispatcher with normal error message
+        with patch.object(FeatureFlag, "scheduled_changes_dispatcher") as mock_dispatcher:
+            mock_dispatcher.side_effect = Exception("Normal error message")
+            process_scheduled_changes()
+
+        # Check the failure reason was NOT truncated
+        updated_scheduled_change = ScheduledChange.objects.get(id=scheduled_change.id)
+        self.assertIsNotNone(updated_scheduled_change.failure_reason)
+        failure_reason = updated_scheduled_change.failure_reason
+        assert failure_reason is not None  # For mypy
+        self.assertLess(len(failure_reason), 400)
+        self.assertFalse(failure_reason.endswith("..."))
+
+        # Should be valid JSON with all fields
+        failure_data = json.loads(failure_reason)
+        self.assertEqual(failure_data["error"], "Normal error message")
+        self.assertEqual(failure_data["error_type"], "Exception")
+        self.assertIn("hostname", failure_data)
 
     def test_cannot_schedule_change_in_past(self) -> None:
         """Test that scheduled changes set in the past are executed immediately when processed"""

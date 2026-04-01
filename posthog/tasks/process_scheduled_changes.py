@@ -282,7 +282,33 @@ def process_scheduled_changes() -> None:
                     else:
                         failure_context["error_classification"] = "recoverable"
 
-                    scheduled_change.failure_reason = json.dumps(failure_context)
+                    # Serialize failure context and truncate if necessary to fit database constraint
+                    failure_reason_json = json.dumps(failure_context)
+
+                    # If the JSON string exceeds the database field limit, truncate intelligently
+                    if len(failure_reason_json) > 400:
+                        # First, try truncating just the error message to preserve other context
+                        original_error = str(failure_context.get("error", ""))
+                        if len(original_error) > 100:  # Leave room for other context
+                            # Calculate how much space we need for the rest of the JSON
+                            temp_context = failure_context.copy()
+                            temp_context["error"] = ""
+                            base_json_length = len(json.dumps(temp_context))
+
+                            # Reserve space for truncation indicator and some buffer
+                            available_for_error = (
+                                400 - base_json_length - 20
+                            )  # 20 chars buffer for "..." + JSON overhead
+                            if available_for_error > 50:  # Ensure we keep at least 50 chars of error
+                                truncated_error = original_error[:available_for_error] + "..."
+                                failure_context["error"] = truncated_error
+                                failure_reason_json = json.dumps(failure_context)
+
+                        # If still too long, truncate the entire JSON string as last resort
+                        if len(failure_reason_json) > 400:
+                            failure_reason_json = failure_reason_json[:397] + "..."
+
+                    scheduled_change.failure_reason = failure_reason_json
 
                     # Only mark as permanently failed if we won't retry
                     if not will_retry:
