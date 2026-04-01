@@ -191,6 +191,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/billing/",
             headers=self.get_auth_headers(organization, authorizer_actor=authorizer_actor),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -199,6 +200,7 @@ class BillingManager:
         res = requests.get(
             f"{BILLING_SERVICE_URL}/api/billing/available_product_features",
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -268,6 +270,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/activate",
             headers=self.get_auth_headers(organization),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -279,6 +282,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/billing/deactivate",
             headers=self.get_auth_headers(organization),
             json={"products": products},
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -336,6 +340,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/billing",
             headers=self.get_auth_headers(organization),
             params=query_params,
+            timeout=20,
         )
         handle_billing_service_error(res)
 
@@ -353,6 +358,7 @@ class BillingManager:
         res = requests.get(
             f"{BILLING_SERVICE_URL}/api/billing/portal",
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -372,6 +378,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/products-v2",
             params=params,
             headers=headers,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -468,6 +475,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/billing/get_invoices",
             params={"status": status},
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -480,6 +488,7 @@ class BillingManager:
         res = requests.get(
             f"{BILLING_SERVICE_URL}/api/credits/overview",
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -491,6 +500,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/credits/purchase",
             headers=self.get_auth_headers(organization),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -502,6 +512,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/trials/activate",
             headers=self.get_auth_headers(organization),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -515,6 +526,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/trials/cancel",
             headers=self.get_auth_headers(organization),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -551,6 +563,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/activate/authorize",
             headers=self.get_auth_headers(organization, billing_provider),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -562,6 +575,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/activate/authorize/status",
             headers=self.get_auth_headers(organization),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -598,6 +612,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/subscription/switch-plan/",
             headers=self.get_auth_headers(organization),
             json=data,
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -610,6 +625,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/startups/apply",
             json=data,
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -620,6 +636,7 @@ class BillingManager:
             f"{BILLING_SERVICE_URL}/api/coupons/claim",
             json=data,
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -629,6 +646,7 @@ class BillingManager:
         res = requests.get(
             f"{BILLING_SERVICE_URL}/api/coupons/overview",
             headers=self.get_auth_headers(organization),
+            timeout=20,
         )
 
         handle_billing_service_error(res)
@@ -654,7 +672,7 @@ class BillingManager:
         url = f"{BILLING_SERVICE_URL}{path}"
         headers = self.get_auth_headers(organization)
 
-        res = requests.get(url, headers=headers, params=self._to_query_params(params))
+        res = requests.get(url, headers=headers, params=self._to_query_params(params), timeout=20)
 
         if res.status_code in (414, 431):
             logger.info(
@@ -663,7 +681,7 @@ class BillingManager:
                 status_code=res.status_code,
                 organization_id=str(organization.id),
             )
-            res = requests.post(url, headers=headers, json=self._to_post_body(params))
+            res = requests.post(url, headers=headers, json=self._to_post_body(params), timeout=20)
 
         handle_billing_service_error(res)
         return res.json()

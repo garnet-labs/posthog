@@ -120,7 +120,7 @@ export const billingUsageLogic = kea<billingUsageLogicType>([
                         return await api.get(`api/billing/usage/?${toParams(params)}`)
                     } catch (error) {
                         lemonToast.error('Failed to load billing usage. Please try again or contact support.')
-                        throw error
+                        return null
                     }
                 },
             },

@@ -310,12 +310,17 @@ export const billingLogic = kea<billingLogicType>([
                     // Note: this is a temporary flag to skip forecasting in the billing page
                     // for customers running into performance issues until we have a more permanent fix
                     // of splitting the billing and forecasting data.
-                    const skipForecasting = values.featureFlags[FEATURE_FLAGS.BILLING_SKIP_FORECASTING]
-                    const response = await api.get(
-                        'api/billing' + (skipForecasting ? '?include_forecasting=false' : '')
-                    )
+                    try {
+                        const skipForecasting = values.featureFlags[FEATURE_FLAGS.BILLING_SKIP_FORECASTING]
+                        const response = await api.get(
+                            'api/billing' + (skipForecasting ? '?include_forecasting=false' : '')
+                        )
 
-                    return parseBillingResponse(response)
+                        return parseBillingResponse(response)
+                    } catch (error) {
+                        lemonToast.error('Failed to load billing data. Please try again or contact support.')
+                        return null
+                    }
                 },
 
                 updateBillingLimits: async (limits: { [key: string]: number | null }) => {
@@ -328,7 +333,7 @@ export const billingLogic = kea<billingLogicType>([
                         lemonToast.error(
                             'There was an error updating your billing limits. Please try again or contact support.'
                         )
-                        throw error
+                        return null
                     }
                 },
 
