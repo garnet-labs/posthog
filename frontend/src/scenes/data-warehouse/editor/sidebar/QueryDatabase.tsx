@@ -217,13 +217,8 @@ export const QueryDatabase = (): JSX.Element => {
                 // Copy column name when clicking on a column
                 if (item && item.record?.type === 'column') {
                     const currentQueryInput = builtTabLogic.values.queryInput
-                    setQueryInput(
-                        buildQueryForColumnClick(
-                            builtTabLogic.values.hogqlParser,
-                            currentQueryInput,
-                            item.record.table,
-                            item.record.columnName
-                        )
+                    void buildQueryForColumnClick(currentQueryInput, item.record.table, item.record.columnName).then(
+                        setQueryInput
                     )
                 }
 
