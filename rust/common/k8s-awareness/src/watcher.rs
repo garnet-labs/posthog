@@ -234,6 +234,15 @@ async fn handle_deployment_event(
         })
         .unwrap_or_default();
 
+    // Snapshot previously cached generation info before the async RS list
+    // call, so we can preserve it if the API call fails (avoids overwriting
+    // correct cached state with empty values during transient errors).
+    let prev_generations = {
+        let map = controllers.read().await;
+        map.get(controller)
+            .map(|p| (p.current_generation.clone(), p.target_generation.clone()))
+    };
+
     // Determine generations by inspecting owned ReplicaSets
     let owned_rses =
         list_owned_replicasets(client, namespace, &controller.name, &label_selector).await;
@@ -264,16 +273,20 @@ async fn handle_deployment_event(
                 warn!(
                     controller = %controller,
                     error = %e,
-                    "failed to discover deployment generations during rollout"
+                    "failed to discover deployment generations during rollout, preserving cached state"
                 );
             } else {
                 debug!(
                     controller = %controller,
                     error = %e,
-                    "failed to discover active generation"
+                    "failed to discover active generation, preserving cached state"
                 );
             }
-            (String::new(), None)
+            // Preserve previously cached generation info instead of empty strings
+            match prev_generations {
+                Some((current, target)) => (current, target),
+                None => (String::new(), None),
+            }
         }
     };
 

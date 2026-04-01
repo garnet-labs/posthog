@@ -34,7 +34,7 @@ use kafka_assigner_proto::kafka_assigner::v1 as proto;
 use kafka_assigner_proto::kafka_assigner::v1::kafka_assigner_server::KafkaAssignerServer;
 
 use common::{
-    create_grpc_client, create_kafka_topic, drive_handoffs_to_completion, set_topic_config,
+    create_grpc_client, create_kafka_topic, set_topic_config, signal_ready, signal_released,
     test_store, wait_for_condition, POLL_INTERVAL,
 };
 
@@ -555,23 +555,37 @@ async fn deployment_rollout_reassigns_partitions() {
         .expect("register new-1 failed")
         .into_inner();
 
-    // Drive handoffs to completion (simulating consumer warm/release behavior).
-    // The assigner excludes old-gen consumers from the active list, so all
-    // partitions are handed off to new-gen.
-    drive_handoffs_to_completion(&store).await;
+    // Drive handoffs to completion while waiting for all partitions to move
+    // to new-gen consumers. We combine driving handoffs with checking the end
+    // state because the assigner may not have rebalanced yet when we start
+    // (the consumer watcher has a 1-second debounce).
+    let drive_store = Arc::clone(&store);
+    let expected_owners = new_names.clone();
+    wait_for_condition(E2E_TIMEOUT, POLL_INTERVAL, || {
+        let store = Arc::clone(&drive_store);
+        let owners = expected_owners.clone();
+        async move {
+            // Advance any in-flight handoffs
+            let handoffs = store.list_handoffs().await.unwrap_or_default();
+            for h in &handoffs {
+                match h.phase {
+                    kafka_assigner::types::HandoffPhase::Warming => {
+                        signal_ready(&store, &h.topic_partition()).await;
+                    }
+                    kafka_assigner::types::HandoffPhase::Complete => {
+                        signal_released(&store, &h.topic_partition()).await;
+                    }
+                    kafka_assigner::types::HandoffPhase::Ready => {}
+                }
+            }
 
-    // Verify all partitions owned by new-gen consumers
-    let assignments = store.list_assignments().await.unwrap();
-    assert_eq!(assignments.len(), NUM_PARTITIONS as usize);
-    for a in &assignments {
-        assert!(
-            a.owner == new_names[0] || a.owner == new_names[1],
-            "partition {}/{} owned by '{}', expected one of new-gen consumers",
-            a.topic,
-            a.partition,
-            a.owner,
-        );
-    }
+            // Check desired end state: all partitions on new-gen consumers
+            let assignments = store.list_assignments().await.unwrap_or_default();
+            assignments.len() == NUM_PARTITIONS as usize
+                && assignments.iter().all(|a| owners.contains(&a.owner))
+        }
+    })
+    .await;
 
     cancel.cancel();
     k8s_cancel.cancel();
