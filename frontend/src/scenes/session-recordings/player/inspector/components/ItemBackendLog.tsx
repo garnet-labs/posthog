@@ -1,10 +1,10 @@
 import clsx from 'clsx'
 
-import { IconOpenInNew } from '@posthog/icons'
 import { LemonButton, LemonDivider } from '@posthog/lemon-ui'
 
 import { CodeSnippet, Language } from 'lib/components/CodeSnippet'
 import { SimpleKeyValueList } from 'lib/components/SimpleKeyValueList'
+import { IconOpenInNew } from 'lib/lemon-ui/icons'
 import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
 import { urls } from 'scenes/urls'
 

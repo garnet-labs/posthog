@@ -37,8 +37,11 @@ import { LogMessage, RecordingsQuery } from '~/queries/schema/schema-general'
 import { getCoreFilterDefinition } from '~/taxonomy/helpers'
 import {
     CommentType,
+    FilterLogicalOperator,
     MatchedRecordingEvent,
     PerformanceEvent,
+    PropertyFilterType,
+    PropertyOperator,
     RRWebRecordingConsoleLogPayload,
     RecordingConsoleLogV2,
     RecordingEventType,
@@ -484,21 +487,23 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                                     date_to: values.end.toISOString(),
                                 },
                                 filterGroup: {
-                                    type: 'AND',
+                                    type: FilterLogicalOperator.And,
                                     values: [
                                         {
-                                            type: 'AND',
+                                            type: FilterLogicalOperator.And,
                                             values: [
                                                 {
                                                     key: 'session_id',
                                                     value: sessionId,
-                                                    operator: 'exact',
-                                                    type: 'log_entry',
+                                                    operator: PropertyOperator.Exact,
+                                                    type: PropertyFilterType.LogEntry,
                                                 },
                                             ],
                                         },
                                     ],
                                 },
+                                severityLevels: [],
+                                serviceNames: [],
                                 limit: 1000,
                             },
                         })
@@ -1270,6 +1275,8 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                 s.allPerformanceEvents,
                 s.sessionComments,
                 s.sessionCommentsLoading,
+                s.backendLogs,
+                s.backendLogsLoading,
             ],
             (
                 sessionEventsDataLoading: boolean,
@@ -1285,7 +1292,9 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                 } | null,
                 performanceEvents: PerformanceEvent[] | null,
                 sessionComments: CommentType[] | null,
-                sessionCommentsLoading: boolean
+                sessionCommentsLoading: boolean,
+                backendLogs: LogMessage[] | null,
+                backendLogsLoading: boolean
             ): Record<FilterableInspectorListItemTypes, 'loading' | 'ready' | 'empty'> => {
                 const dataForEventsState = sessionEventsDataLoading ? 'loading' : events?.length ? 'ready' : 'empty'
                 const dataForConsoleState =
@@ -1313,6 +1322,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     : sessionComments?.length
                       ? 'ready'
                       : 'empty'
+                const dataForBackendLogsState = backendLogsLoading ? 'loading' : backendLogs?.length ? 'ready' : 'empty'
 
                 return {
                     ['events']: dataForEventsState,
@@ -1320,6 +1330,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     ['network']: dataForNetworkState,
                     ['comment']: dataForCommentState,
                     ['doctor']: dataForDoctorState,
+                    ['backend-logs']: dataForBackendLogsState,
                 }
             },
         ],
@@ -1434,8 +1445,6 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     actions.registerWindowId(windowId)
                 }
             }
-        },
-        loadEventsSuccess: () => {
             // Load backend logs when session events data is loaded (indicates session data is ready)
             actions.loadBackendLogs()
         },
