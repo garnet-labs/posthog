@@ -248,7 +248,6 @@ class Reviewer:
                 total_cost_usd=result_message.total_cost_usd,
                 num_turns=result_message.num_turns,
                 stop_reason=result_message.stop_reason,
-                structured_output=structured_output,
             )
 
         return verdict

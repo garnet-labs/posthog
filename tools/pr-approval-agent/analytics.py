@@ -82,7 +82,6 @@ class TraceRecorder:
         total_cost_usd: float | None = None,
         num_turns: int = 0,
         stop_reason: str | None = None,
-        structured_output: Any = None,
     ) -> None:
         """Record a single LLM generation (reviewer call)."""
         if not self.enabled:
@@ -136,11 +135,14 @@ class TraceRecorder:
                 properties[f"stamphog_model_{model_name}_input_tokens"] = model_stats.get("input_tokens", 0)
                 properties[f"stamphog_model_{model_name}_output_tokens"] = model_stats.get("output_tokens", 0)
 
-        self.client.capture(
-            event="$ai_generation",
-            distinct_id=DISTINCT_ID,
-            properties=properties,
-        )
+        try:
+            self.client.capture(
+                event="$ai_generation",
+                distinct_id=DISTINCT_ID,
+                properties=properties,
+            )
+        except Exception:
+            pass
 
     def record_trace(
         self,
@@ -182,13 +184,19 @@ class TraceRecorder:
         if total_cost > 0:
             properties["$ai_total_cost_usd"] = total_cost
 
-        self.client.capture(
-            event="$ai_trace",
-            distinct_id=DISTINCT_ID,
-            properties=properties,
-        )
+        try:
+            self.client.capture(
+                event="$ai_trace",
+                distinct_id=DISTINCT_ID,
+                properties=properties,
+            )
+        except Exception:
+            pass
 
     def flush(self) -> None:
         """Ensure all events are sent before the process exits."""
         if self.enabled:
-            self.client.flush()
+            try:
+                self.client.flush()
+            except Exception:
+                pass
