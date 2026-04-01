@@ -119,12 +119,31 @@ Every run produces a JSON evidence bundle (`--output-json` locally, uploaded as 
 
 The GitHub Action uploads this as a build artifact with 30-day retention.
 
+## LLM Analytics
+
+Every run sends telemetry to PostHog's LLM Analytics dashboard when configured.
+Set the following secrets in the GitHub Action (or env vars locally):
+
+- `STAMPHOG_POSTHOG_API_KEY` — PostHog project API key
+- `STAMPHOG_POSTHOG_HOST` — PostHog ingest host (defaults to `https://us.i.posthog.com`)
+
+Events captured:
+
+| Event | When | Key properties |
+| --- | --- | --- |
+| `$ai_generation` | Each LLM reviewer call | model, tokens, cost, latency, cache metrics |
+| `$ai_trace` | Pipeline completion | total cost, verdict, tier, gate results |
+
+All events include `stamphog_*` custom properties (PR number, author, tier, verdict)
+for filtering in the dashboard. Analytics is a no-op when the API key is not set.
+
 ## Architecture
 
 - `review_pr.py` — pipeline orchestrator (fetch → classify → gates → LLM)
 - `gates.py` — deterministic classification and deny-list logic
 - `github.py` — GitHub data fetching via `gh` CLI
 - `reviewer.py` — Claude Agent SDK reviewer (showstoppers prompt)
+- `analytics.py` — PostHog LLM Analytics instrumentation
 - `.github/workflows/pr-approval-agent.yml` — GitHub Action (label trigger)
 
 ## Empirical basis

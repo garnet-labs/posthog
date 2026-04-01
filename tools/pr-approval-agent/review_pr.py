@@ -4,6 +4,7 @@
 # dependencies = [
 #     "claude-agent-sdk",
 #     "anthropic",
+#     "posthoganalytics",
 # ]
 # ///
 # ruff: noqa: T201
@@ -25,6 +26,7 @@ import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from analytics import TraceRecorder, create_client
 from gates import (
     MAX_FILES,
     MAX_LINES,
@@ -109,6 +111,7 @@ class Pipeline:
         self.gate_results: list[GateResult] = []
         self.reviewer_output: dict | None = None
         self.final_verdict: str = ""
+        self.trace = TraceRecorder(client=create_client())
 
     def run(self) -> str:
         """Run the full pipeline, return final verdict string."""
@@ -118,12 +121,36 @@ class Pipeline:
 
         gate_verdict = self._gate_verdict()
 
+        # Populate trace metadata after classification
+        self.trace.set_pr_metadata(
+            pr_number=self.pr_number,
+            repo=self.repo,
+            author=self.pr.author,
+            title=self.pr.title,
+            tier=self.classification["tier"],
+            t1_subclass=self.classification.get("t1_subclass", ""),
+            lines_total=self.pr.lines_total,
+            files_changed=len(self.pr.files),
+        )
+
         if self.dry_run:
             self.final_verdict = "DRY-RUN"
+            self._emit_trace(gate_verdict)
             return self.final_verdict
 
         self._llm_review(gate_verdict)
+        self._emit_trace(gate_verdict)
         return self.final_verdict
+
+    def _emit_trace(self, gate_verdict: str) -> None:
+        """Record the trace-level event and flush analytics."""
+        self.trace.record_trace(
+            verdict=self.final_verdict,
+            gate_verdict=gate_verdict,
+            gate_results=[{"gate": g.gate, "passed": g.passed, "message": g.message} for g in self.gate_results],
+            reviewer_output=self.reviewer_output,
+        )
+        self.trace.flush()
 
     def _gate_verdict(self) -> str:
         """Determine what gates say — this is authoritative."""
@@ -295,7 +322,7 @@ class Pipeline:
 
     def _llm_review(self, gate_verdict: str) -> None:
         print(f"\n{_bold('LLM Review')}")
-        reviewer = Reviewer(REPO_ROOT, verbose=self.verbose)
+        reviewer = Reviewer(REPO_ROOT, verbose=self.verbose, trace=self.trace)
 
         gate_context = {
             "gate_verdict": gate_verdict,

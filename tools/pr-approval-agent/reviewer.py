@@ -12,6 +12,7 @@ import textwrap
 import subprocess
 from pathlib import Path
 
+from analytics import TraceRecorder
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 from claude_agent_sdk.types import AssistantMessage, ToolUseBlock
 from github import PRData
@@ -183,9 +184,10 @@ REVIEWER_SYSTEM = textwrap.dedent(
 class Reviewer:
     """LLM reviewer using Agent SDK."""
 
-    def __init__(self, repo_root: Path, *, verbose: bool = False):
+    def __init__(self, repo_root: Path, *, verbose: bool = False, trace: TraceRecorder | None = None):
         self.repo_root = repo_root
         self.verbose = verbose
+        self.trace = trace
 
     def review(self, pr: PRData, classification: dict, gate_context: dict) -> dict:
         """Claude explores the repo and produces a verdict."""
@@ -213,10 +215,12 @@ class Reviewer:
         )
 
         structured_output = None
+        result_message: ResultMessage | None = None
         async for message in query(prompt=prompt, options=options):
             if self.verbose:
                 print(f"\033[2m    [{type(message).__name__}]\033[0m", flush=True)
             if isinstance(message, ResultMessage):
+                result_message = message
                 if message.subtype == "error_max_structured_output_retries":
                     raise RuntimeError("Agent could not produce valid structured output after retries")
                 if message.structured_output:
@@ -230,7 +234,24 @@ class Reviewer:
 
         if structured_output is None:
             raise RuntimeError("Reviewer agent returned no structured output")
-        return _validate_verdict(structured_output)
+
+        verdict = _validate_verdict(structured_output)
+
+        if self.trace and result_message:
+            self.trace.record_generation(
+                model=MODEL,
+                input_messages=[{"role": "user", "content": prompt[:2000]}],
+                output_text=verdict.get("reasoning", ""),
+                usage=result_message.usage,
+                model_usage=result_message.model_usage,
+                duration_ms=result_message.duration_ms,
+                total_cost_usd=result_message.total_cost_usd,
+                num_turns=result_message.num_turns,
+                stop_reason=result_message.stop_reason,
+                structured_output=structured_output,
+            )
+
+        return verdict
 
     def _log_tool_call(self, block: ToolUseBlock) -> None:
         name = block.name
