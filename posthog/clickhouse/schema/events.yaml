@@ -94,3 +94,23 @@ tables:
         select: 'SELECT * FROM {{ database }}.kafka_events_json'
         on_nodes: INGESTION_EVENTS
         columns: []
+
+    # Production-only: daily aggregation of event counts
+    events_by_day:
+        engine: ReplicatedSummingMergeTree
+        sharded: false
+        on_nodes: DATA
+        order_by:
+            - team_id
+            - 'toDate(timestamp)'
+            - event
+        partition_by: 'toYYYYMM(timestamp)'
+        columns:
+            - name: team_id
+              type: Int64
+            - name: timestamp
+              type: Date
+            - name: event
+              type: String
+            - name: count
+              type: UInt64

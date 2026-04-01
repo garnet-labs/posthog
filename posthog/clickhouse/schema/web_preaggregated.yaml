@@ -305,6 +305,35 @@ tables:
             - name: mat_metadata_loggedIn
               type: Nullable(Bool)
 
+    # Production distributed tables for hourly/daily aggregations
+    web_stats_daily_distributed:
+        engine: Distributed
+        source: web_pre_aggregated_stats
+        sharding_key: 'rand()'
+        on_nodes: COORDINATOR
+        columns: inherit web_pre_aggregated_stats
+
+    web_stats_hourly_distributed:
+        engine: Distributed
+        source: web_pre_aggregated_stats
+        sharding_key: 'rand()'
+        on_nodes: COORDINATOR
+        columns: inherit web_pre_aggregated_stats
+
+    web_bounces_daily_distributed:
+        engine: Distributed
+        source: web_pre_aggregated_bounces
+        sharding_key: 'rand()'
+        on_nodes: COORDINATOR
+        columns: inherit web_pre_aggregated_bounces
+
+    web_bounces_hourly_distributed:
+        engine: Distributed
+        source: web_pre_aggregated_bounces
+        sharding_key: 'rand()'
+        on_nodes: COORDINATOR
+        columns: inherit web_pre_aggregated_bounces
+
     web_pre_aggregated_bounces_staging:
         engine: ReplicatedMergeTree
         sharded: false

@@ -147,3 +147,20 @@ tables:
         select: "SELECT ... FROM {{ database }}.sharded_events"
         on_nodes: DATA
         columns: []
+
+    # Production-only tables
+    new_raw_sessions:
+        engine: ReplicatedAggregatingMergeTree
+        sharded: false
+        on_nodes: DATA
+        order_by:
+            - team_id
+            - session_id_v7
+        columns: inherit sharded_raw_sessions
+
+    writable_raw_sessions_primary:
+        engine: Distributed
+        source: sharded_raw_sessions
+        sharding_key: 'cityHash64(session_id_v7)'
+        on_nodes: COORDINATOR
+        columns: inherit sharded_raw_sessions

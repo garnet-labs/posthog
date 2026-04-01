@@ -104,3 +104,35 @@ tables:
         select: "SELECT ... FROM {{ database }}.sharded_events"
         on_nodes: DATA
         columns: []
+
+    # Production-only tables for sessions rework
+    new_sessions:
+        engine: ReplicatedAggregatingMergeTree
+        sharded: false
+        on_nodes: DATA
+        order_by:
+            - team_id
+            - session_id
+        columns: inherit sharded_sessions
+
+    new_writable_sessions:
+        engine: Distributed
+        source: new_sessions
+        sharding_key: 'sipHash64(session_id)'
+        on_nodes: COORDINATOR
+        columns: inherit sharded_sessions
+
+    new_sessions_mv:
+        engine: MaterializedView
+        source: sharded_events
+        target: new_writable_sessions
+        select: "SELECT ... FROM {{ database }}.sharded_events"
+        on_nodes: DATA
+        columns: []
+
+    writable_sessions_background:
+        engine: Distributed
+        source: sharded_sessions
+        sharding_key: 'sipHash64(session_id)'
+        on_nodes: COORDINATOR
+        columns: inherit sharded_sessions
