@@ -1,5 +1,4 @@
 from django.contrib.postgres.indexes import GinIndex
-from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -38,7 +37,7 @@ class EventDefinition(UUIDTModel):
         default=SchemaEnforcementMode.ALLOW,
     )
 
-    schema_version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    schema_version = models.PositiveIntegerField(default=1)
 
     class Meta:
         db_table = "posthog_eventdefinition"
