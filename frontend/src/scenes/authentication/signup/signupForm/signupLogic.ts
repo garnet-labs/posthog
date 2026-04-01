@@ -39,6 +39,7 @@ export interface SignupPanelOnboardingForm {
     name: string
     organization_name: string
     role_at_organization: string
+    company_size: string
     referral_source: string
     referral_source_ai_prompt: string
 }
@@ -211,6 +212,7 @@ export const signupLogic = kea<signupLogicType>([
                 name: '',
                 organization_name: '',
                 role_at_organization: '',
+                company_size: '',
                 referral_source: '',
                 referral_source_ai_prompt: '',
             } as SignupPanelOnboardingForm,
@@ -229,6 +231,7 @@ export const signupLogic = kea<signupLogicType>([
                         last_name: payload.name.split(' ')[1] || undefined,
                         organization_name: payload.organization_name || undefined,
                         role_at_organization: payload.role_at_organization,
+                        company_size: payload.company_size,
                         referral_source: payload.referral_source,
                         referral_source_ai_prompt: payload.referral_source_ai_prompt,
                         next_url: nextUrl ?? undefined,
@@ -347,6 +350,7 @@ export const signupLogic = kea<signupLogicType>([
                 name: '',
                 organization_name: '',
                 role_at_organization: '',
+                company_size: '',
                 referral_source: '',
                 referral_source_ai_prompt: '',
             } as SignupForm,

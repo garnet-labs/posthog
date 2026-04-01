@@ -35,6 +35,7 @@ def report_user_signed_up(
     role_at_organization: str = "",  # select input to ask what the user role is at the org
     referral_source: str = "",  # free text input to ask users where did they hear about us
     referral_source_ai_prompt: str = "",  # prompt they used when discovering PostHog via AI
+    company_size: str = "",  # select input for self-reported company size
 ) -> None:
     """
     Reports that a new user has joined. Only triggered when a new user is actually created (i.e. when an existing user
@@ -53,6 +54,7 @@ def report_user_signed_up(
         "role_at_organization": role_at_organization,
         "referral_source": referral_source,
         "referral_source_ai_prompt": referral_source_ai_prompt,
+        "company_size": company_size,
         "is_email_verified": user.is_email_verified,
     }
     if user_analytics_metadata is not None:

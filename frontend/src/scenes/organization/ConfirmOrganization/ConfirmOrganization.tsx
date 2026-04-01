@@ -5,6 +5,7 @@ import { Link } from '@posthog/lemon-ui'
 
 import { AnimatedCollapsible } from 'lib/components/AnimatedCollapsible'
 import { BridgePage } from 'lib/components/BridgePage/BridgePage'
+import SignupCompanySizeSelect from 'lib/components/SignupCompanySizeSelect'
 import SignupReferralSource from 'lib/components/SignupReferralSource'
 import SignupRoleSelect from 'lib/components/SignupRoleSelect'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
@@ -81,6 +82,7 @@ export function ConfirmOrganization(): JSX.Element {
                 </LemonField>
 
                 <SignupRoleSelect />
+                <SignupCompanySizeSelect />
                 <SignupReferralSource disabled={isConfirmOrganizationSubmitting} />
 
                 <LemonButton

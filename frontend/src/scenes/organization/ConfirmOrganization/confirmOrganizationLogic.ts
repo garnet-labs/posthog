@@ -12,6 +12,7 @@ export interface ConfirmOrganizationFormValues {
     organization_name?: string
     first_name?: string
     role_at_organization?: string
+    company_size?: string
     referral_source?: string
     referral_source_ai_prompt?: string
 }

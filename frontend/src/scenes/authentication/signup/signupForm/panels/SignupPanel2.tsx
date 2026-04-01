@@ -3,6 +3,7 @@ import { Form } from 'kea-forms'
 
 import { LemonButton, LemonInput, Link } from '@posthog/lemon-ui'
 
+import SignupCompanySizeSelect from 'lib/components/SignupCompanySizeSelect'
 import SignupReferralSource from 'lib/components/SignupReferralSource'
 import SignupRoleSelect from 'lib/components/SignupRoleSelect'
 import { LemonField } from 'lib/lemon-ui/LemonField'
@@ -40,6 +41,7 @@ export function SignupPanel2(): JSX.Element | null {
                     />
                 </LemonField>
                 <SignupRoleSelect />
+                <SignupCompanySizeSelect />
                 <SignupReferralSource disabled={isSignupPanel2Submitting} />
                 <div className="divider" />
 

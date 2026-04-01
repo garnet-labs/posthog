@@ -31,6 +31,7 @@ export interface AcceptInvitePayloadInterface {
     first_name?: string
     password?: string
     role_at_organization?: string
+    company_size?: string
 }
 
 export const inviteSignupLogic = kea<inviteSignupLogicType>([
@@ -144,7 +145,7 @@ export const inviteSignupLogic = kea<inviteSignupLogicType>([
     })),
     forms(({ actions, values }) => ({
         signup: {
-            defaults: { role_at_organization: '' } as AcceptInvitePayloadInterface,
+            defaults: { role_at_organization: '', company_size: '' } as AcceptInvitePayloadInterface,
             errors: ({ password, first_name, role_at_organization }) => ({
                 password:
                     !values.passkeyRegistered && !password

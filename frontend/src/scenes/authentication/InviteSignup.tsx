@@ -8,6 +8,7 @@ import { LemonButton, LemonDivider, LemonInput } from '@posthog/lemon-ui'
 
 import { BridgePage } from 'lib/components/BridgePage/BridgePage'
 import PasswordStrength from 'lib/components/PasswordStrength'
+import SignupCompanySizeSelect from 'lib/components/SignupCompanySizeSelect'
 import SignupRoleSelect from 'lib/components/SignupRoleSelect'
 import passkeyLogo from 'lib/components/SocialLoginButton/passkey.svg'
 import { SSOEnforcedLoginButton, SocialLoginButtons } from 'lib/components/SocialLoginButton/SocialLoginButton'
@@ -350,6 +351,7 @@ function UnauthenticatedAcceptInvite({ invite }: { invite: PrevalidatedInvite })
                         </LemonField>
 
                         <SignupRoleSelect />
+                        <SignupCompanySizeSelect />
                     </>
                 )}
 
