@@ -24,6 +24,7 @@ export const CyclotronJobInputSchemaTypeSchema = z.object({
         'native_email',
         'posthog_assignee',
         'posthog_ticket_tags',
+        'push_subscription',
     ]),
     key: z.string(),
     label: z.string(),

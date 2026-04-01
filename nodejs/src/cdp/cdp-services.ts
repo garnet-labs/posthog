@@ -2,12 +2,14 @@ import { RedisV2, createRedisV2PoolFromConfig } from '~/common/redis/redis-v2'
 
 import type { CommonConfig } from '../common/config'
 import { InternalCaptureService } from '../common/services/internal-capture'
+import { APP_METRICS_OUTPUT, LOG_ENTRIES_OUTPUT } from '../ingestion/common/outputs'
+import { IngestionOutputs } from '../ingestion/outputs/ingestion-outputs'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import { PostgresRouter } from '../utils/db/postgres'
 import { PubSub } from '../utils/pubsub'
 import { TeamManager } from '../utils/team-manager'
-import { HogExecutorService, MAX_FETCH_TIMEOUT_MS, cdpTrackedFetch } from './services/hog-executor.service'
 import type { CdpConfig } from './config'
+import { HogExecutorService, MAX_FETCH_TIMEOUT_MS, cdpTrackedFetch } from './services/hog-executor.service'
 import { HogInputsService } from './services/hog-inputs.service'
 import { HogFlowExecutorService } from './services/hogflows/hogflow-executor.service'
 import { HogFlowFunctionsService } from './services/hogflows/hogflow-functions.service'
@@ -15,7 +17,6 @@ import { HogFlowManagerService } from './services/hogflows/hogflow-manager.servi
 import { HogFunctionManagerService } from './services/managers/hog-function-manager.service'
 import { HogFunctionTemplateManagerService } from './services/managers/hog-function-template-manager.service'
 import { IntegrationManagerService } from './services/managers/integration-manager.service'
-import { PushSubscriptionsManagerService } from './services/managers/push-subscriptions-manager.service'
 import { RecipientsManagerService } from './services/managers/recipients-manager.service'
 import { EmailService } from './services/messaging/email.service'
 import { PushNotificationService } from './services/messaging/push-notification.service'
@@ -144,20 +145,11 @@ export function createCdpCoreServices(
         config.SITE_URL
     )
     const recipientTokensService = new RecipientTokensService(config.ENCRYPTION_SALT_KEYS, config.SITE_URL)
-    const pushSubscriptionsManagerService = new PushSubscriptionsManagerService(deps.postgres, deps.encryptedFields)
-    const hogInputsService = new HogInputsService(
-        deps.integrationManager,
-        recipientTokensService,
-        pushSubscriptionsManagerService
-    )
-    const pushNotificationService = new PushNotificationService(
-        deps.integrationManager,
-        pushSubscriptionsManagerService,
-        {
-            trackedFetch: cdpTrackedFetch,
-            maxFetchTimeoutMs: MAX_FETCH_TIMEOUT_MS,
-        }
-    )
+    const hogInputsService = new HogInputsService(deps.integrationManager, recipientTokensService, deps.encryptedFields)
+    const pushNotificationService = new PushNotificationService(deps.integrationManager, deps.encryptedFields, {
+        trackedFetch: cdpTrackedFetch,
+        maxFetchTimeoutMs: MAX_FETCH_TIMEOUT_MS,
+    })
 
     const hogExecutor = new HogExecutorService(
         {
@@ -183,14 +175,21 @@ export function createCdpCoreServices(
 
     const recipientsManager = new RecipientsManagerService(deps.postgres)
     const recipientPreferencesService = new RecipientPreferencesService(recipientsManager)
-    const hogFlowExecutor = new HogFlowExecutorService(hogFlowFunctionsService, recipientPreferencesService)
+    const hogFlowExecutor = new HogFlowExecutorService(hogFlowFunctionsService, recipientPreferencesService, redis)
 
     const hogFunctionMonitoringService = new HogFunctionMonitoringService(
-        deps.kafkaProducer,
+        new IngestionOutputs({
+            [APP_METRICS_OUTPUT]: {
+                producer: deps.kafkaProducer,
+                topic: config.HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC,
+            },
+            [LOG_ENTRIES_OUTPUT]: {
+                producer: deps.kafkaProducer,
+                topic: config.HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC,
+            },
+        }),
         deps.internalCaptureService,
-        deps.teamManager,
-        config.HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC,
-        config.HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC
+        deps.teamManager
     )
 
     const nativeDestinationExecutorService = new NativeDestinationExecutorService(config)

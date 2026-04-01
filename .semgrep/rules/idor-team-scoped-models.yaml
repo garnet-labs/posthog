@@ -98,6 +98,7 @@ rules:
                               |Endpoint
                               |EnterpriseEventDefinition
                               |EnterprisePropertyDefinition
+                              |EventFilterConfig
                               |ErrorTrackingAssignmentRule
                               |ErrorTrackingGroupingRule
                               |ErrorTrackingIssue
@@ -149,7 +150,6 @@ rules:
                               |PluginConfig
                               |ProductTour
                               |ProjectSecretAPIKey
-                              |PushSubscription
                               |QueryTabState
                               |QuickFilter
                               |QuickFilterContext
@@ -176,7 +176,7 @@ rules:
                               |Tag
                               |Task
                               |TaskRun
-                              |TeamConversationsEmailConfig
+                              |EmailChannel
                               |Text
                               |Threshold
                               |Ticket
@@ -283,6 +283,7 @@ rules:
                         |Endpoint
                         |EnterpriseEventDefinition
                         |EnterprisePropertyDefinition
+                        |EventFilterConfig
                         |ErrorTrackingAssignmentRule
                         |ErrorTrackingGroupingRule
                         |ErrorTrackingIssue
@@ -332,7 +333,6 @@ rules:
                         |PluginConfig
                         |ProductTour
                         |ProjectSecretAPIKey
-                        |PushSubscription
                         |QueryTabState
                         |QuickFilter
                         |QuickFilterContext
@@ -359,7 +359,7 @@ rules:
                         |Tag
                         |Task
                         |TaskRun
-                        |TeamConversationsEmailConfig
+                        |EmailChannel
                         |Text
                         |Threshold
                         |Ticket

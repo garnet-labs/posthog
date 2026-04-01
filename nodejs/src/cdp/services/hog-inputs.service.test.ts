@@ -9,36 +9,39 @@ import { closeHub, createHub } from '~/utils/db/hub'
 import { createHogExecutionGlobals, createHogFunction, insertIntegration } from '../_tests/fixtures'
 import { compileHog } from '../templates/compiler'
 import { HogFunctionInvocationGlobals, HogFunctionType } from '../types'
-import { HogInputsService, formatHogInput, getFcmProjectIdForPush } from './hog-inputs.service'
+import { HogInputsService, formatHogInput, getAppIdentifierForPush } from './hog-inputs.service'
+import { RecipientTokensService } from './messaging/recipient-tokens.service'
 
-describe('getFcmProjectIdForPush', () => {
-    it('throws when firebase_account or value is missing', () => {
-        expect(() => getFcmProjectIdForPush({})).toThrow(
-            /firebase_account integration is required for push subscription inputs but was not found/
-        )
-        expect(() => getFcmProjectIdForPush({ firebase_account: { value: null } })).toThrow(
-            /firebase_account integration is required for push subscription inputs but was not found/
-        )
+describe('getAppIdentifierForPush', () => {
+    it('returns null when no integration inputs are present', () => {
+        expect(getAppIdentifierForPush({})).toBeNull()
+        expect(getAppIdentifierForPush({ push_provider: { value: null } })).toBeNull()
     })
 
-    it('throws when project_id is missing in firebase_account', () => {
-        expect(() =>
-            getFcmProjectIdForPush({
-                firebase_account: { value: {} },
-            })
-        ).toThrow(/FCM project ID \(project_id\) not found in firebase_account integration/)
-        expect(() =>
-            getFcmProjectIdForPush({
-                firebase_account: { value: { key_info: {} } },
-            })
-        ).toThrow(/FCM project ID \(project_id\) not found in firebase_account integration/)
+    it('returns null when integration has no project_id or bundle_id', () => {
+        expect(getAppIdentifierForPush({ push_provider: { value: { key_id: 'abc' } } })).toBeNull()
     })
 
-    it('returns project_id when firebase_account has key_info.project_id', () => {
-        const result = getFcmProjectIdForPush({
-            firebase_account: { value: { key_info: { project_id: 'my-project' } } },
+    it('returns project_id from a Firebase integration input', () => {
+        const result = getAppIdentifierForPush({
+            push_provider: { value: { project_id: 'my-firebase-project', key_id: 'abc' } },
         })
-        expect(result).toBe('my-project')
+        expect(result).toBe('my-firebase-project')
+    })
+
+    it('returns bundle_id from an APNS integration input', () => {
+        const result = getAppIdentifierForPush({
+            push_provider: { value: { bundle_id: 'com.example.app', key_id: 'abc' } },
+        })
+        expect(result).toBe('com.example.app')
+    })
+
+    it('returns the first app identifier when multiple integrations are present', () => {
+        const result = getAppIdentifierForPush({
+            firebase_account: { value: { project_id: 'firebase-proj' } },
+            apns_account: { value: { bundle_id: 'com.example.app' } },
+        })
+        expect(result).toBe('firebase-proj')
     })
 })
 
@@ -75,7 +78,8 @@ describe('Hog Inputs', () => {
             },
         })
 
-        hogInputsService = new HogInputsService(hub.integrationManager, hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+        const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+        hogInputsService = new HogInputsService(hub.integrationManager, recipientTokensService, hub.encryptedFields)
     })
 
     afterEach(async () => {
@@ -209,6 +213,7 @@ describe('Hog Inputs', () => {
 
             expect(inputs.oauth).toMatchInlineSnapshot(`
                 {
+                  "$integration_id": 1,
                   "access_token": "$$_access_token_placeholder_1",
                   "access_token_raw": "token",
                   "not_encrypted": "not-encrypted",
@@ -217,6 +222,7 @@ describe('Hog Inputs', () => {
             `)
             expect(inputs.auth).toMatchInlineSnapshot(`
                 {
+                  "$integration_id": 2,
                   "access_token": "$$_access_token_placeholder_2",
                   "access_token_raw": "token",
                   "not_encrypted": "not-encrypted",
@@ -279,7 +285,7 @@ describe('Hog Inputs', () => {
             )
         })
 
-        it('throws when push subscription input exists but firebase_account integration is missing', async () => {
+        it('resolves push subscription inputs without a valid integration', async () => {
             const hogFunction = createHogFunction({
                 id: 'hog-function-1',
                 team_id: team.id,
@@ -287,12 +293,12 @@ describe('Hog Inputs', () => {
                 enabled: true,
                 type: 'destination',
                 inputs: {
-                    firebase_account: { value: 999 },
+                    push_provider: { value: 999 },
                     push_subscription: { value: 'user-123' },
                 },
                 inputs_schema: [
                     {
-                        key: 'firebase_account',
+                        key: 'push_provider',
                         type: 'integration',
                     },
                     {
@@ -303,9 +309,8 @@ describe('Hog Inputs', () => {
                 ],
             })
 
-            await expect(hogInputsService.buildInputs(hogFunction, globals)).rejects.toThrow(
-                /firebase_account integration is required for push subscription inputs but was not found/
-            )
+            const inputs = await hogInputsService.buildInputs(hogFunction, globals)
+            expect(inputs.push_subscription).toBeNull()
         })
     })
 })

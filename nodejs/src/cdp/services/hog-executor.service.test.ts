@@ -49,7 +49,12 @@ describe('Hog Executor', () => {
         jest.spyOn(Date, 'now').mockReturnValue(fixedTime.toMillis())
 
         hub = await createHub()
-        const hogInputsService = new HogInputsService(hub.integrationManager, hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+        const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+        const hogInputsService = new HogInputsService(
+            hub.integrationManager,
+            recipientTokensService,
+            hub.encryptedFields
+        )
         const emailService = new EmailService(
             {
                 sesAccessKeyId: hub.SES_ACCESS_KEY_ID,
@@ -61,7 +66,6 @@ describe('Hog Executor', () => {
             hub.ENCRYPTION_SALT_KEYS,
             hub.SITE_URL
         )
-        const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
         executor = new HogExecutorService(
             {
                 hogCostTimingUpperMs: hub.CDP_WATCHER_HOG_COST_TIMING_UPPER_MS,
@@ -73,7 +77,8 @@ describe('Hog Executor', () => {
             { teamManager: hub.teamManager, siteUrl: hub.SITE_URL },
             hogInputsService,
             emailService,
-            recipientTokensService
+            recipientTokensService,
+            undefined as any
         )
     })
 
@@ -279,7 +284,14 @@ describe('Hog Executor', () => {
                 ...HOG_INPUTS_EXAMPLES.simple_send_push_notification,
                 ...HOG_FILTERS_EXAMPLES.no_filters,
             })
-            const invocation = createExampleInvocation(pushHogFunction)
+            const invocation = createExampleInvocation(pushHogFunction, {
+                inputs: {
+                    integrationId: 1,
+                    distinctId: 'test-distinct-id',
+                    title: 'Test notification',
+                    body: 'Hello from PostHog',
+                },
+            })
             const result = await executor.execute(invocation)
 
             expect(result.invocation).toMatchObject({

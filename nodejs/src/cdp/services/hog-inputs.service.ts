@@ -4,16 +4,12 @@ import { ACCESS_TOKEN_PLACEHOLDER } from '~/config/constants'
 import { CyclotronInputType } from '~/schema/cyclotron'
 
 import { logger } from '../../utils/logger'
-import {
-    HogFunctionInputSchemaType,
-    HogFunctionInvocationGlobals,
-    HogFunctionInvocationGlobalsWithInputs,
-    HogFunctionType,
-} from '../types'
+import { HogFunctionInvocationGlobals, HogFunctionInvocationGlobalsWithInputs, HogFunctionType } from '../types'
+import { EncryptedFields } from '../utils/encryption-utils'
 import { execHog } from '../utils/hog-exec'
 import { LiquidRenderer } from '../utils/liquid'
+import { getDevicePushSubscriptionToken } from '../utils/push-subscription-utils'
 import { IntegrationManagerService } from './managers/integration-manager.service'
-import { PushSubscriptionsManagerService } from './managers/push-subscriptions-manager.service'
 import { RecipientTokensService } from './messaging/recipient-tokens.service'
 
 export const EXTEND_OBJECT_KEY = '$$_extend_object'
@@ -22,7 +18,7 @@ export class HogInputsService {
     constructor(
         private integrationManager: IntegrationManagerService,
         private recipientTokensService: RecipientTokensService,
-        private pushSubscriptionsManager: PushSubscriptionsManagerService
+        private encryptedFields: EncryptedFields
     ) {}
 
     public async buildInputs(
@@ -120,66 +116,37 @@ export class HogInputsService {
         }
     }
 
-    private async resolvePushSubscriptionInputs(
+    private resolvePushSubscriptionInputs(
         hogFunction: HogFunctionType,
         integrationInputs: Record<string, { value: Record<string, any> | null }>,
         newGlobals: HogFunctionInvocationGlobalsWithInputs
-    ): Promise<Record<string, { value: string | null }>> {
-        const hasPushSubscriptionInputs = hogFunction.inputs_schema?.some(
-            (schema) => schema.type === 'push_subscription'
-        )
-        if (!hasPushSubscriptionInputs) {
-            return {}
-        }
+    ): Record<string, { value: string | null }> {
+        const result: Record<string, { value: string | null }> = {}
+        const personProperties = newGlobals.person?.properties
 
-        const inputsToLoad: Record<string, { rawValue: string; schema: HogFunctionInputSchemaType }> = {}
+        const appIdentifier = getAppIdentifierForPush(integrationInputs)
+
         hogFunction.inputs_schema?.forEach((schema) => {
-            if (schema.type === 'push_subscription') {
-                const input = hogFunction.inputs?.[schema.key]
-                const value = input?.value
-                if (value && typeof value === 'string') {
-                    inputsToLoad[schema.key] = { rawValue: value, schema }
-                }
+            if (schema.type !== 'push_subscription') {
+                return
             }
-        })
 
-        if (Object.keys(inputsToLoad).length === 0) {
-            return {}
-        }
-
-        const fcmProjectId = getFcmProjectIdForPush(integrationInputs)
-
-        const pushSubscriptionPairs: Record<
-            string,
-            { distinctId: string; fcmProjectId: string; platform?: 'android' | 'ios' }
-        > = {}
-        for (const [key, { rawValue, schema }] of Object.entries(inputsToLoad)) {
-            let resolvedValue: unknown = rawValue
-            const input = hogFunction.inputs?.[key]
-            const templating = schema.templating ?? 'hog'
-            if (templating === 'liquid' || rawValue.includes('{{')) {
-                resolvedValue = formatLiquidInput(rawValue, newGlobals, key)
-            } else if (templating === 'hog' && input?.bytecode) {
-                resolvedValue = await formatHogInput(input.bytecode, newGlobals, key)
-            }
-            if (!resolvedValue || typeof resolvedValue !== 'string') {
-                logger.warn('🦔', '[HogInputsService] Push subscription distinct_id template returned non-string', {
+            if (!appIdentifier) {
+                logger.warn('🦔', '[HogInputsService] No push integration found for push subscription input', {
                     hogFunctionId: hogFunction.id,
                     hogFunctionName: hogFunction.name,
                     teamId: hogFunction.team_id,
-                    inputKey: key,
-                    resolvedValueType: typeof resolvedValue,
+                    inputKey: schema.key,
                 })
-                continue
+                result[schema.key] = { value: null }
+                return
             }
-            pushSubscriptionPairs[key] = {
-                distinctId: resolvedValue,
-                fcmProjectId,
-                platform: schema.platform,
-            }
-        }
 
-        return await this.pushSubscriptionsManager.loadPushSubscriptions(hogFunction, pushSubscriptionPairs)
+            const token = getDevicePushSubscriptionToken(personProperties, appIdentifier, this.encryptedFields)
+            result[schema.key] = { value: token }
+        })
+
+        return result
     }
 
     public async loadIntegrationInputs(
@@ -228,11 +195,7 @@ export class HogInputsService {
         })
 
         if (newGlobals) {
-            const pushSubscriptionInputs = await this.resolvePushSubscriptionInputs(
-                hogFunction,
-                returnInputs,
-                newGlobals
-            )
+            const pushSubscriptionInputs = this.resolvePushSubscriptionInputs(hogFunction, returnInputs, newGlobals)
             Object.assign(returnInputs, pushSubscriptionInputs)
         }
 
@@ -323,22 +286,22 @@ export const formatLiquidInput = (
     return value
 }
 
-export function getFcmProjectIdForPush(
+/**
+ * Finds the app identifier (project_id for Firebase, bundle_id for APNS) from resolved
+ * integration inputs. Used to key the $device_push_subscription_<appIdentifier> person property.
+ */
+export function getAppIdentifierForPush(
     integrationInputs: Record<string, { value: Record<string, any> | null }>
-): string {
-    const firebaseAccountInput = integrationInputs['firebase_account']
-    if (!firebaseAccountInput?.value) {
-        throw new Error(
-            `firebase_account integration is required for push subscription inputs but was not found. ` +
-                `Please configure the firebase_account integration in your hog function.`
-        )
+): string | null {
+    for (const input of Object.values(integrationInputs)) {
+        const value = input?.value
+        if (!value) {
+            continue
+        }
+        const appId = value.project_id ?? value.bundle_id
+        if (typeof appId === 'string' && appId) {
+            return appId
+        }
     }
-    const fcmProjectId = (firebaseAccountInput.value as { key_info?: { project_id?: string } })?.key_info?.project_id
-    if (!fcmProjectId) {
-        throw new Error(
-            `FCM project ID (project_id) not found in firebase_account integration. ` +
-                `Please ensure the Firebase service account key contains a valid project_id.`
-        )
-    }
-    return fcmProjectId
+    return null
 }
