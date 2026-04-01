@@ -254,6 +254,141 @@
             "readOnlyHint": false
         }
     },
+    "batch-exports-list": {
+        "description": "List all batch exports in the project. Returns each export's name, destination type, interval, paused status, and the 10 most recent runs. Use the returned ID for get/update/delete/pause/unpause operations.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "List batch exports",
+        "title": "List batch exports",
+        "required_scopes": ["batch_export:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "batch-export-get": {
+        "description": "Get a specific batch export by ID. Returns the full configuration including destination settings (with secrets redacted), schedule, filters, and recent runs.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Get batch export",
+        "title": "Get batch export",
+        "required_scopes": ["batch_export:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "batch-export-create": {
+        "description": "Create a new batch export. Requires a name, interval, and destination configuration (type + connection parameters). The export starts running immediately unless paused. For daily/weekly exports, use offset_hour and offset_day to control timing.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Create batch export",
+        "title": "Create batch export",
+        "required_scopes": ["batch_export:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "batch-export-update": {
+        "description": "Update an existing batch export by ID. Can update name, interval, destination config, model, filters, timezone, and scheduling offsets. Use the pause/unpause tools to control the running state instead of setting paused directly.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Update batch export",
+        "title": "Update batch export",
+        "required_scopes": ["batch_export:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "batch-export-delete": {
+        "description": "Delete a batch export by ID. This stops the export schedule and soft-deletes the record. Historical run data is preserved.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Delete batch export",
+        "title": "Delete batch export",
+        "required_scopes": ["batch_export:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "batch-export-pause": {
+        "description": "Pause a running batch export. No new runs will be scheduled until unpaused. Existing in-progress runs may still complete.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Pause batch export",
+        "title": "Pause batch export",
+        "required_scopes": ["batch_export:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "batch-export-unpause": {
+        "description": "Unpause a paused batch export. The export will resume on its normal schedule. Optionally set backfill=true in the request body to backfill missed intervals.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Unpause batch export",
+        "title": "Unpause batch export",
+        "required_scopes": ["batch_export:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "batch-export-runs-list": {
+        "description": "List recent runs for a specific batch export. Returns status, record counts, data interval, and any errors. Defaults to runs from the last 7 days. Supports ordering by created_at or data_interval_start.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "List batch export runs",
+        "title": "List batch export runs",
+        "required_scopes": ["batch_export:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "batch-export-backfill-create": {
+        "description": "Trigger a historical data backfill for a batch export. Provide start_at and end_at as ISO datetime strings to define the backfill range. For daily/weekly exports, use ISO date strings (YYYY-MM-DD) instead of datetimes. The backfill runs asynchronously and returns a backfill_id.",
+        "category": "Batch exports",
+        "feature": "batch_exports",
+        "summary": "Create batch export backfill",
+        "title": "Create batch export backfill",
+        "required_scopes": ["batch_export:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
     "cdp-function-templates-list": {
         "description": "List available function templates. Templates are pre-built function configurations for common integrations (Slack, webhooks, email, etc.) and transformations (GeoIP, etc.). Filter by type (destination, site_destination, site_app, transformation, etc.) via the 'type' query parameter. Results are sorted by popularity (number of active functions using each template).",
         "category": "Function templates",

@@ -1,0 +1,16 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "backfill": {
+            "default": false,
+            "description": "Whether to backfill missed intervals since the export was paused.",
+            "type": "boolean"
+        },
+        "id": {
+            "description": "A UUID string identifying this batch export.",
+            "type": "string"
+        }
+    },
+    "required": ["id"],
+    "type": "object"
+}

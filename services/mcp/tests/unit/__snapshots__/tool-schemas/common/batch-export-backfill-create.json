@@ -1,0 +1,32 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "batch_export_id": {
+            "type": "string"
+        },
+        "end_at": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "The end of the backfill range. Use ISO datetime (e.g. '2025-03-31T00:00:00Z') for hourly exports, or ISO date (e.g. '2025-03-31') for daily/weekly exports."
+        },
+        "start_at": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "The start of the backfill range. Use ISO datetime (e.g. '2025-01-01T00:00:00Z') for hourly exports, or ISO date (e.g. '2025-01-01') for daily/weekly exports."
+        }
+    },
+    "required": ["batch_export_id"],
+    "type": "object"
+}

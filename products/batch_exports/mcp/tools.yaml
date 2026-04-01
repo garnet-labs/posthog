@@ -1,0 +1,183 @@
+# MCP tool definition — tool entries are scaffolded from the OpenAPI schema.
+# The tool list and operation IDs are kept in sync automatically:
+#   pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all
+#
+# To enable a tool, set enabled: true and add required scopes + annotations.
+# All other fields (title, description, enrich_url, etc.) are yours to configure.
+category: Batch exports
+feature: batch_exports
+url_prefix: /batch_exports
+tools:
+    batch-exports-list:
+        operation: batch_exports_list
+        enabled: true
+        scopes:
+            - batch_export:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        list: true
+        title: List batch exports
+        description: >
+            List all batch exports in the project. Returns each export's name, destination type,
+            interval, paused status, and the 10 most recent runs. Use the returned ID for
+            get/update/delete/pause/unpause operations.
+
+    batch-export-get:
+        operation: batch_exports_retrieve
+        enabled: true
+        scopes:
+            - batch_export:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        title: Get batch export
+        description: >
+            Get a specific batch export by ID. Returns the full configuration including
+            destination settings (with secrets redacted), schedule, filters, and recent runs.
+
+    batch-export-create:
+        operation: batch_exports_create
+        enabled: true
+        scopes:
+            - batch_export:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: false
+        title: Create batch export
+        description: >
+            Create a new batch export. Requires a name, interval, and destination configuration
+            (type + connection parameters). The export starts running immediately unless paused.
+            For daily/weekly exports, use offset_hour and offset_day to control timing.
+        exclude_params:
+            - schema
+            - latest_runs
+            - hogql_query
+    batch-export-update:
+        operation: batch_exports_partial_update
+        enabled: true
+        scopes:
+            - batch_export:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: true
+        title: Update batch export
+        description: >
+            Update an existing batch export by ID. Can update name, interval, destination config,
+            model, filters, timezone, and scheduling offsets. Use the pause/unpause tools to
+            control the running state instead of setting paused directly.
+        exclude_params:
+            - schema
+            - latest_runs
+            - hogql_query
+    batch-export-delete:
+        operation: batch_exports_destroy
+        enabled: true
+        scopes:
+            - batch_export:write
+        annotations:
+            readOnly: false
+            destructive: true
+            idempotent: true
+        title: Delete batch export
+        description: >
+            Delete a batch export by ID. This stops the export schedule and soft-deletes
+            the record. Historical run data is preserved.
+    batch-export-pause:
+        operation: batch_exports_pause_create
+        enabled: true
+        scopes:
+            - batch_export:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: true
+        title: Pause batch export
+        description: >
+            Pause a running batch export. No new runs will be scheduled until unpaused.
+            Existing in-progress runs may still complete.
+    batch-export-unpause:
+        operation: batch_exports_unpause_create
+        enabled: true
+        scopes:
+            - batch_export:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: true
+        title: Unpause batch export
+        description: >
+            Unpause a paused batch export. The export will resume on its normal schedule.
+            Optionally set backfill=true in the request body to backfill missed intervals.
+    batch-export-runs-list:
+        operation: batch_exports_runs_list
+        enabled: true
+        scopes:
+            - batch_export:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        list: true
+        title: List batch export runs
+        description: >
+            List recent runs for a specific batch export. Returns status, record counts,
+            data interval, and any errors. Defaults to runs from the last 7 days.
+            Supports ordering by created_at or data_interval_start.
+
+    batch-export-backfill-create:
+        operation: batch_exports_backfills_create
+        enabled: true
+        scopes:
+            - batch_export:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: false
+        title: Create batch export backfill
+        description: >
+            Trigger a historical data backfill for a batch export. Provide start_at and
+            end_at as ISO datetime strings to define the backfill range. For daily/weekly
+            exports, use ISO date strings (YYYY-MM-DD) instead of datetimes. The backfill
+            runs asynchronously and returns a backfill_id.
+    # Disabled operations
+    batch-exports-update:
+        operation: batch_exports_update
+        enabled: false
+    batch-exports-logs-retrieve:
+        operation: batch_exports_logs_retrieve
+        enabled: false
+    batch-exports-run-test-step-create:
+        operation: batch_exports_run_test_step_create
+        enabled: false
+    batch-exports-run-test-step-new-create:
+        operation: batch_exports_run_test_step_new_create
+        enabled: false
+    batch-exports-test-retrieve:
+        operation: batch_exports_test_retrieve
+        enabled: false
+    batch-exports-backfills-list:
+        operation: batch_exports_backfills_list
+        enabled: false
+    batch-exports-backfills-retrieve:
+        operation: batch_exports_backfills_retrieve
+        enabled: false
+    batch-exports-backfills-cancel-create:
+        operation: batch_exports_backfills_cancel_create
+        enabled: false
+    batch-exports-runs-retrieve:
+        operation: batch_exports_runs_retrieve
+        enabled: false
+    batch-exports-runs-cancel-create:
+        operation: batch_exports_runs_cancel_create
+        enabled: false
+    batch-exports-runs-logs-retrieve:
+        operation: batch_exports_runs_logs_retrieve
+        enabled: false
+    batch-exports-runs-retry-create:
+        operation: batch_exports_runs_retry_create
+        enabled: false
