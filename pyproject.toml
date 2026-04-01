@@ -241,6 +241,7 @@ dev = [
     "requests-mock~=1.12.1",
     "responses==0.23.1",
     "ruff~=0.14.11",
+    "sqlfluff~=3.3",
     "stpyv8==13.1.201.22; sys_platform != 'linux' or (platform_machine != 'aarch64' and platform_machine != 'arm64')",
     "syrupy~=4.9.1",
     "tach~=0.20.0",
@@ -269,8 +270,6 @@ sentiment = [
 
 [tool.uv]
 required-version = "~=0.10.2"
-exclude-newer = "7 days"
-exclude-newer-package = { hogql-parser = false }
 
 [tool.uv.sources]
 infi-clickhouse-orm = { git = "https://github.com/PostHog/infi.clickhouse_orm", rev = "4e3996becf66bf5c26580aff12a80425d9d56fe5" }
@@ -435,3 +434,21 @@ unresolved-import = "ignore"
 unresolved-attribute = "ignore"  # Django model fields, relationships, auto-generated attributes
 invalid-argument-type = "ignore"  # Django querysets, managers, form fields
 invalid-base = "ignore"  # Django model metaclasses (e.g., models.Model)
+
+[tool.sqlfluff.core]
+dialect = "clickhouse"
+templater = "jinja"
+max_line_length = 120
+# CP03/CP05: ClickHouse uses PascalCase for types/engines (MergeTree, Enum8)
+# RF04: ClickHouse column names overlap SQL keywords (host, checksum)
+# LT01: ClickHouse types use no space before brackets — Enum8(...), DateTime64(3)
+exclude_rules = "CP03, CP05, RF04, LT01"
+
+[tool.sqlfluff.templater.jinja.context]
+database = "posthog"
+
+[tool.sqlfluff.rules.capitalisation.keywords]
+capitalisation_policy = "upper"
+
+[tool.sqlfluff.rules.capitalisation.types]
+capitalisation_policy = "upper"
