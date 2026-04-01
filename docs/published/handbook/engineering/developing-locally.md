@@ -151,7 +151,7 @@ If you need to run multiple branches simultaneously or want fully isolated envir
 ### Creating a sandbox
 
 ```bash
-./bin/sandbox create my-feature-branch
+hogli sandbox create my-feature-branch
 ```
 
 This creates a git worktree, allocates a unique port, and boots all required services. The sandbox is accessible at `http://localhost:{port}`.
@@ -161,7 +161,7 @@ This creates a git worktree, allocates a unique port, and boots all required ser
 Just like `hogli dev:setup`, sandboxes support the `--intents` flag to control which services boot:
 
 ```bash
-./bin/sandbox create my-feature-branch --intents session_replay,tracing
+hogli sandbox create my-feature-branch --intents session_replay,tracing
 ```
 
 Available intents include `product_analytics` (default), `session_replay`, `error_tracking`, `feature_flags`, `experiments`, `llm_analytics`, `web_analytics`, `surveys`, `data_warehouse`, `pipelines`, `tracing`, and more. See `devenv/intent-map.yaml` for the full list.
@@ -172,25 +172,25 @@ Intents are resolved through the same capability system used by `hogli` – each
 
 ```bash
 # List all sandboxes
-./bin/sandbox list
+hogli sandbox list
 
 # Stop a sandbox (preserves state)
-./bin/sandbox stop my-feature-branch
+hogli sandbox stop my-feature-branch
 
 # Start a stopped sandbox
-./bin/sandbox start my-feature-branch
+hogli sandbox start my-feature-branch
 
 # Open VS Code attached to the sandbox
-./bin/sandbox code my-feature-branch
+hogli sandbox code my-feature-branch
 
 # Open a shell in the sandbox
-./bin/sandbox shell my-feature-branch
+hogli sandbox shell my-feature-branch
 
 # Destroy a sandbox
-./bin/sandbox destroy my-feature-branch
+hogli sandbox destroy my-feature-branch
 ```
 
-Run `./bin/sandbox --help` for the full command reference.
+Run `hogli sandbox --help` for the full command reference.
 
 ### Manual setup
 
