@@ -1000,8 +1000,12 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
 
     info("Waiting for PostHog to start...")
     if not wait_for_health(f"http://localhost:{port}/_health", f"{project}-app-1"):
-        cmd_destroy(branch)
-        fatal("Sandbox creation failed. See logs above.")
+        fatal(
+            f"Sandbox creation failed. See logs above.\n"
+            f"  Worktree preserved at: {worktree_path}\n"
+            f"  Retry:   sandbox start {branch}\n"
+            f"  Cleanup: sandbox destroy {branch}"
+        )
 
     url = f"http://localhost:{port}"
     print()
@@ -1055,7 +1059,33 @@ def cmd_stop(branch: str) -> None:
     success("Sandbox stopped. Volumes preserved.")
 
 
-def cmd_destroy(branch: str) -> None:
+def _remove_worktree(worktree_path: str) -> None:
+    """Delete a worktree directory.
+
+    Containers may have created root-owned files, so we use a container
+    to delete contents, then rmdir the empty directory.
+    NEVER delete the main repo.
+    """
+    path = Path(worktree_path)
+    if not path.is_dir():
+        return
+    if path.resolve() == REPO_ROOT.resolve():
+        info("Worktree is the main repo — skipping directory cleanup.")
+        return
+
+    run(
+        ["docker", "run", "--rm", "-v", f"{worktree_path}:/cleanup",
+         "alpine", "sh", "-c", "find /cleanup -mindepth 1 -delete"],
+        check=False, capture=True,
+    )
+    try:
+        path.rmdir()
+    except OSError:
+        pass
+    run(["git", "worktree", "prune"], check=False)
+
+
+def cmd_destroy(branch: str, clean: bool = False) -> None:
     registry = Registry()
     entry = registry.get(branch)
     slug = entry.slug if entry else slugify(branch)
@@ -1072,34 +1102,12 @@ def cmd_destroy(branch: str) -> None:
     profiles = resolve_docker_profiles(entry.intents) if entry else sorted(_all_sandbox_profiles())
     compose(project, port, worktree, "down", "-v", check=False, capture=True, profiles=profiles)
 
-    # Remove worktree — containers may have created root-owned files,
-    # so we use a container to delete, then rmdir the empty directory.
-    # NEVER delete the main repo even if the sandbox was created on the current branch.
-    if entry and entry.worktree and Path(entry.worktree).is_dir():
-        if Path(entry.worktree).resolve() == REPO_ROOT.resolve():
-            info("Worktree is the main repo — skipping directory cleanup.")
-        else:
-            run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "-v",
-                    f"{entry.worktree}:/cleanup",
-                    "alpine",
-                    "sh",
-                    "-c",
-                    "find /cleanup -mindepth 1 -delete",
-                ],
-                check=False,
-                capture=True,
-            )
-            try:
-                Path(entry.worktree).rmdir()
-            except OSError:
-                pass
+    if clean and entry and entry.worktree:
+        _remove_worktree(entry.worktree)
+    elif entry and entry.worktree and Path(entry.worktree).is_dir():
+        info(f"Worktree preserved at: {entry.worktree}")
+        info(f"  To remove: git worktree remove {entry.worktree}")
 
-    run(["git", "worktree", "prune"], check=False)
     registry.remove(branch)
     success("Sandbox destroyed.")
 
@@ -1280,7 +1288,6 @@ examples:
     for name, help_text in [
         ("start", "Start a stopped sandbox"),
         ("stop", "Stop a sandbox (preserves state)"),
-        ("destroy", "Destroy a sandbox and clean up"),
         ("shell", "Attach to the mprocs UI"),
         ("code", "Open VSCode attached to the sandbox container"),
         ("idea", "Open JetBrains Gateway for the sandbox"),
@@ -1288,6 +1295,10 @@ examples:
     ]:
         p = sub.add_parser(name, help=help_text)
         p.add_argument("branch")
+
+    p = sub.add_parser("destroy", help="Destroy a sandbox (preserves worktree)")
+    p.add_argument("branch")
+    p.add_argument("--clean", action="store_true", help="Also delete the git worktree")
 
     sub.add_parser("list", aliases=["ls"], help="List all sandboxes")
     sub.add_parser("rebuild-cache", help="Rebuild the database cache from master")
@@ -1311,7 +1322,7 @@ def main() -> None:
         "create": lambda: cmd_create(args.branch, args.base_branch),
         "start": lambda: cmd_start(args.branch),
         "stop": lambda: cmd_stop(args.branch),
-        "destroy": lambda: cmd_destroy(args.branch),
+        "destroy": lambda: cmd_destroy(args.branch, clean=args.clean),
         "list": cmd_list,
         "ls": cmd_list,
         "shell": lambda: cmd_shell(args.branch),
