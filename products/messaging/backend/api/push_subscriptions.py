@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -6,17 +7,19 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.request import Request
 
+from posthog.api.capture import capture_internal
 from posthog.api.utils import get_token
 from posthog.exceptions import generate_exception_response
+from posthog.helpers.encrypted_fields import EncryptedFieldMixin
 from posthog.models.integration import Integration
 from posthog.models.team.team import Team
 from posthog.utils_cors import cors_response
 
-from products.workflows.backend.models.push_subscription import PushPlatform, PushSubscription
+VALID_PLATFORMS = ("android", "ios")
 
 PLATFORM_TO_INTEGRATION_KIND: dict[str, str] = {
-    PushPlatform.ANDROID: "firebase",
-    PushPlatform.IOS: "apns",
+    "android": "firebase",
+    "ios": "apns",
 }
 
 APP_ID_CONFIG_KEY: dict[str, str] = {
@@ -78,8 +81,8 @@ def push_subscriptions(request: Request):
             ),
         )
 
-    token = get_token(data, request)
-    if not token:
+    api_key = get_token(data, request)
+    if not api_key:
         return cors_response(
             request,
             generate_exception_response(
@@ -91,7 +94,7 @@ def push_subscriptions(request: Request):
             ),
         )
 
-    team = Team.objects.get_team_from_cache_or_token(token)
+    team = Team.objects.get_team_from_cache_or_token(api_key)
     if not team:
         return cors_response(
             request,
@@ -105,7 +108,7 @@ def push_subscriptions(request: Request):
         )
 
     distinct_id = data.get("distinct_id")
-    device_token = data.get("token")
+    device_token = data.get("device_token")
     platform = data.get("platform")
     app_id = data.get("app_id")
 
@@ -113,7 +116,7 @@ def push_subscriptions(request: Request):
         field_name
         for field_name, value in [
             ("distinct_id", distinct_id),
-            ("token", device_token),
+            ("device_token", device_token),
             ("platform", platform),
             ("app_id", app_id),
         ]
@@ -131,12 +134,12 @@ def push_subscriptions(request: Request):
             ),
         )
 
-    if platform not in PushPlatform.values:
+    if platform not in VALID_PLATFORMS:
         return cors_response(
             request,
             generate_exception_response(
                 "push_subscriptions",
-                f"Invalid platform. Must be one of: {', '.join(PushPlatform.values)}.",
+                f"Invalid platform. Must be one of: {', '.join(VALID_PLATFORMS)}.",
                 type="validation_error",
                 code="invalid_platform",
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -157,22 +160,25 @@ def push_subscriptions(request: Request):
             ),
         )
 
-    subscription = PushSubscription.upsert_token(
-        team_id=team.id,
+    encrypted_token = EncryptedFieldMixin().encrypt(device_token)
+    property_key = f"$device_push_subscription_{app_id}"
+
+    capture_internal(
+        token=team.api_token,
+        event_name="$set",
+        event_source="push_subscriptions",
         distinct_id=distinct_id,
-        token=device_token,
-        platform=PushPlatform(platform),
-        integration_id=integration.id,
+        timestamp=datetime.now(UTC),
+        properties={"$set": {property_key: encrypted_token}},
+        process_person_profile=True,
     )
 
     return cors_response(
         request,
         JsonResponse(
             {
-                "id": str(subscription.id),
-                "distinct_id": subscription.distinct_id,
-                "platform": subscription.platform,
-                "is_active": subscription.is_active,
+                "distinct_id": distinct_id,
+                "platform": platform,
             },
             status=status.HTTP_200_OK,
         ),

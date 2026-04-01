@@ -1,6 +1,7 @@
 import json
 
 from posthog.test.base import BaseTest
+from unittest.mock import MagicMock, patch
 
 from django.test import Client
 
@@ -8,8 +9,6 @@ from rest_framework import status
 
 from posthog.models.integration import Integration
 from posthog.models.team.team import Team
-
-from products.workflows.backend.models.push_subscription import PushSubscription
 
 
 class TestPushSubscriptionsAPI(BaseTest):
@@ -40,11 +39,14 @@ class TestPushSubscriptionsAPI(BaseTest):
             content_type="application/json",
         )
 
-    def test_register_android_token(self):
+    @patch("products.messaging.backend.api.push_subscriptions.capture_internal")
+    def test_register_android_token(self, mock_capture: MagicMock):
+        mock_capture.return_value = MagicMock(status_code=200)
+
         response = self._post(
             {
                 "distinct_id": "user-1",
-                "token": "fcm-device-token-abc",
+                "device_token": "fcm-device-token-abc",
                 "platform": "android",
                 "app_id": "my-firebase-project",
             }
@@ -54,16 +56,23 @@ class TestPushSubscriptionsAPI(BaseTest):
         data = response.json()
         assert data["distinct_id"] == "user-1"
         assert data["platform"] == "android"
-        assert data["is_active"] is True
 
-        sub = PushSubscription.objects.get(id=data["id"])
-        assert sub.integration_id == self.firebase_integration.id
+        mock_capture.assert_called_once()
+        call_kwargs = mock_capture.call_args.kwargs
+        assert call_kwargs["token"] == self.team.api_token
+        assert call_kwargs["distinct_id"] == "user-1"
+        assert call_kwargs["event_name"] == "$set"
+        assert call_kwargs["process_person_profile"] is True
+        assert "$device_push_subscription_my-firebase-project" in call_kwargs["properties"]["$set"]
 
-    def test_register_ios_token(self):
+    @patch("products.messaging.backend.api.push_subscriptions.capture_internal")
+    def test_register_ios_token(self, mock_capture: MagicMock):
+        mock_capture.return_value = MagicMock(status_code=200)
+
         response = self._post(
             {
                 "distinct_id": "user-1",
-                "token": "apns-device-token-abc",
+                "device_token": "apns-device-token-abc",
                 "platform": "ios",
                 "app_id": "com.example.app",
             }
@@ -73,37 +82,38 @@ class TestPushSubscriptionsAPI(BaseTest):
         data = response.json()
         assert data["distinct_id"] == "user-1"
         assert data["platform"] == "ios"
-        assert data["is_active"] is True
 
-        sub = PushSubscription.objects.get(id=data["id"])
-        assert sub.integration_id == self.apns_integration.id
+        mock_capture.assert_called_once()
+        call_kwargs = mock_capture.call_args.kwargs
+        assert "$device_push_subscription_com.example.app" in call_kwargs["properties"]["$set"]
 
-    def test_upsert_existing_token(self):
-        self._post(
-            {
-                "distinct_id": "user-1",
-                "token": "device-token-abc",
-                "platform": "android",
-                "app_id": "my-firebase-project",
-            }
-        )
+    @patch("products.messaging.backend.api.push_subscriptions.capture_internal")
+    def test_token_is_encrypted(self, mock_capture: MagicMock):
+        mock_capture.return_value = MagicMock(status_code=200)
 
         response = self._post(
             {
                 "distinct_id": "user-1",
-                "token": "device-token-abc",
+                "device_token": "fcm-device-token-abc",
                 "platform": "android",
                 "app_id": "my-firebase-project",
             }
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert PushSubscription.objects.count() == 1
+
+        call_kwargs = mock_capture.call_args.kwargs
+        encrypted_value = call_kwargs["properties"]["$set"]["$device_push_subscription_my-firebase-project"]
+        # The encrypted value should not be the raw token
+        assert encrypted_value != "fcm-device-token-abc"
+        # It should be a non-empty string (Fernet token)
+        assert isinstance(encrypted_value, str)
+        assert len(encrypted_value) > 0
 
     def test_missing_api_key_returns_401(self):
         response = self.client.post(
             "/api/push_subscriptions/",
-            data=json.dumps({"distinct_id": "user-1", "token": "t", "platform": "android", "app_id": "proj"}),
+            data=json.dumps({"distinct_id": "user-1", "device_token": "t", "platform": "android", "app_id": "proj"}),
             content_type="application/json",
         )
 
@@ -111,7 +121,7 @@ class TestPushSubscriptionsAPI(BaseTest):
 
     def test_invalid_token_returns_401(self):
         response = self._post(
-            {"distinct_id": "user-1", "token": "t", "platform": "android", "app_id": "proj"},
+            {"distinct_id": "user-1", "device_token": "t", "platform": "android", "app_id": "proj"},
             api_key="phc_invalid_token",
         )
 
@@ -121,7 +131,7 @@ class TestPushSubscriptionsAPI(BaseTest):
         response = self._post({"distinct_id": "user-1"})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "token" in response.json()["detail"]
+        assert "device_token" in response.json()["detail"]
         assert "platform" in response.json()["detail"]
         assert "app_id" in response.json()["detail"]
 
@@ -129,7 +139,7 @@ class TestPushSubscriptionsAPI(BaseTest):
         response = self._post(
             {
                 "distinct_id": "user-1",
-                "token": "device-token",
+                "device_token": "device-token",
                 "platform": "windows_phone",
                 "app_id": "proj",
             }
@@ -142,7 +152,7 @@ class TestPushSubscriptionsAPI(BaseTest):
         response = self._post(
             {
                 "distinct_id": "user-1",
-                "token": "device-token",
+                "device_token": "device-token",
                 "platform": "android",
                 "app_id": "nonexistent-project",
             }
@@ -164,7 +174,7 @@ class TestPushSubscriptionsAPI(BaseTest):
         response = self._post(
             {
                 "distinct_id": "user-1",
-                "token": "device-token",
+                "device_token": "device-token",
                 "platform": "android",
                 "app_id": "other-project",
             }
