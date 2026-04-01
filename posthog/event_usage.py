@@ -72,6 +72,11 @@ def report_user_signed_up(
         groups=groups(user.organization, user.team),
     )
 
+    if company_size and user.organization:
+        posthoganalytics.group_identify(
+            "organization", str(user.organization.id), properties={"company_size": company_size}
+        )
+
 
 def report_user_verified_email(current_user: User) -> None:
     """

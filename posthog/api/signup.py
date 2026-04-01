@@ -211,10 +211,6 @@ class SignupSerializer(serializers.Serializer):
                 validated_data["uuid"] = uuid_module.UUID(user_uuid_str)
 
         try:
-            organization_fields: dict[str, Any] = {}
-            if company_size:
-                organization_fields["company_size"] = company_size
-
             with transaction.atomic():
                 self._organization, self._team, self._user = User.objects.bootstrap(
                     organization_name=organization_name,
@@ -222,7 +218,6 @@ class SignupSerializer(serializers.Serializer):
                     is_staff=is_instance_first_user,
                     is_email_verified=self.is_email_auto_verified(),
                     role_at_organization=role_at_organization,
-                    organization_fields=organization_fields or None,
                     **validated_data,
                 )
 

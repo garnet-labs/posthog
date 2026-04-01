@@ -213,24 +213,6 @@ class Organization(ModelActivityMixin, UUIDTModel):
     )
     is_hipaa = models.BooleanField(default=False, null=True, blank=True)
 
-    COMPANY_SIZE_CHOICES = (
-        ("1", "Only me"),
-        ("2-10", "2-10"),
-        ("11-50", "11-50"),
-        ("51-200", "51-200"),
-        ("201-1000", "201-1,000"),
-        ("1001-5000", "1,001-5,000"),
-        ("5001+", "5,001+"),
-    )
-
-    company_size = models.CharField(
-        max_length=20,
-        choices=COMPANY_SIZE_CHOICES,
-        null=True,
-        blank=True,
-        help_text="Self-reported company size collected during signup.",
-    )
-
     ## Managed by Billing
     customer_id = models.CharField(max_length=200, null=True, blank=True)
 
@@ -481,7 +463,6 @@ class Organization(ModelActivityMixin, UUIDTModel):
             "member_count": self.members.count(),
             "project_count": self.teams.count(),
             "name": self.name,
-            "company_size": self.company_size,
         }
 
 
