@@ -1173,8 +1173,12 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
                 return
             }
 
-            // Sync conversation data
+            // Sync conversation data and thread in the same dispatch so there's
+            // no render frame where loading is done but the thread is still empty.
             actions.setConversation(conversation)
+            if (conversation.messages?.length && !values.threadRaw.length) {
+                actions.setThread(updateMessagesWithCompletedStatus(conversation.messages))
+            }
 
             if (conversation.status === ConversationStatus.InProgress) {
                 setTimeout(() => {
