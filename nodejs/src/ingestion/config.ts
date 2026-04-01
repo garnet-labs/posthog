@@ -17,7 +17,7 @@ import {
 } from '../config/kafka-topics'
 import type { PostgresRouterConfig } from '../utils/db/postgres'
 import { isDevEnv, isProdEnv } from '../utils/env-utils'
-import { DEFAULT_PRODUCER, type ProducerName } from './common/producers'
+import { type Infer, env, oneOf, str } from './utils/config-parser'
 
 // =============================================================================
 // Infrastructure sub-config types
@@ -55,29 +55,6 @@ export type RedisConnectionsConfig = Pick<
     | 'POSTHOG_REDIS_PORT'
     | 'POSTHOG_REDIS_PASSWORD'
 >
-
-/** Kafka producer env var config — keys referenced by `DEFAULT_PRODUCER_CONFIG_MAP` */
-export type KafkaProducerEnvConfig = {
-    KAFKA_PRODUCER_METADATA_BROKER_LIST: string
-    KAFKA_PRODUCER_SECURITY_PROTOCOL: string
-    KAFKA_PRODUCER_SASL_MECHANISMS: string
-    KAFKA_PRODUCER_SASL_USERNAME: string
-    KAFKA_PRODUCER_SASL_PASSWORD: string
-    KAFKA_PRODUCER_COMPRESSION_CODEC: string
-    KAFKA_PRODUCER_LINGER_MS: string
-    KAFKA_PRODUCER_BATCH_SIZE: string
-    KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_MESSAGES: string
-    KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_KBYTES: string
-    KAFKA_PRODUCER_ENABLE_SSL_CERTIFICATE_VERIFICATION: string
-    KAFKA_PRODUCER_ENABLE_IDEMPOTENCE: string
-    KAFKA_PRODUCER_MESSAGE_MAX_BYTES: string
-    KAFKA_PRODUCER_BATCH_NUM_MESSAGES: string
-    KAFKA_PRODUCER_STICKY_PARTITIONING_LINGER_MS: string
-    KAFKA_PRODUCER_TOPIC_METADATA_REFRESH_INTERVAL_MS: string
-    KAFKA_PRODUCER_METADATA_MAX_AGE_MS: string
-    KAFKA_PRODUCER_RETRIES: string
-    KAFKA_PRODUCER_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION: string
-}
 
 /** PersonHog gRPC client config */
 export type PersonHogConfig = Pick<
@@ -212,30 +189,6 @@ export type IngestionConsumerConfig = {
     PLUGIN_SERVER_EVENTS_INGESTION_PIPELINE: string | null
 }
 
-export function getDefaultKafkaProducerEnvConfig(): KafkaProducerEnvConfig {
-    return {
-        KAFKA_PRODUCER_METADATA_BROKER_LIST: '',
-        KAFKA_PRODUCER_SECURITY_PROTOCOL: '',
-        KAFKA_PRODUCER_SASL_MECHANISMS: '',
-        KAFKA_PRODUCER_SASL_USERNAME: '',
-        KAFKA_PRODUCER_SASL_PASSWORD: '',
-        KAFKA_PRODUCER_COMPRESSION_CODEC: '',
-        KAFKA_PRODUCER_LINGER_MS: '',
-        KAFKA_PRODUCER_BATCH_SIZE: '',
-        KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_MESSAGES: '',
-        KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_KBYTES: '',
-        KAFKA_PRODUCER_ENABLE_SSL_CERTIFICATE_VERIFICATION: '',
-        KAFKA_PRODUCER_ENABLE_IDEMPOTENCE: '',
-        KAFKA_PRODUCER_MESSAGE_MAX_BYTES: '',
-        KAFKA_PRODUCER_BATCH_NUM_MESSAGES: '',
-        KAFKA_PRODUCER_STICKY_PARTITIONING_LINGER_MS: '',
-        KAFKA_PRODUCER_TOPIC_METADATA_REFRESH_INTERVAL_MS: '',
-        KAFKA_PRODUCER_METADATA_MAX_AGE_MS: '',
-        KAFKA_PRODUCER_RETRIES: '',
-        KAFKA_PRODUCER_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION: '',
-    }
-}
-
 export function getDefaultIngestionConsumerConfig(): IngestionConsumerConfig {
     return {
         INGESTION_LANE: null,
@@ -336,75 +289,67 @@ export function getDefaultIngestionConsumerConfig(): IngestionConsumerConfig {
     }
 }
 
-/** Config type for all analytics ingestion output keys. */
-export type IngestionOutputsConfig = {
-    INGESTION_OUTPUT_EVENTS_TOPIC: string
-    INGESTION_OUTPUT_EVENTS_PRODUCER: ProducerName
+// ---------------------------------------------------------------------------
+// Ingestion outputs config — Zod schema, type inferred
+// ---------------------------------------------------------------------------
 
-    INGESTION_OUTPUT_AI_EVENTS_TOPIC: string
-    INGESTION_OUTPUT_AI_EVENTS_PRODUCER: ProducerName
+export const ingestionOutputsConfigSchema = env({
+    // ── Kafka producer (DEFAULT) ──────────────────────────────────────────
 
-    INGESTION_OUTPUT_HEATMAPS_TOPIC: string
-    INGESTION_OUTPUT_HEATMAPS_PRODUCER: ProducerName
+    KAFKA_PRODUCER_METADATA_BROKER_LIST: str('', 'Broker list for the default Kafka producer'),
+    KAFKA_PRODUCER_SECURITY_PROTOCOL: str('', 'Security protocol (plaintext, ssl, sasl_ssl)'),
+    KAFKA_PRODUCER_SASL_MECHANISMS: str('', 'SASL mechanism'),
+    KAFKA_PRODUCER_SASL_USERNAME: str('', 'SASL username'),
+    KAFKA_PRODUCER_SASL_PASSWORD: str('', 'SASL password'),
+    KAFKA_PRODUCER_COMPRESSION_CODEC: str('', 'Compression (none, gzip, snappy, lz4, zstd)'),
+    KAFKA_PRODUCER_LINGER_MS: str('', 'Producer batching delay (linger.ms)'),
+    KAFKA_PRODUCER_BATCH_SIZE: str('', 'Producer batch size (bytes)'),
+    KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_MESSAGES: str('', 'Max messages in producer queue'),
+    KAFKA_PRODUCER_QUEUE_BUFFERING_MAX_KBYTES: str('', 'Max kbytes in producer queue'),
+    KAFKA_PRODUCER_ENABLE_SSL_CERTIFICATE_VERIFICATION: str('', 'Enable SSL cert verification'),
+    KAFKA_PRODUCER_ENABLE_IDEMPOTENCE: str('', 'Enable idempotent producer'),
+    KAFKA_PRODUCER_MESSAGE_MAX_BYTES: str('', 'Max message size (bytes)'),
+    KAFKA_PRODUCER_BATCH_NUM_MESSAGES: str('', 'Max messages per batch'),
+    KAFKA_PRODUCER_STICKY_PARTITIONING_LINGER_MS: str('', 'Sticky partitioning delay (ms)'),
+    KAFKA_PRODUCER_TOPIC_METADATA_REFRESH_INTERVAL_MS: str('', 'Topic metadata refresh (ms)'),
+    KAFKA_PRODUCER_METADATA_MAX_AGE_MS: str('', 'Max cached metadata age (ms)'),
+    KAFKA_PRODUCER_RETRIES: str('', 'Max send retries'),
+    KAFKA_PRODUCER_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION: str('', 'Max in-flight requests'),
 
-    INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: string
-    INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: ProducerName
+    // ── Output topics and producers ───────────────────────────────────────
 
-    INGESTION_OUTPUT_DLQ_TOPIC: string
-    INGESTION_OUTPUT_DLQ_PRODUCER: ProducerName
+    INGESTION_OUTPUT_EVENTS_TOPIC: str(KAFKA_EVENTS_JSON, 'Topic for processed events'),
+    INGESTION_OUTPUT_EVENTS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for events'),
+    INGESTION_OUTPUT_AI_EVENTS_TOPIC: str(KAFKA_CLICKHOUSE_AI_EVENTS_JSON, 'Topic for AI events'),
+    INGESTION_OUTPUT_AI_EVENTS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for AI events'),
+    INGESTION_OUTPUT_HEATMAPS_TOPIC: str(KAFKA_CLICKHOUSE_HEATMAP_EVENTS, 'Topic for heatmaps'),
+    INGESTION_OUTPUT_HEATMAPS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for heatmaps'),
+    INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: str(KAFKA_INGESTION_WARNINGS, 'Topic for ingestion warnings'),
+    INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for warnings'),
+    INGESTION_OUTPUT_DLQ_TOPIC: str(KAFKA_EVENTS_PLUGIN_INGESTION_DLQ, 'Dead-letter queue topic'),
+    INGESTION_OUTPUT_DLQ_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for DLQ'),
+    INGESTION_OUTPUT_OVERFLOW_TOPIC: str(KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW, 'Overflow topic'),
+    INGESTION_OUTPUT_OVERFLOW_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for overflow'),
+    INGESTION_OUTPUT_ASYNC_TOPIC: str(KAFKA_EVENTS_PLUGIN_INGESTION_ASYNC, 'Async processing topic'),
+    INGESTION_OUTPUT_ASYNC_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for async'),
+    INGESTION_OUTPUT_GROUPS_TOPIC: str(KAFKA_GROUPS, 'Topic for group updates'),
+    INGESTION_OUTPUT_GROUPS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for groups'),
+    INGESTION_OUTPUT_PERSONS_TOPIC: str(KAFKA_PERSON, 'Topic for person updates'),
+    INGESTION_OUTPUT_PERSONS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for persons'),
+    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: str(KAFKA_PERSON_DISTINCT_ID, 'Topic for person distinct IDs'),
+    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for person distinct IDs'),
+    INGESTION_OUTPUT_APP_METRICS_TOPIC: str(KAFKA_APP_METRICS_2, 'Topic for app metrics'),
+    INGESTION_OUTPUT_APP_METRICS_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for app metrics'),
+    INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: str(KAFKA_LOG_ENTRIES, 'Topic for log entries'),
+    INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for log entries'),
+    INGESTION_OUTPUT_TOPHOG_TOPIC: str(KAFKA_CLICKHOUSE_TOPHOG, 'Topic for TopHog metrics'),
+    INGESTION_OUTPUT_TOPHOG_PRODUCER: oneOf(['DEFAULT'], 'DEFAULT', 'Producer for TopHog'),
+})
 
-    INGESTION_OUTPUT_OVERFLOW_TOPIC: string
-    INGESTION_OUTPUT_OVERFLOW_PRODUCER: ProducerName
+export type IngestionOutputsConfig = Infer<typeof ingestionOutputsConfigSchema>
 
-    INGESTION_OUTPUT_ASYNC_TOPIC: string
-    INGESTION_OUTPUT_ASYNC_PRODUCER: ProducerName
-
-    INGESTION_OUTPUT_GROUPS_TOPIC: string
-    INGESTION_OUTPUT_GROUPS_PRODUCER: ProducerName
-
-    INGESTION_OUTPUT_PERSONS_TOPIC: string
-    INGESTION_OUTPUT_PERSONS_PRODUCER: ProducerName
-
-    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: string
-    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: ProducerName
-
-    INGESTION_OUTPUT_APP_METRICS_TOPIC: string
-    INGESTION_OUTPUT_APP_METRICS_PRODUCER: ProducerName
-
-    INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: string
-    INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: ProducerName
-
-    INGESTION_OUTPUT_TOPHOG_TOPIC: string
-    INGESTION_OUTPUT_TOPHOG_PRODUCER: ProducerName
-}
-
-export function getDefaultIngestionOutputsConfig(): IngestionOutputsConfig {
-    return {
-        INGESTION_OUTPUT_EVENTS_TOPIC: KAFKA_EVENTS_JSON,
-        INGESTION_OUTPUT_EVENTS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_AI_EVENTS_TOPIC: KAFKA_CLICKHOUSE_AI_EVENTS_JSON,
-        INGESTION_OUTPUT_AI_EVENTS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_HEATMAPS_TOPIC: KAFKA_CLICKHOUSE_HEATMAP_EVENTS,
-        INGESTION_OUTPUT_HEATMAPS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: KAFKA_INGESTION_WARNINGS,
-        INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_DLQ_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_DLQ,
-        INGESTION_OUTPUT_DLQ_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_OVERFLOW_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
-        INGESTION_OUTPUT_OVERFLOW_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_ASYNC_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_ASYNC,
-        INGESTION_OUTPUT_ASYNC_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_GROUPS_TOPIC: KAFKA_GROUPS,
-        INGESTION_OUTPUT_GROUPS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_PERSONS_TOPIC: KAFKA_PERSON,
-        INGESTION_OUTPUT_PERSONS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: KAFKA_PERSON_DISTINCT_ID,
-        INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_APP_METRICS_TOPIC: KAFKA_APP_METRICS_2,
-        INGESTION_OUTPUT_APP_METRICS_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: KAFKA_LOG_ENTRIES,
-        INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: DEFAULT_PRODUCER,
-        INGESTION_OUTPUT_TOPHOG_TOPIC: KAFKA_CLICKHOUSE_TOPHOG,
-        INGESTION_OUTPUT_TOPHOG_PRODUCER: DEFAULT_PRODUCER,
-    }
+export function parseIngestionOutputsConfig(
+    envVars: Record<string, string | undefined> = process.env
+): IngestionOutputsConfig {
+    return ingestionOutputsConfigSchema.parse(envVars)
 }

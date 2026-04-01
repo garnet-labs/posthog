@@ -9,21 +9,19 @@ import {
 } from '../cdp/hog-transformations/hog-transformer.service'
 import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig } from '../common/config'
-import { defaultConfig, overrideConfigWithEnv } from '../config/config'
+import { defaultConfig } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import {
     DatabaseConnectionConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
-    KafkaProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
-    getDefaultKafkaProducerEnvConfig,
 } from '../ingestion/config'
 import {
     ErrorTrackingConsumerConfig,
     ErrorTrackingOutputsConfig,
-    getDefaultErrorTrackingOutputsConfig,
+    parseErrorTrackingOutputsConfig,
 } from '../ingestion/error-tracking/config'
 import { registerErrorTrackingOutputs } from '../ingestion/error-tracking/config/outputs'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
@@ -57,8 +55,6 @@ export type ErrorTrackingServerConfig = BaseServerConfig &
     ErrorTrackingConsumerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
-    KafkaProducerEnvConfig &
-    ErrorTrackingOutputsConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
     KafkaConsumerBaseConfig &
@@ -72,7 +68,8 @@ export type ErrorTrackingServerConfig = BaseServerConfig &
         | 'CAPTURE_INTERNAL_URL'
         | 'HEALTHCHECK_MAX_STALE_SECONDS'
         | 'KAFKA_HEALTHCHECK_SECONDS'
-    >
+    > &
+    ErrorTrackingOutputsConfig
 
 export class ErrorTrackingServer implements NodeServer {
     readonly lifecycle: ServerLifecycle
@@ -84,12 +81,7 @@ export class ErrorTrackingServer implements NodeServer {
     private pubsub?: PubSub
 
     constructor(config: Partial<ErrorTrackingServerConfig> = {}) {
-        this.config = {
-            ...defaultConfig,
-            ...overrideConfigWithEnv(getDefaultKafkaProducerEnvConfig()),
-            ...overrideConfigWithEnv(getDefaultErrorTrackingOutputsConfig()),
-            ...config,
-        }
+        this.config = { ...defaultConfig, ...parseErrorTrackingOutputsConfig(), ...config }
         this.lifecycle = new ServerLifecycle(this.config)
     }
 
