@@ -53,7 +53,10 @@ class DataModelingJobViewSet(TeamAndOrgViewSetMixin, viewsets.ReadOnlyModelViewS
     ordering = "-created_at"
 
     def safely_get_queryset(self, queryset):
-        return queryset.filter(team_id=self.team_id)
+        return queryset.filter(
+            team_id=self.team_id,
+            engine=DataModelingJob.Engine.CLICKHOUSE,
+        )
 
     @action(methods=["GET"], detail=False)
     def running(self, request, *args, **kwargs):
@@ -61,6 +64,7 @@ class DataModelingJobViewSet(TeamAndOrgViewSetMixin, viewsets.ReadOnlyModelViewS
         queryset = self.get_queryset().filter(
             status=DataModelingJob.Status.RUNNING,
             workflow_id__startswith="materialize",
+            engine=DataModelingJob.Engine.CLICKHOUSE,
         )
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
@@ -71,7 +75,11 @@ class DataModelingJobViewSet(TeamAndOrgViewSetMixin, viewsets.ReadOnlyModelViewS
         queryset = (
             self.get_queryset()
             .exclude(status=DataModelingJob.Status.RUNNING)
-            .filter(saved_query_id__isnull=False, workflow_id__startswith="materialize")
+            .filter(
+                saved_query_id__isnull=False,
+                workflow_id__startswith="materialize",
+                engine=DataModelingJob.Engine.CLICKHOUSE,
+            )
             .order_by("saved_query_id", "-created_at")
             .distinct("saved_query_id")
         )
