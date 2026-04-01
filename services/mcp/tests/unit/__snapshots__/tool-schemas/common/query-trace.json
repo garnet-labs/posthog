@@ -1,6 +1,12 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
+        "contentDetail": {
+            "default": "preview",
+            "description": "Controls how much content is returned for large properties like $ai_input and $ai_output_choices. \"none\" returns metadata only with char counts. \"preview\" (default) returns first/last 300 chars of large properties. \"full\" returns everything — use with caution as traces can be very large.",
+            "enum": ["none", "preview", "full"],
+            "type": "string"
+        },
         "dateRange": {
             "properties": {
                 "date_from": {
@@ -26,34 +32,6 @@
             },
             "type": "object"
         },
-        "filterSupportTraces": {
-            "type": "boolean"
-        },
-        "filterTestAccounts": {
-            "type": "boolean"
-        },
-        "groupKey": {
-            "type": "string"
-        },
-        "groupTypeIndex": {
-            "maximum": 9007199254740991,
-            "minimum": -9007199254740991,
-            "type": "integer"
-        },
-        "limit": {
-            "maximum": 9007199254740991,
-            "minimum": -9007199254740991,
-            "type": "integer"
-        },
-        "offset": {
-            "maximum": 9007199254740991,
-            "minimum": -9007199254740991,
-            "type": "integer"
-        },
-        "personId": {
-            "description": "Person who performed the event",
-            "type": "string"
-        },
         "properties": {
             "description": "Properties configurable in the interface",
             "items": {
@@ -64,7 +42,12 @@
                 "type": "object"
             },
             "type": "array"
+        },
+        "traceId": {
+            "description": "The trace ID to retrieve",
+            "type": "string"
         }
     },
+    "required": ["traceId"],
     "type": "object"
 }
