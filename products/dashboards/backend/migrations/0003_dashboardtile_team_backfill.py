@@ -9,6 +9,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunSQL(
             sql="""
+                -- migration-analyzer: safe reason=single-pass join update, only row-level locks, no table lock
                 UPDATE posthog_dashboardtile dt
                 SET team_id = d.team_id
                 FROM posthog_dashboard d
