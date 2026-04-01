@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("posthog", "1077_add_cron_expression_to_scheduled_change"),
+        ("posthog", "1080_alertcheck_triggered_metadata"),
     ]
 
     operations = [
