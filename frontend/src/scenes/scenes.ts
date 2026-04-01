@@ -72,7 +72,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Web scripts',
         description: 'Web scripts allow you to add custom tags and functionality to your website using PostHog.',
         activityScope: ActivityScope.HOG_FUNCTION,
-        defaultDocsPath: '/docs/cdp/apps',
         iconType: 'data_pipeline',
     },
     [Scene.BatchExport]: {
@@ -80,28 +79,22 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Batch export',
         activityScope: ActivityScope.BATCH_EXPORT,
         iconType: 'data_pipeline',
-        defaultDocsPath: '/docs/cdp/batch-exports',
-        changelogTeamSlug: 'Batch Exports',
     },
     [Scene.BatchExportNew]: {
         projectBased: true,
         name: 'New batch export',
         iconType: 'data_pipeline',
-        defaultDocsPath: '/docs/cdp/batch-exports',
-        changelogTeamSlug: 'Batch Exports',
     },
     [Scene.BillingAuthorizationStatus]: {
         organizationBased: true,
-        defaultDocsPath: '/pricing',
     },
+    [Scene.Billing]: { organizationBased: true },
     [Scene.BillingSection]: { name: 'Billing', organizationBased: true },
-    [Scene.Billing]: { organizationBased: true, defaultDocsPath: '/pricing' },
     [Scene.Canvas]: {
         projectBased: true,
         name: 'Canvas',
         description: 'You can change anything you like and it is persisted to the URL for easy sharing.',
         layout: 'app-full-scene-height',
-        defaultDocsPath: '/blog/introducing-notebooks',
         hideProjectNotice: true,
     },
     [Scene.CLIAuthorize]: {
@@ -116,13 +109,12 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         organizationBased: false,
         layout: 'plain',
     },
-    [Scene.Cohort]: { projectBased: true, name: 'Cohort', defaultDocsPath: '/docs/data/cohorts' },
+    [Scene.Cohort]: { projectBased: true, name: 'Cohort' },
     [Scene.CohortCalculationHistory]: { projectBased: true, name: 'Cohort Calculation History' },
     [Scene.Cohorts]: {
         projectBased: true,
         name: 'Cohorts',
         description: 'A catalog of identified persons and your created cohorts.',
-        defaultDocsPath: '/docs/data/cohorts',
         iconType: 'cohort',
     },
     [Scene.Comments]: {
@@ -135,7 +127,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.Dashboard]: {
         projectBased: true,
         activityScope: ActivityScope.DASHBOARD,
-        defaultDocsPath: '/docs/product-analytics/dashboards',
         iconType: 'dashboard',
     },
     [Scene.Dashboards]: {
@@ -148,43 +139,19 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.DataManagement]: {
         projectBased: true,
         name: 'Data management',
-        defaultDocsPath: '/docs/data',
     },
     [Scene.DataPipelinesNew]: {
         projectBased: true,
         name: 'New data pipeline',
         activityScope: ActivityScope.HOG_FUNCTION,
-        defaultDocsPath: '/docs/cdp',
     },
     [Scene.DataWarehouseSource]: {
         projectBased: true,
         name: 'Data warehouse source',
-        defaultDocsPath: '/docs/cdp/sources',
     },
     [Scene.DataWarehouseSourceNew]: {
         projectBased: true,
         name: 'New data warehouse source',
-        defaultDocsPath: async () => {
-            try {
-                // Importing here to avoid problems with importing logics from such a global file like this one
-                const { sourceWizardLogic } = await import('./data-warehouse/new/sourceWizardLogic')
-                const logic = sourceWizardLogic.findMounted()
-
-                if (logic) {
-                    const { selectedConnector } = logic.values
-
-                    // `docsUrl` includes the full URL, we only need the pathname when opening docs in the sidepanel
-                    if (selectedConnector?.docsUrl) {
-                        const parsedUrl = new URL(selectedConnector.docsUrl)
-                        return parsedUrl.pathname
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to get default docs path for new data warehouse source', error)
-            }
-
-            return '/docs/cdp/sources'
-        },
     },
     [Scene.DeadLetterQueue]: { instanceLevel: true },
     [Scene.Destinations]: {
@@ -192,7 +159,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Destinations',
         description: 'Destinations allow you to send your data to external systems in real time.',
         activityScope: ActivityScope.HOG_FUNCTION,
-        defaultDocsPath: '/docs/cdp/destinations',
         iconType: 'data_pipeline',
     },
     [Scene.DebugHog]: { projectBased: true, name: 'Hog Repl' },
@@ -206,45 +172,38 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Data management',
         activityScope: ActivityScope.EVENT_DEFINITION,
-        defaultDocsPath: '/docs/data/events',
     },
     [Scene.EventDefinitions]: {
         projectBased: true,
         name: 'Event definitions',
         activityScope: ActivityScope.EVENT_DEFINITION,
-        defaultDocsPath: '/docs/data/events',
         description: 'Event definitions are a way to define events that can be used in your app or website.',
     },
     [Scene.EventDefinition]: {
         projectBased: true,
         name: 'Event definitions',
         activityScope: ActivityScope.EVENT_DEFINITION,
-        defaultDocsPath: '/docs/data/events',
         iconType: 'event_definition',
     },
     [Scene.Experiment]: {
         projectBased: true,
         name: 'Experiment',
-        defaultDocsPath: '/docs/experiments/creating-an-experiment',
         activityScope: ActivityScope.EXPERIMENT,
         iconType: 'experiment',
     },
     [Scene.ExperimentsSharedMetric]: {
         projectBased: true,
         name: '',
-        defaultDocsPath: '/docs/experiments/creating-an-experiment',
         activityScope: ActivityScope.EXPERIMENT,
     },
     [Scene.ExperimentsSharedMetrics]: {
         projectBased: true,
         name: 'Shared metrics',
-        defaultDocsPath: '/docs/experiments/creating-an-experiment',
         activityScope: ActivityScope.EXPERIMENT,
     },
     [Scene.Experiments]: {
         projectBased: true,
         name: 'Experiments',
-        defaultDocsPath: '/docs/experiments',
         activityScope: ActivityScope.EXPERIMENT,
         description:
             'Experiments help you test changes to your product to see which changes will lead to optimal results. Automatic statistical calculations let you see if the results are valid or if they are likely just a chance occurrence.',
@@ -253,45 +212,39 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.Activity]: {
         projectBased: true,
         name: 'Activity',
-        defaultDocsPath: '/docs/data/events',
         description: 'Explore your events or see real-time events from your app or website.',
         iconType: 'activity',
     },
     [Scene.ExploreEvents]: {
         projectBased: true,
         name: 'Explore events',
-        defaultDocsPath: '/docs/data/events',
         description: 'A catalog of all user interactions with your app or website.',
         iconType: 'activity',
     },
     [Scene.ExploreSessions]: {
         projectBased: true,
         name: 'Explore sessions',
-        defaultDocsPath: '/docs/data/sessions',
         description: 'A catalog of all user sessions with your app or website.',
         iconType: 'session_replay',
     },
     [Scene.FeatureFlag]: {
         projectBased: true,
         activityScope: ActivityScope.FEATURE_FLAG,
-        defaultDocsPath: '/docs/feature-flags/creating-feature-flags',
     },
     [Scene.FeatureFlags]: {
         projectBased: true,
         name: 'Feature flags',
         description:
             'Use feature flags to safely deploy and roll back new features in an easy-to-manage way. Roll variants out to certain groups, a percentage of users, or everyone all at once.',
-        defaultDocsPath: '/docs/feature-flags',
         activityScope: ActivityScope.FEATURE_FLAG,
     },
     [Scene.Game368]: { name: '368 Hedgehogs', projectBased: true },
     [Scene.Group]: {
         projectBased: true,
         name: 'People & groups',
-        defaultDocsPath: '/docs/product-analytics/group-analytics',
     },
-    [Scene.GroupsNew]: { projectBased: true, defaultDocsPath: '/docs/product-analytics/group-analytics' },
-    [Scene.Groups]: { projectBased: true, name: 'Groups', defaultDocsPath: '/docs/product-analytics/group-analytics' },
+    [Scene.GroupsNew]: { projectBased: true },
+    [Scene.Groups]: { projectBased: true, name: 'Groups' },
     [Scene.Heatmaps]: {
         projectBased: true,
         name: 'Heatmaps',
@@ -323,19 +276,16 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Insights',
         activityScope: ActivityScope.INSIGHT,
-        defaultDocsPath: '/docs/product-analytics/insights',
     },
     [Scene.InsightOptions]: {
         projectBased: true,
         name: 'New insight',
         description: 'Choose the type of insight you want to create',
-        defaultDocsPath: '/docs/product-analytics/insights',
     },
     [Scene.IntegrationsRedirect]: { name: 'Integrations redirect' },
     [Scene.IngestionWarnings]: {
         projectBased: true,
         name: 'Event ingestion warnings',
-        defaultDocsPath: '/docs/data/ingestion-warnings',
         iconType: 'ingestion_warning',
         description: 'Data ingestion related warnings from past 30 days.',
     },
@@ -347,11 +297,10 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.LiveEvents]: {
         projectBased: true,
         name: 'Live events',
-        defaultDocsPath: '/docs/data/events',
         description: 'Real-time events from your app or website.',
         iconType: 'live',
     },
-    [Scene.LiveDebugger]: { projectBased: true, name: 'Live debugger', defaultDocsPath: '/docs/data/events' },
+    [Scene.LiveDebugger]: { projectBased: true, name: 'Live debugger' },
     [Scene.Login2FA]: { onlyUnauthenticated: true, name: 'Login 2FA', layout: 'plain' },
     [Scene.EmailMFAVerify]: { onlyUnauthenticated: true, layout: 'plain' },
     [Scene.Login]: { onlyUnauthenticated: true, layout: 'plain' },
@@ -360,7 +309,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Models',
         description: 'Create and manage views and materialized views for transforming and organizing your data.',
-        defaultDocsPath: '/docs/data-warehouse/views/materialize',
         iconType: 'sql_editor',
     },
     [Scene.MoveToPostHogCloud]: { name: 'Move to PostHog Cloud', hideProjectNotice: true },
@@ -375,7 +323,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Notebook',
         activityScope: ActivityScope.NOTEBOOK,
-        defaultDocsPath: '/blog/introducing-notebooks',
         canvasBackground: true,
     },
     [Scene.Notebooks]: {
@@ -383,7 +330,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Notebooks',
         description: 'Notebooks are a way to organize your work and share it with others.',
         activityScope: ActivityScope.NOTEBOOK,
-        defaultDocsPath: '/blog/introducing-notebooks',
     },
     [Scene.OAuthAuthorize]: {
         name: 'Authorize',
@@ -396,12 +342,10 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.OnboardingCoupon]: { projectBased: true, name: 'Claim coupon', layout: 'plain' },
     [Scene.OrganizationCreateFirst]: {
         name: 'Organization creation',
-        defaultDocsPath: '/docs/data/organizations-and-projects',
     },
     [Scene.OrganizationCreationConfirm]: {
         name: 'Confirm organization creation',
         onlyUnauthenticated: true,
-        defaultDocsPath: '/docs/data/organizations-and-projects',
         layout: 'plain',
     },
     [Scene.PasswordResetComplete]: { onlyUnauthenticated: true, layout: 'plain' },
@@ -413,7 +357,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'People',
         activityScope: ActivityScope.PERSON,
-        defaultDocsPath: '/docs/data/persons',
         iconType: 'user',
     },
     [Scene.Persons]: {
@@ -421,14 +364,12 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Persons',
         description: 'A catalog of all the people behind your events',
         activityScope: ActivityScope.PERSON,
-        defaultDocsPath: '/docs/data/persons',
         iconType: 'persons',
     },
     [Scene.PreflightCheck]: { onlyUnauthenticated: true, layout: 'plain' },
     [Scene.ProjectCreateFirst]: {
         name: 'Project creation',
         organizationBased: true,
-        defaultDocsPath: '/docs/data/organizations-and-projects',
     },
     [Scene.ProjectHomepage]: {
         projectBased: true,
@@ -443,7 +384,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.SqlVariableEdit]: {
         projectBased: true,
         name: 'SQL variable',
-        defaultDocsPath: '/docs/sql',
     },
     [Scene.PropertyDefinitions]: {
         projectBased: true,
@@ -463,31 +403,26 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'File playback',
         activityScope: ActivityScope.REPLAY,
-        defaultDocsPath: '/docs/session-replay',
     },
     [Scene.ReplayPlaylist]: {
         projectBased: true,
         name: 'Replay playlist',
         activityScope: ActivityScope.REPLAY,
-        defaultDocsPath: '/docs/session-replay',
     },
     [Scene.ReplaySettings]: {
         projectBased: true,
         name: 'Settings',
         activityScope: ActivityScope.REPLAY,
-        defaultDocsPath: '/docs/session-replay',
     },
     [Scene.ReplaySingle]: {
         projectBased: true,
         name: 'Replay recording',
         activityScope: ActivityScope.REPLAY,
-        defaultDocsPath: '/docs/session-replay',
     },
     [Scene.Replay]: {
         projectBased: true,
         name: 'Session replay',
         activityScope: ActivityScope.REPLAY,
-        defaultDocsPath: '/docs/session-replay',
         layout: 'app-full-scene-height',
         iconType: 'session_replay',
         description:
@@ -497,7 +432,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Kiosk mode',
         activityScope: ActivityScope.REPLAY,
-        defaultDocsPath: '/docs/session-replay',
         layout: 'plain',
         hideProjectNotice: true,
     },
@@ -510,13 +444,11 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Revenue analytics',
         layout: 'app-container',
-        defaultDocsPath: '/docs/revenue-analytics',
     },
     [Scene.MarketingAnalytics]: {
         projectBased: true,
         name: 'Marketing analytics',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics/marketing-analytics',
         description:
             'Analyze your marketing performance across integrations: spend, impressions, conversions, ROAS, and more metrics.',
         iconType: 'marketing_analytics',
@@ -526,7 +458,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Product analytics',
         description: 'Track, analyze, and experiment with user behavior.',
         activityScope: ActivityScope.INSIGHT,
-        defaultDocsPath: '/docs/product-analytics',
         iconType: 'product_analytics',
     },
     [Scene.Health]: {
@@ -552,7 +483,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         iconType: 'sdk_doctor',
         description:
             'Monitor and maintain your PostHog SDK integrations by automatically detecting version issues, configuration problems, and implementation patterns across your applications.',
-        defaultDocsPath: '/docs/sdk-doctor',
     },
     [Scene.Exports]: {
         projectBased: true,
@@ -570,23 +500,19 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.SurveyWizard]: {
         projectBased: true,
         name: 'Create survey',
-        defaultDocsPath: '/docs/surveys/creating-surveys',
     },
     [Scene.SurveyFormBuilder]: {
         projectBased: true,
         name: 'Create form',
-        defaultDocsPath: '/docs/surveys/creating-surveys',
     },
     [Scene.Survey]: {
         projectBased: true,
         name: 'Survey',
-        defaultDocsPath: '/docs/surveys',
         activityScope: ActivityScope.SURVEY,
     },
     [Scene.Surveys]: {
         projectBased: true,
         name: 'Surveys',
-        defaultDocsPath: '/docs/surveys',
         activityScope: ActivityScope.SURVEY,
         description: 'Create surveys to collect feedback from your users',
         iconType: 'survey',
@@ -594,23 +520,20 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
     [Scene.ProductTours]: {
         projectBased: true,
         name: 'Product tours',
-        defaultDocsPath: '/docs/product-tours',
         description: 'Guide users through your product with interactive tours',
     },
     [Scene.ProductTour]: {
         projectBased: true,
         name: 'Product tour',
-        defaultDocsPath: '/docs/product-tours',
     },
     [Scene.SystemStatus]: { instanceLevel: true, name: 'Instance panel' },
-    [Scene.ToolbarLaunch]: { projectBased: true, name: 'Launch toolbar', defaultDocsPath: '/docs/toolbar' },
+    [Scene.ToolbarLaunch]: { projectBased: true, name: 'Launch toolbar' },
     [Scene.Sources]: {
         projectBased: true,
         name: 'Sources',
         description:
             'Import data into PostHog from external sources including webhooks, application connectors, and self-managed databases.',
         activityScope: ActivityScope.HOG_FUNCTION,
-        defaultDocsPath: '/docs/data-warehouse',
         iconType: 'data_pipeline',
     },
     [Scene.Transformations]: {
@@ -619,7 +542,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         description:
             'Transformations let you modify, filter, and enrich event data to improve data quality, privacy, and consistency.',
         activityScope: ActivityScope.HOG_FUNCTION,
-        defaultDocsPath: '/docs/cdp/transformations',
         iconType: 'data_pipeline',
     },
     [Scene.Unsubscribe]: { allowUnauthenticated: true, layout: 'app-raw' },
@@ -628,7 +550,6 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Marketing settings',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics/marketing',
         description: 'Analyze your marketing analytics data to understand your marketing performance.',
         iconType: 'marketing_settings',
     },
@@ -636,31 +557,26 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         projectBased: true,
         name: 'Page reports',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics',
     },
     [Scene.WebAnalyticsWebVitals]: {
         projectBased: true,
         name: 'Web vitals',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics/web-vitals',
     },
     [Scene.WebAnalyticsHealth]: {
         projectBased: true,
         name: 'Health',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics/health',
     },
     [Scene.WebAnalyticsLive]: {
         projectBased: true,
         name: 'Live',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics/live',
     },
     [Scene.WebAnalytics]: {
         projectBased: true,
         name: 'Web analytics',
         layout: 'app-container',
-        defaultDocsPath: '/docs/web-analytics',
         description: 'Analyze your web analytics data to understand website performance and user behavior.',
         iconType: 'web_analytics',
     },

@@ -11,7 +11,6 @@ export const manifest: ProductManifest = {
             name: 'Data ops',
             import: () => import('./DataWarehouseScene'),
             projectBased: true,
-            defaultDocsPath: '/docs/data-warehouse',
             activityScope: 'DataWarehouse',
             description:
                 'Manage your data warehouse sources and queries. New source syncs are always free for the first 7 days',
@@ -21,7 +20,6 @@ export const manifest: ProductManifest = {
             name: 'Models',
             import: () => import('../../frontend/src/scenes/models/ModelsScene'),
             projectBased: true,
-            defaultDocsPath: '/docs/data-warehouse',
             description: 'Create and manage views and materialized views for transforming and organizing your data.',
             iconType: 'sql_editor',
         },
@@ -29,12 +27,10 @@ export const manifest: ProductManifest = {
             name: 'Model detail',
             import: () => import('../../frontend/src/scenes/models/NodeDetailScene'),
             projectBased: true,
-            defaultDocsPath: '/docs/data-warehouse',
         },
         SQLEditor: {
             projectBased: true,
             name: 'SQL editor',
-            defaultDocsPath: '/docs/cdp/sources',
             layout: 'app-raw-no-header',
             hideProjectNotice: true,
             description: 'Write and execute SQL queries against your data warehouse',

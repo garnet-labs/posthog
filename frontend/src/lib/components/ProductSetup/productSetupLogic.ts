@@ -7,7 +7,7 @@ import { organizationLogic } from 'scenes/organizationLogic'
 import { inviteLogic } from 'scenes/settings/organization/inviteLogic'
 import { teamLogic } from 'scenes/teamLogic'
 
-import { sidePanelSettingsLogic } from '~/layout/navigation-3000/sidepanel/panels/sidePanelSettingsLogic'
+import { sidePanelSettingsLogic } from '~/layout/navigation-3000/sidepanel/panels/settings/sidePanelSettingsLogic'
 import { ProductKey } from '~/queries/schema/schema-general'
 import { ActivationTaskStatus } from '~/types'
 
