@@ -1043,6 +1043,8 @@ class HogQLRealtimeCohortQuery(HogQLCohortQuery):
         For example: email contains X OR email contains Y
         Uses HAVING matching_count >= 1
 
+        Missing precalculated-person-properties are treated as matches=false.
+
         Args:
             merged_hashes: List of condition hashes to match against
 
@@ -1057,7 +1059,7 @@ class HogQLRealtimeCohortQuery(HogQLCohortQuery):
                 SELECT
                     person_id,
                     condition,
-                    argMax(matches, _timestamp) as latest_matches
+                    ifNull(argMax(matches, _timestamp), 0) as latest_matches
                 FROM precalculated_person_properties
                 WHERE
                     team_id = {team_id}
@@ -1086,6 +1088,9 @@ class HogQLRealtimeCohortQuery(HogQLCohortQuery):
         For example: email contains X AND email contains Y
         Uses HAVING matching_count = len(merged_hashes)
 
+        Missing precalculated-person-properties are treated as matches=false, so persons
+        without entries for all required conditions will not match.
+
         Args:
             merged_hashes: List of condition hashes that all must match
 
@@ -1100,7 +1105,7 @@ class HogQLRealtimeCohortQuery(HogQLCohortQuery):
                 SELECT
                     person_id,
                     condition,
-                    argMax(matches, _timestamp) as latest_matches
+                    ifNull(argMax(matches, _timestamp), 0) as latest_matches
                 FROM precalculated_person_properties
                 WHERE
                     team_id = {team_id}
@@ -1167,7 +1172,7 @@ class HogQLRealtimeCohortQuery(HogQLCohortQuery):
                     team_id = {team_id}
                     AND condition = {condition_hash}
                 GROUP BY person_id
-                HAVING argMax(matches, _offset) = 1
+                HAVING ifNull(argMax(matches, _offset), 0) = 1
             """
 
             return cast(

@@ -1526,3 +1526,139 @@ class TestHogQLRealtimeCohortQuery(ClickhouseTestMixin, APIBaseTest):
 
         # Should NOT use INTERSECT since all properties merged into one
         self.assertNotIn("INTERSECT DISTINCT", query_str)
+
+    def test_single_condition_missing_properties_treated_as_false(self) -> None:
+        """
+        Test that single person property conditions use ifNull() to treat missing properties as matches=false.
+
+        This ensures that persons without entries in precalculated_person_properties
+        for a condition are correctly excluded from the cohort.
+        """
+        cohort_filters = {
+            "type": "AND",
+            "values": [
+                {
+                    "type": "AND",
+                    "values": [
+                        {
+                            "key": "email",
+                            "type": "person",
+                            "value": "@posthog.com",
+                            "negation": False,
+                            "operator": "icontains",
+                            "conditionHash": "missing_props_test_hash",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        cohort = Cohort.objects.create(
+            team=self.team, name="Test Missing Properties Single", filters={"properties": cohort_filters}
+        )
+
+        hogql_query = HogQLRealtimeCohortQuery(cohort=cohort)
+        query_str = hogql_query.query_str("clickhouse")
+
+        # Should use ifNull() to treat missing properties as 0 (false)
+        self.assertIn("ifnull(argmax(precalculated_person_properties.matches", query_str.lower())
+        # Should compare result to 1 (true)
+        self.assertIn("equals(ifnull(argmax", query_str.lower())
+
+    def test_or_semantics_missing_properties_treated_as_false(self) -> None:
+        """
+        Test that OR semantics queries use ifNull() to treat missing properties as matches=false.
+
+        For OR semantics, a person should only match if at least ONE condition has matches=1.
+        Missing properties should be treated as matches=0 and not contribute to the count.
+        """
+        cohort_filters = {
+            "type": "OR",
+            "values": [
+                {
+                    "type": "OR",
+                    "values": [
+                        {
+                            "key": "email",
+                            "type": "person",
+                            "value": "@gmail.com",
+                            "negation": False,
+                            "operator": "icontains",
+                            "conditionHash": "or_test_hash1",
+                        },
+                        {
+                            "key": "email",
+                            "type": "person",
+                            "value": "@yahoo.com",
+                            "negation": False,
+                            "operator": "icontains",
+                            "conditionHash": "or_test_hash2",
+                        },
+                    ],
+                }
+            ],
+        }
+
+        cohort = Cohort.objects.create(
+            team=self.team, name="Test Missing Properties OR", filters={"properties": cohort_filters}
+        )
+
+        hogql_query = HogQLRealtimeCohortQuery(cohort=cohort)
+        query_str = hogql_query.query_str("clickhouse")
+
+        # Should use ifNull() in the subquery to treat missing properties as 0
+        self.assertIn("ifnull(argmax(precalculated_person_properties.matches", query_str.lower())
+        # Should use countIf to count only true matches
+        self.assertIn("countif(ifnull(equals(latest_matches, 1), 0))", query_str.lower())
+        # Should require at least 1 match for OR semantics
+        self.assertIn("greaterorequals(countif", query_str.lower())
+
+    def test_and_semantics_missing_properties_treated_as_false(self) -> None:
+        """
+        Test that AND semantics queries use ifNull() to treat missing properties as matches=false.
+
+        For AND semantics, a person should only match if ALL conditions have matches=1.
+        Missing properties should be treated as matches=0, so if any property is missing,
+        the person should not match the cohort.
+        """
+        cohort_filters = {
+            "type": "AND",
+            "values": [
+                {
+                    "type": "AND",
+                    "values": [
+                        {
+                            "key": "email",
+                            "type": "person",
+                            "value": "@gmail",
+                            "negation": False,
+                            "operator": "icontains",
+                            "conditionHash": "and_test_hash1",
+                        },
+                        {
+                            "key": "email",
+                            "type": "person",
+                            "value": ".com",
+                            "negation": False,
+                            "operator": "icontains",
+                            "conditionHash": "and_test_hash2",
+                        },
+                    ],
+                }
+            ],
+        }
+
+        cohort = Cohort.objects.create(
+            team=self.team, name="Test Missing Properties AND", filters={"properties": cohort_filters}
+        )
+
+        hogql_query = HogQLRealtimeCohortQuery(cohort=cohort)
+        query_str = hogql_query.query_str("clickhouse")
+
+        # Should use ifNull() in the subquery to treat missing properties as 0
+        self.assertIn("ifnull(argmax(precalculated_person_properties.matches", query_str.lower())
+        # Should use countIf to count only true matches
+        self.assertIn("countif(ifnull(equals(latest_matches, 1), 0))", query_str.lower())
+        # Should require exactly 2 matches for AND semantics (all conditions must match)
+        self.assertIn("equals(countif", query_str.lower())
+        self.assertIn(", 2)", query_str)  # equals(countIf(...), 2)
