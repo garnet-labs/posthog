@@ -998,26 +998,9 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
         info(f"Docker profiles: {', '.join(profiles)}")
     _restore_and_start(project, port, worktree_path, use_cache, profiles=profiles)
 
-    info("Waiting for PostHog to start...")
-    if not wait_for_health(f"http://localhost:{port}/_health", f"{project}-app-1"):
-        fatal(
-            f"Sandbox creation failed. See logs above.\n"
-            f"  Worktree preserved at: {worktree_path}\n"
-            f"  Retry:   sandbox start {branch}\n"
-            f"  Cleanup: sandbox destroy {branch}"
-        )
-
-    url = f"http://localhost:{port}"
-    print()
-    success(f"PostHog running at {url}")
-    info(f"Worktree:  {worktree_path}")
-    info(f"Shell:     sandbox shell {branch}")
-    info(f"VSCode:    sandbox code {branch}")
-    if _load_config().get("jetbrains"):
-        info(f"JetBrains: sandbox idea {branch}")
-    info(f"SSH:       ssh -p {port + 2000} sandbox@localhost")
-    info(f"Logs:      sandbox logs {branch}")
-    webbrowser.open(url)
+    container = f"{project}-app-1"
+    health_url = f"http://localhost:{port}/_health"
+    _attach_with_health_poll(container, health_url)
 
 
 def cmd_start(branch: str) -> None:
@@ -1033,19 +1016,11 @@ def cmd_start(branch: str) -> None:
     compose(project, entry.port, entry.worktree, "up", "-d", capture=True, profiles=profiles)
 
     # Clear stale progress from the previous boot
-    run(["docker", "exec", f"{project}-app-1", "rm", "-f", "/tmp/sandbox-progress"], check=False, capture=True)
+    container = f"{project}-app-1"
+    run(["docker", "exec", container, "rm", "-f", "/tmp/sandbox-progress"], check=False, capture=True)
 
-    info("Waiting for PostHog to start...")
-    if not wait_for_health(f"http://localhost:{entry.port}/_health", f"{project}-app-1"):
-        fatal("Sandbox failed to start. See logs above.")
-
-    url = f"http://localhost:{entry.port}"
-    success(f"PostHog running at {url}")
-    info(f"VSCode:    sandbox code {branch}")
-    if _load_config().get("jetbrains"):
-        info(f"JetBrains: sandbox idea {branch}")
-    info(f"SSH:       ssh -p {entry.port + 2000} sandbox@localhost")
-    webbrowser.open(url)
+    health_url = f"http://localhost:{entry.port}/_health"
+    _attach_with_health_poll(container, health_url)
 
 
 def cmd_stop(branch: str) -> None:
@@ -1192,12 +1167,8 @@ def cmd_idea(branch: str) -> None:
     info(f"  Project: /workspace")
 
 
-def cmd_shell(branch: str) -> None:
-    registry = Registry()
-    entry = _require_registered(registry, branch)
-    container = f"sandbox-{entry.slug}-app-1"
-
-    info(f"Attaching to mprocs in {container}... (detach with Ctrl-b d)")
+def _attach_tmux(container: str) -> None:
+    """Exec into the tmux session — replaces the current process."""
     os.execvp(
         "docker",
         [
@@ -1215,6 +1186,39 @@ def cmd_shell(branch: str) -> None:
             "posthog",
         ],
     )
+
+
+def _attach_with_health_poll(container: str, health_url: str) -> None:
+    """Attach to tmux; open browser in background when healthy."""
+    pid = os.fork()
+    if pid == 0:
+        # Child: poll health, open browser, exit.
+        if wait_for_health(health_url, container):
+            webbrowser.open(health_url.replace("/_health", ""))
+        os._exit(0)
+
+    # Parent: wait for tmux then attach (replaces this process).
+    # The entrypoint installs deps before starting tmux, so there's a
+    # brief window where the container is running but tmux isn't ready.
+    info("Attaching to mprocs... (detach with Ctrl-b d)")
+    while True:
+        result = run(
+            ["docker", "exec", container, "tmux", "-L", "sandbox", "has-session", "-t", "posthog"],
+            check=False, capture=True,
+        )
+        if result.returncode == 0:
+            break
+        time.sleep(2)
+    _attach_tmux(container)
+
+
+def cmd_shell(branch: str) -> None:
+    registry = Registry()
+    entry = _require_registered(registry, branch)
+    container = f"sandbox-{entry.slug}-app-1"
+
+    info(f"Attaching to mprocs in {container}... (detach with Ctrl-b d)")
+    _attach_tmux(container)
 
 
 def cmd_logs(branch: str) -> None:
