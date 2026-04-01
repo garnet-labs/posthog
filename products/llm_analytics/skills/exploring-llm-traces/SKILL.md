@@ -1,5 +1,5 @@
 ---
-name: exploring-traces-mcp
+name: exploring-llm-traces
 description: >
   How to query, inspect, and debug LLM traces using PostHog's MCP tools.
   Use when the user asks to debug an AI agent trace, investigate LLM behavior,
