@@ -14,12 +14,11 @@ a single AI interaction — from the top-level agent invocation down to individu
 
 ## Available tools
 
-| Tool                                      | Purpose                                                   |
-| ----------------------------------------- | --------------------------------------------------------- |
-| `posthog:query-llm-traces-list`           | Search and list traces (compact — no large content)       |
-| `posthog:query-llm-trace`                 | Get a single trace by ID with configurable content detail |
-| `posthog:execute-sql`                     | Ad-hoc SQL for complex trace analysis                     |
-| `posthog:get-llm-total-costs-for-project` | Aggregated LLM costs by model over time                   |
+| Tool                            | Purpose                                                   |
+| ------------------------------- | --------------------------------------------------------- |
+| `posthog:query-llm-traces-list` | Search and list traces (compact — no large content)       |
+| `posthog:query-llm-trace`       | Get a single trace by ID with configurable content detail |
+| `posthog:execute-sql`           | Ad-hoc SQL for complex trace analysis                     |
 
 ## Content detail levels
 
@@ -118,9 +117,7 @@ LIMIT 20
 
 ### 5. Analyze costs
 
-For aggregated costs: `get-llm-total-costs-for-project`
-
-For per-trace breakdown:
+Per-trace cost breakdown:
 
 ```sql
 SELECT
