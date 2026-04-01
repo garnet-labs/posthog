@@ -234,6 +234,8 @@ function BoldNumberComparison({
                         ref={comparisonRef}
                         onMouseEnter={() => setIsTooltipShown(true)}
                         onMouseLeave={() => setIsTooltipShown(false)}
+                        // eslint-disable-next-line react/forbid-dom-props
+                        style={{ display: 'contents' }}
                     >
                         <Link
                             onClick={() => {
