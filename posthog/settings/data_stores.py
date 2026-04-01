@@ -70,7 +70,7 @@ def postgres_config(host: str) -> dict:
 
 
 if TEST or DEBUG:
-    PG_HOST: str = os.getenv("PGHOST", "localhost")
+    PG_HOST: str = os.getenv("PGHOST", "db")
     PG_USER: str = os.getenv("PGUSER", "posthog")
     PG_PASSWORD: str = os.getenv("PGPASSWORD", "posthog")
     PG_PORT: str = os.getenv("PGPORT", "5432")
@@ -153,7 +153,7 @@ if not persons_db_writer_url and DEBUG and not TEST:
     # This matches the docker-compose.dev.yml configuration
     # A default is needed for generate_demo_data to properly populate the correct databases
     # with the demo data
-    persons_db_writer_url = f"postgres://{PG_USER}:{PG_PASSWORD}@localhost:5432/posthog_persons"
+    persons_db_writer_url = f"postgres://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/posthog_persons"
 elif not persons_db_writer_url and TEST:
     # In test mode, use a placeholder database name that will be updated by conftest
     # pytest-django adds test_ prefix which isn't known at settings import time
@@ -218,6 +218,18 @@ for route in product_routes:
         DATABASES[writer_alias]["DISABLE_SERVER_SIDE_CURSORS"] = True
         DATABASES[reader_alias]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
+    # Direct connection for migrations (bypasses PgBouncer). Only registered
+    # when the env var is explicitly set — in dev/test there's no PgBouncer,
+    # so migrations use the writer alias directly.
+    direct_env = f"PRODUCT_DB_{db.upper()}_DIRECT_URL"
+    direct_url = os.getenv(direct_env)
+    if direct_url:
+        direct_alias = f"{db}_db_direct"
+        DATABASES[direct_alias] = dj_database_url.parse(direct_url, conn_max_age=0)
+        DATABASES[direct_alias].setdefault("OPTIONS", {})["connect_timeout"] = 10
+        if DISABLE_SERVER_SIDE_CURSORS:
+            DATABASES[direct_alias]["DISABLE_SERVER_SIDE_CURSORS"] = True
+
     configured_product_databases.add(db)
 
 if configured_product_databases:
@@ -256,8 +268,8 @@ elif TEST:
 # Clickhouse Settings
 CLICKHOUSE_TEST_DB: str = "posthog" + SUFFIX
 
-CLICKHOUSE_HOST: str = os.getenv("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_LOGS_HOST: str = os.getenv("CLICKHOUSE_LOGS_HOST", "localhost")
+CLICKHOUSE_HOST: str = os.getenv("CLICKHOUSE_HOST", "clickhouse")
+CLICKHOUSE_LOGS_HOST: str = os.getenv("CLICKHOUSE_LOGS_HOST", "clickhouse")
 CLICKHOUSE_OFFLINE_CLUSTER_HOST: str | None = os.getenv("CLICKHOUSE_OFFLINE_CLUSTER_HOST", None)
 CLICKHOUSE_MIGRATIONS_HOST: str = os.getenv("CLICKHOUSE_MIGRATIONS_HOST", CLICKHOUSE_HOST)
 CLICKHOUSE_ENDPOINTS_HOST: str = os.getenv("CLICKHOUSE_ENDPOINTS_HOST", CLICKHOUSE_HOST)
@@ -444,9 +456,9 @@ TOKENS_HISTORICAL_DATA = os.getenv("TOKENS_HISTORICAL_DATA", "").split(",")
 # The last case happens when someone upgrades Heroku but doesn't have Redis installed yet. Collectstatic gets called before we can provision Redis.
 if TEST or DEBUG or IS_COLLECT_STATIC:
     if PYTEST_XDIST_WORKER_NUM is not None:
-        REDIS_URL = os.getenv("REDIS_URL", f"redis://localhost/{PYTEST_XDIST_WORKER_NUM}")
+        REDIS_URL = os.getenv("REDIS_URL", f"redis://redis7/{PYTEST_XDIST_WORKER_NUM}")
     else:
-        REDIS_URL = os.getenv("REDIS_URL", "redis://localhost/")
+        REDIS_URL = os.getenv("REDIS_URL", "redis://redis7/")
 else:
     REDIS_URL = os.getenv("REDIS_URL", "")
 
@@ -493,7 +505,9 @@ PLUGINS_RELOAD_REDIS_URL = os.getenv("PLUGINS_RELOAD_REDIS_URL", REDIS_URL)
 CDP_API_URL = get_from_env("CDP_API_URL", "")
 
 if not CDP_API_URL:
-    CDP_API_URL = "http://localhost:6738" if DEBUG else "http://ingestion-cdp-api.posthog.svc.cluster.local"
+    CDP_API_URL = (
+        "http://localhost:6738" if DEBUG else "http://ingestion-cdp-api.posthog.svc.cluster.local"
+    )  # localhost is correct — plugin server runs on host in dev
 
 # Shared secret for internal API authentication between Django and Node.js services
 LOCAL_DEV_INTERNAL_API_SECRET = "posthog123"
