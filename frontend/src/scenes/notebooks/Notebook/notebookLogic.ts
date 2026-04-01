@@ -339,8 +339,11 @@ export const notebookLogic = kea<notebookLogicType>([
                     const notebook = await migrate(response)
 
                     if (notebook.content && (!values.notebook || values.notebook.version !== notebook.version)) {
-                        // If this is the first load we need to override the content fully
-                        values.editor?.setContent(notebook.content)
+                        if (!values.notebook || values.editor?.isEmpty()) {
+                            values.editor?.setContent(notebook.content)
+                        } else {
+                            values.editor?.mergeContent(notebook.content, { skipNodeIds: values.editingNodeIds })
+                        }
                     }
 
                     return notebook
@@ -368,7 +371,7 @@ export const notebookLogic = kea<notebookLogicType>([
                             const currentEditorContent = values.editor.getJSON()
                             if (JSON.stringify(response.content) !== JSON.stringify(currentEditorContent)) {
                                 const currentPosition = values.editor.getCurrentPosition()
-                                values.editor.setContent(response.content)
+                                values.editor.mergeContent(response.content, { skipNodeIds: values.editingNodeIds })
                                 values.editor.setTextSelection(currentPosition)
                             }
                         }

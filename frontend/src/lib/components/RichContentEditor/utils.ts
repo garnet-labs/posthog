@@ -2,11 +2,20 @@ import {
     EditorFocusPosition,
     EditorRange,
     JSONContent,
+    MergeContentOptions,
     RichContentEditorType,
     RichContentNode,
     RichContentNodeType,
     TTEditor,
 } from './types'
+import equal from 'fast-deep-equal'
+import { Node as PMNode } from '@tiptap/pm/model'
+
+type MergeNode = {
+    json: JSONContent
+    pmNode: PMNode
+    nodeId: string | null
+}
 
 export function createEditor(editor: TTEditor): RichContentEditorType {
     return {
@@ -19,6 +28,8 @@ export function createEditor(editor: TTEditor): RichContentEditorType {
         setEditable: (editable: boolean) => queueMicrotask(() => editor.setEditable(editable, false)),
         setContent: (content: JSONContent) =>
             queueMicrotask(() => editor.commands.setContent(content, { emitUpdate: false })),
+        mergeContent: (content: JSONContent, options?: MergeContentOptions) =>
+            queueMicrotask(() => mergeContent(editor, content, options)),
         setSelection: (position: number) => editor.commands.setNodeSelection(position),
         setTextSelection: (position: number | EditorRange) =>
             queueMicrotask(() => editor.commands.setTextSelection(position)),
@@ -127,6 +138,190 @@ function getChildren(node: RichContentNode, direct: boolean = true): RichContent
         return !direct
     })
     return children
+}
+
+function mergeContent(editor: TTEditor, content: JSONContent, options?: MergeContentOptions): void {
+    const nextDoc = editor.schema.nodeFromJSON(normalizeDocumentContent(content))
+    const workingNodes = getTopLevelNodes(editor.state.doc)
+    const targetNodes = getTopLevelNodes(nextDoc)
+    let tr = editor.state.tr
+    let currentIndex = 0
+    let targetIndex = 0
+
+    while (targetIndex < targetNodes.length || currentIndex < workingNodes.length) {
+        const currentNode = workingNodes[currentIndex]
+        const targetNode = targetNodes[targetIndex]
+
+        if (!currentNode && targetNode) {
+            tr = insertNodeAtIndex(tr, workingNodes, currentIndex, targetNode)
+            currentIndex += 1
+            targetIndex += 1
+            continue
+        }
+
+        if (currentNode && !targetNode) {
+            if (shouldSkipNode(currentNode, options)) {
+                currentIndex += 1
+                continue
+            }
+
+            tr = deleteNodeAtIndex(tr, workingNodes, currentIndex)
+            continue
+        }
+
+        if (!currentNode || !targetNode) {
+            break
+        }
+
+        if (nodesMatch(currentNode, targetNode)) {
+            if (!shouldSkipNode(currentNode, options) && !equal(currentNode.json, targetNode.json)) {
+                tr = syncMatchedNodeAtIndex(tr, workingNodes, currentIndex, targetNode)
+            }
+
+            currentIndex += 1
+            targetIndex += 1
+            continue
+        }
+
+        const currentNodeAppearsLaterInTarget = findNodeIndexById(targetNodes, currentNode.nodeId, targetIndex + 1)
+        const targetNodeAppearsLaterInCurrent = findNodeIndexById(workingNodes, targetNode.nodeId, currentIndex + 1)
+
+        if (shouldSkipNode(currentNode, options)) {
+            if (currentNodeAppearsLaterInTarget !== -1) {
+                tr = insertNodeAtIndex(tr, workingNodes, currentIndex, targetNode)
+                currentIndex += 1
+                targetIndex += 1
+                continue
+            }
+
+            currentIndex += 1
+            continue
+        }
+
+        if (
+            currentNodeAppearsLaterInTarget !== -1 &&
+            (targetNodeAppearsLaterInCurrent === -1 || currentNodeAppearsLaterInTarget < targetNodeAppearsLaterInCurrent)
+        ) {
+            tr = insertNodeAtIndex(tr, workingNodes, currentIndex, targetNode)
+            currentIndex += 1
+            targetIndex += 1
+            continue
+        }
+
+        if (targetNodeAppearsLaterInCurrent !== -1) {
+            tr = deleteNodeAtIndex(tr, workingNodes, currentIndex)
+            continue
+        }
+
+        tr = replaceNodeAtIndex(tr, workingNodes, currentIndex, targetNode)
+        currentIndex += 1
+        targetIndex += 1
+    }
+
+    if (tr.docChanged) {
+        editor.view.dispatch(tr.setMeta('preventUpdate', true))
+    }
+}
+
+function normalizeDocumentContent(content: JSONContent): JSONContent {
+    const rawContent = content as JSONContent | JSONContent[]
+
+    if (Array.isArray(rawContent)) {
+        return { type: 'doc', content: rawContent }
+    }
+
+    if (rawContent.type === 'doc') {
+        return rawContent
+    }
+
+    return { type: 'doc', content: [rawContent] }
+}
+
+function getTopLevelNodes(doc: PMNode): MergeNode[] {
+    const nodes: MergeNode[] = []
+
+    doc.forEach((node) => {
+        nodes.push({
+            json: node.toJSON() as JSONContent,
+            pmNode: node,
+            nodeId: getNodeId(node.attrs),
+        })
+    })
+
+    return nodes
+}
+
+function getNodeId(attrs: Record<string, any> | undefined): string | null {
+    return typeof attrs?.nodeId === 'string' && attrs.nodeId.length > 0 ? attrs.nodeId : null
+}
+
+function shouldSkipNode(node: MergeNode, options?: MergeContentOptions): boolean {
+    return !!(node.nodeId && options?.skipNodeIds?.[node.nodeId])
+}
+
+function nodesMatch(currentNode: MergeNode, targetNode: MergeNode): boolean {
+    if (currentNode.nodeId || targetNode.nodeId) {
+        return currentNode.nodeId !== null && currentNode.nodeId === targetNode.nodeId
+    }
+
+    return currentNode.pmNode.type === targetNode.pmNode.type
+}
+
+function findNodeIndexById(nodes: MergeNode[], nodeId: string | null, startIndex: number): number {
+    if (!nodeId) {
+        return -1
+    }
+
+    for (let index = startIndex; index < nodes.length; index++) {
+        if (nodes[index].nodeId === nodeId) {
+            return index
+        }
+    }
+
+    return -1
+}
+
+function getPositionAtIndex(nodes: MergeNode[], index: number): number {
+    let position = 0
+
+    for (let nodeIndex = 0; nodeIndex < index; nodeIndex++) {
+        position += nodes[nodeIndex].pmNode.nodeSize
+    }
+
+    return position
+}
+
+function insertNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number, node: MergeNode) {
+    tr.insert(getPositionAtIndex(nodes, index), node.pmNode)
+    nodes.splice(index, 0, node)
+    return tr
+}
+
+function deleteNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number) {
+    const position = getPositionAtIndex(nodes, index)
+    tr.delete(position, position + nodes[index].pmNode.nodeSize)
+    nodes.splice(index, 1)
+    return tr
+}
+
+function replaceNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number, node: MergeNode) {
+    const position = getPositionAtIndex(nodes, index)
+    tr.replaceWith(position, position + nodes[index].pmNode.nodeSize, node.pmNode)
+    nodes[index] = node
+    return tr
+}
+
+function syncMatchedNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number, node: MergeNode) {
+    const position = getPositionAtIndex(nodes, index)
+    const currentNode = nodes[index]
+
+    if (currentNode.pmNode.type === node.pmNode.type && currentNode.pmNode.content.eq(node.pmNode.content)) {
+        tr.setNodeMarkup(position, node.pmNode.type, node.pmNode.attrs, node.pmNode.marks)
+        nodes[index] = node
+        return tr
+    }
+
+    return replaceNodeAtIndex(tr, nodes, index, node)
 }
 
 function getAdjacentNodes(

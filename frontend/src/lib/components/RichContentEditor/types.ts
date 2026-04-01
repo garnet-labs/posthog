@@ -9,6 +9,10 @@ import { Node as PMNode } from '@tiptap/pm/model'
 export interface RichContentNode extends PMNode {}
 export interface JSONContent extends TTJSONContent {}
 
+export type MergeContentOptions = {
+    skipNodeIds?: Record<string, true>
+}
+
 export type {
     ChainedCommands as EditorCommands,
     FocusPosition as EditorFocusPosition,
@@ -29,6 +33,7 @@ export interface RichContentEditorType {
     getAdjacentNodes: (pos: number) => { previous: RichContentNode | null; next: RichContentNode | null }
     setEditable: (editable: boolean) => void
     setContent: (content: JSONContent) => void
+    mergeContent: (content: JSONContent, options?: MergeContentOptions) => void
     setSelection: (position: number) => void
     setTextSelection: (position: number | EditorRange) => void
     focus: (position?: EditorFocusPosition) => void
