@@ -1,9 +1,14 @@
 import { getDefaultCdpConfig } from '../cdp/config'
 import { getDefaultCommonConfig } from '../common/config'
-import { getDefaultIngestionOutputsConfig } from '../ingestion/analytics/config/outputs'
-import { getDefaultIngestionConsumerConfig, getDefaultKafkaProducerEnvConfig } from '../ingestion/config'
-import { getDefaultErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
-import { getDefaultErrorTrackingOutputsConfig } from '../ingestion/error-tracking/config/outputs'
+import {
+    getDefaultIngestionConsumerConfig,
+    getDefaultIngestionOutputsConfig,
+    getDefaultKafkaProducerEnvConfig,
+} from '../ingestion/config'
+import {
+    getDefaultErrorTrackingConsumerConfig,
+    getDefaultErrorTrackingOutputsConfig,
+} from '../ingestion/error-tracking/config'
 import {
     getDefaultLogsIngestionConsumerConfig,
     getDefaultTracesIngestionConsumerConfig,

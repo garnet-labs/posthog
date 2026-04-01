@@ -19,8 +19,8 @@ import {
     PersonHogConfig,
     RedisConnectionsConfig,
 } from '../ingestion/config'
-import { ErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
-import { ErrorTrackingOutputsConfig, registerErrorTrackingOutputs } from '../ingestion/error-tracking/config/outputs'
+import { ErrorTrackingConsumerConfig, ErrorTrackingOutputsConfig } from '../ingestion/error-tracking/config'
+import { registerErrorTrackingOutputs } from '../ingestion/error-tracking/config/outputs'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
 import {
     DEFAULT_PRODUCER,

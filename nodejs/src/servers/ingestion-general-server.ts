@@ -16,11 +16,12 @@ import {
     KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { IngestionOutputsConfig, registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
+import { registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
 import { DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/analytics/config/producers'
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
+    IngestionOutputsConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
     KafkaProducerEnvConfig,
