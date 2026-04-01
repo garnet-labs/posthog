@@ -56,6 +56,19 @@ python manage.py ch_migrate apply
 | `add_column`             | guidance to edit existing YAML directly         |
 | `drop_table`             | guidance to remove from existing YAML           |
 
+## Modules
+
+- `desired_state.py` -- parses `schema/*.yaml` into DesiredState objects
+- `state_diff.py` -- diffs desired state against live ClickHouse schema
+- `plan_generator.py` -- generates human-readable plan + executable SQL steps
+- `schema_introspect.py` -- queries `system.tables`/`system.columns` across all hosts
+- `schema_graph.py` -- models table ecosystems (events, sessions, person, replay)
+- `templates.py` -- generates desired-state YAML from template configs
+- `runner.py` -- executes SQL steps via ClickhouseCluster + legacy migration support
+- `tracking.py` -- per-host step tracking, advisory locking
+- `validator.py` -- validates desired-state YAML (ecosystem completeness, cross-cluster targeting)
+- `manifest.py` -- ManifestStep dataclass + node role mapping
+
 ## Running tests
 
 ```bash

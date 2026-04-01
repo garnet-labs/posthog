@@ -2,6 +2,36 @@
 
 This directory contains ClickHouse schema migrations for PostHog.
 
+## How it works
+
+The old migration system (`run_sql_with_exceptions`) asks you to pick from 12 node roles,
+know whether a table is sharded, remember to set `is_alter_on_replicated_table`,
+and get the execution order right for companion tables (Kafka, MV, Distributed).
+Miss any of these and your migration runs on the wrong nodes, silently.
+
+The new system works like Terraform for ClickHouse.
+You declare the schema you want in YAML, diff it against what's actually running, and apply the difference.
+
+```bash
+# Scaffold a new table ecosystem
+python manage.py ch_migrate generate --template ingestion_pipeline --table sessions_v4
+
+# See what would change
+python manage.py ch_migrate plan
+
+# Do it
+python manage.py ch_migrate apply
+```
+
+```mermaid
+graph LR
+    YAML["schema/X.yaml"] -->|plan| Diff["Diff vs live CH"]
+    Diff -->|apply| CH["ClickHouse"]
+```
+
+The plan output shows every SQL statement, which hosts it targets, and the execution order.
+Review it the same way you'd review a Terraform plan before hitting apply.
+
 ## Migration approaches
 
 ### Desired-state YAML (new)
@@ -102,3 +132,41 @@ and cross-cluster targeting mismatches.
 | SHUFFLEHOG       | Shufflehog nodes                                |
 | ENDPOINTS        | Endpoint nodes                                  |
 | LOGS             | Log nodes                                       |
+
+## FAQ
+
+**What happens to live writes during ALTER TABLE on sharded_events?**
+
+Nothing. `ALTER ADD COLUMN` on ReplicatedMergeTree is metadata-only -- it completes in milliseconds regardless of table size.
+Writes keep going. Same behavior as the old system.
+
+**What about ALTER MODIFY COLUMN (type changes)?**
+
+That rewrites data parts and can take hours on large tables.
+The plan flags it with a warning. Schedule these carefully and coordinate with whoever's on-call.
+
+**What happens during the MV drop/recreate gap?**
+
+There's a sub-second window where Kafka messages aren't consumed by that MV.
+Kafka retains them, and the new MV picks up from the last committed offset.
+Same window the old system had.
+
+**What if a shard fails during apply?**
+
+Apply halts immediately. The tracking table records which steps succeeded on which hosts.
+Re-running is safe -- all generated SQL uses `IF NOT EXISTS` / `IF EXISTS`.
+
+**How do the 231 legacy migrations coexist?**
+
+They're untouched. `migrate_clickhouse` still runs them in order.
+The two systems coexist. `run_sql_with_exceptions` has a deprecation warning pointing here.
+
+**What about drift between hosts?**
+
+`ch_migrate drift` queries `system.tables` on every host and compares.
+Use `--halt-on-drift` on apply to block execution if hosts disagree.
+
+**How do I roll back?**
+
+Edit the schema YAML (revert your change), run `plan`, run `apply`.
+Git history of the YAML files is your rollback mechanism.
