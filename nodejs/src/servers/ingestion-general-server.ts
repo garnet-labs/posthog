@@ -17,19 +17,20 @@ import {
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import { INGESTION_OUTPUT_DEFINITIONS } from '../ingestion/analytics/config/outputs'
-import { PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/analytics/config/producers'
+import { DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/analytics/config/producers'
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
+    KafkaProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
 } from '../ingestion/config'
 import { CookielessManager } from '../ingestion/cookieless/cookieless-manager'
 import { IngestionConsumer, IngestionConsumerDeps } from '../ingestion/ingestion-consumer'
 import { IngestionTestingConsumer } from '../ingestion/ingestion-testing-consumer'
-import { KafkaProducerRegistry, resolveIngestionOutputs } from '../ingestion/outputs'
+import { KafkaProducerRegistry, KafkaProducerRegistryBuilder, resolveIngestionOutputs } from '../ingestion/outputs'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import { PluginServerService, RedisPool } from '../types'
@@ -62,6 +63,7 @@ export type IngestionGeneralServerConfig = BaseServerConfig &
     IngestionConsumerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
+    KafkaProducerEnvConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
     KafkaConsumerBaseConfig &
@@ -193,14 +195,13 @@ export class IngestionGeneralServer implements NodeServer {
                 return consumer.service
             })
         } else {
-            // Resolve ingestion outputs — producer creation blocks until the broker
+            // Build producer registry — producer creation blocks until the broker
             // is reachable (rdkafka retries indefinitely), so the server will hang
             // here if a broker is down and the pod never becomes healthy.
-            this.ingestionProducerRegistry = new KafkaProducerRegistry(
-                this.config.KAFKA_CLIENT_RACK,
-                PRODUCER_CONFIG_MAP
-            )
-            const ingestionOutputs = await resolveIngestionOutputs(
+            this.ingestionProducerRegistry = await new KafkaProducerRegistryBuilder(this.config.KAFKA_CLIENT_RACK)
+                .register(DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, this.config)
+                .build()
+            const ingestionOutputs = resolveIngestionOutputs(
                 this.ingestionProducerRegistry,
                 INGESTION_OUTPUT_DEFINITIONS
             )

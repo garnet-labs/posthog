@@ -25,31 +25,18 @@ export interface IngestionOutputDefinition<P extends string> {
  * @param definitions - Static output definitions keyed by output name.
  * @returns A fully resolved `IngestionOutputs` instance ready for use by pipeline steps.
  */
-export async function resolveIngestionOutputs<O extends string, P extends string>(
+export function resolveIngestionOutputs<O extends string, P extends string>(
     registry: KafkaProducerRegistry<P>,
     definitions: Record<O, IngestionOutputDefinition<P>>
-): Promise<IngestionOutputs<O>> {
-    const promises: Promise<{ outputName: O; config: IngestionOutput }>[] = []
+): IngestionOutputs<O> {
+    const resolved: Record<string, IngestionOutput> = {}
 
     for (const outputName in definitions) {
         const definition = definitions[outputName]
         const producerName = (process.env[definition.producerOverrideEnvVar] ?? definition.defaultProducerName) as P
         const topic = process.env[definition.topicOverrideEnvVar] ?? definition.defaultTopic
 
-        // getProducer throws if the producer is not found, so all keys of O
-        // are guaranteed to be present in the result or the call fails.
-        promises.push(
-            registry.getProducer(producerName).then((producer) => ({
-                outputName,
-                config: { topic, producer },
-            }))
-        )
-    }
-
-    const results = await Promise.all(promises)
-    const resolved: Record<string, IngestionOutput> = {}
-    for (const { outputName, config } of results) {
-        resolved[outputName] = config
+        resolved[outputName] = { topic, producer: registry.getProducer(producerName) }
     }
 
     // Safe cast: every key in Record<O, ...> has been resolved above.

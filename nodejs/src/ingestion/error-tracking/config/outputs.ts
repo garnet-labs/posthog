@@ -17,7 +17,7 @@ import {
     TOPHOG_OUTPUT,
 } from '../../common/outputs'
 import { IngestionOutputDefinition } from '../../outputs/resolver'
-import { DEFAULT_PRODUCER, ProducerName } from './producers'
+import { DEFAULT_PRODUCER, ProducerName } from '../outputs/producers'
 
 /** Static config for all error tracking ingestion outputs. */
 export const ERROR_TRACKING_OUTPUT_DEFINITIONS: Record<string, IngestionOutputDefinition<ProducerName>> = {

@@ -15,14 +15,19 @@ import {
     DatabaseConnectionConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
+    KafkaProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
 } from '../ingestion/config'
 import { ErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
 import { ERROR_TRACKING_OUTPUT_DEFINITIONS } from '../ingestion/error-tracking/config/outputs'
-import { PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/error-tracking/config/producers'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
-import { KafkaProducerRegistry, resolveIngestionOutputs } from '../ingestion/outputs'
+import {
+    DEFAULT_PRODUCER,
+    DEFAULT_PRODUCER_CONFIG_MAP,
+    ProducerName,
+} from '../ingestion/error-tracking/outputs/producers'
+import { KafkaProducerRegistry, KafkaProducerRegistryBuilder, resolveIngestionOutputs } from '../ingestion/outputs'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { PluginServerService, RedisPool } from '../types'
 import { ServerCommands } from '../utils/commands'
@@ -51,6 +56,7 @@ export type ErrorTrackingServerConfig = BaseServerConfig &
     ErrorTrackingConsumerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
+    KafkaProducerEnvConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
     KafkaConsumerBaseConfig &
@@ -104,8 +110,10 @@ export class ErrorTrackingServer implements NodeServer {
         logger.info('👍', 'Postgres Router ready')
 
         logger.info('🤔', 'Connecting to Kafka...')
-        this.producerRegistry = new KafkaProducerRegistry(this.config.KAFKA_CLIENT_RACK, PRODUCER_CONFIG_MAP)
-        const outputs = await resolveIngestionOutputs(this.producerRegistry, ERROR_TRACKING_OUTPUT_DEFINITIONS)
+        this.producerRegistry = await new KafkaProducerRegistryBuilder(this.config.KAFKA_CLIENT_RACK)
+            .register(DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, this.config)
+            .build()
+        const outputs = resolveIngestionOutputs(this.producerRegistry, ERROR_TRACKING_OUTPUT_DEFINITIONS)
         logger.info('👍', 'Kafka ready')
 
         logger.info('🤔', 'Connecting to ingestion Redis...')
