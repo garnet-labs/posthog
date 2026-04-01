@@ -522,11 +522,7 @@ class TestReconcileImportYamlRoundTrip(unittest.TestCase):
         self.assertEqual(len(writable.columns), 3)  # inherited
 
         # Write back out as YAML and re-parse
-        out_data = {
-            "ecosystem": state.ecosystem,
-            "cluster": state.cluster,
-            "tables": {},
-        }
+        tables_out: dict[str, dict] = {}
         for tname, tbl in state.tables.items():
             tdata: dict = {"engine": tbl.engine, "on_nodes": tbl.on_nodes}
             if tbl.order_by:
@@ -540,7 +536,12 @@ class TestReconcileImportYamlRoundTrip(unittest.TestCase):
             if tbl.sharded:
                 tdata["sharded"] = True
             tdata["columns"] = [{"name": c.name, "type": c.type} for c in tbl.columns]
-            out_data["tables"][tname] = tdata
+            tables_out[tname] = tdata
+        out_data = {
+            "ecosystem": state.ecosystem,
+            "cluster": state.cluster,
+            "tables": tables_out,
+        }
 
         out_path = Path(d) / "roundtrip_out.yaml"
         with open(out_path, "w") as f:
