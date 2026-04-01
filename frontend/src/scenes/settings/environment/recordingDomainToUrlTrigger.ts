@@ -19,7 +19,7 @@ export function recordingDomainEntryToUrlTrigger(domainEntry: string): UrlTrigge
         return null
     }
     const hostPattern = escapeRegExp(host).replace(/\\\*/g, '.*')
-    const pattern = `^${protocol}${hostPattern}(?:[/?#:][\\s\\S]*)?$`
+    const pattern = `^${escapeRegExp(protocol)}${hostPattern}(?:[/?#:][\\s\\S]*)?$`
     try {
         new RegExp(pattern)
     } catch {
