@@ -1,6 +1,8 @@
-import type { ASTNode, HogQLParser } from '@posthog/hogql-parser'
+import type { ASTNode } from '@posthog/hogql-parser'
 
 import { escapePropertyAsHogQLIdentifier } from '~/queries/utils'
+
+import { parseSelect } from './hogqlParserSingleton'
 
 /** Escape a possibly qualified (dot-separated) name, escaping each segment individually. */
 const escapeQualifiedIdentifier = (name: string): string => {
@@ -12,12 +14,9 @@ export const normalizeIdentifier = (identifier: string): string => {
 }
 
 /** Try to parse a SELECT query, returning the AST node or null on failure. */
-const tryParseSelect = (parser: HogQLParser | null, query: string): ASTNode | null => {
-    if (!parser) {
-        return null
-    }
+const tryParseSelect = async (query: string): Promise<ASTNode | null> => {
     try {
-        const result = JSON.parse(parser.parseSelect(query))
+        const result = JSON.parse(await parseSelect(query))
         if (result.error || result.node !== 'SelectQuery') {
             return null
         }
@@ -60,13 +59,12 @@ const extractLimitOffsetFromAST = (ast: ASTNode): string | null => {
     return parts.length > 0 ? parts.join(' ') : null
 }
 
-export const buildQueryForColumnClick = (
-    parser: HogQLParser | null,
+export const buildQueryForColumnClick = async (
     currentQuery: string | null,
     tableName: string,
     columnName: string
-): string => {
-    const ast = currentQuery ? tryParseSelect(parser, currentQuery) : null
+): Promise<string> => {
+    const ast = currentQuery ? await tryParseSelect(currentQuery) : null
     const limitOffsetClause = ast ? extractLimitOffsetFromAST(ast) : null
     const baseQuery = `SELECT ${escapeQualifiedIdentifier(columnName)} FROM ${escapeQualifiedIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 
@@ -119,15 +117,14 @@ export const buildQueryForColumnClick = (
     return `SELECT ${columns.map(escapeQualifiedIdentifier).join(', ')} FROM ${escapeQualifiedIdentifier(tableName)} ${limitOffsetClause ?? 'LIMIT 100'}`
 }
 
-export const parseQueryTablesAndColumns = (
-    parser: HogQLParser | null,
+export const parseQueryTablesAndColumns = async (
     queryInput: string | null
-): Record<string, Record<string, boolean>> => {
+): Promise<Record<string, Record<string, boolean>>> => {
     if (!queryInput) {
         return {}
     }
 
-    const ast = tryParseSelect(parser, queryInput)
+    const ast = await tryParseSelect(queryInput)
     if (!ast) {
         return {}
     }
