@@ -1117,12 +1117,21 @@ class TestPrinter(BaseTest):
         self.assertEqual(self._expr("max2(1,2)"), "max2(1, 2)")
         self.assertEqual(self._expr("toInt('1')", context), "accurateCastOrNull(%(hogql_val_0)s, %(hogql_val_1)s)")
         self.assertEqual(self._expr("toFloat('1.3')", context), "accurateCastOrNull(%(hogql_val_2)s, %(hogql_val_3)s)")
+        # ClickHouse-style type conversion aliases
         self.assertEqual(
-            self._expr("toUUID('470f9b15-ff43-402a-af9f-2ed7c526a6cf')", context),
-            "accurateCastOrNull(%(hogql_val_4)s, %(hogql_val_5)s)",
+            self._expr("toFloat64('1.3')", context), "accurateCastOrNull(%(hogql_val_4)s, %(hogql_val_5)s)"
         )
         self.assertEqual(
-            self._expr("toDecimal('3.14', 2)", context), "accurateCastOrNull(%(hogql_val_6)s, %(hogql_val_7)s)"
+            self._expr("toFloat64OrNull('1.3')", context), "accurateCastOrNull(%(hogql_val_6)s, %(hogql_val_7)s)"
+        )
+        self.assertEqual(self._expr("toInt64('1')", context), "accurateCastOrNull(%(hogql_val_8)s, %(hogql_val_9)s)")
+        self.assertEqual(self._expr("toInt32('1')", context), "accurateCastOrNull(%(hogql_val_10)s, %(hogql_val_11)s)")
+        self.assertEqual(
+            self._expr("toUUID('470f9b15-ff43-402a-af9f-2ed7c526a6cf')", context),
+            "accurateCastOrNull(%(hogql_val_12)s, %(hogql_val_13)s)",
+        )
+        self.assertEqual(
+            self._expr("toDecimal('3.14', 2)", context), "accurateCastOrNull(%(hogql_val_14)s, %(hogql_val_15)s)"
         )
         self.assertEqual(self._expr("quantile(0.95)( event )"), "quantile(0.95)(events.event)")
 
@@ -3666,11 +3675,25 @@ class TestPrinter(BaseTest):
             ("int", "event::int", "toInt64(events.event)"),
             ("integer", "event::integer", "toInt64(events.event)"),
             ("int_upper", "event::INT", "toInt64(events.event)"),
+            # ClickHouse-style integer type names
+            ("int8", "event::int8", "toInt64(events.event)"),
+            ("int16", "event::int16", "toInt64(events.event)"),
+            ("int32", "event::int32", "toInt64(events.event)"),
+            ("int64", "event::int64", "toInt64(events.event)"),
+            ("bigint", "event::bigint", "toInt64(events.event)"),
+            # Unsigned integer type names
+            ("uint8", "event::uint8", "toUInt64(events.event)"),
+            ("uint16", "event::uint16", "toUInt64(events.event)"),
+            ("uint32", "event::uint32", "toUInt64(events.event)"),
+            ("uint64", "event::uint64", "toUInt64(events.event)"),
             # Float types
             ("float", "event::float", "toFloat64(events.event)"),
             ("double", "event::double", "toFloat64(events.event)"),
             ("double_precision", 'event::"double precision"', "toFloat64(events.event)"),
             ("real", "event::real", "toFloat64(events.event)"),
+            # ClickHouse-style float type names
+            ("float32", "event::float32", "toFloat64(events.event)"),
+            ("float64", "event::float64", "toFloat64(events.event)"),
             # String types
             ("text", "event::text", "toString(events.event)"),
             ("varchar", "event::varchar", "toString(events.event)"),

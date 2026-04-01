@@ -1709,9 +1709,11 @@ class HogQLPrinter(Visitor[str]):
 
     def visit_type_cast(self, node: ast.TypeCast):
         match node.type_name.lower():
-            case "int" | "integer":
+            case "int" | "integer" | "int8" | "int16" | "int32" | "int64" | "int128" | "int256" | "bigint":
                 return f"toInt64({self.visit(node.expr)})"
-            case "float" | "double" | "double precision" | "real":
+            case "uint8" | "uint16" | "uint32" | "uint64" | "uint128" | "uint256":
+                return f"toUInt64({self.visit(node.expr)})"
+            case "float" | "double" | "double precision" | "real" | "float32" | "float64":
                 return f"toFloat64({self.visit(node.expr)})"
             case "text" | "varchar" | "char" | "string":
                 return f"toString({self.visit(node.expr)})"
