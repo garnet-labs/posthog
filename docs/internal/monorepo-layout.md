@@ -93,4 +93,4 @@ Developer tooling: CLIs, linters, formatters, code generators, scaffolding scrip
 
 ### Dev environment
 
-Configuration for the local developer environment. The `devenv/` directory holds the intent/capability model used by both `hogli dev:setup` and `bin/sandbox` — mapping developer intents (e.g., "I'm working on error tracking") to capabilities (event_ingestion, replay_storage, etc.) and Docker Compose profiles. Process definitions for local dev live in `bin/mprocs.yaml`, while sandboxes resolve intents to profiles in `docker-compose.profiles.yml`.
+Configuration for the local developer environment. The `devenv/` directory holds the intent/capability model used by both `hogli dev:setup` and `hogli sandbox` — mapping developer intents (e.g., "I'm working on error tracking") to capabilities (event_ingestion, replay_storage, etc.) and Docker Compose profiles. Process definitions for local dev live in `bin/mprocs.yaml`, while sandboxes resolve intents to profiles in `docker-compose.profiles.yml`.
