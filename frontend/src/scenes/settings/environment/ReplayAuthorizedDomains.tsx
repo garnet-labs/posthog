@@ -39,14 +39,11 @@ export function ReplayAuthorizedDomains(): JSX.Element {
                         (!currentTeam?.recording_domains?.length ? 'No authorized domains to convert' : undefined)
                     }
                     loading={currentTeamLoading}
+                    tooltip="URL triggers give you more control over which pages are recorded and support regex matching"
                     data-attr="replay-authorized-domains-convert-to-url-triggers"
                 >
                     Convert to URL triggers
                 </LemonButton>
-                <p className="text-muted text-sm mt-2 mb-0">
-                    Opens a confirmation step: map each domain to a regex URL trigger, then remove this deprecated list
-                    after you convert.
-                </p>
             </div>
             <AuthorizedUrlList
                 type={AuthorizedUrlListType.RECORDING_DOMAINS}
