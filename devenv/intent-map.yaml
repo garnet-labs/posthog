@@ -60,7 +60,7 @@ capabilities:
 
     temporal_workflows:
         description: 'Temporal workflow orchestration'
-        requires: [core_infra]
+        requires: [core_infra, duckgres]
         docker_profiles: [temporal]
 
     recording_rasterizer:
@@ -70,7 +70,7 @@ capabilities:
 
     dagster_pipelines:
         description: 'Dagster data pipeline orchestration'
-        requires: [core_infra]
+        requires: [core_infra, duckgres]
         docker_profiles: []
 
     llm_gateway:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import yaml
 from hogli.devenv.generator import (
     DevenvConfig,
     MprocsGenerator,
@@ -408,10 +409,12 @@ class TestIntentMapLoading:
 
         # Check that capabilities with docker services have profiles
         assert intent_map.capabilities["temporal_workflows"].docker_profiles == ["temporal"]
+        assert "duckgres" in intent_map.capabilities["temporal_workflows"].requires
         assert intent_map.capabilities["replay_storage"].docker_profiles == ["replay"]
         assert intent_map.capabilities["observability"].docker_profiles == ["observability"]
         assert intent_map.capabilities["dev_tools"].docker_profiles == ["dev_tools"]
         assert intent_map.capabilities["coordination"].docker_profiles == ["etcd"]
+        assert "duckgres" in intent_map.capabilities["dagster_pipelines"].requires
 
 
 class TestMprocsRegistry:
@@ -443,6 +446,25 @@ class TestMprocsRegistry:
 
         assert "shell" in config
         assert "start-backend" in config["shell"]
+
+    def test_ducklake_dependent_processes_use_standard_duckgres_wait(self) -> None:
+        """DuckLake-dependent processes wait on duckgres via the standard docker wait helper."""
+        registry = create_mprocs_registry()
+
+        temporal_config = registry.get_process_config("temporal-worker")
+        dagster_config = registry.get_process_config("dagster")
+
+        assert "bin/wait-for-docker temporal duckgres" in temporal_config["shell"]
+        assert "check_ducklake_up" not in temporal_config["shell"]
+        assert "bin/wait-for-docker duckgres" in dagster_config["shell"]
+        assert "check_ducklake_up" not in dagster_config["shell"]
+
+    def test_local_duckgres_service_has_healthcheck(self) -> None:
+        """Local duckgres service declares a Docker healthcheck for standard readiness handling."""
+        compose = yaml.safe_load(Path("docker-compose.dev.yml").read_text())
+        duckgres = compose["services"]["duckgres"]
+
+        assert duckgres["healthcheck"]["test"] == ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/15432'"]
 
 
 class TestDevenvConfig:

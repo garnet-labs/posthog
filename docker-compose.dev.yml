@@ -566,6 +566,11 @@ services:
                 condition: service_healthy
             objectstorage:
                 condition: service_started
+        healthcheck:
+            test: ['CMD-SHELL', "bash -c 'echo > /dev/tcp/localhost/15432'"]
+            interval: 2s
+            timeout: 5s
+            retries: 15
         command: ['--config', '/app/config.yaml']
 
     etcd:

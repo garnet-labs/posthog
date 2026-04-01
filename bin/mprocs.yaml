@@ -98,8 +98,7 @@ procs:
 
     temporal-worker:
         shell: |-
-            bin/wait-for-docker temporal && \
-            bin/check_ducklake_up && \
+            bin/wait-for-docker temporal duckgres && \
             python manage.py register_temporal_search_attributes && \
             if [ -n "$TEMPORAL_DISABLE_HOT_RELOAD" ] || ! command -v nodemon >/dev/null 2>&1; then \
                 python manage.py start_temporal_worker --task-queue development-task-queue --max-concurrent-workflow-tasks=1000 --max-concurrent-activities=1000; \
@@ -128,8 +127,7 @@ procs:
 
     dagster:
         shell: |-
-            bin/wait-for-docker && \
-            bin/check_ducklake_up && \
+            bin/wait-for-docker duckgres && \
             dagster dev --workspace $DAGSTER_HOME/workspace.yaml -p $DAGSTER_UI_PORT
         capability: dagster_pipelines
         ready_pattern: 'Launching Dagster services'
