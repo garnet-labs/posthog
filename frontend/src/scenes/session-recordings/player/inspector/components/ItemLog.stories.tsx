@@ -175,20 +175,35 @@ export const LogWithNoAttributes: Story = {
 }
 
 export const LogWithLongBody: Story = {
-    render: renderBasic as any,
-    args: {
-        item: makeItem(
-            'info',
-            'This is a very long log message that contains a lot of information about what happened during the request processing pipeline including multiple stages of validation, transformation, and storage operations that were performed on the incoming data payload before it was finally committed to the database and a response was sent back to the client',
-            {
-                attributes: {
-                    'request.id': 'req-abc-123-def-456',
-                    'request.duration_ms': '1523',
-                    'request.size_bytes': '45230',
-                },
-            }
-        ),
+    render: (props: Partial<ItemLogProps>) => {
+        const propsToUse = {
+            item: makeItem(
+                'info',
+                'This is a very long log message that contains a lot of information about what happened during the request processing pipeline including multiple stages of validation, transformation, and storage operations that were performed on the incoming data payload before it was finally committed to the database and a response was sent back to the client',
+                {
+                    attributes: {
+                        'request.id': 'req-abc-123-def-456',
+                        'request.duration_ms': '1523',
+                        'request.size_bytes': '45230',
+                    },
+                }
+            ),
+            ...props,
+        } as ItemLogProps
+
+        return (
+            <BindLogic logic={sessionRecordingPlayerLogic} props={{ sessionRecordingId: '12345' }}>
+                <div className="flex flex-col gap-2 w-[400px]">
+                    <h3>Collapsed (constrained width)</h3>
+                    <ItemLog {...propsToUse} />
+                    <LemonDivider />
+                    <h3>Expanded (constrained width)</h3>
+                    <ItemLogDetail {...propsToUse} />
+                </div>
+            </BindLogic>
+        )
     },
+    args: {},
 }
 
 export const LogWithGroupedItems: Story = {
