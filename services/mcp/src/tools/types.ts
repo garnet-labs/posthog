@@ -23,6 +23,7 @@ export type CachedOrg = {
     name: string
     projectName: string
     timezone: string
+    personOnEventsEnabled: boolean
 }
 
 export type State = {

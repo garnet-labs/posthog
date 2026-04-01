@@ -480,6 +480,15 @@ export class MCP extends McpAgent<Env> {
             if (org) {
                 lines.push(`You are currently in project "${org.projectName}" (organization: "${org.name}").`)
                 lines.push(`Project timezone: ${org.timezone}.`)
+                if (org.personOnEventsEnabled) {
+                    lines.push(
+                        'Person-on-events mode is enabled. When querying `person.properties.*` on the events table, values reflect what was set at the time the event was ingested, not the person\'s current value. The same person can have different property values across different events. Do not suggest workarounds for "query-time" person properties.'
+                    )
+                } else {
+                    lines.push(
+                        "Person properties are query-time in this project. `person.properties.*` on the events table always returns the person's current (latest) value, regardless of when the event occurred."
+                    )
+                }
             }
             if (user) {
                 lines.push(`The user's name is ${user.fullName} (${user.email}).`)
@@ -590,10 +599,23 @@ export class MCP extends McpAgent<Env> {
             return undefined
         }
         const user = result.data
+
+        // Fetch project details to get person-on-events mode (not available in TeamBasicSerializer)
+        const projectId = await this.cache.get('projectId')
+        let personOnEventsEnabled = false
+        if (projectId) {
+            const projectResult = await api.projects().get({ projectId })
+            if (projectResult.success) {
+                const poeValue = projectResult.data.person_on_events_querying_enabled
+                personOnEventsEnabled = poeValue === true || poeValue === 'true'
+            }
+        }
+
         const data: CachedOrg = {
             name: user.organization?.name || 'Unknown',
             projectName: user.team?.name || 'Unknown',
             timezone: user.team?.timezone || 'UTC',
+            personOnEventsEnabled,
         }
         await this.cache.set(cacheKey, data)
         await this.cache.set(fetchedAtKey, Date.now())
