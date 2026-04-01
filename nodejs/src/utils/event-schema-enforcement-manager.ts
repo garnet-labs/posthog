@@ -16,7 +16,7 @@ interface RawSchemaPropertyRow {
 /**
  * Manages event schema enforcement configuration for teams.
  *
- * Fetches schemas for events that have enforcement_mode='reject' on their EventDefinition,
+ * Fetches schemas for events that have enforcement_mode='reject' or 'enforce' on their EventDefinition,
  * which are validated at ingestion time.
  */
 /** Map from event_name to schema for O(1) lookups */
@@ -81,7 +81,7 @@ export class EventSchemaEnforcementManager {
             JOIN posthog_eventschema es ON es.event_definition_id = ed.id
             JOIN posthog_schemapropertygroupproperty p ON p.property_group_id = es.property_group_id
             WHERE ed.team_id = ANY($1)
-              AND ed.enforcement_mode = 'reject'
+              AND ed.enforcement_mode IN ('reject', 'enforce')
               AND p.is_required = true
             GROUP BY ed.team_id, ed.name, p.name
             ORDER BY ed.team_id, ed.name, p.name`,

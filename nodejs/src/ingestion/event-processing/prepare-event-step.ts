@@ -9,7 +9,7 @@ import { ok } from '../pipelines/results'
 import { ProcessingStep } from '../pipelines/steps'
 
 export type PrepareEventStepInput = {
-    normalizedEvent: PluginEvent
+    normalizedEvent: PluginEvent & { validated_schema_version?: number }
     team: Team
     processPerson: boolean
     headers: EventHeaders
@@ -50,6 +50,9 @@ export function createPrepareEventStep<TInput extends PrepareEventStepInput>(): 
             timestamp: timestamp.toISO() as ISOTimestamp,
             teamId: input.team.id,
             projectId: input.team.project_id,
+            ...(normalizedEvent.validated_schema_version !== undefined
+                ? { validated_schema_version: normalizedEvent.validated_schema_version }
+                : {}),
         }
 
         const historicalMigration = input.headers.historical_migration ?? false
