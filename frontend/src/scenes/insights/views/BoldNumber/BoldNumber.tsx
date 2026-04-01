@@ -7,7 +7,7 @@ import { useEffect } from 'react'
 import React from 'react'
 
 import { IconTrending } from '@posthog/icons'
-import { LemonRow, Link, Tooltip } from '@posthog/lemon-ui'
+import { LemonRow, Link } from '@posthog/lemon-ui'
 
 import { IconFlare, IconTrendingDown, IconTrendingFlat } from 'lib/lemon-ui/icons'
 import { percentage } from 'lib/utils'
@@ -57,10 +57,12 @@ const BOLD_NUMBER_TOOLTIP_OFFSET_PX = 8
 function useBoldNumberTooltip({
     showPersonsModal,
     isTooltipShown,
+    seriesIndex = 0,
     groupTypeLabel,
 }: {
     showPersonsModal: boolean
     isTooltipShown: boolean
+    seriesIndex?: number
     groupTypeLabel?: string
 }): React.RefObject<HTMLDivElement> {
     const { insightProps } = useValues(insightLogic)
@@ -77,7 +79,7 @@ function useBoldNumberTooltip({
     useLayoutEffect(() => {
         tooltipEl.style.opacity = isTooltipShown ? '1' : '0'
 
-        const seriesResult = insightData?.result?.[0]
+        const seriesResult = insightData?.result?.[seriesIndex]
 
         tooltipRoot.render(
             <InsightTooltip
@@ -179,8 +181,14 @@ function BoldNumberComparison({
     context,
 }: Pick<ChartParams, 'showPersonsModal' | 'context'>): JSX.Element | null {
     const { insightProps } = useValues(insightLogic)
-    const { insightData, trendsFilter, querySource } = useValues(insightVizDataLogic(insightProps))
-    const { baseCurrency } = useValues(teamLogic)
+    const { insightData, querySource } = useValues(insightVizDataLogic(insightProps))
+
+    const [isTooltipShown, setIsTooltipShown] = useState(false)
+    const comparisonRef = useBoldNumberTooltip({
+        showPersonsModal,
+        isTooltipShown,
+        seriesIndex: 1,
+    })
 
     if (!insightData?.result) {
         return null
@@ -196,9 +204,6 @@ function BoldNumberComparison({
         hasComparableDiff,
         displayText: percentageDiffDisplay,
     } = computeComparisonDisplay(currentValue, previousValue)
-
-    const formattedPreviousValue =
-        previousValue !== null ? formatAggregationAxisValue(trendsFilter, previousValue, baseCurrency) : null
 
     return (
         <LemonRow
@@ -225,7 +230,11 @@ function BoldNumberComparison({
                 ) : previousValue === null || !showPersonsModal || !hasComparableDiff ? (
                     'previous period'
                 ) : (
-                    <Tooltip title={`Previous period value: ${formattedPreviousValue}`}>
+                    <span
+                        ref={comparisonRef}
+                        onMouseEnter={() => setIsTooltipShown(true)}
+                        onMouseLeave={() => setIsTooltipShown(false)}
+                    >
                         <Link
                             onClick={() => {
                                 if (context?.onDataPointClick) {
@@ -250,7 +259,7 @@ function BoldNumberComparison({
                         >
                             previous period
                         </Link>
-                    </Tooltip>
+                    </span>
                 )}
             </span>
         </LemonRow>
