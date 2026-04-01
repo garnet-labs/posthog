@@ -121,11 +121,12 @@ The GitHub Action uploads this as a build artifact with 30-day retention.
 
 ## LLM Analytics
 
-Every run sends telemetry to PostHog's LLM Analytics dashboard when configured.
-Set the following secrets in the GitHub Action (or env vars locally):
+Every run automatically sends telemetry to PostHog's internal LLM Analytics
+dashboard using the standard internal project API key (`sTMFPsFhdP1Ssg`).
+No extra secrets are needed.
 
-- `STAMPHOG_POSTHOG_API_KEY` — PostHog project API key
-- `STAMPHOG_POSTHOG_HOST` — PostHog ingest host (defaults to `https://us.i.posthog.com`)
+To disable, set `OPT_OUT_CAPTURE=1`.
+To override the destination, set `STAMPHOG_POSTHOG_API_KEY` and/or `STAMPHOG_POSTHOG_HOST`.
 
 Events captured:
 
@@ -135,7 +136,7 @@ Events captured:
 | `$ai_trace` | Pipeline completion | total cost, verdict, tier, gate results |
 
 All events include `stamphog_*` custom properties (PR number, author, tier, verdict)
-for filtering in the dashboard. Analytics is a no-op when the API key is not set.
+for filtering in the dashboard.
 
 ## Architecture
 

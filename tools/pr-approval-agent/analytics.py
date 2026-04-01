@@ -12,16 +12,22 @@ from typing import Any
 
 from posthoganalytics import Posthog
 
-POSTHOG_API_KEY = os.environ.get("STAMPHOG_POSTHOG_API_KEY", "")
-POSTHOG_HOST = os.environ.get("STAMPHOG_POSTHOG_HOST", "https://us.i.posthog.com")
+_INTERNAL_PROJECT_API_KEY = "sTMFPsFhdP1Ssg"
+_INTERNAL_HOST = "https://us.i.posthog.com"
 DISTINCT_ID = "stamphog-ci-bot"
 
 
 def create_client() -> Posthog | None:
-    """Create a PostHog client if configured, else return None."""
-    if not POSTHOG_API_KEY:
+    """Create a PostHog client for LLM analytics.
+
+    Uses the internal PostHog project key by default so no extra secrets
+    are needed.  Set OPT_OUT_CAPTURE=1 to disable.
+    """
+    if os.environ.get("OPT_OUT_CAPTURE"):
         return None
-    return Posthog(POSTHOG_API_KEY, host=POSTHOG_HOST)
+    api_key = os.environ.get("STAMPHOG_POSTHOG_API_KEY", _INTERNAL_PROJECT_API_KEY)
+    host = os.environ.get("STAMPHOG_POSTHOG_HOST", _INTERNAL_HOST)
+    return Posthog(api_key, host=host)
 
 
 @dataclass
