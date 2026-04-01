@@ -36,7 +36,12 @@ def generate_plan_text(diffs: list[StateDiff]) -> str:
 
     for diff in diffs:
         symbol = _ACTION_SYMBOL.get(diff.action, "?")
-        lines.append(f"  {symbol} {diff.table:40s} ({diff.detail})")
+        if diff.action == "alter_modify_column":
+            lines.append(
+                f"  \u26a0 {diff.table:40s} ({diff.detail} \u2014 rewrites data, may take hours on large tables)"
+            )
+        else:
+            lines.append(f"  {symbol} {diff.table:40s} ({diff.detail})")
 
         if diff.action == "create":
             creates += 1

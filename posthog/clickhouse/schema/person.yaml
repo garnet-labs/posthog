@@ -41,7 +41,7 @@ tables:
         engine: Kafka
         on_nodes: INGESTION_EVENTS
         settings:
-            kafka_broker_list: 'kafka:9092'
+            kafka_broker_list: __from_settings__
             kafka_topic_list: clickhouse_person
             kafka_group_name: person_consumer
             kafka_format: JSONEachRow
@@ -52,6 +52,6 @@ tables:
         engine: MaterializedView
         source: kafka_person
         target: writable_person
-        select: 'SELECT * FROM posthog.kafka_person'
+        select: 'SELECT * FROM {{ database }}.kafka_person'
         on_nodes: INGESTION_EVENTS
         columns: []

@@ -167,13 +167,20 @@ class Command(BaseCommand):
         print(generate_plan_text(all_diffs))
 
     def handle_apply(self, options: dict[str, Any]) -> None:
+        import time
         import socket
+        import hashlib
         from pathlib import Path
 
         from posthog.clickhouse.client.migration_tools import get_migrations_cluster
         from posthog.clickhouse.migration_tools.plan_generator import generate_manifest_steps, generate_plan_text
         from posthog.clickhouse.migration_tools.runner import execute_migration_step
-        from posthog.clickhouse.migration_tools.tracking import acquire_apply_lock, release_apply_lock
+        from posthog.clickhouse.migration_tools.tracking import (
+            StepRecord,
+            _record_step,
+            acquire_apply_lock,
+            release_apply_lock,
+        )
 
         database: str = settings.CLICKHOUSE_DATABASE
         force: bool = options.get("force", False)
@@ -208,15 +215,56 @@ class Command(BaseCommand):
             steps = generate_manifest_steps(all_diffs)
             print(f"Applying {len(steps)} step(s)...\n")
 
+            max_retries = 3
             for i, (step, rendered_sql) in enumerate(steps):
                 print(f"  Step {i}: {step.comment}...", end=" ", flush=True)
-                try:
-                    execute_migration_step(cluster_obj, step, rendered_sql)
+                checksum = hashlib.sha256(rendered_sql.encode()).hexdigest()
+                success = False
+                for attempt in range(max_retries):
+                    try:
+                        execute_migration_step(cluster_obj, step, rendered_sql)
+                        success = True
+                        break
+                    except Exception as exc:
+                        if attempt < max_retries - 1:
+                            wait = 2**attempt
+                            print(f"\n    Retry {attempt + 1}/{max_retries} in {wait}s: {exc}", flush=True)
+                            time.sleep(wait)
+                        else:
+                            print(f"FAILED after {max_retries} attempts: {exc}")
+                            _record_step(
+                                client=client,
+                                record=StepRecord(
+                                    migration_number=0,
+                                    migration_name=step.comment or "reconcile",
+                                    step_index=i,
+                                    host=hostname,
+                                    node_role="*",
+                                    direction="up",
+                                    checksum=checksum,
+                                    success=False,
+                                ),
+                                database=database,
+                            )
+                            print("\nApply halted. Review the error and retry.")
+                            return
+
+                if success:
                     print("OK")
-                except Exception as exc:
-                    print(f"FAILED: {exc}")
-                    print("\nApply halted. Review the error and retry.")
-                    return
+                    _record_step(
+                        client=client,
+                        record=StepRecord(
+                            migration_number=0,
+                            migration_name=step.comment or "reconcile",
+                            step_index=i,
+                            host=hostname,
+                            node_role="*",
+                            direction="up",
+                            checksum=checksum,
+                            success=True,
+                        ),
+                        database=database,
+                    )
         finally:
             release_apply_lock(client, database, hostname)
 

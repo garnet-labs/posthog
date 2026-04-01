@@ -15,8 +15,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from django.conf import settings as django_settings
+
 from posthog.clickhouse.migration_tools.desired_state import ColumnDef, DesiredState, DesiredTable
 from posthog.clickhouse.migration_tools.schema_introspect import TableSchema
+
+# Sentinel value used in schema YAML to indicate the value should come from Django settings
+_FROM_SETTINGS_SENTINEL = "__from_settings__"
+
+# Map of YAML setting keys to Django settings attributes
+_SETTINGS_RESOLUTION: dict[str, str] = {
+    "kafka_broker_list": "KAFKA_HOSTS_FOR_CLICKHOUSE",
+}
+
+
+def _resolve_setting(key: str) -> str:
+    """Resolve a __from_settings__ sentinel to its Django settings value."""
+    attr = _SETTINGS_RESOLUTION.get(key)
+    if attr:
+        val = getattr(django_settings, attr, None)
+        if val:
+            return ",".join(val) if isinstance(val, list) else str(val)
+    # Fallback for local dev
+    return "kafka:9092"
 
 
 @dataclass
@@ -97,7 +118,7 @@ def _generate_create_sql(
 
     if _is_mv(table.engine):
         target = table.target or ""
-        select = table.select or "SELECT * FROM ???"
+        select = (table.select or "SELECT * FROM ???").replace("{{ database }}", database)
         return f"CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.{table.name}\nTO {database}.{target}\nAS {select}"
 
     if _is_distributed(table.engine):
@@ -113,7 +134,8 @@ def _generate_create_sql(
         settings_lines = []
         if table.settings:
             for k, v in table.settings.items():
-                settings_lines.append(f"    {k} = '{v}'")
+                resolved = _resolve_setting(k) if str(v) == _FROM_SETTINGS_SENTINEL else v
+                settings_lines.append(f"    {k} = '{resolved}'")
         settings_block = ",\n".join(settings_lines)
         return (
             f"CREATE TABLE IF NOT EXISTS {database}.{table.name}\n"

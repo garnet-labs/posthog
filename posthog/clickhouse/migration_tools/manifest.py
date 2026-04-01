@@ -14,6 +14,9 @@ ROLE_MAP: dict[str, str] = {
     "ENDPOINTS": "endpoints",
     "LOGS": "logs",
     "ALL": "all",
+    "OPS": "ops",
+    "AI_EVENTS": "ai_events",
+    "AUX": "aux",
 }
 
 VALID_NODE_ROLES = frozenset(ROLE_MAP.keys())

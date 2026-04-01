@@ -80,7 +80,7 @@ tables:
         engine: Kafka
         on_nodes: INGESTION_EVENTS
         settings:
-            kafka_broker_list: 'kafka:9092'
+            kafka_broker_list: __from_settings__
             kafka_topic_list: events_json
             kafka_group_name: events_json_consumer
             kafka_format: JSONEachRow
@@ -91,6 +91,6 @@ tables:
         engine: MaterializedView
         source: kafka_events_json
         target: writable_events
-        select: 'SELECT * FROM posthog.kafka_events_json'
+        select: 'SELECT * FROM {{ database }}.kafka_events_json'
         on_nodes: INGESTION_EVENTS
         columns: []
