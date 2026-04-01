@@ -225,13 +225,7 @@ function BoldNumberComparison({
                 ) : previousValue === null || !showPersonsModal || !hasComparableDiff ? (
                     'previous period'
                 ) : (
-                    <Tooltip
-                        title={
-                            formattedPreviousValue !== null
-                                ? `Previous period value: ${formattedPreviousValue}`
-                                : undefined
-                        }
-                    >
+                    <Tooltip title={`Previous period value: ${formattedPreviousValue}`}>
                         <Link
                             onClick={() => {
                                 if (context?.onDataPointClick) {
