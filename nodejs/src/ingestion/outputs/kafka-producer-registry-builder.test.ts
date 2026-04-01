@@ -22,9 +22,7 @@ describe('KafkaProducerRegistryBuilder', () => {
     it('creates a registry with a single producer', async () => {
         const config = { BROKER_LIST: 'kafka:9092', LINGER_MS: '20' }
 
-        const registry = await new KafkaProducerRegistryBuilder(undefined)
-            .register('DEFAULT', configMap, config)
-            .build()
+        const registry = await new KafkaProducerRegistryBuilder(undefined).register('DEFAULT', configMap).build(config)
 
         expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledTimes(1)
         expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledWith(
@@ -35,20 +33,18 @@ describe('KafkaProducerRegistryBuilder', () => {
     })
 
     it('creates a registry with multiple producers', async () => {
-        const primaryConfig = { PRIMARY_BROKER: 'kafka-primary:9092' }
-        const secondaryConfig = { SECONDARY_BROKER: 'kafka-secondary:9092' }
-
         const primaryMap = { 'metadata.broker.list': 'PRIMARY_BROKER' } as const satisfies Partial<
             Record<AllowedConfigKey, string>
         >
         const secondaryMap = { 'metadata.broker.list': 'SECONDARY_BROKER' } as const satisfies Partial<
             Record<AllowedConfigKey, string>
         >
+        const config = { PRIMARY_BROKER: 'kafka-primary:9092', SECONDARY_BROKER: 'kafka-secondary:9092' }
 
         const registry = await new KafkaProducerRegistryBuilder(undefined)
-            .register('PRIMARY', primaryMap, primaryConfig)
-            .register('SECONDARY', secondaryMap, secondaryConfig)
-            .build()
+            .register('PRIMARY', primaryMap)
+            .register('SECONDARY', secondaryMap)
+            .build(config)
 
         expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledTimes(2)
         expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledWith(
@@ -67,7 +63,7 @@ describe('KafkaProducerRegistryBuilder', () => {
     it('passes kafka client rack to producer creation', async () => {
         const config = { BROKER_LIST: 'kafka:9092', LINGER_MS: '20' }
 
-        await new KafkaProducerRegistryBuilder('us-east-1a').register('DEFAULT', configMap, config).build()
+        await new KafkaProducerRegistryBuilder('us-east-1a').register('DEFAULT', configMap).build(config)
 
         expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledWith('us-east-1a', expect.any(Object))
     })
@@ -75,7 +71,7 @@ describe('KafkaProducerRegistryBuilder', () => {
     it('skips empty config values and falls back to zod defaults', async () => {
         const config = { BROKER_LIST: '', LINGER_MS: '' }
 
-        await new KafkaProducerRegistryBuilder(undefined).register('DEFAULT', configMap, config).build()
+        await new KafkaProducerRegistryBuilder(undefined).register('DEFAULT', configMap).build(config)
 
         expect(KafkaProducerWrapper.createWithConfig).toHaveBeenCalledWith(
             undefined,
@@ -91,12 +87,12 @@ describe('KafkaProducerRegistryBuilder', () => {
         const config = { BROKER_LIST: 'bad-host:9092', LINGER_MS: '20' }
 
         await expect(
-            new KafkaProducerRegistryBuilder(undefined).register('DEFAULT', configMap, config).build()
+            new KafkaProducerRegistryBuilder(undefined).register('DEFAULT', configMap).build(config)
         ).rejects.toThrow('connection refused')
     })
 
     it('builds an empty registry when no producers are registered', async () => {
-        const registry = await new KafkaProducerRegistryBuilder(undefined).build()
+        const registry = await new KafkaProducerRegistryBuilder(undefined).build({})
 
         expect(KafkaProducerWrapper.createWithConfig).not.toHaveBeenCalled()
         await registry.disconnectAll()

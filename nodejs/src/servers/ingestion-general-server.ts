@@ -17,7 +17,7 @@ import {
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import { registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
-import { DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/analytics/config/producers'
+import { ProducerName, registerProducers } from '../ingestion/analytics/config/producers'
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
@@ -33,7 +33,7 @@ import {
 import { CookielessManager } from '../ingestion/cookieless/cookieless-manager'
 import { IngestionConsumer, IngestionConsumerDeps } from '../ingestion/ingestion-consumer'
 import { IngestionTestingConsumer } from '../ingestion/ingestion-testing-consumer'
-import { KafkaProducerRegistry, KafkaProducerRegistryBuilder } from '../ingestion/outputs'
+import { KafkaProducerRegistry } from '../ingestion/outputs'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import { PluginServerService, RedisPool } from '../types'
@@ -207,9 +207,7 @@ export class IngestionGeneralServer implements NodeServer {
             // Build producer registry — producer creation blocks until the broker
             // is reachable (rdkafka retries indefinitely), so the server will hang
             // here if a broker is down and the pod never becomes healthy.
-            this.ingestionProducerRegistry = await new KafkaProducerRegistryBuilder(this.config.KAFKA_CLIENT_RACK)
-                .register(DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, this.config)
-                .build()
+            this.ingestionProducerRegistry = await registerProducers(this.config.KAFKA_CLIENT_RACK).build(this.config)
             const ingestionOutputs = registerIngestionOutputs().build(this.ingestionProducerRegistry, this.config)
             const clickhouseGroupRepository = new ClickhouseGroupRepository(ingestionOutputs)
 

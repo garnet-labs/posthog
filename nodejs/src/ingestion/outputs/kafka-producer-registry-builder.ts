@@ -20,77 +20,68 @@ function redactConfig(config: ProducerGlobalConfig): Record<string, unknown> {
 /**
  * Builder for `KafkaProducerRegistry` that validates config keys at compile time.
  *
- * Each `register()` call adds a named producer, mapping rdkafka config keys to config object
- * keys. The compiler verifies that every referenced key exists in the passed config object.
- * The producer name is accumulated in the `P` type parameter.
- *
- * Call `build()` after registering all producers to create the registry. This connects to
- * brokers, so it is async and will throw if any producer fails to connect.
+ * Each `register()` call adds a named producer and accumulates its config key requirements
+ * in the `CK` type parameter. `build(config)` then checks that the config object contains
+ * all accumulated keys.
  *
  * @example
  * ```ts
  * const registry = await new KafkaProducerRegistryBuilder(config.KAFKA_CLIENT_RACK)
- *     .register('DEFAULT', DEFAULT_PRODUCER_CONFIG_MAP, config)
- *     .build()
+ *     .register('DEFAULT', DEFAULT_PRODUCER_CONFIG_MAP)
+ *     .build(config)
  * // registry is KafkaProducerRegistry<'DEFAULT'>
  * ```
  */
-export class KafkaProducerRegistryBuilder<P extends string = never> {
-    private registered = new Map<string, ProducerGlobalConfig>()
+export class KafkaProducerRegistryBuilder<P extends string = never, CK extends string = never> {
+    private registrations = new Map<string, Partial<Record<AllowedConfigKey, CK>>>()
 
     constructor(private kafkaClientRack: string | undefined) {}
 
     /**
-     * Register a producer with a name, rdkafka-to-config-key mapping, and config object.
+     * Register a producer with a name and rdkafka-to-config-key mapping.
      *
-     * The `configMap` maps rdkafka config keys (e.g. `'linger.ms'`) to config key names
-     * (e.g. `'KAFKA_PRODUCER_LINGER_MS'`). The config object must contain all referenced
-     * keys — this is enforced at compile time via `Record<ConfigKeys, string>`.
-     *
-     * @param name - Unique producer name (used as the type-level key).
-     * @param configMap - Maps rdkafka config keys to config key names.
-     * @param config - Config object that must contain all keys referenced by `configMap`.
+     * The config key names are accumulated in the `CK` type parameter and checked
+     * against the config object when `build()` is called.
      */
     register<Name extends string, ConfigKeys extends string>(
         name: Name,
-        configMap: Partial<Record<AllowedConfigKey, ConfigKeys>>,
-        config: Record<ConfigKeys, string>
-    ): KafkaProducerRegistryBuilder<P | Name> {
-        const values: Record<string, string> = {}
-        for (const [rdkafkaKey, configKey] of Object.entries(configMap)) {
-            if (configKey !== undefined) {
-                const value = config[configKey]
-                if (value) {
-                    values[rdkafkaKey] = value
-                }
-            }
-        }
-        const resolvedConfig = parseProducerConfig(values)
-
-        const next = new KafkaProducerRegistryBuilder<P | Name>(this.kafkaClientRack)
-        next.registered = new Map(this.registered)
-        next.registered.set(name, resolvedConfig)
+        configMap: Partial<Record<AllowedConfigKey, ConfigKeys>>
+    ): KafkaProducerRegistryBuilder<P | Name, CK | ConfigKeys> {
+        const next = new KafkaProducerRegistryBuilder<P | Name, CK | ConfigKeys>(this.kafkaClientRack)
+        next.registrations = new Map(this.registrations)
+        next.registrations.set(name, configMap)
         return next
     }
 
     /**
      * Create all registered producers and return an immutable registry.
      *
+     * The compiler verifies that the config contains all accumulated config keys.
      * Connects to brokers in parallel. Throws if any producer fails to connect.
      */
-    async build(): Promise<KafkaProducerRegistry<P>> {
+    async build(config: Record<CK, string>): Promise<KafkaProducerRegistry<P>> {
         const producers: Record<string, KafkaProducerWrapper> = {}
 
         await Promise.all(
-            Array.from(this.registered.entries()).map(async ([name, config]) => {
-                logger.info('📝', `Creating producer "${name}"`, { config: redactConfig(config) })
-                producers[name] = await KafkaProducerWrapper.createWithConfig(this.kafkaClientRack, config)
+            Array.from(this.registrations.entries()).map(async ([name, configMap]) => {
+                const values: Record<string, string> = {}
+                for (const [rdkafkaKey, configKey] of Object.entries(configMap)) {
+                    if (configKey !== undefined) {
+                        const value = config[configKey]
+                        if (value) {
+                            values[rdkafkaKey] = value
+                        }
+                    }
+                }
+                const resolvedConfig = parseProducerConfig(values)
+                logger.info('📝', `Creating producer "${name}"`, { config: redactConfig(resolvedConfig) })
+                producers[name] = await KafkaProducerWrapper.createWithConfig(this.kafkaClientRack, resolvedConfig)
             })
         )
 
         // TypeScript cannot verify that an imperatively-built Record has all keys of a
         // generic union P. The builder guarantees this: every `register()` call adds an
-        // entry to `this.registered`, and `build()` creates a producer for each entry.
+        // entry to `this.registrations`, and `build()` creates a producer for each entry.
         return new KafkaProducerRegistry<P>(producers as Record<P, KafkaProducerWrapper>)
     }
 }
