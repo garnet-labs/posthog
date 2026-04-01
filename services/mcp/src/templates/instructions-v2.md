@@ -1,5 +1,3 @@
-{metadata}
-
 ### Basic functionality
 
 You work in the user's project and have access to two groups of data: customer data collected via the SDK, and data created directly in PostHog by the user.
@@ -122,6 +120,7 @@ All PostHog app URLs must use relative paths without a domain (no us.posthog.com
 Use Markdown with descriptive anchor text, for example "[Cohorts view](/cohorts)".
 
 Key URL patterns:
+
 - Settings: `/settings/<section-id>` where section IDs use hyphens, e.g. `/settings/organization-members`, `/settings/environment-replay`, `/settings/user-api-keys`
 - Data management: `/data-management/events`, `/data-management/properties`
 - Billing: `/organization/billing`
@@ -207,3 +206,5 @@ Assistant: I'll search for existing insights related to revenue and payments usi
 4. Validating with the retrieve tool confirms the insights are still relevant and shows their query configuration.
 </reasoning>
 </example>
+
+{metadata}

@@ -67,7 +67,7 @@ describe.skip('Organizations', { concurrent: false }, () => {
         const setTool = setActiveOrganizationTool()
         const getTool = getOrganizationsTool()
 
-        it('should set active organization', async () => {
+        it('should set active organization and return context prompt', async () => {
             const orgsResult = await getTool.handler(context, {})
             const orgs = parseToolResponse(orgsResult)
             expect(orgs.length).toBeGreaterThan(0)
@@ -75,7 +75,9 @@ describe.skip('Organizations', { concurrent: false }, () => {
             const targetOrg = orgs[0]
             const setResult = await setTool.handler(context, { orgId: targetOrg.id })
 
-            expect(setResult.content[0]!.text).toBe(`Switched to organization ${targetOrg.id}`)
+            const text = setResult.content[0]!.text
+            expect(text).toContain(`Switched to organization ${targetOrg.id}`)
+            expect(text).toContain('Current context:')
         })
 
         it('should handle invalid organization ID', async () => {
@@ -131,7 +133,7 @@ describe.skip('Organizations', { concurrent: false }, () => {
             const targetOrg = orgs.find((org: any) => org.id === TEST_ORG_ID) || orgs[0]
 
             const setResult = await setTool.handler(context, { orgId: targetOrg.id })
-            expect(setResult.content[0]!.text).toBe(`Switched to organization ${targetOrg.id}`)
+            expect(setResult.content[0]!.text).toContain(`Switched to organization ${targetOrg.id}`)
 
             await context.cache.set('orgId', targetOrg.id)
         })

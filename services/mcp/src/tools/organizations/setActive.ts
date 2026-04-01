@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 
-import { buildMetadataBlock } from '@/lib/instructions'
+import { buildActiveEnvironmentContextPrompt } from '@/lib/instructions'
 import { OrganizationSetActiveSchema } from '@/schema/tool-inputs'
 import type { CachedOrg, CachedProject, CachedUser, Context, ToolBase } from '@/tools/types'
 
@@ -33,7 +33,7 @@ export const setActiveHandler: ToolBase<typeof schema, Result>['handler'] = asyn
     const user = (await context.cache.get(`cachedUser:${distinctId}` as const)) as CachedUser | undefined
     const project = (await context.cache.get(`cachedProject:${projectId}` as const)) as CachedProject | undefined
 
-    const metadata = buildMetadataBlock(user, org, project)
+    const metadata = buildActiveEnvironmentContextPrompt(user, org, project)
     const text = metadata
         ? `Switched to organization ${orgId}.\n\nCurrent context:\n${metadata}`
         : `Switched to organization ${orgId}`

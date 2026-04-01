@@ -14,7 +14,11 @@ export function buildGroupTypesBlock(groupTypes?: GroupType[]): string {
     return `### Group type mapping\n\nGroups aggregate events based on entities, such as organizations or sellers. This project has the following group types. Instead of a group's name, always use its numeric index.\n\n${lines.join('\n')}`
 }
 
-export function buildMetadataBlock(user?: CachedUser, org?: CachedOrg, project?: CachedProject): string | undefined {
+export function buildActiveEnvironmentContextPrompt(
+    user?: CachedUser,
+    org?: CachedOrg,
+    project?: CachedProject
+): string | undefined {
     if (!user && !org && !project) {
         return undefined
     }
@@ -26,7 +30,7 @@ export function buildMetadataBlock(user?: CachedUser, org?: CachedOrg, project?:
     }
     if (project) {
         lines.push(`Project timezone: ${project.timezone ?? 'UTC'}.`)
-        const poeValue = project.person_on_events_querying_enabled
+        const poeValue = project.person_on_events_querying_enabled as string | boolean | null | undefined
         if (poeValue === true || poeValue === 'true') {
             lines.push(
                 'Person-on-events mode is enabled. When querying `person.properties.*` on the events table, values reflect what was set at the time the event was ingested, not the person\'s current value. The same person can have different property values across different events. Do not suggest workarounds for "query-time" person properties.'
@@ -41,7 +45,14 @@ export function buildMetadataBlock(user?: CachedUser, org?: CachedOrg, project?:
         const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Unknown'
         lines.push(`The user's name is ${fullName} (${user.email}).`)
     }
-    return lines.join('\n')
+    return `### Active environment\n\nAll tool calls and queries are scoped to this environment.\n\n${lines.join('\n')}`
+}
+
+export function buildInstructionsV1(template: string, metadata?: string): string {
+    if (!metadata) {
+        return template
+    }
+    return `${template}\n\n${metadata}`
 }
 
 export function buildInstructionsV2(
