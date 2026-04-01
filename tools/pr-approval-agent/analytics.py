@@ -23,7 +23,7 @@ def create_client() -> Posthog | None:
     Uses the internal PostHog project key by default so no extra secrets
     are needed.  Set OPT_OUT_CAPTURE=1 to disable.
     """
-    if os.environ.get("OPT_OUT_CAPTURE"):
+    if os.environ.get("OPT_OUT_CAPTURE", "").lower() in ("true", "yes", "1"):
         return None
     api_key = os.environ.get("STAMPHOG_POSTHOG_API_KEY", _INTERNAL_PROJECT_API_KEY)
     host = os.environ.get("STAMPHOG_POSTHOG_HOST", _INTERNAL_HOST)
