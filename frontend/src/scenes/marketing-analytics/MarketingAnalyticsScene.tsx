@@ -2,7 +2,6 @@ import clsx from 'clsx'
 import { BindLogic, useActions, useValues } from 'kea'
 import { useEffect } from 'react'
 
-import { IconGear } from '@posthog/icons'
 import { LemonBanner, LemonButton, LemonSkeleton, Link } from '@posthog/lemon-ui'
 
 import { FEATURE_FLAGS } from 'lib/constants'
@@ -10,7 +9,6 @@ import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { externalDataSourcesLogic } from 'scenes/data-warehouse/externalDataSourcesLogic'
 import { sceneConfigurations } from 'scenes/scenes'
 import { Scene, SceneExport } from 'scenes/sceneTypes'
-import { urls } from 'scenes/urls'
 import { QueryTile } from 'scenes/web-analytics/common'
 import { NonIntegratedConversionsTable } from 'scenes/web-analytics/tabs/marketing-analytics/frontend/components/NonIntegratedConversionsTable/NonIntegratedConversionsTable'
 import { WebQuery } from 'scenes/web-analytics/tiles/WebAnalyticsTile'
@@ -179,15 +177,6 @@ export function MarketingAnalyticsScene(): JSX.Element {
                                     data-attr="marketing-analytics-docs-button"
                                 >
                                     Documentation
-                                </LemonButton>
-                                <LemonButton
-                                    type="secondary"
-                                    size="small"
-                                    icon={<IconGear />}
-                                    to={urls.settings('environment-marketing-analytics', 'marketing-settings')}
-                                    data-attr="marketing-analytics-settings-button"
-                                >
-                                    Settings
                                 </LemonButton>
                             </>
                         }

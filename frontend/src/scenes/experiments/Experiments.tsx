@@ -53,7 +53,6 @@ import {
     getShippedVariantKey,
     isSingleVariantShipped,
 } from './experimentsLogic'
-import { ExperimentsSettings } from './ExperimentsSettings'
 import { ExperimentVelocityStats } from './ExperimentVelocityStats'
 import { StatusTag } from './ExperimentView/components'
 import { Holdouts } from './Holdouts'
@@ -573,11 +572,6 @@ export function Experiments(): JSX.Element {
                         key: ExperimentsTabs.History,
                         label: 'History',
                         content: <ActivityLog scope={ActivityScope.EXPERIMENT} />,
-                    },
-                    {
-                        key: ExperimentsTabs.Settings,
-                        label: 'Settings',
-                        content: <ExperimentsSettings />,
                     },
                 ]}
             />

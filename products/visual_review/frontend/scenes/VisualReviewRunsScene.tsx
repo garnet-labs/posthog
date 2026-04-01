@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 
-import { IconGear, IconGithub } from '@posthog/icons'
+import { IconGithub } from '@posthog/icons'
 import { LemonButton, LemonTable, LemonTableColumns, LemonTabs, Link } from '@posthog/lemon-ui'
 
 import { dayjs } from 'lib/dayjs'
@@ -131,21 +131,16 @@ export function VisualReviewRunsScene(): JSX.Element {
                 name="Visual review"
                 resourceType={{ type: 'visual_review' }}
                 actions={
-                    <div className="flex gap-2">
-                        <LemonButton type="secondary" icon={<IconGear />} to="/visual_review/settings">
-                            Settings
-                        </LemonButton>
-                        <LemonButton
-                            type="secondary"
-                            onClick={() => {
-                                loadRuns()
-                                loadCounts()
-                            }}
-                            loading={runsLoading}
-                        >
-                            Refresh
-                        </LemonButton>
-                    </div>
+                    <LemonButton
+                        type="secondary"
+                        onClick={() => {
+                            loadRuns()
+                            loadCounts()
+                        }}
+                        loading={runsLoading}
+                    >
+                        Refresh
+                    </LemonButton>
                 }
             />
 

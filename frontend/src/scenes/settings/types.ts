@@ -34,6 +34,8 @@ export type SettingSectionId =
     | 'environment-experiments'
     | 'environment-error-tracking'
     | 'environment-logs'
+    | 'environment-conversations'
+    | 'environment-visual-review'
     | 'environment-csp-reporting'
     | 'environment-max'
     | 'environment-posthog-code'
@@ -209,6 +211,7 @@ export type SettingId =
     | 'approval-policies'
     | 'change-requests'
     | 'banner'
+    | 'visual-review-repos'
 
 type FeatureFlagKey = keyof typeof FEATURE_FLAGS
 

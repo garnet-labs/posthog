@@ -31,10 +31,6 @@ import {
 
 import type { logsSceneLogicType } from './logsSceneLogicType'
 
-export type LogsSceneActiveTab = 'viewer' | 'configuration'
-const VALID_ACTIVE_TABS: LogsSceneActiveTab[] = ['viewer', 'configuration']
-export const DEFAULT_ACTIVE_TAB: LogsSceneActiveTab = 'viewer'
-
 export interface LogsLogicProps {
     tabId: string
 }
@@ -67,13 +63,6 @@ export const logsSceneLogic = kea<logsSceneLogicType>([
         const urlToAction = (_: any, params: Params): void => {
             if (cache.isSyncingUrl) {
                 return
-            }
-            if (
-                typeof params.activeTab === 'string' &&
-                VALID_ACTIVE_TABS.includes(params.activeTab as LogsSceneActiveTab) &&
-                params.activeTab !== values.activeTab
-            ) {
-                actions.setActiveTab(params.activeTab as LogsSceneActiveTab)
             }
 
             const filtersFromUrl: Partial<LogsViewerFilters> = {}
@@ -189,37 +178,22 @@ export const logsSceneLogic = kea<logsSceneLogicType>([
             })
         }
 
-        const syncActiveTab = (): ReturnType<typeof syncSearchParams> => {
-            return syncSearchParams(router, (params: Params) => {
-                updateSearchParams(params, 'activeTab', values.activeTab, DEFAULT_ACTIVE_TAB)
-                return params
-            })
-        }
-
         return {
             // initialLogsLimit is a one-shot override from "copy link to log" URLs.
             // It ensures the first fetch loads enough logs to include the linked log,
             // then resets to null so subsequent queries use the default page size.
             fetchLogsSuccess: () => clearInitialLogsLimit(),
             syncUrl: () => syncUrl(),
-            setActiveTab: () => syncActiveTab(),
         }
     }),
 
     actions({
-        setActiveTab: (activeTab: LogsSceneActiveTab) => ({ activeTab }),
         syncUrl: true,
         toggleAttributeBreakdown: (key: string) => ({ key }),
         setExpandedAttributeBreaksdowns: (expandedAttributeBreaksdowns: string[]) => ({ expandedAttributeBreaksdowns }),
     }),
 
     reducers({
-        activeTab: [
-            DEFAULT_ACTIVE_TAB as LogsSceneActiveTab,
-            {
-                setActiveTab: (_, { activeTab }) => activeTab,
-            },
-        ],
         expandedAttributeBreaksdowns: [
             [] as string[],
             {

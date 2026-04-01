@@ -1,14 +1,13 @@
-import { useActions, useValues } from 'kea'
+import { useValues } from 'kea'
 import posthog from 'posthog-js'
 
 import { IconGear } from '@posthog/icons'
-import { LemonBanner, LemonButton, LemonTabs } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton } from '@posthog/lemon-ui'
 
 import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { IconFeedback } from 'lib/lemon-ui/icons'
 import { sceneConfigurations } from 'scenes/scenes'
 import { Scene, SceneExport } from 'scenes/sceneTypes'
-import { Settings } from 'scenes/settings/Settings'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
@@ -20,7 +19,7 @@ import { logsIngestionLogic } from 'products/logs/frontend/components/SetupPromp
 import { LogsSetupPrompt } from 'products/logs/frontend/components/SetupPrompt/SetupPrompt'
 
 import { useOpenLogsSettingsPanel } from './hooks/useOpenLogsSettingsPanel'
-import { LogsSceneActiveTab, logsSceneLogic } from './logsSceneLogic'
+import { logsSceneLogic } from './logsSceneLogic'
 
 export const LOGS_LOGIC_KEY = 'logs'
 
@@ -86,8 +85,7 @@ const LogsSceneContent = (): JSX.Element => {
 }
 
 const LogsSceneTabbedContent = (): JSX.Element => {
-    const { tabId, activeTab } = useValues(logsSceneLogic)
-    const { setActiveTab } = useActions(logsSceneLogic)
+    const { tabId } = useValues(logsSceneLogic)
     const { hasLogs, teamHasLogsCheckFailed } = useValues(logsIngestionLogic)
 
     return (
@@ -117,25 +115,11 @@ const LogsSceneTabbedContent = (): JSX.Element => {
                     Unable to verify logs setup. If you haven't configured logging yet, check out our setup guide.
                 </LemonBanner>
             )}
-            <LemonTabs<LogsSceneActiveTab>
-                activeKey={activeTab}
-                onChange={(key) => setActiveTab(key)}
-                tabs={[
-                    { key: 'viewer', label: 'Viewer' },
-                    { key: 'configuration', label: 'Configuration' },
-                ]}
-                sceneInset
-            />
-            {activeTab === 'viewer' && (
-                <LogsSetupPrompt>
-                    <div className="flex flex-col gap-2 py-2 flex-1 min-h-0">
-                        <LogsViewer id={tabId} />
-                    </div>
-                </LogsSetupPrompt>
-            )}
-            {activeTab === 'configuration' && (
-                <Settings logicKey={LOGS_LOGIC_KEY} sectionId="environment-logs" settingId="logs" handleLocally />
-            )}
+            <LogsSetupPrompt>
+                <div className="flex flex-col gap-2 py-2 flex-1 min-h-0">
+                    <LogsViewer id={tabId} />
+                </div>
+            </LogsSetupPrompt>
         </>
     )
 }
