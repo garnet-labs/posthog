@@ -537,7 +537,10 @@ export class MCP extends McpAgent<Env> {
     }
 
     private async getOrFetchUser(): Promise<CachedUser | undefined> {
-        const distinctId = (await this.cache.get('distinctId')) ?? 'unknown'
+        const distinctId = await this.cache.get('distinctId')
+        if (!distinctId) {
+            return undefined
+        }
         const api = await this.api()
         return this.getOrFetchCached({
             name: 'user',
@@ -551,36 +554,34 @@ export class MCP extends McpAgent<Env> {
     }
 
     private async getOrFetchOrg(): Promise<CachedOrg | undefined> {
-        const orgId = (await this.cache.get('orgId')) ?? 'unknown'
+        const orgId = await this.cache.get('orgId')
+        if (!orgId) {
+            return undefined
+        }
         const api = await this.api()
         return this.getOrFetchCached({
             name: 'org',
             cacheKey: `cachedOrg:${orgId}`,
             fetchedAtKey: `cachedOrgFetchedAt:${orgId}`,
             fetcher: async () => {
-                const currentOrgId = await this.cache.get('orgId')
-                if (!currentOrgId) {
-                    return undefined
-                }
-                const result = await api.organizations().get({ orgId: currentOrgId })
+                const result = await api.organizations().get({ orgId })
                 return result.success ? result.data : undefined
             },
         })
     }
 
     private async getOrFetchProject(): Promise<CachedProject | undefined> {
-        const projectId = (await this.cache.get('projectId')) ?? 'unknown'
+        const projectId = await this.cache.get('projectId')
+        if (!projectId) {
+            return undefined
+        }
         const api = await this.api()
         return this.getOrFetchCached({
             name: 'project',
             cacheKey: `cachedProject:${projectId}`,
             fetchedAtKey: `cachedProjectFetchedAt:${projectId}`,
             fetcher: async () => {
-                const currentProjectId = await this.cache.get('projectId')
-                if (!currentProjectId) {
-                    return undefined
-                }
-                const result = await api.projects().get({ projectId: currentProjectId })
+                const result = await api.projects().get({ projectId })
                 return result.success ? result.data : undefined
             },
         })
