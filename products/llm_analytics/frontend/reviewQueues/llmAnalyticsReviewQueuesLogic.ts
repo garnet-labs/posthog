@@ -5,6 +5,7 @@ import { router } from 'kea-router'
 import { LemonDialog } from '@posthog/lemon-ui'
 
 import { Sorting } from 'lib/lemon-ui/LemonTable'
+import { getApiErrorDetail } from 'lib/utils/getApiErrorDetail'
 
 import { lemonToast } from '~/lib/lemon-ui/LemonToast/LemonToast'
 import { PaginationManual } from '~/lib/lemon-ui/PaginationControl'
@@ -21,7 +22,6 @@ import type {
 } from '../generated/api.schemas'
 import type { llmAnalyticsReviewQueuesLogicType } from './llmAnalyticsReviewQueuesLogicType'
 import { reviewQueuesApi } from './reviewQueuesApi'
-import { getApiErrorDetail } from './reviewQueueUtils'
 
 export const REVIEW_QUEUES_PER_PAGE = 15
 export const REVIEW_QUEUE_ITEMS_PER_PAGE = 30

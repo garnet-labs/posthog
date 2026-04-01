@@ -1,12 +1,13 @@
 import { actions, afterMount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
+import { getApiErrorDetail } from 'lib/utils/getApiErrorDetail'
+
 import { lemonToast } from '~/lib/lemon-ui/LemonToast/LemonToast'
 
 import type { PaginatedReviewQueueListApi, ReviewQueueApi } from '../generated/api.schemas'
 import type { reviewQueuePickerModalLogicType } from './reviewQueuePickerModalLogicType'
 import { reviewQueuesApi } from './reviewQueuesApi'
-import { getApiErrorDetail } from './reviewQueueUtils'
 
 export interface ReviewQueuePickerModalProps {
     defaultQueueId?: string | null

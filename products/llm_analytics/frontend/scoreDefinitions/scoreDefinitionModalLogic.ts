@@ -1,5 +1,7 @@
 import { actions, afterMount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
+import { getApiErrorDetail } from 'lib/utils/getApiErrorDetail'
+
 import { lemonToast } from '~/lib/lemon-ui/LemonToast/LemonToast'
 
 import {
@@ -13,7 +15,6 @@ import type { scoreDefinitionModalLogicType } from './scoreDefinitionModalLogicT
 import {
     createDraft,
     buildConfigFromDraft,
-    getApiErrorDetail,
     getCurrentProjectId,
     getModalTitle,
     type ScoreDefinitionDraft,

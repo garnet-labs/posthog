@@ -19,6 +19,7 @@ import { combineUrl, router } from 'kea-router'
 import api, { ApiError } from '~/lib/api'
 import { lemonToast } from '~/lib/lemon-ui/LemonToast/LemonToast'
 import { tabAwareUrlToAction } from '~/lib/logic/scenes/tabAwareUrlToAction'
+import { getApiErrorDetail } from '~/lib/utils/getApiErrorDetail'
 import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
 import {
     DataTableNode,
@@ -127,13 +128,6 @@ function buildPromptVersionSummary(prompt: LLMPrompt, isLatest: boolean): LLMPro
         created_at: prompt.created_at,
         is_latest: isLatest,
     }
-}
-
-export function getApiErrorDetail(error: unknown): string | undefined {
-    if (error !== null && typeof error === 'object' && 'detail' in error && typeof error.detail === 'string') {
-        return error.detail
-    }
-    return undefined
 }
 
 function isNameFieldValidationError(error: unknown): error is { attr: 'name'; detail: string } {

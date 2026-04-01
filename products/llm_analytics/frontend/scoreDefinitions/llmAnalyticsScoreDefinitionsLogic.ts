@@ -3,6 +3,7 @@ import { loaders } from 'kea-loaders'
 import { router } from 'kea-router'
 
 import { Sorting } from 'lib/lemon-ui/LemonTable'
+import { getApiErrorDetail } from 'lib/utils/getApiErrorDetail'
 
 import { ApiConfig } from '~/lib/api'
 import { lemonToast } from '~/lib/lemon-ui/LemonToast/LemonToast'
@@ -19,7 +20,7 @@ import type {
     ScoreDefinitionApi,
 } from '../generated/api.schemas'
 import type { llmAnalyticsScoreDefinitionsLogicType } from './llmAnalyticsScoreDefinitionsLogicType'
-import { getApiErrorDetail, getCurrentProjectId, type ScoreDefinitionModalMode } from './scoreDefinitionModalUtils'
+import { getCurrentProjectId, type ScoreDefinitionModalMode } from './scoreDefinitionModalUtils'
 
 export const SCORE_DEFINITIONS_PER_PAGE = 30
 
