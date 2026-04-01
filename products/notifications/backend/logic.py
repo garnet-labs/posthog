@@ -24,6 +24,7 @@ def _publish_to_kafka(event: NotificationEvent) -> None:
             data={
                 "id": str(event.id),
                 "organization_id": str(event.organization_id),
+                "team_id": event.team_id,
                 "notification_type": event.notification_type,
                 "priority": event.priority,
                 "title": event.title,

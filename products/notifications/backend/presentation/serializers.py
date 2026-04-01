@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 class NotificationEventSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    team_id = serializers.IntegerField()
     notification_type = serializers.CharField()
     priority = serializers.CharField()
     title = serializers.CharField()
