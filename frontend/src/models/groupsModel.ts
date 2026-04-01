@@ -28,7 +28,7 @@ export const groupsModel = kea<groupsModelType>([
             {
                 loadAllGroupTypes: async () => {
                     if (!values.currentProjectId) {
-                        return []
+                        return [] // testing a change
                     }
                     return await api.get(`api/projects/${values.currentProjectId}/groups_types`)
                 },
