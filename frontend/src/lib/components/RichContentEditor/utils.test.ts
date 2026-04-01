@@ -1,15 +1,22 @@
-import { Editor } from '@tiptap/core'
+import { Editor, Node } from '@tiptap/core'
 import Document from '@tiptap/extension-document'
-import Paragraph from '@tiptap/extension-paragraph'
-import Text from '@tiptap/extension-text'
+import StarterKit from '@tiptap/starter-kit'
 
 import { createEditor } from './utils'
 import { JSONContent } from './types'
 
-const ParagraphWithNotebookAttrs = Paragraph.extend({
+const NotebookParagraph = Node.create({
+    name: 'paragraph',
+    group: 'block',
+    content: 'inline*',
+    parseHTML() {
+        return [{ tag: 'p' }]
+    },
+    renderHTML({ HTMLAttributes }) {
+        return ['p', HTMLAttributes, 0]
+    },
     addAttributes() {
         return {
-            ...this.parent?.(),
             nodeId: { default: null },
             query: { default: null },
         }
@@ -36,9 +43,13 @@ const initialContent: JSONContent = {
 
 function createTestEditor(content: JSONContent = initialContent): Editor {
     return new Editor({
-        extensions: [Document, ParagraphWithNotebookAttrs, Text],
+        extensions: [Document, NotebookParagraph, StarterKit.configure({ document: false, paragraph: false })],
         content,
     })
+}
+
+function normalizeJson(content: JSONContent): JSONContent {
+    return JSON.parse(JSON.stringify(content)) as JSONContent
 }
 
 describe('createEditor.mergeContent', () => {
@@ -71,11 +82,12 @@ describe('createEditor.mergeContent', () => {
 
         expect(editor.state.doc.child(0)).toBe(firstNodeBefore)
         expect(editor.state.doc.child(2)).toBe(nodeTwoBefore)
-        expect(editor.getJSON()).toEqual({
+        expect(normalizeJson(editor.getJSON() as JSONContent)).toEqual({
             type: 'doc',
             content: [
                 {
                     type: 'paragraph',
+                    attrs: { nodeId: null, query: null },
                     content: [{ type: 'text', text: 'Heading' }],
                 },
                 {
@@ -116,11 +128,12 @@ describe('createEditor.mergeContent', () => {
 
         await Promise.resolve()
 
-        expect(editor.getJSON()).toEqual({
+        expect(normalizeJson(editor.getJSON() as JSONContent)).toEqual({
             type: 'doc',
             content: [
                 {
                     type: 'paragraph',
+                    attrs: { nodeId: null, query: null },
                     content: [{ type: 'text', text: 'Heading' }],
                 },
                 {
@@ -164,11 +177,12 @@ describe('createEditor.mergeContent', () => {
 
         await Promise.resolve()
 
-        expect(editor.getJSON()).toEqual({
+        expect(normalizeJson(editor.getJSON() as JSONContent)).toEqual({
             type: 'doc',
             content: [
                 {
                     type: 'paragraph',
+                    attrs: { nodeId: null, query: null },
                     content: [{ type: 'text', text: 'Heading' }],
                 },
                 {

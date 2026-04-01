@@ -8,14 +8,14 @@ import {
     RichContentNodeType,
     TTEditor,
 } from './types'
-import equal from 'fast-deep-equal'
 import { Node as PMNode } from '@tiptap/pm/model'
 
 type MergeNode = {
-    json: JSONContent
     pmNode: PMNode
     nodeId: string | null
 }
+
+type EditorTransaction = TTEditor['state']['tr']
 
 export function createEditor(editor: TTEditor): RichContentEditorType {
     return {
@@ -174,7 +174,7 @@ function mergeContent(editor: TTEditor, content: JSONContent, options?: MergeCon
         }
 
         if (nodesMatch(currentNode, targetNode)) {
-            if (!shouldSkipNode(currentNode, options) && !equal(currentNode.json, targetNode.json)) {
+            if (!shouldSkipNode(currentNode, options) && !currentNode.pmNode.eq(targetNode.pmNode)) {
                 tr = syncMatchedNodeAtIndex(tr, workingNodes, currentIndex, targetNode)
             }
 
@@ -242,7 +242,6 @@ function getTopLevelNodes(doc: PMNode): MergeNode[] {
 
     doc.forEach((node) => {
         nodes.push({
-            json: node.toJSON() as JSONContent,
             pmNode: node,
             nodeId: getNodeId(node.attrs),
         })
@@ -291,27 +290,32 @@ function getPositionAtIndex(nodes: MergeNode[], index: number): number {
     return position
 }
 
-function insertNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number, node: MergeNode) {
+function insertNodeAtIndex(tr: EditorTransaction, nodes: MergeNode[], index: number, node: MergeNode): EditorTransaction {
     tr.insert(getPositionAtIndex(nodes, index), node.pmNode)
     nodes.splice(index, 0, node)
     return tr
 }
 
-function deleteNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number) {
+function deleteNodeAtIndex(tr: EditorTransaction, nodes: MergeNode[], index: number): EditorTransaction {
     const position = getPositionAtIndex(nodes, index)
     tr.delete(position, position + nodes[index].pmNode.nodeSize)
     nodes.splice(index, 1)
     return tr
 }
 
-function replaceNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number, node: MergeNode) {
+function replaceNodeAtIndex(tr: EditorTransaction, nodes: MergeNode[], index: number, node: MergeNode): EditorTransaction {
     const position = getPositionAtIndex(nodes, index)
     tr.replaceWith(position, position + nodes[index].pmNode.nodeSize, node.pmNode)
     nodes[index] = node
     return tr
 }
 
-function syncMatchedNodeAtIndex(tr: typeof TTEditor.prototype.state.tr, nodes: MergeNode[], index: number, node: MergeNode) {
+function syncMatchedNodeAtIndex(
+    tr: EditorTransaction,
+    nodes: MergeNode[],
+    index: number,
+    node: MergeNode
+): EditorTransaction {
     const position = getPositionAtIndex(nodes, index)
     const currentNode = nodes[index]
 
