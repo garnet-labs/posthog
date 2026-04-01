@@ -1112,10 +1112,11 @@ export interface SharingConfigurationApi {
  * `firebase` - Firebase
  * `jira` - Jira
  * `pinterest-ads` - Pinterest Ads
+ * `apns` - Apple Push
  */
-export type Kind8d6EnumApi = (typeof Kind8d6EnumApi)[keyof typeof Kind8d6EnumApi]
+export type KindD48EnumApi = (typeof KindD48EnumApi)[keyof typeof KindD48EnumApi]
 
-export const Kind8d6EnumApi = {
+export const KindD48EnumApi = {
     Slack: 'slack',
     SlackPosthogCode: 'slack-posthog-code',
     Salesforce: 'salesforce',
@@ -1144,6 +1145,7 @@ export const Kind8d6EnumApi = {
     Firebase: 'firebase',
     Jira: 'jira',
     PinterestAds: 'pinterest-ads',
+    Apns: 'apns',
 } as const
 
 /**
@@ -1151,7 +1153,7 @@ export const Kind8d6EnumApi = {
  */
 export interface IntegrationApi {
     readonly id: number
-    kind: Kind8d6EnumApi
+    kind: KindD48EnumApi
     config?: unknown
     readonly created_at: string
     readonly created_by: UserBasicApi
@@ -1173,7 +1175,7 @@ export interface PaginatedIntegrationListApi {
  */
 export interface PatchedIntegrationApi {
     readonly id?: number
-    kind?: Kind8d6EnumApi
+    kind?: KindD48EnumApi
     config?: unknown
     readonly created_at?: string
     readonly created_by?: UserBasicApi
