@@ -19,7 +19,6 @@ import { HogInputsService } from '../hog-inputs.service'
 import { EmailService } from '../messaging/email.service'
 import { RecipientTokensService } from '../messaging/recipient-tokens.service'
 import { PushNotificationService } from '../messaging/push-notification.service'
-import { PushSubscriptionsManagerService } from '../managers/push-subscriptions-manager.service'
 import { HogFunctionTemplateManagerService } from '../managers/hog-function-template-manager.service'
 import { RecipientsManagerService } from '../managers/recipients-manager.service'
 import { RecipientPreferencesService } from '../messaging/recipient-preferences.service'
@@ -63,7 +62,11 @@ describe('Hogflow Executor', () => {
             SITE_URL: 'http://localhost:8000',
         })
         const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
-        const hogInputsService = new HogInputsService(hub.integrationManager, recipientTokensService, undefined as any)
+        const hogInputsService = new HogInputsService(
+            hub.integrationManager,
+            recipientTokensService,
+            hub.encryptedFields
+        )
         const emailService = new EmailService(
             {
                 sesAccessKeyId: hub.SES_ACCESS_KEY_ID,
@@ -1798,14 +1801,10 @@ describe('Hogflow Executor', () => {
                 new HogFunctionTemplateManagerService(hub.postgres),
                 (() => {
                     const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
-                    const pushSubscriptionsManager = new PushSubscriptionsManagerService(
-                        hub.postgres,
-                        hub.encryptedFields
-                    )
                     const hogInputsService = new HogInputsService(
                         hub.integrationManager,
                         recipientTokensService,
-                        pushSubscriptionsManager
+                        hub.encryptedFields
                     )
                     return new HogExecutorService(
                         {
@@ -1829,7 +1828,7 @@ describe('Hogflow Executor', () => {
                             hub.SITE_URL
                         ),
                         recipientTokensService,
-                        new PushNotificationService(hub.integrationManager, pushSubscriptionsManager, undefined as any)
+                        new PushNotificationService(hub.integrationManager, hub.encryptedFields, undefined as any)
                     )
                 })()
             ),

@@ -50,7 +50,11 @@ describe('Hog Executor', () => {
 
         hub = await createHub()
         const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
-        const hogInputsService = new HogInputsService(hub.integrationManager, recipientTokensService, undefined as any)
+        const hogInputsService = new HogInputsService(
+            hub.integrationManager,
+            recipientTokensService,
+            hub.encryptedFields
+        )
         const emailService = new EmailService(
             {
                 sesAccessKeyId: hub.SES_ACCESS_KEY_ID,

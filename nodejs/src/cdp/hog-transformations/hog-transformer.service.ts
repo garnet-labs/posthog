@@ -21,7 +21,6 @@ import { HogInputsService } from '../services/hog-inputs.service'
 import { LegacyPluginExecutorService } from '../services/legacy-plugin-executor.service'
 import { HogFunctionManagerService } from '../services/managers/hog-function-manager.service'
 import { IntegrationManagerService } from '../services/managers/integration-manager.service'
-import { PushSubscriptionsManagerService } from '../services/managers/push-subscriptions-manager.service'
 import { EmailService } from '../services/messaging/email.service'
 import { PushNotificationService } from '../services/messaging/push-notification.service'
 import { RecipientTokensService } from '../services/messaging/recipient-tokens.service'
@@ -435,12 +434,7 @@ export function createHogTransformerService(
     })
     const hogFunctionManager = new HogFunctionManagerService(deps.postgres, deps.pubSub, deps.encryptedFields)
     const recipientTokensService = new RecipientTokensService(config.ENCRYPTION_SALT_KEYS, config.SITE_URL)
-    const pushSubscriptionsManager = new PushSubscriptionsManagerService(deps.postgres, deps.encryptedFields)
-    const hogInputsService = new HogInputsService(
-        deps.integrationManager,
-        recipientTokensService,
-        pushSubscriptionsManager
-    )
+    const hogInputsService = new HogInputsService(deps.integrationManager, recipientTokensService, deps.encryptedFields)
     const emailService = new EmailService(
         {
             sesAccessKeyId: config.SES_ACCESS_KEY_ID,
@@ -452,7 +446,7 @@ export function createHogTransformerService(
         config.ENCRYPTION_SALT_KEYS,
         config.SITE_URL
     )
-    const pushNotificationService = new PushNotificationService(deps.integrationManager, pushSubscriptionsManager, {
+    const pushNotificationService = new PushNotificationService(deps.integrationManager, deps.encryptedFields, {
         trackedFetch: cdpTrackedFetch,
         maxFetchTimeoutMs: MAX_FETCH_TIMEOUT_MS,
     })

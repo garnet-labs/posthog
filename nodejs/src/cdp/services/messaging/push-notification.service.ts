@@ -11,13 +11,10 @@ import {
 import { parseJSON } from '../../../utils/json-parse'
 import { CyclotronJobInvocationHogFunction, CyclotronJobInvocationResult, IntegrationType } from '../../types'
 import { createAddLogFunction } from '../../utils'
+import { EncryptedFields } from '../../utils/encryption-utils'
 import { createInvocationResult } from '../../utils/invocation-utils'
+import { getDevicePushSubscriptionToken } from '../../utils/push-subscription-utils'
 import { IntegrationManagerService } from '../managers/integration-manager.service'
-import {
-    ApnsErrorResponse,
-    FcmErrorDetail,
-    PushSubscriptionsManagerService,
-} from '../managers/push-subscriptions-manager.service'
 
 const pushNotificationSentCounter = new Counter({
     name: 'push_notification_sent_total',
@@ -37,7 +34,7 @@ export type PushNotificationFetchUtils = {
 export class PushNotificationService {
     constructor(
         private integrationManager: IntegrationManagerService,
-        private pushSubscriptionsManager: PushSubscriptionsManagerService,
+        private encryptedFields: EncryptedFields,
         private fetchUtils: PushNotificationFetchUtils
     ) {}
 
@@ -62,9 +59,9 @@ export class PushNotificationService {
             }
 
             if (integration.kind === 'firebase') {
-                await this.executeFcm(result, params, integration)
+                await this.executeFcm(result, params, integration, invocation)
             } else if (integration.kind === 'apple-push') {
-                await this.executeApns(result, params, integration)
+                await this.executeApns(result, params, integration, invocation)
             } else {
                 throw new Error(`Unsupported push integration kind: ${integration.kind}`)
             }
@@ -92,11 +89,11 @@ export class PushNotificationService {
     private async executeFcm(
         result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>,
         params: CyclotronInvocationQueueParametersSendPushNotificationType,
-        integration: IntegrationType
+        integration: IntegrationType,
+        invocation: CyclotronJobInvocationHogFunction
     ): Promise<void> {
         const addLog = createAddLogFunction(result.logs)
         const payload = params.payload
-        const teamId = result.invocation.teamId
 
         const projectId = integration.config.project_id
         const accessToken = integration.sensitive_config.access_token ?? integration.config.access_token
@@ -104,103 +101,81 @@ export class PushNotificationService {
             throw new Error('Firebase integration is missing project_id or access_token')
         }
 
-        // Look up device tokens for this distinct ID
-        const subscriptions = await this.pushSubscriptionsManager.get({
-            teamId,
-            distinctId: params.distinctId,
-            integrationId: params.integrationId,
-        })
+        const personProperties = invocation.state.globals.person?.properties
+        const token = getDevicePushSubscriptionToken(personProperties, projectId, this.encryptedFields)
 
-        if (subscriptions.length === 0) {
-            addLog('warn', `No active FCM device tokens found for distinct_id: ${params.distinctId}`)
+        if (!token) {
+            addLog('warn', `No active FCM device token found for distinct_id: ${params.distinctId}`)
             return
         }
 
         const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`
         const templateId = result.invocation.hogFunction.template_id ?? 'unknown'
-        let sentCount = 0
 
-        for (const subscription of subscriptions) {
-            const fcmMessage = this.buildFcmMessage(subscription.token, payload)
+        const fcmMessage = this.buildFcmMessage(token, payload)
 
-            const fetchParams: FetchOptions = {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(fcmMessage),
-            }
+        const fetchParams: FetchOptions = {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(fcmMessage),
+        }
 
-            if (params.timeoutMs !== undefined) {
-                fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
-            }
+        if (params.timeoutMs !== undefined) {
+            fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
+        }
 
-            const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
-                url,
-                fetchParams,
-                templateId,
-            })
+        const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
+            url,
+            fetchParams,
+            templateId,
+        })
 
-            result.invocation.state.timings.push({
-                kind: 'async_function',
-                duration_ms: fetchDuration,
-            })
+        result.invocation.state.timings.push({
+            kind: 'async_function',
+            duration_ms: fetchDuration,
+        })
 
-            let body: unknown = undefined
-            try {
-                body = await fetchResponse?.text()
-                if (typeof body === 'string') {
-                    try {
-                        body = parseJSON(body)
-                    } catch (_e) {
-                        // Pass through
-                    }
+        let body: unknown = undefined
+        try {
+            body = await fetchResponse?.text()
+            if (typeof body === 'string') {
+                try {
+                    body = parseJSON(body)
+                } catch (_e) {
+                    // Pass through
                 }
-            } catch (e) {
-                addLog('error', `Failed to parse response body: ${e.message}`)
             }
+        } catch (e) {
+            addLog('error', `Failed to parse response body: ${e.message}`)
+        }
 
-            // Handle FCM token lifecycle
-            const status = fetchResponse?.status
-            let errorDetails: FcmErrorDetail[] | undefined
-            if (status === 400 && body && typeof body === 'object') {
-                const errorBody = body as Record<string, unknown>
-                const error = errorBody?.error as { details?: FcmErrorDetail[] } | undefined
-                errorDetails = error?.details
-            }
-            await this.pushSubscriptionsManager.updateFcmTokenLifecycle(
-                teamId,
-                subscription.token,
-                status,
-                errorDetails
+        const status = fetchResponse?.status
+
+        if (!fetchResponse || (status && status >= 400)) {
+            addLog(
+                'error',
+                `FCM send error. Status: ${status ?? '(none)'}. Body: ${typeof body === 'string' ? body : JSON.stringify(body)}. Fetch error: ${fetchError?.message ?? 'none'}`
             )
-
-            if (!fetchResponse || (status && status >= 400)) {
-                const message = `Push notification to device ${subscription.id} failed with status ${status ?? '(none)'}.${fetchError ? ` Error: ${fetchError.message}.` : ''}`
-                addLog('error', message)
-                continue
-            }
-
-            sentCount++
+            throw new Error(
+                `Push notification failed with status ${status ?? '(none)'}.${fetchError ? ` Error: ${fetchError.message}.` : ''}`
+            )
         }
 
-        if (sentCount === 0) {
-            throw new Error(`Push notification failed for all ${subscriptions.length} device(s)`)
-        }
-
-        pushNotificationSentCounter.labels({ platform: 'fcm' }).inc(sentCount)
-        addLog('info', `Push notification sent via FCM to ${sentCount}/${subscriptions.length} device(s)`)
+        pushNotificationSentCounter.labels({ platform: 'fcm' }).inc()
+        addLog('info', `Push notification sent via FCM`)
     }
 
     private async executeApns(
         result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>,
         params: CyclotronInvocationQueueParametersSendPushNotificationType,
-        integration: IntegrationType
+        integration: IntegrationType,
+        invocation: CyclotronJobInvocationHogFunction
     ): Promise<void> {
         const addLog = createAddLogFunction(result.logs)
         const payload = params.payload
-        const teamId = result.invocation.teamId
 
         const signingKey = integration.sensitive_config.signing_key
         const keyId = integration.config.key_id
@@ -210,101 +185,86 @@ export class PushNotificationService {
             throw new Error('APNS integration is missing required fields: signing_key, key_id, team_id, or bundle_id')
         }
 
-        const subscriptions = await this.pushSubscriptionsManager.get({
-            teamId,
-            distinctId: params.distinctId,
-            integrationId: params.integrationId,
-        })
+        const personProperties = invocation.state.globals.person?.properties
+        const token = getDevicePushSubscriptionToken(personProperties, bundleId, this.encryptedFields)
 
-        if (subscriptions.length === 0) {
-            addLog('warn', `No active APNS device tokens found for distinct_id: ${params.distinctId}`)
+        if (!token) {
+            addLog('warn', `No active APNS device token found for distinct_id: ${params.distinctId}`)
             return
         }
 
         const jwt = this.generateApnsJwt(appleTeamId, keyId, signingKey)
         const templateId = result.invocation.hogFunction.template_id ?? 'unknown'
-        let sentCount = 0
 
-        for (const subscription of subscriptions) {
-            const apnsPayload = this.buildApnsPayload(payload)
-            const url = `https://api.push.apple.com/3/device/${subscription.token}`
+        const apnsPayload = this.buildApnsPayload(payload)
+        const url = `https://api.push.apple.com/3/device/${token}`
 
-            const headers: Record<string, string> = {
-                Authorization: `bearer ${jwt}`,
-                'apns-topic': bundleId,
-                'apns-push-type': 'alert',
-            }
-            if (payload.collapseKey) {
-                headers['apns-collapse-id'] = payload.collapseKey
-            }
-            if (payload.ttlSeconds !== undefined) {
-                headers['apns-expiration'] = String(Math.floor(Date.now() / 1000) + payload.ttlSeconds)
-            }
-            if (payload.apns?.interruptionLevel) {
-                headers['apns-priority'] = payload.apns.interruptionLevel === 'passive' ? '5' : '10'
-            }
+        const headers: Record<string, string> = {
+            Authorization: `bearer ${jwt}`,
+            'apns-topic': bundleId,
+            'apns-push-type': 'alert',
+        }
+        if (payload.collapseKey) {
+            headers['apns-collapse-id'] = payload.collapseKey
+        }
+        if (payload.ttlSeconds !== undefined) {
+            headers['apns-expiration'] = String(Math.floor(Date.now() / 1000) + payload.ttlSeconds)
+        }
+        if (payload.apns?.interruptionLevel) {
+            headers['apns-priority'] = payload.apns.interruptionLevel === 'passive' ? '5' : '10'
+        }
 
-            const fetchParams: FetchOptions = {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(apnsPayload),
-            }
+        const fetchParams: FetchOptions = {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(apnsPayload),
+        }
 
-            if (params.timeoutMs !== undefined) {
-                fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
-            }
+        if (params.timeoutMs !== undefined) {
+            fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
+        }
 
-            const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
-                url,
-                fetchParams,
-                templateId,
-            })
+        const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
+            url,
+            fetchParams,
+            templateId,
+        })
 
-            result.invocation.state.timings.push({
-                kind: 'async_function',
-                duration_ms: fetchDuration,
-            })
+        result.invocation.state.timings.push({
+            kind: 'async_function',
+            duration_ms: fetchDuration,
+        })
 
-            let body: unknown = undefined
-            try {
-                body = await fetchResponse?.text()
-                if (typeof body === 'string' && body.length > 0) {
-                    try {
-                        body = parseJSON(body)
-                    } catch (_e) {
-                        // Pass through
-                    }
+        let body: unknown = undefined
+        try {
+            body = await fetchResponse?.text()
+            if (typeof body === 'string' && body.length > 0) {
+                try {
+                    body = parseJSON(body)
+                } catch (_e) {
+                    // Pass through
                 }
-            } catch (e) {
-                addLog('error', `Failed to parse response body: ${e.message}`)
             }
+        } catch (e) {
+            addLog('error', `Failed to parse response body: ${e.message}`)
+        }
 
-            const status = fetchResponse?.status
-            const errorResponse: ApnsErrorResponse | undefined =
-                body && typeof body === 'object' ? (body as ApnsErrorResponse) : undefined
-            await this.pushSubscriptionsManager.updateApnsTokenLifecycle(
-                teamId,
-                subscription.token,
-                status,
-                errorResponse
+        const status = fetchResponse?.status
+
+        if (!fetchResponse || (status && status >= 400)) {
+            const reason =
+                body && typeof body === 'object' && 'reason' in body ? ` Reason: ${(body as any).reason}.` : ''
+            addLog(
+                'error',
+                `APNS send error. Status: ${status ?? '(none)'}. Body: ${typeof body === 'string' ? body : JSON.stringify(body)}. Fetch error: ${fetchError?.message ?? 'none'}`
             )
-
-            if (!fetchResponse || (status && status >= 400)) {
-                const reason = errorResponse?.reason ? ` Reason: ${errorResponse.reason}.` : ''
-                const message = `Push notification to device ${subscription.id} failed with status ${status ?? '(none)'}.${reason}${fetchError ? ` Error: ${fetchError.message}.` : ''}`
-                addLog('error', message)
-                continue
-            }
-
-            sentCount++
+            throw new Error(
+                `Push notification failed with status ${status ?? '(none)'}.${reason}${fetchError ? ` Error: ${fetchError.message}.` : ''}`
+            )
         }
 
-        if (sentCount === 0) {
-            throw new Error(`Push notification failed for all ${subscriptions.length} device(s)`)
-        }
-
-        pushNotificationSentCounter.labels({ platform: 'apns' }).inc(sentCount)
-        addLog('info', `Push notification sent via APNS to ${sentCount}/${subscriptions.length} device(s)`)
+        pushNotificationSentCounter.labels({ platform: 'apns' }).inc()
+        addLog('info', `Push notification sent via APNS`)
     }
 
     private generateApnsJwt(teamId: string, keyId: string, signingKey: string): string {

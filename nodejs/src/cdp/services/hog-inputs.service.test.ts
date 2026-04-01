@@ -9,33 +9,39 @@ import { closeHub, createHub } from '~/utils/db/hub'
 import { createHogExecutionGlobals, createHogFunction, insertIntegration } from '../_tests/fixtures'
 import { compileHog } from '../templates/compiler'
 import { HogFunctionInvocationGlobals, HogFunctionType } from '../types'
-import { HogInputsService, formatHogInput, getIntegrationIdForPush } from './hog-inputs.service'
-import { PushSubscriptionsManagerService } from './managers/push-subscriptions-manager.service'
+import { HogInputsService, formatHogInput, getAppIdentifierForPush } from './hog-inputs.service'
 import { RecipientTokensService } from './messaging/recipient-tokens.service'
 
-describe('getIntegrationIdForPush', () => {
+describe('getAppIdentifierForPush', () => {
     it('returns null when no integration inputs are present', () => {
-        expect(getIntegrationIdForPush({})).toBeNull()
-        expect(getIntegrationIdForPush({ push_provider: { value: null } })).toBeNull()
+        expect(getAppIdentifierForPush({})).toBeNull()
+        expect(getAppIdentifierForPush({ push_provider: { value: null } })).toBeNull()
     })
 
-    it('returns null when integration has no $integration_id', () => {
-        expect(getIntegrationIdForPush({ push_provider: { value: { key_id: 'abc' } } })).toBeNull()
+    it('returns null when integration has no project_id or bundle_id', () => {
+        expect(getAppIdentifierForPush({ push_provider: { value: { key_id: 'abc' } } })).toBeNull()
     })
 
-    it('returns $integration_id from a resolved integration input', () => {
-        const result = getIntegrationIdForPush({
-            push_provider: { value: { $integration_id: 42, key_id: 'abc' } },
+    it('returns project_id from a Firebase integration input', () => {
+        const result = getAppIdentifierForPush({
+            push_provider: { value: { project_id: 'my-firebase-project', key_id: 'abc' } },
         })
-        expect(result).toBe(42)
+        expect(result).toBe('my-firebase-project')
     })
 
-    it('returns the first $integration_id when multiple integrations are present', () => {
-        const result = getIntegrationIdForPush({
-            firebase_account: { value: { $integration_id: 10 } },
-            apns_account: { value: { $integration_id: 20 } },
+    it('returns bundle_id from an APNS integration input', () => {
+        const result = getAppIdentifierForPush({
+            push_provider: { value: { bundle_id: 'com.example.app', key_id: 'abc' } },
         })
-        expect(result).toBe(10)
+        expect(result).toBe('com.example.app')
+    })
+
+    it('returns the first app identifier when multiple integrations are present', () => {
+        const result = getAppIdentifierForPush({
+            firebase_account: { value: { project_id: 'firebase-proj' } },
+            apns_account: { value: { bundle_id: 'com.example.app' } },
+        })
+        expect(result).toBe('firebase-proj')
     })
 })
 
@@ -73,12 +79,7 @@ describe('Hog Inputs', () => {
         })
 
         const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
-        const pushSubscriptionsManager = new PushSubscriptionsManagerService(hub.postgres, hub.encryptedFields)
-        hogInputsService = new HogInputsService(
-            hub.integrationManager,
-            recipientTokensService,
-            pushSubscriptionsManager
-        )
+        hogInputsService = new HogInputsService(hub.integrationManager, recipientTokensService, hub.encryptedFields)
     })
 
     afterEach(async () => {
