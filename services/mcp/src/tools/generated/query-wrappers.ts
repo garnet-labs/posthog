@@ -1306,6 +1306,13 @@ const TracesQuery = z.object({
         .optional(),
 })
 
+const TraceQuery = z.object({
+    dateRange: DateRange.optional(),
+    kind: z.literal('TraceQuery').default('TraceQuery'),
+    properties: z.array(AnyPropertyFilter).describe('Properties configurable in the interface').optional(),
+    traceId: z.string(),
+})
+
 // --- Tool registrations ---
 
 export const GENERATED_TOOLS: Record<string, ReturnType<typeof createQueryWrapper<ZodObjectAny>>> = {
@@ -1346,4 +1353,5 @@ export const GENERATED_TOOLS: Record<string, ReturnType<typeof createQueryWrappe
         uiResourceUri: 'ui://posthog/query-results.html',
     }),
     'query-traces-list': createQueryWrapper({ name: 'query-traces-list', schema: TracesQuery, kind: 'TracesQuery' }),
+    'query-trace': createQueryWrapper({ name: 'query-trace', schema: TraceQuery, kind: 'TraceQuery' }),
 }

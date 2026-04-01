@@ -2258,5 +2258,20 @@
             "openWorldHint": true,
             "readOnlyHint": true
         }
+    },
+    "query-trace": {
+        "description": "Retrieve a single LLM trace by its trace ID. Returns the full trace including all child events (generations, spans, embeddings, feedback, metrics), total latency, token usage, costs, and input/output state. Requires traceId and dateRange. Use query-traces-list first to find trace IDs, then this tool to inspect a specific trace in detail.",
+        "category": "Query wrappers",
+        "feature": "insights",
+        "summary": "Get a single LLM trace",
+        "title": "Get a single LLM trace",
+        "required_scopes": ["query:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
     }
 }
