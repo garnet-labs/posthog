@@ -67,26 +67,6 @@ Embedding creation event (text to vector).
 | `$ai_total_cost_usd` | float  | Total cost in USD          |
 | `$ai_latency`        | float  | Duration in seconds        |
 
-### `$ai_feedback`
-
-Human feedback on a trace or generation.
-
-| Property            | Type   | Description                             |
-| ------------------- | ------ | --------------------------------------- |
-| `$ai_trace_id`      | string | Trace this feedback applies to          |
-| `$ai_parent_id`     | string | Specific event this feedback applies to |
-| `$ai_feedback_text` | string | Freeform feedback text                  |
-
-### `$ai_metric`
-
-Custom numeric metric captured on a trace.
-
-| Property           | Type   | Description        |
-| ------------------ | ------ | ------------------ |
-| `$ai_trace_id`     | string | Parent trace ID    |
-| `$ai_metric_name`  | string | Name of the metric |
-| `$ai_metric_value` | float  | Metric value       |
-
 ## Common patterns
 
 ### Linking events in a trace

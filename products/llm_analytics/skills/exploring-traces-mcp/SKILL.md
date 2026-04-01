@@ -41,9 +41,7 @@ See the [event reference](./references/events-and-properties.md) for the full sc
 $ai_trace (top-level container)
   └── $ai_span (logical groupings, e.g. "RAG retrieval", "tool execution")
         ├── $ai_generation (individual LLM API call)
-        ├── $ai_embedding (embedding creation)
-        ├── $ai_metric (custom numeric metrics)
-        └── $ai_feedback (human feedback)
+        └── $ai_embedding (embedding creation)
 ```
 
 Events are captured bottom-up: `$ai_generation`/`$ai_embedding` first, then `$ai_span`, then `$ai_trace`.
@@ -100,7 +98,7 @@ posthog:query-llm-trace
 2. **Scan the events** — look at the `event` field to identify generations, spans, feedback
 3. **Check generations** — each `$ai_generation` has `$ai_model`, `$ai_input`, `$ai_output_choices`, `$ai_is_error`
 4. **Check spans** — `$ai_span` events show logical steps (RAG, tool calls, routing)
-5. **Deep dive** — re-fetch with `contentDetail: "full"` for specific events if needed, dump to file
+5. **Deep dive** — re-fetch with `contentDetail: "full"` if needed, dump to file
 
 ### 4. Search trace content with SQL
 
