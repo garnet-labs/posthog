@@ -792,7 +792,6 @@ class HogQLQueryExecutor:
                 self._execute_clickhouse_query()
 
         return HogQLQueryResponse(
-            query=self.query,
             hogql=self.hogql,
             clickhouse=self.direct_postgres_sql or self.clickhouse_sql,
             error=self.error,
