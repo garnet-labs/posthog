@@ -9,7 +9,7 @@ import {
 } from '../cdp/hog-transformations/hog-transformer.service'
 import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig, PluginServerMode } from '../common/config'
-import { defaultConfig } from '../config/config'
+import { defaultConfig, overrideConfigWithEnv } from '../config/config'
 import {
     KAFKA_EVENTS_PLUGIN_INGESTION,
     KAFKA_EVENTS_PLUGIN_INGESTION_HISTORICAL,
@@ -27,6 +27,8 @@ import {
     KafkaProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
+    getDefaultIngestionOutputsConfig,
+    getDefaultKafkaProducerEnvConfig,
 } from '../ingestion/config'
 import { CookielessManager } from '../ingestion/cookieless/cookieless-manager'
 import { IngestionConsumer, IngestionConsumerDeps } from '../ingestion/ingestion-consumer'
@@ -99,7 +101,12 @@ export class IngestionGeneralServer implements NodeServer {
     private pubsub?: PubSub
 
     constructor(config: Partial<IngestionGeneralServerConfig> = {}) {
-        this.config = { ...defaultConfig, ...config }
+        this.config = {
+            ...defaultConfig,
+            ...overrideConfigWithEnv(getDefaultKafkaProducerEnvConfig()),
+            ...overrideConfigWithEnv(getDefaultIngestionOutputsConfig()),
+            ...config,
+        }
         this.lifecycle = new ServerLifecycle(this.config)
     }
 

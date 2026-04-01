@@ -9,7 +9,7 @@ import {
 } from '../cdp/hog-transformations/hog-transformer.service'
 import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig } from '../common/config'
-import { defaultConfig } from '../config/config'
+import { defaultConfig, overrideConfigWithEnv } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import {
     DatabaseConnectionConfig,
@@ -18,8 +18,13 @@ import {
     KafkaProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
+    getDefaultKafkaProducerEnvConfig,
 } from '../ingestion/config'
-import { ErrorTrackingConsumerConfig, ErrorTrackingOutputsConfig } from '../ingestion/error-tracking/config'
+import {
+    ErrorTrackingConsumerConfig,
+    ErrorTrackingOutputsConfig,
+    getDefaultErrorTrackingOutputsConfig,
+} from '../ingestion/error-tracking/config'
 import { registerErrorTrackingOutputs } from '../ingestion/error-tracking/config/outputs'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
 import {
@@ -83,7 +88,12 @@ export class ErrorTrackingServer implements NodeServer {
     private pubsub?: PubSub
 
     constructor(config: Partial<ErrorTrackingServerConfig> = {}) {
-        this.config = { ...defaultConfig, ...config }
+        this.config = {
+            ...defaultConfig,
+            ...overrideConfigWithEnv(getDefaultKafkaProducerEnvConfig()),
+            ...overrideConfigWithEnv(getDefaultErrorTrackingOutputsConfig()),
+            ...config,
+        }
         this.lifecycle = new ServerLifecycle(this.config)
     }
 
