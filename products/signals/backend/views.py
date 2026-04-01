@@ -52,6 +52,7 @@ from products.signals.backend.temporal.backfill_error_tracking import (
     BackfillErrorTrackingWorkflow,
 )
 from products.signals.backend.temporal.deletion import SignalReportDeletionWorkflow
+from products.signals.backend.temporal.grouping_v2 import TeamSignalGroupingV2Workflow
 from products.signals.backend.temporal.reingestion import SignalReportReingestionWorkflow
 from products.signals.backend.temporal.types import (
     SignalReportDeletionWorkflowInputs,
@@ -583,3 +584,59 @@ class SignalReportViewSet(
             )
 
         return Response({"status": "reingestion_started", "report_id": report_id}, status=status.HTTP_202_ACCEPTED)
+
+
+class PauseUntilRequestSerializer(serializers.Serializer):
+    paused_until = serializers.DateTimeField(help_text="Timestamp until which processing is paused.")
+
+
+class PauseResponseSerializer(serializers.Serializer):
+    status = serializers.CharField(help_text="Result status, always 'paused'.")
+    paused_until = serializers.DateTimeField(help_text="Timestamp until which processing is paused.")
+
+
+class UnpauseResponseSerializer(serializers.Serializer):
+    status = serializers.CharField(help_text="Result status, always 'unpaused'.")
+    was_paused = serializers.BooleanField(help_text="Whether the workflow was actually paused at call time.")
+
+
+class SignalProcessingStateResponseSerializer(serializers.Serializer):
+    paused_until = serializers.DateTimeField(
+        allow_null=True, help_text="Timestamp until which processing is paused, or null if not paused."
+    )
+
+
+class SignalProcessingViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
+    scope_object = "INTERNAL"
+
+    @extend_schema(
+        request=None,
+        responses={200: SignalProcessingStateResponseSerializer},
+    )
+    def list(self, request: Request, *args, **kwargs) -> Response:
+        """Get the current signal processing state, including pause status."""
+        paused_until = async_to_sync(TeamSignalGroupingV2Workflow.paused_state)(self.team.id)
+        return Response({"paused_until": paused_until})
+
+    @extend_schema(
+        request=PauseUntilRequestSerializer,
+        responses={200: PauseResponseSerializer},
+    )
+    @action(detail=False, methods=["PUT"], url_path="pause")
+    def pause(self, request: Request, *args, **kwargs) -> Response:
+        """Pause signal processing until a given timestamp."""
+        serializer = PauseUntilRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        timestamp = serializer.validated_data["paused_until"]
+        async_to_sync(TeamSignalGroupingV2Workflow.pause_until)(self.team.id, timestamp)
+        return Response({"status": "paused", "paused_until": timestamp})
+
+    @extend_schema(
+        request=None,
+        responses={200: UnpauseResponseSerializer},
+    )
+    @pause.mapping.delete
+    def unpause(self, request: Request, *args, **kwargs) -> Response:
+        """Clear the pause state on signal processing."""
+        was_paused = async_to_sync(TeamSignalGroupingV2Workflow.unpause)(self.team.id)
+        return Response({"status": "unpaused", "was_paused": was_paused})
