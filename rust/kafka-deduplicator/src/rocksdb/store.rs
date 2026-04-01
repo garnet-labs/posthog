@@ -6,8 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 use rocksdb::{
     checkpoint::Checkpoint, BlockBasedOptions, BoundColumnFamily, Cache, ColumnFamilyDescriptor,
-    DBCompressionType, DBWithThreadMode, MultiThreaded, Options, WriteBatch, WriteBufferManager,
-    WriteOptions,
+    DBCompressionType, DBWithThreadMode, LogLevel, MultiThreaded, Options, WriteBatch,
+    WriteBufferManager, WriteOptions,
 };
 use std::time::Instant;
 use tracing::error;
@@ -56,6 +56,18 @@ const DEFAULT_UNIVERSAL_COMPRESSION_SIZE_PERCENT: i32 = -1; // Compress all leve
 
 // ── Compression type parsing ─────────────────────────────────────────────────
 
+pub fn parse_rocksdb_log_level(s: &str) -> Result<LogLevel> {
+    match s.to_lowercase().trim() {
+        "debug" => Ok(LogLevel::Debug),
+        "info" => Ok(LogLevel::Info),
+        "warn" => Ok(LogLevel::Warn),
+        "error" => Ok(LogLevel::Error),
+        "fatal" => Ok(LogLevel::Fatal),
+        "header" => Ok(LogLevel::Header),
+        other => anyhow::bail!("unknown RocksDB log level: {other}"),
+    }
+}
+
 pub fn parse_compression_type(s: &str) -> Result<DBCompressionType> {
     match s.to_lowercase().trim() {
         "none" => Ok(DBCompressionType::None),
@@ -99,6 +111,11 @@ pub struct RocksDbConfig {
     /// Controls what fraction of data is compressed in Universal compaction.
     /// -1 = compress all (per-level settings ignored), >= 0 = enable per-level compression.
     pub universal_compression_size_percent: i32,
+    /// RocksDB internal log level. Controls verbosity of the LOG file written by RocksDB.
+    pub log_level: LogLevel,
+    /// When set, all RocksDB instances write their LOG files to this shared directory
+    /// instead of each DB's own directory. Useful for centralized log forwarding.
+    pub log_dir: Option<String>,
 }
 
 impl Default for RocksDbConfig {
@@ -121,6 +138,8 @@ impl Default for RocksDbConfig {
             compression_per_level: None,
             bottommost_compression_type: None,
             universal_compression_size_percent: DEFAULT_UNIVERSAL_COMPRESSION_SIZE_PERCENT,
+            log_level: LogLevel::Info,
+            log_dir: None,
         }
     }
 }
@@ -256,6 +275,15 @@ fn rocksdb_options(config: &RocksDbConfig) -> Options {
     // CRITICAL: Disable mmap with many partitions to avoid virtual memory explosion
     opts.set_allow_mmap_reads(false);
     opts.set_allow_mmap_writes(false);
+
+    // RocksDB internal logging
+    opts.set_log_level(config.log_level);
+    if let Some(ref dir) = config.log_dir {
+        opts.set_db_log_dir(dir);
+    }
+    // Keep at most 5 rotated LOG files per DB, cap each at 10MB
+    opts.set_keep_log_file_num(5);
+    opts.set_max_log_file_size(10 * 1024 * 1024);
 
     opts
 }

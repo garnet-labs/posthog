@@ -5,7 +5,9 @@ use bytesize::ByteSize;
 use common_continuous_profiling::ContinuousProfilingConfig;
 use envconfig::Envconfig;
 
-use crate::rocksdb::store::{parse_compression_per_level, parse_compression_type, RocksDbConfig};
+use crate::rocksdb::store::{
+    parse_compression_per_level, parse_compression_type, parse_rocksdb_log_level, RocksDbConfig,
+};
 
 /// Pipeline type for the deduplicator service.
 ///
@@ -118,6 +120,14 @@ pub struct Config {
     pub rocksdb_compression_per_level: Option<String>,
     pub rocksdb_bottommost_compression_type: Option<String>,
     pub rocksdb_universal_compression_size_percent: Option<i32>,
+
+    // RocksDB internal log level (debug, info, warn, error, fatal, header). Default: warn.
+    #[envconfig(default = "warn")]
+    pub rocksdb_log_level: String,
+
+    // When set, all RocksDB instances write LOG files to this shared directory.
+    // A background task tails these files and forwards them through tracing (stdout/Loki).
+    pub rocksdb_log_dir: Option<String>,
 
     #[envconfig(default = "1073741824")]
     // 1GB default, supports: raw bytes, scientific notation (9.663676416e+09), or units (9Gi, 1GB)
@@ -575,6 +585,15 @@ impl Config {
             universal_compression_size_percent: self
                 .rocksdb_universal_compression_size_percent
                 .unwrap_or(defaults.universal_compression_size_percent),
+            log_level: parse_rocksdb_log_level(&self.rocksdb_log_level).unwrap_or_else(|e| {
+                tracing::warn!(
+                    value = self.rocksdb_log_level,
+                    error = %e,
+                    "invalid ROCKSDB_LOG_LEVEL, using default (warn)"
+                );
+                defaults.log_level
+            }),
+            log_dir: self.rocksdb_log_dir.clone(),
         };
 
         if config.compression_per_level.is_some() && config.universal_compression_size_percent < 0 {
