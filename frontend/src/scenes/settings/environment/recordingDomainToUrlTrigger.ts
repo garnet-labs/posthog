@@ -9,7 +9,7 @@ export function recordingDomainEntryToUrlTrigger(domainEntry: string): UrlTrigge
     if (!trimmed) {
         return null
     }
-    const match = /^(https?:\/\/)(.+)$/.exec(trimmed)
+    const match = /^([a-zA-Z][a-zA-Z0-9+\-.]*:\/\/)(.+)$/.exec(trimmed)
     if (!match) {
         return null
     }

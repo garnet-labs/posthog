@@ -44,7 +44,17 @@ describe('recordingDomainEntryToUrlTrigger', () => {
         expect(new RegExp(t!.url).test(url)).toBe(expected)
     })
 
-    it.each([[''], ['not a url'], ['ftp://nope.com']])('returns null for invalid input %s', (domain) => {
+    it.each([
+        ['capacitor://localhost', '^capacitor://localhost(?:[/?#:][\\s\\S]*)?$'],
+        ['ftp://files.example.com', '^ftp://files\\.example\\.com(?:[/?#:][\\s\\S]*)?$'],
+    ])('converts non-http protocol %s to regex %s', (domain, expectedPattern) => {
+        expect(recordingDomainEntryToUrlTrigger(domain)).toEqual({
+            url: expectedPattern,
+            matching: 'regex',
+        })
+    })
+
+    it.each([[''], ['not a url']])('returns null for invalid input %s', (domain) => {
         expect(recordingDomainEntryToUrlTrigger(domain)).toBeNull()
     })
 })
