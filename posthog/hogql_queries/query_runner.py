@@ -89,7 +89,7 @@ from posthog.clickhouse.client.limit import (
 )
 from posthog.clickhouse.query_tagging import get_query_tag_value, tag_queries
 from posthog.errors import QueryErrorCategory, classify_query_error, clickhouse_error_type
-from posthog.event_usage import AnalyticsProps, groups
+from posthog.event_usage import AnalyticsProps, groups, report_user_or_team_action
 from posthog.exceptions_capture import capture_exception
 from posthog.hogql_queries.query_cache import count_query_cache_hit
 from posthog.hogql_queries.query_cache_base import QueryCacheManagerBase
@@ -1322,6 +1322,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                             analytics_props=analytics_props,
                         )
                         if results:
+                            cache_tracking_props = {}
                             if isinstance(results, CachedResponse):
                                 if (not trigger or not trigger.startswith("warming")) and results.query_metadata:
                                     log_event_usage_from_query_metadata(
@@ -1331,17 +1332,40 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                                     )
 
                                 last_refresh = last_refresh_from_cached_result(results)
+                                cache_tracking_props = {
+                                    "is_cache_stale": self._is_stale(last_refresh=last_refresh),
+                                    "calculation_trigger": results.calculation_trigger,
+                                    "cache_age_seconds": round((datetime.now(UTC) - last_refresh).total_seconds(), 2)
+                                    if last_refresh
+                                    else None,
+                                    "last_refresh": last_refresh.isoformat() if last_refresh else None,
+                                }
                                 slo.tag(
                                     execution_path="cache_hit",
                                     cache_hit=True,
-                                    is_cache_stale=self._is_stale(last_refresh=last_refresh),
-                                    calculation_trigger=results.calculation_trigger,
-                                    cache_age_seconds=round((datetime.now(UTC) - last_refresh).total_seconds(), 2)
-                                    if last_refresh
-                                    else None,
+                                    **cache_tracking_props,
                                 )
                             else:
                                 slo.tag(execution_path="cache_miss", cache_hit=False)
+
+                            query_executed_props = {
+                                "insight_id": insight_id,
+                                "dashboard_id": dashboard_id,
+                                "execution_mode": execution_mode.value,
+                                "query_type": query_type,
+                                "cache_key": cache_key,
+                                "cache_hit": isinstance(results, CachedResponse),
+                                "response_time_ms": round((perf_counter() - start_time) * 1000, 2),
+                                **cache_tracking_props,
+                            }
+                            report_user_or_team_action(
+                                "query executed",
+                                query_executed_props,
+                                user=user,
+                                team=self.team,
+                                organization=self.team.organization,
+                                analytics_props=analytics_props,
+                            )
 
                             return results
 
@@ -1445,6 +1469,27 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                 # Set target_age to None in that case
                 target_age=target_age,
             )
+
+        query_executed_props = {
+            "insight_id": insight_id,
+            "dashboard_id": dashboard_id,
+            "cache_hit": False,
+            "cache_key": cache_key,
+            "calculation_trigger": trigger,
+            "execution_mode": execution_mode.value,
+            "query_type": query_type,
+            "response_time_ms": round((perf_counter() - start_time) * 1000, 2),
+            "query_duration_ms": query_duration_ms,
+            "has_error": has_error,
+        }
+        report_user_or_team_action(
+            "query executed",
+            query_executed_props,
+            user=user,
+            team=self.team,
+            organization=self.team.organization,
+            analytics_props=analytics_props,
+        )
 
         return CachedResponse(**fresh_response_dict)
 
