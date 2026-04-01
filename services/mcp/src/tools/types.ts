@@ -1,11 +1,12 @@
 import type { z } from 'zod'
 
 import type { ApiClient, GroupType } from '@/api/client'
+import type { Schemas } from '@/api/generated'
 import type { ScopedCache } from '@/lib/cache/ScopedCache'
 import type { SessionManager } from '@/lib/SessionManager'
 import type { StateManager } from '@/lib/StateManager'
 import type { PrefixedString } from '@/lib/types'
-import type { ApiRedactedPersonalApiKey } from '@/schema/api'
+import type { ApiRedactedPersonalApiKey, ApiUser } from '@/schema/api'
 
 export type CloudRegion = 'us' | 'eu'
 
@@ -13,18 +14,9 @@ export type SessionState = {
     uuid: string
 }
 
-export type CachedUser = {
-    distinctId: string
-    fullName: string
-    email: string
-}
-
-export type CachedOrg = {
-    name: string
-    projectName: string
-    timezone: string
-    personOnEventsEnabled: boolean
-}
+export type CachedUser = ApiUser
+export type CachedOrg = Schemas.OrganizationBasic
+export type CachedProject = Schemas.ProjectBackwardCompat
 
 export type State = {
     projectId: string | undefined
@@ -41,7 +33,9 @@ export type State = {
     Record<PrefixedString<'cachedUser'>, CachedUser | undefined> &
     Record<PrefixedString<'cachedUserFetchedAt'>, number | undefined> &
     Record<PrefixedString<'cachedOrg'>, CachedOrg | undefined> &
-    Record<PrefixedString<'cachedOrgFetchedAt'>, number | undefined>
+    Record<PrefixedString<'cachedOrgFetchedAt'>, number | undefined> &
+    Record<PrefixedString<'cachedProject'>, CachedProject | undefined> &
+    Record<PrefixedString<'cachedProjectFetchedAt'>, number | undefined>
 
 export type Env = {
     /**

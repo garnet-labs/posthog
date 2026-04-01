@@ -15,7 +15,7 @@ import {
     toCloudRegion,
 } from '@/lib/constants'
 import { handleToolError } from '@/lib/errors'
-import { buildInstructionsV2 } from '@/lib/instructions'
+import { buildInstructionsV2, buildMetadataBlock } from '@/lib/instructions'
 import { formatResponse } from '@/lib/response'
 import { SessionManager } from '@/lib/SessionManager'
 import { StateManager } from '@/lib/StateManager'
@@ -25,7 +25,7 @@ import { registerResources } from '@/resources'
 import { registerUiAppResources } from '@/resources/ui-apps'
 import INSTRUCTIONS_TEMPLATE_V1 from '@/templates/instructions-v1.md'
 import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
-import type { CachedOrg, CachedUser, CloudRegion, Context, State, Tool } from '@/tools/types'
+import type { CachedOrg, CachedProject, CachedUser, CloudRegion, Context, State, Tool } from '@/tools/types'
 import type { AnalyticsMetadata, WithAnalytics } from '@/ui-apps/types'
 
 function buildInstructions(groupTypes?: GroupType[], metadata?: string): string {
@@ -59,6 +59,8 @@ export class MCP extends McpAgent<Env> {
         aiConsentGiven: undefined,
         aiConsentFetchedAt: undefined,
     }
+
+    private readonly CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
     _cache: DurableObjectCache<State> | undefined
 
@@ -471,29 +473,12 @@ export class MCP extends McpAgent<Env> {
 
     private async getOrFetchMetadata(): Promise<string | undefined> {
         try {
-            const [user, org] = await Promise.all([this.getOrFetchUser(), this.getOrFetchOrg()])
-            if (!user && !org) {
-                return undefined
-            }
-
-            const lines: string[] = []
-            if (org) {
-                lines.push(`You are currently in project "${org.projectName}" (organization: "${org.name}").`)
-                lines.push(`Project timezone: ${org.timezone}.`)
-                if (org.personOnEventsEnabled) {
-                    lines.push(
-                        'Person-on-events mode is enabled. When querying `person.properties.*` on the events table, values reflect what was set at the time the event was ingested, not the person\'s current value. The same person can have different property values across different events. Do not suggest workarounds for "query-time" person properties.'
-                    )
-                } else {
-                    lines.push(
-                        "Person properties are query-time in this project. `person.properties.*` on the events table always returns the person's current (latest) value, regardless of when the event occurred."
-                    )
-                }
-            }
-            if (user) {
-                lines.push(`The user's name is ${user.fullName} (${user.email}).`)
-            }
-            return lines.join('\n')
+            const [user, org, project] = await Promise.all([
+                this.getOrFetchUser(),
+                this.getOrFetchOrg(),
+                this.getOrFetchProject(),
+            ])
+            return buildMetadataBlock(user, org, project)
         } catch (error) {
             getPostHogClient(!!CUSTOM_API_BASE_URL).captureException(error, undefined, {
                 tag: 'max_ai',
@@ -504,7 +489,6 @@ export class MCP extends McpAgent<Env> {
     }
 
     private async getOrFetchUser(): Promise<CachedUser | undefined> {
-        const CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
         const distinctId = (await this.cache.get('distinctId')) ?? 'unknown'
         const cacheKey = `cachedUser:${distinctId}` as const
         const fetchedAtKey = `cachedUserFetchedAt:${distinctId}` as const
@@ -512,7 +496,7 @@ export class MCP extends McpAgent<Env> {
         try {
             const cached = await this.cache.get(cacheKey)
             const fetchedAt = await this.cache.get(fetchedAtKey)
-            const isStale = !fetchedAt || Date.now() - fetchedAt > CACHE_TTL_MS
+            const isStale = !fetchedAt || Date.now() - fetchedAt > this.CACHE_TTL_MS
 
             if (cached !== undefined && !isStale) {
                 return cached
@@ -545,19 +529,12 @@ export class MCP extends McpAgent<Env> {
         if (!result.success) {
             return undefined
         }
-        const user = result.data
-        const data: CachedUser = {
-            distinctId: user.distinct_id,
-            fullName: [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Unknown',
-            email: user.email,
-        }
-        await this.cache.set(cacheKey, data)
+        await this.cache.set(cacheKey, result.data)
         await this.cache.set(fetchedAtKey, Date.now())
-        return data
+        return result.data
     }
 
     private async getOrFetchOrg(): Promise<CachedOrg | undefined> {
-        const CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
         const orgId = (await this.cache.get('orgId')) ?? 'unknown'
         const cacheKey = `cachedOrg:${orgId}` as const
         const fetchedAtKey = `cachedOrgFetchedAt:${orgId}` as const
@@ -565,7 +542,7 @@ export class MCP extends McpAgent<Env> {
         try {
             const cached = await this.cache.get(cacheKey)
             const fetchedAt = await this.cache.get(fetchedAtKey)
-            const isStale = !fetchedAt || Date.now() - fetchedAt > CACHE_TTL_MS
+            const isStale = !fetchedAt || Date.now() - fetchedAt > this.CACHE_TTL_MS
 
             if (cached !== undefined && !isStale) {
                 return cached
@@ -593,42 +570,75 @@ export class MCP extends McpAgent<Env> {
         cacheKey: `cachedOrg:${string}`,
         fetchedAtKey: `cachedOrgFetchedAt:${string}`
     ): Promise<CachedOrg | undefined> {
+        const orgId = await this.cache.get('orgId')
+        if (!orgId) {
+            return undefined
+        }
         const api = await this.api()
-        const result = await api.users().me()
+        const result = await api.organizations().get({ orgId })
         if (!result.success) {
             return undefined
         }
-        const user = result.data
-
-        // Fetch project details to get person-on-events mode (not available in TeamBasicSerializer)
-        const projectId = await this.cache.get('projectId')
-        let personOnEventsEnabled = false
-        if (projectId) {
-            const projectResult = await api.projects().get({ projectId })
-            if (projectResult.success) {
-                const poeValue = projectResult.data.person_on_events_querying_enabled
-                personOnEventsEnabled = poeValue === true || poeValue === 'true'
-            }
-        }
-
-        const data: CachedOrg = {
-            name: user.organization?.name || 'Unknown',
-            projectName: user.team?.name || 'Unknown',
-            timezone: user.team?.timezone || 'UTC',
-            personOnEventsEnabled,
-        }
-        await this.cache.set(cacheKey, data)
+        await this.cache.set(cacheKey, result.data)
         await this.cache.set(fetchedAtKey, Date.now())
-        return data
+        return result.data
+    }
+
+    private async getOrFetchProject(): Promise<CachedProject | undefined> {
+        const projectId = (await this.cache.get('projectId')) ?? 'unknown'
+        const cacheKey = `cachedProject:${projectId}` as const
+        const fetchedAtKey = `cachedProjectFetchedAt:${projectId}` as const
+
+        try {
+            const cached = await this.cache.get(cacheKey)
+            const fetchedAt = await this.cache.get(fetchedAtKey)
+            const isStale = !fetchedAt || Date.now() - fetchedAt > this.CACHE_TTL_MS
+
+            if (cached !== undefined && !isStale) {
+                return cached
+            }
+
+            if (cached !== undefined) {
+                this.ctx.waitUntil(
+                    this.fetchAndCacheProject(cacheKey, fetchedAtKey).catch((error) => {
+                        getPostHogClient(!!CUSTOM_API_BASE_URL).captureException(error, undefined, {
+                            tag: 'max_ai',
+                            context: 'project_background_revalidation',
+                        })
+                    })
+                )
+                return cached
+            }
+
+            return await this.fetchAndCacheProject(cacheKey, fetchedAtKey)
+        } catch {
+            return undefined
+        }
+    }
+
+    private async fetchAndCacheProject(
+        cacheKey: `cachedProject:${string}`,
+        fetchedAtKey: `cachedProjectFetchedAt:${string}`
+    ): Promise<CachedProject | undefined> {
+        const projectId = await this.cache.get('projectId')
+        if (!projectId) {
+            return undefined
+        }
+        const api = await this.api()
+        const result = await api.projects().get({ projectId })
+        if (!result.success) {
+            return undefined
+        }
+        await this.cache.set(cacheKey, result.data)
+        await this.cache.set(fetchedAtKey, Date.now())
+        return result.data
     }
 
     private async getOrFetchGroupTypes(projectId: string): Promise<GroupType[] | undefined> {
-        const GROUP_TYPES_TTL_MS = 10 * 60 * 1000 // 10 minutes
-
         try {
             const cached = await this.cache.get(`groupTypes:${projectId}`)
             const fetchedAt = await this.cache.get(`groupTypesFetchedAt:${projectId}`)
-            const isStale = !fetchedAt || Date.now() - fetchedAt > GROUP_TYPES_TTL_MS
+            const isStale = !fetchedAt || Date.now() - fetchedAt > this.CACHE_TTL_MS
 
             if (cached !== undefined && !isStale) {
                 return cached
