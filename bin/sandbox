@@ -952,7 +952,7 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
     existing = registry.get(branch)
     if existing:
         error(f"Sandbox already exists for branch '{branch}' on port {existing.port}")
-        print(f"Use 'sandbox start {branch}' to start it, or 'sandbox destroy {branch}' first.")
+        print(f"Use 'sandbox start {branch}' to start it, or 'sandbox rm {branch}' first.")
         sys.exit(1)
 
     worktree_path = ensure_worktree(branch, base_branch)
@@ -1292,11 +1292,11 @@ def build_parser() -> argparse.ArgumentParser:
 examples:
   sandbox create aspicer/cool-feature
   sandbox create aspicer/bugfix main
-  sandbox list
+  sandbox ls
   sandbox shell aspicer/cool-feature
   sandbox stop aspicer/cool-feature
   sandbox start aspicer/cool-feature
-  sandbox destroy aspicer/cool-feature""",
+  sandbox rm aspicer/cool-feature""",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -1320,7 +1320,7 @@ examples:
         p = sub.add_parser(name, help=help_text)
         p.add_argument("branch")
 
-    p = sub.add_parser("destroy", help="Destroy a sandbox (preserves worktree)")
+    p = sub.add_parser("destroy", aliases=["rm"], help="Destroy a sandbox (preserves worktree)")
     p.add_argument("branch")
     p.add_argument("--clean", action="store_true", help="Also delete the git worktree")
 
@@ -1347,6 +1347,7 @@ def main() -> None:
         "start": lambda: cmd_start(args.branch),
         "stop": lambda: cmd_stop(args.branch),
         "destroy": lambda: cmd_destroy(args.branch, clean=args.clean),
+        "rm": lambda: cmd_destroy(args.branch, clean=args.clean),
         "list": cmd_list,
         "ls": cmd_list,
         "shell": lambda: cmd_shell(args.branch),
