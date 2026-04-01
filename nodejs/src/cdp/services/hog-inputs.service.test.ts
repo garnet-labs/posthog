@@ -212,6 +212,7 @@ describe('Hog Inputs', () => {
 
             expect(inputs.oauth).toMatchInlineSnapshot(`
                 {
+                  "$integration_id": 1,
                   "access_token": "$$_access_token_placeholder_1",
                   "access_token_raw": "token",
                   "not_encrypted": "not-encrypted",
@@ -220,6 +221,7 @@ describe('Hog Inputs', () => {
             `)
             expect(inputs.auth).toMatchInlineSnapshot(`
                 {
+                  "$integration_id": 2,
                   "access_token": "$$_access_token_placeholder_2",
                   "access_token_raw": "token",
                   "not_encrypted": "not-encrypted",
@@ -307,7 +309,7 @@ describe('Hog Inputs', () => {
             })
 
             const inputs = await hogInputsService.buildInputs(hogFunction, globals)
-            expect(inputs.push_subscription).toEqual({ value: null })
+            expect(inputs.push_subscription).toBeNull()
         })
     })
 })

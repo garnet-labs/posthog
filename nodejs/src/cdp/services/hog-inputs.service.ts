@@ -152,6 +152,7 @@ export class HogInputsService {
         const integrationId = getIntegrationIdForPush(integrationInputs)
 
         const pushSubscriptionPairs: Record<string, { distinctId: string; integrationId: number }> = {}
+        const nullResults: Record<string, { value: null }> = {}
         for (const [key, { rawValue, schema }] of Object.entries(inputsToLoad)) {
             let resolvedValue: unknown = rawValue
             const input = hogFunction.inputs?.[key]
@@ -169,6 +170,7 @@ export class HogInputsService {
                     inputKey: key,
                     resolvedValueType: typeof resolvedValue,
                 })
+                nullResults[key] = { value: null }
                 continue
             }
             if (integrationId === null) {
@@ -178,6 +180,7 @@ export class HogInputsService {
                     teamId: hogFunction.team_id,
                     inputKey: key,
                 })
+                nullResults[key] = { value: null }
                 continue
             }
             pushSubscriptionPairs[key] = {
@@ -186,7 +189,8 @@ export class HogInputsService {
             }
         }
 
-        return await this.pushSubscriptionsManager.loadPushSubscriptions(hogFunction, pushSubscriptionPairs)
+        const resolved = await this.pushSubscriptionsManager.loadPushSubscriptions(hogFunction, pushSubscriptionPairs)
+        return { ...nullResults, ...resolved }
     }
 
     public async loadIntegrationInputs(

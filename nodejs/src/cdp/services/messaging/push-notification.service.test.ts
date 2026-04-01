@@ -6,8 +6,6 @@ import { IntegrationManagerService } from '../managers/integration-manager.servi
 import { PushSubscriptionsManagerService } from '../managers/push-subscriptions-manager.service'
 import { PushNotificationFetchUtils, PushNotificationService } from './push-notification.service'
 
-const fcmUrl = 'https://fcm.googleapis.com/v1/projects/test-project/messages:send'
-
 const createSendPushNotificationInvocation = (token: string | null | undefined): CyclotronJobInvocationHogFunction => {
     const hogFunction = createHogFunction({
         name: 'Test FCM function',
@@ -30,8 +28,12 @@ const createSendPushNotificationInvocation = (token: string | null | undefined):
 
     invocation.queueParameters = {
         type: 'sendPushNotification',
-        url: fcmUrl,
-        method: 'POST',
+        integrationId: 1,
+        distinctId: 'test-distinct-id',
+        payload: {
+            title: 'Test notification',
+            body: 'Hello from PostHog',
+        },
     } as any
 
     invocation.state.vmState = { stack: [] } as any
@@ -47,12 +49,20 @@ describe('PushNotificationService', () => {
 
     const mockTrackedFetch = jest.fn()
 
+    const firebaseIntegration = {
+        id: 1,
+        team_id: 1,
+        kind: 'firebase' as const,
+        config: { project_id: 'test-project' },
+        sensitive_config: { access_token: 'test-access-token' },
+    }
+
     beforeEach(() => {
         integrationManager = {
-            get: jest.fn().mockResolvedValue(undefined),
+            get: jest.fn().mockResolvedValue(firebaseIntegration),
         } as any
         pushSubscriptionsManager = {
-            get: jest.fn().mockResolvedValue([]),
+            get: jest.fn().mockResolvedValue([{ id: 'sub-1', token: 'device-token-123' }]),
             updateLastSuccessfullyUsedAtByToken: jest.fn().mockResolvedValue(undefined),
             deactivateByTokens: jest.fn().mockResolvedValue(undefined),
             updateFcmTokenLifecycle: jest.fn().mockResolvedValue(undefined),
@@ -74,7 +84,7 @@ describe('PushNotificationService', () => {
     describe('executeSendPushNotification', () => {
         it('throws when queue parameters type is not sendPushNotification', async () => {
             const invocation = createSendPushNotificationInvocation('token')
-            invocation.queueParameters = { type: 'fetch', url: fcmUrl, method: 'POST' } as any
+            invocation.queueParameters = { type: 'fetch', url: 'http://example.com', method: 'POST' } as any
 
             await expect(service.executeSendPushNotification(invocation)).rejects.toThrow('Bad invocation')
             expect(mockTrackedFetch).not.toHaveBeenCalled()
@@ -95,13 +105,13 @@ describe('PushNotificationService', () => {
             await service.executeSendPushNotification(invocation)
 
             expect(mockTrackedFetch).toHaveBeenCalledWith({
-                url: fcmUrl,
+                url: 'https://fcm.googleapis.com/v1/projects/test-project/messages:send',
                 fetchParams: expect.objectContaining({ method: 'POST' }),
                 templateId: 'unknown',
             })
         })
 
-        it('returns result with execResult and metric sendPushNotification on success', async () => {
+        it('returns result with execResult and metric push_sent on success', async () => {
             const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
@@ -115,39 +125,29 @@ describe('PushNotificationService', () => {
 
             const result = await service.executeSendPushNotification(invocation)
 
-            expect(result.execResult).toEqual({ status: 200, body: {} })
             expect(result.metrics).toContainEqual(
                 expect.objectContaining({
-                    metric_name: 'sendPushNotification',
+                    metric_name: 'push_sent',
                     count: 1,
                 })
             )
-            expect(result.finished).toBe(false)
+            expect(result.finished).toBe(true)
         })
 
-        it('logs warning when token is not found in inputs', async () => {
+        it('logs warning when no device tokens found', async () => {
             const invocation = createSendPushNotificationInvocation(null)
-            mockTrackedFetch.mockResolvedValue({
-                fetchError: null,
-                fetchResponse: {
-                    status: 200,
-                    text: () => Promise.resolve('{}'),
-                    dump: () => Promise.resolve(),
-                },
-                fetchDuration: 10,
-            })
+            ;(pushSubscriptionsManager.get as jest.Mock).mockResolvedValue([])
 
             const result = await service.executeSendPushNotification(invocation)
 
-            expect(result.logs.map((log) => log.message)).toContain(
-                'FCM token not found in inputs, skipping FCM response handling'
+            expect(result.logs.map((log) => log.message)).toContainEqual(
+                expect.stringContaining('No active FCM device tokens found')
             )
             expect(pushSubscriptionsManager.updateFcmTokenLifecycle).not.toHaveBeenCalled()
         })
 
         it('handles successful response (200) and calls updateFcmTokenLifecycle', async () => {
-            const token = 'test-fcm-token-123'
-            const invocation = createSendPushNotificationInvocation(token)
+            const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -160,12 +160,16 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 200, undefined)
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(
+                1,
+                'device-token-123',
+                200,
+                undefined
+            )
         })
 
         it('handles 404 response and calls updateFcmTokenLifecycle (deactivate)', async () => {
-            const token = 'test-fcm-token-123'
-            const invocation = createSendPushNotificationInvocation(token)
+            const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -176,13 +180,19 @@ describe('PushNotificationService', () => {
                 fetchDuration: 10,
             })
 
-            await service.executeSendPushNotification(invocation)
+            const result = await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 404, undefined)
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(
+                1,
+                'device-token-123',
+                404,
+                undefined
+            )
+            // All devices failed, so error should be thrown and caught
+            expect(result.logs.map((log) => log.message)).toContainEqual(expect.stringContaining('failed for all'))
         })
 
         it('handles 400 with INVALID_ARGUMENT and passes error details to updateFcmTokenLifecycle', async () => {
-            const token = 'test-fcm-token-123'
             const responseBody = {
                 error: {
                     code: 400,
@@ -194,7 +204,7 @@ describe('PushNotificationService', () => {
                     ],
                 },
             }
-            const invocation = createSendPushNotificationInvocation(token)
+            const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -209,21 +219,20 @@ describe('PushNotificationService', () => {
 
             expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(
                 1,
-                token,
+                'device-token-123',
                 400,
                 responseBody.error.details
             )
         })
 
         it('handles 400 with empty error details and calls updateFcmTokenLifecycle', async () => {
-            const token = 'test-fcm-token-123'
             const responseBody = {
                 error: {
                     code: 400,
                     details: [],
                 },
             }
-            const invocation = createSendPushNotificationInvocation(token)
+            const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -236,12 +245,16 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 400, [])
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(
+                1,
+                'device-token-123',
+                400,
+                []
+            )
         })
 
         it('handles other status codes and still calls updateFcmTokenLifecycle', async () => {
-            const token = 'test-fcm-token-123'
-            const invocation = createSendPushNotificationInvocation(token)
+            const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -254,12 +267,16 @@ describe('PushNotificationService', () => {
 
             await service.executeSendPushNotification(invocation)
 
-            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(1, token, 500, undefined)
+            expect(pushSubscriptionsManager.updateFcmTokenLifecycle).toHaveBeenCalledWith(
+                1,
+                'device-token-123',
+                500,
+                undefined
+            )
         })
 
-        it('schedules retry when response is retriable', async () => {
-            const token = 'test-fcm-token-123'
-            const invocation = createSendPushNotificationInvocation(token)
+        it('sets error when all devices fail', async () => {
+            const invocation = createSendPushNotificationInvocation('token')
             mockTrackedFetch.mockResolvedValue({
                 fetchError: null,
                 fetchResponse: {
@@ -272,29 +289,18 @@ describe('PushNotificationService', () => {
 
             const result = await service.executeSendPushNotification(invocation)
 
-            expect(result.invocation.queue).toBe('hog')
-            expect(result.invocation.queueParameters?.type).toBe('sendPushNotification')
-            expect(result.invocation.queueScheduledAt).toBeDefined()
-            expect(result.error).toBeUndefined()
+            expect(result.error).toBeTruthy()
+            expect(result.logs.map((log) => log.message)).toContainEqual(expect.stringContaining('failed for all'))
         })
 
-        it('sets result.error when retries exhausted and not retriable', async () => {
-            const token = 'test-fcm-token-123'
-            const invocation = createSendPushNotificationInvocation(token)
-            mockTrackedFetch.mockResolvedValue({
-                fetchError: null,
-                fetchResponse: {
-                    status: 500,
-                    text: () => Promise.resolve('{}'),
-                    dump: () => Promise.resolve(),
-                },
-                fetchDuration: 10,
-            })
+        it('returns error when integration not found', async () => {
+            const invocation = createSendPushNotificationInvocation('token')
+            ;(integrationManager.get as jest.Mock).mockResolvedValue(undefined)
 
             const result = await service.executeSendPushNotification(invocation)
 
-            expect(result.error).toBeInstanceOf(Error)
-            expect(result.error?.message).toContain('status code 500')
+            expect(result.error).toBeTruthy()
+            expect(result.logs.map((log) => log.message)).toContain('Push notification integration not found')
         })
     })
 })

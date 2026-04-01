@@ -27,8 +27,8 @@ describe('PushSubscriptionsManagerService', () => {
         ): Promise<number> => {
             const result = await hub.postgres.query<{ id: number }>(
                 PostgresUse.COMMON_WRITE,
-                `INSERT INTO posthog_integration (team_id, kind, config, sensitive_config, created_at, created_by_id)
-                 VALUES ($1, $2, $3, '{}'::jsonb, NOW(), NULL)
+                `INSERT INTO posthog_integration (team_id, kind, config, sensitive_config, created_at, created_by_id, errors)
+                 VALUES ($1, $2, $3, '{}'::jsonb, NOW(), NULL, '')
                  RETURNING id`,
                 [teamId, kind, JSON.stringify(config)],
                 'insertIntegration'
@@ -184,7 +184,14 @@ describe('PushSubscriptionsManagerService', () => {
         it('returns null for subscription from different team', async () => {
             const distinctId = 'user-123'
             const token = 'fcm-token-abc123'
-            await insertPushSubscription(999, distinctId, token, 'android', fcmIntegrationId)
+            // Insert subscription for the real team
+            await insertPushSubscription(team.id, distinctId, token, 'android', fcmIntegrationId)
+
+            // But query with a hogFunction that belongs to a different team
+            const otherTeamHogFunction = createHogFunction({
+                ...hogFunction,
+                team_id: 999,
+            })
 
             const inputsToLoad: Record<string, PushSubscriptionInputToLoad> = {
                 push_subscription: {
@@ -192,7 +199,7 @@ describe('PushSubscriptionsManagerService', () => {
                     integrationId: fcmIntegrationId,
                 },
             }
-            const result = await manager.loadPushSubscriptions(hogFunction, inputsToLoad)
+            const result = await manager.loadPushSubscriptions(otherTeamHogFunction, inputsToLoad)
             expect(result).toEqual({
                 push_subscription: { value: null },
             })

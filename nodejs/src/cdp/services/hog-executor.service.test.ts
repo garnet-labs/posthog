@@ -280,7 +280,14 @@ describe('Hog Executor', () => {
                 ...HOG_INPUTS_EXAMPLES.simple_send_push_notification,
                 ...HOG_FILTERS_EXAMPLES.no_filters,
             })
-            const invocation = createExampleInvocation(pushHogFunction)
+            const invocation = createExampleInvocation(pushHogFunction, {
+                inputs: {
+                    integrationId: 1,
+                    distinctId: 'test-distinct-id',
+                    title: 'Test notification',
+                    body: 'Hello from PostHog',
+                },
+            })
             const result = await executor.execute(invocation)
 
             expect(result.invocation).toMatchObject({

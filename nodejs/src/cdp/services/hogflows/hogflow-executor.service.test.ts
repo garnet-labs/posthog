@@ -18,6 +18,8 @@ import { HogExecutorService } from '../hog-executor.service'
 import { HogInputsService } from '../hog-inputs.service'
 import { EmailService } from '../messaging/email.service'
 import { RecipientTokensService } from '../messaging/recipient-tokens.service'
+import { PushNotificationService } from '../messaging/push-notification.service'
+import { PushSubscriptionsManagerService } from '../managers/push-subscriptions-manager.service'
 import { HogFunctionTemplateManagerService } from '../managers/hog-function-template-manager.service'
 import { RecipientsManagerService } from '../managers/recipients-manager.service'
 import { RecipientPreferencesService } from '../messaging/recipient-preferences.service'
@@ -1794,29 +1796,42 @@ describe('Hogflow Executor', () => {
             new HogFlowFunctionsService(
                 hub.SITE_URL,
                 new HogFunctionTemplateManagerService(hub.postgres),
-                new HogExecutorService(
-                    {
-                        hogCostTimingUpperMs: hub.CDP_WATCHER_HOG_COST_TIMING_UPPER_MS,
-                        googleAdwordsDeveloperToken: hub.CDP_GOOGLE_ADWORDS_DEVELOPER_TOKEN,
-                        fetchRetries: hub.CDP_FETCH_RETRIES,
-                        fetchBackoffBaseMs: hub.CDP_FETCH_BACKOFF_BASE_MS,
-                        fetchBackoffMaxMs: hub.CDP_FETCH_BACKOFF_MAX_MS,
-                    },
-                    { teamManager: hub.teamManager, siteUrl: hub.SITE_URL },
-                    new HogInputsService(hub.integrationManager, hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL),
-                    new EmailService(
-                        {
-                            sesAccessKeyId: hub.SES_ACCESS_KEY_ID,
-                            sesSecretAccessKey: hub.SES_SECRET_ACCESS_KEY,
-                            sesRegion: hub.SES_REGION,
-                            sesEndpoint: hub.SES_ENDPOINT,
-                        },
+                (() => {
+                    const recipientTokensService = new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
+                    const pushSubscriptionsManager = new PushSubscriptionsManagerService(
+                        hub.postgres,
+                        hub.encryptedFields
+                    )
+                    const hogInputsService = new HogInputsService(
                         hub.integrationManager,
-                        hub.ENCRYPTION_SALT_KEYS,
-                        hub.SITE_URL
-                    ),
-                    new RecipientTokensService(hub.ENCRYPTION_SALT_KEYS, hub.SITE_URL)
-                )
+                        recipientTokensService,
+                        pushSubscriptionsManager
+                    )
+                    return new HogExecutorService(
+                        {
+                            hogCostTimingUpperMs: hub.CDP_WATCHER_HOG_COST_TIMING_UPPER_MS,
+                            googleAdwordsDeveloperToken: hub.CDP_GOOGLE_ADWORDS_DEVELOPER_TOKEN,
+                            fetchRetries: hub.CDP_FETCH_RETRIES,
+                            fetchBackoffBaseMs: hub.CDP_FETCH_BACKOFF_BASE_MS,
+                            fetchBackoffMaxMs: hub.CDP_FETCH_BACKOFF_MAX_MS,
+                        },
+                        { teamManager: hub.teamManager, siteUrl: hub.SITE_URL },
+                        hogInputsService,
+                        new EmailService(
+                            {
+                                sesAccessKeyId: hub.SES_ACCESS_KEY_ID,
+                                sesSecretAccessKey: hub.SES_SECRET_ACCESS_KEY,
+                                sesRegion: hub.SES_REGION,
+                                sesEndpoint: hub.SES_ENDPOINT,
+                            },
+                            hub.integrationManager,
+                            hub.ENCRYPTION_SALT_KEYS,
+                            hub.SITE_URL
+                        ),
+                        recipientTokensService,
+                        new PushNotificationService(hub.integrationManager, pushSubscriptionsManager, undefined as any)
+                    )
+                })()
             ),
             new RecipientPreferencesService(new RecipientsManagerService(hub.postgres)),
             redis
