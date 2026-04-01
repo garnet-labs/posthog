@@ -238,6 +238,14 @@ tables:
         on_nodes: DATA
         columns: []
 
+    query_log_archive_mv:
+        engine: MaterializedView
+        source: system.query_log
+        target: writable_query_log_archive
+        select: "SELECT hostname, user, query_id, ... FROM system.query_log WHERE type != 'QueryStart'"
+        on_nodes: ENDPOINTS
+        columns: []
+
     dist_query_log_archive_mv:
         engine: MaterializedView
         source: system.query_log
