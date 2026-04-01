@@ -28,6 +28,7 @@ import psycopg
 from posthog.ducklake.common import (
     escape as ducklake_escape,
     get_config,
+    get_duckgres_config,
     get_team_config,
 )
 
@@ -629,11 +630,35 @@ def cleanup_staged_files(
             s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})  # type: ignore[typeddict-item]
 
 
-def setup_duckgres_session(conn: psycopg.Connection) -> None:
+def setup_duckgres_session(
+    conn: psycopg.Connection,
+    source_storage_config: DuckLakeStorageConfig | None = None,
+    destinations: list[CrossAccountDestination] | None = None,
+) -> None:
     """Install and load required extensions on a duckgres connection."""
     for ext in ("ducklake", "httpfs", "delta"):
         conn.execute(f"INSTALL {ext}")
         conn.execute(f"LOAD {ext}")
+
+    if source_storage_config is not None:
+        conn.execute(source_storage_config.to_duckdb_secret_sql())
+
+    if destinations:
+        effective_storage_config = source_storage_config or DuckLakeStorageConfig.from_runtime()
+        for i, dest in enumerate(destinations):
+            access_key, secret_key, session_token = _get_cross_account_credentials(
+                dest.role_arn,
+                external_id=dest.external_id,
+            )
+            secret_sql = effective_storage_config.to_duckdb_scoped_secret_sql(
+                secret_name=f"ducklake_s3_dest_{i}",
+                scope=f"s3://{dest.bucket_name}",
+                access_key=access_key,
+                secret_key=secret_key,
+                session_token=session_token,
+                region=dest.region,
+            )
+            conn.execute(secret_sql)
 
 
 def connect_to_duckgres(server: DuckgresServer) -> psycopg.Connection:
@@ -648,6 +673,19 @@ def connect_to_duckgres(server: DuckgresServer) -> psycopg.Connection:
     )
 
 
+def connect_to_local_duckgres(team_id: int) -> psycopg.Connection:
+    """Open a psycopg connection to the local dev duckgres instance."""
+    config = get_duckgres_config(team_id)
+    return psycopg.connect(
+        host=config["DUCKGRES_HOST"],
+        port=int(config["DUCKGRES_PORT"]),
+        dbname=config["DUCKGRES_DATABASE"],
+        user=config["DUCKGRES_USERNAME"],
+        password=config["DUCKGRES_PASSWORD"],
+        autocommit=True,
+    )
+
+
 __all__ = [
     "DuckLakeStorageConfig",
     "CrossAccountDestination",
@@ -656,6 +694,7 @@ __all__ = [
     "configure_connection",
     "configure_cross_account_connection",
     "connect_to_duckgres",
+    "connect_to_local_duckgres",
     "ensure_ducklake_bucket_exists",
     "get_deltalake_storage_options",
     "normalize_endpoint",

@@ -1,17 +1,17 @@
 import json
 import datetime as dt
 import dataclasses
+from typing import Protocol
 
-import duckdb
 import deltalake
 import posthoganalytics
+from psycopg import sql
 from structlog.contextvars import bind_contextvars
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 
 from posthog.ducklake.common import (
-    attach_catalog,
     get_config,
     get_duckgres_server_for_team,
     get_ducklake_catalog_for_team,
@@ -19,11 +19,11 @@ from posthog.ducklake.common import (
     sanitize_ducklake_identifier,
 )
 from posthog.ducklake.storage import (
+    DuckLakeStorageConfig,
     cleanup_staged_files,
     compute_staging_uri,
-    configure_connection,
-    configure_cross_account_connection,
     connect_to_duckgres,
+    connect_to_local_duckgres,
     ensure_ducklake_bucket_exists,
     get_deltalake_storage_options,
     setup_duckgres_session,
@@ -50,6 +50,27 @@ from products.data_warehouse.backend.models import DataWarehouseSavedQuery
 
 LOGGER = get_logger(__name__)
 DATA_MODELING_DUCKLAKE_WORKFLOW_PREFIX = "data_modeling"
+
+
+class QueryResult(Protocol):
+    def fetchone(self) -> tuple | None: ...
+
+    def fetchall(self) -> list[tuple]: ...
+
+
+class QueryConnection(Protocol):
+    def execute(self, statement: str, params: list | None = None) -> QueryResult: ...
+
+
+def _create_schema_if_missing_query(schema_name: str) -> sql.Composed:
+    return sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
+
+
+def _create_replace_table_from_delta_query(schema_name: str, table_name: str) -> sql.Composed:
+    return sql.SQL("CREATE OR REPLACE TABLE {}.{} AS SELECT * FROM delta_scan(%s)").format(
+        sql.Identifier(schema_name),
+        sql.Identifier(table_name),
+    )
 
 
 @dataclasses.dataclass
@@ -181,7 +202,7 @@ async def prepare_data_modeling_ducklake_metadata_activity(
 
 @activity.defn
 def copy_data_modeling_model_to_ducklake_activity(inputs: DuckLakeCopyActivityInputs) -> None:
-    """Ingest a single model's Delta snapshot into DuckLake using native SQL."""
+    """Ingest a single model's Delta snapshot into DuckLake."""
     bind_contextvars(team_id=inputs.team_id)
     logger = LOGGER.bind(model_label=inputs.model.model_label, job_id=inputs.job_id)
 
@@ -190,34 +211,14 @@ def copy_data_modeling_model_to_ducklake_activity(inputs: DuckLakeCopyActivityIn
         dev_mode = is_dev_mode()
 
         if dev_mode:
-            alias = "ducklake"
-            with duckdb.connect() as conn:
-                config = get_config()
-                configure_connection(conn)
-                ensure_ducklake_bucket_exists(config=config, team_id=inputs.team_id)
-                _attach_ducklake_catalog(conn, config, alias=alias)
-
-                qualified_schema = f"{alias}.{inputs.model.schema_name}"
-                qualified_table = f"{qualified_schema}.{inputs.model.table_name}"
-
-                logger.info(
-                    "Creating DuckLake table from Delta snapshot",
-                    ducklake_table=qualified_table,
-                    source_table=inputs.model.source_table_uri,
-                )
-                conn.execute(f"CREATE SCHEMA IF NOT EXISTS {qualified_schema}")
-                conn.execute(
-                    f"CREATE OR REPLACE TABLE {qualified_table} AS SELECT * FROM delta_scan(?)",
-                    [inputs.model.source_table_uri],
-                )
-                logger.info("Successfully materialized DuckLake table", ducklake_table=qualified_table)
+            _copy_data_modeling_via_local_duckgres(inputs, logger)
         else:
             _copy_data_modeling_via_duckgres(inputs, logger)
 
 
 @activity.defn
 def verify_ducklake_copy_activity(inputs: DuckLakeCopyActivityInputs) -> list[DuckLakeCopyVerificationResult]:
-    """Run configured DuckDB verification queries to ensure the copy matches the source."""
+    """Run configured verification queries to ensure the copy matches the source."""
     bind_contextvars(team_id=inputs.team_id)
     logger = LOGGER.bind(model_label=inputs.model.model_label, job_id=inputs.job_id)
 
@@ -229,34 +230,26 @@ def verify_ducklake_copy_activity(inputs: DuckLakeCopyActivityInputs) -> list[Du
 
     heartbeater = HeartbeaterSync(details=("ducklake_verify", inputs.model.model_label), logger=logger)
     with heartbeater:
-        alias = "ducklake"
-        dev_mode = is_dev_mode()
-
         results: list[DuckLakeCopyVerificationResult] = []
+        ducklake_table = f"{inputs.model.schema_name}.{inputs.model.table_name}"
+        format_values = {
+            "ducklake_table": ducklake_table,
+            "ducklake_schema": inputs.model.schema_name,
+            "ducklake_alias": "main",
+            "schema_name": inputs.model.schema_name,
+            "table_name": inputs.model.table_name,
+        }
 
-        with duckdb.connect() as conn:
-            if dev_mode:
-                config = get_config()
-                configure_connection(conn)
-            else:
-                catalog = get_ducklake_catalog_for_team(inputs.team_id)
-                if catalog is None:
-                    raise ApplicationError(
-                        f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True
-                    )
-                config = catalog.to_public_config()
-                config["DUCKLAKE_RDS_PASSWORD"] = catalog.db_password
-                configure_cross_account_connection(conn, destinations=[catalog.to_cross_account_destination()])
-            _attach_ducklake_catalog(conn, config, alias=alias)
+        storage_config = DuckLakeStorageConfig.from_runtime(team_id=inputs.team_id)
+        destinations = None
+        if inputs.model.staging_uri:
+            catalog = get_ducklake_catalog_for_team(inputs.team_id)
+            if catalog is None:
+                raise ApplicationError(f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True)
+            destinations = [catalog.to_cross_account_destination()]
 
-            ducklake_table = f"{alias}.{inputs.model.schema_name}.{inputs.model.table_name}"
-            format_values = {
-                "ducklake_table": ducklake_table,
-                "ducklake_schema": f"{alias}.{inputs.model.schema_name}",
-                "ducklake_alias": alias,
-                "schema_name": inputs.model.schema_name,
-                "table_name": inputs.model.table_name,
-            }
+        with _connect_to_duckgres_for_team(inputs.team_id) as conn:
+            setup_duckgres_session(conn, source_storage_config=storage_config, destinations=destinations)
 
             for query in inputs.model.verification_queries:
                 rendered_sql = query.sql.format(**format_values)
@@ -348,13 +341,19 @@ def verify_ducklake_copy_activity(inputs: DuckLakeCopyActivityInputs) -> list[Du
                 )
 
             schema_result = _run_schema_verification(
-                conn, ducklake_table, inputs, source_uri_override=effective_source_uri
+                conn,
+                ducklake_table,
+                inputs,
+                source_uri_override=effective_source_uri,
             )
             if schema_result:
                 results.append(schema_result)
 
             partition_result = _run_partition_verification(
-                conn, ducklake_table, inputs, source_uri_override=effective_source_uri
+                conn,
+                ducklake_table,
+                inputs,
+                source_uri_override=effective_source_uri,
             )
             if partition_result:
                 results.append(partition_result)
@@ -528,12 +527,36 @@ def _copy_data_modeling_via_duckgres(inputs: DuckLakeCopyActivityInputs, logger)
             ducklake_table=table,
             staging_uri=inputs.model.staging_uri,
         )
-        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        conn.execute(_create_schema_if_missing_query(schema))
         conn.execute(
-            f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM delta_scan(%s)",
+            _create_replace_table_from_delta_query(schema, inputs.model.table_name),
             [inputs.model.staging_uri],
         )
         logger.info("Successfully materialized DuckLake table via duckgres", ducklake_table=table)
+
+
+def _copy_data_modeling_via_local_duckgres(inputs: DuckLakeCopyActivityInputs, logger) -> None:
+    """Materialize a DuckLake table via local duckgres in dev mode."""
+    config = get_config()
+    storage_config = DuckLakeStorageConfig.from_runtime(team_id=inputs.team_id)
+    ensure_ducklake_bucket_exists(storage_config=storage_config, config=config, team_id=inputs.team_id)
+
+    schema = inputs.model.schema_name
+    table = f"{schema}.{inputs.model.table_name}"
+
+    with connect_to_local_duckgres(inputs.team_id) as conn:
+        setup_duckgres_session(conn, source_storage_config=storage_config)
+        logger.info(
+            "Creating DuckLake table from Delta snapshot via local duckgres",
+            ducklake_table=table,
+            source_uri=inputs.model.source_table_uri,
+        )
+        conn.execute(_create_schema_if_missing_query(schema))
+        conn.execute(
+            _create_replace_table_from_delta_query(schema, inputs.model.table_name),
+            [inputs.model.source_table_uri],
+        )
+        logger.info("Successfully materialized DuckLake table via local duckgres", ducklake_table=table)
 
 
 @dataclasses.dataclass
@@ -556,13 +579,14 @@ def cleanup_data_modeling_staging_activity(inputs: DuckLakeDataModelingStagingCl
     )
 
 
-def _attach_ducklake_catalog(conn: duckdb.DuckDBPyConnection, config: dict[str, str], alias: str) -> None:
-    """Attach the DuckLake catalog, swallowing the error if already attached."""
-    try:
-        attach_catalog(conn, config, alias=alias)
-    except duckdb.CatalogException as exc:
-        if alias not in str(exc):
-            raise
+def _connect_to_duckgres_for_team(team_id: int):
+    if is_dev_mode():
+        return connect_to_local_duckgres(team_id)
+
+    server = get_duckgres_server_for_team(team_id)
+    if server is None:
+        raise ApplicationError(f"No DuckgresServer configured for team {team_id}", non_retryable=True)
+    return connect_to_duckgres(server)
 
 
 def _detect_partition_column_name(table_uri: str) -> str | None:
@@ -611,7 +635,7 @@ def _is_datetime_column_type(column_type: str | None) -> bool:
 
 
 def _run_schema_verification(
-    conn: duckdb.DuckDBPyConnection,
+    conn: QueryConnection,
     ducklake_table: str,
     inputs: DuckLakeCopyActivityInputs,
     *,
@@ -650,7 +674,7 @@ def _run_schema_verification(
 
 
 def _run_partition_verification(
-    conn: duckdb.DuckDBPyConnection,
+    conn: QueryConnection,
     ducklake_table: str,
     inputs: DuckLakeCopyActivityInputs,
     *,
@@ -676,7 +700,7 @@ def _run_partition_verification(
     sql = f"""
         WITH source AS (
             SELECT {bucket_expr} AS bucket, count(*) AS cnt
-            FROM delta_scan(?)
+            FROM delta_scan(%s)
             GROUP BY 1
         ),
         ducklake AS (
@@ -766,15 +790,18 @@ def _schema_map(schema: list[tuple[str, str]]) -> dict[str, tuple[str, str]]:
     return mapping
 
 
-def _fetch_delta_schema(conn: duckdb.DuckDBPyConnection, source_uri: str) -> list[tuple[str, str]]:
+def _fetch_delta_schema(
+    conn: QueryConnection,
+    source_uri: str,
+) -> list[tuple[str, str]]:
     rows = conn.execute(
-        "DESCRIBE SELECT * FROM delta_scan(?) LIMIT 0",
+        "DESCRIBE SELECT * FROM delta_scan(%s) LIMIT 0",
         [source_uri],
     ).fetchall()
     return [(row[0], row[1]) for row in rows]
 
 
-def _fetch_schema(conn: duckdb.DuckDBPyConnection, table_name: str) -> list[tuple[str, str]]:
+def _fetch_schema(conn: QueryConnection, table_name: str) -> list[tuple[str, str]]:
     rows = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
     return [(row[1], row[2]) for row in rows]
 

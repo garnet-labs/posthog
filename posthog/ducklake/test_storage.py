@@ -6,6 +6,7 @@ from posthog.ducklake.storage import (
     _DELTA_LOG_VERSION_RE,
     DuckLakeStorageConfig,
     _collect_delta_log_keys,
+    connect_to_local_duckgres,
     normalize_endpoint,
 )
 
@@ -177,6 +178,31 @@ class TestDuckLakeStorageConfigProduction:
         assert "REGION 'eu-central-1'" in sql
         assert "PROVIDER CREDENTIAL_CHAIN" not in sql
         assert "ENDPOINT '" not in sql
+
+
+class TestConnectToLocalDuckgres:
+    @patch("posthog.ducklake.storage.psycopg.connect")
+    def test_uses_runtime_config(self, mock_connect: MagicMock):
+        with patch(
+            "posthog.ducklake.storage.get_duckgres_config",
+            return_value={
+                "DUCKGRES_HOST": "localhost",
+                "DUCKGRES_PORT": "15432",
+                "DUCKGRES_DATABASE": "ducklake",
+                "DUCKGRES_USERNAME": "posthog",
+                "DUCKGRES_PASSWORD": "posthog",
+            },
+        ):
+            connect_to_local_duckgres(team_id=1)
+
+        mock_connect.assert_called_once_with(
+            host="localhost",
+            port=15432,
+            dbname="ducklake",
+            user="posthog",
+            password="posthog",
+            autocommit=True,
+        )
 
     def test_to_duckdb_secret_sql_production_no_session_token(self, monkeypatch):
         monkeypatch.setenv("DUCKLAKE_BUCKET_REGION", "us-east-1")

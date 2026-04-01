@@ -64,7 +64,7 @@ models:
         description: Allow a larger gap for this model’s backfill window
         sql: |
           SELECT ABS(
-              (SELECT COUNT(*) FROM delta_scan(?))
+              (SELECT COUNT(*) FROM delta_scan(%s))
               -
               (SELECT COUNT(*) FROM {ducklake_table})
           )
