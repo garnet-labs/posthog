@@ -225,6 +225,64 @@ export const getClaudeAgentSDKSteps = (ctx: OnboardingComponentsContext): StepDe
                 </>
             ),
         },
+        {
+            title: 'Multi-turn conversations with history',
+            badge: 'optional',
+            content: (
+                <>
+                    <Markdown>
+                        For stateful, multi-turn conversations where each follow-up has full context from previous
+                        turns, use `PostHogClaudeSDKClient`. This wraps the Claude Agent SDK's `ClaudeSDKClient` and
+                        instruments each turn automatically. All turns share a single trace.
+                    </Markdown>
+
+                    <CodeBlock
+                        language="python"
+                        code={dedent`
+                            from posthog import Posthog
+                            from posthog.ai.claude_agent_sdk import PostHogClaudeSDKClient
+                            from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage
+                            from claude_agent_sdk.types import TextBlock
+
+                            posthog = Posthog(
+                                "<ph_project_token>",
+                                host="<ph_client_api_host>"
+                            )
+
+                            options = ClaudeAgentOptions(max_turns=5)
+
+                            async with PostHogClaudeSDKClient(
+                                options,
+                                posthog_client=posthog,
+                                posthog_distinct_id="user_123",
+                                posthog_properties={"app": "my-agent"},
+                            ) as client:
+                                # Turn 1
+                                await client.query("What is the capital of France?")
+                                async for msg in client.receive_response():
+                                    if isinstance(msg, AssistantMessage):
+                                        for block in msg.content:
+                                            if isinstance(block, TextBlock):
+                                                print(block.text)
+
+                                # Turn 2 — has full conversation history
+                                await client.query("What language do they speak there?")
+                                async for msg in client.receive_response():
+                                    if isinstance(msg, AssistantMessage):
+                                        for block in msg.content:
+                                            if isinstance(block, TextBlock):
+                                                print(block.text)
+                        `}
+                    />
+
+                    <Markdown>
+                        {dedent`
+                            Each \`receive_response()\` cycle emits \`$ai_generation\` events for that turn. When the client disconnects (exiting the \`async with\` block), a single \`$ai_trace\` event is emitted covering the entire session with aggregate latency.
+                        `}
+                    </Markdown>
+                </>
+            ),
+        },
     ]
 }
 
