@@ -219,8 +219,6 @@ func NotificationsHandler(redisClient rueidis.Client) func(c echo.Context) error
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
-		heartbeat := time.NewTicker(15 * time.Second)
-		defer heartbeat.Stop()
 		timeout := time.After(30 * time.Minute)
 
 		for {
@@ -240,12 +238,6 @@ func NotificationsHandler(redisClient rueidis.Client) func(c echo.Context) error
 					continue
 				}
 				event := Event{Data: []byte(cleaned)}
-				if err := event.WriteTo(w); err != nil {
-					return err
-				}
-				w.Flush()
-			case <-heartbeat.C:
-				event := Event{Comment: []byte("heartbeat")}
 				if err := event.WriteTo(w); err != nil {
 					return err
 				}

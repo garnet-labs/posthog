@@ -242,6 +242,7 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
                     },
                     signal: abortController.signal,
                     onMessage: (event) => {
+                        actions.clearErrorCount()
                         if (!values.isInitialLoadComplete) {
                             return
                         }
@@ -288,11 +289,15 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
                         }
                     },
                     onError: () => {
-                        actions.fallbackToPoll()
-                        throw new Error('SSE connection failed, falling back to polling')
+                        actions.incrementErrorCount()
+                        if (values.errorCounter >= 3) {
+                            actions.fallbackToPoll()
+                            throw new Error('SSE failed 3 times, falling back to polling')
+                        }
+                        // Otherwise let fetchEventSource silently reconnect
                     },
                 })
-                .catch(() => console.warn('[Notifications] SSE connection failed, using polling fallback'))
+                .catch(() => {})
         },
         stopSSE: () => {
             cache.sseConnection?.abort()
