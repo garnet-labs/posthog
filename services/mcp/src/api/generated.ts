@@ -12834,6 +12834,7 @@ export namespace Schemas {
 
     /**
      * * `allow` - Allow
+    * `enforce` - Enforce
     * `reject` - Reject
      */
     export type EnforcementModeEnum = typeof EnforcementModeEnum[keyof typeof EnforcementModeEnum];
@@ -12841,6 +12842,7 @@ export namespace Schemas {
 
     export const EnforcementModeEnum = {
       Allow: 'allow',
+      Enforce: 'enforce',
       Reject: 'reject',
     } as const;
 
@@ -12882,6 +12884,7 @@ export namespace Schemas {
       /** @nullable */
       hidden?: boolean | null;
       enforcement_mode?: EnforcementModeEnum;
+      readonly schema_version: number;
       readonly is_action: boolean;
       readonly action_id: number;
       readonly is_calculating: boolean;
@@ -22278,6 +22281,7 @@ export namespace Schemas {
       /** @nullable */
       hidden?: boolean | null;
       enforcement_mode?: EnforcementModeEnum;
+      readonly schema_version?: number;
       readonly is_action?: boolean;
       readonly action_id?: number;
       readonly is_calculating?: boolean;

@@ -1,4 +1,5 @@
 from django.contrib.postgres.indexes import GinIndex
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -7,6 +8,7 @@ from posthog.models.utils import UniqueConstraintByExpression, UUIDTModel
 
 class SchemaEnforcementMode(models.TextChoices):
     ALLOW = "allow", "Allow"
+    ENFORCE = "enforce", "Enforce"
     REJECT = "reject", "Reject"
 
 
@@ -36,6 +38,8 @@ class EventDefinition(UUIDTModel):
         default=SchemaEnforcementMode.ALLOW,
     )
 
+    schema_version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+
     class Meta:
         db_table = "posthog_eventdefinition"
         indexes = [
@@ -49,7 +53,7 @@ class EventDefinition(UUIDTModel):
             models.Index(
                 fields=["team_id"],
                 name="posthog_eventdef_enforce_idx",
-                condition=models.Q(enforcement_mode="reject"),
+                condition=models.Q(enforcement_mode__in=["reject", "enforce"]),
             ),
         ]
         constraints = [

@@ -26,7 +26,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -231,7 +232,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -1013,7 +1015,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
       
       
       
@@ -1178,7 +1181,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -1335,6 +1339,7 @@
   group4_created_at,
   person_mode,
   historical_migration,
+  validated_schema_version,
   dmat_string_0,
   dmat_string_1,
   dmat_string_2,
@@ -1415,7 +1420,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
       
       
       
@@ -1788,7 +1794,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -4398,7 +4405,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -4534,7 +4542,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
       
       
       
@@ -5623,7 +5632,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -5732,7 +5742,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
       
       
       
@@ -7323,7 +7334,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
           , `dmat_string_0` Nullable(String)
       , `dmat_string_1` Nullable(String)
       , `dmat_string_2` Nullable(String)
@@ -7459,7 +7471,8 @@
       group3_created_at DateTime64,
       group4_created_at DateTime64,
       person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
-      historical_migration Bool
+      historical_migration Bool,
+      validated_schema_version Int16
       
       
       

@@ -68,12 +68,14 @@ export interface UserBasicApi {
 
 /**
  * * `allow` - Allow
+ * `enforce` - Enforce
  * `reject` - Reject
  */
 export type EnforcementModeEnumApi = (typeof EnforcementModeEnumApi)[keyof typeof EnforcementModeEnumApi]
 
 export const EnforcementModeEnumApi = {
     Allow: 'allow',
+    Enforce: 'enforce',
     Reject: 'reject',
 } as const
 
@@ -103,6 +105,7 @@ export interface EnterpriseEventDefinitionApi {
     /** @nullable */
     hidden?: boolean | null
     enforcement_mode?: EnforcementModeEnumApi
+    readonly schema_version: number
     readonly is_action: boolean
     readonly action_id: number
     readonly is_calculating: boolean
@@ -148,6 +151,7 @@ export interface PatchedEnterpriseEventDefinitionApi {
     /** @nullable */
     hidden?: boolean | null
     enforcement_mode?: EnforcementModeEnumApi
+    readonly schema_version?: number
     readonly is_action?: boolean
     readonly action_id?: number
     readonly is_calculating?: boolean
