@@ -349,3 +349,38 @@ def delete_cdc_extraction_schedule(source_id: str) -> None:
         delete_external_data_schedule(schedule_id)
     except Exception:
         pass
+
+
+_CDC_SLOT_CLEANUP_SCHEDULE_ID = "cdc-slot-cleanup-global"
+
+
+def ensure_cdc_slot_cleanup_schedule() -> None:
+    """Ensure the global hourly CDCSlotCleanupWorkflow schedule exists.
+
+    Idempotent — safe to call on every app startup or source creation.
+    Creates the schedule if absent; no-ops if already present.
+    """
+    temporal = sync_connect()
+
+    if schedule_exists(temporal, schedule_id=_CDC_SLOT_CLEANUP_SCHEDULE_ID):
+        return
+
+    action = ScheduleActionStartWorkflow(
+        "cdc-slot-cleanup",
+        id=_CDC_SLOT_CLEANUP_SCHEDULE_ID,
+        task_queue=str(settings.DATA_WAREHOUSE_TASK_QUEUE),
+        retry_policy=RetryPolicy(
+            initial_interval=timedelta(seconds=30),
+            maximum_interval=timedelta(seconds=300),
+            maximum_attempts=2,
+        ),
+    )
+
+    schedule = Schedule(
+        action=action,
+        spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(hours=1))]),
+        state=ScheduleState(note="Global CDC slot orphan cleanup and WAL lag monitor"),
+        policy=SchedulePolicy(overlap=ScheduleOverlapPolicy.SKIP),
+    )
+
+    create_schedule(temporal, id=_CDC_SLOT_CLEANUP_SCHEDULE_ID, schedule=schedule)

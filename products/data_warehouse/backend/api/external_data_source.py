@@ -829,11 +829,15 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
         # Start CDC extraction schedule if any CDC schemas are active
         if cdc_enabled:
             try:
-                from products.data_warehouse.backend.data_load.service import sync_cdc_extraction_schedule
+                from products.data_warehouse.backend.data_load.service import (
+                    ensure_cdc_slot_cleanup_schedule,
+                    sync_cdc_extraction_schedule,
+                )
 
                 sync_cdc_extraction_schedule(new_source_model, create=True)
+                ensure_cdc_slot_cleanup_schedule()
             except Exception as e:
-                logger.exception("Could not create CDC extraction schedule", exc_info=e)
+                logger.exception("Could not create CDC schedules", exc_info=e)
 
         if new_source_model.revenue_analytics_config_safe.enabled:
             managed_viewset, _ = DataWarehouseManagedViewSet.objects.get_or_create(

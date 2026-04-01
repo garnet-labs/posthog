@@ -1220,7 +1220,16 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
 
                         // Include CDC configuration if present
                         const cdcFields: Record<string, any> = {}
-                        const cdcKeys = ['cdc_enabled', 'cdc_management_mode', 'cdc_slot_name', 'cdc_publication_name']
+                        const cdcKeys = [
+                            'cdc_enabled',
+                            'cdc_management_mode',
+                            'cdc_slot_name',
+                            'cdc_publication_name',
+                            'cdc_auto_drop_slot',
+                            'cdc_lag_warning_threshold_mb',
+                            'cdc_lag_critical_threshold_mb',
+                            'cdc_schema_disable_grace_period_hours',
+                        ]
                         for (const key of cdcKeys) {
                             if (payload['payload']?.[key] !== undefined) {
                                 cdcFields[key] = payload['payload'][key]
