@@ -9,6 +9,7 @@
  */
 export interface NotificationEventApi {
     id: string
+    team_id: number
     notification_type: string
     priority: string
     title: string
