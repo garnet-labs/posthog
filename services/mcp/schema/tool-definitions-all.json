@@ -684,6 +684,36 @@
             "readOnlyHint": true
         }
     },
+    "query-traces-list": {
+        "description": "Query LLM traces to inspect AI/LLM usage. Returns a compact list of traces with metadata (latency, token usage, costs, event counts). Large content properties are stripped — use query-trace to inspect individual traces.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "summary": "List LLM traces with metadata only (content stripped for compactness).",
+        "title": "List LLM traces",
+        "required_scopes": ["query:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "query-trace": {
+        "description": "Retrieve a single LLM trace by ID. Use contentDetail to control how much content is returned: 'none' for metadata only, 'preview' (default) for first/last 300 chars of large properties, 'full' for everything.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "summary": "Get a single LLM trace by ID with configurable content detail.",
+        "title": "Get LLM trace",
+        "required_scopes": ["query:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
     "execute-sql": {
         "description": "Use this tool to execute an SQL query (or HogQL, which is PostHog's variant of SQL that supports most of ClickHouse SQL). We're going to use terms \"HogQL\" and \"SQL\" interchangeably. For more information, see the posthog-query-data skill.\nBEFORE writing any query, you should follow these steps:\n1. Call posthog:read-data-warehouse-schema to discover available tables, views, columns, and their types. Do NOT guess table or column names.\n2. Call posthog:read-data-schema to discover available events, properties, and property values. Do NOT rely on training data or PostHog defaults.\n3. Only after completing steps 1 and 2, write and execute your SQL query using verified table and column names.\nAn example query to retrieve columns of a custom data warehouse table:\n```sql\nSELECT columns FROM system.data_warehouse_tables WHERE name = 'my_table'\n```\nIMPORTANT: By default, large JSON values in results (like full `properties` objects) are truncated. If you anticipate that results might be large or you are selecting the full `properties` object (e.g., `SELECT properties FROM events`), you should dump the results to a file instead of outputting them directly. Use bash commands to process the file. Alternatively, cherry-pick only the specific properties you need (e.g., `properties.$browser`) instead of selecting the entire object.",
         "category": "SQL",
@@ -2235,36 +2265,6 @@
         "feature": "insights",
         "summary": "Run a lifecycle query",
         "title": "Run a lifecycle query",
-        "required_scopes": ["query:read"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": true
-        }
-    },
-    "query-traces-list": {
-        "description": "Query LLM traces to inspect AI/LLM usage. Returns a list of traces with their events, latency, token usage, and other metadata. Use dateRange, properties, and limit to filter results.",
-        "category": "Query wrappers",
-        "feature": "insights",
-        "summary": "List LLM traces",
-        "title": "List LLM traces",
-        "required_scopes": ["query:read"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": true
-        }
-    },
-    "query-trace": {
-        "description": "Retrieve a single LLM trace by its trace ID. Returns the full trace including all child events (generations, spans, embeddings, feedback, metrics), total latency, token usage, costs, and input/output state. Requires traceId and dateRange. Use query-traces-list first to find trace IDs, then this tool to inspect a specific trace in detail.",
-        "category": "Query wrappers",
-        "feature": "insights",
-        "summary": "Get a single LLM trace",
-        "title": "Get a single LLM trace",
         "required_scopes": ["query:read"],
         "new_mcp": true,
         "annotations": {

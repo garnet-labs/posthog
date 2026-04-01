@@ -236,7 +236,7 @@
         }
     },
     "query-run": {
-        "description": "You should use this to answer questions that a user has about their data and for when you want to create a new insight. You can use 'event-definitions-list' to get events to use in the query, and 'event-properties-list' to get properties for those events. It can run a trend, funnel, paths or HogQL query. Where possible, use a trend, funnel or paths query rather than a HogQL query, unless you know the HogQL is correct (e.g. it came from a previous insight.). Use PathsQuery to visualize user flows and navigation patterns — set includeEventTypes to ['hogql'] with a pathsHogQLExpression for custom path steps.",
+        "description": "You should use this to answer questions that a user has about their data and for when you want to create a new insight. You can use 'event-definitions-list' to get events to use in the query, and 'event-properties-list' to get properties for those events. It can run a trend, funnel, paths or HogQL query. Where possible, use a trend, funnel or paths query rather than a HogQL query, unless you know the HogQL is correct (e.g. it came from a previous insight.). Use PathsQuery to visualize user flows and navigation patterns \u2014 set includeEventTypes to ['hogql'] with a pathsHogQLExpression for custom path steps.",
         "category": "Insights & analytics",
         "summary": "Run a trend, funnel, paths or HogQL query.",
         "feature": "insights",
@@ -267,7 +267,7 @@
         }
     },
     "evaluations-get": {
-        "description": "List LLM analytics evaluations for the project. Evaluations automatically score AI generations for quality, relevance, safety, and other criteria. Supports optional search by name/description and filtering by enabled status. Evaluation results are stored as '$ai_evaluation' events — to query results, use the execute-sql or query-run tool with a HogQL query filtering on event = '$ai_evaluation'. Key properties: $ai_evaluation_id (evaluation UUID), $ai_evaluation_name, $ai_target_event_id (generation event UUID), $ai_trace_id, $ai_evaluation_result (boolean pass/fail), $ai_evaluation_reasoning (text), $ai_evaluation_applicable (boolean, false = N/A).",
+        "description": "List LLM analytics evaluations for the project. Evaluations automatically score AI generations for quality, relevance, safety, and other criteria. Supports optional search by name/description and filtering by enabled status. Evaluation results are stored as '$ai_evaluation' events \u2014 to query results, use the execute-sql or query-run tool with a HogQL query filtering on event = '$ai_evaluation'. Key properties: $ai_evaluation_id (evaluation UUID), $ai_evaluation_name, $ai_target_event_id (generation event UUID), $ai_trace_id, $ai_evaluation_result (boolean pass/fail), $ai_evaluation_reasoning (text), $ai_evaluation_applicable (boolean, false = N/A).",
         "category": "LLM analytics",
         "feature": "llm_analytics",
         "summary": "List LLM analytics evaluations.",
@@ -342,7 +342,7 @@
         }
     },
     "evaluation-run": {
-        "description": "Trigger an evaluation run on a specific $ai_generation event. This executes the evaluation (either LLM judge or Hog code) against the target event asynchronously via a background workflow. The run is async — it returns a workflow_id and status 'started'. Results are written as '$ai_evaluation' events once complete. To check results after triggering a run, query events with: SELECT properties.$ai_evaluation_result as result, properties.$ai_evaluation_reasoning as reasoning FROM events WHERE event = '$ai_evaluation' AND properties.$ai_evaluation_id = '<evaluation_uuid>' AND properties.$ai_target_event_id = '<generation_event_uuid>' ORDER BY timestamp DESC LIMIT 1.",
+        "description": "Trigger an evaluation run on a specific $ai_generation event. This executes the evaluation (either LLM judge or Hog code) against the target event asynchronously via a background workflow. The run is async \u2014 it returns a workflow_id and status 'started'. Results are written as '$ai_evaluation' events once complete. To check results after triggering a run, query events with: SELECT properties.$ai_evaluation_result as result, properties.$ai_evaluation_reasoning as reasoning FROM events WHERE event = '$ai_evaluation' AND properties.$ai_evaluation_id = '<evaluation_uuid>' AND properties.$ai_target_event_id = '<generation_event_uuid>' ORDER BY timestamp DESC LIMIT 1.",
         "category": "LLM analytics",
         "feature": "llm_analytics",
         "summary": "Run an evaluation on a specific event.",
@@ -679,6 +679,36 @@
             "destructiveHint": false,
             "idempotentHint": true,
             "openWorldHint": false,
+            "readOnlyHint": true
+        }
+    },
+    "query-traces-list": {
+        "description": "Query LLM traces to inspect AI/LLM usage. Returns a compact list of traces with metadata (latency, token usage, costs, event counts). Large content properties are stripped \u2014 use query-trace to inspect individual traces.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "summary": "List LLM traces with metadata only (content stripped for compactness).",
+        "title": "List LLM traces",
+        "required_scopes": ["query:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "query-trace": {
+        "description": "Retrieve a single LLM trace by ID. Use contentDetail to control how much content is returned: 'none' for metadata only, 'preview' (default) for first/last 300 chars of large properties, 'full' for everything.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "summary": "Get a single LLM trace by ID with configurable content detail.",
+        "title": "Get LLM trace",
+        "required_scopes": ["query:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
             "readOnlyHint": true
         }
     }

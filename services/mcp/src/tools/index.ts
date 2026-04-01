@@ -32,6 +32,8 @@ import evaluationsGet from './llmAnalytics/evaluations/getAll'
 import evaluationRun from './llmAnalytics/evaluations/run'
 import evaluationUpdate from './llmAnalytics/evaluations/update'
 import getLLMCosts from './llmAnalytics/getLLMCosts'
+import queryTrace from './llmAnalytics/queryTrace'
+import queryTracesList from './llmAnalytics/queryTracesList'
 import logsListAttributes from './logs/listAttributes'
 import logsListAttributeValues from './logs/listAttributeValues'
 // Logs
@@ -110,6 +112,8 @@ export const TOOL_MAP: Record<string, () => ToolBase<ZodObjectAny>> = {
 
     // LLM Analytics
     'get-llm-total-costs-for-project': getLLMCosts,
+    'query-traces-list': queryTracesList,
+    'query-trace': queryTrace,
     'evaluations-get': evaluationsGet,
     'evaluation-get': evaluationGet,
     'evaluation-create': evaluationCreate,
