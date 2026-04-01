@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react'
+import { BindLogic } from 'kea'
 
 import { dayjs } from 'lib/dayjs'
 import { LemonDivider } from 'lib/lemon-ui/LemonDivider'
 import { uuid } from 'lib/utils'
+import { sessionRecordingPlayerLogic } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 
 import { mswDecorator } from '~/mocks/browser'
 import { LogMessage, LogSeverityLevel } from '~/queries/schema/schema-general'
@@ -73,18 +75,20 @@ const renderBasic = (props: Partial<ItemLogProps>): JSX.Element => {
     } as ItemLogProps
 
     return (
-        <div className="flex flex-col gap-2 min-w-96">
-            <h3>Collapsed</h3>
-            <ItemLog {...propsToUse} />
-            <LemonDivider />
-            <h3>Expanded</h3>
-            <ItemLogDetail {...propsToUse} />
-            <LemonDivider />
-            <h3>Collapsed with overflowing text</h3>
-            <div className="w-20">
+        <BindLogic logic={sessionRecordingPlayerLogic} props={{ sessionRecordingId: '12345' }}>
+            <div className="flex flex-col gap-2 min-w-96">
+                <h3>Collapsed</h3>
                 <ItemLog {...propsToUse} />
+                <LemonDivider />
+                <h3>Expanded</h3>
+                <ItemLogDetail {...propsToUse} />
+                <LemonDivider />
+                <h3>Collapsed with overflowing text</h3>
+                <div className="w-20">
+                    <ItemLog {...propsToUse} />
+                </div>
             </div>
-        </div>
+        </BindLogic>
     )
 }
 
@@ -231,27 +235,29 @@ export const AllSeverityLevels: Story = {
         ]
 
         return (
-            <div className="flex flex-col gap-2 min-w-96">
-                <h3>All severity levels</h3>
-                {levels.map(({ level, body }) => (
-                    <div key={level} className="border rounded">
-                        <ItemLog item={makeItem(level, body)} />
-                    </div>
-                ))}
-                <LemonDivider />
-                <h3>All severity levels expanded</h3>
-                {levels.map(({ level, body }) => (
-                    <div key={level} className="border rounded">
-                        <ItemLog item={makeItem(level, body)} />
-                        <ItemLogDetail
-                            item={makeItem(level, body, {
-                                instrumentation_scope: 'example-service',
-                                attributes: { environment: 'production', 'service.version': '2.1.0' },
-                            })}
-                        />
-                    </div>
-                ))}
-            </div>
+            <BindLogic logic={sessionRecordingPlayerLogic} props={{ sessionRecordingId: '12345' }}>
+                <div className="flex flex-col gap-2 min-w-96">
+                    <h3>All severity levels</h3>
+                    {levels.map(({ level, body }) => (
+                        <div key={level} className="border rounded">
+                            <ItemLog item={makeItem(level, body)} />
+                        </div>
+                    ))}
+                    <LemonDivider />
+                    <h3>All severity levels expanded</h3>
+                    {levels.map(({ level, body }) => (
+                        <div key={level} className="border rounded">
+                            <ItemLog item={makeItem(level, body)} />
+                            <ItemLogDetail
+                                item={makeItem(level, body, {
+                                    instrumentation_scope: 'example-service',
+                                    attributes: { environment: 'production', 'service.version': '2.1.0' },
+                                })}
+                            />
+                        </div>
+                    ))}
+                </div>
+            </BindLogic>
         )
     },
 }
