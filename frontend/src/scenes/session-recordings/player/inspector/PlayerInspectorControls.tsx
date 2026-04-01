@@ -10,6 +10,8 @@ import {
     IconDashboard,
     IconGear,
     IconInfo,
+    IconLive,
+    IconOpenInNew,
     IconStethoscope,
     IconTerminal,
 } from '@posthog/icons'
@@ -27,8 +29,11 @@ import {
     playerInspectorLogic,
 } from 'scenes/session-recordings/player/inspector/playerInspectorLogic'
 import { teamLogic } from 'scenes/teamLogic'
+import { urls } from 'scenes/urls'
 
 import { sidePanelSettingsLogic } from '~/layout/navigation-3000/sidepanel/panels/sidePanelSettingsLogic'
+
+import { logsIngestionLogic } from 'products/logs/frontend/components/SetupPrompt/logsIngestionLogic'
 
 import { SessionRecordingPlayerMode, sessionRecordingPlayerLogic } from '../sessionRecordingPlayerLogic'
 import { InspectorSearchInfo } from './components/InspectorSearchInfo'
@@ -267,6 +272,82 @@ function CommentsFilterSettingsButton(): JSX.Element {
     )
 }
 
+function BackendLogsFilterSettingsButton(): JSX.Element {
+    const { logicProps } = useValues(sessionRecordingPlayerLogic)
+    const { allItemsByItemType, backendLogsLoading } = useValues(playerInspectorLogic(logicProps))
+    const { hasLogs } = useValues(logsIngestionLogic)
+
+    const hasBackendLogItems = allItemsByItemType['backend-logs']?.length > 0
+    const sessionId = logicProps.sessionRecordingId
+
+    const logsUrlWithSessionFilter = `${urls.logs()}?filterGroup=${encodeURIComponent(
+        JSON.stringify({
+            type: 'AND',
+            values: [
+                {
+                    type: 'AND',
+                    values: [
+                        {
+                            key: 'session_id',
+                            value: sessionId,
+                            operator: 'exact',
+                            type: 'log_entry',
+                        },
+                    ],
+                },
+            ],
+        })
+    )}`
+
+    const upsellAction: SideAction | undefined =
+        !hasLogs && !backendLogsLoading
+            ? {
+                  icon: <IconChevronDown />,
+                  dropdown: {
+                      closeOnClickInside: false,
+                      overlay: (
+                          <>
+                              <LemonButton
+                                  data-attr="player-inspector-logs-upsell"
+                                  icon={<IconGear />}
+                                  fullWidth
+                                  size="xsmall"
+                                  to="https://posthog.com/docs/logs"
+                                  targetBlank
+                              >
+                                  Set up PostHog Logs
+                              </LemonButton>
+                          </>
+                      ),
+                  },
+              }
+            : hasBackendLogItems
+              ? {
+                    icon: <IconOpenInNew />,
+                    tooltip: 'View logs for this session',
+                    to: logsUrlWithSessionFilter,
+                    targetBlank: true,
+                }
+              : undefined
+
+    return (
+        <FilterSettingsButton
+            data-attr="player-inspector-backend-logs-toggle-all"
+            type="backend-logs"
+            icon={<IconLive />}
+            disabledReason={
+                backendLogsLoading
+                    ? 'Loading logs...'
+                    : !hasBackendLogItems
+                      ? 'There are no backend logs for this session'
+                      : undefined
+            }
+            upsellSideAction={upsellAction}
+            label="Logs"
+        />
+    )
+}
+
 export function PlayerInspectorControls(): JSX.Element {
     const { logicProps } = useValues(sessionRecordingPlayerLogic)
     const { searchQuery, miniFiltersByKey } = useValues(miniFiltersLogic)
@@ -289,6 +370,8 @@ export function PlayerInspectorControls(): JSX.Element {
                 {mode !== SessionRecordingPlayerMode.Sharing && <EventsFilterSettingsButton />}
                 <ConsoleFilterSettingsButton />
                 <NetworkFilterSettingsButton />
+                {featureFlags[FEATURE_FLAGS.SESSION_REPLAY_BACKEND_LOGS] &&
+                    mode !== SessionRecordingPlayerMode.Sharing && <BackendLogsFilterSettingsButton />}
                 {mode !== SessionRecordingPlayerMode.Sharing && <CommentsFilterSettingsButton />}
                 {(window.IMPERSONATED_SESSION || featureFlags[FEATURE_FLAGS.SESSION_REPLAY_DOCTOR]) &&
                     mode !== SessionRecordingPlayerMode.Sharing && (

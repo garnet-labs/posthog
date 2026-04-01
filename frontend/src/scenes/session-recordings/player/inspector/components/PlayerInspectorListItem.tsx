@@ -15,6 +15,7 @@ import {
     IconExpand,
     IconEye,
     IconLeave,
+    IconLive,
     IconLogomark,
     IconRedux,
     IconTerminal,
@@ -41,10 +42,12 @@ import { IconWindow } from '../../icons'
 import { sessionRecordingPlayerLogic } from '../../sessionRecordingPlayerLogic'
 import {
     InspectorListItem,
+    InspectorListItemBackendLog,
     InspectorListItemConsole,
     InspectorListItemEvent,
     playerInspectorLogic,
 } from '../playerInspectorLogic'
+import { ItemBackendLog, ItemBackendLogDetail } from './ItemBackendLog'
 import { ItemAppState, ItemAppStateDetail, ItemConsoleLog, ItemConsoleLogDetail } from './ItemConsoleLog'
 import { ItemDoctor, ItemDoctorDetail } from './ItemDoctor'
 import { ItemEvent, ItemEventDetail, ItemEventMenu } from './ItemEvent'
@@ -100,6 +103,10 @@ const typeToIconAndDescription: Record<InspectorListItem['type'], IconAndDescrip
     inactivity: {
         Icon: undefined,
         tooltip: undefined,
+    },
+    'backend-logs': {
+        Icon: IconLive,
+        tooltip: 'Backend log entry',
     },
 }
 
@@ -193,6 +200,8 @@ function RowItemTitle({
                 <ItemInactivity item={item} />
             ) : item.type === 'session-change' ? (
                 <ItemSessionChange item={item} />
+            ) : item.type === 'backend-logs' ? (
+                <ItemBackendLog item={item} groupCount={groupCount} />
             ) : null}
         </div>
     )
@@ -233,6 +242,11 @@ function RowItemDetail({
                 <ItemDoctorDetail item={item} />
             ) : item.type === 'comment' ? (
                 <ItemAnyCommentDetail item={item} />
+            ) : item.type === 'backend-logs' ? (
+                <ItemBackendLogDetail
+                    item={item}
+                    groupedItems={groupedItems as InspectorListItemBackendLog[] | undefined}
+                />
             ) : null}
         </div>
     )

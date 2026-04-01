@@ -33,7 +33,7 @@ import {
 } from 'scenes/session-recordings/playlist/sessionRecordingsPlaylistLogic'
 import { sessionRecordingEventUsageLogic } from 'scenes/session-recordings/sessionRecordingEventUsageLogic'
 
-import { RecordingsQuery } from '~/queries/schema/schema-general'
+import { LogMessage, RecordingsQuery } from '~/queries/schema/schema-general'
 import { getCoreFilterDefinition } from '~/taxonomy/helpers'
 import {
     CommentType,
@@ -78,7 +78,7 @@ export type RecordingComment = {
     timeInRecording: number
 }
 
-const _filterableItemTypes = ['events', 'console', 'network', 'comment', 'doctor'] as const
+const _filterableItemTypes = ['events', 'console', 'network', 'comment', 'doctor', 'backend-logs'] as const
 const _itemTypes = [
     ..._filterableItemTypes,
     'performance',
@@ -172,6 +172,11 @@ export type InspectorListItemSummary = InspectorListItemBase & {
     errorCount: number | null
 }
 
+export type InspectorListItemBackendLog = InspectorListItemBase & {
+    type: 'backend-logs'
+    data: LogMessage
+}
+
 export type InspectorListItem =
     | InspectorListItemEvent
     | InspectorListItemConsole
@@ -185,6 +190,7 @@ export type InspectorListItem =
     | InspectorListItemInactivity
     | InspectorListItemAppState
     | InspectorListSessionChange
+    | InspectorListItemBackendLog
 
 export interface PlayerInspectorLogicProps extends SessionRecordingPlayerLogicProps {
     matchingEventsMatchType?: MatchingEventsMatchType
@@ -454,6 +460,53 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     const response = await api.recordings.getMatchingEvents(toParams(params))
                     skipToEarliestEvent(response.results)
                     return response.results
+                },
+            },
+        ],
+        backendLogs: [
+            [] as LogMessage[],
+            {
+                loadBackendLogs: async () => {
+                    if (!values.featureFlags[FEATURE_FLAGS.SESSION_REPLAY_BACKEND_LOGS]) {
+                        return []
+                    }
+
+                    const sessionId = props.sessionRecordingId
+                    if (!sessionId || !values.start || !values.end) {
+                        return []
+                    }
+
+                    try {
+                        const response = await api.logs.query({
+                            query: {
+                                dateRange: {
+                                    date_from: values.start.toISOString(),
+                                    date_to: values.end.toISOString(),
+                                },
+                                filterGroup: {
+                                    type: 'AND',
+                                    values: [
+                                        {
+                                            type: 'AND',
+                                            values: [
+                                                {
+                                                    key: 'session_id',
+                                                    value: sessionId,
+                                                    operator: 'exact',
+                                                    type: 'log_entry',
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                },
+                                limit: 1000,
+                            },
+                        })
+                        return response.results
+                    } catch (error) {
+                        console.error('Failed to load backend logs for session replay', error)
+                        return []
+                    }
                 },
             },
         ],
@@ -865,6 +918,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                 s.sessionPlayerData,
                 s.miniFiltersByKey,
                 s.uuidToIndex,
+                s.backendLogs,
             ],
             (
                 start,
@@ -878,7 +932,8 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                 notebookCommentItems,
                 sessionPlayerData,
                 miniFiltersByKey,
-                uuidToIndex
+                uuidToIndex,
+                backendLogs
             ): {
                 items: InspectorListItem[]
                 itemsByMiniFilterKey: Record<MiniFilterKey, InspectorListItem[]>
@@ -916,6 +971,9 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     'performance-other': [],
                     comment: [],
                     doctor: [],
+                    'backend-logs-info': [],
+                    'backend-logs-warn': [],
+                    'backend-logs-error': [],
                 }
                 const itemsByType: Record<FilterableInspectorListItemTypes | 'context', InspectorListItem[]> = {
                     ['events']: [],
@@ -923,6 +981,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     ['network']: [],
                     ['doctor']: [],
                     ['comment']: [],
+                    ['backend-logs']: [],
                     context: [],
                 }
                 let summaryItem: InspectorListItemSummary | undefined
@@ -938,7 +997,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     }
 
                     // Categorize by type
-                    const itemType = ['events', 'console', 'network', 'doctor', 'comment'].includes(
+                    const itemType = ['events', 'console', 'network', 'doctor', 'comment', 'backend-logs'].includes(
                         item.type as FilterableInspectorListItemTypes
                     )
                         ? (item.type as FilterableInspectorListItemTypes | 'context')
@@ -1040,6 +1099,26 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
 
                 for (const stateLogItem of processedSnapshotData?.appStateItems || []) {
                     addItem(stateLogItem)
+                }
+
+                // BACKEND LOGS
+                for (const log of backendLogs || []) {
+                    const { timestamp, timeInRecording } = timeRelativeToStart(log, start)
+                    const highlightColor =
+                        log.level === 'error' || log.level === 'fatal'
+                            ? 'danger'
+                            : log.level === 'warn'
+                              ? 'warning'
+                              : undefined
+                    addItem({
+                        type: 'backend-logs',
+                        timestamp,
+                        timeInRecording,
+                        search: `${log.body} ${log.event_name || ''} ${log.instrumentation_scope || ''}`,
+                        data: log,
+                        highlightColor,
+                        key: `backend-log-${log.uuid}`,
+                    })
                 }
 
                 // NOTE: Native JS sorting is relatively slow here - be careful changing this
@@ -1355,6 +1434,10 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     actions.registerWindowId(windowId)
                 }
             }
+        },
+        loadEventsSuccess: () => {
+            // Load backend logs when session events data is loaded (indicates session data is ready)
+            actions.loadBackendLogs()
         },
     })),
     events(({ actions }) => ({
