@@ -116,7 +116,39 @@ wrappers:
             - modifiers
             - samplingFactor
 
-    # query-llm-traces-list and query-llm-trace are hand-coded in
-    # src/tools/llmAnalytics/ with content detail processing
-    # (stripping/truncating large $ai_input, $ai_output_choices, etc.)
-    # See queryLLMTracesList.ts and queryLLMTrace.ts
+    # Handlers for query-llm-traces-list and query-llm-trace are hand-coded
+    # in src/tools/llmAnalytics/ (content detail processing).
+    # TOOL_MAP takes precedence over GENERATED_TOOL_MAP, so the hand-coded
+    # handlers are used at runtime while these YAML entries provide the
+    # descriptions, scopes, and annotations.
+    query-llm-traces-list:
+        schema_ref: AssistantTracesQuery
+        enabled: true
+        scopes:
+            - query:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        mcp_version: 2
+        title: List LLM traces
+        description_file: ./prompts/query-llm-traces-list.md
+        exclude_properties:
+            - response
+            - modifiers
+
+    query-llm-trace:
+        schema_ref: AssistantTraceQuery
+        enabled: true
+        scopes:
+            - query:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        mcp_version: 2
+        title: Get LLM trace
+        description_file: ./prompts/query-llm-trace.md
+        exclude_properties:
+            - response
+            - modifiers
