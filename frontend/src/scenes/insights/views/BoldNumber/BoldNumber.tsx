@@ -7,7 +7,7 @@ import { useEffect } from 'react'
 import React from 'react'
 
 import { IconTrending } from '@posthog/icons'
-import { LemonRow, Link } from '@posthog/lemon-ui'
+import { LemonRow, Link, Tooltip } from '@posthog/lemon-ui'
 
 import { IconFlare, IconTrendingDown, IconTrendingFlat } from 'lib/lemon-ui/icons'
 import { percentage } from 'lib/utils'
@@ -147,6 +147,7 @@ export function BoldNumber({ showPersonsModal = true, context }: ChartParams): J
                                     query: {
                                         kind: NodeKind.InsightActorsQuery,
                                         source: querySource!,
+                                        compare: showComparison ? 'current' : undefined,
                                         includeRecordings: true,
                                     },
                                     additionalSelect: {
@@ -178,7 +179,8 @@ function BoldNumberComparison({
     context,
 }: Pick<ChartParams, 'showPersonsModal' | 'context'>): JSX.Element | null {
     const { insightProps } = useValues(insightLogic)
-    const { insightData, querySource } = useValues(insightVizDataLogic(insightProps))
+    const { insightData, trendsFilter, querySource } = useValues(insightVizDataLogic(insightProps))
+    const { baseCurrency } = useValues(teamLogic)
 
     if (!insightData?.result) {
         return null
@@ -194,6 +196,9 @@ function BoldNumberComparison({
         hasComparableDiff,
         displayText: percentageDiffDisplay,
     } = computeComparisonDisplay(currentValue, previousValue)
+
+    const formattedPreviousValue =
+        previousValue !== null ? formatAggregationAxisValue(trendsFilter, previousValue, baseCurrency) : null
 
     return (
         <LemonRow
@@ -220,29 +225,38 @@ function BoldNumberComparison({
                 ) : previousValue === null || !showPersonsModal || !hasComparableDiff ? (
                     'previous period'
                 ) : (
-                    <Link
-                        onClick={() => {
-                            if (context?.onDataPointClick) {
-                                context.onDataPointClick({ compare: 'previous' }, currentPeriodSeries)
-                            } else {
-                                openPersonsModal({
-                                    title: previousPeriodSeries.label,
-                                    query: {
-                                        kind: NodeKind.InsightActorsQuery,
-                                        source: querySource!,
-                                        includeRecordings: true,
-                                    },
-                                    additionalSelect: {
-                                        value_at_data_point: 'event_count',
-                                        matched_recordings: 'matched_recordings',
-                                    },
-                                    orderBy: ['event_count DESC, actor_id DESC'],
-                                })
-                            }
-                        }}
+                    <Tooltip
+                        title={
+                            formattedPreviousValue !== null
+                                ? `Previous period value: ${formattedPreviousValue}`
+                                : undefined
+                        }
                     >
-                        previous period
-                    </Link>
+                        <Link
+                            onClick={() => {
+                                if (context?.onDataPointClick) {
+                                    context.onDataPointClick({ compare: 'previous' }, currentPeriodSeries)
+                                } else {
+                                    openPersonsModal({
+                                        title: previousPeriodSeries.label,
+                                        query: {
+                                            kind: NodeKind.InsightActorsQuery,
+                                            source: querySource!,
+                                            compare: 'previous',
+                                            includeRecordings: true,
+                                        },
+                                        additionalSelect: {
+                                            value_at_data_point: 'event_count',
+                                            matched_recordings: 'matched_recordings',
+                                        },
+                                        orderBy: ['event_count DESC, actor_id DESC'],
+                                    })
+                                }
+                            }}
+                        >
+                            previous period
+                        </Link>
+                    </Tooltip>
                 )}
             </span>
         </LemonRow>
