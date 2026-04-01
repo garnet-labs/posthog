@@ -62,6 +62,8 @@ Example regex for search: execute-sql or experiment.
 
 {group_types}
 
+{metadata}
+
 {guidelines}
 
 ### Querying data with insight schemas
@@ -206,5 +208,3 @@ Assistant: I'll search for existing insights related to revenue and payments usi
 4. Validating with the retrieve tool confirms the insights are still relevant and shows their query configuration.
 </reasoning>
 </example>
-
-{metadata}
