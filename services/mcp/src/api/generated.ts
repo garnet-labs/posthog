@@ -25263,6 +25263,18 @@ export namespace Schemas {
       variants?: unknown;
     }
 
+    export interface PauseResponse {
+      /** Result status, always 'paused'. */
+      status: string;
+      /** Timestamp until which processing is paused. */
+      paused_until: string;
+    }
+
+    export interface PauseUntilRequest {
+      /** Timestamp until which processing is paused. */
+      paused_until: string;
+    }
+
     export interface PersonBulkDeleteRequest {
       /** A list of PostHog person UUIDs to delete (max 1000). */
       ids?: string[];
@@ -28740,6 +28752,14 @@ export namespace Schemas {
       variant_key: string;
     }
 
+    export interface SignalProcessingStateResponse {
+      /**
+       * Timestamp until which processing is paused, or null if not paused.
+       * @nullable
+       */
+      paused_until: string | null;
+    }
+
     export interface SummaryBullet {
       text: string;
       line_refs: string;
@@ -29722,6 +29742,13 @@ export namespace Schemas {
        * @nullable
        */
       queue_id?: string | null;
+    }
+
+    export interface UnpauseResponse {
+      /** Result status, always 'unpaused'. */
+      status: string;
+      /** Whether the workflow was actually paused at call time. */
+      was_paused: boolean;
     }
 
     /**

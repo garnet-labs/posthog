@@ -10,8 +10,12 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  */
 import type {
     PaginatedSignalSourceConfigListApi,
+    PauseResponseApi,
+    PauseUntilRequestApi,
+    SignalProcessingStateResponseApi,
     SignalSourceConfigApi,
     SignalSourceConfigsListParams,
+    UnpauseResponseApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -30,6 +34,60 @@ type NonReadonly<T> = [T] extends [UnionToIntersection<T>]
           [P in keyof Writable<T>]: T[P] extends object ? NonReadonly<NonNullable<T[P]>> : T[P]
       }
     : DistributeReadOnlyOverUnions<T>
+
+/**
+ * Get the current signal processing state, including pause status.
+ */
+export const getSignalProcessingListUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/signal_processing/`
+}
+
+export const signalProcessingList = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<SignalProcessingStateResponseApi[]> => {
+    return apiMutator<SignalProcessingStateResponseApi[]>(getSignalProcessingListUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+/**
+ * Pause signal processing until a given timestamp.
+ */
+export const getSignalProcessingPauseUpdateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/signal_processing/pause/`
+}
+
+export const signalProcessingPauseUpdate = async (
+    projectId: string,
+    pauseUntilRequestApi: PauseUntilRequestApi,
+    options?: RequestInit
+): Promise<PauseResponseApi> => {
+    return apiMutator<PauseResponseApi>(getSignalProcessingPauseUpdateUrl(projectId), {
+        ...options,
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(pauseUntilRequestApi),
+    })
+}
+
+/**
+ * Clear the pause state on signal processing.
+ */
+export const getSignalProcessingPauseDestroyUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/signal_processing/pause/`
+}
+
+export const signalProcessingPauseDestroy = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<UnpauseResponseApi> => {
+    return apiMutator<UnpauseResponseApi>(getSignalProcessingPauseDestroyUrl(projectId), {
+        ...options,
+        method: 'DELETE',
+    })
+}
 
 export const getSignalSourceConfigsListUrl = (projectId: string, params?: SignalSourceConfigsListParams) => {
     const normalizedParams = new URLSearchParams()

@@ -7,6 +7,33 @@
  * PostHog API - generated
  * OpenAPI spec version: 1.0.0
  */
+export interface SignalProcessingStateResponseApi {
+    /**
+     * Timestamp until which processing is paused, or null if not paused.
+     * @nullable
+     */
+    paused_until: string | null
+}
+
+export interface PauseUntilRequestApi {
+    /** Timestamp until which processing is paused. */
+    paused_until: string
+}
+
+export interface PauseResponseApi {
+    /** Result status, always 'paused'. */
+    status: string
+    /** Timestamp until which processing is paused. */
+    paused_until: string
+}
+
+export interface UnpauseResponseApi {
+    /** Result status, always 'unpaused'. */
+    status: string
+    /** Whether the workflow was actually paused at call time. */
+    was_paused: boolean
+}
+
 /**
  * * `session_replay` - Session replay
  * `llm_analytics` - LLM analytics
