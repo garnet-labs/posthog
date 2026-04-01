@@ -117,22 +117,22 @@ export const MiniFilters: SharedListMiniFilter[] = [
             'Comments can be made using annotations or notebooks. Includes project and org level annotations that are within this session.',
     },
     {
-        type: 'backend-logs',
-        key: 'backend-logs-info',
+        type: 'logs',
+        key: 'logs-info',
         name: 'Info',
-        tooltip: 'Backend log entries with info, debug, or trace severity',
+        tooltip: 'Log entries with info, debug, or trace severity',
     },
     {
-        type: 'backend-logs',
-        key: 'backend-logs-warn',
+        type: 'logs',
+        key: 'logs-warn',
         name: 'Warn',
-        tooltip: 'Backend log entries with warn severity',
+        tooltip: 'Log entries with warn severity',
     },
     {
-        type: 'backend-logs',
-        key: 'backend-logs-error',
+        type: 'logs',
+        key: 'logs-error',
         name: 'Error',
-        tooltip: 'Backend log entries with error or fatal severity',
+        tooltip: 'Log entries with error or fatal severity',
     },
 ]
 export type MiniFilterKey = (typeof MiniFilters)[number]['key']
@@ -147,9 +147,9 @@ const defaultMinifilters = [
     'console-warn',
     'console-error',
     'comment',
-    'backend-logs-info',
-    'backend-logs-warn',
-    'backend-logs-error',
+    'logs-info',
+    'logs-warn',
+    'logs-error',
 ]
 
 export const miniFiltersLogic = kea<miniFiltersLogicType>([

@@ -3,7 +3,7 @@ import { MiniFilterKey, SharedListMiniFilter } from 'scenes/session-recordings/p
 import {
     IMAGE_WEB_EXTENSIONS,
     InspectorListItem,
-    InspectorListItemBackendLog,
+    InspectorListItemLog,
     InspectorListItemConsole,
     InspectorListItemDoctor,
     InspectorListItemEvent,
@@ -66,8 +66,8 @@ function isDoctorEvent(item: InspectorListItem): item is InspectorListItemDoctor
     return item.type === 'doctor'
 }
 
-function isBackendLogEvent(item: InspectorListItem): item is InspectorListItemBackendLog {
-    return item.type === 'backend-logs'
+function isLogEvent(item: InspectorListItem): item is InspectorListItemLog {
+    return item.type === 'logs'
 }
 
 function isContextItem(item: InspectorListItem): boolean {
@@ -143,19 +143,19 @@ function networkMatch(
     return null
 }
 
-function backendLogsMatch(
-    item: InspectorListItemBackendLog,
+function logsMatch(
+    item: InspectorListItemLog,
     miniFiltersByKey: {
         [p: MiniFilterKey]: SharedListMiniFilter
     }
 ): SharedListMiniFilter | null {
     const level = item.data.level
     if (['trace', 'debug', 'info'].includes(level)) {
-        return miniFiltersByKey['backend-logs-info']
+        return miniFiltersByKey['logs-info']
     } else if (level === 'warn') {
-        return miniFiltersByKey['backend-logs-warn']
+        return miniFiltersByKey['logs-warn']
     } else if (['error', 'fatal'].includes(level)) {
-        return miniFiltersByKey['backend-logs-error']
+        return miniFiltersByKey['logs-error']
     }
     return null
 }
@@ -180,9 +180,9 @@ export function itemToMiniFilter(
                 return miniFiltersByKey['doctor']
             }
             break
-        case 'backend-logs':
-            if (isBackendLogEvent(item)) {
-                return backendLogsMatch(item, miniFiltersByKey)
+        case 'logs':
+            if (isLogEvent(item)) {
+                return logsMatch(item, miniFiltersByKey)
             }
             break
     }

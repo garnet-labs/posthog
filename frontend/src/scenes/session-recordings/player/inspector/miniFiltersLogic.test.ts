@@ -30,9 +30,9 @@ describe('miniFiltersLogic', () => {
                     'console-warn',
                     'console-error',
                     'comment',
-                    'backend-logs-info',
-                    'backend-logs-warn',
-                    'backend-logs-error',
+                    'logs-info',
+                    'logs-warn',
+                    'logs-error',
                 ],
             })
         })
@@ -73,9 +73,9 @@ describe('miniFiltersLogic', () => {
                     'console-warn',
                     'console-error',
                     'comment',
-                    'backend-logs-info',
-                    'backend-logs-warn',
-                    'backend-logs-error',
+                    'logs-info',
+                    'logs-warn',
+                    'logs-error',
                 ],
             })
         })

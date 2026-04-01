@@ -271,12 +271,12 @@ function CommentsFilterSettingsButton(): JSX.Element {
     )
 }
 
-function BackendLogsFilterSettingsButton(): JSX.Element {
+function LogsFilterSettingsButton(): JSX.Element {
     const { logicProps } = useValues(sessionRecordingPlayerLogic)
-    const { allItemsByItemType, backendLogsLoading } = useValues(playerInspectorLogic(logicProps))
+    const { allItemsByItemType, logsLoading } = useValues(playerInspectorLogic(logicProps))
     const { hasLogs } = useValues(logsIngestionLogic)
 
-    const hasBackendLogItems = allItemsByItemType['backend-logs']?.length > 0
+    const hasLogItems = allItemsByItemType['logs']?.length > 0
     const sessionId = logicProps.sessionRecordingId
 
     const logsUrlWithSessionFilter = `${urls.logs()}?filterGroup=${encodeURIComponent(
@@ -299,7 +299,7 @@ function BackendLogsFilterSettingsButton(): JSX.Element {
     )}`
 
     const upsellAction: SideAction | undefined =
-        !hasLogs && !backendLogsLoading
+        !hasLogs && !logsLoading
             ? {
                   icon: <IconChevronDown />,
                   dropdown: {
@@ -320,7 +320,7 @@ function BackendLogsFilterSettingsButton(): JSX.Element {
                       ),
                   },
               }
-            : hasBackendLogItems
+            : hasLogItems
               ? {
                     icon: <IconOpenInNew />,
                     tooltip: 'View logs for this session',
@@ -331,15 +331,11 @@ function BackendLogsFilterSettingsButton(): JSX.Element {
 
     return (
         <FilterSettingsButton
-            data-attr="player-inspector-backend-logs-toggle-all"
-            type="backend-logs"
+            data-attr="player-inspector-logs-toggle-all"
+            type="logs"
             icon={<IconLive />}
             disabledReason={
-                backendLogsLoading
-                    ? 'Loading logs...'
-                    : !hasBackendLogItems
-                      ? 'There are no backend logs for this session'
-                      : undefined
+                logsLoading ? 'Loading logs...' : !hasLogItems ? 'There are no logs for this session' : undefined
             }
             upsellSideAction={upsellAction}
             label="Logs"
@@ -370,7 +366,7 @@ export function PlayerInspectorControls(): JSX.Element {
                 <ConsoleFilterSettingsButton />
                 <NetworkFilterSettingsButton />
                 {featureFlags[FEATURE_FLAGS.SESSION_REPLAY_BACKEND_LOGS] &&
-                    mode !== SessionRecordingPlayerMode.Sharing && <BackendLogsFilterSettingsButton />}
+                    mode !== SessionRecordingPlayerMode.Sharing && <LogsFilterSettingsButton />}
                 {mode !== SessionRecordingPlayerMode.Sharing && <CommentsFilterSettingsButton />}
                 {(window.IMPERSONATED_SESSION || featureFlags[FEATURE_FLAGS.SESSION_REPLAY_DOCTOR]) &&
                     mode !== SessionRecordingPlayerMode.Sharing && (

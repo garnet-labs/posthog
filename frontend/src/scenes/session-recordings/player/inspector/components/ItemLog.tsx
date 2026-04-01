@@ -9,12 +9,12 @@ import { LemonLabel } from 'lib/lemon-ui/LemonLabel/LemonLabel'
 import { urls } from 'scenes/urls'
 
 import { ItemTimeDisplay } from '../../../components/ItemTimeDisplay'
-import { InspectorListItemBackendLog } from '../playerInspectorLogic'
+import { InspectorListItemLog } from '../playerInspectorLogic'
 
-export interface ItemBackendLogProps {
-    item: InspectorListItemBackendLog
+export interface ItemLogProps {
+    item: InspectorListItemLog
     groupCount?: number
-    groupedItems?: InspectorListItemBackendLog[]
+    groupedItems?: InspectorListItemLog[]
     sessionId?: string
 }
 
@@ -27,12 +27,12 @@ const levelColors: Record<string, string> = {
     fatal: 'text-danger',
 }
 
-export function ItemBackendLog({ item, groupCount }: ItemBackendLogProps): JSX.Element {
+export function ItemLog({ item, groupCount }: ItemLogProps): JSX.Element {
     const count = groupCount ?? 1
     const showBadge = count > 1
 
     return (
-        <div className="w-full font-light flex items-center" data-attr="item-backend-log">
+        <div className="w-full font-light flex items-center" data-attr="item-log">
             <div className="px-2 py-1 text-xs cursor-pointer truncate font-mono flex-1 flex items-center gap-2">
                 <span
                     className={clsx('uppercase font-semibold text-xxs', levelColors[item.data.level] || 'text-primary')}
@@ -59,7 +59,7 @@ export function ItemBackendLog({ item, groupCount }: ItemBackendLogProps): JSX.E
     )
 }
 
-export function ItemBackendLogDetail({ item, groupedItems, sessionId }: ItemBackendLogProps): JSX.Element {
+export function ItemLogDetail({ item, groupedItems, sessionId }: ItemLogProps): JSX.Element {
     const logsUrl = sessionId
         ? `${urls.logs()}?filterGroup=${encodeURIComponent(
               JSON.stringify({
@@ -92,10 +92,10 @@ export function ItemBackendLogDetail({ item, groupedItems, sessionId }: ItemBack
             : {}
 
     return (
-        <div className="w-full font-light" data-attr="item-backend-log-detail">
+        <div className="w-full font-light" data-attr="item-log-detail">
             <div className="px-2 py-1 text-xs border-t">
                 <div className="flex justify-between items-center mb-2">
-                    <LemonLabel>Backend log</LemonLabel>
+                    <LemonLabel>Log</LemonLabel>
                     <LemonButton type="tertiary" size="xsmall" icon={<IconOpenInNew />} targetBlank to={logsUrl}>
                         View in Logs
                     </LemonButton>

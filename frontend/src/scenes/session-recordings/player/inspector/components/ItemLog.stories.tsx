@@ -7,13 +7,13 @@ import { uuid } from 'lib/utils'
 import { mswDecorator } from '~/mocks/browser'
 import { LogMessage, LogSeverityLevel } from '~/queries/schema/schema-general'
 
-import { InspectorListItemBackendLog } from '../playerInspectorLogic'
-import { ItemBackendLog, ItemBackendLogDetail, ItemBackendLogProps } from './ItemBackendLog'
+import { InspectorListItemLog } from '../playerInspectorLogic'
+import { ItemLog, ItemLogDetail, ItemLogProps } from './ItemLog'
 
-type Story = StoryObj<ItemBackendLogProps>
-const meta: Meta<ItemBackendLogProps> = {
-    title: 'Components/PlayerInspector/ItemBackendLog',
-    component: ItemBackendLog,
+type Story = StoryObj<ItemLogProps>
+const meta: Meta<ItemLogProps> = {
+    title: 'Components/PlayerInspector/ItemLog',
+    component: ItemLog,
     decorators: [
         mswDecorator({
             get: {},
@@ -49,40 +49,40 @@ function makeItem(
     level: LogSeverityLevel,
     body: string,
     overrides: Partial<LogMessage> = {},
-    itemOverrides: Partial<InspectorListItemBackendLog> = {}
-): InspectorListItemBackendLog {
+    itemOverrides: Partial<InspectorListItemLog> = {}
+): InspectorListItemLog {
     const mockDate = dayjs('2025-01-15T10:30:00Z')
     const highlightColor = level === 'error' || level === 'fatal' ? 'danger' : level === 'warn' ? 'warning' : undefined
 
     return {
-        type: 'backend-logs',
+        type: 'logs',
         timestamp: mockDate,
         timeInRecording: 5000,
         search: body,
-        key: `backend-log-${uuid()}`,
+        key: `log-${uuid()}`,
         highlightColor,
         data: makeLogMessage({ level, severity_text: level, body, ...overrides }),
         ...itemOverrides,
     }
 }
 
-const renderBasic = (props: Partial<ItemBackendLogProps>): JSX.Element => {
+const renderBasic = (props: Partial<ItemLogProps>): JSX.Element => {
     const propsToUse = {
         item: makeItem('info', 'Processing request for /api/users'),
         ...props,
-    } as ItemBackendLogProps
+    } as ItemLogProps
 
     return (
         <div className="flex flex-col gap-2 min-w-96">
             <h3>Collapsed</h3>
-            <ItemBackendLog {...propsToUse} />
+            <ItemLog {...propsToUse} />
             <LemonDivider />
             <h3>Expanded</h3>
-            <ItemBackendLogDetail {...propsToUse} />
+            <ItemLogDetail {...propsToUse} />
             <LemonDivider />
             <h3>Collapsed with overflowing text</h3>
             <div className="w-20">
-                <ItemBackendLog {...propsToUse} />
+                <ItemLog {...propsToUse} />
             </div>
         </div>
     )
@@ -235,15 +235,15 @@ export const AllSeverityLevels: Story = {
                 <h3>All severity levels</h3>
                 {levels.map(({ level, body }) => (
                     <div key={level} className="border rounded">
-                        <ItemBackendLog item={makeItem(level, body)} />
+                        <ItemLog item={makeItem(level, body)} />
                     </div>
                 ))}
                 <LemonDivider />
                 <h3>All severity levels expanded</h3>
                 {levels.map(({ level, body }) => (
                     <div key={level} className="border rounded">
-                        <ItemBackendLog item={makeItem(level, body)} />
-                        <ItemBackendLogDetail
+                        <ItemLog item={makeItem(level, body)} />
+                        <ItemLogDetail
                             item={makeItem(level, body, {
                                 instrumentation_scope: 'example-service',
                                 attributes: { environment: 'production', 'service.version': '2.1.0' },

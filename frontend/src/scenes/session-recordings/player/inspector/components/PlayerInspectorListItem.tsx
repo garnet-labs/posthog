@@ -42,15 +42,15 @@ import { IconWindow } from '../../icons'
 import { sessionRecordingPlayerLogic } from '../../sessionRecordingPlayerLogic'
 import {
     InspectorListItem,
-    InspectorListItemBackendLog,
     InspectorListItemConsole,
     InspectorListItemEvent,
+    InspectorListItemLog,
     playerInspectorLogic,
 } from '../playerInspectorLogic'
-import { ItemBackendLog, ItemBackendLogDetail } from './ItemBackendLog'
 import { ItemAppState, ItemAppStateDetail, ItemConsoleLog, ItemConsoleLogDetail } from './ItemConsoleLog'
 import { ItemDoctor, ItemDoctorDetail } from './ItemDoctor'
 import { ItemEvent, ItemEventDetail, ItemEventMenu } from './ItemEvent'
+import { ItemLog, ItemLogDetail } from './ItemLog'
 
 const PLAYER_INSPECTOR_LIST_ITEM_MARGIN = 1
 
@@ -104,9 +104,9 @@ const typeToIconAndDescription: Record<InspectorListItem['type'], IconAndDescrip
         Icon: undefined,
         tooltip: undefined,
     },
-    'backend-logs': {
+    logs: {
         Icon: IconLive,
-        tooltip: 'Backend log entry',
+        tooltip: 'Log entry',
     },
 }
 
@@ -200,8 +200,8 @@ function RowItemTitle({
                 <ItemInactivity item={item} />
             ) : item.type === 'session-change' ? (
                 <ItemSessionChange item={item} />
-            ) : item.type === 'backend-logs' ? (
-                <ItemBackendLog item={item} groupCount={groupCount} />
+            ) : item.type === 'logs' ? (
+                <ItemLog item={item} groupCount={groupCount} />
             ) : null}
         </div>
     )
@@ -242,11 +242,8 @@ function RowItemDetail({
                 <ItemDoctorDetail item={item} />
             ) : item.type === 'comment' ? (
                 <ItemAnyCommentDetail item={item} />
-            ) : item.type === 'backend-logs' ? (
-                <ItemBackendLogDetail
-                    item={item}
-                    groupedItems={groupedItems as InspectorListItemBackendLog[] | undefined}
-                />
+            ) : item.type === 'logs' ? (
+                <ItemLogDetail item={item} groupedItems={groupedItems as InspectorListItemLog[] | undefined} />
             ) : null}
         </div>
     )
