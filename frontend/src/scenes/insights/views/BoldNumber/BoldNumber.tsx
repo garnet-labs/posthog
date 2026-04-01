@@ -177,7 +177,7 @@ export function BoldNumber({ showPersonsModal = true, context }: ChartParams): J
 }
 
 function BoldNumberComparison({
-    showPersonsModal,
+    showPersonsModal = true,
     context,
 }: Pick<ChartParams, 'showPersonsModal' | 'context'>): JSX.Element | null {
     const { insightProps } = useValues(insightLogic)
