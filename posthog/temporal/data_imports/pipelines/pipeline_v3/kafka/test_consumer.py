@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -223,8 +223,7 @@ class TestProcessBatchPersistentRetry:
 
         mock_inc.assert_called_once_with(1, "schema-1", "run-1", 0)
         mock_clear.assert_called_once_with(1, "schema-1", "run-1", 0)
-        assert service._consumer is not None
-        service._consumer.commit.assert_called_once()
+        cast(MagicMock, service._consumer).commit.assert_called_once()
 
     @patch(f"{RETRY_TRACKER_PATH}.update_retry_error_type")
     @patch(f"{RETRY_TRACKER_PATH}.increment_retry_count", return_value=RetryInfo(count=1))
@@ -240,8 +239,7 @@ class TestProcessBatchPersistentRetry:
         mock_update.assert_called_once_with(
             1, "schema-1", "run-1", 0, error_type="non_transient", last_error="bad data"
         )
-        assert service._consumer is not None
-        service._consumer.commit.assert_not_called()
+        cast(MagicMock, service._consumer).commit.assert_not_called()
 
     @patch(f"{RETRY_TRACKER_PATH}.clear_retry_info")
     @patch(f"{RETRY_TRACKER_PATH}.update_retry_error_type")
@@ -261,8 +259,7 @@ class TestProcessBatchPersistentRetry:
             mock_dlq.assert_called_once()
             mock_fail.assert_called_once()
             mock_clear.assert_called_once_with(1, "schema-1", "run-1", 0)
-            assert service._consumer is not None
-            service._consumer.commit.assert_called_once()
+            cast(MagicMock, service._consumer).commit.assert_called_once()
 
     @patch(f"{RETRY_TRACKER_PATH}.clear_retry_info")
     @patch(f"{RETRY_TRACKER_PATH}.increment_retry_count")
@@ -286,8 +283,7 @@ class TestProcessBatchPersistentRetry:
             mock_dlq.assert_called_once()
             mock_fail.assert_called_once()
             mock_clear.assert_called_once()
-            assert service._consumer is not None
-            service._consumer.commit.assert_called_once()
+            cast(MagicMock, service._consumer).commit.assert_called_once()
 
     @patch(f"{RETRY_TRACKER_PATH}.clear_retry_info")
     @patch(f"{RETRY_TRACKER_PATH}.increment_retry_count", return_value=RetryInfo(count=1))
@@ -348,5 +344,4 @@ class TestProcessBatchPersistentRetry:
 
         # Only the first message was attempted
         assert call_count == 1
-        assert service._consumer is not None
-        service._consumer.commit.assert_not_called()
+        cast(MagicMock, service._consumer).commit.assert_not_called()
