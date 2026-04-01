@@ -130,10 +130,10 @@ To override the destination, set `STAMPHOG_POSTHOG_API_KEY` and/or `STAMPHOG_POS
 
 Events captured:
 
-| Event | When | Key properties |
-| --- | --- | --- |
+| Event            | When                   | Key properties                              |
+| ---------------- | ---------------------- | ------------------------------------------- |
 | `$ai_generation` | Each LLM reviewer call | model, tokens, cost, latency, cache metrics |
-| `$ai_trace` | Pipeline completion | total cost, verdict, tier, gate results |
+| `$ai_trace`      | Pipeline completion    | total cost, verdict, tier, gate results     |
 
 All events include `stamphog_*` custom properties (PR number, author, tier, verdict)
 for filtering in the dashboard.
