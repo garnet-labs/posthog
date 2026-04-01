@@ -3,7 +3,6 @@ from typing import Optional
 
 from django.db import models
 
-from celery import shared_task
 from rest_framework import serializers
 
 from posthog.schema import ProductIntentContext, ProductKey
@@ -284,7 +283,6 @@ class ProductIntent(UUIDTModel, RootTeamMixin):
         return product_intent
 
 
-@shared_task(ignore_result=True)
 def calculate_product_activation(team_id: int, only_calc_if_days_since_last_checked: int = 1) -> None:
     """
     Calculate product activation for a team.

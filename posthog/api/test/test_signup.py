@@ -808,7 +808,8 @@ class TestSignupAPI(APIBaseTest):
             cast(OrganizationMembership, user.organization_memberships.first()).level,
             OrganizationMembership.Level.MEMBER,
         )
-        self.assertFalse(mock_capture.call_args.kwargs["properties"]["is_organization_first_user"])
+        signup_call = next(call for call in mock_capture.call_args_list if call.kwargs.get("event") == "user signed up")
+        self.assertFalse(signup_call.kwargs["properties"]["is_organization_first_user"])
 
         if use_invite and not expired_invite:
             # make sure the org invite no longer exists
@@ -839,11 +840,8 @@ class TestSignupAPI(APIBaseTest):
     @patch("posthoganalytics.capture")
     @mock.patch("social_core.backends.base.BaseAuth.request")
     @mock.patch("posthog.api.authentication.get_instance_available_sso_providers")
-    @mock.patch("posthog.tasks.user_identify.identify_task")
     @pytest.mark.ee
-    def test_social_signup_with_allowed_domain_on_self_hosted(
-        self, mock_identify, mock_sso_providers, mock_request, mock_capture
-    ):
+    def test_social_signup_with_allowed_domain_on_self_hosted(self, mock_sso_providers, mock_request, mock_capture):
         self.run_test_for_allowed_domain(mock_sso_providers, mock_request, mock_capture)
 
     @unittest.skip("Skipping until fixed in Python 3.12+")
@@ -851,11 +849,9 @@ class TestSignupAPI(APIBaseTest):
     @mock.patch("ee.billing.billing_manager.BillingManager.update_billing_organization_users")
     @mock.patch("social_core.backends.base.BaseAuth.request")
     @mock.patch("posthog.api.authentication.get_instance_available_sso_providers")
-    @mock.patch("posthog.tasks.user_identify.identify_task")
     @pytest.mark.ee
     def test_social_signup_with_allowed_domain_on_cloud(
         self,
-        mock_identify,
         mock_sso_providers,
         mock_request,
         mock_update_billing_organization_users,
@@ -870,11 +866,9 @@ class TestSignupAPI(APIBaseTest):
     @mock.patch("ee.billing.billing_manager.BillingManager.update_billing_organization_users")
     @mock.patch("social_core.backends.base.BaseAuth.request")
     @mock.patch("posthog.api.authentication.get_instance_available_sso_providers")
-    @mock.patch("posthog.tasks.user_identify.identify_task")
     @pytest.mark.ee
     def test_social_signup_with_allowed_domain_on_cloud_with_existing_invite(
         self,
-        mock_identify,
         mock_sso_providers,
         mock_request,
         mock_update_billing_organization_users,
@@ -889,11 +883,9 @@ class TestSignupAPI(APIBaseTest):
     @mock.patch("ee.billing.billing_manager.BillingManager.update_billing_organization_users")
     @mock.patch("social_core.backends.base.BaseAuth.request")
     @mock.patch("posthog.api.authentication.get_instance_available_sso_providers")
-    @mock.patch("posthog.tasks.user_identify.identify_task")
     @pytest.mark.ee
     def test_social_signup_with_allowed_domain_on_cloud_with_existing_expired_invite(
         self,
-        mock_identify,
         mock_sso_providers,
         mock_request,
         mock_update_billing_organization_users,

@@ -22,6 +22,7 @@ from django.views.decorators.http import require_http_methods
 import jwt
 import requests
 import structlog
+import posthoganalytics
 from django_filters.rest_framework import DjangoFilterBackend
 from django_otp import login as otp_login
 from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
@@ -82,7 +83,6 @@ from posthog.models.organization import Organization
 from posthog.models.user import NOTIFICATION_DEFAULTS, ROLE_CHOICES, Notifications, ShortcutPosition
 from posthog.permissions import APIScopePermission, TimeSensitiveActionPermission, UserNoOrgMembershipDeletePermission
 from posthog.rate_limit import ToolbarOAuthRefreshThrottle, UserAuthenticationThrottle, UserEmailVerificationThrottle
-from posthog.tasks import user_identify
 from posthog.tasks.email import (
     send_email_change_emails,
     send_password_changed_email,
@@ -421,7 +421,11 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
     def to_representation(self, instance: Any) -> Any:
-        user_identify.identify_task.delay(user_id=instance.id)
+        posthoganalytics.capture(
+            distinct_id=instance.distinct_id,
+            event="update user properties",
+            properties={"$set": instance.get_analytics_metadata()},
+        )
         data = super().to_representation(instance)
 
         # Backfill shortcut_position default for frontend if null
