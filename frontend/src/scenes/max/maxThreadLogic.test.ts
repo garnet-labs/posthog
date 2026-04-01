@@ -1081,6 +1081,30 @@ describe('maxThreadLogic', () => {
             expect(logic.values.threadRaw).toEqual([])
         })
 
+        it('loads full conversation details when mounted from a history entry without messages', async () => {
+            const conversationWithoutMessages: ConversationDetail = {
+                id: MOCK_CONVERSATION_ID,
+                status: ConversationStatus.Idle,
+                title: 'History entry',
+                user: MOCK_DEFAULT_BASIC_USER,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                messages: [],
+                type: ConversationType.Assistant,
+            }
+
+            logic.unmount()
+            logic = maxThreadLogic({
+                conversationId: MOCK_CONVERSATION_ID,
+                tabId: 'test',
+                conversation: conversationWithoutMessages,
+            })
+
+            await expectLogic(logic, () => {
+                logic.mount()
+            }).toDispatchActions(['loadConversation'])
+        })
+
         it('updates threadRaw with status fields when conversation prop changes with new messages', async () => {
             // Start with empty conversation
             const initialConversation: ConversationDetail = {
