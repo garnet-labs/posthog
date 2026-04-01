@@ -137,3 +137,26 @@ wrappers:
             - showColumnConfigurator
             - tags
             - version
+
+    query-trace:
+        schema_ref: TraceQuery
+        enabled: true
+        scopes:
+            - query:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        mcp_version: 2
+        title: Get a single LLM trace
+        description: >
+            Retrieve a single LLM trace by its trace ID. Returns the full trace
+            including all child events (generations, spans, embeddings, feedback,
+            metrics), total latency, token usage, costs, and input/output state.
+            Requires traceId and dateRange. Use query-traces-list first to find
+            trace IDs, then this tool to inspect a specific trace in detail.
+        exclude_properties:
+            - response
+            - modifiers
+            - tags
+            - version

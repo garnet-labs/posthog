@@ -237,6 +237,19 @@ describe('Query Wrapper Integration Tests', { concurrent: false }, () => {
         })
     })
 
+    describe('query-trace', () => {
+        it('should execute a single trace query and return results', async () => {
+            const tool = getToolByName(GENERATED_TOOLS as Record<string, () => ToolBase<ZodObjectAny>>, 'query-trace')
+            const result = (await tool.handler(context, {
+                traceId: '00000000-0000-0000-0000-000000000000',
+                dateRange: { date_from: '-7d' },
+            })) as any
+
+            expect(result).toHaveProperty('results')
+            expect(result).toHaveProperty('_posthogUrl')
+        })
+    })
+
     describe('factory behavior', () => {
         it('should generate a valid PostHog URL with kind', async () => {
             const tool = getToolByName(GENERATED_TOOLS as Record<string, () => ToolBase<ZodObjectAny>>, 'query-trends')
