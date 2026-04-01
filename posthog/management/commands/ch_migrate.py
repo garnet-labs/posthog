@@ -694,9 +694,7 @@ class Command(BaseCommand):
         else:
             print("Usage: ch_migrate reconcile {plan|apply|import}")
 
-    def _compute_reconcile_diffs(
-        self, client: Any, database: str, schema_dir: Any
-    ) -> tuple[list, str | None]:
+    def _compute_reconcile_diffs(self, client: Any, database: str, schema_dir: Any) -> tuple[list, str | None]:
         """Compute desired-vs-current diffs. Returns (diffs, error_message)."""
         from posthog.clickhouse.migration_tools.desired_state import parse_desired_state_dir
         from posthog.clickhouse.migration_tools.state_diff import diff_state
