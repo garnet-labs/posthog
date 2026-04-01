@@ -258,6 +258,22 @@ def diff_state(
         desired_cols = {c.name: c for c in desired_table.columns}
         current_cols = {c.name: c for c in current_table.columns}
 
+        # Kafka/Dictionary engines don't support ALTER — recreate instead
+        if desired_table.engine.lower() in ("kafka", "dictionary") and desired_cols != current_cols:
+            drops.append(StateDiff(
+                action="drop", table=table_name,
+                detail=f"Drop {desired_table.engine} table {table_name} (recreate for column change)",
+                sql=f"DROP TABLE IF EXISTS {db}.{table_name}",
+                node_roles=desired_table.on_nodes,
+            ))
+            creates.append(StateDiff(
+                action="create", table=table_name,
+                detail=f"Recreate {desired_table.engine} table {table_name} with updated columns",
+                sql=_generate_create_sql(desired_table, db, cl),
+                node_roles=desired_table.on_nodes,
+            ))
+            continue
+
         # Skip column diffing for MVs (columns are derived from SELECT)
         if _is_mv(desired_table.engine):
             continue
