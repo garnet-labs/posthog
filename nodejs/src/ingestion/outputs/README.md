@@ -10,39 +10,49 @@ Previously, pipelines received raw `KafkaProducerWrapper` instances and hardcode
 
 **A named output abstraction.** Pipeline steps produce messages to an output by name (e.g. `'events'`). The output resolves to a topic and producer at startup. Steps never see the producer directly.
 
-**Configurable producer routing.** Each output has a default producer, overridable via env var. Producers are defined with their own env var → rdkafka config mapping, validated with zod at startup.
+**Configurable producer routing.** Each output has a default producer, overridable via the config object (backed by env vars). Producers are defined with their own config key → rdkafka config mapping, validated with zod at startup.
 
-**Configurable topics.** Each output has a default topic, also overridable via env var.
+**Configurable topics.** Each output has a default topic, also overridable via the config object.
+
+**Compile-time config validation.** Both the producer registry builder and the outputs builder enforce at compile time that the server config contains all required keys. Missing keys are caught by the type checker, not at runtime.
 
 **Health checks.** `IngestionOutputs` can verify broker connectivity and topic existence at startup, and provide ongoing health status for Kubernetes readiness probes.
 
 ## Concepts
 
-A **producer** is a Kafka connection configured via env vars. Each producer has a name (e.g. `'DEFAULT'`) and a mapping from env var names to rdkafka config keys. The `KafkaProducerRegistry` creates and caches producers by name — you define the producers and their env var mappings, the registry handles creation and lifecycle.
+A **producer** is a Kafka connection configured via the server config object. Each producer has a name (e.g. `'DEFAULT'`) and a mapping from config key names to rdkafka config keys. `KafkaProducerRegistryBuilder` creates all producers at startup, returning a typed `KafkaProducerRegistry<P>` where `P` is the union of registered producer names.
 
-An **output** is a named destination (e.g. `'events'`, `'heatmaps'`). Each output points to a producer and a topic. Both are configurable via env vars so you can re-route outputs between clusters or topics at deploy time without touching code.
+An **output** is a named destination (e.g. `'events'`, `'heatmaps'`). Each output points to a producer and a topic, both resolved from the config object. `IngestionOutputsBuilder` registers outputs with their config key pairs, then `build(registry, config)` resolves them — verifying at compile time that all config keys exist and producer values match the registry's type.
 
 `IngestionOutputs` is the interface pipeline steps use to produce messages. It maps each output name to its resolved producer and topic, exposing `produce()` and `queueMessages()` methods that route messages to the right Kafka cluster and topic without the caller needing to know the details.
-
-The **resolver** (`resolveIngestionOutputs`) is the glue. It takes a registry and a set of output definitions, looks up env var overrides, creates the producers through the registry, and returns an `IngestionOutputs`. This happens once at startup.
 
 ## Conventions
 
 Pipeline steps receive `IngestionOutputs<O>` as a dependency and produce messages through it using `outputs.produce(output, message)` or `outputs.queueMessages(output, messages)`. Steps should never access Kafka producers directly.
 
-Each pipeline defines its output and producer config in its own directory (e.g. `analytics/config/`). Shared output constants that appear in multiple pipelines go in `common/outputs.ts`. The server resolves the definitions into an `IngestionOutputs` at startup and passes it down.
+Each pipeline defines its output and producer config in its own directory (e.g. `analytics/config/`). Shared output constants that appear in multiple pipelines go in `common/outputs.ts`. The server builds the outputs at startup and passes them down.
 
 ## How to extend
 
-To add a new output, add the output constant to the appropriate `outputs.ts` file (`common/` if shared, or the pipeline's own) and add an entry to the pipeline's output definitions.
+To add a new output:
 
-To add a new producer, add it to the pipeline's `producers.ts` with its env var mapping. The registry creates it on first use.
+1. Add the output name constant to the appropriate `outputs.ts` file (`common/` if shared, or the pipeline's own)
+2. Add topic and producer config keys to the pipeline's config type (e.g. `IngestionOutputsConfig`)
+3. Add defaults in the `getDefault*Config()` function
+4. Add a `.register()` call in the pipeline's `register*Outputs()` function
+
+To add a new producer:
+
+1. Add the name constant and config map to the pipeline's `producers.ts`
+2. Add the config keys to `KafkaProducerEnvConfig` with defaults
+3. Add a `.register()` call on the `KafkaProducerRegistryBuilder` in the server
 
 ## File layout
 
 ```text
 ingestion/outputs/              — generic infrastructure (pipeline-agnostic)
 ingestion/common/outputs.ts     — shared output constants (e.g. EVENTS_OUTPUT)
+ingestion/common/producers.ts   — shared producer constants and config maps
 ingestion/analytics/outputs.ts  — analytics-specific output constants
-ingestion/analytics/config/     — analytics pipeline definitions (outputs + producers)
+ingestion/analytics/config/     — analytics pipeline config (output types, defaults, registration)
 ```
