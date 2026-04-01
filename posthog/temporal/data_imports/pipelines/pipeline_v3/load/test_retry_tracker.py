@@ -186,6 +186,7 @@ class TestUpdateRetryErrorType:
             update_retry_error_type(1, "schema", "run", 0, error_type="transient", last_error=long_error)
 
         saved = RetryInfo.from_json(mock_redis.set.call_args[0][1])
+        assert saved.last_error is not None
         assert len(saved.last_error) == 1000
 
     def test_noop_when_key_missing(self):

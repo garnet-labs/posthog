@@ -207,7 +207,7 @@ class TestExtractMessageKey:
 
 
 class TestProcessBatchPersistentRetry:
-    def _setup_service(self, process_message: MagicMock | None = None) -> KafkaConsumerService:
+    def _setup_service(self, process_message: Any = None) -> KafkaConsumerService:
         service = _make_service(process_message=process_message or MagicMock())
         service._consumer = MagicMock()
         return service
@@ -223,6 +223,7 @@ class TestProcessBatchPersistentRetry:
 
         mock_inc.assert_called_once_with(1, "schema-1", "run-1", 0)
         mock_clear.assert_called_once_with(1, "schema-1", "run-1", 0)
+        assert service._consumer is not None
         service._consumer.commit.assert_called_once()
 
     @patch(f"{RETRY_TRACKER_PATH}.update_retry_error_type")
@@ -239,6 +240,7 @@ class TestProcessBatchPersistentRetry:
         mock_update.assert_called_once_with(
             1, "schema-1", "run-1", 0, error_type="non_transient", last_error="bad data"
         )
+        assert service._consumer is not None
         service._consumer.commit.assert_not_called()
 
     @patch(f"{RETRY_TRACKER_PATH}.clear_retry_info")
@@ -248,16 +250,19 @@ class TestProcessBatchPersistentRetry:
     def test_exhausted_after_attempt_sends_to_dlq(self, mock_get, mock_inc, mock_update, mock_clear):
         process_fn = MagicMock(side_effect=ValueError("bad data"))
         service = self._setup_service(process_message=process_fn)
-        service._send_to_dlq = MagicMock()
-        service._mark_job_failed_from_message = MagicMock()
         msg = _make_message()
 
-        service._process_batch_with_retry([msg])
+        with (
+            patch.object(service, "_send_to_dlq") as mock_dlq,
+            patch.object(service, "_mark_job_failed_from_message") as mock_fail,
+        ):
+            service._process_batch_with_retry([msg])
 
-        service._send_to_dlq.assert_called_once()
-        service._mark_job_failed_from_message.assert_called_once()
-        mock_clear.assert_called_once_with(1, "schema-1", "run-1", 0)
-        service._consumer.commit.assert_called_once()
+            mock_dlq.assert_called_once()
+            mock_fail.assert_called_once()
+            mock_clear.assert_called_once_with(1, "schema-1", "run-1", 0)
+            assert service._consumer is not None
+            service._consumer.commit.assert_called_once()
 
     @patch(f"{RETRY_TRACKER_PATH}.clear_retry_info")
     @patch(f"{RETRY_TRACKER_PATH}.increment_retry_count")
@@ -268,18 +273,21 @@ class TestProcessBatchPersistentRetry:
     def test_already_exhausted_skips_processing(self, mock_get, mock_inc, mock_clear):
         process_fn = MagicMock()
         service = self._setup_service(process_message=process_fn)
-        service._send_to_dlq = MagicMock()
-        service._mark_job_failed_from_message = MagicMock()
         msg = _make_message()
 
-        service._process_batch_with_retry([msg])
+        with (
+            patch.object(service, "_send_to_dlq") as mock_dlq,
+            patch.object(service, "_mark_job_failed_from_message") as mock_fail,
+        ):
+            service._process_batch_with_retry([msg])
 
-        process_fn.assert_not_called()
-        mock_inc.assert_not_called()
-        service._send_to_dlq.assert_called_once()
-        service._mark_job_failed_from_message.assert_called_once()
-        mock_clear.assert_called_once()
-        service._consumer.commit.assert_called_once()
+            process_fn.assert_not_called()
+            mock_inc.assert_not_called()
+            mock_dlq.assert_called_once()
+            mock_fail.assert_called_once()
+            mock_clear.assert_called_once()
+            assert service._consumer is not None
+            service._consumer.commit.assert_called_once()
 
     @patch(f"{RETRY_TRACKER_PATH}.clear_retry_info")
     @patch(f"{RETRY_TRACKER_PATH}.increment_retry_count", return_value=RetryInfo(count=1))
@@ -290,7 +298,11 @@ class TestProcessBatchPersistentRetry:
         def track_process(msg):
             call_order.append("process")
 
-        mock_inc.side_effect = lambda *a: (call_order.append("increment"), RetryInfo(count=1))[1]
+        def _increment_side_effect(*a: Any) -> RetryInfo:
+            call_order.append("increment")
+            return RetryInfo(count=1)
+
+        mock_inc.side_effect = _increment_side_effect
 
         service = self._setup_service(process_message=track_process)
         msg = _make_message()
@@ -336,4 +348,5 @@ class TestProcessBatchPersistentRetry:
 
         # Only the first message was attempted
         assert call_count == 1
+        assert service._consumer is not None
         service._consumer.commit.assert_not_called()
