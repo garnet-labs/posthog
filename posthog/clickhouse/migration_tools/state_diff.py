@@ -132,14 +132,6 @@ def _generate_create_sql(
     )
 
 
-def _desired_col_set(columns: list[ColumnDef]) -> dict[str, ColumnDef]:
-    return {c.name: c for c in columns}
-
-
-def _current_col_set(columns: list[ColumnSchema]) -> dict[str, ColumnSchema]:
-    return {c.name: c for c in columns}
-
-
 def diff_state(
     desired: DesiredState,
     current: dict[str, TableSchema],
@@ -241,8 +233,8 @@ def diff_state(
             pass
 
         # Column comparison
-        desired_cols = _desired_col_set(desired_table.columns)
-        current_cols = _current_col_set(current_table.columns)
+        desired_cols = {c.name: c for c in desired_table.columns}
+        current_cols = {c.name: c for c in current_table.columns}
 
         # Skip column diffing for MVs (columns are derived from SELECT)
         if _is_mv(desired_table.engine):
