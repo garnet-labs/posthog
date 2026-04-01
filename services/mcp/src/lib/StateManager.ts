@@ -1,12 +1,14 @@
 import type { ApiClient } from '@/api/client'
 import { ErrorCode } from '@/lib/errors'
+import { buildActiveEnvironmentContextPrompt } from '@/lib/instructions'
 import { sanitizeHeaderValue } from '@/lib/utils'
 import type { ApiUser } from '@/schema/api'
-import type { State } from '@/tools/types'
+import type { CachedOrg, CachedProject, CachedUser, State } from '@/tools/types'
 
 import type { ScopedCache } from './cache/ScopedCache'
 
 const AI_CONSENT_TTL_MS = 4 * 60 * 60 * 1000 // 4 hours
+const CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
 export class StateManager {
     private _cache: ScopedCache<State>
@@ -164,6 +166,91 @@ export class StateManager {
         }
 
         return projectId
+    }
+
+    private isCacheStale(fetchedAtKey: string, fetchedAt: number | undefined): boolean {
+        return !fetchedAt || Date.now() - fetchedAt > CACHE_TTL_MS
+    }
+
+    async getCachedOrFetchUser(): Promise<CachedUser | undefined> {
+        let distinctId = await this._cache.get('distinctId')
+
+        if (!distinctId) {
+            // Fetch user to get distinctId and cache both in one API call
+            const user = await this._fetchUser()
+            distinctId = user.distinct_id
+            await this._cache.set('distinctId', distinctId)
+            await this._cache.set(`cachedUser:${distinctId}`, user)
+            await this._cache.set(`cachedUserFetchedAt:${distinctId}`, Date.now())
+            return user
+        }
+
+        const cached = (await this._cache.get(`cachedUser:${distinctId}`)) as CachedUser | undefined
+        const fetchedAt = (await this._cache.get(`cachedUserFetchedAt:${distinctId}`)) as number | undefined
+
+        if (cached && !this.isCacheStale(`cachedUserFetchedAt:${distinctId}`, fetchedAt)) {
+            return cached
+        }
+
+        const user = await this._fetchUser()
+        await this._cache.set(`cachedUser:${distinctId}`, user)
+        await this._cache.set(`cachedUserFetchedAt:${distinctId}`, Date.now())
+        return user
+    }
+
+    async getCachedOrFetchOrg(): Promise<CachedOrg | undefined> {
+        const orgId = await this.getOrgID()
+        if (!orgId) {
+            return undefined
+        }
+
+        const cached = (await this._cache.get(`cachedOrg:${orgId}`)) as CachedOrg | undefined
+        const fetchedAt = (await this._cache.get(`cachedOrgFetchedAt:${orgId}`)) as number | undefined
+
+        if (cached && !this.isCacheStale(`cachedOrgFetchedAt:${orgId}`, fetchedAt)) {
+            return cached
+        }
+
+        const result = await this._api.organizations().get({ orgId })
+        if (!result.success) {
+            return cached
+        }
+
+        await this._cache.set(`cachedOrg:${orgId}`, result.data)
+        await this._cache.set(`cachedOrgFetchedAt:${orgId}`, Date.now())
+        return result.data
+    }
+
+    async getCachedOrFetchProject(): Promise<CachedProject | undefined> {
+        const projectId = await this.getProjectId()
+        if (!projectId) {
+            return undefined
+        }
+
+        const cached = (await this._cache.get(`cachedProject:${projectId}`)) as CachedProject | undefined
+        const fetchedAt = (await this._cache.get(`cachedProjectFetchedAt:${projectId}`)) as number | undefined
+
+        if (cached && !this.isCacheStale(`cachedProjectFetchedAt:${projectId}`, fetchedAt)) {
+            return cached
+        }
+
+        const result = await this._api.projects().get({ projectId })
+        if (!result.success) {
+            return cached
+        }
+
+        await this._cache.set(`cachedProject:${projectId}`, result.data)
+        await this._cache.set(`cachedProjectFetchedAt:${projectId}`, Date.now())
+        return result.data
+    }
+
+    async getCachedOrFetchMetadata(): Promise<string | undefined> {
+        const [user, org, project] = await Promise.all([
+            this.getCachedOrFetchUser().catch(() => undefined),
+            this.getCachedOrFetchOrg().catch(() => undefined),
+            this.getCachedOrFetchProject().catch(() => undefined),
+        ])
+        return buildActiveEnvironmentContextPrompt(user, org, project)
     }
 
     async invalidateAiConsent(): Promise<void> {

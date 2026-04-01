@@ -15,7 +15,7 @@ import {
     toCloudRegion,
 } from '@/lib/constants'
 import { handleToolError } from '@/lib/errors'
-import { buildInstructionsV1, buildInstructionsV2, buildActiveEnvironmentContextPrompt } from '@/lib/instructions'
+import { buildInstructionsV1, buildInstructionsV2 } from '@/lib/instructions'
 import { formatResponse } from '@/lib/response'
 import { SessionManager } from '@/lib/SessionManager'
 import { StateManager } from '@/lib/StateManager'
@@ -25,7 +25,7 @@ import { registerResources } from '@/resources'
 import { registerUiAppResources } from '@/resources/ui-apps'
 import INSTRUCTIONS_TEMPLATE_V1 from '@/templates/instructions-v1.md'
 import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
-import type { CachedOrg, CachedProject, CachedUser, CloudRegion, Context, State, Tool } from '@/tools/types'
+import type { CloudRegion, Context, State, Tool } from '@/tools/types'
 import type { AnalyticsMetadata, WithAnalytics } from '@/ui-apps/types'
 
 export type RequestProperties = {
@@ -413,9 +413,7 @@ export class MCP extends McpAgent<Env> {
     async init(): Promise<void> {
         const { features, version, organizationId, projectId, readOnly } = this.requestProperties
 
-        // Pre-seed cache and fetch group types + metadata in parallel
-        const groupTypesPromise = projectId ? this.getOrFetchGroupTypes(projectId) : Promise.resolve(undefined)
-        const metadataPromise = this.getOrFetchMetadata()
+        // Seed cache with header-provided IDs before any fetches
         if (organizationId) {
             await this.cache.set('orgId', organizationId)
         }
@@ -423,8 +421,19 @@ export class MCP extends McpAgent<Env> {
             await this.cache.set('projectId', projectId)
         }
 
-        // Resolve group types and metadata (started above in parallel with cache seeding)
-        const [groupTypes, metadata] = await Promise.all([groupTypesPromise, metadataPromise])
+        const context = await this.getContext()
+
+        // Resolve defaults if headers didn't provide org/project
+        if (!organizationId || !projectId) {
+            await context.stateManager.setDefaultOrganizationAndProject()
+        }
+
+        // Fetch group types and metadata in parallel (cache is now seeded)
+        const resolvedProjectId = projectId || (await this.cache.get('projectId'))
+        const [groupTypes, metadata] = await Promise.all([
+            resolvedProjectId ? this.getOrFetchGroupTypes(resolvedProjectId) : Promise.resolve(undefined),
+            context.stateManager.getCachedOrFetchMetadata(),
+        ])
         const instructions =
             version === 2
                 ? buildInstructionsV2(INSTRUCTIONS_TEMPLATE_V2, guidelines, groupTypes, metadata)
@@ -440,8 +449,6 @@ export class MCP extends McpAgent<Env> {
         } else if (organizationId) {
             excludeTools.push('switch-organization')
         }
-
-        const context = await this.getContext()
 
         // Register prompts and resources
         await registerPrompts(this.server)
@@ -517,74 +524,6 @@ export class MCP extends McpAgent<Env> {
             })
             return undefined
         }
-    }
-
-    private async getOrFetchMetadata(): Promise<string | undefined> {
-        try {
-            const [user, org, project] = await Promise.all([
-                this.getOrFetchUser(),
-                this.getOrFetchOrg(),
-                this.getOrFetchProject(),
-            ])
-            return buildActiveEnvironmentContextPrompt(user, org, project)
-        } catch (error) {
-            getPostHogClient(!!CUSTOM_API_BASE_URL).captureException(error, undefined, {
-                tag: 'max_ai',
-                context: 'get_or_fetch_metadata',
-            })
-            return undefined
-        }
-    }
-
-    private async getOrFetchUser(): Promise<CachedUser | undefined> {
-        const distinctId = await this.cache.get('distinctId')
-        if (!distinctId) {
-            return undefined
-        }
-        const api = await this.api()
-        return this.getOrFetchCached({
-            name: 'user',
-            cacheKey: `cachedUser:${distinctId}`,
-            fetchedAtKey: `cachedUserFetchedAt:${distinctId}`,
-            fetcher: async () => {
-                const result = await api.users().me()
-                return result.success ? result.data : undefined
-            },
-        })
-    }
-
-    private async getOrFetchOrg(): Promise<CachedOrg | undefined> {
-        const orgId = await this.cache.get('orgId')
-        if (!orgId) {
-            return undefined
-        }
-        const api = await this.api()
-        return this.getOrFetchCached({
-            name: 'org',
-            cacheKey: `cachedOrg:${orgId}`,
-            fetchedAtKey: `cachedOrgFetchedAt:${orgId}`,
-            fetcher: async () => {
-                const result = await api.organizations().get({ orgId })
-                return result.success ? result.data : undefined
-            },
-        })
-    }
-
-    private async getOrFetchProject(): Promise<CachedProject | undefined> {
-        const projectId = await this.cache.get('projectId')
-        if (!projectId) {
-            return undefined
-        }
-        const api = await this.api()
-        return this.getOrFetchCached({
-            name: 'project',
-            cacheKey: `cachedProject:${projectId}`,
-            fetchedAtKey: `cachedProjectFetchedAt:${projectId}`,
-            fetcher: async () => {
-                const result = await api.projects().get({ projectId })
-                return result.success ? result.data : undefined
-            },
-        })
     }
 
     private async getOrFetchGroupTypes(projectId: string): Promise<GroupType[] | undefined> {
