@@ -14,6 +14,7 @@ from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 
 import requests as http_requests
+import jsonschema
 import posthoganalytics
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
@@ -507,7 +508,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     )
     def set_output(self, request, pk=None, **kwargs):
         task_run = cast(TaskRun, self.get_object())
-
+        task = cast(Task, task_run.task)
         output_data = request.data.get("output", {})
         if not isinstance(output_data, dict):
             return Response(
@@ -515,7 +516,14 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # TODO: Validate output data according to schema for the task type.
+        if task.json_schema:
+            try:
+                jsonschema.validate(instance=output_data, schema=task.json_schema)
+            except jsonschema.ValidationError as e:
+                return Response(
+                    ErrorResponseSerializer({"error": f"Output validation error: {e.message}"}).data,
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         task_run.output = output_data
         task_run.save(update_fields=["output", "updated_at"])
         self._post_slack_update_for_pr(task_run)

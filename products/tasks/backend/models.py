@@ -6,6 +6,11 @@ import string
 import secrets
 from typing import TYPE_CHECKING, Literal, Optional
 
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+from pydantic import BaseModel
+
 if TYPE_CHECKING:
     from products.slack_app.backend.slack_thread import SlackThreadContext
 
@@ -224,6 +229,7 @@ class Task(DeletedMetaFields, models.Model):
         start_workflow: bool = True,
         posthog_mcp_scopes: PosthogMcpScopes = "full",
         branch: str | None = None,
+        output_schema: BaseModel | None = None,
     ) -> "Task":
         from products.tasks.backend.temporal.client import execute_task_processing_workflow
 
@@ -234,7 +240,6 @@ class Task(DeletedMetaFields, models.Model):
             github_integration = Integration.objects.filter(team=team, kind="github").first()
             if not github_integration:
                 raise ValueError(f"Team {team.id} does not have a GitHub integration")
-
         task = Task.objects.create(
             team=team,
             title=title,
@@ -243,6 +248,7 @@ class Task(DeletedMetaFields, models.Model):
             created_by=created_by,
             github_integration=github_integration,
             repository=repository,
+            json_schema=output_schema.model_json_schema() if output_schema else None,
         )
 
         extra_state: dict[str, str] | None = None
@@ -487,6 +493,20 @@ class TaskRun(models.Model):
             "task_run_completed",
             {"duration_seconds": self._duration_seconds()},
         )
+
+    def track_structured_result(self):
+        """Track a structured result event with properties from the run output."""
+        if not self.output:
+            return
+
+        try:
+            self.capture_event("task_run_structured_result", {"result": self.output})
+        except Exception as e:
+            logger.warning(
+                "task_run.track_structured_result_failed",
+                task_run_id=str(self.id),
+                error=str(e),
+            )
 
     def mark_failed(self, error: str):
         """Mark the progress as failed with an error message."""
@@ -796,3 +816,16 @@ class CodeInviteRedemption(UUIDModel):
 
     def __str__(self):
         return f"{self.user} redeemed {self.invite_code}"
+
+
+@receiver(post_save, sender=TaskRun)
+def track_task_run_completion(sender, instance: TaskRun, created: bool, **kwargs):
+    try:
+        if not created and instance.state == TaskRun.Status.COMPLETED and instance.output and instance.task.json_schema:
+            instance.track_structured_result()
+    except Exception as e:
+        logger.warning(
+            "task_run.track_structured_result_failed",
+            task_run_id=str(instance.id),
+            error=str(e),
+        )
