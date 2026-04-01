@@ -655,7 +655,7 @@ def _copy_sandbox_backup_xml(worktree_path: str) -> None:
 
 def _init_cache_cleanup(port: int, worktree: str) -> None:
     info("Cleaning up cache init containers...")
-    compose("sandbox-cache-init", port, worktree, "down", "-v", check=False, capture=True)
+    compose("sandbox-cache-init", port, worktree, "down", "-v", "-t", "0", check=False, capture=True)
     shutil.rmtree(worktree, ignore_errors=True)
     run(["git", "worktree", "prune"], check=False)
 
@@ -1075,7 +1075,7 @@ def cmd_destroy(branch: str, clean: bool = False) -> None:
     # entry is missing, derive profiles from the compose file to ensure nothing
     # is orphaned.
     profiles = resolve_docker_profiles(entry.intents) if entry else sorted(_all_sandbox_profiles())
-    compose(project, port, worktree, "down", "-v", check=False, capture=True, profiles=profiles)
+    compose(project, port, worktree, "down", "-v", "-t", "0", check=False, capture=True, profiles=profiles)
 
     if clean and entry and entry.worktree:
         _remove_worktree(entry.worktree)
@@ -1190,20 +1190,37 @@ def _attach_tmux(container: str) -> None:
 
 def _attach_with_health_poll(container: str, health_url: str) -> None:
     """Attach to tmux; open browser in background when healthy."""
-    pid = os.fork()
-    if pid == 0:
-        # Child: poll health, open browser, exit.
-        if wait_for_health(health_url, container):
-            webbrowser.open(health_url.replace("/_health", ""))
-        os._exit(0)
+    # Launch a background process to poll health and open browser.
+    # We use a separate process so the main process can execvp into tmux
+    # with a clean TTY.
+    url = health_url.replace("/_health", "")
+    subprocess.Popen(
+        [sys.executable, "-c", f"""
+import time, webbrowser, subprocess
+while True:
+    try:
+        r = subprocess.run(["curl", "-sf", "{health_url}"], capture_output=True, timeout=5)
+        if r.returncode == 0:
+            webbrowser.open("{url}")
+            break
+    except Exception:
+        pass
+    time.sleep(5)
+"""],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
-    # Parent: wait for tmux then attach (replaces this process).
+    # Wait for tmux then attach (replaces this process).
     # The entrypoint installs deps before starting tmux, so there's a
     # brief window where the container is running but tmux isn't ready.
     info("Attaching to mprocs... (detach with Ctrl-b d)")
     while True:
         result = run(
-            ["docker", "exec", container, "tmux", "-L", "sandbox", "has-session", "-t", "posthog"],
+            ["docker", "exec", "-u", f"{os.getuid()}:{os.getgid()}", container,
+             "tmux", "-L", "sandbox", "has-session", "-t", "posthog"],
             check=False, capture=True,
         )
         if result.returncode == 0:
