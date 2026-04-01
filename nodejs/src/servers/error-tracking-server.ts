@@ -20,14 +20,14 @@ import {
     RedisConnectionsConfig,
 } from '../ingestion/config'
 import { ErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
-import { ERROR_TRACKING_OUTPUT_DEFINITIONS } from '../ingestion/error-tracking/config/outputs'
+import { ErrorTrackingOutputsConfig, registerErrorTrackingOutputs } from '../ingestion/error-tracking/config/outputs'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
 import {
     DEFAULT_PRODUCER,
     DEFAULT_PRODUCER_CONFIG_MAP,
     ProducerName,
 } from '../ingestion/error-tracking/outputs/producers'
-import { KafkaProducerRegistry, KafkaProducerRegistryBuilder, resolveIngestionOutputs } from '../ingestion/outputs'
+import { KafkaProducerRegistry, KafkaProducerRegistryBuilder } from '../ingestion/outputs'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { PluginServerService, RedisPool } from '../types'
 import { ServerCommands } from '../utils/commands'
@@ -57,6 +57,7 @@ export type ErrorTrackingServerConfig = BaseServerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
     KafkaProducerEnvConfig &
+    ErrorTrackingOutputsConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
     KafkaConsumerBaseConfig &
@@ -113,7 +114,7 @@ export class ErrorTrackingServer implements NodeServer {
         this.producerRegistry = await new KafkaProducerRegistryBuilder(this.config.KAFKA_CLIENT_RACK)
             .register(DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, this.config)
             .build()
-        const outputs = resolveIngestionOutputs(this.producerRegistry, ERROR_TRACKING_OUTPUT_DEFINITIONS)
+        const outputs = registerErrorTrackingOutputs().build(this.producerRegistry, this.config)
         logger.info('👍', 'Kafka ready')
 
         logger.info('🤔', 'Connecting to ingestion Redis...')

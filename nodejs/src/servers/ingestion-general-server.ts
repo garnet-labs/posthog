@@ -16,7 +16,7 @@ import {
     KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { INGESTION_OUTPUT_DEFINITIONS } from '../ingestion/analytics/config/outputs'
+import { IngestionOutputsConfig, registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
 import { DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, ProducerName } from '../ingestion/analytics/config/producers'
 import {
     DatabaseConnectionConfig,
@@ -30,7 +30,7 @@ import {
 import { CookielessManager } from '../ingestion/cookieless/cookieless-manager'
 import { IngestionConsumer, IngestionConsumerDeps } from '../ingestion/ingestion-consumer'
 import { IngestionTestingConsumer } from '../ingestion/ingestion-testing-consumer'
-import { KafkaProducerRegistry, KafkaProducerRegistryBuilder, resolveIngestionOutputs } from '../ingestion/outputs'
+import { KafkaProducerRegistry, KafkaProducerRegistryBuilder } from '../ingestion/outputs'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import { PluginServerService, RedisPool } from '../types'
@@ -64,6 +64,7 @@ export type IngestionGeneralServerConfig = BaseServerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
     KafkaProducerEnvConfig &
+    IngestionOutputsConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
     KafkaConsumerBaseConfig &
@@ -201,10 +202,7 @@ export class IngestionGeneralServer implements NodeServer {
             this.ingestionProducerRegistry = await new KafkaProducerRegistryBuilder(this.config.KAFKA_CLIENT_RACK)
                 .register(DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP, this.config)
                 .build()
-            const ingestionOutputs = resolveIngestionOutputs(
-                this.ingestionProducerRegistry,
-                INGESTION_OUTPUT_DEFINITIONS
-            )
+            const ingestionOutputs = registerIngestionOutputs().build(this.ingestionProducerRegistry, this.config)
             const clickhouseGroupRepository = new ClickhouseGroupRepository(ingestionOutputs)
 
             const hogTransformerDeps: HogTransformerServiceDeps = {

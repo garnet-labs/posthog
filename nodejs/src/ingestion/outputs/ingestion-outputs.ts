@@ -21,7 +21,7 @@ export interface IngestionOutput {
  * Pipeline steps use `produce()` and `queueMessages()` to send messages by output name —
  * they never access the underlying producer or topic directly.
  *
- * @see `resolveIngestionOutputs()` for building an instance from output definitions.
+ * @see `IngestionOutputsBuilder` for constructing instances from config.
  */
 export class IngestionOutputs<O extends string> {
     constructor(private outputs: Record<O, IngestionOutput>) {}

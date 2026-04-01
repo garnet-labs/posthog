@@ -12,9 +12,11 @@ import { EncryptedFields } from './cdp/utils/encryption-utils'
 import type { CommonConfig } from './common/config'
 import { InternalCaptureService } from './common/services/internal-capture'
 import { InternalFetchService } from './common/services/internal-fetch'
+import type { IngestionOutputsConfig } from './ingestion/analytics/config/outputs'
 import type { IngestionConsumerConfig, KafkaProducerEnvConfig } from './ingestion/config'
 import type { CookielessManager } from './ingestion/cookieless/cookieless-manager'
 import type { ErrorTrackingConsumerConfig } from './ingestion/error-tracking/config'
+import type { ErrorTrackingOutputsConfig } from './ingestion/error-tracking/config/outputs'
 import { KafkaProducerWrapper } from './kafka/producer'
 import type { LogsIngestionConsumerConfig, TracesIngestionConsumerConfig } from './logs-ingestion/config'
 import type { SessionRecordingApiConfig, SessionRecordingConfig } from './session-recording/config'
@@ -116,9 +118,11 @@ export interface PluginsServerConfig
         CdpConfig,
         IngestionConsumerConfig,
         KafkaProducerEnvConfig,
+        IngestionOutputsConfig,
         LogsIngestionConsumerConfig,
         TracesIngestionConsumerConfig,
         ErrorTrackingConsumerConfig,
+        ErrorTrackingOutputsConfig,
         SessionRecordingConfig,
         SessionRecordingApiConfig {}
 

@@ -16,51 +16,81 @@ import {
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
 } from '../../common/outputs'
-import { IngestionOutputDefinition } from '../../outputs/resolver'
+import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder'
 import { DEFAULT_PRODUCER, ProducerName } from '../outputs/producers'
 
-/** Static config for all error tracking ingestion outputs. */
-export const ERROR_TRACKING_OUTPUT_DEFINITIONS: Record<string, IngestionOutputDefinition<ProducerName>> = {
-    [EVENTS_OUTPUT]: {
-        defaultTopic: KAFKA_EVENTS_JSON,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_CONSUMER_OUTPUT_TOPIC',
-    },
-    [INGESTION_WARNINGS_OUTPUT]: {
-        defaultTopic: KAFKA_INGESTION_WARNINGS,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_TOPIC',
-    },
-    [DLQ_OUTPUT]: {
-        defaultTopic: KAFKA_ERROR_TRACKING_INGESTION_DLQ,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_DLQ_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_CONSUMER_DLQ_TOPIC',
-    },
-    [OVERFLOW_OUTPUT]: {
-        defaultTopic: KAFKA_ERROR_TRACKING_INGESTION_OVERFLOW,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC',
-    },
-    [APP_METRICS_OUTPUT]: {
-        defaultTopic: KAFKA_APP_METRICS_2,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_APP_METRICS_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_APP_METRICS_TOPIC',
-    },
-    [LOG_ENTRIES_OUTPUT]: {
-        defaultTopic: KAFKA_LOG_ENTRIES,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_LOG_ENTRIES_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_LOG_ENTRIES_TOPIC',
-    },
-    [TOPHOG_OUTPUT]: {
-        defaultTopic: KAFKA_CLICKHOUSE_TOPHOG,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_TOPHOG_PRODUCER',
-        topicOverrideEnvVar: 'ERROR_TRACKING_OUTPUT_TOPHOG_TOPIC',
-    },
+/** Config type for all error tracking output keys. */
+export type ErrorTrackingOutputsConfig = {
+    ERROR_TRACKING_OUTPUT_EVENTS_TOPIC: string
+    ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER: ProducerName
+
+    ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_TOPIC: string
+    ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER: ProducerName
+
+    ERROR_TRACKING_OUTPUT_DLQ_TOPIC: string
+    ERROR_TRACKING_OUTPUT_DLQ_PRODUCER: ProducerName
+
+    ERROR_TRACKING_OUTPUT_OVERFLOW_TOPIC: string
+    ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER: ProducerName
+
+    ERROR_TRACKING_OUTPUT_APP_METRICS_TOPIC: string
+    ERROR_TRACKING_OUTPUT_APP_METRICS_PRODUCER: ProducerName
+
+    ERROR_TRACKING_OUTPUT_LOG_ENTRIES_TOPIC: string
+    ERROR_TRACKING_OUTPUT_LOG_ENTRIES_PRODUCER: ProducerName
+
+    ERROR_TRACKING_OUTPUT_TOPHOG_TOPIC: string
+    ERROR_TRACKING_OUTPUT_TOPHOG_PRODUCER: ProducerName
+}
+
+export function getDefaultErrorTrackingOutputsConfig(): ErrorTrackingOutputsConfig {
+    return {
+        ERROR_TRACKING_OUTPUT_EVENTS_TOPIC: KAFKA_EVENTS_JSON,
+        ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER: DEFAULT_PRODUCER,
+        ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_TOPIC: KAFKA_INGESTION_WARNINGS,
+        ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER: DEFAULT_PRODUCER,
+        ERROR_TRACKING_OUTPUT_DLQ_TOPIC: KAFKA_ERROR_TRACKING_INGESTION_DLQ,
+        ERROR_TRACKING_OUTPUT_DLQ_PRODUCER: DEFAULT_PRODUCER,
+        ERROR_TRACKING_OUTPUT_OVERFLOW_TOPIC: KAFKA_ERROR_TRACKING_INGESTION_OVERFLOW,
+        ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER: DEFAULT_PRODUCER,
+        ERROR_TRACKING_OUTPUT_APP_METRICS_TOPIC: KAFKA_APP_METRICS_2,
+        ERROR_TRACKING_OUTPUT_APP_METRICS_PRODUCER: DEFAULT_PRODUCER,
+        ERROR_TRACKING_OUTPUT_LOG_ENTRIES_TOPIC: KAFKA_LOG_ENTRIES,
+        ERROR_TRACKING_OUTPUT_LOG_ENTRIES_PRODUCER: DEFAULT_PRODUCER,
+        ERROR_TRACKING_OUTPUT_TOPHOG_TOPIC: KAFKA_CLICKHOUSE_TOPHOG,
+        ERROR_TRACKING_OUTPUT_TOPHOG_PRODUCER: DEFAULT_PRODUCER,
+    }
+}
+
+/** Register all error tracking outputs on the builder. Call `.build(registry, config)` to resolve. */
+export function registerErrorTrackingOutputs() {
+    return new IngestionOutputsBuilder()
+        .register(EVENTS_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_EVENTS_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER',
+        })
+        .register(INGESTION_WARNINGS_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER',
+        })
+        .register(DLQ_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_DLQ_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_DLQ_PRODUCER',
+        })
+        .register(OVERFLOW_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_OVERFLOW_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER',
+        })
+        .register(APP_METRICS_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_APP_METRICS_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_APP_METRICS_PRODUCER',
+        })
+        .register(LOG_ENTRIES_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_LOG_ENTRIES_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_LOG_ENTRIES_PRODUCER',
+        })
+        .register(TOPHOG_OUTPUT, {
+            topicKey: 'ERROR_TRACKING_OUTPUT_TOPHOG_TOPIC',
+            producerKey: 'ERROR_TRACKING_OUTPUT_TOPHOG_PRODUCER',
+        })
 }

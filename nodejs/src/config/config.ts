@@ -1,7 +1,9 @@
 import { getDefaultCdpConfig } from '../cdp/config'
 import { getDefaultCommonConfig } from '../common/config'
+import { getDefaultIngestionOutputsConfig } from '../ingestion/analytics/config/outputs'
 import { getDefaultIngestionConsumerConfig, getDefaultKafkaProducerEnvConfig } from '../ingestion/config'
 import { getDefaultErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
+import { getDefaultErrorTrackingOutputsConfig } from '../ingestion/error-tracking/config/outputs'
 import {
     getDefaultLogsIngestionConsumerConfig,
     getDefaultTracesIngestionConsumerConfig,
@@ -21,9 +23,11 @@ export function getDefaultConfig(): PluginsServerConfig {
         ...getDefaultCdpConfig(),
         ...getDefaultIngestionConsumerConfig(),
         ...getDefaultKafkaProducerEnvConfig(),
+        ...getDefaultIngestionOutputsConfig(),
         ...getDefaultLogsIngestionConsumerConfig(),
         ...getDefaultTracesIngestionConsumerConfig(),
         ...getDefaultErrorTrackingConsumerConfig(),
+        ...getDefaultErrorTrackingOutputsConfig(),
         ...getDefaultSessionRecordingConfig(),
         ...getDefaultSessionRecordingApiConfig(),
     }

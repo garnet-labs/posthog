@@ -22,7 +22,7 @@ import {
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
 } from '../../common/outputs'
-import { IngestionOutputDefinition } from '../../outputs/resolver'
+import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder'
 import {
     AI_EVENTS_OUTPUT,
     ASYNC_OUTPUT,
@@ -33,84 +33,129 @@ import {
 } from '../outputs'
 import { DEFAULT_PRODUCER, ProducerName } from './producers'
 
-/** Static config for all analytics ingestion outputs. */
-export const INGESTION_OUTPUT_DEFINITIONS: Record<string, IngestionOutputDefinition<ProducerName>> = {
-    [EVENTS_OUTPUT]: {
-        defaultTopic: KAFKA_EVENTS_JSON,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_EVENTS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_EVENTS_TOPIC',
-    },
-    [AI_EVENTS_OUTPUT]: {
-        defaultTopic: KAFKA_CLICKHOUSE_AI_EVENTS_JSON,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_AI_EVENTS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_AI_EVENTS_TOPIC',
-    },
-    [HEATMAPS_OUTPUT]: {
-        defaultTopic: KAFKA_CLICKHOUSE_HEATMAP_EVENTS,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_HEATMAPS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_HEATMAPS_TOPIC',
-    },
-    [INGESTION_WARNINGS_OUTPUT]: {
-        defaultTopic: KAFKA_INGESTION_WARNINGS,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC',
-    },
-    [DLQ_OUTPUT]: {
-        defaultTopic: KAFKA_EVENTS_PLUGIN_INGESTION_DLQ,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_DLQ_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_DLQ_TOPIC',
-    },
-    [OVERFLOW_OUTPUT]: {
-        defaultTopic: KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_OVERFLOW_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_OVERFLOW_TOPIC',
-    },
-    [ASYNC_OUTPUT]: {
-        defaultTopic: KAFKA_EVENTS_PLUGIN_INGESTION_ASYNC,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_ASYNC_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_ASYNC_TOPIC',
-    },
-    [GROUPS_OUTPUT]: {
-        defaultTopic: KAFKA_GROUPS,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_GROUPS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_GROUPS_TOPIC',
-    },
-    [PERSONS_OUTPUT]: {
-        defaultTopic: KAFKA_PERSON,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_PERSONS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_PERSONS_TOPIC',
-    },
-    [PERSON_DISTINCT_IDS_OUTPUT]: {
-        defaultTopic: KAFKA_PERSON_DISTINCT_ID,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC',
-    },
-    [APP_METRICS_OUTPUT]: {
-        defaultTopic: KAFKA_APP_METRICS_2,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_APP_METRICS_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_APP_METRICS_TOPIC',
-    },
-    [LOG_ENTRIES_OUTPUT]: {
-        defaultTopic: KAFKA_LOG_ENTRIES,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_LOG_ENTRIES_TOPIC',
-    },
-    [TOPHOG_OUTPUT]: {
-        defaultTopic: KAFKA_CLICKHOUSE_TOPHOG,
-        defaultProducerName: DEFAULT_PRODUCER,
-        producerOverrideEnvVar: 'INGESTION_OUTPUT_TOPHOG_PRODUCER',
-        topicOverrideEnvVar: 'INGESTION_OUTPUT_TOPHOG_TOPIC',
-    },
+/** Config type for all analytics ingestion output keys. */
+export type IngestionOutputsConfig = {
+    INGESTION_OUTPUT_EVENTS_TOPIC: string
+    INGESTION_OUTPUT_EVENTS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_AI_EVENTS_TOPIC: string
+    INGESTION_OUTPUT_AI_EVENTS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_HEATMAPS_TOPIC: string
+    INGESTION_OUTPUT_HEATMAPS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: string
+    INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_DLQ_TOPIC: string
+    INGESTION_OUTPUT_DLQ_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_OVERFLOW_TOPIC: string
+    INGESTION_OUTPUT_OVERFLOW_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_ASYNC_TOPIC: string
+    INGESTION_OUTPUT_ASYNC_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_GROUPS_TOPIC: string
+    INGESTION_OUTPUT_GROUPS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_PERSONS_TOPIC: string
+    INGESTION_OUTPUT_PERSONS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: string
+    INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_APP_METRICS_TOPIC: string
+    INGESTION_OUTPUT_APP_METRICS_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: string
+    INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: ProducerName
+
+    INGESTION_OUTPUT_TOPHOG_TOPIC: string
+    INGESTION_OUTPUT_TOPHOG_PRODUCER: ProducerName
+}
+
+export function getDefaultIngestionOutputsConfig(): IngestionOutputsConfig {
+    return {
+        INGESTION_OUTPUT_EVENTS_TOPIC: KAFKA_EVENTS_JSON,
+        INGESTION_OUTPUT_EVENTS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_AI_EVENTS_TOPIC: KAFKA_CLICKHOUSE_AI_EVENTS_JSON,
+        INGESTION_OUTPUT_AI_EVENTS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_HEATMAPS_TOPIC: KAFKA_CLICKHOUSE_HEATMAP_EVENTS,
+        INGESTION_OUTPUT_HEATMAPS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC: KAFKA_INGESTION_WARNINGS,
+        INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_DLQ_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_DLQ,
+        INGESTION_OUTPUT_DLQ_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_OVERFLOW_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
+        INGESTION_OUTPUT_OVERFLOW_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_ASYNC_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_ASYNC,
+        INGESTION_OUTPUT_ASYNC_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_GROUPS_TOPIC: KAFKA_GROUPS,
+        INGESTION_OUTPUT_GROUPS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_PERSONS_TOPIC: KAFKA_PERSON,
+        INGESTION_OUTPUT_PERSONS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC: KAFKA_PERSON_DISTINCT_ID,
+        INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_APP_METRICS_TOPIC: KAFKA_APP_METRICS_2,
+        INGESTION_OUTPUT_APP_METRICS_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: KAFKA_LOG_ENTRIES,
+        INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: DEFAULT_PRODUCER,
+        INGESTION_OUTPUT_TOPHOG_TOPIC: KAFKA_CLICKHOUSE_TOPHOG,
+        INGESTION_OUTPUT_TOPHOG_PRODUCER: DEFAULT_PRODUCER,
+    }
+}
+
+/** Register all analytics ingestion outputs on the builder. Call `.build(registry, config)` to resolve. */
+export function registerIngestionOutputs() {
+    return new IngestionOutputsBuilder()
+        .register(EVENTS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_EVENTS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_EVENTS_PRODUCER',
+        })
+        .register(AI_EVENTS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_AI_EVENTS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_AI_EVENTS_PRODUCER',
+        })
+        .register(HEATMAPS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_HEATMAPS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_HEATMAPS_PRODUCER',
+        })
+        .register(INGESTION_WARNINGS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_INGESTION_WARNINGS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_INGESTION_WARNINGS_PRODUCER',
+        })
+        .register(DLQ_OUTPUT, { topicKey: 'INGESTION_OUTPUT_DLQ_TOPIC', producerKey: 'INGESTION_OUTPUT_DLQ_PRODUCER' })
+        .register(OVERFLOW_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_OVERFLOW_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_OVERFLOW_PRODUCER',
+        })
+        .register(ASYNC_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_ASYNC_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_ASYNC_PRODUCER',
+        })
+        .register(GROUPS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_GROUPS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_GROUPS_PRODUCER',
+        })
+        .register(PERSONS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_PERSONS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_PERSONS_PRODUCER',
+        })
+        .register(PERSON_DISTINCT_IDS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_PERSON_DISTINCT_IDS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_PERSON_DISTINCT_IDS_PRODUCER',
+        })
+        .register(APP_METRICS_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_APP_METRICS_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_APP_METRICS_PRODUCER',
+        })
+        .register(LOG_ENTRIES_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_LOG_ENTRIES_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER',
+        })
+        .register(TOPHOG_OUTPUT, {
+            topicKey: 'INGESTION_OUTPUT_TOPHOG_TOPIC',
+            producerKey: 'INGESTION_OUTPUT_TOPHOG_PRODUCER',
+        })
 }
