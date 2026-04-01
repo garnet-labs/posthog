@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Union
 
 from freezegun import freeze_time
@@ -11,6 +12,7 @@ from posthog.schema import (
     ActionsNode,
     CohortPropertyFilter,
     CompareFilter,
+    DataWarehouseNode,
     DateRange,
     ElementPropertyFilter,
     EmptyPropertyFilter,
@@ -45,7 +47,10 @@ from posthog.models.group.util import create_group
 from posthog.settings import HOGQL_INCREASED_MAX_EXECUTION_TIME
 from posthog.test.test_utils import create_group_type_mapping_without_created_at
 
+from products.data_warehouse.backend.test.utils import create_data_warehouse_table_from_csv
 from products.event_definitions.backend.models.property_definition import PropertyDefinition
+
+TEST_BUCKET = "test_storage_bucket-posthog.hogql.datawarehouse.stickinessquery"
 
 
 @dataclass
@@ -82,6 +87,10 @@ StickinessProperties = Union[
 
 
 class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
+    def teardown_method(self, method) -> None:
+        if getattr(self, "cleanUpDataWarehouse", None):
+            self.cleanUpDataWarehouse()
+
     default_date_from = "2020-01-11"
     default_date_to = "2020-01-20"
 
@@ -138,6 +147,22 @@ class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
             group_type_index=0,
             group_key="org:1",
         )
+
+    def _setup_data_warehouse(self) -> str:
+        table, _source, _credential, _df, self.cleanUpDataWarehouse = create_data_warehouse_table_from_csv(
+            csv_path=Path(__file__).parent / "data" / "trends_data.csv",
+            table_name="test_table_stickiness",
+            table_columns={
+                "id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+                "created": {"clickhouse": "DateTime64(3, 'UTC')", "hogql": "DateTimeDatabaseField"},
+                "prop_1": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+                "prop_2": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+            },
+            test_bucket=TEST_BUCKET,
+            team=self.team,
+        )
+
+        return table.name
 
     def _create_test_events(self):
         self._create_events(
@@ -207,7 +232,7 @@ class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
 
     def _get_query(
         self,
-        series: Optional[list[EventsNode | ActionsNode]] = None,
+        series: Optional[list[EventsNode | ActionsNode | DataWarehouseNode]] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         interval: Optional[IntervalType] = None,
@@ -217,7 +242,9 @@ class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
         filter_test_accounts: Optional[bool] = False,
         compare_filters: Optional[CompareFilter] = None,
     ):
-        query_series: list[EventsNode | ActionsNode] = [EventsNode(event="$pageview")] if series is None else series
+        query_series: list[EventsNode | ActionsNode | DataWarehouseNode] = (
+            [EventsNode(event="$pageview")] if series is None else series
+        )
         query_date_from = date_from or self.default_date_from
         query_date_to = None if date_to == "now" else date_to or self.default_date_to
         query_interval = interval or IntervalType.DAY
@@ -254,6 +281,29 @@ class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
         assert isinstance(response, StickinessQueryResponse)
         assert isinstance(response.results, list)
         assert isinstance(response.results[0], dict)
+
+    @freeze_time("2023-01-07")
+    def test_stickiness_data_warehouse_runs(self):
+        table_name = self._setup_data_warehouse()
+
+        response = self._run_query(
+            series=[
+                DataWarehouseNode(
+                    id=table_name,
+                    table_name=table_name,
+                    id_field="id",
+                    distinct_id_field="customer_email",
+                    timestamp_field="created",
+                )
+            ],
+            date_from="2023-01-01",
+            date_to="2023-01-07",
+        )
+
+        assert isinstance(response, StickinessQueryResponse)
+        assert response.results[0]["label"] == table_name
+        assert response.results[0]["data"] == [4]
+        assert response.results[0]["days"] == [1]
 
     def test_days(self):
         self._create_test_events()
