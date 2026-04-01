@@ -24,7 +24,7 @@ export function HistoryPreview({ sidePanel = false }: HistoryPreviewProps): JSX.
 
     return (
         <div className="max-w-120 w-full self-center flex flex-col gap-2 px-2">
-            <div className="flex items-center justify-between gap-2 -mr-2">
+            <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-medium text-secondary mb-0">Recent chats</h3>
                 <LemonButton
                     size="small"
