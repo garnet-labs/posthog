@@ -106,6 +106,7 @@ export enum NodeKind {
     LogsQuery = 'LogsQuery',
     LogAttributesQuery = 'LogAttributesQuery',
     LogValuesQuery = 'LogValuesQuery',
+    TraceSpansQuery = 'TraceSpansQuery',
     SessionBatchEventsQuery = 'SessionBatchEventsQuery',
 
     // Interface nodes
@@ -226,6 +227,7 @@ export type AnyDataNode =
     | LogsQuery
     | LogAttributesQuery
     | LogValuesQuery
+    | TraceSpansQuery
     | ExperimentFunnelsQuery
     | ExperimentTrendsQuery
     | CalendarHeatmapQuery
@@ -319,6 +321,9 @@ export type QuerySchema =
     | LogAttributesQuery
     | LogValuesQuery
 
+    // Tracing
+    | TraceSpansQuery
+
     // AI
     | SuggestedQuestionsQuery
     | TeamTaxonomyQuery
@@ -375,6 +380,7 @@ export type AnyResponseType =
     | LogsQueryResponse
     | LogAttributesQueryResponse
     | LogValuesQueryResponse
+    | TraceSpansQueryResponse
 
 /** Tags that will be added to the Query log comment  **/
 export interface QueryLogTags {
@@ -476,6 +482,8 @@ export interface HogQLQuery extends DataNode<HogQLQueryResponse> {
     query: string
     /** Optional direct external data source id for running against a specific source */
     connectionId?: string
+    /** Run the selected connection query directly without translating it through HogQL first */
+    sendRawQuery?: boolean
     filters?: HogQLFilters
     /** Variables to be substituted into the query */
     variables?: Record<string, HogQLVariable>
@@ -1071,6 +1079,8 @@ export interface HeatmapSettings {
     valueColumn?: string
     xAxisLabel?: string
     yAxisLabel?: string
+    nullLabel?: string
+    nullValue?: string
     gradient?: HeatmapGradientStop[]
     gradientPreset?: string
     gradientScaleMode?: 'absolute' | 'relative'
@@ -1118,6 +1128,7 @@ export interface TableSettings {
     columns?: ChartAxis[]
     conditionalFormatting?: ConditionalFormattingRule[]
     pinnedColumns?: string[]
+    transpose?: boolean
 }
 
 export interface SharingConfigurationSettings {
@@ -1706,16 +1717,18 @@ export const StickinessComputationModes = {
 
 export type StickinessComputationMode = (typeof StickinessComputationModes)[keyof typeof StickinessComputationModes]
 
+export interface StickinessCriteria {
+    operator: StickinessOperator
+    value: integer
+}
+
 export type StickinessFilter = {
     display?: StickinessFilterLegacy['display']
     showLegend?: StickinessFilterLegacy['show_legend']
     showValuesOnSeries?: StickinessFilterLegacy['show_values_on_series']
     showMultipleYAxes?: StickinessFilterLegacy['show_multiple_y_axes']
     hiddenLegendIndexes?: integer[]
-    stickinessCriteria?: {
-        operator: StickinessOperator
-        value: integer
-    }
+    stickinessCriteria?: StickinessCriteria
     computedAs?: StickinessComputationMode
     /**
      * Whether result datasets are associated by their values or by their order.
@@ -1803,6 +1816,8 @@ export interface EndpointRequest {
     version?: integer
     /** Per-column bucket function overrides for range variable materialization. Keys are column names, values are bucket keys (hour, day, week, month). */
     bucket_overrides?: Record<string, string>
+    /** Set to true to soft-delete this endpoint */
+    deleted?: boolean
 }
 
 /**
@@ -2890,6 +2905,34 @@ export type CachedSessionBatchEventsQueryResponse = CachedEventsQueryResponse & 
 }
 export type CachedLogsQueryResponse = CachedQueryResponse<LogsQueryResponse>
 
+export interface TraceSpansQuery extends DataNode<TraceSpansQueryResponse> {
+    kind: NodeKind.TraceSpansQuery
+    dateRange: DateRange
+    limit?: integer
+    offset?: integer
+    orderBy?: 'latest' | 'earliest'
+    filterGroup?: PropertyGroupFilter
+    serviceNames?: string[]
+    statusCodes?: integer[]
+    traceId?: string
+    rootSpans?: boolean
+    /** Cursor for fetching the next page of results */
+    after?: string
+    /** Prefetch up to this many spans per trace and include them in results */
+    prefetchSpans?: integer
+}
+
+export interface TraceSpansQueryResponse extends AnalyticsQueryResponseBase {
+    results: unknown
+    hasMore?: boolean
+    limit?: integer
+    offset?: integer
+    /** Cursor for fetching the next page of results */
+    nextCursor?: string
+}
+
+export type CachedTraceSpansQueryResponse = CachedQueryResponse<TraceSpansQueryResponse>
+
 export interface FileSystemCount {
     count: number
     entries: FileSystemEntry[]
@@ -3813,7 +3856,15 @@ export interface ResolvedDateRangeResponse {
 
 export type MultipleBreakdownType = Extract<
     BreakdownType,
-    'person' | 'event' | 'event_metadata' | 'group' | 'session' | 'hogql' | 'cohort' | 'revenue_analytics'
+    | 'person'
+    | 'event'
+    | 'event_metadata'
+    | 'group'
+    | 'session'
+    | 'hogql'
+    | 'cohort'
+    | 'revenue_analytics'
+    | 'data_warehouse_person_property'
 >
 
 export interface Breakdown {
@@ -3981,6 +4032,8 @@ export interface ECODDetectorConfig {
     type: 'ecod'
     /** Anomaly probability threshold (default: 0.9) */
     threshold?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -3989,6 +4042,8 @@ export interface COPODDetectorConfig {
     type: 'copod'
     /** Anomaly probability threshold (default: 0.9) */
     threshold?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -3999,6 +4054,8 @@ export interface IsolationForestDetectorConfig {
     threshold?: number
     /** Number of trees in the forest (default: 100) */
     n_estimators?: integer
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -4011,6 +4068,8 @@ export interface KNNDetectorConfig {
     n_neighbors?: integer
     /** Distance method: 'largest', 'mean', 'median' (default: 'largest') */
     method?: 'largest' | 'mean' | 'median'
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -4021,6 +4080,8 @@ export interface HBOSDetectorConfig {
     threshold?: number
     /** Number of histogram bins (default: 10) */
     n_bins?: integer
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -4031,6 +4092,8 @@ export interface LOFDetectorConfig {
     threshold?: number
     /** Number of neighbors for LOF (default: 20) */
     n_neighbors?: integer
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -4043,6 +4106,8 @@ export interface OCSVMDetectorConfig {
     kernel?: string
     /** Upper bound on training errors fraction (default: 0.1) */
     nu?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -4051,6 +4116,8 @@ export interface PCADetectorConfig {
     type: 'pca'
     /** Anomaly probability threshold (default: 0.9) */
     threshold?: number
+    /** Rolling window size — how many historical data points to train on (default: based on calculation interval) */
+    window?: integer
     /** Preprocessing transforms applied before detection */
     preprocessing?: PreprocessingConfig
 }
@@ -5038,6 +5105,7 @@ export interface SourceFieldOauthConfig {
     label: string
     required: boolean
     kind: string
+    requiredScopes?: string
 }
 
 export type SourceFieldInputConfigType =
@@ -5277,6 +5345,7 @@ export const externalDataSources = [
     'Postmark',
     'Granola',
     'BuildBetter',
+    'Convex',
 ] as const
 
 export type ExternalDataSourceType = (typeof externalDataSources)[number]
@@ -5923,6 +5992,7 @@ export interface ReplayInactivityPeriod {
 
 export enum DomainConnectProviderName {
     Cloudflare = 'Cloudflare',
+    Vercel = 'Vercel',
 }
 
 export enum PropertyType {

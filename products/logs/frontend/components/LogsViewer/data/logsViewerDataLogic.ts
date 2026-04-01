@@ -426,7 +426,6 @@ export const logsViewerDataLogic = kea<logsViewerDataLogicType>([
                                       trace: 'muted-alt',
                                   }[name],
                     }))
-                    .filter((series) => series.values.reduce((a, b) => a + b) > 0)
 
                 return { data, labels, dates }
             },
@@ -506,15 +505,6 @@ export const logsViewerDataLogic = kea<logsViewerDataLogicType>([
         runQuery: async ({ debounce }, breakpoint) => {
             if (debounce) {
                 await breakpoint(debounce)
-            }
-            // Track query execution (skip initial page load)
-            if (values.hasRunQuery) {
-                posthog.capture('logs query executed', {
-                    has_search_term: !!values.filters.searchTerm,
-                    has_filters: values.filters.filterGroup.values.length > 0,
-                    severity_count: values.filters.severityLevels?.length ?? 0,
-                    service_count: values.filters.serviceNames?.length ?? 0,
-                })
             }
             actions.clearLogs()
             actions.fetchLogs()
