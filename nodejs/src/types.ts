@@ -262,8 +262,6 @@ export type OrganizationAvailableFeature = 'group_analytics' | 'data_pipelines' 
 /** Event schema with enforcement enabled. Only includes required properties since optional properties are not validated. */
 export interface EventSchemaEnforcement {
     event_name: string
-    enforcement_mode: 'reject' | 'enforce'
-    schema_version: number
     /** Map from property name to accepted types (multiple types when property groups disagree) */
     required_properties: Map<string, string[]>
 }
@@ -301,7 +299,6 @@ export interface Team {
     drop_events_older_than_seconds: number | null
     logs_settings?: LogsSettings | null
     extra_settings: Record<string, string | number | boolean> | null
-    schema_validation_disabled?: boolean | null
 }
 
 /** Properties shared by RawEventMessage and EventMessage. */
@@ -372,7 +369,6 @@ export interface RawClickHouseEvent extends BaseEvent {
     group4_created_at?: ClickHouseTimestamp
     person_mode: PersonMode
     historical_migration?: boolean
-    validated_schema_version?: number
 }
 
 export interface RawKafkaEvent extends RawClickHouseEvent {
@@ -400,7 +396,6 @@ export interface ProcessedEvent {
     person_created_at: DateTime | null
     person_mode: PersonMode
     historical_migration?: boolean
-    validated_schema_version?: number
 }
 
 /** Parsed event row from ClickHouse. */
@@ -436,7 +431,6 @@ export interface PreIngestionEvent {
     distinctId: string
     properties: Properties
     timestamp: ISOTimestamp
-    validated_schema_version?: number
 }
 
 /** Parsed event structure after initial ingestion.
@@ -871,7 +865,6 @@ export enum OrganizationMembershipLevel {
 
 export interface PipelineEvent extends Omit<PluginEvent, 'team_id'> {
     team_id?: number | null
-    validated_schema_version?: number
 }
 
 export interface EventHeaders {

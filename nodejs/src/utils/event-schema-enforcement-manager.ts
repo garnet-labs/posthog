@@ -9,8 +9,6 @@ import { LazyLoader } from './lazy-loader'
 interface RawSchemaPropertyRow {
     team_id: number
     event_name: string
-    enforcement_mode: 'reject' | 'enforce'
-    schema_version: number
     property_name: string
     property_types: string[]
 }
@@ -77,8 +75,6 @@ export class EventSchemaEnforcementManager {
             `SELECT
                 ed.team_id,
                 ed.name as event_name,
-                ed.enforcement_mode,
-                ed.schema_version,
                 p.name as property_name,
                 array_agg(DISTINCT p.property_type ORDER BY p.property_type) as property_types
             FROM posthog_eventdefinition ed
@@ -87,7 +83,7 @@ export class EventSchemaEnforcementManager {
             WHERE ed.team_id = ANY($1)
               AND ed.enforcement_mode = 'reject'
               AND p.is_required = true
-            GROUP BY ed.team_id, ed.name, ed.enforcement_mode, ed.schema_version, p.name
+            GROUP BY ed.team_id, ed.name, p.name
             ORDER BY ed.team_id, ed.name, p.name`,
             [numericTeamIds],
             'fetch-enforced-event-schemas'
@@ -116,12 +112,7 @@ export class EventSchemaEnforcementManager {
 
             let schema = result[teamId].get(row.event_name)
             if (!schema) {
-                schema = {
-                    event_name: row.event_name,
-                    enforcement_mode: row.enforcement_mode,
-                    schema_version: row.schema_version,
-                    required_properties: new Map(),
-                }
+                schema = { event_name: row.event_name, required_properties: new Map() }
                 result[teamId].set(row.event_name, schema)
             }
 
