@@ -1,5 +1,4 @@
 import { useActions, useValues } from 'kea'
-import { router } from 'kea-router'
 import { useState } from 'react'
 
 import { IconBug, IconCheckCircle, IconComment, IconNotification, IconPlug, IconWarning } from '@posthog/icons'
@@ -8,8 +7,6 @@ import { Tooltip } from '@posthog/lemon-ui'
 import { dayjs } from 'lib/dayjs'
 import { IconRadioButtonUnchecked } from 'lib/lemon-ui/icons'
 import { IconOpenInNew } from 'lib/lemon-ui/icons'
-import { organizationLogic } from 'scenes/organizationLogic'
-import { teamLogic } from 'scenes/teamLogic'
 
 import { sidePanelNotificationsLogic } from '~/layout/navigation-3000/sidepanel/panels/activity/sidePanelNotificationsLogic'
 import { InAppNotification } from '~/types'
@@ -34,30 +31,16 @@ export function NotificationRow({
     notification: InAppNotification
     onNavigate?: () => void
 }): JSX.Element {
-    const { markAsRead, toggleRead } = useActions(sidePanelNotificationsLogic)
-    const { currentTeamId } = useValues(teamLogic)
-    const { currentOrganization } = useValues(organizationLogic)
+    const { navigateToNotification, toggleRead } = useActions(sidePanelNotificationsLogic)
+    const { projectNameForNotification } = useValues(sidePanelNotificationsLogic)
     const [expanded, setExpanded] = useState(false)
 
-    const isOtherProject = notification.team_id !== null && notification.team_id !== currentTeamId
-    const otherProjectName = isOtherProject
-        ? currentOrganization?.teams?.find((t) => t.id === notification.team_id)?.name
-        : null
+    const otherProjectName = projectNameForNotification(notification)
 
     const handleNavigate = (e: React.MouseEvent): void => {
         e.stopPropagation()
-        if (!notification.read) {
-            markAsRead(notification.id)
-        }
-        if (notification.source_url) {
-            const alreadyHasProjectPrefix = notification.source_url.startsWith('/project/')
-            const url =
-                notification.team_id !== null && !alreadyHasProjectPrefix
-                    ? `/project/${notification.team_id}${notification.source_url}`
-                    : notification.source_url
-            router.actions.push(url)
-            onNavigate?.()
-        }
+        navigateToNotification(notification)
+        onNavigate?.()
     }
 
     const handleToggleRead = (e: React.MouseEvent): void => {
@@ -111,12 +94,14 @@ export function NotificationRow({
                         {notification.body}
                     </div>
                 )}
-                <div className="flex items-center gap-1.5 mt-0.5">
+                <div className="flex items-center gap-1.5 mt-2">
                     <span className="text-[10px] text-muted">{dayjs(notification.created_at).fromNow()}</span>
                     {otherProjectName && (
-                        <span className="text-[10px] text-muted bg-fill-highlight-100 px-1 py-0.5 rounded">
-                            {otherProjectName}
-                        </span>
+                        <Tooltip title={`Occurred on project ${otherProjectName}`}>
+                            <span className="text-[10px] text-muted bg-fill-highlight-100 px-1 py-px rounded truncate max-w-[240px]">
+                                {otherProjectName}
+                            </span>
+                        </Tooltip>
                     )}
                 </div>
             </div>

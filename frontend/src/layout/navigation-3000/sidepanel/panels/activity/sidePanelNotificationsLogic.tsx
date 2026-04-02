@@ -1,5 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { lazyLoaders } from 'kea-loaders'
+import { router } from 'kea-router'
 import posthog, { JsonRecord } from 'posthog-js'
 
 import { IconBug, IconCheckCircle, IconComment, IconNotification, IconPlug, IconWarning } from '@posthog/icons'
@@ -15,8 +16,10 @@ import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { toParams } from 'lib/utils'
 import { liveEventsHostOrigin } from 'lib/utils/apiHost'
+import { organizationLogic } from 'scenes/organizationLogic'
 import { projectLogic } from 'scenes/projectLogic'
 import { teamLogic } from 'scenes/teamLogic'
+import { urls } from 'scenes/urls'
 
 import { ChangesResponse } from '~/layout/navigation-3000/sidepanel/panels/activity/sidePanelActivityLogic'
 import { InAppNotification } from '~/types'
@@ -46,7 +49,9 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
             featureFlagLogic,
             ['featureFlags'],
             teamLogic,
-            ['currentTeam'],
+            ['currentTeam', 'currentTeamId'],
+            organizationLogic,
+            ['currentOrganization'],
         ],
         actions: [sidePanelStateLogic, ['openSidePanel'], teamLogic, ['loadCurrentTeamSuccess']],
     })),
@@ -68,6 +73,7 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
         notificationReceived: (notification: InAppNotification) => ({ notification }),
         markAsRead: (id: string) => ({ id }),
         toggleRead: (id: string) => ({ id }),
+        navigateToNotification: (notification: InAppNotification) => ({ notification }),
         loadMoreNotifications: true,
         initialLoadDone: true,
         startSSE: true,
@@ -302,6 +308,26 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
             cache.sseConnection?.abort()
             cache.sseConnection = null
         },
+        navigateToNotification: ({ notification }) => {
+            if (!notification.source_url) {
+                return
+            }
+            if (!notification.read) {
+                actions.markAsRead(notification.id)
+            }
+            const isOtherProject = notification.team_id !== null && notification.team_id !== values.currentTeamId
+            if (isOtherProject) {
+                const path = notification.source_url.startsWith('/project/')
+                    ? notification.source_url
+                    : urls.project(notification.team_id!, notification.source_url)
+                window.location.href = path
+            } else {
+                const path = notification.source_url.startsWith('/project/')
+                    ? notification.source_url
+                    : notification.source_url
+                router.actions.push(path)
+            }
+        },
         markAsRead: async ({ id }) => {
             try {
                 await api.create(`api/environments/${values.currentProjectId}/notifications/${id}/mark_read/`, {})
@@ -423,6 +449,17 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
             },
         ],
         hasUnread: [(s) => [s.unreadCount], (unreadCount) => unreadCount > 0],
+        projectNameForNotification: [
+            (s) => [s.currentTeamId, s.currentOrganization],
+            (currentTeamId, currentOrganization) => {
+                return (notification: InAppNotification): string | null => {
+                    if (notification.team_id === null || notification.team_id === currentTeamId) {
+                        return null
+                    }
+                    return currentOrganization?.teams?.find((t) => t.id === notification.team_id)?.name ?? null
+                }
+            },
+        ],
     }),
     afterMount(({ cache, actions, values }) => {
         if (values.realTimeNotificationsEnabled) {
