@@ -176,8 +176,9 @@ export const sidepanelTicketsLogic = kea<sidepanelTicketsLogicType>([
                     }
                 }
             } catch (e) {
+                // Log but don't show toast - this runs in the background when the help menu renders
+                // and users shouldn't see errors for background operations they didn't trigger
                 console.error('Failed to load tickets:', e)
-                lemonToast.error('Failed to load tickets. Please try again.')
             } finally {
                 actions.setTicketsLoading(false)
             }
