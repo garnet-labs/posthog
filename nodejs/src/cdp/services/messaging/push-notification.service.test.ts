@@ -250,6 +250,7 @@ describe('PushNotificationService', () => {
                 url: 'https://api.push.apple.com/3/device/apns-device-token',
                 fetchParams: expect.objectContaining({
                     method: 'POST',
+                    allowH2: true,
                     headers: expect.objectContaining({
                         'apns-topic': 'com.example.app',
                         'apns-push-type': 'alert',

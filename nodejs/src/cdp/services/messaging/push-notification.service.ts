@@ -60,7 +60,7 @@ export class PushNotificationService {
 
             if (integration.kind === 'firebase') {
                 await this.executeFcm(result, params, integration, invocation)
-            } else if (integration.kind === 'apple-push') {
+            } else if (integration.kind === 'apns') {
                 await this.executeApns(result, params, integration, invocation)
             } else {
                 throw new Error(`Unsupported push integration kind: ${integration.kind}`)
@@ -194,7 +194,6 @@ export class PushNotificationService {
         }
 
         const jwt = this.generateApnsJwt(appleTeamId, keyId, signingKey)
-        const templateId = result.invocation.hogFunction.template_id ?? 'unknown'
 
         const apnsPayload = this.buildApnsPayload(payload)
         const url = `https://api.push.apple.com/3/device/${token}`
@@ -218,11 +217,15 @@ export class PushNotificationService {
             method: 'POST',
             headers,
             body: JSON.stringify(apnsPayload),
+            // APNs requires HTTP/2
+            allowH2: true,
         }
 
         if (params.timeoutMs !== undefined) {
             fetchParams.timeoutMs = Math.min(params.timeoutMs, this.fetchUtils.maxFetchTimeoutMs)
         }
+
+        const templateId = result.invocation.hogFunction.template_id ?? 'unknown'
 
         const { fetchError, fetchResponse, fetchDuration } = await this.fetchUtils.trackedFetch({
             url,

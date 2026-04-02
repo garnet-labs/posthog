@@ -3,12 +3,10 @@ import { convertHogToJS } from '@posthog/hogvm'
 import { ACCESS_TOKEN_PLACEHOLDER } from '~/config/constants'
 import { CyclotronInputType } from '~/schema/cyclotron'
 
-import { logger } from '../../utils/logger'
 import { HogFunctionInvocationGlobals, HogFunctionInvocationGlobalsWithInputs, HogFunctionType } from '../types'
 import { EncryptedFields } from '../utils/encryption-utils'
 import { execHog } from '../utils/hog-exec'
 import { LiquidRenderer } from '../utils/liquid'
-import { getDevicePushSubscriptionToken } from '../utils/push-subscription-utils'
 import { IntegrationManagerService } from './managers/integration-manager.service'
 import { RecipientTokensService } from './messaging/recipient-tokens.service'
 
@@ -116,49 +114,26 @@ export class HogInputsService {
         }
     }
 
-    private resolvePushSubscriptionInputs(
-        hogFunction: HogFunctionType,
-        integrationInputs: Record<string, { value: Record<string, any> | null }>,
-        newGlobals: HogFunctionInvocationGlobalsWithInputs
-    ): Record<string, { value: string | null }> {
-        const result: Record<string, { value: string | null }> = {}
-        const personProperties = newGlobals.person?.properties
-
-        const appIdentifier = getAppIdentifierForPush(integrationInputs)
-
-        hogFunction.inputs_schema?.forEach((schema) => {
-            if (schema.type !== 'push_subscription') {
-                return
-            }
-
-            if (!appIdentifier) {
-                logger.warn('🦔', '[HogInputsService] No push integration found for push subscription input', {
-                    hogFunctionId: hogFunction.id,
-                    hogFunctionName: hogFunction.name,
-                    teamId: hogFunction.team_id,
-                    inputKey: schema.key,
-                })
-                result[schema.key] = { value: null }
-                return
-            }
-
-            const token = getDevicePushSubscriptionToken(personProperties, appIdentifier, this.encryptedFields)
-            result[schema.key] = { value: token }
-        })
-
-        return result
-    }
-
     public async loadIntegrationInputs(
-        hogFunction: HogFunctionType,
-        newGlobals?: HogFunctionInvocationGlobalsWithInputs
+        hogFunction: HogFunctionType
     ): Promise<Record<string, { value: Record<string, any> | null }>> {
         const inputsToLoad: Record<string, number> = {}
 
-        hogFunction.inputs_schema?.forEach((schema) => {
+        const allSchemas = [
+            ...(hogFunction.inputs_schema ?? []),
+            ...(hogFunction.mappings?.flatMap((m) => m.inputs_schema ?? []) ?? []),
+        ]
+        const allInputs: Record<string, CyclotronInputType | null | undefined> = {
+            ...hogFunction.inputs,
+        }
+        for (const mapping of hogFunction.mappings ?? []) {
+            Object.assign(allInputs, mapping.inputs)
+        }
+
+        allSchemas.forEach((schema) => {
             if (schema.type === 'integration') {
-                const input = hogFunction.inputs?.[schema.key]
-                const value = input?.value?.integrationId ?? input?.value
+                const input = allInputs[schema.key]
+                const value = input?.value
                 if (value && typeof value === 'number') {
                     inputsToLoad[schema.key] = value
                 }
@@ -193,11 +168,6 @@ export class HogInputsService {
                 }
             }
         })
-
-        if (newGlobals) {
-            const pushSubscriptionInputs = this.resolvePushSubscriptionInputs(hogFunction, returnInputs, newGlobals)
-            Object.assign(returnInputs, pushSubscriptionInputs)
-        }
 
         return returnInputs
     }
