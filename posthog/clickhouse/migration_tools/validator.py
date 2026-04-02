@@ -30,11 +30,7 @@ def _is_mv_engine(engine: str) -> bool:
 
 
 def build_ecosystems_from_yaml(desired_states: list[DesiredState]) -> list[TableEcosystem]:
-    """Build ecosystem objects from desired-state YAML definitions.
-
-    Scans all DesiredState objects and identifies ecosystems by finding
-    Distributed tables that reference MergeTree source tables.
-    """
+    """Build ecosystem objects from desired-state YAML definitions."""
     ecosystems: list[TableEcosystem] = []
 
     for state in desired_states:
@@ -103,11 +99,7 @@ def _check_ecosystem_completeness(
     state: DesiredState,
     dynamic_lookup: dict[str, TableEcosystem] | None = None,
 ) -> list[str]:
-    """Warn if an ecosystem is partially declared (e.g. sharded without distributed).
-
-    Uses dynamic ecosystems built from YAML when available, falls back to
-    the hardcoded registry in schema_graph.py.
-    """
+    """Warn if an ecosystem is partially declared (e.g. sharded without distributed)."""
     errors: list[str] = []
 
     for table_name in state.tables:

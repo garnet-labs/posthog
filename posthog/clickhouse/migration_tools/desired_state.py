@@ -1,11 +1,4 @@
-"""Parse desired-state YAML files into typed Python objects.
-
-Each YAML file declares the complete desired schema for one table ecosystem
-(e.g. events, sessions_v3, person). The system reads these files, diffs them
-against live ClickHouse state, and generates migration plans.
-
-This is the "terraform plan" equivalent for ClickHouse schema management.
-"""
+"""Parse desired-state YAML files into typed Python objects."""
 
 from __future__ import annotations
 

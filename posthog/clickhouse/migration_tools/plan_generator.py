@@ -1,10 +1,4 @@
-"""Generate human-readable plans and executable ManifestStep lists from StateDiffs.
-
-Takes a list[StateDiff] from state_diff.diff_state() and produces:
-1. A human-readable plan (like terraform plan) with +/-/~ symbols
-2. A list of ManifestStep objects that the existing runner can execute
-3. Rollback steps (reverse of the plan)
-"""
+"""Generate human-readable plans and ManifestStep lists from StateDiffs."""
 
 from __future__ import annotations
 

@@ -1,11 +1,5 @@
 # ruff: noqa: T201 allow print statements
-"""Generate desired-state YAML dicts from templates.
-
-Each template produces a dict matching the DesiredState YAML format:
-  ecosystem, cluster, tables: {name: {engine, columns, on_nodes, ...}}
-
-The ch_migrate generate command writes this dict as YAML.
-"""
+"""Generate desired-state YAML dicts from templates."""
 
 from __future__ import annotations
 

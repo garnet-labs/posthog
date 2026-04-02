@@ -1,14 +1,7 @@
 """Diff engine: compare desired state against current live schema.
 
-Produces a list of StateDiff objects, each representing a single DDL operation
-(CREATE, ALTER, DROP, recreate) with the SQL to execute, target node roles,
-and dependency ordering.
-
-The diff respects ClickHouse ecosystem rules:
-- DROP MV before altering source tables
-- CREATE local tables before Distributed tables
-- CREATE Kafka tables before MVs
-- ALTER all ecosystem tables when adding a column (sharded + writable + readable)
+Ordering rules: DROP MV before altering sources, CREATE local before
+Distributed, CREATE Kafka before MVs, ALTER across full ecosystem.
 """
 
 from __future__ import annotations
