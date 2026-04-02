@@ -1,4 +1,4 @@
-import { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/core'
+import { DragEndEvent } from '@dnd-kit/core'
 import { useActions, useMountedLogic, useValues } from 'kea'
 import { router } from 'kea-router'
 import { useEffect, useRef } from 'react'
@@ -43,26 +43,14 @@ import { renderTableCount } from '../editorSceneLogic'
 import { isJoined, queryDatabaseLogic } from './queryDatabaseLogic'
 
 export const QueryDatabase = (): JSX.Element => {
-    const {
-        searchTerm,
-        joinsByFieldName,
-        editingDraftId,
-        displayedTreeData,
-        expandedItemIds,
-        connectionId,
-        activeDraggedViewId,
-        highlightedDropFolderId,
-        highlightViewsSectionDrop,
-    } = useValues(queryDatabaseLogic)
+    const { searchTerm, joinsByFieldName, editingDraftId, displayedTreeData, expandedItemIds, connectionId } =
+        useValues(queryDatabaseLogic)
     const {
         setExpandedFolders,
         toggleFolderOpen,
         setTreeRef,
         setExpandedSearchFolders,
-        startDraggingView,
-        updateDraggedViewDropTarget,
-        clearDraggedViewState,
-        moveDraggedViewToDropTarget,
+        moveSavedQueryToDropTarget,
         selectSourceTable,
         toggleEditJoinModal,
         setEditingDraft,
@@ -216,21 +204,20 @@ export const QueryDatabase = (): JSX.Element => {
             ref={treeRef}
             data={displayedTreeData}
             enableDragAndDrop={!searchTerm}
-            isItemDraggable={(item) => !searchTerm && item.record?.type === 'view' && item.record?.isSavedQuery}
+            isItemDraggable={(item) =>
+                !searchTerm &&
+                ((item.record?.type === 'view' && item.record?.isSavedQuery) ||
+                    (item.record?.type === 'endpoint' && !!item.record?.savedQueryId))
+            }
             isItemDroppable={(item) =>
                 !searchTerm &&
                 ((item.record?.type === 'folder' && item.record?.folderType === 'view-folder') ||
-                    item.record?.type === 'views')
+                    item.record?.type === 'views' ||
+                    (item.record?.type === 'view' && item.record?.isSavedQuery) ||
+                    (item.record?.type === 'endpoint' && !!item.record?.savedQueryId))
             }
-            onDragStart={(dragEvent: DragStartEvent) => {
-                startDraggingView(String(dragEvent.active.id))
-            }}
-            onDragOver={(dragEvent: DragOverEvent) => {
-                updateDraggedViewDropTarget(dragEvent.over?.id ? String(dragEvent.over.id) : null)
-            }}
-            onDragCancel={clearDraggedViewState}
             onDragEnd={(dragEvent: DragEndEvent) => {
-                moveDraggedViewToDropTarget(
+                moveSavedQueryToDropTarget(
                     String(dragEvent.active.id),
                     dragEvent.over?.id ? String(dragEvent.over.id) : null
                 )
@@ -276,15 +263,6 @@ export const QueryDatabase = (): JSX.Element => {
                 const isColumn = item.record?.type === 'column'
                 const columnType = isColumn ? item.record?.field?.type : null
                 const tableKindLabel = !isColumn && item.children?.length ? getTableKindLabel(item) : null
-                const isHighlightedFolderDropTarget =
-                    item.record?.type === 'folder' &&
-                    item.record?.folderType === 'view-folder' &&
-                    item.record.folder.id === highlightedDropFolderId
-                const isHighlightedViewsDropTarget = item.record?.type === 'views' && highlightViewsSectionDrop
-                const showDropTargetBadge =
-                    activeDraggedViewId &&
-                    (isHighlightedFolderDropTarget || isHighlightedViewsDropTarget) &&
-                    activeDraggedViewId !== item.id
 
                 return (
                     <span className="truncate">
@@ -321,10 +299,6 @@ export const QueryDatabase = (): JSX.Element => {
                                 ) : tableKindLabel ? (
                                     <span className="shrink rounded px-1.5 py-0.5 text-xs text-muted-alt">
                                         {tableKindLabel}
-                                    </span>
-                                ) : showDropTargetBadge ? (
-                                    <span className="shrink rounded px-1.5 py-0.5 text-xs bg-accent-highlight-secondary text-accent">
-                                        Drop here
                                     </span>
                                 ) : null}
                             </div>
