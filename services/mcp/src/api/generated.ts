@@ -18913,6 +18913,10 @@ export namespace Schemas {
       resource_type: string | null;
       resource_id: string;
       source_url: string;
+      /** @nullable */
+      source_type: string | null;
+      /** @nullable */
+      source_id: string | null;
       created_at: string;
     }
 
