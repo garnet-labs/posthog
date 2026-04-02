@@ -27,6 +27,26 @@ def f(s: Union[str, ast.Expr, None], placeholders: Optional[dict[str, ast.Expr]]
     return clone_expr(expr, clear_types=True, clear_locations=True)
 
 
+def with_min_ts(v7_expr: str) -> str:
+    """Add min_timestamp guards alongside a v7-derived timestamp expression.
+
+    For each GtEq/LtEq bound in v7_expr, appends a matching raw_sessions.min_timestamp bound.
+    Handles single bounds (>= or <=) and combined bounds (>= ... AND <= ...).
+    """
+    parts = [p.strip() for p in v7_expr.split(" AND ")]
+    guards = []
+    for part in parts:
+        if " >= " in part:
+            right = part.split(" >= ", 1)[1]
+            guards.append(f"raw_sessions.min_timestamp >= {right}")
+        elif " <= " in part:
+            right = part.split(" <= ", 1)[1]
+            guards.append(f"raw_sessions.min_timestamp <= {right}")
+    if guards:
+        return v7_expr + " AND " + " AND ".join(guards)
+    return v7_expr
+
+
 def parse(
     s: str,
     placeholders: Optional[dict[str, ast.Expr]] = None,
@@ -64,7 +84,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
         )
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions LIMIT 10")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (toDateTime('2099-01-15 00:00:00') - toIntervalDay(30))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (toDateTime('2099-01-15 00:00:00') - toIntervalDay(30))"
+            )
         )
         assert expected == actual
 
@@ -98,13 +120,17 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
     def test_limit_bound_where_wins(self):
         self.assert_limit_bound_edge_case(
             "SELECT * FROM sessions WHERE $start_timestamp > '2021-01-01' LIMIT 10",
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))",
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            ),
         )
 
     def test_limit_bound_with_offset(self):
         self.assert_limit_bound_edge_case(
             "SELECT * FROM sessions LIMIT 10 OFFSET 5",
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (toDateTime('2099-01-15 00:00:00') - toIntervalDay(30))",
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (toDateTime('2099-01-15 00:00:00') - toIntervalDay(30))"
+            ),
         )
 
     def test_no_limit_bound_with_group_by(self):
@@ -114,42 +140,54 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
     def test_handles_select_with_eq(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp = '2021-01-01'")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_handles_select_with_eq_flipped(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE '2021-01-01' = $start_timestamp")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_handles_select_with_simple_gt(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp > '2021-01-01'")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_handles_select_with_simple_gte(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp >= '2021-01-01'")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_handles_select_with_simple_lt(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp < '2021-01-01'")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_handles_select_with_simple_lte(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp <= '2021-01-01'")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -163,7 +201,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -182,7 +222,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-03' + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-03' + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -193,7 +235,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -232,7 +276,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         assert actual == f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            )
         )
 
     def test_join(self):
@@ -244,7 +290,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -257,14 +305,18 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-03' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_minus(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp >= today() - 2")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ((today() - 2) - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ((today() - 2) - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -273,21 +325,27 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp >= minus(today() , 2)"))
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (minus(today(), 2) - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (minus(today(), 2) - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_less_function(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE less($start_timestamp, today())")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= (today() + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= (today() + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
     def test_less_function_second_arg(self):
         actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE less(today(), $start_timestamp)")))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (today() - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (today() - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -298,7 +356,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (today() - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (today() - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -311,7 +371,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "toTimeZone(fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)), 'US/Pacific') >= (toDateTime('2024-03-12 00:00:00', 'US/Pacific') - toIntervalDay(3)) AND toTimeZone(fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)), 'US/Pacific') <= (toDateTime('2024-03-19 23:59:59', 'US/Pacific') + toIntervalDay(3))"
+            with_min_ts(
+                "toTimeZone(fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)), 'US/Pacific') >= (toDateTime('2024-03-12 00:00:00', 'US/Pacific') - toIntervalDay(3)) AND toTimeZone(fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)), 'US/Pacific') <= (toDateTime('2024-03-19 23:59:59', 'US/Pacific') + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -324,7 +386,9 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2024-03-12' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2024-03-12' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -364,7 +428,9 @@ SELECT
             )
         )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (toStartOfDay(assumeNotNull(toDateTime('2024-04-13 00:00:00'))) - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= (assumeNotNull(toDateTime('2024-04-20 23:59:59')) + toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= (toStartOfDay(assumeNotNull(toDateTime('2024-04-13 00:00:00'))) - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= (assumeNotNull(toDateTime('2024-04-20 23:59:59')) + toIntervalDay(3))"
+            )
         )
         assert expected == actual
 
@@ -401,7 +467,9 @@ SELECT
         select = ast.SelectQuery(select=[], where=where)
         actual = f(self.inliner.get_inner_where(select))
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2024-03-12' - toIntervalDay(3))"
+            with_min_ts(
+                "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2024-03-12' - toIntervalDay(3))"
+            )
         )
         assert expected == actual
 

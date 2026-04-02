@@ -434,6 +434,51 @@ class SessionMinTimestampWhereClauseExtractorV2(SessionMinTimestampWhereClauseEx
     timestamp_field = uuid_uint128_expr_to_timestamp_expr_v2(ast.Field(chain=["raw_sessions", "session_id_v7"]))
     time_buffer = ast.Call(name="toIntervalDay", args=[ast.Constant(value=SESSION_BUFFER_DAYS)])
 
+    def get_inner_where(self, select_query: ast.SelectQuery) -> Optional[ast.Expr]:
+        result = super().get_inner_where(select_query)
+        if result is None:
+            return None
+
+        # Add a min_timestamp guard to help ClickHouse with partition pruning.
+        # The session_id_v7-derived timestamp uses fromUnixTimestamp(...) which doesn't
+        # match the sorting key's toStartOfHour(fromUnixTimestamp(...)). Adding a direct
+        # min_timestamp condition gives ClickHouse a simpler expression to prune on.
+        min_ts_guard = self._build_min_timestamp_bounds(result)
+        if min_ts_guard:
+            existing = result.exprs if isinstance(result, ast.And) else [result]
+            return ast.And(exprs=[*existing, *min_ts_guard])
+
+        return result
+
+    def _build_min_timestamp_bounds(self, expr: ast.Expr) -> list[ast.Expr]:
+        bounds: list[ast.Expr] = []
+        self._collect_bounds(expr, bounds)
+        return bounds
+
+    def _collect_bounds(self, expr: ast.Expr, bounds: list[ast.Expr]) -> None:
+        if isinstance(expr, ast.And):
+            for child in expr.exprs:
+                self._collect_bounds(child, bounds)
+        elif isinstance(expr, ast.CompareOperation):
+            if expr.op in (CompareOperationOp.GtEq, CompareOperationOp.Gt):
+                # left >= right → min_timestamp >= right
+                bounds.append(
+                    ast.CompareOperation(
+                        op=ast.CompareOperationOp.GtEq,
+                        left=ast.Field(chain=["raw_sessions", "min_timestamp"]),
+                        right=clone_expr(expr.right),
+                    )
+                )
+            elif expr.op in (CompareOperationOp.LtEq, CompareOperationOp.Lt):
+                # left <= right → min_timestamp <= right
+                bounds.append(
+                    ast.CompareOperation(
+                        op=ast.CompareOperationOp.LtEq,
+                        left=ast.Field(chain=["raw_sessions", "min_timestamp"]),
+                        right=clone_expr(expr.right),
+                    )
+                )
+
 
 class SessionMinTimestampWhereClauseExtractorV3(SessionMinTimestampWhereClauseExtractor):
     timestamp_field = ast.Field(chain=["raw_sessions_v3", "session_timestamp"])
