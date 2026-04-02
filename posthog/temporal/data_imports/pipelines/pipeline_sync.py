@@ -255,11 +255,15 @@ async def register_cdc_companion_table(
     table_format: DataWarehouseTable.TableFormat,
     queryable_folder: str,
     table_schema_dict: Optional[dict[str, str]] = None,
+    set_as_schema_table: bool = False,
 ) -> None:
     """Create or update a standalone DataWarehouseTable for a CDC companion resource (e.g. `{schema_name}_cdc`).
 
     Unlike `validate_schema_and_update_table`, this does NOT update `schema.table` — the companion table is
     independent of the main schema table so that writing CDC history never overwrites the snapshot queryable folder.
+
+    When ``set_as_schema_table`` is True (used for cdc_only mode), the companion table is also linked as the
+    schema's primary table so the UI shows row counts and query links.
     """
     logger = LOGGER.bind(team_id=team_id)
 
@@ -312,6 +316,9 @@ async def register_cdc_companion_table(
                 columns = merge_columns(db_columns, table_schema_dict or {}, existing_columns)
                 companion_table.columns = columns
                 companion_table.save()
+
+                if set_as_schema_table:
+                    ExternalDataSchema.objects.filter(id=schema_id, team_id=team_id).update(table=companion_table)
 
         except Exception as e:
             logger.exception(

@@ -68,6 +68,7 @@ from products.data_warehouse.backend.external_data_source.webhooks import (
 )
 from products.data_warehouse.backend.models import (
     DataWarehouseManagedViewSet,
+    DataWarehouseTable,
     ExternalDataJob,
     ExternalDataSchema,
     ExternalDataSource,
@@ -1008,13 +1009,22 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             .all()
         )
 
-        # Soft-delete source, schemas, and tables atomically first so DB state
-        # is consistent even if the external cleanup below fails
+        # Soft-delete source, schemas, tables, and companion _cdc tables atomically
+        # first so DB state is consistent even if the external cleanup below fails
         with transaction.atomic():
             for schema in schemas:
                 if schema.table:
                     schema.table.soft_delete()
                 schema.soft_delete()
+
+            # Clean up CDC companion tables (e.g. {name}_cdc) — these are standalone
+            # DataWarehouseTable records linked to the source but not to schema.table.
+            DataWarehouseTable.objects.filter(
+                external_data_source_id=instance.id,
+                team_id=self.team_id,
+                deleted=False,
+            ).exclude(id__in=[s.table_id for s in schemas if s.table_id is not None]).update(deleted=True)
+
             instance.soft_delete()
 
         # Best-effort webhook cleanup — soft-deletes are already committed

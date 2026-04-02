@@ -432,10 +432,16 @@ def process_message(message: Any) -> None:
         )
 
         if export_signal.is_final_batch:
-            logger.debug(
+            logger.info(
                 "final_batch_received",
                 total_batches=export_signal.total_batches,
                 total_rows=export_signal.total_rows,
+                cdc_write_mode=export_signal.cdc_write_mode,
+                cdc_table_mode=export_signal.cdc_table_mode,
+                sync_type=export_signal.sync_type,
+                schema_sync_type=schema.sync_type,
+                schema_cdc_table_mode=schema.cdc_table_mode,
+                resource_name=export_signal.resource_name,
             )
 
             async_to_sync(run_post_load_operations)(

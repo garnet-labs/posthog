@@ -525,13 +525,18 @@ class ExternalDataSchemaViewset(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             instance.sync_type_config.pop("cdc_deferred_runs", None)
             instance.initial_sync_complete = False
 
+        # Save BEFORE triggering the workflow so the Postgres source sees
+        # cdc_mode="snapshot" when it reloads the schema from DB.
+        # Otherwise a race: the workflow starts, loads stale "streaming" mode,
+        # raises CDCHandledExternally, and the full-refresh never runs.
+        instance.status = ExternalDataSchema.Status.RUNNING
+        instance.save()
+
         try:
             trigger_external_data_workflow(instance)
         except temporalio.service.RPCError as e:
             logger.exception(f"Could not trigger external data job for schema {instance.id}", exc_info=e)
 
-        instance.status = ExternalDataSchema.Status.RUNNING
-        instance.save()
         return Response(status=status.HTTP_200_OK)
 
     @action(methods=["DELETE"], detail=True)

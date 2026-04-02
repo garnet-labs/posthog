@@ -320,32 +320,52 @@ async def run_post_load_operations(
                 table_format=DataWarehouseTable.TableFormat.DeltaS3Wrapper,
                 queryable_folder=queryable_folder,
                 table_schema_dict=table_schema_dict,
+                set_as_schema_table=schema.cdc_table_mode == "cdc_only",
             )
         logger.debug("Finished registering CDC companion table")
     else:
-        logger.debug("Validating schema and updating table")
-        with POST_LOAD_DURATION_SECONDS.labels(operation="validate_schema").time():
-            await validate_schema_and_update_table(
-                run_id=str(job.id),
-                team_id=job.team_id,
-                schema_id=schema.id,
-                table_schema_dict=table_schema_dict,
-                row_count=row_count,
-                queryable_folder=queryable_folder,
-                table_format=DataWarehouseTable.TableFormat.DeltaS3Wrapper,
-            )
-        logger.debug("Finished validating schema and updating table")
+        # For cdc_only mode during the initial load, skip registering the consolidated
+        # DataWarehouseTable — only the _cdc companion table should be visible.
+        # The DeltaLake files still exist on S3 for the seeding step to read from.
+        is_cdc_only_initial = (
+            cdc_write_mode is None
+            and schema.sync_type == ExternalDataSchema.SyncType.CDC
+            and schema.cdc_table_mode == "cdc_only"
+        )
+
+        if not is_cdc_only_initial:
+            logger.debug("Validating schema and updating table")
+            with POST_LOAD_DURATION_SECONDS.labels(operation="validate_schema").time():
+                await validate_schema_and_update_table(
+                    run_id=str(job.id),
+                    team_id=job.team_id,
+                    schema_id=schema.id,
+                    table_schema_dict=table_schema_dict,
+                    row_count=row_count,
+                    queryable_folder=queryable_folder,
+                    table_format=DataWarehouseTable.TableFormat.DeltaS3Wrapper,
+                )
+            logger.debug("Finished validating schema and updating table")
 
         # After the initial snapshot load for a CDC schema, seed the companion _cdc table
         # with the snapshot rows as synthetic INSERT events.  Only fires when cdc_write_mode
         # is None (initial non-CDC load), NOT on every CDC consolidated streaming batch.
-        if (
+        should_seed = (
             cdc_write_mode is None
             and schema.sync_type == ExternalDataSchema.SyncType.CDC
             and schema.cdc_table_mode in ("cdc_only", "both")
             and delta_table_helper is not None
-        ):
-            logger.debug("Seeding CDC companion table from snapshot")
+        )
+        logger.info(
+            "cdc_seed_check",
+            should_seed=should_seed,
+            cdc_write_mode=cdc_write_mode,
+            sync_type=schema.sync_type,
+            cdc_table_mode=schema.cdc_table_mode,
+            has_delta_table_helper=delta_table_helper is not None,
+        )
+        if should_seed:
+            logger.info("Seeding CDC companion table from snapshot")
             await _seed_cdc_companion_from_snapshot(
                 schema=schema,
                 job=job,
@@ -353,4 +373,4 @@ async def run_post_load_operations(
                 snapshot_delta_table_helper=delta_table_helper,
                 logger=logger,
             )
-            logger.debug("Finished seeding CDC companion table from snapshot")
+            logger.info("Finished seeding CDC companion table from snapshot")
