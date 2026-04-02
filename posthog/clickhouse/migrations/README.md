@@ -67,45 +67,45 @@ ecosystem: events
 cluster: main
 
 tables:
-    sharded_events:
-        engine: ReplicatedReplacingMergeTree
-        sharded: true
-        on_nodes: DATA
-        order_by: [team_id, "toDate(timestamp)", event]
-        partition_by: "toYYYYMM(timestamp)"
-        columns:
-            - name: uuid
-              type: UUID
-            - name: event
-              type: String
+  sharded_events:
+    engine: ReplicatedReplacingMergeTree
+    sharded: true
+    on_nodes: DATA
+    order_by: [team_id, 'toDate(timestamp)', event]
+    partition_by: 'toYYYYMM(timestamp)'
+    columns:
+      - name: uuid
+        type: UUID
+      - name: event
+        type: String
 
-    writable_events:
-        engine: Distributed
-        source: sharded_events
-        on_nodes: COORDINATOR
-        columns: inherit sharded_events
+  writable_events:
+    engine: Distributed
+    source: sharded_events
+    on_nodes: COORDINATOR
+    columns: inherit sharded_events
 
-    events:
-        engine: Distributed
-        source: sharded_events
-        on_nodes: ALL
-        columns: inherit sharded_events
+  events:
+    engine: Distributed
+    source: sharded_events
+    on_nodes: ALL
+    columns: inherit sharded_events
 ```
 
 ## `ch_migrate` subcommands
 
-| Command     | Description                                    |
-| ----------- | ---------------------------------------------- |
-| `plan`      | Diff schema YAML vs live ClickHouse            |
-| `apply`     | Execute the reconciliation plan                |
-| `generate`  | Scaffold a schema YAML from a template         |
-| `drift`     | Detect per-host schema divergence              |
-| `schema`    | Dump current live schema                       |
-| `status`    | Show per-host migration tracking records       |
-| `bootstrap` | Create the tracking table                      |
-| `check`     | Show pending legacy migrations                 |
-| `lint`      | Validate schema YAML files                     |
-| `down`      | Roll back a legacy migration by number         |
+| Command     | Description                              |
+| ----------- | ---------------------------------------- |
+| `plan`      | Diff schema YAML vs live ClickHouse      |
+| `apply`     | Execute the reconciliation plan          |
+| `generate`  | Scaffold a schema YAML from a template   |
+| `drift`     | Detect per-host schema divergence        |
+| `schema`    | Dump current live schema                 |
+| `status`    | Show per-host migration tracking records |
+| `bootstrap` | Create the tracking table                |
+| `check`     | Show pending legacy migrations           |
+| `lint`      | Validate schema YAML files               |
+| `down`      | Roll back a legacy migration by number   |
 
 ## Schema safety
 

@@ -53,8 +53,8 @@ python manage.py ch_migrate apply
 | `sharded_table`          | sharded + writable + readable (3)              |
 | `cross_cluster_readable` | distributed table for cross-cluster reads      |
 | `materialized_view`      | single MV                                      |
-| `add_column`             | guidance to edit existing YAML directly         |
-| `drop_table`             | guidance to remove from existing YAML           |
+| `add_column`             | guidance to edit existing YAML directly        |
+| `drop_table`             | guidance to remove from existing YAML          |
 
 ## Modules
 
