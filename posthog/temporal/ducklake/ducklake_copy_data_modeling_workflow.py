@@ -1,11 +1,9 @@
 import json
 import datetime as dt
 import dataclasses
-from typing import Protocol
 
 import deltalake
 import posthoganalytics
-from psycopg import sql
 from structlog.contextvars import bind_contextvars
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
@@ -44,33 +42,19 @@ from posthog.temporal.ducklake.metrics import (
     get_ducklake_copy_data_modeling_finished_metric,
     get_ducklake_copy_data_modeling_verification_metric,
 )
-from posthog.temporal.ducklake.types import DataModelingDuckLakeCopyInputs, DuckLakeCopyModelInput
+from posthog.temporal.ducklake.types import (
+    DataModelingDuckLakeCopyInputs,
+    DuckLakeCopyModelInput,
+    QueryConnection,
+    connect_to_duckgres_for_team,
+    create_replace_table_from_delta_query,
+    create_schema_if_missing_query,
+)
 
 from products.data_warehouse.backend.models import DataWarehouseSavedQuery
 
 LOGGER = get_logger(__name__)
 DATA_MODELING_DUCKLAKE_WORKFLOW_PREFIX = "data_modeling"
-
-
-class QueryResult(Protocol):
-    def fetchone(self) -> tuple | None: ...
-
-    def fetchall(self) -> list[tuple]: ...
-
-
-class QueryConnection(Protocol):
-    def execute(self, statement: str, params: list | None = None) -> QueryResult: ...
-
-
-def _create_schema_if_missing_query(schema_name: str) -> sql.Composed:
-    return sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
-
-
-def _create_replace_table_from_delta_query(schema_name: str, table_name: str) -> sql.Composed:
-    return sql.SQL("CREATE OR REPLACE TABLE {}.{} AS SELECT * FROM delta_scan(%s)").format(
-        sql.Identifier(schema_name),
-        sql.Identifier(table_name),
-    )
 
 
 @dataclasses.dataclass
@@ -248,7 +232,7 @@ def verify_ducklake_copy_activity(inputs: DuckLakeCopyActivityInputs) -> list[Du
                 raise ApplicationError(f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True)
             destinations = [catalog.to_cross_account_destination()]
 
-        with _connect_to_duckgres_for_team(inputs.team_id) as conn:
+        with connect_to_duckgres_for_team(inputs.team_id) as conn:
             setup_duckgres_session(conn, source_storage_config=storage_config, destinations=destinations)
 
             for query in inputs.model.verification_queries:
@@ -527,9 +511,9 @@ def _copy_data_modeling_via_duckgres(inputs: DuckLakeCopyActivityInputs, logger)
             ducklake_table=table,
             staging_uri=inputs.model.staging_uri,
         )
-        conn.execute(_create_schema_if_missing_query(schema))
+        conn.execute(create_schema_if_missing_query(schema))
         conn.execute(
-            _create_replace_table_from_delta_query(schema, inputs.model.table_name),
+            create_replace_table_from_delta_query(schema, inputs.model.table_name),
             [inputs.model.staging_uri],
         )
         logger.info("Successfully materialized DuckLake table via duckgres", ducklake_table=table)
@@ -551,9 +535,9 @@ def _copy_data_modeling_via_local_duckgres(inputs: DuckLakeCopyActivityInputs, l
             ducklake_table=table,
             source_uri=inputs.model.source_table_uri,
         )
-        conn.execute(_create_schema_if_missing_query(schema))
+        conn.execute(create_schema_if_missing_query(schema))
         conn.execute(
-            _create_replace_table_from_delta_query(schema, inputs.model.table_name),
+            create_replace_table_from_delta_query(schema, inputs.model.table_name),
             [inputs.model.source_table_uri],
         )
         logger.info("Successfully materialized DuckLake table via local duckgres", ducklake_table=table)
@@ -577,16 +561,6 @@ def cleanup_data_modeling_staging_activity(inputs: DuckLakeDataModelingStagingCl
         role_arn=catalog.cross_account_role_arn,
         external_id=catalog.cross_account_external_id,
     )
-
-
-def _connect_to_duckgres_for_team(team_id: int):
-    if is_dev_mode():
-        return connect_to_local_duckgres(team_id)
-
-    server = get_duckgres_server_for_team(team_id)
-    if server is None:
-        raise ApplicationError(f"No DuckgresServer configured for team {team_id}", non_retryable=True)
-    return connect_to_duckgres(server)
 
 
 def _detect_partition_column_name(table_uri: str) -> str | None:

@@ -3,13 +3,11 @@ import uuid
 import typing
 import datetime as dt
 import dataclasses
-from typing import Protocol
 
 from django.conf import settings
 
 import deltalake
 import posthoganalytics
-from psycopg import sql
 from structlog.contextvars import bind_contextvars
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
@@ -48,32 +46,17 @@ from posthog.temporal.ducklake.metrics import (
     get_ducklake_copy_data_imports_finished_metric,
     get_ducklake_copy_data_imports_verification_metric,
 )
+from posthog.temporal.ducklake.types import (
+    QueryConnection,
+    connect_to_duckgres_for_team,
+    create_replace_table_from_delta_query,
+    create_schema_if_missing_query,
+)
 
 from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
 
 LOGGER = get_logger(__name__)
 DATA_IMPORTS_DUCKLAKE_WORKFLOW_PREFIX = "data_imports"
-
-
-class QueryResult(Protocol):
-    def fetchone(self) -> tuple | None: ...
-
-    def fetchall(self) -> list[tuple]: ...
-
-
-class QueryConnection(Protocol):
-    def execute(self, statement: str, params: list | None = None) -> QueryResult: ...
-
-
-def _create_schema_if_missing_query(schema_name: str) -> sql.Composed:
-    return sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
-
-
-def _create_replace_table_from_delta_query(schema_name: str, table_name: str) -> sql.Composed:
-    return sql.SQL("CREATE OR REPLACE TABLE {}.{} AS SELECT * FROM delta_scan(%s)").format(
-        sql.Identifier(schema_name),
-        sql.Identifier(table_name),
-    )
 
 
 @dataclasses.dataclass
@@ -294,9 +277,9 @@ def _copy_data_imports_via_duckgres(inputs: DuckLakeCopyDataImportsActivityInput
             ducklake_table=table,
             staging_uri=inputs.model.staging_uri,
         )
-        conn.execute(_create_schema_if_missing_query(schema))
+        conn.execute(create_schema_if_missing_query(schema))
         conn.execute(
-            _create_replace_table_from_delta_query(schema, inputs.model.ducklake_table_name),
+            create_replace_table_from_delta_query(schema, inputs.model.ducklake_table_name),
             [inputs.model.staging_uri],
         )
         logger.info("Successfully materialized DuckLake table via duckgres", ducklake_table=table)
@@ -318,9 +301,9 @@ def _copy_data_imports_via_local_duckgres(inputs: DuckLakeCopyDataImportsActivit
             ducklake_table=table,
             source_uri=inputs.model.source_table_uri,
         )
-        conn.execute(_create_schema_if_missing_query(schema))
+        conn.execute(create_schema_if_missing_query(schema))
         conn.execute(
-            _create_replace_table_from_delta_query(schema, inputs.model.ducklake_table_name),
+            create_replace_table_from_delta_query(schema, inputs.model.ducklake_table_name),
             [inputs.model.source_table_uri],
         )
         logger.info("Successfully materialized DuckLake table via local duckgres", ducklake_table=table)
@@ -373,16 +356,6 @@ def _fetch_delta_partition_columns(table_uri: str) -> list[str]:
     return [column for column in partition_columns if column]
 
 
-def _connect_to_duckgres_for_team(team_id: int):
-    if is_dev_mode():
-        return connect_to_local_duckgres(team_id)
-
-    server = get_duckgres_server_for_team(team_id)
-    if server is None:
-        raise ApplicationError(f"No DuckgresServer configured for team {team_id}", non_retryable=True)
-    return connect_to_duckgres(server)
-
-
 @activity.defn
 def verify_data_imports_ducklake_copy_activity(
     inputs: DuckLakeCopyDataImportsActivityInputs,
@@ -417,7 +390,7 @@ def verify_data_imports_ducklake_copy_activity(
                 raise ApplicationError(f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True)
             destinations = [catalog.to_cross_account_destination()]
 
-        with _connect_to_duckgres_for_team(inputs.team_id) as conn:
+        with connect_to_duckgres_for_team(inputs.team_id) as conn:
             setup_duckgres_session(conn, source_storage_config=storage_config, destinations=destinations)
 
             for query in inputs.model.verification_queries:
