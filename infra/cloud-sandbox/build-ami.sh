@@ -217,6 +217,7 @@ RUN_ARGS=(
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=sandbox-ami-builder},{Key=sandbox,Value=true},{Key=sandbox-ami-builder,Value=true}]"
     --security-group-ids "$SECURITY_GROUP"
     --subnet-id "$SUBNET_ID"
+    --instance-initiated-shutdown-behavior stop
 )
 
 if [ -n "$KEY_NAME" ]; then
@@ -266,6 +267,11 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
             aws ec2 wait instance-stopped --region "$REGION" --instance-ids "$INSTANCE_ID"
         fi
         break
+    fi
+
+    if [ "$STATE" = "terminated" ] || [ "$STATE" = "shutting-down" ]; then
+        echo "ERROR: Instance was terminated unexpectedly (state: $STATE)"
+        exit 1
     fi
 
     # Best-effort progress from console output (may be cached/delayed)
