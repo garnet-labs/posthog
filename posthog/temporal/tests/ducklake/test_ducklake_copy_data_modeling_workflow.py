@@ -698,7 +698,7 @@ def test_run_partition_verification_without_temporal_type():
         def __init__(self):
             self.statements: list[str] = []
 
-        def execute(self, statement: str, params: list | None = None):
+        def execute(self, statement, params: list | None = None):
             self.statements.append(statement)
             return FakeCursor()
 
@@ -733,7 +733,7 @@ def test_run_partition_verification_with_temporal_type():
         def __init__(self):
             self.statements: list[str] = []
 
-        def execute(self, statement: str, params: list | None = None):
+        def execute(self, statement, params: list | None = None):
             self.statements.append(statement)
             return FakeCursor()
 
