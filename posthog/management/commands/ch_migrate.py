@@ -59,6 +59,7 @@ class Command(BaseCommand):
             help="Directory with desired-state YAML files",
         )
         apply_parser.add_argument("--force", action="store_true", default=False)
+        apply_parser.add_argument("--yes", "-y", action="store_true", default=False, help="Skip confirmation prompt")
 
         # generate -- scaffold schema YAML from template
         gen_parser = subparsers.add_parser("generate", help="Generate a schema YAML file from a template")
@@ -205,6 +206,13 @@ class Command(BaseCommand):
 
         print(generate_plan_text(all_diffs))
         print()
+
+        auto_approve: bool = options.get("yes", False)
+        if not auto_approve:
+            answer = input(f"Apply {len(all_diffs)} change(s)? [y/N] ")
+            if answer.lower() not in ("y", "yes"):
+                print("Aborted.")
+                return
 
         acquired, reason = acquire_apply_lock(client, database, hostname, force=force)
         if not acquired:
@@ -376,14 +384,27 @@ class Command(BaseCommand):
         _ensure_tracking_table(client, database)
 
         node_filter = options.get("node")
-        where_clause = f" AND host = '{node_filter}'" if node_filter else ""
 
-        rows = client.execute(
-            f"SELECT migration_number, migration_name, host, direction, applied_at, success "
-            f"FROM {database}.{TRACKING_TABLE_NAME} "
-            f"WHERE migration_number > 0{where_clause} "
-            f"ORDER BY applied_at DESC LIMIT 50"
-        )
+        if node_filter:
+            import re
+
+            if not re.match(r"^[a-zA-Z0-9._:-]+$", node_filter):
+                print(f"Invalid node filter: {node_filter!r}")
+                return
+            rows = client.execute(
+                f"SELECT migration_number, migration_name, host, direction, applied_at, success "
+                f"FROM {database}.{TRACKING_TABLE_NAME} "
+                f"WHERE migration_number > 0 AND host = %(host)s "
+                f"ORDER BY applied_at DESC LIMIT 50",
+                {"host": node_filter},
+            )
+        else:
+            rows = client.execute(
+                f"SELECT migration_number, migration_name, host, direction, applied_at, success "
+                f"FROM {database}.{TRACKING_TABLE_NAME} "
+                f"WHERE migration_number > 0 "
+                f"ORDER BY applied_at DESC LIMIT 50"
+            )
 
         if not rows:
             print("No migration records found.")

@@ -247,12 +247,36 @@ def diff_state(
                 )
             continue
 
-        # For MVs, check if SELECT changed → recreate
+        # For MVs, compare SELECT if both sides have it
         if _is_mv(desired_table.engine) and desired_table.select:
-            # We can't easily compare MV SELECT from system.tables, so if the
-            # desired state specifies a select, we always flag for review
-            # In practice the user controls when to update MVs
-            pass
+            current_select = current_table.as_select if hasattr(current_table, "as_select") else ""
+            if current_select and current_select.strip() != desired_table.select.strip():
+                drops.append(
+                    StateDiff(
+                        action="drop",
+                        table=table_name,
+                        detail=f"Drop MV {table_name} (SELECT changed — will recreate)",
+                        sql=f"DROP TABLE IF EXISTS {db}.{table_name}",
+                        node_roles=desired_table.on_nodes,
+                    )
+                )
+                creates.append(
+                    StateDiff(
+                        action="create",
+                        table=table_name,
+                        detail=f"Recreate MV {table_name} with updated SELECT",
+                        sql=_generate_create_sql(desired_table, db, cl),
+                        node_roles=desired_table.on_nodes,
+                    )
+                )
+            elif not current_select:
+                import logging
+
+                logging.getLogger("migrations").warning(
+                    "MV %s: SELECT comparison not possible (as_select not available from host). "
+                    "Verify manually with 'ch_migrate schema'.",
+                    table_name,
+                )
 
         # Column comparison
         desired_cols = {c.name: c for c in desired_table.columns}
@@ -260,18 +284,24 @@ def diff_state(
 
         # Kafka/Dictionary engines don't support ALTER — recreate instead
         if desired_table.engine.lower() in ("kafka", "dictionary") and desired_cols != current_cols:
-            drops.append(StateDiff(
-                action="drop", table=table_name,
-                detail=f"Drop {desired_table.engine} table {table_name} (recreate for column change)",
-                sql=f"DROP TABLE IF EXISTS {db}.{table_name}",
-                node_roles=desired_table.on_nodes,
-            ))
-            creates.append(StateDiff(
-                action="create", table=table_name,
-                detail=f"Recreate {desired_table.engine} table {table_name} with updated columns",
-                sql=_generate_create_sql(desired_table, db, cl),
-                node_roles=desired_table.on_nodes,
-            ))
+            drops.append(
+                StateDiff(
+                    action="drop",
+                    table=table_name,
+                    detail=f"Drop {desired_table.engine} table {table_name} (recreate for column change)",
+                    sql=f"DROP TABLE IF EXISTS {db}.{table_name}",
+                    node_roles=desired_table.on_nodes,
+                )
+            )
+            creates.append(
+                StateDiff(
+                    action="create",
+                    table=table_name,
+                    detail=f"Recreate {desired_table.engine} table {table_name} with updated columns",
+                    sql=_generate_create_sql(desired_table, db, cl),
+                    node_roles=desired_table.on_nodes,
+                )
+            )
             continue
 
         # Skip column diffing for MVs (columns are derived from SELECT)
