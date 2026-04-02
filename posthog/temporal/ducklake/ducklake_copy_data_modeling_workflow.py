@@ -46,7 +46,6 @@ from posthog.temporal.ducklake.types import (
     DataModelingDuckLakeCopyInputs,
     DuckLakeCopyModelInput,
     QueryConnection,
-    connect_to_duckgres_for_team,
     create_replace_table_from_delta_query,
     create_schema_if_missing_query,
 )
@@ -232,7 +231,7 @@ def verify_ducklake_copy_activity(inputs: DuckLakeCopyActivityInputs) -> list[Du
                 raise ApplicationError(f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True)
             destinations = [catalog.to_cross_account_destination()]
 
-        with connect_to_duckgres_for_team(inputs.team_id) as conn:
+        with _connect_to_duckgres_for_team(inputs.team_id) as conn:
             setup_duckgres_session(conn, source_storage_config=storage_config, destinations=destinations)
 
             for query in inputs.model.verification_queries:
@@ -561,6 +560,16 @@ def cleanup_data_modeling_staging_activity(inputs: DuckLakeDataModelingStagingCl
         role_arn=catalog.cross_account_role_arn,
         external_id=catalog.cross_account_external_id,
     )
+
+
+def _connect_to_duckgres_for_team(team_id: int):
+    if is_dev_mode():
+        return connect_to_local_duckgres(team_id)
+
+    server = get_duckgres_server_for_team(team_id)
+    if server is None:
+        raise ApplicationError(f"No DuckgresServer configured for team {team_id}", non_retryable=True)
+    return connect_to_duckgres(server)
 
 
 def _detect_partition_column_name(table_uri: str) -> str | None:

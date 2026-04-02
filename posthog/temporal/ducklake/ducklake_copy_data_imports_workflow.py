@@ -48,7 +48,6 @@ from posthog.temporal.ducklake.metrics import (
 )
 from posthog.temporal.ducklake.types import (
     QueryConnection,
-    connect_to_duckgres_for_team,
     create_replace_table_from_delta_query,
     create_schema_if_missing_query,
 )
@@ -356,6 +355,16 @@ def _fetch_delta_partition_columns(table_uri: str) -> list[str]:
     return [column for column in partition_columns if column]
 
 
+def _connect_to_duckgres_for_team(team_id: int):
+    if is_dev_mode():
+        return connect_to_local_duckgres(team_id)
+
+    server = get_duckgres_server_for_team(team_id)
+    if server is None:
+        raise ApplicationError(f"No DuckgresServer configured for team {team_id}", non_retryable=True)
+    return connect_to_duckgres(server)
+
+
 @activity.defn
 def verify_data_imports_ducklake_copy_activity(
     inputs: DuckLakeCopyDataImportsActivityInputs,
@@ -390,7 +399,7 @@ def verify_data_imports_ducklake_copy_activity(
                 raise ApplicationError(f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True)
             destinations = [catalog.to_cross_account_destination()]
 
-        with connect_to_duckgres_for_team(inputs.team_id) as conn:
+        with _connect_to_duckgres_for_team(inputs.team_id) as conn:
             setup_duckgres_session(conn, source_storage_config=storage_config, destinations=destinations)
 
             for query in inputs.model.verification_queries:
