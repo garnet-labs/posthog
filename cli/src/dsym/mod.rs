@@ -77,10 +77,6 @@ impl DsymFile {
         self.entries.iter().map(|e| e.uuid.as_str()).collect()
     }
 
-    pub fn arches(&self) -> Vec<&str> {
-        self.entries.iter().map(|e| e.arch.as_str()).collect()
-    }
-
     pub fn total_size(&self) -> usize {
         self.entries.iter().map(|e| e.data.len()).sum()
     }
@@ -259,11 +255,15 @@ fn thin_if_fat(path: &Path, arch: &str) -> Result<Vec<u8>> {
     );
 
     // Run `lipo -thin <arch>` to extract just this architecture.
-    let tmp_path = std::env::temp_dir().join(format!(
-        "posthog_lipo_{arch}_{pid}",
-        arch = arch,
-        pid = std::process::id()
-    ));
+    // `NamedTempFile` creates the file securely (random suffix, mode 0600) and
+    // automatically deletes it when dropped — covering both success and all
+    // early-return error paths without manual cleanup.
+    let tmp_file = tempfile::Builder::new()
+        .prefix(&format!("posthog_lipo_{arch}_"))
+        .suffix(".dwarf")
+        .tempfile()
+        .map_err(|e| anyhow!("Failed to create temp file for lipo output: {e}"))?;
+    let tmp_path = tmp_file.path().to_path_buf();
 
     let status = Command::new("lipo")
         .args([
@@ -281,6 +281,7 @@ fn thin_if_fat(path: &Path, arch: &str) -> Result<Vec<u8>> {
 
     if !status.success() {
         // lipo failed (e.g. arch not present) — fall back to full binary.
+        // tmp_file is dropped here, deleting the (possibly partial) output.
         tracing::warn!(
             "[lipo] lipo -thin {arch} failed for {}; falling back to full fat binary",
             path.display()
@@ -288,9 +289,9 @@ fn thin_if_fat(path: &Path, arch: &str) -> Result<Vec<u8>> {
         return Ok(raw);
     }
 
+    // Read the thinned slice. tmp_file is dropped at end of scope, cleaning up.
     let thinned =
         std::fs::read(&tmp_path).map_err(|e| anyhow!("Failed to read lipo output: {e}"))?;
-    let _ = std::fs::remove_file(&tmp_path);
     tracing::info!(
         "[lipo] thinned {} ({} arch) to {} bytes (was {} bytes)",
         path.file_name().unwrap_or_default().to_string_lossy(),
