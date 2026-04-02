@@ -49,6 +49,12 @@ class Command(BaseCommand):
             default=DEFAULT_SCHEMA_DIR,
             help="Directory with desired-state YAML files",
         )
+        plan_parser.add_argument(
+            "--cluster",
+            type=str,
+            default=None,
+            help="Filter to a specific cluster (e.g. main, logs). Default: all clusters.",
+        )
 
         # apply -- execute the diff
         apply_parser = subparsers.add_parser("apply", help="Execute the reconciliation plan")
@@ -60,6 +66,7 @@ class Command(BaseCommand):
         )
         apply_parser.add_argument("--force", action="store_true", default=False)
         apply_parser.add_argument("--yes", "-y", action="store_true", default=False, help="Skip confirmation prompt")
+        apply_parser.add_argument("--cluster", type=str, default=None, help="Filter to a specific cluster")
 
         # generate -- scaffold schema YAML from template
         gen_parser = subparsers.add_parser("generate", help="Generate a schema YAML file from a template")
@@ -147,14 +154,24 @@ class Command(BaseCommand):
     # plan / apply -- desired-state reconciliation
     # ------------------------------------------------------------------
 
-    def _compute_diffs(self, client: Any, database: str, schema_dir: Any) -> tuple[list, str | None]:
-        """Compute desired-vs-current diffs. Returns (diffs, error_message)."""
+    def _compute_diffs(
+        self, client: Any, database: str, schema_dir: Any, cluster_filter: str | None = None
+    ) -> tuple[list, str | None]:
+        """Compute desired-vs-current diffs. Returns (diffs, error_message).
+
+        When cluster_filter is set, only YAML files matching that cluster are diffed.
+        """
         from posthog.clickhouse.migration_tools.desired_state import parse_desired_state_dir
         from posthog.clickhouse.migration_tools.state_diff import diff_state
 
         desired_states = parse_desired_state_dir(schema_dir)
         if not desired_states:
             return [], f"No YAML files found in {schema_dir}"
+
+        if cluster_filter:
+            desired_states = [ds for ds in desired_states if ds.cluster == cluster_filter]
+            if not desired_states:
+                return [], f"No YAML files for cluster '{cluster_filter}' in {schema_dir}"
 
         current = dump_schema(client, database)
 
@@ -181,11 +198,14 @@ class Command(BaseCommand):
             return
 
         client = _any_client(cluster)
-        all_diffs, err = self._compute_diffs(client, database, schema_dir)
+        cluster_filter = options.get("cluster")
+        all_diffs, err = self._compute_diffs(client, database, schema_dir, cluster_filter=cluster_filter)
         if err:
             print(err)
             return
 
+        if cluster_filter:
+            print(f"Filtering to cluster: {cluster_filter}\n")
         print(generate_plan_text(all_diffs))
 
     def handle_apply(self, options: dict[str, Any]) -> None:
@@ -218,7 +238,8 @@ class Command(BaseCommand):
         client = _any_client(cluster_obj)
         hostname = socket.gethostname()
 
-        all_diffs, err = self._compute_diffs(client, database, schema_dir)
+        cluster_filter = options.get("cluster")
+        all_diffs, err = self._compute_diffs(client, database, schema_dir, cluster_filter=cluster_filter)
         if err:
             print(err)
             return
