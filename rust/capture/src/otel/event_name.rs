@@ -46,43 +46,29 @@ const EVENT_CLASSIFIERS: &[EventClassifier] = &[
     },
 ];
 
-const AI_ATTRIBUTE_PREFIXES: &[&str] = &["gen_ai.", "pydantic_ai.", "traceloop."];
+/// Attribute key prefixes for explicitly supported AI SDK namespaces. Only
+/// spans from these SDKs (or those matched by `EVENT_CLASSIFIERS`) are ingested;
+/// everything else is dropped. This is intentional — the OTEL endpoint exists
+/// solely for LLM analytics, so we only accept spans we have processing
+/// middleware for.
+///
+/// Supported SDKs and their prefixes:
+/// - OpenTelemetry GenAI semantic conventions: `gen_ai.`
+/// - Vercel AI SDK: `ai.` (also uses `ai.operationId` as a classifier key)
+/// - pydantic-ai: `pydantic_ai.`
+/// - Traceloop/OpenLLMetry: `traceloop.`
+const AI_ATTRIBUTE_PREFIXES: &[&str] = &["gen_ai.", "ai.", "pydantic_ai.", "traceloop."];
 
-/// Attribute keys that indicate an AI-related span when no classifier matches.
-/// These are intentionally broad — a false positive (non-AI span ingested as
-/// `$ai_span`) is harmless, while a false negative (real AI span dropped) loses
-/// data. Keys already handled by `EVENT_CLASSIFIERS` are omitted since the
-/// classifier loop runs first.
-const AI_MARKER_KEYS: &[&str] = &[
-    "ai.telemetry.functionId",
-    "agent_name",
-    "final_result",
-    "logfire.json_schema",
-    "logfire.msg",
-    "model_name",
-    "model_request_parameters",
-    "tool_arguments",
-    "tool_response",
-];
-
-fn has_ai_markers(attrs: &serde_json::Map<String, Value>) -> bool {
-    attrs.keys().any(|key| {
-        AI_ATTRIBUTE_PREFIXES
-            .iter()
-            .any(|prefix| key.starts_with(prefix))
-            || AI_MARKER_KEYS.contains(&key.as_str())
-    })
-}
-
-/// Lightweight check on raw protobuf attributes to avoid converting irrelevant
-/// spans into JSON. Derives classifier keys from `EVENT_CLASSIFIERS` so the
-/// two stay in sync automatically.
+/// Lightweight pre-filter on raw protobuf attributes to avoid converting irrelevant
+/// spans into JSON. A span passes if it carries an attribute from a supported SDK
+/// namespace (`AI_ATTRIBUTE_PREFIXES`) or exactly matches a classifier key from
+/// `EVENT_CLASSIFIERS`. These two checks mirror the logic in `get_event_name` so
+/// every span that passes this gate will also produce a `Some` result there.
 pub fn has_ai_attributes_raw(attrs: &[opentelemetry_proto::tonic::common::v1::KeyValue]) -> bool {
     attrs.iter().any(|kv| {
         AI_ATTRIBUTE_PREFIXES
             .iter()
             .any(|prefix| kv.key.starts_with(prefix))
-            || AI_MARKER_KEYS.contains(&kv.key.as_str())
             || EVENT_CLASSIFIERS.iter().any(|c| c.attr_key == kv.key)
     })
 }
@@ -94,7 +80,10 @@ pub fn get_event_name(attrs: &serde_json::Map<String, Value>) -> Option<&'static
         }
     }
 
-    if has_ai_markers(attrs) {
+    if attrs
+        .keys()
+        .any(|key| AI_ATTRIBUTE_PREFIXES.iter().any(|prefix| key.starts_with(prefix)))
+    {
         Some("$ai_span")
     } else {
         None
@@ -125,7 +114,6 @@ mod tests {
             get_event_name(&attrs_with("gen_ai.operation.name", "unknown")),
             Some("$ai_span")
         );
-        assert_eq!(get_event_name(&serde_json::Map::new()), None);
     }
 
     #[test]
@@ -182,21 +170,42 @@ mod tests {
     }
 
     #[test]
-    fn test_relevant_ai_markers_default_to_ai_span() {
+    fn test_supported_sdk_prefix_defaults_to_ai_span() {
         assert_eq!(
             get_event_name(&attrs_with("gen_ai.request.model", "gpt-4")),
             Some("$ai_span")
         );
         assert_eq!(
-            get_event_name(&attrs_with("logfire.msg", "running 1 tool")),
+            get_event_name(&attrs_with("pydantic_ai.agent_name", "my-agent")),
+            Some("$ai_span")
+        );
+        assert_eq!(
+            get_event_name(&attrs_with("traceloop.workflow.name", "my-workflow")),
             Some("$ai_span")
         );
     }
 
     #[test]
+    fn test_unsupported_sdk_returns_none() {
+        // logfire is not a supported SDK — spans with only logfire attributes are dropped
+        assert_eq!(
+            get_event_name(&attrs_with("logfire.msg", "running 1 tool")),
+            None
+        );
+    }
+
+    #[test]
     fn test_irrelevant_span_returns_none() {
+        // HTTP instrumentation spans have no AI attributes
         assert_eq!(
             get_event_name(&attrs_with("http.request.method", "POST")),
+            None
+        );
+        // Empty span (no attributes at all)
+        assert_eq!(get_event_name(&serde_json::Map::new()), None);
+        // Unknown AI-adjacent framework — not in supported SDK list, so dropped
+        assert_eq!(
+            get_event_name(&attrs_with("langchain.chain.name", "my-chain")),
             None
         );
     }

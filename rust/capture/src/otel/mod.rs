@@ -22,7 +22,15 @@ use crate::router::State as AppState;
 use crate::token::validate_token;
 
 pub const OTEL_BODY_SIZE: usize = 4 * 1024 * 1024; // 4MB
+
+/// Maximum AI spans accepted after filtering. SDKs receive a 400 (non-retryable)
+/// if this is exceeded, so callers must batch sensibly.
 const MAX_SPANS_PER_REQUEST: usize = 100;
+
+/// Maximum raw spans accepted before filtering. Set well above MAX_SPANS_PER_REQUEST
+/// to accommodate mixed-content batches (e.g. Next.js sending HTTP + AI spans together)
+/// while still bounding the cost of attribute scanning.
+const MAX_RAW_SPANS_PER_REQUEST: usize = 1000;
 
 fn count_spans(request: &ExportTraceServiceRequest) -> usize {
     request
@@ -123,7 +131,6 @@ pub async fn otel_handler(
     // Cap raw spans before doing any expensive attribute conversion. The body
     // size limit (4 MB) bounds the absolute maximum, but compact protobuf can
     // pack many spans into that budget.
-    const MAX_RAW_SPANS_PER_REQUEST: usize = 1000;
     if raw_span_count > MAX_RAW_SPANS_PER_REQUEST {
         warn!(
             "OTEL request contains {} raw spans, exceeding limit of {}",
@@ -140,7 +147,7 @@ pub async fn otel_handler(
     let distinct_id = identity::extract_distinct_id(&request);
     let span_events = fan_out::expand_into_events(&request, &distinct_id);
     let span_count = span_events.len();
-    let dropped_span_count = raw_span_count - span_count;
+    let dropped_span_count = raw_span_count.saturating_sub(span_count);
     Span::current().record("span_count", span_count);
 
     if dropped_span_count > 0 {
@@ -161,7 +168,7 @@ pub async fn otel_handler(
         report_internal_error_metrics(err.to_metric_tag(), "otel_validation");
         return Err(err.into_response());
     }
-    counter!("capture_ai_otel_spans_received").increment(span_count as u64);
+    counter!("capture_ai_otel_spans_accepted").increment(span_count as u64);
     histogram!("capture_ai_otel_spans_per_request").record(span_count as f64);
 
     let client_ip = ip
