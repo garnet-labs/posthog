@@ -196,7 +196,9 @@ export class PushNotificationService {
         const jwt = this.generateApnsJwt(appleTeamId, keyId, signingKey)
 
         const apnsPayload = this.buildApnsPayload(payload)
-        const url = `https://api.push.apple.com/3/device/${token}`
+        const apnsHost =
+            integration.config.environment === 'sandbox' ? 'api.sandbox.push.apple.com' : 'api.push.apple.com'
+        const url = `https://${apnsHost}/3/device/${token}`
 
         const headers: Record<string, string> = {
             Authorization: `bearer ${jwt}`,

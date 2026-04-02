@@ -266,6 +266,7 @@ class IntegrationSerializer(serializers.ModelSerializer, UserAccessControlSerial
             key_id = config.get("key_id")
             team_id_apple = config.get("team_id_apple")
             bundle_id = config.get("bundle_id")
+            environment = config.get("environment", "production")
 
             if not all([signing_key, key_id, team_id_apple, bundle_id]):
                 raise ValidationError("All APNS fields are required: signing_key, key_id, team_id_apple, bundle_id")
@@ -277,6 +278,7 @@ class IntegrationSerializer(serializers.ModelSerializer, UserAccessControlSerial
                 bundle_id=bundle_id,
                 team_id=team_id,
                 created_by=request.user,
+                environment=environment,
             )
             return instance
 
