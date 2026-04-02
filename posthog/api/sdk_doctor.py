@@ -15,8 +15,8 @@ from posthog.models.user import User
 from posthog.redis import get_client
 
 from products.growth.backend.constants import github_sdk_versions_key, team_sdk_versions_key
+from products.growth.backend.sdk_versions import get_and_cache_team_sdk_versions
 from products.growth.dags.github_sdk_versions import SDK_TYPES
-from products.growth.dags.team_sdk_versions import get_and_cache_team_sdk_versions
 
 logger = structlog.get_logger(__name__)
 
@@ -25,7 +25,7 @@ logger = structlog.get_logger(__name__)
 @permission_classes([IsAuthenticated])
 def sdk_doctor(request: Request) -> Response:
     """
-    Serve team SDK versions. Data is cached by Dagster job.
+    Serve team SDK versions. Data is cached by the sdk_outdated health check.
     Supports force_refresh=true for on-demand detection.
     """
     user = cast(User, request.user)
