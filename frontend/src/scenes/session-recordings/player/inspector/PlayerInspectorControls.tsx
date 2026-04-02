@@ -28,7 +28,6 @@ import {
     playerInspectorLogic,
 } from 'scenes/session-recordings/player/inspector/playerInspectorLogic'
 import { teamLogic } from 'scenes/teamLogic'
-import { urls } from 'scenes/urls'
 
 import { sidePanelSettingsLogic } from '~/layout/navigation-3000/sidepanel/panels/sidePanelSettingsLogic'
 
