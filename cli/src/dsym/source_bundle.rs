@@ -121,14 +121,20 @@ fn collect_cu_source_paths<'d>(obj: &impl DwarfObject<'d>, out: &mut Vec<String>
         let header = match iter.next() {
             Ok(Some(h)) => h,
             Ok(None) => break,
-            Err(e) => { tracing::debug!("units().next() error: {:?}", e); break; },
+            Err(e) => {
+                tracing::debug!("units().next() error: {:?}", e);
+                break;
+            }
         };
         cu_count += 1;
 
         // Obtain abbreviation table for this CU.
         let abbrevs = match dwarf.abbreviations(&header) {
             Ok(a) => a,
-            Err(e) => { tracing::debug!("CU {}: abbreviations() error: {:?}", cu_count, e); continue; }
+            Err(e) => {
+                tracing::debug!("CU {}: abbreviations() error: {:?}", cu_count, e);
+                continue;
+            }
         };
 
         // Parse the root DIE WITHOUT calling dwarf.unit() — that helper also
@@ -144,28 +150,43 @@ fn collect_cu_source_paths<'d>(obj: &impl DwarfObject<'d>, out: &mut Vec<String>
         }
 
         // Resolve an attribute value to a UTF-8 string from debug_str / inline data.
-        let resolve_str = |val: gimli::AttributeValue<gimli::EndianSlice<'_, gimli::RunTimeEndian>>| -> Option<String> {
+        let resolve_str = |val: gimli::AttributeValue<
+            gimli::EndianSlice<'_, gimli::RunTimeEndian>,
+        >|
+         -> Option<String> {
             match val {
-                gimli::AttributeValue::String(s) =>
-                    std::str::from_utf8(s.slice()).ok().map(|s| s.to_string()),
-                gimli::AttributeValue::DebugStrRef(offset) =>
-                    dwarf.debug_str.get_str(offset).ok()
-                        .and_then(|s| std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())),
-                gimli::AttributeValue::DebugLineStrRef(offset) =>
-                    dwarf.debug_line_str.get_str(offset).ok()
-                        .and_then(|s| std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())),
+                gimli::AttributeValue::String(s) => {
+                    std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())
+                }
+                gimli::AttributeValue::DebugStrRef(offset) => dwarf
+                    .debug_str
+                    .get_str(offset)
+                    .ok()
+                    .and_then(|s| std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())),
+                gimli::AttributeValue::DebugLineStrRef(offset) => dwarf
+                    .debug_line_str
+                    .get_str(offset)
+                    .ok()
+                    .and_then(|s| std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())),
                 _ => None,
             }
         };
 
-        let comp_dir: Option<String> = root.attr_value(gimli::DW_AT_comp_dir).ok().flatten()
+        let comp_dir: Option<String> = root
+            .attr_value(gimli::DW_AT_comp_dir)
+            .ok()
+            .flatten()
             .and_then(&resolve_str);
-        let name: Option<String> = root.attr_value(gimli::DW_AT_name).ok().flatten()
+        let name: Option<String> = root
+            .attr_value(gimli::DW_AT_name)
+            .ok()
+            .flatten()
             .and_then(&resolve_str);
 
         let path = match (comp_dir, name) {
-            (Some(dir), Some(name)) if !name.starts_with('/') =>
-                format!("{}/{}", dir.trim_end_matches('/'), name),
+            (Some(dir), Some(name)) if !name.starts_with('/') => {
+                format!("{}/{}", dir.trim_end_matches('/'), name)
+            }
             (_, Some(name)) if name.starts_with('/') => name,
             (Some(dir), None) => dir,
             _ => continue,
@@ -238,10 +259,7 @@ pub fn filter_source_paths(paths: &[String]) -> Vec<&str> {
             }
             // Exclude synthetic short names that Apple's linker emits as
             // placeholder compile-unit names for system frameworks.
-            if EXCLUDED_SYNTHETIC_NAMES
-                .iter()
-                .any(|s| path.starts_with(s))
-            {
+            if EXCLUDED_SYNTHETIC_NAMES.iter().any(|s| path.starts_with(s)) {
                 tracing::debug!("Filtered out (synthetic): {}", path);
                 return false;
             }

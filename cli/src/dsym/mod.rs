@@ -244,19 +244,26 @@ fn thin_if_fat(path: &Path, arch: &str) -> Result<Vec<u8>> {
 
     if !is_fat {
         // Already a thin (single-arch) binary — use it directly.
-        tracing::info!("[lipo] {} is already a thin binary, using as-is", path.display());
+        tracing::info!(
+            "[lipo] {} is already a thin binary, using as-is",
+            path.display()
+        );
         return Ok(raw);
     }
 
     tracing::info!(
         "[lipo] fat binary detected at {}, thinning to {} slice ({} bytes total)",
-        path.display(), arch, raw.len()
+        path.display(),
+        arch,
+        raw.len()
     );
 
     // Run `lipo -thin <arch>` to extract just this architecture.
-    let tmp_path = std::env::temp_dir().join(format!("posthog_lipo_{arch}_{pid}",
+    let tmp_path = std::env::temp_dir().join(format!(
+        "posthog_lipo_{arch}_{pid}",
         arch = arch,
-        pid = std::process::id()));
+        pid = std::process::id()
+    ));
 
     let status = Command::new("lipo")
         .args([
@@ -281,13 +288,15 @@ fn thin_if_fat(path: &Path, arch: &str) -> Result<Vec<u8>> {
         return Ok(raw);
     }
 
-    let thinned = std::fs::read(&tmp_path)
-        .map_err(|e| anyhow!("Failed to read lipo output: {e}"))?;
+    let thinned =
+        std::fs::read(&tmp_path).map_err(|e| anyhow!("Failed to read lipo output: {e}"))?;
     let _ = std::fs::remove_file(&tmp_path);
     tracing::info!(
         "[lipo] thinned {} ({} arch) to {} bytes (was {} bytes)",
         path.file_name().unwrap_or_default().to_string_lossy(),
-        arch, thinned.len(), raw.len()
+        arch,
+        thinned.len(),
+        raw.len()
     );
     Ok(thinned)
 }

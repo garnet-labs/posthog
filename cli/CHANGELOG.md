@@ -1,5 +1,11 @@
 # posthog-cli
 
+# 0.7.5
+
+- fix: stable content hash for dSYM uploads on incremental builds
+  - thin fat (universal) binaries per architecture before zipping, so rebuilding one arch slice does not change the hash of sibling slices
+  - extract source file paths from DWARF compilation-unit main files only, preventing cross-module source references (e.g. framework headers) from causing hash changes when a dependency is updated
+
 # 0.7.4
 
 - fix: create per-UUID ZIP for dSYM uploads
