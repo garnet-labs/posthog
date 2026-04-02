@@ -24,11 +24,7 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from posthog.clickhouse.migration_tools.cluster_registry import (
-    get_all_cluster_names,
-    get_cluster_for,
-    validate_cluster_name,
-)
+from posthog.clickhouse.cluster import get_all_logical_clusters, get_cluster_by_name, is_known_cluster
 from posthog.clickhouse.migration_tools.schema_introspect import detect_drift, dump_schema
 
 MAX_DRIFT_DISPLAY = 10
@@ -183,13 +179,13 @@ class Command(BaseCommand):
 
         # Validate cluster names
         for ds in desired_states:
-            if not validate_cluster_name(ds.cluster):
-                known = ", ".join(get_all_cluster_names())
+            if not is_known_cluster(ds.cluster):
+                known = ", ".join(get_all_logical_clusters())
                 return [], (
                     f"Schema file for ecosystem '{ds.ecosystem}' references cluster "
                     f"'{ds.cluster}' which is not in the cluster registry. "
                     f"Known clusters: {known}. "
-                    f"Add '{ds.cluster}' to _REGISTRY in cluster_registry.py with the "
+                    f"Add '{ds.cluster}' to _REGISTRY in posthog/clickhouse/cluster.py with the "
                     f"appropriate CLICKHOUSE_*_HOST and CLICKHOUSE_*_CLUSTER settings."
                 )
 
@@ -200,7 +196,7 @@ class Command(BaseCommand):
 
         all_diffs = []
         for cluster_name, states in by_cluster.items():
-            cluster_obj = get_cluster_for(cluster_name)
+            cluster_obj = get_cluster_by_name(cluster_name)
             client = _any_client(cluster_obj)
             current = dump_schema(client, database)
 
@@ -407,9 +403,9 @@ class Command(BaseCommand):
         print(f"Checking schema drift across all registered clusters (database={database})...")
 
         all_diffs = []
-        for name in get_all_cluster_names():
+        for name in get_all_logical_clusters():
             try:
-                cluster = get_cluster_for(name)
+                cluster = get_cluster_by_name(name)
                 diffs = detect_drift(cluster, database)
                 if diffs:
                     print(f"\nDrift detected on cluster '{name}':")
@@ -439,7 +435,7 @@ class Command(BaseCommand):
 
     def handle_schema(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster_for("main")
+        cluster = get_cluster_by_name("main")
 
         client = _any_client(cluster)
         schema = dump_schema(client, database)
@@ -467,7 +463,7 @@ class Command(BaseCommand):
 
     def handle_status(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster_for("main")
+        cluster = get_cluster_by_name("main")
         client = _any_client(cluster)
 
         from posthog.clickhouse.migration_tools.tracking import TRACKING_TABLE_NAME, _ensure_tracking_table
@@ -512,7 +508,7 @@ class Command(BaseCommand):
 
     def handle_bootstrap(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster_for("main")
+        cluster = get_cluster_by_name("main")
         client = _any_client(cluster)
 
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table
@@ -589,7 +585,7 @@ class Command(BaseCommand):
             print(f"No YAML files found in {schema_dir}")
             return
 
-        cluster = get_cluster_for("main")
+        cluster = get_cluster_by_name("main")
         client = _any_client(cluster)
         current = dump_schema(client, database)
         exclude = options.get("exclude") or []
@@ -614,7 +610,7 @@ class Command(BaseCommand):
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
 
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster_for("main")
+        cluster = get_cluster_by_name("main")
         client = _any_client(cluster)
 
         _ensure_tracking_table(client, database)

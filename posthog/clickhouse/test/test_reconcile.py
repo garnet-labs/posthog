@@ -660,7 +660,7 @@ class TestDetectOrphans(unittest.TestCase):
 
 
 class TestClusterRegistry(unittest.TestCase):
-    """Tests for cluster_registry module."""
+    """Tests for cluster registry in cluster.py."""
 
     def test_cluster_registry_maps_main(self) -> None:
         from unittest.mock import MagicMock, patch
@@ -670,12 +670,12 @@ class TestClusterRegistry(unittest.TestCase):
         mock_settings.CLICKHOUSE_CLUSTER = "posthog"
 
         with (
-            patch("posthog.clickhouse.migration_tools.cluster_registry.get_cluster") as mock_get_cluster,
-            patch("django.conf.settings", mock_settings),
+            patch("posthog.clickhouse.cluster.get_cluster") as mock_get_cluster,
+            patch("posthog.clickhouse.cluster.settings", mock_settings),
         ):
-            from posthog.clickhouse.migration_tools.cluster_registry import get_cluster_for
+            from posthog.clickhouse.cluster import get_cluster_by_name
 
-            get_cluster_for("main")
+            get_cluster_by_name("main")
             mock_get_cluster.assert_called_once_with(host="main-host", cluster="posthog")
 
     def test_cluster_registry_maps_logs(self) -> None:
@@ -686,21 +686,21 @@ class TestClusterRegistry(unittest.TestCase):
         mock_settings.CLICKHOUSE_LOGS_CLUSTER = "posthog_single_shard"
 
         with (
-            patch("posthog.clickhouse.migration_tools.cluster_registry.get_cluster") as mock_get_cluster,
-            patch("django.conf.settings", mock_settings),
+            patch("posthog.clickhouse.cluster.get_cluster") as mock_get_cluster,
+            patch("posthog.clickhouse.cluster.settings", mock_settings),
         ):
-            from posthog.clickhouse.migration_tools.cluster_registry import get_cluster_for
+            from posthog.clickhouse.cluster import get_cluster_by_name
 
-            get_cluster_for("logs")
+            get_cluster_by_name("logs")
             mock_get_cluster.assert_called_once_with(host="logs-host", cluster="posthog_single_shard")
 
     def test_cluster_registry_unknown_falls_back(self) -> None:
         from unittest.mock import patch
 
-        with patch("posthog.clickhouse.migration_tools.cluster_registry.get_cluster") as mock_get_cluster:
-            from posthog.clickhouse.migration_tools.cluster_registry import get_cluster_for
+        with patch("posthog.clickhouse.cluster.get_cluster") as mock_get_cluster:
+            from posthog.clickhouse.cluster import get_cluster_by_name
 
-            get_cluster_for("unknown_cluster")
+            get_cluster_by_name("unknown_cluster")
             mock_get_cluster.assert_called_once_with()
 
     def test_plan_groups_by_cluster(self) -> None:
@@ -715,10 +715,10 @@ class TestClusterRegistry(unittest.TestCase):
         )
 
         # Both clusters exist in the registry
-        from posthog.clickhouse.migration_tools.cluster_registry import validate_cluster_name
+        from posthog.clickhouse.cluster import is_known_cluster
 
-        self.assertTrue(validate_cluster_name("main"))
-        self.assertTrue(validate_cluster_name("logs"))
+        self.assertTrue(is_known_cluster("main"))
+        self.assertTrue(is_known_cluster("logs"))
         # And they produce separate groupings
         from collections import defaultdict
 
@@ -732,11 +732,11 @@ class TestClusterRegistry(unittest.TestCase):
 
     def test_unknown_cluster_in_yaml_errors(self) -> None:
         """A YAML referencing an unknown cluster should produce a clear error."""
-        from posthog.clickhouse.migration_tools.cluster_registry import get_all_cluster_names, validate_cluster_name
+        from posthog.clickhouse.cluster import get_all_logical_clusters, is_known_cluster
 
-        self.assertFalse(validate_cluster_name("sessions"))
+        self.assertFalse(is_known_cluster("sessions"))
 
-        known = ", ".join(get_all_cluster_names())
+        known = ", ".join(get_all_logical_clusters())
         self.assertIn("logs", known)
         self.assertIn("main", known)
         self.assertIn("migrations", known)
