@@ -73,11 +73,12 @@ def _record_step(
 
 
 def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool = False) -> tuple[bool, str]:
-    """Atomic advisory lock via INSERT...SELECT WHERE NOT EXISTS. Returns (acquired, message).
+    """Best-effort advisory lock via INSERT...SELECT WHERE NOT EXISTS. Returns (acquired, message).
 
-    Auto-creates the tracking table if it doesn't exist. Uses a single atomic
-    query to check for existing locks and insert a new one, eliminating the
-    race window of the old SELECT-then-INSERT pattern.
+    Auto-creates the tracking table if needed. Uses a single query to check
+    for existing locks and insert, but MergeTree is eventually consistent —
+    two concurrent pods could both acquire in the same merge cycle.
+    Sufficient for single-deploy-at-a-time; use --force to break stale locks.
     """
     _ensure_tracking_table(client, database)
     table_ref = f"{database}.{TRACKING_TABLE_NAME}"
@@ -194,4 +195,5 @@ def release_apply_lock(client: Any, database: str, hostname: str) -> None:
             checksum="unlock",
             success=False,
         ),
+        database=database,
     )

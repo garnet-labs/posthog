@@ -163,8 +163,8 @@ The two systems coexist. `run_sql_with_exceptions` has a deprecation warning poi
 
 **What about drift between hosts?**
 
-`ch_migrate drift` queries `system.tables` on every host and compares.
-Use `--halt-on-drift` on apply to block execution if hosts disagree.
+`ch_migrate drift` queries `system.tables` on every host across all registered clusters and compares.
+Run it before apply to check for host divergence.
 
 **How do I roll back?**
 
