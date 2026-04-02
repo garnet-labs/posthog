@@ -191,58 +191,34 @@ const cdpFunctionsDelete = (): ToolBase<typeof CdpFunctionsDeleteSchema, Schemas
 })
 
 const CdpFunctionsInvocationsCreateSchema = HogFunctionsInvocationsCreateParams.omit({ project_id: true }).extend(
-    HogFunctionsInvocationsCreateBody.omit({ _create_in_folder: true }).shape
+    HogFunctionsInvocationsCreateBody.shape
 )
 
-const cdpFunctionsInvocationsCreate = (): ToolBase<typeof CdpFunctionsInvocationsCreateSchema, unknown> => ({
+const cdpFunctionsInvocationsCreate = (): ToolBase<
+    typeof CdpFunctionsInvocationsCreateSchema,
+    Schemas.HogFunctionInvocation
+> => ({
     name: 'cdp-functions-invocations-create',
     schema: CdpFunctionsInvocationsCreateSchema,
     handler: async (context: Context, params: z.infer<typeof CdpFunctionsInvocationsCreateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.type !== undefined) {
-            body['type'] = params.type
+        if (params.configuration !== undefined) {
+            body['configuration'] = params.configuration
         }
-        if (params.name !== undefined) {
-            body['name'] = params.name
+        if (params.globals !== undefined) {
+            body['globals'] = params.globals
         }
-        if (params.description !== undefined) {
-            body['description'] = params.description
+        if (params.clickhouse_event !== undefined) {
+            body['clickhouse_event'] = params.clickhouse_event
         }
-        if (params.enabled !== undefined) {
-            body['enabled'] = params.enabled
+        if (params.mock_async_functions !== undefined) {
+            body['mock_async_functions'] = params.mock_async_functions
         }
-        if (params.deleted !== undefined) {
-            body['deleted'] = params.deleted
+        if (params.invocation_id !== undefined) {
+            body['invocation_id'] = params.invocation_id
         }
-        if (params.hog !== undefined) {
-            body['hog'] = params.hog
-        }
-        if (params.inputs_schema !== undefined) {
-            body['inputs_schema'] = params.inputs_schema
-        }
-        if (params.inputs !== undefined) {
-            body['inputs'] = params.inputs
-        }
-        if (params.filters !== undefined) {
-            body['filters'] = params.filters
-        }
-        if (params.masking !== undefined) {
-            body['masking'] = params.masking
-        }
-        if (params.mappings !== undefined) {
-            body['mappings'] = params.mappings
-        }
-        if (params.icon_url !== undefined) {
-            body['icon_url'] = params.icon_url
-        }
-        if (params.template_id !== undefined) {
-            body['template_id'] = params.template_id
-        }
-        if (params.execution_order !== undefined) {
-            body['execution_order'] = params.execution_order
-        }
-        const result = await context.api.request<unknown>({
+        const result = await context.api.request<Schemas.HogFunctionInvocation>({
             method: 'POST',
             path: `/api/projects/${projectId}/hog_functions/${params.id}/invocations/`,
             body,
@@ -251,59 +227,21 @@ const cdpFunctionsInvocationsCreate = (): ToolBase<typeof CdpFunctionsInvocation
     },
 })
 
-const CdpFunctionsRearrangePartialUpdateSchema = HogFunctionsRearrangePartialUpdateBody.omit({
-    _create_in_folder: true,
-})
+const CdpFunctionsRearrangePartialUpdateSchema = HogFunctionsRearrangePartialUpdateBody
 
-const cdpFunctionsRearrangePartialUpdate = (): ToolBase<typeof CdpFunctionsRearrangePartialUpdateSchema, unknown> => ({
+const cdpFunctionsRearrangePartialUpdate = (): ToolBase<
+    typeof CdpFunctionsRearrangePartialUpdateSchema,
+    Schemas.HogFunction[]
+> => ({
     name: 'cdp-functions-rearrange-partial-update',
     schema: CdpFunctionsRearrangePartialUpdateSchema,
     handler: async (context: Context, params: z.infer<typeof CdpFunctionsRearrangePartialUpdateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.type !== undefined) {
-            body['type'] = params.type
+        if (params.orders !== undefined) {
+            body['orders'] = params.orders
         }
-        if (params.name !== undefined) {
-            body['name'] = params.name
-        }
-        if (params.description !== undefined) {
-            body['description'] = params.description
-        }
-        if (params.enabled !== undefined) {
-            body['enabled'] = params.enabled
-        }
-        if (params.deleted !== undefined) {
-            body['deleted'] = params.deleted
-        }
-        if (params.hog !== undefined) {
-            body['hog'] = params.hog
-        }
-        if (params.inputs_schema !== undefined) {
-            body['inputs_schema'] = params.inputs_schema
-        }
-        if (params.inputs !== undefined) {
-            body['inputs'] = params.inputs
-        }
-        if (params.filters !== undefined) {
-            body['filters'] = params.filters
-        }
-        if (params.masking !== undefined) {
-            body['masking'] = params.masking
-        }
-        if (params.mappings !== undefined) {
-            body['mappings'] = params.mappings
-        }
-        if (params.icon_url !== undefined) {
-            body['icon_url'] = params.icon_url
-        }
-        if (params.template_id !== undefined) {
-            body['template_id'] = params.template_id
-        }
-        if (params.execution_order !== undefined) {
-            body['execution_order'] = params.execution_order
-        }
-        const result = await context.api.request<unknown>({
+        const result = await context.api.request<Schemas.HogFunction[]>({
             method: 'PATCH',
             path: `/api/projects/${projectId}/hog_functions/rearrange/`,
             body,
