@@ -163,15 +163,27 @@ def push_subscriptions(request: Request):
     encrypted_token = EncryptedFieldMixin().encrypt(device_token)
     property_key = f"$device_push_subscription_{app_id}"
 
-    capture_internal(
-        token=team.api_token,
-        event_name="$set",
-        event_source="push_subscriptions",
-        distinct_id=distinct_id,
-        timestamp=datetime.now(UTC),
-        properties={"$set": {property_key: encrypted_token}},
-        process_person_profile=True,
-    )
+    try:
+        capture_internal(
+            token=team.api_token,
+            event_name="$set",
+            event_source="push_subscriptions",
+            distinct_id=distinct_id,
+            timestamp=datetime.now(UTC),
+            properties={"$set": {property_key: encrypted_token}},
+            process_person_profile=True,
+        )
+    except Exception:
+        return cors_response(
+            request,
+            generate_exception_response(
+                "push_subscriptions",
+                "Failed to store push subscription.",
+                type="server_error",
+                code="capture_failed",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            ),
+        )
 
     return cors_response(
         request,
