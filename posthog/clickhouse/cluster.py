@@ -457,11 +457,6 @@ def get_cluster_by_name(
     logical_name: str,
     **kwargs: Any,
 ) -> ClickhouseCluster:
-    """Get a ClickhouseCluster for a logical cluster name (main, logs, etc).
-
-    Resolves the host and cluster name from Django settings based on the
-    registry. Falls back to the default cluster for unknown names.
-    """
     if logical_name not in _CLUSTER_REGISTRY:
         return get_cluster(**kwargs)
 
@@ -472,12 +467,10 @@ def get_cluster_by_name(
 
 
 def get_all_logical_clusters() -> list[str]:
-    """Return all registered logical cluster names."""
     return sorted(_CLUSTER_REGISTRY.keys())
 
 
 def is_known_cluster(name: str) -> bool:
-    """Check if a logical cluster name is registered."""
     return name in _CLUSTER_REGISTRY
 
 
