@@ -64,14 +64,17 @@ export namespace Schemas {
     * `log` - log
     * `log_attribute` - log_attribute
     * `log_resource_attribute` - log_resource_attribute
+    * `span` - span
+    * `span_attribute` - span_attribute
+    * `span_resource_attribute` - span_resource_attribute
     * `revenue_analytics` - revenue_analytics
     * `flag` - flag
     * `workflow_variable` - workflow_variable
      */
-    export type Type19aEnum = typeof Type19aEnum[keyof typeof Type19aEnum];
+    export type Type3f6Enum = typeof Type3f6Enum[keyof typeof Type3f6Enum];
 
 
-    export const Type19aEnum = {
+    export const Type3f6Enum = {
       Event: 'event',
       EventMetadata: 'event_metadata',
       Feature: 'feature',
@@ -93,6 +96,9 @@ export namespace Schemas {
       Log: 'log',
       LogAttribute: 'log_attribute',
       LogResourceAttribute: 'log_resource_attribute',
+      Span: 'span',
+      SpanAttribute: 'span_attribute',
+      SpanResourceAttribute: 'span_resource_attribute',
       RevenueAnalytics: 'revenue_analytics',
       Flag: 'flag',
       WorkflowVariable: 'workflow_variable',
@@ -147,10 +153,13 @@ export namespace Schemas {
     * `log` - log
     * `log_attribute` - log_attribute
     * `log_resource_attribute` - log_resource_attribute
+    * `span` - span
+    * `span_attribute` - span_attribute
+    * `span_resource_attribute` - span_resource_attribute
     * `revenue_analytics` - revenue_analytics
     * `flag` - flag
     * `workflow_variable` - workflow_variable */
-      type?: Type19aEnum;
+      type?: Type3f6Enum;
       /** String value to match against. */
       value: string;
       /** String comparison operator.
@@ -213,10 +222,13 @@ export namespace Schemas {
     * `log` - log
     * `log_attribute` - log_attribute
     * `log_resource_attribute` - log_resource_attribute
+    * `span` - span
+    * `span_attribute` - span_attribute
+    * `span_resource_attribute` - span_resource_attribute
     * `revenue_analytics` - revenue_analytics
     * `flag` - flag
     * `workflow_variable` - workflow_variable */
-      type?: Type19aEnum;
+      type?: Type3f6Enum;
       /** Numeric value to compare against. */
       value: number;
       /** Numeric comparison operator.
@@ -275,10 +287,13 @@ export namespace Schemas {
     * `log` - log
     * `log_attribute` - log_attribute
     * `log_resource_attribute` - log_resource_attribute
+    * `span` - span
+    * `span_attribute` - span_attribute
+    * `span_resource_attribute` - span_resource_attribute
     * `revenue_analytics` - revenue_analytics
     * `flag` - flag
     * `workflow_variable` - workflow_variable */
-      type?: Type19aEnum;
+      type?: Type3f6Enum;
       /** List of values to match. For example `["test@example.com", "ok@example.com"]`. */
       value: string[];
       /** Array comparison operator.
@@ -333,10 +348,13 @@ export namespace Schemas {
     * `log` - log
     * `log_attribute` - log_attribute
     * `log_resource_attribute` - log_resource_attribute
+    * `span` - span
+    * `span_attribute` - span_attribute
+    * `span_resource_attribute` - span_resource_attribute
     * `revenue_analytics` - revenue_analytics
     * `flag` - flag
     * `workflow_variable` - workflow_variable */
-      type?: Type19aEnum;
+      type?: Type3f6Enum;
       /** Date or datetime string in ISO 8601 format (e.g. '2024-01-15' or '2024-01-15T10:30:00Z'). */
       value: string;
       /** Date comparison operator.
@@ -388,10 +406,13 @@ export namespace Schemas {
     * `log` - log
     * `log_attribute` - log_attribute
     * `log_resource_attribute` - log_resource_attribute
+    * `span` - span
+    * `span_attribute` - span_attribute
+    * `span_resource_attribute` - span_resource_attribute
     * `revenue_analytics` - revenue_analytics
     * `flag` - flag
     * `workflow_variable` - workflow_variable */
-      type?: Type19aEnum;
+      type?: Type3f6Enum;
       /** Existence check operator.
 
     * `is_set` - is_set
@@ -585,6 +606,24 @@ export namespace Schemas {
 
     export interface ActionConversionGoal {
       actionId: number;
+    }
+
+    export interface ActionReference {
+      /** Resource type: insight, experiment, cohort, or hog_function */
+      type: string;
+      /** Resource ID (integer or UUID depending on type) */
+      id: string;
+      /** Resource name */
+      name: string;
+      /** Relative URL to the resource */
+      url: string;
+      /**
+       * When the resource was created
+       * @nullable
+       */
+      created_at: string | null;
+      /** User who created the resource */
+      created_by: UserBasic | null;
     }
 
     export type ActionsNodeKind = typeof ActionsNodeKind[keyof typeof ActionsNodeKind];
@@ -1050,6 +1089,24 @@ export namespace Schemas {
       value?: (string | number | boolean)[] | string | number | boolean | null;
     }
 
+    export type SpanPropertyFilterType = typeof SpanPropertyFilterType[keyof typeof SpanPropertyFilterType];
+
+
+    export const SpanPropertyFilterType = {
+      Span: 'span',
+      SpanAttribute: 'span_attribute',
+      SpanResourceAttribute: 'span_resource_attribute',
+    } as const;
+
+    export interface SpanPropertyFilter {
+      key: string;
+      /** @nullable */
+      label?: string | null;
+      operator: PropertyOperator;
+      type: SpanPropertyFilterType;
+      value?: (string | number | boolean)[] | string | number | boolean | null;
+    }
+
     export type RevenueAnalyticsPropertyFilterType = typeof RevenueAnalyticsPropertyFilterType[keyof typeof RevenueAnalyticsPropertyFilterType];
 
 
@@ -1248,7 +1305,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       id: number;
       kind?: ActionsNodeKind;
       math?: typeof ActionsNodeMath[keyof typeof ActionsNodeMath]  | null;
@@ -1270,7 +1327,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: ActionsNodeResponse;
       /**
@@ -1379,6 +1436,7 @@ export namespace Schemas {
     }
 
     export interface ActivityLogEntry {
+      readonly id: string;
       /** @nullable */
       readonly user: ActivityLogEntryUser;
       readonly activity: string;
@@ -1754,7 +1812,7 @@ export namespace Schemas {
 
     export interface PropertyGroupFilterValue {
       type: FilterLogicalOperator;
-      values: (PropertyGroupFilterValue | EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[];
+      values: (PropertyGroupFilterValue | EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[];
     }
 
     export interface ActorsQueryResponse {
@@ -2006,7 +2064,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: EventsNodeKind;
       /** @nullable */
       limit?: number | null;
@@ -2034,7 +2092,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: EventsNodeResponse;
       /**
@@ -2069,7 +2127,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       id: string;
       id_field: string;
       kind?: DataWarehouseNodeKind;
@@ -2092,7 +2150,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: DataWarehouseNodeResponse;
       table_name: string;
@@ -2119,7 +2177,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: GroupNodeKind;
       /** @nullable */
       limit?: number | null;
@@ -2151,7 +2209,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: GroupNodeResponse;
       /**
@@ -2397,7 +2455,7 @@ export namespace Schemas {
       /** Modifiers used when performing the query */
       modifiers?: HogQLQueryModifiers | null;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: TrendsQueryResponse | null;
       /**
        * Sampling rate
@@ -2454,7 +2512,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       funnelFromStep: number;
       funnelToStep: number;
       kind?: FunnelExclusionEventsNodeKind;
@@ -2484,7 +2542,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: FunnelExclusionEventsNodeResponse;
       /**
@@ -2516,7 +2574,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       funnelFromStep: number;
       funnelToStep: number;
       id: number;
@@ -2540,7 +2598,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: FunnelExclusionActionsNodeResponse;
       /**
@@ -2717,7 +2775,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       id: string;
       id_field: string;
       kind?: FunnelsDataWarehouseNodeKind;
@@ -2740,7 +2798,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: FunnelsDataWarehouseNodeResponse;
       table_name: string;
@@ -2780,7 +2838,7 @@ export namespace Schemas {
       /** Modifiers used when performing the query */
       modifiers?: HogQLQueryModifiers | null;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: FunnelsQueryResponse | null;
       /**
        * Sampling rate
@@ -2940,7 +2998,7 @@ export namespace Schemas {
        * filters on the event
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       type?: EntityType | null;
       /** @nullable */
       uuid?: string | null;
@@ -3022,7 +3080,7 @@ export namespace Schemas {
       /** Modifiers used when performing the query */
       modifiers?: HogQLQueryModifiers | null;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: RetentionQueryResponse | null;
       /** Properties specific to the retention insight */
       retentionFilter: RetentionFilter;
@@ -3184,7 +3242,7 @@ export namespace Schemas {
       /** Properties specific to the paths insight */
       pathsFilter: PathsFilter;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: PathsQueryResponse | null;
       /**
        * Sampling rate
@@ -3305,7 +3363,7 @@ export namespace Schemas {
       /** Modifiers used when performing the query */
       modifiers?: HogQLQueryModifiers | null;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: StickinessQueryResponse | null;
       /**
        * Sampling rate
@@ -3404,7 +3462,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       id: string;
       kind?: LifecycleDataWarehouseNodeKind;
       math?: typeof LifecycleDataWarehouseNodeMath[keyof typeof LifecycleDataWarehouseNodeMath]  | null;
@@ -3426,7 +3484,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: LifecycleDataWarehouseNodeResponse;
       table_name: string;
@@ -3469,7 +3527,7 @@ export namespace Schemas {
       /** Modifiers used when performing the query */
       modifiers?: HogQLQueryModifiers | null;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: LifecycleQueryResponse | null;
       /**
        * Sampling rate
@@ -3951,7 +4009,7 @@ export namespace Schemas {
       funnelCorrelationPersonConverted?: boolean | null;
       funnelCorrelationPersonEntity?: EventsNode | ActionsNode | DataWarehouseNode | null;
       /** @nullable */
-      funnelCorrelationPropertyValues?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      funnelCorrelationPropertyValues?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       includeRecordings?: boolean | null;
       kind?: FunnelCorrelationActorsQueryKind;
@@ -4000,7 +4058,7 @@ export namespace Schemas {
       /** @nullable */
       filterTestAccounts?: boolean | null;
       /** @nullable */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
     }
 
     export type HogQLQueryKind = typeof HogQLQueryKind[keyof typeof HogQLQueryKind];
@@ -4142,6 +4200,11 @@ export namespace Schemas {
       name?: string | null;
       query: string;
       response?: HogQLQueryResponse | null;
+      /**
+       * Run the selected connection query directly without translating it through HogQL first
+       * @nullable
+       */
+      sendRawQuery?: boolean | null;
       tags?: QueryLogTags | null;
       /**
        * Constant values that can be referenced with the {placeholder} syntax in the query
@@ -4189,6 +4252,38 @@ export namespace Schemas {
        * @nullable
        */
       version?: number | null;
+    }
+
+    export type AddSnapshotsInputBaselineHashes = {[key: string]: string};
+
+    export type SnapshotManifestItemMetadata = {[key: string]: unknown};
+
+    export interface SnapshotManifestItem {
+      identifier: string;
+      content_hash: string;
+      /** @nullable */
+      width?: number | null;
+      /** @nullable */
+      height?: number | null;
+      metadata?: SnapshotManifestItemMetadata;
+    }
+
+    export interface AddSnapshotsInput {
+      snapshots: SnapshotManifestItem[];
+      baseline_hashes?: AddSnapshotsInputBaselineHashes;
+    }
+
+    export type UploadTargetFields = {[key: string]: string};
+
+    export interface UploadTarget {
+      content_hash: string;
+      url: string;
+      fields: UploadTargetFields;
+    }
+
+    export interface AddSnapshotsResult {
+      added: number;
+      uploads: UploadTarget[];
     }
 
     /**
@@ -4298,6 +4393,7 @@ export namespace Schemas {
       readonly triggered_dates: unknown | null;
       /** @nullable */
       readonly interval: string | null;
+      readonly triggered_metadata: unknown | null;
     }
 
     export type TrendsAlertConfigType = typeof TrendsAlertConfigType[keyof typeof TrendsAlertConfigType];
@@ -4732,7 +4828,7 @@ export namespace Schemas {
     * `daily` - daily
     * `weekly` - weekly
     * `monthly` - monthly */
-      calculation_interval?: CalculationIntervalEnum | NullEnum | null;
+      calculation_interval?: CalculationIntervalEnum;
       /**
        * Snooze the alert until this time. Pass a relative date string (e.g. '2h', '1d') or null to unsnooze.
        * @nullable
@@ -4766,6 +4862,29 @@ export namespace Schemas {
 
     export type AlertSimulateResponseSubDetectorScoresItem = {[key: string]: unknown};
 
+    export type BreakdownSimulationResultSubDetectorScoresItem = {[key: string]: unknown};
+
+    export interface BreakdownSimulationResult {
+      /** Breakdown value label. */
+      label: string;
+      /** Data values for each point. */
+      data: number[];
+      /** Date labels for each point. */
+      dates: string[];
+      /** Anomaly score for each point. */
+      scores: (number | null)[];
+      /** Indices of points flagged as anomalies. */
+      triggered_indices: number[];
+      /** Dates of points flagged as anomalies. */
+      triggered_dates: string[];
+      /** Total number of data points analyzed. */
+      total_points: number;
+      /** Number of anomalies detected. */
+      anomaly_count: number;
+      /** Per-sub-detector scores for ensemble detectors. */
+      sub_detector_scores?: BreakdownSimulationResultSubDetectorScoresItem[];
+    }
+
     export interface AlertSimulateResponse {
       /** Data values for each point. */
       data: number[];
@@ -4788,6 +4907,8 @@ export namespace Schemas {
       anomaly_count: number;
       /** Per-sub-detector scores for ensemble detectors. Each entry has 'type' and 'scores' fields. */
       sub_detector_scores?: AlertSimulateResponseSubDetectorScoresItem[];
+      /** Per-breakdown-value simulation results. Present only when the insight has breakdowns (up to 25 values). */
+      breakdown_results?: BreakdownSimulationResult[];
     }
 
     /**
@@ -4934,7 +5055,8 @@ export namespace Schemas {
     }
 
     export interface ApproveRunRequestInput {
-      snapshots: ApproveSnapshotInput[];
+      snapshots?: ApproveSnapshotInput[];
+      approve_all?: boolean;
       commit_to_github?: boolean;
     }
 
@@ -6188,7 +6310,7 @@ export namespace Schemas {
       /** Modifiers used when performing the query */
       modifiers?: HogQLQueryModifiers | null;
       /** Property filters for all series */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | PropertyGroupFilter | null;
       response?: CalendarHeatmapResponse | null;
       /**
        * Sampling rate
@@ -6295,30 +6417,6 @@ export namespace Schemas {
        */
       max_selections?: number | null;
     }
-
-    /**
-     * * `acquisition` - Acquisition
-    * `activation` - Activation
-    * `monetization` - Monetization
-    * `expansion` - Expansion
-    * `referral` - Referral
-    * `retention` - Retention
-    * `churn` - Churn
-    * `reactivation` - Reactivation
-     */
-    export type CategoryEnum = typeof CategoryEnum[keyof typeof CategoryEnum];
-
-
-    export const CategoryEnum = {
-      Acquisition: 'acquisition',
-      Activation: 'activation',
-      Monetization: 'monetization',
-      Expansion: 'expansion',
-      Referral: 'referral',
-      Retention: 'retention',
-      Churn: 'churn',
-      Reactivation: 'reactivation',
-    } as const;
 
     /**
      * * `marketing` - Marketing
@@ -6517,6 +6615,10 @@ export namespace Schemas {
       /** @nullable */
       gradientPreset?: string | null;
       gradientScaleMode?: GradientScaleMode | null;
+      /** @nullable */
+      nullLabel?: string | null;
+      /** @nullable */
+      nullValue?: string | null;
       /** @nullable */
       valueColumn?: string | null;
       /** @nullable */
@@ -6995,6 +7097,24 @@ export namespace Schemas {
       value: string;
     }
 
+    /**
+     * * `won` - won
+    * `lost` - lost
+    * `inconclusive` - inconclusive
+    * `stopped_early` - stopped_early
+    * `invalid` - invalid
+     */
+    export type ConclusionF33Enum = typeof ConclusionF33Enum[keyof typeof ConclusionF33Enum];
+
+
+    export const ConclusionF33Enum = {
+      Won: 'won',
+      Lost: 'lost',
+      Inconclusive: 'inconclusive',
+      StoppedEarly: 'stopped_early',
+      Invalid: 'invalid',
+    } as const;
+
     export interface ConditionalFormattingRule {
       bytecode: unknown[];
       color: string;
@@ -7119,7 +7239,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: ConversionGoalFilter1Kind;
       /** @nullable */
       limit?: number | null;
@@ -7147,7 +7267,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: ConversionGoalFilter1Response;
       schema_map: ConversionGoalFilter1SchemaMap;
@@ -7184,7 +7304,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       id: number;
       kind?: ConversionGoalFilter2Kind;
       math?: typeof ConversionGoalFilter2Math[keyof typeof ConversionGoalFilter2Math]  | null;
@@ -7206,7 +7326,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: ConversionGoalFilter2Response;
       schema_map: ConversionGoalFilter2SchemaMap;
@@ -7246,7 +7366,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       id: string;
       id_field: string;
       kind?: ConversionGoalFilter3Kind;
@@ -7269,7 +7389,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: ConversionGoalFilter3Response;
       schema_map: ConversionGoalFilter3SchemaMap;
@@ -7344,6 +7464,30 @@ export namespace Schemas {
       failed: CopyFlagsResult[];
     }
 
+    /**
+     * * `acquisition` - Acquisition
+    * `activation` - Activation
+    * `monetization` - Monetization
+    * `expansion` - Expansion
+    * `referral` - Referral
+    * `retention` - Retention
+    * `churn` - Churn
+    * `reactivation` - Reactivation
+     */
+    export type CoreEventCategoryEnum = typeof CoreEventCategoryEnum[keyof typeof CoreEventCategoryEnum];
+
+
+    export const CoreEventCategoryEnum = {
+      Acquisition: 'acquisition',
+      Activation: 'activation',
+      Monetization: 'monetization',
+      Expansion: 'expansion',
+      Referral: 'referral',
+      Retention: 'retention',
+      Churn: 'churn',
+      Reactivation: 'reactivation',
+    } as const;
+
     export interface CoreEvent {
       readonly id: string;
       /**
@@ -7363,7 +7507,7 @@ export namespace Schemas {
     * `retention` - Retention
     * `churn` - Churn
     * `reactivation` - Reactivation */
-      category: CategoryEnum;
+      category: CoreEventCategoryEnum;
       /** Filter configuration - event, action, or data warehouse node */
       filter: unknown;
       readonly created_at: string;
@@ -7535,18 +7679,6 @@ export namespace Schemas {
 
     export type CreateRunInputMetadata = {[key: string]: unknown};
 
-    export type SnapshotManifestItemMetadata = {[key: string]: unknown};
-
-    export interface SnapshotManifestItem {
-      identifier: string;
-      content_hash: string;
-      /** @nullable */
-      width?: number | null;
-      /** @nullable */
-      height?: number | null;
-      metadata?: SnapshotManifestItemMetadata;
-    }
-
     export interface CreateRunInput {
       repo_id: string;
       run_type: string;
@@ -7556,15 +7688,10 @@ export namespace Schemas {
       /** @nullable */
       pr_number?: number | null;
       baseline_hashes?: CreateRunInputBaselineHashes;
+      unchanged_count?: number;
+      removed_identifiers?: string[];
+      purpose?: string;
       metadata?: CreateRunInputMetadata;
-    }
-
-    export type UploadTargetFields = {[key: string]: string};
-
-    export interface UploadTarget {
-      content_hash: string;
-      url: string;
-      fields: UploadTargetFields;
     }
 
     export interface CreateRunResult {
@@ -7825,7 +7952,12 @@ export namespace Schemas {
       /** @nullable */
       explicitDate?: boolean | null;
       /** @nullable */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+    }
+
+    export interface DashboardGeneratedMetadata {
+      name: string;
+      description: string;
     }
 
     /**
@@ -9092,6 +9224,9 @@ export namespace Schemas {
       Logs: 'logs',
       LogAttributes: 'log_attributes',
       LogResourceAttributes: 'log_resource_attributes',
+      Spans: 'spans',
+      SpanAttributes: 'span_attributes',
+      SpanResourceAttributes: 'span_resource_attributes',
       Replay: 'replay',
       ReplaySavedFilters: 'replay_saved_filters',
       RevenueAnalyticsProperties: 'revenue_analytics_properties',
@@ -9104,6 +9239,53 @@ export namespace Schemas {
       RecentFilters: 'recent_filters',
       Empty: 'empty',
     } as const;
+
+    export type HrefMatching = typeof HrefMatching[keyof typeof HrefMatching];
+
+
+    export const HrefMatching = {
+      Contains: 'contains',
+      Exact: 'exact',
+      Regex: 'regex',
+    } as const;
+
+    export type TextMatching = typeof TextMatching[keyof typeof TextMatching];
+
+
+    export const TextMatching = {
+      Contains: 'contains',
+      Exact: 'exact',
+      Regex: 'regex',
+    } as const;
+
+    export type UrlMatching = typeof UrlMatching[keyof typeof UrlMatching];
+
+
+    export const UrlMatching = {
+      Contains: 'contains',
+      Exact: 'exact',
+      Regex: 'regex',
+    } as const;
+
+    export interface EventsQueryActionStep {
+      /** @nullable */
+      event?: string | null;
+      /** @nullable */
+      href?: string | null;
+      href_matching?: HrefMatching | null;
+      /** @nullable */
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      /** @nullable */
+      selector?: string | null;
+      /** @nullable */
+      tag_name?: string | null;
+      /** @nullable */
+      text?: string | null;
+      text_matching?: TextMatching | null;
+      /** @nullable */
+      url?: string | null;
+      url_matching?: UrlMatching | null;
+    }
 
     export type EventsQueryKind = typeof EventsQueryKind[keyof typeof EventsQueryKind];
 
@@ -9154,6 +9336,11 @@ export namespace Schemas {
        */
       actionId?: number | null;
       /**
+       * Show events matching action steps directly, used when no actionId is provided (e.g. previewing unsaved actions). Ignored if actionId is set.
+       * @nullable
+       */
+      actionSteps?: EventsQueryActionStep[] | null;
+      /**
        * Only fetch events that happened after this timestamp
        * @nullable
        */
@@ -9182,7 +9369,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (PropertyGroupFilter | PropertyGroupFilterValue | EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (PropertyGroupFilter | PropertyGroupFilterValue | EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: EventsQueryKind;
       /**
        * Number of rows to return
@@ -9210,7 +9397,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       response?: EventsQueryResponse | null;
       /** Return a limited set of data. Required. */
       select: string[];
@@ -9250,7 +9437,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: PersonsNodeKind;
       /** @nullable */
       limit?: number | null;
@@ -9262,7 +9449,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: PersonsNodeResponse;
       /** @nullable */
@@ -9832,7 +10019,7 @@ export namespace Schemas {
        * Event property filters - only applies when event or actionId is set
        * @nullable
        */
-      eventProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      eventProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /**
        * Filter test accounts
        * @nullable
@@ -9842,7 +10029,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (PropertyGroupFilter | PropertyGroupFilterValue | EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (PropertyGroupFilter | PropertyGroupFilterValue | EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: SessionsQueryKind;
       /**
        * Number of rows to return
@@ -9870,7 +10057,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       response?: SessionsQueryResponse | null;
       /** Return a limited set of data. Required. */
       select: string[];
@@ -10965,7 +11152,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /**
        * Use random ordering instead of timestamp DESC. Useful for representative sampling to avoid recency bias.
        * @nullable
@@ -11031,7 +11218,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       response?: TraceQueryResponse | null;
       tags?: QueryLogTags | null;
       traceId: string;
@@ -11336,6 +11523,8 @@ export namespace Schemas {
       conditionalFormatting?: ConditionalFormattingRule[] | null;
       /** @nullable */
       pinnedColumns?: string[] | null;
+      /** @nullable */
+      transpose?: boolean | null;
     }
 
     export interface DataVisualizationNode {
@@ -11432,6 +11621,16 @@ export namespace Schemas {
       readonly last_run_at: string | null;
       /** @nullable */
       readonly managed_viewset_kind: string | null;
+      /**
+       * Optional folder ID used to organize this view in the SQL editor sidebar.
+       * @nullable
+       */
+      folder_id?: string | null;
+      /**
+       * Folder name used to organize this view in the SQL editor sidebar.
+       * @nullable
+       */
+      readonly folder_name: string | null;
       /** @nullable */
       readonly latest_error: string | null;
       /**
@@ -11482,6 +11681,18 @@ export namespace Schemas {
       edited_history_id?: string | null;
     }
 
+    export interface DataWarehouseSavedQueryFolder {
+      readonly id: string;
+      /**
+       * Display name for the folder used to organize saved queries in the SQL editor sidebar.
+       * @maxLength 128
+       */
+      name: string;
+      readonly created_at: string;
+      readonly created_by: UserBasic;
+      readonly view_count: number;
+    }
+
     export type DataWarehouseSavedQueryMinimalColumnsItem = {[key: string]: unknown};
 
     /**
@@ -11510,6 +11721,10 @@ export namespace Schemas {
       /** @nullable */
       readonly managed_viewset_kind: string | null;
       /** @nullable */
+      readonly folder_id: string | null;
+      /** @nullable */
+      readonly folder_name: string | null;
+      /** @nullable */
       readonly latest_error: string | null;
       /** @nullable */
       readonly is_materialized: boolean | null;
@@ -11527,21 +11742,6 @@ export namespace Schemas {
        */
       readonly expires_at: string | null;
     }
-
-    export type DataWarehouseSyncInterval = typeof DataWarehouseSyncInterval[keyof typeof DataWarehouseSyncInterval];
-
-
-    export const DataWarehouseSyncInterval = {
-      '5min': '5min',
-      '15min': '15min',
-      '30min': '30min',
-      '1hour': '1hour',
-      '6hour': '6hour',
-      '12hour': '12hour',
-      '24hour': '24hour',
-      '7day': '7day',
-      '30day': '30day',
-    } as const;
 
     export type HedgehogActorAccessoryOption = typeof HedgehogActorAccessoryOption[keyof typeof HedgehogActorAccessoryOption];
 
@@ -12380,24 +12580,6 @@ export namespace Schemas {
       design?: unknown;
     }
 
-    /**
-     * * `won` - won
-    * `lost` - lost
-    * `inconclusive` - inconclusive
-    * `stopped_early` - stopped_early
-    * `invalid` - invalid
-     */
-    export type EndExperimentConclusionEnum = typeof EndExperimentConclusionEnum[keyof typeof EndExperimentConclusionEnum];
-
-
-    export const EndExperimentConclusionEnum = {
-      Won: 'won',
-      Lost: 'lost',
-      Inconclusive: 'inconclusive',
-      StoppedEarly: 'stopped_early',
-      Invalid: 'invalid',
-    } as const;
-
     export interface EndExperiment {
       /** The conclusion of the experiment.
 
@@ -12406,7 +12588,7 @@ export namespace Schemas {
     * `inconclusive` - inconclusive
     * `stopped_early` - stopped_early
     * `invalid` - invalid */
-      conclusion?: EndExperimentConclusionEnum | NullEnum | null;
+      conclusion?: ConclusionF33Enum | NullEnum | null;
       /**
        * Optional comment about the experiment conclusion.
        * @nullable
@@ -12414,8 +12596,45 @@ export namespace Schemas {
       conclusion_comment?: string | null;
     }
 
+    /**
+     * A column in the endpoint's query result.
+     */
+    export interface EndpointColumn {
+      /** Column name from the query SELECT clause. */
+      name: string;
+      /** Serialized column type: integer, float, string, datetime, date, boolean, array, json, or unknown. */
+      type: string;
+    }
+
     export interface EndpointLastExecutionTimesRequest {
       names: string[];
+    }
+
+    /**
+     * Materialization status for an endpoint version.
+     */
+    export interface EndpointMaterialization {
+      /** Current materialization status (e.g. 'Completed', 'Running'). */
+      status?: string;
+      /** Whether this endpoint query can be materialized. */
+      can_materialize: boolean;
+      /**
+       * Reason why materialization is not possible (only when can_materialize is false).
+       * @nullable
+       */
+      reason?: string | null;
+      /**
+       * ISO 8601 timestamp of the last successful materialization.
+       * @nullable
+       */
+      last_materialized_at?: string | null;
+      /** Last materialization error message, if any. */
+      error?: string;
+      /**
+       * How often the materialization refreshes (e.g. 'every_hour').
+       * @nullable
+       */
+      sync_frequency?: string | null;
     }
 
     export type EndpointRefreshMode = typeof EndpointRefreshMode[keyof typeof EndpointRefreshMode];
@@ -12428,40 +12647,140 @@ export namespace Schemas {
     } as const;
 
     /**
-     * Per-column bucket function overrides for range variable materialization. Keys are column names, values are bucket keys (hour, day, week, month).
+     * Per-column bucket overrides for range variable materialization. Keys are column names, values are bucket keys.
      * @nullable
      */
-    export type EndpointRequestBucketOverrides = {[key: string]: string} | null | null;
+    export type EndpointRequestBucketOverrides = {[key: string]: unknown} | null | null;
 
+    /**
+     * Schema for creating/updating endpoints. OpenAPI docs only — validation uses Pydantic.
+     */
     export interface EndpointRequest {
       /**
-       * Per-column bucket function overrides for range variable materialization. Keys are column names, values are bucket keys (hour, day, week, month).
+       * Unique URL-safe name. Must start with a letter, only letters/numbers/hyphens/underscores, max 128 chars.
        * @nullable
        */
-      bucket_overrides?: EndpointRequestBucketOverrides;
-      /** @nullable */
-      cache_age_seconds?: number | null;
-      /** @nullable */
-      derived_from_insight?: string | null;
-      /** @nullable */
+      name?: string | null;
+      /** HogQL or insight query this endpoint executes. Changing this auto-creates a new version. */
+      query?: unknown | null;
+      /**
+       * Human-readable description of what this endpoint returns.
+       * @nullable
+       */
       description?: string | null;
-      /** @nullable */
+      /**
+       * Cache TTL in seconds (60–86400).
+       * @nullable
+       */
+      cache_age_seconds?: number | null;
+      /**
+       * Whether this endpoint is available for execution via the API.
+       * @nullable
+       */
       is_active?: boolean | null;
       /**
-       * Whether this endpoint's query results are materialized to S3
+       * Whether query results are materialized to S3.
        * @nullable
        */
       is_materialized?: boolean | null;
-      /** @nullable */
-      name?: string | null;
-      query?: HogQLQuery | TrendsQuery | FunnelsQuery | RetentionQuery | PathsQuery | StickinessQuery | LifecycleQuery | WebStatsTableQuery | WebOverviewQuery | null;
-      /** How frequently should the underlying materialized view be updated */
-      sync_frequency?: DataWarehouseSyncInterval | null;
       /**
-       * Target a specific version for updates (optional, defaults to current version)
+       * Materialization refresh frequency (e.g. 'every_hour', 'every_day').
+       * @nullable
+       */
+      sync_frequency?: string | null;
+      /**
+       * Short ID of the insight this endpoint was derived from.
+       * @nullable
+       */
+      derived_from_insight?: string | null;
+      /**
+       * Target a specific version for updates (defaults to current version).
        * @nullable
        */
       version?: number | null;
+      /**
+       * Per-column bucket overrides for range variable materialization. Keys are column names, values are bucket keys.
+       * @nullable
+       */
+      bucket_overrides?: EndpointRequestBucketOverrides;
+      /**
+       * Set to true to soft-delete this endpoint.
+       * @nullable
+       */
+      deleted?: boolean | null;
+    }
+
+    /**
+     * Per-column bucket overrides for range variable materialization.
+     * @nullable
+     */
+    export type EndpointResponseBucketOverrides = {[key: string]: unknown} | null | null;
+
+    /**
+     * Full endpoint representation returned by list/retrieve/create/update.
+     */
+    export interface EndpointResponse {
+      /** Unique endpoint identifier (UUID). */
+      id: string;
+      /** URL-safe endpoint name, unique per team. */
+      name: string;
+      /**
+       * Human-readable description of the endpoint.
+       * @nullable
+       */
+      description: string | null;
+      /** The HogQL or insight query definition (JSON object with 'kind' key). */
+      query: unknown;
+      /** Whether the endpoint can be executed via the API. */
+      is_active: boolean;
+      /**
+       * Cache TTL in seconds, or null for default interval-based caching.
+       * @nullable
+       */
+      cache_age_seconds: number | null;
+      /** Relative API path to execute this endpoint (e.g. /api/environments/{team_id}/endpoints/{name}/run). */
+      endpoint_path: string;
+      /**
+       * Absolute URL to execute this endpoint.
+       * @nullable
+       */
+      url: string | null;
+      /**
+       * Absolute URL to view this endpoint in the PostHog UI.
+       * @nullable
+       */
+      ui_url: string | null;
+      /** When the endpoint was created (ISO 8601). */
+      created_at: string;
+      /** When the endpoint was last updated (ISO 8601). */
+      updated_at: string;
+      /** User who created the endpoint. */
+      readonly created_by: UserBasic;
+      /** Whether the current version's results are pre-computed to S3. */
+      is_materialized: boolean;
+      /** Latest version number. */
+      current_version: number;
+      /** Total number of versions for this endpoint. */
+      versions_count: number;
+      /**
+       * Short ID of the source insight, if derived from one.
+       * @nullable
+       */
+      derived_from_insight: string | null;
+      /**
+       * When this endpoint was last executed via the API (ISO 8601), or null if never executed.
+       * @nullable
+       */
+      last_executed_at: string | null;
+      /** Materialization status and configuration for the current version. */
+      materialization: EndpointMaterialization;
+      /**
+       * Per-column bucket overrides for range variable materialization.
+       * @nullable
+       */
+      bucket_overrides: EndpointResponseBucketOverrides;
+      /** Column names and types from the query's SELECT clause. */
+      columns: EndpointColumn[];
     }
 
     /**
@@ -12519,6 +12838,89 @@ export namespace Schemas {
        * @nullable
        */
       version?: number | null;
+    }
+
+    /**
+     * Per-column bucket overrides for range variable materialization.
+     * @nullable
+     */
+    export type EndpointVersionResponseBucketOverrides = {[key: string]: unknown} | null | null;
+
+    /**
+     * Extended endpoint representation when viewing a specific version.
+     */
+    export interface EndpointVersionResponse {
+      /** Unique endpoint identifier (UUID). */
+      id: string;
+      /** URL-safe endpoint name, unique per team. */
+      name: string;
+      /**
+       * Human-readable description of the endpoint.
+       * @nullable
+       */
+      description: string | null;
+      /** The HogQL or insight query definition (JSON object with 'kind' key). */
+      query: unknown;
+      /** Whether the endpoint can be executed via the API. */
+      is_active: boolean;
+      /**
+       * Cache TTL in seconds, or null for default interval-based caching.
+       * @nullable
+       */
+      cache_age_seconds: number | null;
+      /** Relative API path to execute this endpoint (e.g. /api/environments/{team_id}/endpoints/{name}/run). */
+      endpoint_path: string;
+      /**
+       * Absolute URL to execute this endpoint.
+       * @nullable
+       */
+      url: string | null;
+      /**
+       * Absolute URL to view this endpoint in the PostHog UI.
+       * @nullable
+       */
+      ui_url: string | null;
+      /** When the endpoint was created (ISO 8601). */
+      created_at: string;
+      /** When the endpoint was last updated (ISO 8601). */
+      updated_at: string;
+      /** User who created the endpoint. */
+      readonly created_by: UserBasic;
+      /** Whether the current version's results are pre-computed to S3. */
+      is_materialized: boolean;
+      /** Latest version number. */
+      current_version: number;
+      /** Total number of versions for this endpoint. */
+      versions_count: number;
+      /**
+       * Short ID of the source insight, if derived from one.
+       * @nullable
+       */
+      derived_from_insight: string | null;
+      /**
+       * When this endpoint was last executed via the API (ISO 8601), or null if never executed.
+       * @nullable
+       */
+      last_executed_at: string | null;
+      /** Materialization status and configuration for the current version. */
+      materialization: EndpointMaterialization;
+      /**
+       * Per-column bucket overrides for range variable materialization.
+       * @nullable
+       */
+      bucket_overrides: EndpointVersionResponseBucketOverrides;
+      /** Column names and types from the query's SELECT clause. */
+      columns: EndpointColumn[];
+      /** Version number. */
+      version: number;
+      /** Version unique identifier (UUID). */
+      version_id: string;
+      /** Whether the parent endpoint is active (distinct from version.is_active). */
+      endpoint_is_active: boolean;
+      /** ISO 8601 timestamp when this version was created. */
+      version_created_at: string;
+      /** User who created this version. */
+      readonly version_created_by: UserBasic | null;
     }
 
     export type EndpointsUsageOverviewItemKey = typeof EndpointsUsageOverviewItemKey[keyof typeof EndpointsUsageOverviewItemKey];
@@ -13543,6 +13945,7 @@ export namespace Schemas {
       primary_metrics_ordered_uuids?: unknown | null;
       secondary_metrics_ordered_uuids?: unknown | null;
       exposure_preaggregation_enabled?: boolean;
+      only_count_matured_users?: boolean;
       readonly status: ExperimentStatusEnum | NullEnum | null;
       /**
        * The effective access level the user has for this object
@@ -13693,7 +14096,7 @@ export namespace Schemas {
        * Fixed properties in the query, can't be edited in the interface (e.g. scoping down by person)
        * @nullable
        */
-      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      fixedProperties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: ExperimentDataWarehouseNodeKind;
       math?: typeof ExperimentDataWarehouseNodeMath[keyof typeof ExperimentDataWarehouseNodeMath]  | null;
       math_group_type_index?: MathGroupTypeIndex | null;
@@ -13714,7 +14117,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       response?: ExperimentDataWarehouseNodeResponse;
       table_name: string;
@@ -13741,7 +14144,7 @@ export namespace Schemas {
     export interface ExperimentEventExposureConfig {
       event: string;
       kind?: ExperimentEventExposureConfigKind;
-      properties: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[];
+      properties: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[];
       /** @nullable */
       response?: ExperimentEventExposureConfigResponse;
       /**
@@ -13781,7 +14184,7 @@ export namespace Schemas {
       /** @nullable */
       description?: string | null;
       /** @nullable */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       rollout_percentage?: number | null;
       /** @nullable */
@@ -14244,6 +14647,7 @@ export namespace Schemas {
       FullRefresh: 'full_refresh',
       Incremental: 'incremental',
       Append: 'append',
+      Webhook: 'webhook',
     } as const;
 
     export interface ExternalDataSchema {
@@ -15600,6 +16004,34 @@ export namespace Schemas {
     }
 
     /**
+     * * `active` - Active
+    * `paused` - Paused
+    * `completed` - Completed
+     */
+    export type HogFlowScheduleStatusEnum = typeof HogFlowScheduleStatusEnum[keyof typeof HogFlowScheduleStatusEnum];
+
+
+    export const HogFlowScheduleStatusEnum = {
+      Active: 'active',
+      Paused: 'paused',
+      Completed: 'completed',
+    } as const;
+
+    export interface HogFlowSchedule {
+      readonly id: string;
+      rrule: string;
+      starts_at: string;
+      /** @maxLength 64 */
+      timezone?: string;
+      variables?: unknown;
+      readonly status: HogFlowScheduleStatusEnum;
+      /** @nullable */
+      readonly next_run_at: string | null;
+      readonly created_at: string;
+      readonly updated_at: string;
+    }
+
+    /**
      * @nullable
      */
     export type HogFlowTemplateCreatedBy = { [key: string]: unknown } | null | null;
@@ -15823,6 +16255,11 @@ export namespace Schemas {
        * @nullable
        */
       include_by_default?: boolean | null;
+      /**
+       * Whether this mapping should match all events by default, hiding the event filter UI.
+       * @nullable
+       */
+      use_all_events_by_default?: boolean | null;
       /** Event filters specific to this mapping. */
       filters?: unknown | null;
       /** Input values specific to this mapping. */
@@ -16788,6 +17225,7 @@ export namespace Schemas {
        */
       after?: string | null;
       dateRange: DateRange;
+      filterGroup?: PropertyGroupFilter | null;
       kind?: TraceSpansQueryKind;
       /** @nullable */
       limit?: number | null;
@@ -16796,11 +17234,14 @@ export namespace Schemas {
       /** @nullable */
       offset?: number | null;
       orderBy?: OrderBy3 | null;
+      /**
+       * Prefetch up to this many spans per trace and include them in results
+       * @nullable
+       */
+      prefetchSpans?: number | null;
       response?: TraceSpansQueryResponse | null;
       /** @nullable */
       rootSpans?: boolean | null;
-      /** @nullable */
-      searchTerm?: string | null;
       /** @nullable */
       serviceNames?: string[] | null;
       /** @nullable */
@@ -17102,7 +17543,7 @@ export namespace Schemas {
       /** @nullable */
       filter_test_accounts?: boolean | null;
       /** @nullable */
-      having_predicates?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      having_predicates?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       kind?: RecordingsQueryKind;
       /** @nullable */
       limit?: number | null;
@@ -17117,7 +17558,7 @@ export namespace Schemas {
       /** @nullable */
       person_uuid?: string | null;
       /** @nullable */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       response?: RecordingsQueryResponse | null;
       /** @nullable */
       session_ids?: string[] | null;
@@ -17184,7 +17625,7 @@ export namespace Schemas {
        * Properties configurable in the interface
        * @nullable
        */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       response?: TraceNeighborsQueryResponse | null;
       tags?: QueryLogTags | null;
       /** Timestamp of the current trace to find neighbors for */
@@ -17671,7 +18112,6 @@ export namespace Schemas {
       auth_type: InstallCustomAuthTypeEnum;
       api_key?: string;
       description?: string;
-      oauth_provider_kind?: string;
       install_source?: InstallSourceEnum;
       posthog_code_callback_url?: string;
     }
@@ -17938,6 +18378,181 @@ export namespace Schemas {
     }
 
     /**
+     * * `feedback` - Feedback
+    * `missing_capability` - Missing capability
+     */
+    export type MCPAnalyticsSubmissionKindEnum = typeof MCPAnalyticsSubmissionKindEnum[keyof typeof MCPAnalyticsSubmissionKindEnum];
+
+
+    export const MCPAnalyticsSubmissionKindEnum = {
+      Feedback: 'feedback',
+      MissingCapability: 'missing_capability',
+    } as const;
+
+    export interface MCPAnalyticsSubmission {
+      /** Unique identifier for this submission. */
+      readonly id: string;
+      /** Whether this submission is general feedback or a missing capability report.
+
+    * `feedback` - Feedback
+    * `missing_capability` - Missing capability */
+      readonly kind: MCPAnalyticsSubmissionKindEnum;
+      /** The user's goal in plain language. */
+      goal: string;
+      /** The core feedback or missing capability request. */
+      summary: string;
+      /** Feedback category when present. Empty for submissions that do not use categories. */
+      readonly category: string;
+      /**
+       * Whether the missing capability blocked progress. Null when not provided.
+       * @nullable
+       */
+      readonly blocked: boolean | null;
+      /** The tool the user tried before submitting this feedback, if known. */
+      readonly attempted_tool: string;
+      /** MCP client name captured alongside the submission when available. */
+      readonly mcp_client_name: string;
+      /** MCP client version captured alongside the submission when available. */
+      readonly mcp_client_version: string;
+      /** MCP protocol version captured alongside the submission when available. */
+      readonly mcp_protocol_version: string;
+      /** MCP transport captured alongside the submission when available. */
+      readonly mcp_transport: string;
+      /** MCP session identifier captured alongside the submission when available. */
+      readonly mcp_session_id: string;
+      /** MCP trace identifier captured alongside the submission when available. */
+      readonly mcp_trace_id: string;
+      /** When this submission was created. */
+      readonly created_at: string;
+      /** When this submission was last updated. */
+      readonly updated_at: string;
+    }
+
+    /**
+     * * `results` - Results
+    * `usability` - Usability
+    * `bug` - Bug
+    * `docs` - Docs
+    * `other` - Other
+     */
+    export type MCPFeedbackCreateCategoryEnum = typeof MCPFeedbackCreateCategoryEnum[keyof typeof MCPFeedbackCreateCategoryEnum];
+
+
+    export const MCPFeedbackCreateCategoryEnum = {
+      Results: 'results',
+      Usability: 'usability',
+      Bug: 'bug',
+      Docs: 'docs',
+      Other: 'other',
+    } as const;
+
+    export interface MCPFeedbackCreate {
+      /**
+       * The tool the user tried before leaving feedback, if known.
+       * @maxLength 200
+       */
+      attempted_tool?: string;
+      /**
+       * MCP client name, for example Claude Desktop or Cursor.
+       * @maxLength 200
+       */
+      mcp_client_name?: string;
+      /**
+       * Version string for the MCP client when available.
+       * @maxLength 100
+       */
+      mcp_client_version?: string;
+      /**
+       * MCP protocol version negotiated for the session when available.
+       * @maxLength 50
+       */
+      mcp_protocol_version?: string;
+      /**
+       * Transport used for the MCP session, for example streamable_http or sse.
+       * @maxLength 50
+       */
+      mcp_transport?: string;
+      /**
+       * Stable MCP session identifier when available.
+       * @maxLength 200
+       */
+      mcp_session_id?: string;
+      /**
+       * Trace identifier for the surrounding MCP workflow when available.
+       * @maxLength 200
+       */
+      mcp_trace_id?: string;
+      /**
+       * The user's intended outcome when using MCP.
+       * @maxLength 500
+       */
+      goal: string;
+      /**
+       * Concrete feedback about the MCP experience, tool result, or workflow friction.
+       * @maxLength 5000
+       */
+      feedback: string;
+      /** High-level category for the feedback.
+
+    * `results` - Results
+    * `usability` - Usability
+    * `bug` - Bug
+    * `docs` - Docs
+    * `other` - Other */
+      category?: MCPFeedbackCreateCategoryEnum;
+    }
+
+    export interface MCPMissingCapabilityCreate {
+      /**
+       * The tool the user tried before leaving feedback, if known.
+       * @maxLength 200
+       */
+      attempted_tool?: string;
+      /**
+       * MCP client name, for example Claude Desktop or Cursor.
+       * @maxLength 200
+       */
+      mcp_client_name?: string;
+      /**
+       * Version string for the MCP client when available.
+       * @maxLength 100
+       */
+      mcp_client_version?: string;
+      /**
+       * MCP protocol version negotiated for the session when available.
+       * @maxLength 50
+       */
+      mcp_protocol_version?: string;
+      /**
+       * Transport used for the MCP session, for example streamable_http or sse.
+       * @maxLength 50
+       */
+      mcp_transport?: string;
+      /**
+       * Stable MCP session identifier when available.
+       * @maxLength 200
+       */
+      mcp_session_id?: string;
+      /**
+       * Trace identifier for the surrounding MCP workflow when available.
+       * @maxLength 200
+       */
+      mcp_trace_id?: string;
+      /**
+       * The user's intended outcome when using MCP.
+       * @maxLength 500
+       */
+      goal: string;
+      /**
+       * Capability, tool, or workflow support that is currently missing.
+       * @maxLength 5000
+       */
+      missing_capability: string;
+      /** Whether the missing capability blocked the user's progress. */
+      blocked?: boolean;
+    }
+
+    /**
      * * `api_key` - API Key
     * `oauth` - OAuth
      */
@@ -17967,6 +18582,21 @@ export namespace Schemas {
       readonly created_at: string;
       /** @nullable */
       readonly updated_at: string | null;
+    }
+
+    /**
+     * Per-column bucket function overrides, e.g. {"timestamp": "hour"}
+     * @nullable
+     */
+    export type MaterializationPreviewRequestBucketOverrides = {[key: string]: string} | null | null;
+
+    export interface MaterializationPreviewRequest {
+      version?: number;
+      /**
+       * Per-column bucket function overrides, e.g. {"timestamp": "hour"}
+       * @nullable
+       */
+      bucket_overrides?: MaterializationPreviewRequestBucketOverrides;
     }
 
     /**
@@ -18195,6 +18825,20 @@ export namespace Schemas {
       feature_flag: MinimalFeatureFlag;
       value: unknown;
     }
+
+    /**
+     * * `trusted` - Trusted
+    * `full` - Full
+    * `custom` - Custom
+     */
+    export type NetworkAccessLevelEnum = typeof NetworkAccessLevelEnum[keyof typeof NetworkAccessLevelEnum];
+
+
+    export const NetworkAccessLevelEnum = {
+      Trusted: 'trusted',
+      Full: 'full',
+      Custom: 'custom',
+    } as const;
 
     /**
      * * `table` - Table
@@ -18882,6 +19526,24 @@ export namespace Schemas {
       results: Element[];
     }
 
+    export interface PaginatedEndpointResponseList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: EndpointResponse[];
+    }
+
+    export interface PaginatedEndpointVersionResponseList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: EndpointVersionResponse[];
+    }
+
     export interface PaginatedEnterpriseEventDefinitionList {
       count: number;
       /** @nullable */
@@ -19151,6 +19813,15 @@ export namespace Schemas {
       results: HogFlowMinimal[];
     }
 
+    export interface PaginatedHogFlowScheduleList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: HogFlowSchedule[];
+    }
+
     export interface PaginatedHogFlowTemplateList {
       count: number;
       /** @nullable */
@@ -19248,6 +19919,15 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: LogsView[];
+    }
+
+    export interface PaginatedMCPAnalyticsSubmissionList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: MCPAnalyticsSubmission[];
     }
 
     export interface PaginatedMCPServerInstallationList {
@@ -19383,6 +20063,23 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: OrganizationOAuthApplication[];
+    }
+
+    export interface PauseStateResponse {
+      /**
+       * The timestamp the pipeline is paused until, or null if not paused/not running.
+       * @nullable
+       */
+      paused_until: string | null;
+    }
+
+    export interface PaginatedPauseStateResponseList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: PauseStateResponse[];
     }
 
     /**
@@ -19553,6 +20250,32 @@ export namespace Schemas {
       results: ProjectBackwardCompatBasic[];
     }
 
+    export interface ProjectSecretAPIKey {
+      readonly id: string;
+      /** @maxLength 40 */
+      label: string;
+      readonly value: string;
+      /** @nullable */
+      readonly mask_value: string | null;
+      readonly created_at: string;
+      /** @nullable */
+      readonly created_by: number | null;
+      /** @nullable */
+      readonly last_used_at: string | null;
+      /** @nullable */
+      readonly last_rolled_at: string | null;
+      scopes: string[];
+    }
+
+    export interface PaginatedProjectSecretAPIKeyList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: ProjectSecretAPIKey[];
+    }
+
     export interface QueryTabState {
       readonly id: string;
       /** 
@@ -19626,7 +20349,6 @@ export namespace Schemas {
       url: string;
       description: string;
       auth_type: RecommendedServerAuthTypeEnum;
-      oauth_provider_kind?: string;
     }
 
     export interface PaginatedRecommendedServerList {
@@ -19646,6 +20368,7 @@ export namespace Schemas {
       repo_external_id: number;
       repo_full_name: string;
       baseline_file_paths: RepoBaselineFilePaths;
+      enable_pr_comments: boolean;
       created_at: string;
     }
 
@@ -19756,6 +20479,31 @@ export namespace Schemas {
       results: Run[];
     }
 
+    export interface SandboxEnvironmentList {
+      readonly id: string;
+      /** @maxLength 255 */
+      name: string;
+      network_access_level?: NetworkAccessLevelEnum;
+      /** List of allowed domains for custom network access */
+      allowed_domains?: string[];
+      /** List of repositories this environment applies to (format: org/repo) */
+      repositories?: string[];
+      /** If true, only the creator can see this environment. Otherwise visible to whole team. */
+      private?: boolean;
+      readonly created_by: UserBasic;
+      readonly created_at: string;
+      readonly updated_at: string;
+    }
+
+    export interface PaginatedSandboxEnvironmentListList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: SandboxEnvironmentList[];
+    }
+
     /**
      * * `daily` - daily
     * `weekly` - weekly
@@ -19775,10 +20523,18 @@ export namespace Schemas {
     export interface ScheduledChange {
       readonly id: number;
       readonly team_id: number;
-      /** @maxLength 200 */
+      /**
+       * The ID of the record to modify (e.g. the feature flag ID).
+       * @maxLength 200
+       */
       record_id: string;
+      /** The type of record to modify. Currently only "FeatureFlag" is supported.
+
+    * `FeatureFlag` - feature flag */
       model_name: ModelNameEnum;
-      payload?: unknown;
+      /** The change to apply. Must include an 'operation' key and a 'value' key. Supported operations: 'update_status' (value: true/false to enable/disable the flag), 'add_release_condition' (value: object with 'groups', 'payloads', and 'multivariate' keys), 'update_variants' (value: object with 'variants' and 'payloads' keys). */
+      payload: unknown;
+      /** ISO 8601 datetime when the change should be applied (e.g. '2025-06-01T14:00:00Z'). */
       scheduled_at: string;
       /** @nullable */
       executed_at?: string | null;
@@ -19790,11 +20546,26 @@ export namespace Schemas {
       readonly created_at: string;
       readonly created_by: UserBasic;
       readonly updated_at: string;
+      /** Whether this schedule repeats. Only the 'update_status' operation supports recurring schedules. */
       is_recurring?: boolean;
-      recurrence_interval?: RecurrenceIntervalEnum | BlankEnum | NullEnum | null;
+      /** How often the schedule repeats. Required when is_recurring is true. One of: daily, weekly, monthly, yearly.
+
+    * `daily` - daily
+    * `weekly` - weekly
+    * `monthly` - monthly
+    * `yearly` - yearly */
+      recurrence_interval?: RecurrenceIntervalEnum | NullEnum | null;
+      /**
+       * @maxLength 100
+       * @nullable
+       */
+      cron_expression?: string | null;
       /** @nullable */
       readonly last_executed_at: string | null;
-      /** @nullable */
+      /**
+       * Optional ISO 8601 datetime after which a recurring schedule stops executing.
+       * @nullable
+       */
       end_date?: string | null;
     }
 
@@ -20743,6 +21514,8 @@ export namespace Schemas {
       readonly email_subject: string | null;
       /** @nullable */
       readonly email_from: string | null;
+      /** @nullable */
+      readonly email_to: string | null;
       readonly person: TicketPerson | null;
       tags?: unknown[];
     }
@@ -21173,7 +21946,7 @@ export namespace Schemas {
     * `daily` - daily
     * `weekly` - weekly
     * `monthly` - monthly */
-      calculation_interval?: CalculationIntervalEnum | NullEnum | null;
+      calculation_interval?: CalculationIntervalEnum;
       /**
        * Snooze the alert until this time. Pass a relative date string (e.g. '2h', '1d') or null to unsnooze.
        * @nullable
@@ -21493,7 +22266,7 @@ export namespace Schemas {
     * `retention` - Retention
     * `churn` - Churn
     * `reactivation` - Reactivation */
-      category?: CategoryEnum;
+      category?: CoreEventCategoryEnum;
       /** Filter configuration - event, action, or data warehouse node */
       filter?: unknown;
       readonly created_at?: string;
@@ -21697,6 +22470,16 @@ export namespace Schemas {
       readonly last_run_at?: string | null;
       /** @nullable */
       readonly managed_viewset_kind?: string | null;
+      /**
+       * Optional folder ID used to organize this view in the SQL editor sidebar.
+       * @nullable
+       */
+      folder_id?: string | null;
+      /**
+       * Folder name used to organize this view in the SQL editor sidebar.
+       * @nullable
+       */
+      readonly folder_name?: string | null;
       /** @nullable */
       readonly latest_error?: string | null;
       /**
@@ -21745,6 +22528,18 @@ export namespace Schemas {
        * @nullable
        */
       edited_history_id?: string | null;
+    }
+
+    export interface PatchedDataWarehouseSavedQueryFolder {
+      readonly id?: string;
+      /**
+       * Display name for the folder used to organize saved queries in the SQL editor sidebar.
+       * @maxLength 128
+       */
+      name?: string;
+      readonly created_at?: string;
+      readonly created_by?: UserBasic;
+      readonly view_count?: number;
     }
 
     export interface PatchedDataset {
@@ -22210,6 +23005,7 @@ export namespace Schemas {
       primary_metrics_ordered_uuids?: unknown | null;
       secondary_metrics_ordered_uuids?: unknown | null;
       exposure_preaggregation_enabled?: boolean;
+      only_count_matured_users?: boolean;
       readonly status?: ExperimentStatusEnum | NullEnum | null;
       /**
        * The effective access level the user has for this object
@@ -23118,6 +23914,20 @@ export namespace Schemas {
       readonly scim_bearer_token?: string | null;
     }
 
+    /**
+     * Serializer for organization-level integrations.
+     */
+    export interface PatchedOrganizationIntegration {
+      readonly id?: string;
+      readonly kind?: OrganizationIntegrationKindEnum;
+      /** @nullable */
+      readonly integration_id?: string | null;
+      readonly config?: unknown;
+      readonly created_at?: string;
+      readonly updated_at?: string;
+      readonly created_by?: UserBasic;
+    }
+
     export interface PatchedOrganizationMember {
       readonly id?: string;
       readonly user?: UserBasic;
@@ -23401,6 +24211,23 @@ export namespace Schemas {
       readonly available_setup_task_ids?: readonly AvailableSetupTaskIdsEnum[];
     }
 
+    export interface PatchedProjectSecretAPIKey {
+      readonly id?: string;
+      /** @maxLength 40 */
+      label?: string;
+      readonly value?: string;
+      /** @nullable */
+      readonly mask_value?: string | null;
+      readonly created_at?: string;
+      /** @nullable */
+      readonly created_by?: number | null;
+      /** @nullable */
+      readonly last_used_at?: string | null;
+      /** @nullable */
+      readonly last_rolled_at?: string | null;
+      scopes?: string[];
+    }
+
     export interface PatchedQueryTabState {
       readonly id?: string;
       /** 
@@ -23456,13 +24283,45 @@ export namespace Schemas {
       readonly is_default?: boolean;
     }
 
+    export interface PatchedSandboxEnvironment {
+      readonly id?: string;
+      /** @maxLength 255 */
+      name?: string;
+      network_access_level?: NetworkAccessLevelEnum;
+      /** List of allowed domains for custom network access */
+      allowed_domains?: string[];
+      /** Whether to include default trusted domains (GitHub, npm, PyPI) */
+      include_default_domains?: boolean;
+      /** List of repositories this environment applies to (format: org/repo) */
+      repositories?: string[];
+      /** Encrypted environment variables (write-only, never returned in responses) */
+      environment_variables?: unknown;
+      /** Whether this environment has any environment variables set */
+      readonly has_environment_variables?: boolean;
+      /** If true, only the creator can see this environment. Otherwise visible to whole team. */
+      private?: boolean;
+      /** Computed domain allowlist based on network_access_level and allowed_domains */
+      readonly effective_domains?: readonly string[];
+      readonly created_by?: UserBasic;
+      readonly created_at?: string;
+      readonly updated_at?: string;
+    }
+
     export interface PatchedScheduledChange {
       readonly id?: number;
       readonly team_id?: number;
-      /** @maxLength 200 */
+      /**
+       * The ID of the record to modify (e.g. the feature flag ID).
+       * @maxLength 200
+       */
       record_id?: string;
+      /** The type of record to modify. Currently only "FeatureFlag" is supported.
+
+    * `FeatureFlag` - feature flag */
       model_name?: ModelNameEnum;
+      /** The change to apply. Must include an 'operation' key and a 'value' key. Supported operations: 'update_status' (value: true/false to enable/disable the flag), 'add_release_condition' (value: object with 'groups', 'payloads', and 'multivariate' keys), 'update_variants' (value: object with 'variants' and 'payloads' keys). */
       payload?: unknown;
+      /** ISO 8601 datetime when the change should be applied (e.g. '2025-06-01T14:00:00Z'). */
       scheduled_at?: string;
       /** @nullable */
       executed_at?: string | null;
@@ -23474,11 +24333,26 @@ export namespace Schemas {
       readonly created_at?: string;
       readonly created_by?: UserBasic;
       readonly updated_at?: string;
+      /** Whether this schedule repeats. Only the 'update_status' operation supports recurring schedules. */
       is_recurring?: boolean;
-      recurrence_interval?: RecurrenceIntervalEnum | BlankEnum | NullEnum | null;
+      /** How often the schedule repeats. Required when is_recurring is true. One of: daily, weekly, monthly, yearly.
+
+    * `daily` - daily
+    * `weekly` - weekly
+    * `monthly` - monthly
+    * `yearly` - yearly */
+      recurrence_interval?: RecurrenceIntervalEnum | NullEnum | null;
+      /**
+       * @maxLength 100
+       * @nullable
+       */
+      cron_expression?: string | null;
       /** @nullable */
       readonly last_executed_at?: string | null;
-      /** @nullable */
+      /**
+       * Optional ISO 8601 datetime after which a recurring schedule stops executing.
+       * @nullable
+       */
       end_date?: string | null;
     }
 
@@ -24395,6 +25269,8 @@ export namespace Schemas {
       github_integration?: number | null;
       /** JSON schema for the task. This is used to validate the output of the task. */
       json_schema?: unknown | null;
+      /** If true, this task is for internal use and should not be exposed to end users. */
+      internal?: boolean;
       /**
        * Latest run details for this task
        * @nullable
@@ -24722,6 +25598,8 @@ export namespace Schemas {
       readonly email_subject?: string | null;
       /** @nullable */
       readonly email_from?: string | null;
+      /** @nullable */
+      readonly email_to?: string | null;
       readonly person?: TicketPerson | null;
       tags?: unknown[];
     }
@@ -24781,6 +25659,8 @@ export namespace Schemas {
     export interface PatchedUpdateRepoRequestInput {
       /** @nullable */
       baseline_file_paths?: PatchedUpdateRepoRequestInputBaselineFilePaths;
+      /** @nullable */
+      enable_pr_comments?: boolean | null;
     }
 
     export type PatchedUserNotificationSettings = {[key: string]: unknown};
@@ -24926,6 +25806,18 @@ export namespace Schemas {
                 },
             } */
       variants?: unknown;
+    }
+
+    export interface PauseResponse {
+      /** Always 'paused'. */
+      status: string;
+      /** The timestamp the pipeline is paused until. */
+      paused_until: string;
+    }
+
+    export interface PauseUntilRequest {
+      /** Pause the grouping pipeline until this timestamp (ISO 8601). */
+      timestamp: string;
     }
 
     export interface PersonBulkDeleteRequest {
@@ -25264,7 +26156,7 @@ export namespace Schemas {
       /** Value of your filter. For example `test@example.com` or `https://example.com/test/`. Can be an array for an OR query, like `["test@example.com","ok@example.com"]` */
       value: string | number | boolean | (string | number)[];
       operator?: PropertyItemOperatorEnum | BlankEnum | NullEnum | null;
-      type?: Type19aEnum | BlankEnum;
+      type?: Type3f6Enum | BlankEnum;
     }
 
     export interface Property {
@@ -28250,6 +29142,30 @@ export namespace Schemas {
       stale: number;
     }
 
+    export interface SandboxEnvironment {
+      readonly id: string;
+      /** @maxLength 255 */
+      name: string;
+      network_access_level?: NetworkAccessLevelEnum;
+      /** List of allowed domains for custom network access */
+      allowed_domains?: string[];
+      /** Whether to include default trusted domains (GitHub, npm, PyPI) */
+      include_default_domains?: boolean;
+      /** List of repositories this environment applies to (format: org/repo) */
+      repositories?: string[];
+      /** Encrypted environment variables (write-only, never returned in responses) */
+      environment_variables?: unknown;
+      /** Whether this environment has any environment variables set */
+      readonly has_environment_variables: boolean;
+      /** If true, only the creator can see this environment. Otherwise visible to whole team. */
+      private?: boolean;
+      /** Computed domain allowlist based on network_access_level and allowed_domains */
+      readonly effective_domains: readonly string[];
+      readonly created_by: UserBasic;
+      readonly created_at: string;
+      readonly updated_at: string;
+    }
+
     export interface ScoreDefinitionCreate {
       /**
        * Human-readable scorer name.
@@ -28363,6 +29279,24 @@ export namespace Schemas {
       readonly share_passwords: readonly SharePassword[];
     }
 
+    export interface ShipVariant {
+      /** The conclusion of the experiment.
+
+    * `won` - won
+    * `lost` - lost
+    * `inconclusive` - inconclusive
+    * `stopped_early` - stopped_early
+    * `invalid` - invalid */
+      conclusion?: ConclusionF33Enum | NullEnum | null;
+      /**
+       * Optional comment about the experiment conclusion.
+       * @nullable
+       */
+      conclusion_comment?: string | null;
+      /** The key of the variant to ship to 100% of users. */
+      variant_key: string;
+    }
+
     export interface SummaryBullet {
       text: string;
       line_refs: string;
@@ -28401,18 +29335,18 @@ export namespace Schemas {
     } as const;
 
     export interface SummarizeRequest {
-      /** Type of entity to summarize
+      /** Type of entity to summarize. Inferred automatically when using trace_id or generation_id.
 
     * `trace` - trace
     * `event` - event */
-      summarize_type: SummarizeTypeEnum;
+      summarize_type?: SummarizeTypeEnum;
       /** Summary detail level: 'minimal' for 3-5 points, 'detailed' for 5-10 points
 
     * `minimal` - minimal
     * `detailed` - detailed */
       mode?: Mode02aEnum;
-      /** Data to summarize. For traces: {trace, hierarchy}. For events: {event}. */
-      data: unknown;
+      /** Data to summarize. For traces: {trace, hierarchy}. For events: {event}. Not required when using trace_id or generation_id. */
+      data?: unknown;
       /** Force regenerate summary, bypassing cache */
       force_refresh?: boolean;
       /**
@@ -28420,6 +29354,20 @@ export namespace Schemas {
        * @nullable
        */
       model?: string | null;
+      /** Trace ID to summarize. The backend fetches the trace data automatically. Requires date_from for efficient lookup. */
+      trace_id?: string;
+      /** Generation event UUID to summarize. The backend fetches the event data automatically. Requires date_from for efficient lookup. */
+      generation_id?: string;
+      /**
+       * Start of date range for ID-based lookup (e.g. '-7d' or '2026-01-01'). Defaults to -30d.
+       * @nullable
+       */
+      date_from?: string | null;
+      /**
+       * End of date range for ID-based lookup. Defaults to now.
+       * @nullable
+       */
+      date_to?: string | null;
     }
 
     export interface SummarizeResponse {
@@ -28429,6 +29377,23 @@ export namespace Schemas {
       text_repr: string;
       /** Metadata about the summarization */
       metadata?: unknown;
+    }
+
+    /**
+     * Event counts keyed by event name (survey shown, survey dismissed, survey sent).
+     */
+    export type SurveyGlobalStatsResponseStats = {[key: string]: unknown};
+
+    /**
+     * Calculated response and dismissal rates.
+     */
+    export type SurveyGlobalStatsResponseRates = {[key: string]: unknown};
+
+    export interface SurveyGlobalStatsResponse {
+      /** Event counts keyed by event name (survey shown, survey dismissed, survey sent). */
+      stats: SurveyGlobalStatsResponseStats;
+      /** Calculated response and dismissal rates. */
+      rates: SurveyGlobalStatsResponseRates;
     }
 
     export interface SurveySerializerCreateUpdateOnly {
@@ -28858,6 +29823,35 @@ export namespace Schemas {
       form_content?: unknown | null;
     }
 
+    /**
+     * Event counts keyed by event name (survey shown, survey dismissed, survey sent).
+     */
+    export type SurveyStatsResponseStats = {[key: string]: unknown};
+
+    /**
+     * Calculated response and dismissal rates.
+     */
+    export type SurveyStatsResponseRates = {[key: string]: unknown};
+
+    export interface SurveyStatsResponse {
+      /** The survey ID these stats belong to. */
+      survey_id: string;
+      /**
+       * When the survey started collecting responses.
+       * @nullable
+       */
+      start_date: string | null;
+      /**
+       * When the survey stopped collecting responses.
+       * @nullable
+       */
+      end_date: string | null;
+      /** Event counts keyed by event name (survey shown, survey dismissed, survey sent). */
+      stats: SurveyStatsResponseStats;
+      /** Calculated response and dismissal rates. */
+      rates: SurveyStatsResponseRates;
+    }
+
     export type TaskRunAppendLogRequestEntriesItem = {[key: string]: unknown};
 
     export interface TaskRunAppendLogRequest {
@@ -29014,6 +30008,8 @@ export namespace Schemas {
       resume_from_run_id?: string;
       /** Follow-up user message to include in the resumed run's prompt. */
       pending_user_message?: string;
+      /** Optional sandbox environment to apply for this cloud run. */
+      sandbox_environment_id?: string;
     }
 
     export interface TaskRunRelayMessageRequest {
@@ -29299,6 +30295,13 @@ export namespace Schemas {
       queue_id?: string | null;
     }
 
+    export interface UnpauseResponse {
+      /** Always 'unpaused'. */
+      status: string;
+      /** Whether the workflow was actually paused at the time of the call. */
+      was_paused: boolean;
+    }
+
     /**
      * The release condition to evaluate
      */
@@ -29330,33 +30333,6 @@ export namespace Schemas {
       source_table_name: string;
       /** @maxLength 255 */
       source_table_key: string;
-    }
-
-    export interface WebAnalyticsBreakdownResponse {
-      /**
-       * URL for next page of results
-       * @nullable
-       */
-      next?: string | null;
-      /** Array of breakdown items */
-      results: unknown[];
-    }
-
-    export interface WebAnalyticsOverviewResponse {
-      /** Unique visitors */
-      visitors: number;
-      /** Total page views */
-      views: number;
-      /** Total sessions */
-      sessions: number;
-      /**
-       * Bounce rate
-       * @minimum 0
-       * @maximum 1
-       */
-      bounce_rate: number;
-      /** Average session duration in seconds */
-      session_duration: number;
     }
 
     export type EnvironmentsAlertsListParams = {
@@ -29522,6 +30498,18 @@ export namespace Schemas {
       Txt: 'txt',
     } as const;
 
+    export type EnvironmentsDashboardsGenerateMetadataCreateParams = {
+    format?: EnvironmentsDashboardsGenerateMetadataCreateFormat;
+    };
+
+    export type EnvironmentsDashboardsGenerateMetadataCreateFormat = typeof EnvironmentsDashboardsGenerateMetadataCreateFormat[keyof typeof EnvironmentsDashboardsGenerateMetadataCreateFormat];
+
+
+    export const EnvironmentsDashboardsGenerateMetadataCreateFormat = {
+      Json: 'json',
+      Txt: 'txt',
+    } as const;
+
     export type EnvironmentsDashboardsMoveTilePartialUpdateParams = {
     format?: EnvironmentsDashboardsMoveTilePartialUpdateFormat;
     };
@@ -29664,6 +30652,32 @@ export namespace Schemas {
     };
 
     export type EnvironmentsElementsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type EnvironmentsEndpointsListParams = {
+    created_by?: number;
+    is_active?: boolean;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type EnvironmentsEndpointsVersionsListParams = {
+    created_by?: number;
+    is_active?: boolean;
     /**
      * Number of results to return per page.
      */
@@ -29925,6 +30939,36 @@ export namespace Schemas {
     };
 
     export type EnvironmentsHogFlowsListParams = {
+    created_at?: string;
+    created_by?: number;
+    id?: string;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    updated_at?: string;
+    };
+
+    export type EnvironmentsHogFlowsSchedulesListParams = {
+    created_at?: string;
+    created_by?: number;
+    id?: string;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    updated_at?: string;
+    };
+
+    export type EnvironmentsHogFlowsSchedulesCreateParams = {
     created_at?: string;
     created_by?: number;
     id?: string;
@@ -30439,6 +31483,18 @@ export namespace Schemas {
       Json: 'json',
     } as const;
 
+    export type EnvironmentsPersonsBatchByUuidsCreateParams = {
+    format?: EnvironmentsPersonsBatchByUuidsCreateFormat;
+    };
+
+    export type EnvironmentsPersonsBatchByUuidsCreateFormat = typeof EnvironmentsPersonsBatchByUuidsCreateFormat[keyof typeof EnvironmentsPersonsBatchByUuidsCreateFormat];
+
+
+    export const EnvironmentsPersonsBatchByUuidsCreateFormat = {
+      Csv: 'csv',
+      Json: 'json',
+    } as const;
+
     export type EnvironmentsPersonsBulkDeleteCreateParams = {
     format?: EnvironmentsPersonsBulkDeleteCreateFormat;
     };
@@ -30616,6 +31672,17 @@ export namespace Schemas {
     } as const;
 
     export type EnvironmentsPluginConfigsLogsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type EnvironmentsProjectSecretApiKeysListParams = {
     /**
      * Number of results to return per page.
      */
@@ -31264,6 +32331,28 @@ export namespace Schemas {
     offset?: number;
     };
 
+    export type McpAnalyticsFeedbackListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type McpAnalyticsMissingCapabilitiesListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
     export type McpServerInstallationsListParams = {
     /**
      * Number of results to return per page.
@@ -31596,6 +32685,18 @@ export namespace Schemas {
       Json: 'json',
     } as const;
 
+    export type ActionsReferencesListParams = {
+    format?: ActionsReferencesListFormat;
+    };
+
+    export type ActionsReferencesListFormat = typeof ActionsReferencesListFormat[keyof typeof ActionsReferencesListFormat];
+
+
+    export const ActionsReferencesListFormat = {
+      Csv: 'csv',
+      Json: 'json',
+    } as const;
+
     export type ActivityLogListParams = {
     /**
      * Filter by the ID of the affected resource.
@@ -31657,6 +32758,7 @@ export namespace Schemas {
     * `TaggedItem` - TaggedItem
     * `Subscription` - Subscription
     * `PersonalAPIKey` - PersonalAPIKey
+    * `ProjectSecretAPIKey` - ProjectSecretAPIKey
     * `User` - User
     * `Action` - Action
     * `AlertConfiguration` - AlertConfiguration
@@ -31729,6 +32831,7 @@ export namespace Schemas {
       TaggedItem: 'TaggedItem',
       Subscription: 'Subscription',
       PersonalAPIKey: 'PersonalAPIKey',
+      ProjectSecretAPIKey: 'ProjectSecretAPIKey',
       User: 'User',
       Action: 'Action',
       AlertConfiguration: 'AlertConfiguration',
@@ -31787,6 +32890,7 @@ export namespace Schemas {
     * `TaggedItem` - TaggedItem
     * `Subscription` - Subscription
     * `PersonalAPIKey` - PersonalAPIKey
+    * `ProjectSecretAPIKey` - ProjectSecretAPIKey
     * `User` - User
     * `Action` - Action
     * `AlertConfiguration` - AlertConfiguration
@@ -31847,6 +32951,7 @@ export namespace Schemas {
       TaggedItem: 'TaggedItem',
       Subscription: 'Subscription',
       PersonalAPIKey: 'PersonalAPIKey',
+      ProjectSecretAPIKey: 'ProjectSecretAPIKey',
       User: 'User',
       Action: 'Action',
       AlertConfiguration: 'AlertConfiguration',
@@ -31980,6 +33085,10 @@ export namespace Schemas {
 
     export type DashboardTemplatesListParams = {
     /**
+     * Omit for all templates. When set, filter by featured flag; parsed with str_to_bool (same as other API query booleans).
+     */
+    is_featured?: boolean;
+    /**
      * Number of results to return per page.
      */
     limit?: number;
@@ -31987,6 +33096,10 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    /**
+     * Optional. Sort templates by name when not using `search`. Omit for database default order. Ignored when `search` is set (results stay relevance-ranked). Use `template_name` for A–Z or `-template_name` for Z–A.
+     */
+    ordering?: string;
     };
 
     export type DashboardsListParams = {
@@ -32089,6 +33202,18 @@ export namespace Schemas {
 
 
     export const DashboardsCopyTileCreateFormat = {
+      Json: 'json',
+      Txt: 'txt',
+    } as const;
+
+    export type DashboardsGenerateMetadataCreateParams = {
+    format?: DashboardsGenerateMetadataCreateFormat;
+    };
+
+    export type DashboardsGenerateMetadataCreateFormat = typeof DashboardsGenerateMetadataCreateFormat[keyof typeof DashboardsGenerateMetadataCreateFormat];
+
+
+    export const DashboardsGenerateMetadataCreateFormat = {
       Json: 'json',
       Txt: 'txt',
     } as const;
@@ -32246,6 +33371,32 @@ export namespace Schemas {
     };
 
     export type ElementsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type EndpointsListParams = {
+    created_by?: number;
+    is_active?: boolean;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type EndpointsVersionsListParams = {
+    created_by?: number;
+    is_active?: boolean;
     /**
      * Number of results to return per page.
      */
@@ -32766,6 +33917,36 @@ export namespace Schemas {
     };
 
     export type HogFlowsListParams = {
+    created_at?: string;
+    created_by?: number;
+    id?: string;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    updated_at?: string;
+    };
+
+    export type HogFlowsSchedulesListParams = {
+    created_at?: string;
+    created_by?: number;
+    id?: string;
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    updated_at?: string;
+    };
+
+    export type HogFlowsSchedulesCreateParams = {
     created_at?: string;
     created_by?: number;
     id?: string;
@@ -33426,6 +34607,18 @@ export namespace Schemas {
       Json: 'json',
     } as const;
 
+    export type PersonsBatchByUuidsCreateParams = {
+    format?: PersonsBatchByUuidsCreateFormat;
+    };
+
+    export type PersonsBatchByUuidsCreateFormat = typeof PersonsBatchByUuidsCreateFormat[keyof typeof PersonsBatchByUuidsCreateFormat];
+
+
+    export const PersonsBatchByUuidsCreateFormat = {
+      Csv: 'csv',
+      Json: 'json',
+    } as const;
+
     export type PersonsBulkDeleteCreateParams = {
     format?: PersonsBulkDeleteCreateFormat;
     };
@@ -33628,6 +34821,17 @@ export namespace Schemas {
     search?: string;
     };
 
+    export type ProjectSecretApiKeysListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
     export type PropertyDefinitionsListParams = {
     /**
      * If sent, response value will have `is_seen_on_filtered_events` populated. JSON-encoded
@@ -33693,6 +34897,11 @@ export namespace Schemas {
      * @minLength 1
      */
     type?: PropertyDefinitionsListType;
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     * @nullable
+     */
+    verified?: boolean | null;
     };
 
     export type PropertyDefinitionsListType = typeof PropertyDefinitionsListType[keyof typeof PropertyDefinitionsListType];
@@ -33721,6 +34930,17 @@ export namespace Schemas {
     offset?: number;
     };
 
+    export type SandboxListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
     export type SavedListParams = {
     /**
      * Number of results to return per page.
@@ -33738,9 +34958,17 @@ export namespace Schemas {
      */
     limit?: number;
     /**
+     * Filter by model type. Use "FeatureFlag" to see feature flag schedules.
+     */
+    model_name?: string;
+    /**
      * The initial index from which to return the results.
      */
     offset?: number;
+    /**
+     * Filter by the ID of a specific feature flag.
+     */
+    record_id?: string;
     };
 
     export type SchemaPropertyGroupsListParams = {
@@ -33779,6 +35007,17 @@ export namespace Schemas {
     };
 
     export type SessionRecordingsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type SignalProcessingListParams = {
     /**
      * Number of results to return per page.
      */
@@ -33865,6 +35104,10 @@ export namespace Schemas {
      * Filter by creator user ID
      */
     created_by?: number;
+    /**
+     * Filter by internal flag. Defaults to excluding internal tasks when not specified.
+     */
+    internal?: boolean;
     /**
      * Number of results to return per page.
      */
@@ -34071,109 +35314,6 @@ export namespace Schemas {
      * A search term.
      */
     search?: string;
-    };
-
-    export type WebAnalyticsBreakdownRetrieveParams = {
-    /**
-     * Apply URL path cleaning
-     */
-    apply_path_cleaning?: boolean;
-    /**
-     * Property to break down by
-
-    * `DeviceType` - DeviceType
-    * `Browser` - Browser
-    * `OS` - OS
-    * `Viewport` - Viewport
-    * `InitialReferringDomain` - InitialReferringDomain
-    * `InitialUTMSource` - InitialUTMSource
-    * `InitialUTMMedium` - InitialUTMMedium
-    * `InitialUTMCampaign` - InitialUTMCampaign
-    * `InitialUTMTerm` - InitialUTMTerm
-    * `InitialUTMContent` - InitialUTMContent
-    * `Country` - Country
-    * `Region` - Region
-    * `City` - City
-    * `InitialPage` - InitialPage
-    * `Page` - Page
-    * `ExitPage` - ExitPage
-    * `InitialChannelType` - InitialChannelType
-     * @minLength 1
-     */
-    breakdown_by: WebAnalyticsBreakdownRetrieveBreakdownBy;
-    /**
-     * Start date for the query (format: YYYY-MM-DD)
-     */
-    date_from: string;
-    /**
-     * End date for the query (format: YYYY-MM-DD)
-     */
-    date_to: string;
-    /**
-     * Filter out test accounts
-     */
-    filter_test_accounts?: boolean;
-    /**
-     * Host to filter by (e.g. example.com)
-     * @minLength 1
-     * @nullable
-     */
-    host?: string | null;
-    /**
-     * Number of results to return
-     * @minimum 1
-     * @maximum 1000
-     */
-    limit?: number;
-    /**
-     * Number of results to skip
-     * @minimum 0
-     */
-    offset?: number;
-    };
-
-    export type WebAnalyticsBreakdownRetrieveBreakdownBy = typeof WebAnalyticsBreakdownRetrieveBreakdownBy[keyof typeof WebAnalyticsBreakdownRetrieveBreakdownBy];
-
-
-    export const WebAnalyticsBreakdownRetrieveBreakdownBy = {
-      DeviceType: 'DeviceType',
-      Browser: 'Browser',
-      Os: 'OS',
-      Viewport: 'Viewport',
-      InitialReferringDomain: 'InitialReferringDomain',
-      InitialUTMSource: 'InitialUTMSource',
-      InitialUTMMedium: 'InitialUTMMedium',
-      InitialUTMCampaign: 'InitialUTMCampaign',
-      InitialUTMTerm: 'InitialUTMTerm',
-      InitialUTMContent: 'InitialUTMContent',
-      Country: 'Country',
-      Region: 'Region',
-      City: 'City',
-      InitialPage: 'InitialPage',
-      Page: 'Page',
-      ExitPage: 'ExitPage',
-      InitialChannelType: 'InitialChannelType',
-    } as const;
-
-    export type WebAnalyticsOverviewRetrieveParams = {
-    /**
-     * Start date for the query (format: YYYY-MM-DD)
-     */
-    date_from: string;
-    /**
-     * End date for the query (format: YYYY-MM-DD)
-     */
-    date_to: string;
-    /**
-     * Filter out test accounts
-     */
-    filter_test_accounts?: boolean;
-    /**
-     * Host to filter by (e.g. example.com)
-     * @minLength 1
-     * @nullable
-     */
-    host?: string | null;
     };
 
     export type WebExperimentsListParams = {

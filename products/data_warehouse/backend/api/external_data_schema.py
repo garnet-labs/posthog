@@ -142,6 +142,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             and sync_type != ExternalDataSchema.SyncType.FULL_REFRESH
             and sync_type != ExternalDataSchema.SyncType.INCREMENTAL
             and sync_type != ExternalDataSchema.SyncType.APPEND
+            and sync_type != ExternalDataSchema.SyncType.WEBHOOK
         ):
             raise ValidationError("Invalid sync type")
 
@@ -151,7 +152,11 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
 
         trigger_refresh = False
         # Update the validated_data with incremental fields
-        if sync_type == ExternalDataSchema.SyncType.INCREMENTAL or sync_type == ExternalDataSchema.SyncType.APPEND:
+        if sync_type in (
+            ExternalDataSchema.SyncType.INCREMENTAL,
+            ExternalDataSchema.SyncType.APPEND,
+            ExternalDataSchema.SyncType.WEBHOOK,
+        ):
             incremental_field_changed = (
                 instance.sync_type_config.get("incremental_field") != data.get("incremental_field")
                 or instance.sync_type_config.get("incremental_field_last_value") is None
@@ -249,7 +254,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
 
         updated_instance = super().update(instance, validated_data)
 
-        if sync_type == ExternalDataSchema.SyncType.INCREMENTAL:
+        if sync_type == ExternalDataSchema.SyncType.WEBHOOK:
             self._maybe_create_webhook(updated_instance)
 
         return updated_instance
@@ -389,6 +394,33 @@ class ExternalDataSchemaViewset(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
         instance.status = ExternalDataSchema.Status.RUNNING
         instance.save()
+        return Response(status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def cancel(self, request: Request, *args: Any, **kwargs: Any):
+        instance: ExternalDataSchema = self.get_object()
+
+        latest_running_job = (
+            ExternalDataJob.objects.filter(schema_id=instance.pk, team_id=instance.team_id)
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not latest_running_job or latest_running_job.status != "Running" or not latest_running_job.workflow_id:
+            return Response(
+                status=status.HTTP_400_BAD_REQUEST,
+                data={"detail": "No running sync to cancel."},
+            )
+
+        try:
+            cancel_external_data_workflow(latest_running_job.workflow_id)
+        except temporalio.service.RPCError as e:
+            logger.exception(f"Could not cancel external data workflow for schema {instance.id}", exc_info=e)
+            return Response(
+                status=status.HTTP_400_BAD_REQUEST,
+                data={"detail": "Could not find workflow to cancel. The sync may have already finished."},
+            )
+
         return Response(status=status.HTTP_200_OK)
 
     @action(methods=["DELETE"], detail=True)
