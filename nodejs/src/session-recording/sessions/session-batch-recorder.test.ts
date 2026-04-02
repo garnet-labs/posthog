@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon'
 import { validate as uuidValidate } from 'uuid'
 
+import { SessionFeatureStore } from '../../session-replay/shared/features/session-feature-store'
 import { SessionMetadataStore } from '../../session-replay/shared/metadata/session-metadata-store'
 import { createMockEncryptor, createMockKeyStore } from '../../session-replay/shared/test-helpers'
 import { KeyStore, RecordingEncryptor } from '../../session-replay/shared/types'
@@ -121,6 +122,45 @@ jest.mock('./session-console-log-recorder', () => ({
     })),
 }))
 
+jest.mock('./session-feature-recorder', () => ({
+    SessionFeatureRecorder: jest.fn().mockImplementation((_sessionId, _teamId, _batchId) => ({
+        recordMessage: jest.fn().mockResolvedValue(undefined),
+        end: jest.fn().mockResolvedValue({
+            startDateTime: null,
+            endDateTime: null,
+            eventCount: 0,
+            mousePositionCount: 0,
+            mouseSumX: 0,
+            mouseSumXSquared: 0,
+            mouseSumY: 0,
+            mouseSumYSquared: 0,
+            mouseDistanceTraveled: 0,
+            mouseDirectionChangeCount: 0,
+            mouseVelocitySum: 0,
+            mouseVelocitySumOfSquares: 0,
+            mouseVelocityCount: 0,
+            scrollEventCount: 0,
+            totalScrollMagnitude: 0,
+            scrollDirectionReversalCount: 0,
+            rapidScrollReversalCount: 0,
+            clickCount: 0,
+            keypressCount: 0,
+            mouseActivityCount: 0,
+            rageClickCount: 0,
+            deadClickCount: 0,
+            interActionGapCount: 0,
+            interActionGapSumMs: 0,
+            interActionGapSumOfSquaresMs: 0,
+            maxIdleGapMs: 0,
+            quickBackCount: 0,
+            pageVisitCount: 0,
+            pageRevisitCount: 0,
+            consoleErrorCount: 0,
+            consoleErrorAfterClickCount: 0,
+        }),
+    })),
+}))
+
 jest.setTimeout(1000)
 
 jest.mock('./metrics', () => ({
@@ -153,6 +193,7 @@ describe('SessionBatchRecorder', () => {
     let mockStorage: jest.Mocked<SessionBatchFileStorage>
     let mockMetadataStore: jest.Mocked<SessionMetadataStore>
     let mockConsoleLogStore: jest.Mocked<SessionConsoleLogStore>
+    let mockFeatureStore: jest.Mocked<SessionFeatureStore>
     let mockSessionTracker: jest.Mocked<SessionTracker>
     let mockSessionFilter: jest.Mocked<SessionFilter>
     let mockKeyStore: jest.Mocked<KeyStore>
@@ -189,6 +230,10 @@ describe('SessionBatchRecorder', () => {
             flush: jest.fn().mockResolvedValue(undefined),
         } as unknown as jest.Mocked<SessionConsoleLogStore>
 
+        mockFeatureStore = {
+            storeSessionFeatures: jest.fn().mockResolvedValue(undefined),
+        } as unknown as jest.Mocked<SessionFeatureStore>
+
         mockStorage = {
             newBatch: jest.fn().mockReturnValue(mockWriter),
         } as unknown as jest.Mocked<SessionBatchFileStorage>
@@ -210,6 +255,7 @@ describe('SessionBatchRecorder', () => {
             mockStorage,
             mockMetadataStore,
             mockConsoleLogStore,
+            mockFeatureStore,
             mockSessionTracker,
             mockSessionFilter,
             mockKeyStore,
@@ -1433,6 +1479,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1635,6 +1682,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1664,6 +1712,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1696,6 +1745,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1721,6 +1771,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1749,6 +1800,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1787,6 +1839,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1825,6 +1878,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1857,6 +1911,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1891,6 +1946,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1922,6 +1978,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1952,6 +2009,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
@@ -1983,6 +2041,7 @@ describe('SessionBatchRecorder', () => {
                 mockStorage,
                 mockMetadataStore,
                 mockConsoleLogStore,
+                mockFeatureStore,
                 mockSessionTracker,
                 mockSessionFilter,
                 mockKeyStore,
