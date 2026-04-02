@@ -30,6 +30,7 @@ import { createAddLogFunction, destinationE2eLagMsSummary, sanitizeLogMessage } 
 import { execHog } from '../utils/hog-exec'
 import { convertToHogFunctionFilterGlobal, filterFunctionInstrumented } from '../utils/hog-function-filtering'
 import { createInvocation, createInvocationResult } from '../utils/invocation-utils'
+import { Semaphore } from '../utils/sempahore'
 import { HogInputsService } from './hog-inputs.service'
 import { EmailService } from './messaging/email.service'
 import { RecipientTokensService } from './messaging/recipient-tokens.service'
@@ -71,6 +72,15 @@ const cdpHttpRequestTimingRetried = new Histogram({
     buckets: [0, 10, 20, 50, 100, 200, 500, 1000, 2000, 3000, 5000, 10000],
 })
 
+// Limits the number of concurrent HTTP fetches to bound off-heap memory from
+// undici response body Buffers. Each in-flight fetch allocates response data in
+// V8 ArrayBuffer arenas (~64 MB each) that are never returned to the OS.
+let fetchSemaphore: Semaphore | undefined
+
+export function initFetchConcurrency(maxConcurrency: number): void {
+    fetchSemaphore = new Semaphore(maxConcurrency)
+}
+
 // Stale keep-alive connections produce these errors when the server has closed its end before
 // we reuse the socket. A single in-process retry on a fresh connection may resolve them immediately.
 export function isConnectionLevelError(error: any): boolean {
@@ -92,27 +102,38 @@ export async function cdpTrackedFetch({
     fetchParams: FetchOptions
     templateId: string
 }): Promise<{ fetchError: Error | null; fetchResponse: FetchResponse | null; fetchDuration: number }> {
-    const start = performance.now()
+    const doFetch = async (): Promise<{
+        fetchError: Error | null
+        fetchResponse: FetchResponse | null
+        fetchDuration: number
+    }> => {
+        const start = performance.now()
 
-    let [fetchError, fetchResponse] = await tryCatch(async () => await fetch(url, fetchParams))
+        let [fetchError, fetchResponse] = await tryCatch(async () => await fetch(url, fetchParams))
 
-    const fetchDuration = performance.now() - start
-    cdpHttpRequestTiming.observe(fetchDuration)
-    cdpHttpRequests.inc({ status: fetchResponse?.status?.toString() ?? 'error', template_id: templateId })
-
-    if (fetchError && isConnectionLevelError(fetchError)) {
-        logger.warn('🦔', '[cdpTrackedFetch] Connection-level error detected, immediately retrying fetch once', {
-            url,
-            error: fetchError,
-        })
-        ;[fetchError, fetchResponse] = await tryCatch(async () => await fetch(url, fetchParams))
-        const retryDuration = performance.now() - start
-        cdpHttpRequestTimingRetried.observe(retryDuration)
+        const fetchDuration = performance.now() - start
+        cdpHttpRequestTiming.observe(fetchDuration)
         cdpHttpRequests.inc({ status: fetchResponse?.status?.toString() ?? 'error', template_id: templateId })
-        return { fetchError, fetchResponse, fetchDuration: retryDuration }
+
+        if (fetchError && isConnectionLevelError(fetchError)) {
+            logger.warn('🦔', '[cdpTrackedFetch] Connection-level error detected, immediately retrying fetch once', {
+                url,
+                error: fetchError,
+            })
+            ;[fetchError, fetchResponse] = await tryCatch(async () => await fetch(url, fetchParams))
+            const retryDuration = performance.now() - start
+            cdpHttpRequestTimingRetried.observe(retryDuration)
+            cdpHttpRequests.inc({ status: fetchResponse?.status?.toString() ?? 'error', template_id: templateId })
+            return { fetchError, fetchResponse, fetchDuration: retryDuration }
+        }
+
+        return { fetchError, fetchResponse, fetchDuration }
     }
 
-    return { fetchError, fetchResponse, fetchDuration }
+    if (fetchSemaphore) {
+        return await fetchSemaphore.run(doFetch)
+    }
+    return await doFetch()
 }
 
 export const RETRIABLE_STATUS_CODES = [

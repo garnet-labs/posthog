@@ -9,7 +9,7 @@ import { PostgresRouter } from '../utils/db/postgres'
 import { PubSub } from '../utils/pubsub'
 import { TeamManager } from '../utils/team-manager'
 import type { CdpConfig } from './config'
-import { HogExecutorService } from './services/hog-executor.service'
+import { HogExecutorService, initFetchConcurrency } from './services/hog-executor.service'
 import { HogInputsService } from './services/hog-inputs.service'
 import { HogFlowExecutorService } from './services/hogflows/hogflow-executor.service'
 import { HogFlowFunctionsService } from './services/hogflows/hogflow-functions.service'
@@ -76,6 +76,7 @@ export type CdpCoreServicesConfig = Pick<
         | 'CDP_FETCH_RETRIES'
         | 'CDP_FETCH_BACKOFF_BASE_MS'
         | 'CDP_FETCH_BACKOFF_MAX_MS'
+        | 'CDP_FETCH_MAX_CONCURRENCY'
         | 'HOG_FUNCTION_MONITORING_APP_METRICS_TOPIC'
         | 'HOG_FUNCTION_MONITORING_LOG_ENTRIES_TOPIC'
     >
@@ -131,6 +132,8 @@ export function createCdpCoreServices(
         },
         redis
     )
+
+    initFetchConcurrency(config.CDP_FETCH_MAX_CONCURRENCY)
 
     const hogInputsService = new HogInputsService(deps.integrationManager, config.ENCRYPTION_SALT_KEYS, config.SITE_URL)
     const emailService = new EmailService(
