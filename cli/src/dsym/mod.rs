@@ -18,8 +18,6 @@ pub enum DsymSubcommand {
 struct DsymEntry {
     /// The UUID of this DWARF binary (used as chunk_id)
     uuid: String,
-    /// Architecture name as reported by dwarfdump (e.g. "arm64", "x86_64")
-    arch: String,
     /// ZIP containing only this DWARF binary (+ optional source files)
     data: Vec<u8>,
 }
@@ -62,7 +60,6 @@ impl DsymFile {
             let data = zip_dwarf_binary(&dwarf_path, arch, include_source)?;
             entries.push(DsymEntry {
                 uuid: uuid.clone(),
-                arch: arch.clone(),
                 data,
             });
         }
