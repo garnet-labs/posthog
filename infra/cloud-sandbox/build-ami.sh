@@ -186,6 +186,11 @@ cloud-init clean --logs
 
 build_status "complete"
 echo "==> AMI build provisioning complete!"
+
+# Stop the instance to signal completion to the local script.
+# The local script detects "stopped" state as the success signal,
+# which is far more reliable than polling console output.
+shutdown -h now
 USERDATA_EOF
 )
 
@@ -231,39 +236,59 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- Poll for completion via console output ---
+# --- Wait for the instance to stop ---
+# The user-data script calls `shutdown -h now` on success. We wait for
+# the instance to reach "stopped" state — this is far more reliable than
+# polling the EC2 console output API (which has multi-minute cache lag).
+# Console output is still checked for progress updates and error details.
 echo "==> Waiting for provisioning to complete (this takes 15-20 min)..."
 echo "    Instance: $INSTANCE_ID"
+echo "    The instance will stop itself when done."
 echo ""
 
-TIMEOUT=2400  # 40 minutes
+TIMEOUT=3600  # 60 minutes
 ELAPSED=0
 INTERVAL=30
+LAST_STATUS=""
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    # Get the console output and look for our status markers
+    # Check instance state
+    STATE=$(aws ec2 describe-instances \
+        --region "$REGION" \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].State.Name' \
+        --output text 2>/dev/null) || STATE="unknown"
+
+    if [ "$STATE" = "stopped" ] || [ "$STATE" = "stopping" ]; then
+        echo "  [$((ELAPSED / 60))m] Instance is $STATE — build complete!"
+        # Wait for fully stopped if still stopping
+        if [ "$STATE" = "stopping" ]; then
+            aws ec2 wait instance-stopped --region "$REGION" --instance-ids "$INSTANCE_ID"
+        fi
+        break
+    fi
+
+    # Best-effort progress from console output (may be cached/delayed)
     CONSOLE=$(aws ec2 get-console-output \
         --region "$REGION" \
         --instance-id "$INSTANCE_ID" \
         --query 'Output' \
         --output text 2>/dev/null) || CONSOLE=""
-
-    # Find the last status marker
     STATUS=$(echo "$CONSOLE" | grep -o '===SANDBOX_BUILD_STATUS=[a-z-]*===' | tail -1 | sed 's/===SANDBOX_BUILD_STATUS=//;s/===//' || echo "")
 
-    if [ -n "$STATUS" ]; then
-        echo "  [$((ELAPSED / 60))m] Status: $STATUS"
-    else
-        echo "  [$((ELAPSED / 60))m] Waiting for console output..."
+    if [ "$STATUS" = "failed" ]; then
+        echo "ERROR: Build failed!"
+        echo "$CONSOLE" | grep -A 100 "LAST 30 LINES" | head -40
+        exit 1
     fi
 
-    if [ "$STATUS" = "complete" ]; then
-        break
-    fi
-    if [ "$STATUS" = "failed" ]; then
-        echo "ERROR: Build failed. Console output:"
-        echo "$CONSOLE" | tail -50
-        exit 1
+    if [ -n "$STATUS" ] && [ "$STATUS" != "$LAST_STATUS" ]; then
+        echo "  [$((ELAPSED / 60))m] Status: $STATUS"
+        LAST_STATUS="$STATUS"
+    elif [ -z "$STATUS" ]; then
+        echo "  [$((ELAPSED / 60))m] Waiting for console output..."
+    else
+        echo "  [$((ELAPSED / 60))m] ($STATUS)"
     fi
 
     sleep $INTERVAL
@@ -273,14 +298,14 @@ done
 if [ $ELAPSED -ge $TIMEOUT ]; then
     echo "ERROR: Build timed out after $((TIMEOUT / 60)) minutes."
     echo "Last console output:"
+    CONSOLE=$(aws ec2 get-console-output \
+        --region "$REGION" \
+        --instance-id "$INSTANCE_ID" \
+        --query 'Output' \
+        --output text 2>/dev/null) || CONSOLE=""
     echo "$CONSOLE" | tail -30
     exit 1
 fi
-
-# --- Stop the instance and create AMI ---
-echo "==> Stopping instance for snapshot..."
-aws ec2 stop-instances --region "$REGION" --instance-ids "$INSTANCE_ID" > /dev/null
-aws ec2 wait instance-stopped --region "$REGION" --instance-ids "$INSTANCE_ID"
 
 DATE=$(date +%Y%m%d-%H%M%S)
 AMI_NAME="cloud-sandbox-$DATE"
