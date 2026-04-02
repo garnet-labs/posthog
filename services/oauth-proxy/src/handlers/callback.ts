@@ -1,4 +1,4 @@
-import { getCallbackRedirectUri, getRegionSelection } from '@/lib/kv'
+import { getCallbackRedirectUri } from '@/lib/kv'
 
 /**
  * OAuth Callback Interception — proxy receives the regional server's callback
@@ -24,12 +24,6 @@ export async function handleCallback(request: Request, kv: KVNamespace): Promise
     const clientUrl = new URL(originalRedirectUri)
     for (const [key, value] of url.searchParams.entries()) {
         clientUrl.searchParams.set(key, value)
-    }
-
-    // Surface the selected region so the client knows which PostHog host to use
-    const region = await getRegionSelection(kv, state)
-    if (region) {
-        clientUrl.searchParams.set('_region', region)
     }
 
     return Response.redirect(clientUrl.toString(), 302)
