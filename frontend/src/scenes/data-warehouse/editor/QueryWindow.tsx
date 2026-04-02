@@ -59,7 +59,8 @@ export function QueryWindow({
         activeQueryOffset,
     } = useValues(sqlEditorLogic)
 
-    const { setQueryInput, runQuery, setError, setMetadata, setMetadataLoading } = useActions(sqlEditorLogic)
+    const { setQueryInput, runQuery, runSubquery, setError, setMetadata, setMetadataLoading } =
+        useActions(sqlEditorLogic)
 
     const { setSuggestedQueryInput, reportAIQueryPromptOpen } = useActions(sqlEditorLogic)
     const vimModeFeatureEnabled = useFeatureFlag('SQL_EDITOR_VIM_MODE')
@@ -176,6 +177,7 @@ export function QueryWindow({
                             runQuery()
                         }
                     },
+                    onPressCmdShiftEnter: runSubquery,
                     onError: (error) => {
                         setError(error)
                     },

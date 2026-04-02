@@ -1,3 +1,7 @@
+import type { ASTNode } from '@posthog/hogql-parser'
+
+import { parseSelect } from './hogqlParserSingleton'
+
 export interface QueryRange {
     /** The SQL text of this individual statement */
     query: string
@@ -119,4 +123,81 @@ export function findQueryAtCursor(queries: QueryRange[], cursorOffset: number): 
     }
 
     return best ?? queries[0]
+}
+
+/**
+ * Recursively collect all SelectQuery/SelectSetQuery nodes from the AST
+ * whose position range contains the target offset.
+ */
+function collectSelectNodesAtOffset(node: unknown, targetOffset: number, results: ASTNode[]): void {
+    if (node === null || node === undefined || typeof node !== 'object') {
+        return
+    }
+
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            collectSelectNodesAtOffset(item, targetOffset, results)
+        }
+        return
+    }
+
+    const astNode = node as ASTNode
+    if (
+        (astNode.node === 'SelectQuery' || astNode.node === 'SelectSetQuery') &&
+        astNode.start?.offset != null &&
+        astNode.end?.offset != null &&
+        targetOffset >= astNode.start.offset &&
+        targetOffset <= astNode.end.offset
+    ) {
+        results.push(astNode)
+    }
+
+    // Recurse into all object values
+    for (const value of Object.values(astNode)) {
+        if (typeof value === 'object' && value !== null) {
+            collectSelectNodesAtOffset(value, targetOffset, results)
+        }
+    }
+}
+
+/**
+ * Find the innermost SELECT subquery at the given cursor offset within a query.
+ * Returns null if the cursor is only in the outermost SELECT (no nesting).
+ *
+ * @param query - The query text to parse (a single top-level query, already split by semicolons)
+ * @param cursorOffset - Cursor position in the full editor text
+ * @param queryStartOffset - Where this query starts in the full editor text
+ */
+export async function findInnermostSelectAtOffset(
+    query: string,
+    cursorOffset: number,
+    queryStartOffset: number
+): Promise<QueryRange | null> {
+    try {
+        const ast: ASTNode = JSON.parse(await parseSelect(query))
+        if (ast.error || (ast.node !== 'SelectQuery' && ast.node !== 'SelectSetQuery')) {
+            return null
+        }
+
+        const localOffset = cursorOffset - queryStartOffset
+        const results: ASTNode[] = []
+        collectSelectNodesAtOffset(ast, localOffset, results)
+
+        // Need at least 2 matches (outer + inner) to have a subquery
+        if (results.length < 2) {
+            return null
+        }
+
+        // The innermost is the last match (deepest nesting)
+        const innermost = results[results.length - 1]
+        const text = query.slice(innermost.start.offset, innermost.end.offset)
+
+        return {
+            query: text,
+            start: queryStartOffset + innermost.start.offset,
+            end: queryStartOffset + innermost.end.offset,
+        }
+    } catch {
+        return null
+    }
 }

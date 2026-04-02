@@ -31,6 +31,8 @@ export interface CodeEditorProps extends Omit<EditorProps, 'loading' | 'theme'> 
     queryKey?: string
     autocompleteContext?: string
     onPressCmdEnter?: (value: string, selectionType: 'selection' | 'full') => void
+    /** Run the innermost subquery at cursor (Cmd+Shift+Enter) */
+    onPressCmdShiftEnter?: () => void
     /** Pressed up in an empty code editor, likely to edit the previous message in a list */
     onPressUpNoValue?: () => void
     autoFocus?: boolean
@@ -132,6 +134,7 @@ export function CodeEditor({
     onMount,
     value,
     onPressCmdEnter,
+    onPressCmdShiftEnter,
     autoFocus,
     globals,
     sourceQuery,
@@ -378,6 +381,18 @@ export function CodeEditor({
                         }
 
                         onPressCmdEnter(editor.getValue(), 'full')
+                    },
+                })
+            )
+        }
+        if (onPressCmdShiftEnter) {
+            monacoDisposables.current.push(
+                editor.addAction({
+                    id: 'runSubqueryPostHog',
+                    label: 'Run subquery at cursor',
+                    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+                    run: () => {
+                        onPressCmdShiftEnter()
                     },
                 })
             )

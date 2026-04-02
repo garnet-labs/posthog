@@ -71,7 +71,7 @@ import { dataWarehouseViewsLogic } from '../saved_queries/dataWarehouseViewsLogi
 import { draftsLogic } from './draftsLogic'
 import { editorSceneLogic } from './editorSceneLogic'
 import { fixSQLErrorsLogic } from './fixSQLErrorsLogic'
-import { findQueryAtCursor, splitQueries } from './multiQueryUtils'
+import { findInnermostSelectAtOffset, findQueryAtCursor, splitQueries } from './multiQueryUtils'
 import { OutputTab, outputPaneLogic } from './outputPaneLogic'
 import type { sqlEditorLogicType } from './sqlEditorLogicType'
 import { SQLEditorMode, isEmbeddedSQLEditorMode } from './sqlEditorModes'
@@ -304,6 +304,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         syncUrlWithQuery: true,
         insertTextAtCursor: (text: string) => ({ text }),
         setEditorSource: (source: SqlEditorSource) => ({ source }),
+        runSubquery: true,
     })),
     propsChanged(({ actions, props, cache }, oldProps) => {
         if (!oldProps.monaco && !oldProps.editor && props.monaco && props.editor) {
@@ -754,6 +755,54 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         },
         initialize: async () => {
             actions.setFinishedLoading(false)
+        },
+        runSubquery: async () => {
+            if (!props.editor) {
+                actions.runQuery()
+                return
+            }
+            const model = props.editor.getModel()
+            const position = props.editor.getPosition()
+            if (!model || !position) {
+                actions.runQuery()
+                return
+            }
+
+            const fullText = values.queryInput ?? ''
+            const queries = splitQueries(fullText)
+            const cursorOffset = model.getOffsetAt(position)
+            const activeQuery = findQueryAtCursor(queries, cursorOffset)
+
+            if (!activeQuery) {
+                actions.runQuery()
+                return
+            }
+
+            const subquery = await findInnermostSelectAtOffset(activeQuery.query, cursorOffset, activeQuery.start)
+
+            const rangeToRun = subquery ?? activeQuery
+
+            // Flash highlight on the subquery/query about to run
+            const startPos = model.getPositionAt(rangeToRun.start)
+            const endPos = model.getPositionAt(rangeToRun.end)
+            cache.activeQueryDecorationIds = props.editor.deltaDecorations(cache.activeQueryDecorationIds ?? [], [
+                {
+                    range: {
+                        startLineNumber: startPos.lineNumber,
+                        startColumn: startPos.column,
+                        endLineNumber: endPos.lineNumber,
+                        endColumn: endPos.column,
+                    },
+                    options: { className: 'active-query-highlight-flash' },
+                },
+            ])
+
+            // Remove flash after a short delay and restore normal decoration
+            setTimeout(() => {
+                cache.updateActiveQueryDecoration?.()
+            }, 600)
+
+            actions.runQuery(rangeToRun.query)
         },
         setQueryInput: async ({ queryInput }, breakpoint) => {
             // Keep suggestion payload active - let user make edits and then decide to approve/reject
@@ -1750,7 +1799,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         cache.lastSelectedConnectionId = values.selectedConnectionId
         cache.activeQueryDecorationIds = [] as string[]
 
-        cache.updateActiveQueryDecoration = (): void => {
+        cache.updateActiveQueryDecoration = async (): Promise<void> => {
             const editorInstance = props.editor
             if (!editorInstance) {
                 return
@@ -1763,18 +1812,48 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
 
             const fullText = values.queryInput ?? ''
             const queries = splitQueries(fullText)
+            const cursorOffset = model.getOffsetAt(position)
 
-            // Only show decoration when there are multiple queries
+            // Single query — check for subqueries only
             if (queries.length <= 1) {
+                const singleQuery = queries.length === 1 ? queries[0] : null
+                actions.setActiveQueryText(singleQuery?.query ?? null, 0)
+
+                if (singleQuery) {
+                    const subquery = await findInnermostSelectAtOffset(
+                        singleQuery.query,
+                        cursorOffset,
+                        singleQuery.start
+                    )
+                    if (subquery) {
+                        const subStart = model.getPositionAt(subquery.start)
+                        const subEnd = model.getPositionAt(subquery.end)
+                        cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
+                            cache.activeQueryDecorationIds ?? [],
+                            [
+                                {
+                                    range: {
+                                        startLineNumber: subStart.lineNumber,
+                                        startColumn: subStart.column,
+                                        endLineNumber: subEnd.lineNumber,
+                                        endColumn: subEnd.column,
+                                    },
+                                    options: { className: 'active-subquery-highlight' },
+                                },
+                            ]
+                        )
+                        return
+                    }
+                }
+
                 cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
                     cache.activeQueryDecorationIds ?? [],
                     []
                 )
-                actions.setActiveQueryText(queries.length === 1 ? queries[0].query : null, 0)
                 return
             }
 
-            const cursorOffset = model.getOffsetAt(position)
+            // Multiple queries
             const match = findQueryAtCursor(queries, cursorOffset)
             if (!match) {
                 cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
@@ -1790,7 +1869,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             const startPos = model.getPositionAt(match.start)
             const endPos = model.getPositionAt(match.end)
 
-            cache.activeQueryDecorationIds = editorInstance.deltaDecorations(cache.activeQueryDecorationIds ?? [], [
+            const decorations: editor.IModelDeltaDecoration[] = [
                 {
                     range: {
                         startLineNumber: startPos.lineNumber,
@@ -1798,11 +1877,30 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                         endLineNumber: endPos.lineNumber,
                         endColumn: endPos.column,
                     },
-                    options: {
-                        className: 'active-query-highlight',
-                    },
+                    options: { className: 'active-query-highlight' },
                 },
-            ])
+            ]
+
+            // Check for subquery within the active query
+            const subquery = await findInnermostSelectAtOffset(match.query, cursorOffset, match.start)
+            if (subquery) {
+                const subStart = model.getPositionAt(subquery.start)
+                const subEnd = model.getPositionAt(subquery.end)
+                decorations.push({
+                    range: {
+                        startLineNumber: subStart.lineNumber,
+                        startColumn: subStart.column,
+                        endLineNumber: subEnd.lineNumber,
+                        endColumn: subEnd.column,
+                    },
+                    options: { className: 'active-subquery-highlight' },
+                })
+            }
+
+            cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
+                cache.activeQueryDecorationIds ?? [],
+                decorations
+            )
         }
 
         if (
