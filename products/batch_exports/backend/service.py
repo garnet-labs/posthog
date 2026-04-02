@@ -41,6 +41,28 @@ from posthog.temporal.common.schedule import (
 logger = structlog.get_logger(__name__)
 
 
+class EscapedString(str):
+    """A string escaped of any `escape_chars`.
+
+    This class doesn't do any escaping. Subclass it and set `escape_chars`.
+
+    Examples:
+        Escape two characters:
+
+        >>> class MyEscapedString(EscapedString):
+        ...     escape_chars = ("@", "!")
+        >>> MyEscapedString("me@wow!")
+        'me@@wow!!'
+    """
+
+    escape_chars: tuple[str, ...] = ()
+
+    def __new__(cls, s):
+        translation = str.maketrans({escape_char: escape_char * 2 for escape_char in cls.escape_chars})
+        escaped = s.translate(translation)
+        return super().__new__(cls, escaped)
+
+
 class BatchExportField(typing.TypedDict):
     """A field to be queried from ClickHouse.
 
@@ -192,16 +214,22 @@ class S3BatchExportInputs(BaseBatchExportInputs):
     use_virtual_style_addressing: bool = False
 
 
+class SnowflakeIdentifier(EscapedString):
+    """Snowflake identifiers need to escape double quotes."""
+
+    escape_chars = ('"',)
+
+
 @dataclass(kw_only=True)
 class SnowflakeBatchExportInputs(BaseBatchExportInputs):
     """Inputs for Snowflake export workflow."""
 
     account: str
     user: str
-    database: str
-    warehouse: str
-    schema: str
-    table_name: str = "events"
+    database: SnowflakeIdentifier
+    warehouse: SnowflakeIdentifier
+    schema: SnowflakeIdentifier
+    table_name: SnowflakeIdentifier = SnowflakeIdentifier("events")
     authentication_type: str = "password"
     password: str | None = None
     private_key: str | None = None

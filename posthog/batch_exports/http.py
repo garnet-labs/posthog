@@ -58,6 +58,7 @@ from products.batch_exports.backend.service import (
     BatchExportServiceError,
     BatchExportServiceRPCError,
     BatchExportWithNoEndNotAllowedError,
+    EscapedString,
     backfill_export,
     cancel_running_batch_export_run,
     delete_batch_export,
@@ -355,6 +356,8 @@ def try_convert_to_type(value: typing.Any, target_type: type) -> tuple[typing.An
             cast_func: typing.Callable[[typing.Any], typing.Any] = str_to_bool
         case (builtins.str, builtins.int):
             cast_func = int
+        case (builtins.str, cls) if issubclass(cls, EscapedString):
+            cast_func = cls
         case _:
             return (value, False)
 
