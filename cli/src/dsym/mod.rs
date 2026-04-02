@@ -18,6 +18,8 @@ pub enum DsymSubcommand {
 struct DsymEntry {
     /// The UUID of this DWARF binary (used as chunk_id)
     uuid: String,
+    /// Architecture name as reported by dwarfdump (e.g. "arm64", "x86_64")
+    arch: String,
     /// ZIP containing only this DWARF binary (+ optional source files)
     data: Vec<u8>,
 }
@@ -32,9 +34,12 @@ pub struct DsymFile {
 
 impl DsymFile {
     /// Create a new DsymFile from a .dSYM bundle path.
-    /// Each DWARF binary in the bundle gets its own ZIP so that
-    /// stable UUIDs (e.g. app stubs) don't get a new content hash
-    /// when a sibling binary (e.g. debug dylib) changes.
+    ///
+    /// Each UUID gets its own ZIP containing only the architecture slice it
+    /// corresponds to (via `lipo -thin`). This ensures the content hash for a
+    /// stable slice (e.g. arm64) does not change when a sibling slice (e.g.
+    /// x86_64) is rebuilt with a new UUID, which would otherwise cause a
+    /// `content_hash_mismatch` error on incremental builds.
     pub fn new(path: &PathBuf, include_source: bool) -> Result<Self> {
         if !path.is_dir() {
             anyhow::bail!("Path {} is not a directory", path.display());
@@ -52,11 +57,12 @@ impl DsymFile {
         let uuid_entries = extract_dsym_uuids(path)?;
 
         let mut entries = Vec::new();
-        for (uuid, dwarf_filename) in &uuid_entries {
+        for (uuid, arch, dwarf_filename) in &uuid_entries {
             let dwarf_path = dwarf_dir.join(dwarf_filename);
-            let data = zip_dwarf_binary(&dwarf_path, include_source)?;
+            let data = zip_dwarf_binary(&dwarf_path, arch, include_source)?;
             entries.push(DsymEntry {
                 uuid: uuid.clone(),
+                arch: arch.clone(),
                 data,
             });
         }
@@ -69,6 +75,10 @@ impl DsymFile {
 
     pub fn uuids(&self) -> Vec<&str> {
         self.entries.iter().map(|e| e.uuid.as_str()).collect()
+    }
+
+    pub fn arches(&self) -> Vec<&str> {
+        self.entries.iter().map(|e| e.arch.as_str()).collect()
     }
 
     pub fn total_size(&self) -> usize {
@@ -88,9 +98,9 @@ impl DsymFile {
     }
 }
 
-/// Extract all UUIDs and their corresponding DWARF filenames from a dSYM bundle.
-/// Returns (uuid, dwarf_filename) pairs.
-fn extract_dsym_uuids(dsym_path: &PathBuf) -> Result<Vec<(String, String)>> {
+/// Extract all UUIDs, architectures, and DWARF filenames from a dSYM bundle.
+/// Returns `(uuid, arch, dwarf_filename)` triples.
+fn extract_dsym_uuids(dsym_path: &PathBuf) -> Result<Vec<(String, String, String)>> {
     use std::process::Command;
 
     let output = Command::new("dwarfdump")
@@ -107,7 +117,7 @@ fn extract_dsym_uuids(dsym_path: &PathBuf) -> Result<Vec<(String, String)>> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Parse output like: "UUID: 12345678-1234-1234-1234-123456789ABC (arm64) /path/to/DWARF/PostHogExample"
-    let entries: Vec<(String, String)> = stdout
+    let entries: Vec<(String, String, String)> = stdout
         .lines()
         .filter_map(|line| {
             let uuid_start = line.find("UUID: ")? + 6;
@@ -115,13 +125,18 @@ fn extract_dsym_uuids(dsym_path: &PathBuf) -> Result<Vec<(String, String)>> {
             let uuid_end = uuid_part.find(' ')?;
             let uuid = uuid_part[..uuid_end].to_uppercase();
 
+            // Extract arch from "(arm64)" parentheses
+            let arch_start = line.find('(')? + 1;
+            let arch_end = line.find(')')?;
+            let arch = line.get(arch_start..arch_end)?.trim().to_string();
+
             // Extract the DWARF filename from the path at end of line
             // Format: "UUID: <uuid> (<arch>) <full_path>"
             let path_start = line.rfind(')')? + 2; // Skip ") "
             let dwarf_path = line.get(path_start..)?;
             let dwarf_filename = Path::new(dwarf_path).file_name()?.to_str()?.to_string();
 
-            Some((uuid, dwarf_filename))
+            Some((uuid, arch, dwarf_filename))
         })
         .collect();
 
@@ -137,13 +152,16 @@ fn extract_dsym_uuids(dsym_path: &PathBuf) -> Result<Vec<(String, String)>> {
 }
 
 /// Create a minimal ZIP containing a single DWARF binary and optional source files.
+///
+/// If the DWARF binary is a fat (universal) Mach-O, only the slice for `arch`
+/// is included. This ensures the content hash is stable for a given architecture
+/// even when a sibling architecture is rebuilt with new object files.
+///
 /// The ZIP layout is:
-///   dwarf                    — the raw DWARF Mach-O binary
+///   dwarf                    — the raw DWARF Mach-O binary (single-arch)
 ///   __source/manifest.json   — (optional) source file manifest
 ///   __source/...             — (optional) source files
-fn zip_dwarf_binary(dwarf_path: &Path, include_source: bool) -> Result<Vec<u8>> {
-    use std::fs::File;
-    use std::io::Read;
+fn zip_dwarf_binary(dwarf_path: &Path, arch: &str, include_source: bool) -> Result<Vec<u8>> {
     use std::io::{Cursor, Write};
     use tracing::info;
 
@@ -154,11 +172,11 @@ fn zip_dwarf_binary(dwarf_path: &Path, include_source: bool) -> Result<Vec<u8>> 
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
 
-        // Add the DWARF binary as "dwarf"
+        // Add the DWARF binary as "dwarf".
+        // If the file is a fat binary, thin it to only this arch first so that
+        // a rebuild of a sibling slice does not change this UUID's content hash.
         zip.start_file("dwarf", options)?;
-        let mut file = File::open(dwarf_path)?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)?;
+        let contents = thin_if_fat(dwarf_path, arch)?;
         zip.write_all(&contents)?;
 
         // Optionally include source files referenced by this DWARF binary
@@ -198,6 +216,80 @@ fn zip_dwarf_binary(dwarf_path: &Path, include_source: bool) -> Result<Vec<u8>> 
     let zip_data = buffer.into_inner();
     let wrapped = write_symbol_data(AppleDsym { data: zip_data })?;
     Ok(wrapped)
+}
+
+/// Return the bytes for the given architecture slice of `path`.
+///
+/// If the file is a fat (universal) binary, runs `lipo -thin <arch>` to extract
+/// only the relevant slice. If it is already a thin binary (single-arch), the
+/// file is read as-is. Using only the relevant slice means the content hash for
+/// a stable architecture does not change when a sibling architecture is rebuilt.
+fn thin_if_fat(path: &Path, arch: &str) -> Result<Vec<u8>> {
+    use std::process::Command;
+
+    // Fat Mach-O magic numbers (big-endian and little-endian fat headers)
+    const FAT_MAGIC: u32 = 0xCAFE_BABE;
+    const FAT_MAGIC_64: u32 = 0xCAFE_BABF;
+    const FAT_CIGAM: u32 = 0xBEBA_FECA; // byte-swapped FAT_MAGIC
+
+    let raw = std::fs::read(path)
+        .map_err(|e| anyhow!("Failed to read DWARF binary {}: {e}", path.display()))?;
+
+    if raw.len() < 4 {
+        return Ok(raw);
+    }
+
+    let magic = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
+    let is_fat = magic == FAT_MAGIC || magic == FAT_MAGIC_64 || magic == FAT_CIGAM;
+
+    if !is_fat {
+        // Already a thin (single-arch) binary — use it directly.
+        tracing::info!("[lipo] {} is already a thin binary, using as-is", path.display());
+        return Ok(raw);
+    }
+
+    tracing::info!(
+        "[lipo] fat binary detected at {}, thinning to {} slice ({} bytes total)",
+        path.display(), arch, raw.len()
+    );
+
+    // Run `lipo -thin <arch>` to extract just this architecture.
+    let tmp_path = std::env::temp_dir().join(format!("posthog_lipo_{arch}_{pid}",
+        arch = arch,
+        pid = std::process::id()));
+
+    let status = Command::new("lipo")
+        .args([
+            path.to_str()
+                .ok_or_else(|| anyhow!("Non-UTF8 path: {}", path.display()))?,
+            "-thin",
+            arch,
+            "-output",
+            tmp_path
+                .to_str()
+                .ok_or_else(|| anyhow!("Non-UTF8 temp path"))?,
+        ])
+        .status()
+        .map_err(|e| anyhow!("Failed to run lipo: {e}. Is Xcode installed?"))?;
+
+    if !status.success() {
+        // lipo failed (e.g. arch not present) — fall back to full binary.
+        tracing::warn!(
+            "[lipo] lipo -thin {arch} failed for {}; falling back to full fat binary",
+            path.display()
+        );
+        return Ok(raw);
+    }
+
+    let thinned = std::fs::read(&tmp_path)
+        .map_err(|e| anyhow!("Failed to read lipo output: {e}"))?;
+    let _ = std::fs::remove_file(&tmp_path);
+    tracing::info!(
+        "[lipo] thinned {} ({} arch) to {} bytes (was {} bytes)",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        arch, thinned.len(), raw.len()
+    );
+    Ok(thinned)
 }
 
 /// Find all dSYM bundles in a directory

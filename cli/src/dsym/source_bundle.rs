@@ -5,7 +5,8 @@ use std::path::Path;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use symbolic::debuginfo::Archive;
+use symbolic::debuginfo::dwarf::{gimli, Dwarf as DwarfObject};
+use symbolic::debuginfo::{Archive, Object};
 use tracing::{info, warn};
 
 /// Manifest format stored as `__source/manifest.json` inside the dSYM ZIP
@@ -23,7 +24,14 @@ pub struct SourceFiles {
     pub contents: BTreeMap<String, Vec<u8>>,
 }
 
-/// Extract all source file paths referenced in a DWARF binary file.
+/// Extract source file paths from a DWARF binary using only compilation-unit
+/// main files (`DW_AT_comp_dir` + `DW_AT_name` on each `DW_TAG_compile_unit`).
+///
+/// This intentionally excludes the full DWARF line-number file table, which also
+/// contains files from *other* modules referenced via `DW_AT_decl_file` on type
+/// declarations.  Including those would cause the source-bundle hash to change
+/// whenever a dependency's source changes — even when this binary's UUID is
+/// identical — triggering spurious `content_hash_mismatch` rejections.
 pub fn extract_source_paths_from_dwarf(dwarf_path: &Path) -> Result<Vec<String>> {
     let dwarf_data = fs::read(dwarf_path)?;
     let archive = Archive::parse(&dwarf_data)?;
@@ -32,13 +40,12 @@ pub fn extract_source_paths_from_dwarf(dwarf_path: &Path) -> Result<Vec<String>>
 
     for obj in archive.objects() {
         let obj = obj?;
-        let session = obj.debug_session()?;
-        for file in session.files() {
-            let file = file?;
-            let abs_path = file.abs_path_str();
-            if !abs_path.is_empty() {
-                paths.push(abs_path);
-            }
+        // collect_cu_source_paths requires the concrete Dwarf implementor; the
+        // Object enum itself does not implement the trait.
+        match &obj {
+            Object::MachO(m) => collect_cu_source_paths(m, &mut paths),
+            Object::Elf(e) => collect_cu_source_paths(e, &mut paths),
+            _ => {} // Other formats not relevant for iOS / Android
         }
     }
 
@@ -47,10 +54,127 @@ pub fn extract_source_paths_from_dwarf(dwarf_path: &Path) -> Result<Vec<String>>
     paths.dedup();
 
     for p in &paths {
-        tracing::debug!("DWARF source path: {}", p);
+        tracing::debug!("DWARF source path (CU main file): {}", p);
     }
 
     Ok(paths)
+}
+
+/// Walk `debug_info` with gimli and collect the main source file of each
+/// compilation unit (the `DW_AT_comp_dir + DW_AT_name` pair on the CU DIE).
+/// This does NOT read the line-number program's file table, so cross-module
+/// file references that appear there are never included.
+fn collect_cu_source_paths<'d>(obj: &impl DwarfObject<'d>, out: &mut Vec<String>) {
+    // Load the minimal DWARF sections we need: debug_info, debug_abbrev, debug_str,
+    // and debug_line_str (DWARF v5 string section).
+    let empty: &[u8] = &[];
+
+    let info_data = obj
+        .section("debug_info")
+        .map(|s| s.data.into_owned())
+        .unwrap_or_default();
+    let abbrev_data = obj
+        .section("debug_abbrev")
+        .map(|s| s.data.into_owned())
+        .unwrap_or_default();
+    let str_data = obj
+        .section("debug_str")
+        .map(|s| s.data.into_owned())
+        .unwrap_or_default();
+    let line_str_data = obj
+        .section("debug_line_str")
+        .map(|s| s.data.into_owned())
+        .unwrap_or_default();
+
+    let endian = if matches!(obj.endianity(), symbolic::debuginfo::dwarf::Endian::Big) {
+        gimli::RunTimeEndian::Big
+    } else {
+        gimli::RunTimeEndian::Little
+    };
+
+    let dwarf = gimli::Dwarf {
+        debug_info: gimli::DebugInfo::new(&info_data, endian),
+        debug_abbrev: gimli::DebugAbbrev::new(&abbrev_data, endian),
+        debug_str: gimli::DebugStr::new(&str_data, endian),
+        debug_line_str: gimli::DebugLineStr::new(&line_str_data, endian),
+        // Sections not needed for CU-name extraction:
+        debug_addr: gimli::DebugAddr::from(gimli::EndianSlice::new(empty, endian)),
+        debug_aranges: gimli::DebugAranges::new(empty, endian),
+        debug_line: gimli::DebugLine::new(empty, endian),
+        debug_str_offsets: gimli::DebugStrOffsets::from(gimli::EndianSlice::new(empty, endian)),
+        debug_types: Default::default(),
+        debug_macinfo: gimli::DebugMacinfo::new(empty, endian),
+        debug_macro: gimli::DebugMacro::new(empty, endian),
+        locations: Default::default(),
+        ranges: gimli::RangeLists::new(
+            gimli::DebugRanges::new(empty, endian),
+            gimli::DebugRngLists::new(empty, endian),
+        ),
+        file_type: gimli::DwarfFileType::Main,
+        abbreviations_cache: Default::default(),
+        sup: None,
+    };
+
+    let mut cu_count = 0u32;
+    let mut iter = dwarf.units();
+    loop {
+        let header = match iter.next() {
+            Ok(Some(h)) => h,
+            Ok(None) => break,
+            Err(e) => { tracing::debug!("units().next() error: {:?}", e); break; },
+        };
+        cu_count += 1;
+
+        // Obtain abbreviation table for this CU.
+        let abbrevs = match dwarf.abbreviations(&header) {
+            Ok(a) => a,
+            Err(e) => { tracing::debug!("CU {}: abbreviations() error: {:?}", cu_count, e); continue; }
+        };
+
+        // Parse the root DIE WITHOUT calling dwarf.unit() — that helper also
+        // tries to load the line program, which would fail because we omitted
+        // debug_line from our minimal Dwarf instance.
+        let mut cursor = header.entries(&abbrevs);
+        let (_, root) = match cursor.next_dfs() {
+            Ok(Some(e)) => e,
+            _ => continue,
+        };
+        if root.tag() != gimli::DW_TAG_compile_unit {
+            continue;
+        }
+
+        // Resolve an attribute value to a UTF-8 string from debug_str / inline data.
+        let resolve_str = |val: gimli::AttributeValue<gimli::EndianSlice<'_, gimli::RunTimeEndian>>| -> Option<String> {
+            match val {
+                gimli::AttributeValue::String(s) =>
+                    std::str::from_utf8(s.slice()).ok().map(|s| s.to_string()),
+                gimli::AttributeValue::DebugStrRef(offset) =>
+                    dwarf.debug_str.get_str(offset).ok()
+                        .and_then(|s| std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())),
+                gimli::AttributeValue::DebugLineStrRef(offset) =>
+                    dwarf.debug_line_str.get_str(offset).ok()
+                        .and_then(|s| std::str::from_utf8(s.slice()).ok().map(|s| s.to_string())),
+                _ => None,
+            }
+        };
+
+        let comp_dir: Option<String> = root.attr_value(gimli::DW_AT_comp_dir).ok().flatten()
+            .and_then(&resolve_str);
+        let name: Option<String> = root.attr_value(gimli::DW_AT_name).ok().flatten()
+            .and_then(&resolve_str);
+
+        let path = match (comp_dir, name) {
+            (Some(dir), Some(name)) if !name.starts_with('/') =>
+                format!("{}/{}", dir.trim_end_matches('/'), name),
+            (_, Some(name)) if name.starts_with('/') => name,
+            (Some(dir), None) => dir,
+            _ => continue,
+        };
+
+        if !path.is_empty() {
+            out.push(path);
+        }
+    }
 }
 
 /// System/SDK path prefixes to exclude from source bundling
@@ -70,6 +194,30 @@ const EXCLUDED_SUBSTRINGS: &[&str] = &[
     "/DerivedData/",
 ];
 
+/// Short (root-level) names produced by Apple's Clang/Swift linker as synthetic
+/// DWARF compile-unit names for system frameworks. These are not real file paths
+/// and can never be read from disk.
+const EXCLUDED_SYNTHETIC_NAMES: &[&str] = &[
+    "/_AvailabilityInternal",
+    "/_Builtin_",
+    "/_DarwinFoundation",
+    "/CFNetwork",
+    "/CoreFoundation",
+    "/Darwin",
+    "/Dispatch",
+    "/Foundation",
+    "/MachO",
+    "/ObjectiveC",
+    "/Security",
+    "/XPC",
+    "/asl",
+    "/os_",
+    "/ptrcheck",
+    "/ptrauth",
+    "<stdin>",
+    "<swift-imported-modules>",
+];
+
 /// Filter out system framework and SDK paths, keeping only user source files.
 pub fn filter_source_paths(paths: &[String]) -> Vec<&str> {
     paths
@@ -86,6 +234,15 @@ pub fn filter_source_paths(paths: &[String]) -> Vec<&str> {
             // Exclude paths containing system substrings
             if EXCLUDED_SUBSTRINGS.iter().any(|sub| path.contains(sub)) {
                 tracing::debug!("Filtered out (substring): {}", path);
+                return false;
+            }
+            // Exclude synthetic short names that Apple's linker emits as
+            // placeholder compile-unit names for system frameworks.
+            if EXCLUDED_SYNTHETIC_NAMES
+                .iter()
+                .any(|s| path.starts_with(s))
+            {
+                tracing::debug!("Filtered out (synthetic): {}", path);
                 return false;
             }
             true
