@@ -1,22 +1,5 @@
 # ruff: noqa: T201 allow print statements
-"""
-ClickHouse schema management -- declarative, Terraform-style.
-
-Subcommands (10):
-  plan       -- diff schema/*.yaml vs live ClickHouse, show plan
-  apply      -- execute the diff (plan + apply)
-  generate   -- scaffold a new schema YAML from a template
-  drift      -- detect per-host schema divergence
-  schema     -- dump current live schema
-  status     -- show per-host migration state
-  bootstrap  -- create the tracking table
-  check      -- show pending legacy migrations
-  lint       -- lint schema YAML files
-  down       -- roll back a legacy migration
-
-Modules: desired_state, state_diff, plan_generator, schema_graph,
-schema_introspect, tracking.
-"""
+"""ClickHouse schema management -- declarative, Terraform-style."""
 
 import sys
 from typing import Any
@@ -36,7 +19,7 @@ def _any_client(cluster: Any) -> Any:
 
 
 class Command(BaseCommand):
-    help = "ClickHouse schema management -- plan, apply, generate, drift, schema, status, bootstrap, check, lint, down, orphans, version"
+    help = "ClickHouse schema management -- plan, apply, generate, drift, schema, status, bootstrap, lint, orphans, version"
 
     def add_arguments(self, parser: Any) -> None:
         subparsers = parser.add_subparsers(dest="subcommand")
@@ -93,9 +76,6 @@ class Command(BaseCommand):
         # bootstrap
         subparsers.add_parser("bootstrap", help="Create the tracking table on all nodes")
 
-        # check
-        subparsers.add_parser("check", help="Show pending legacy migrations")
-
         # lint
         lint_parser = subparsers.add_parser("lint", help="Lint schema YAML files")
         lint_parser.add_argument(
@@ -124,10 +104,6 @@ class Command(BaseCommand):
         # version
         subparsers.add_parser("version", help="Show the last applied schema version (git commit)")
 
-        # down (legacy)
-        down_parser = subparsers.add_parser("down", help="Roll back a legacy migration by number")
-        down_parser.add_argument("migration_number", type=int, help="Migration number to roll back")
-
     def handle(self, *args: Any, **options: Any) -> None:
         subcommand = options.get("subcommand")
         handlers: dict[str, Any] = {
@@ -138,21 +114,15 @@ class Command(BaseCommand):
             "schema": self.handle_schema,
             "status": self.handle_status,
             "bootstrap": self.handle_bootstrap,
-            "check": self.handle_check,
             "lint": self.handle_lint,
             "orphans": self.handle_orphans,
             "version": self.handle_version,
-            "down": self.handle_down,
         }
         handler = handlers.get(subcommand or "")
         if handler:
             handler(options)
         else:
             self.print_help("manage.py", "ch_migrate")
-
-    # ------------------------------------------------------------------
-    # plan / apply -- desired-state reconciliation
-    # ------------------------------------------------------------------
 
     def _compute_diffs(
         self, database: str, schema_dir: Any, cluster_filter: str | None = None
@@ -358,10 +328,6 @@ class Command(BaseCommand):
 
         print("\nApply completed successfully.")
 
-    # ------------------------------------------------------------------
-    # generate -- scaffold schema YAML from template
-    # ------------------------------------------------------------------
-
     def handle_generate(self, options: dict[str, Any]) -> None:
         from pathlib import Path
 
@@ -392,10 +358,6 @@ class Command(BaseCommand):
         table_count = len(yaml_data.get("tables", {}))
         print(f"Generated: {output_path} ({table_count} table(s))")
         print(f"Edit the YAML, then run: ch_migrate plan")
-
-    # ------------------------------------------------------------------
-    # drift
-    # ------------------------------------------------------------------
 
     def handle_drift(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -429,10 +391,6 @@ class Command(BaseCommand):
 
         sys.exit(1)
 
-    # ------------------------------------------------------------------
-    # schema
-    # ------------------------------------------------------------------
-
     def handle_schema(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
         cluster = get_cluster_by_name("main")
@@ -456,10 +414,6 @@ class Command(BaseCommand):
                 default_str = f" DEFAULT {col.default_expression}" if col.default_expression else ""
                 print(f"    - {col.name}: {col.type}{default_str}")
             print()
-
-    # ------------------------------------------------------------------
-    # status
-    # ------------------------------------------------------------------
 
     def handle_status(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -502,10 +456,6 @@ class Command(BaseCommand):
             status = "OK" if success else "FAILED"
             print(f"  {number:04d} {name:40s} {direction:4s} {host:20s} {applied_at} {status}")
 
-    # ------------------------------------------------------------------
-    # bootstrap
-    # ------------------------------------------------------------------
-
     def handle_bootstrap(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
         cluster = get_cluster_by_name("main")
@@ -515,26 +465,6 @@ class Command(BaseCommand):
 
         _ensure_tracking_table(client, database)
         print(f"Tracking table ensured in database '{database}'.")
-
-    # ------------------------------------------------------------------
-    # check -- pending legacy migrations
-    # ------------------------------------------------------------------
-
-    def handle_check(self, options: dict[str, Any]) -> None:
-        from posthog.clickhouse.migration_tools.runner import get_pending_migrations
-
-        pending = get_pending_migrations()
-        if not pending:
-            print("No pending legacy migrations.")
-            return
-
-        print(f"{len(pending)} pending legacy migration(s):\n")
-        for m in pending:
-            print(f"  {m}")
-
-    # ------------------------------------------------------------------
-    # lint -- validate schema YAML files
-    # ------------------------------------------------------------------
 
     def handle_lint(self, options: dict[str, Any]) -> None:
         from pathlib import Path
@@ -561,10 +491,6 @@ class Command(BaseCommand):
         for err in errors:
             print(f"  - {err}")
         sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # orphans -- find undeclared tables
-    # ------------------------------------------------------------------
 
     def handle_orphans(self, options: dict[str, Any]) -> None:
         from pathlib import Path
@@ -602,10 +528,6 @@ class Command(BaseCommand):
             print(f"  {name} (engine={engine})")
         print("\nThese tables may be leftover from old migrations or manual creation.")
 
-    # ------------------------------------------------------------------
-    # version -- show last applied schema version
-    # ------------------------------------------------------------------
-
     def handle_version(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
 
@@ -625,15 +547,3 @@ class Command(BaseCommand):
         print(f"  Commit:     {commit_hash}")
         print(f"  Applied by: {host}")
         print(f"  Applied at: {applied_at}")
-
-    # ------------------------------------------------------------------
-    # down -- legacy rollback
-    # ------------------------------------------------------------------
-
-    def handle_down(self, options: dict[str, Any]) -> None:
-        from posthog.clickhouse.migration_tools.runner import run_migration_down
-
-        migration_number = options["migration_number"]
-        print(f"Rolling back migration {migration_number}...")
-        run_migration_down(migration_number)
-        print("Done.")
