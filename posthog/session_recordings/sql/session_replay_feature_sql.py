@@ -45,7 +45,15 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     page_visit_count Int64,
     page_revisit_count Int64,
     console_error_count Int64,
-    console_error_after_click_count Int64
+    console_error_after_click_count Int64,
+    network_request_count Int64,
+    network_failed_request_count Int64,
+    network_request_duration_sum Float64,
+    network_request_duration_sum_of_squares Float64,
+    network_request_duration_count Int64,
+    max_scroll_y Float64,
+    unique_click_target_count Int64,
+    text_selection_count Int64
 ) ENGINE = {engine}
 """
 
@@ -85,7 +93,15 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     page_visit_count SimpleAggregateFunction(sum, Int64),
     page_revisit_count SimpleAggregateFunction(sum, Int64),
     console_error_count SimpleAggregateFunction(sum, Int64),
-    console_error_after_click_count SimpleAggregateFunction(sum, Int64)
+    console_error_after_click_count SimpleAggregateFunction(sum, Int64),
+    network_request_count SimpleAggregateFunction(sum, Int64),
+    network_failed_request_count SimpleAggregateFunction(sum, Int64),
+    network_request_duration_sum SimpleAggregateFunction(sum, Float64),
+    network_request_duration_sum_of_squares SimpleAggregateFunction(sum, Float64),
+    network_request_duration_count SimpleAggregateFunction(sum, Int64),
+    max_scroll_y SimpleAggregateFunction(max, Float64),
+    unique_click_target_count SimpleAggregateFunction(sum, Int64),
+    text_selection_count SimpleAggregateFunction(sum, Int64)
 ) ENGINE = {engine}
 """
 
@@ -158,7 +174,15 @@ sum(quick_back_count) as quick_back_count,
 sum(page_visit_count) as page_visit_count,
 sum(page_revisit_count) as page_revisit_count,
 sum(console_error_count) as console_error_count,
-sum(console_error_after_click_count) as console_error_after_click_count
+sum(console_error_after_click_count) as console_error_after_click_count,
+sum(network_request_count) as network_request_count,
+sum(network_failed_request_count) as network_failed_request_count,
+sum(network_request_duration_sum) as network_request_duration_sum,
+sum(network_request_duration_sum_of_squares) as network_request_duration_sum_of_squares,
+sum(network_request_duration_count) as network_request_duration_count,
+max(max_scroll_y) as max_scroll_y,
+sum(unique_click_target_count) as unique_click_target_count,
+sum(text_selection_count) as text_selection_count
 FROM kafka_session_replay_features
 GROUP BY session_id, team_id
 """

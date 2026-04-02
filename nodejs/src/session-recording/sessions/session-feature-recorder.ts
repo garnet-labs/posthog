@@ -3,6 +3,13 @@ import { DateTime } from 'luxon'
 import { ParsedMessageData, SnapshotEvent } from '../kafka/types'
 import { RRWebEventSource, RRWebEventType, hrefFrom, isClick, isKeypress, isMouseActivity } from '../rrweb-types'
 
+const POSTHOG_NETWORK_PLUGIN = 'posthog/network@1'
+const RRWEB_NETWORK_PLUGIN = 'rrweb/network@1'
+
+// Numeric keys for posthog/network@1 payload
+const POSTHOG_NETWORK_DURATION_KEY = 39
+const POSTHOG_NETWORK_STATUS_KEY = 21
+
 // Typed shape for accessing rrweb event internals
 interface RRWebEventData {
     type?: number
@@ -15,7 +22,15 @@ interface RRWebEventData {
         id?: number
         positions?: Array<{ x: number; y: number; id: number; timeOffset: number }>
         plugin?: string
-        payload?: { level?: string }
+        payload?: {
+            level?: string
+            requests?: Array<{
+                duration?: number
+                status?: number
+                responseStatus?: number
+            }>
+            [key: number]: unknown
+        }
     }
 }
 
@@ -67,6 +82,22 @@ export interface FeatureEndResult {
     // Error features
     consoleErrorCount: number
     consoleErrorAfterClickCount: number
+
+    // Network features
+    networkRequestCount: number
+    networkFailedRequestCount: number
+    networkRequestDurationSum: number
+    networkRequestDurationSumOfSquares: number
+    networkRequestDurationCount: number
+
+    // Scroll depth
+    maxScrollY: number
+
+    // Click target diversity
+    uniqueClickTargetCount: number
+
+    // Text selection
+    textSelectionCount: number
 }
 
 /**
@@ -142,6 +173,22 @@ export class SessionFeatureRecorder {
     private consoleErrorAfterClickCount = 0
     private lastUserActionTimestamp: number | null = null
 
+    // Network features
+    private networkRequestCount = 0
+    private networkFailedRequestCount = 0
+    private networkRequestDurationSum = 0
+    private networkRequestDurationSumOfSquares = 0
+    private networkRequestDurationCount = 0
+
+    // Scroll depth
+    private maxScrollY = 0
+
+    // Click target diversity
+    private clickTargetIds: Set<number> = new Set()
+
+    // Text selection
+    private textSelectionCount = 0
+
     constructor(
         public readonly sessionId: string,
         public readonly teamId: number,
@@ -181,6 +228,8 @@ export class SessionFeatureRecorder {
         this.trackInterActionTiming(event, e.timestamp)
         this.trackNavigation(event, e.timestamp)
         this.trackConsoleErrors(e)
+        this.trackNetworkRequests(e)
+        this.trackTextSelection(e)
 
         if (isMouseActivity(event)) {
             this.mouseActivityCount++
@@ -249,6 +298,10 @@ export class SessionFeatureRecorder {
             return
         }
 
+        if (scrollY > this.maxScrollY) {
+            this.maxScrollY = scrollY
+        }
+
         // Reset tracking when the scroll target element changes
         if (scrollId !== this.lastScrollId) {
             this.lastScrollY = null
@@ -287,6 +340,11 @@ export class SessionFeatureRecorder {
 
         this.clickCount++
         this.lastUserActionTimestamp = e.timestamp
+
+        const clickTargetId = e.data?.id
+        if (clickTargetId !== undefined) {
+            this.clickTargetIds.add(clickTargetId)
+        }
 
         const clickX = e.data?.x
         const clickY = e.data?.y
@@ -401,6 +459,53 @@ export class SessionFeatureRecorder {
         }
     }
 
+    private trackNetworkRequests(e: RRWebEventData): void {
+        if (e.type !== RRWebEventType.Plugin) {
+            return
+        }
+
+        const plugin = e.data?.plugin
+        if (plugin === RRWEB_NETWORK_PLUGIN) {
+            const requests = e.data?.payload?.requests
+            if (!Array.isArray(requests)) {
+                return
+            }
+            for (const req of requests) {
+                this.processNetworkRequest(req.duration, req.status ?? req.responseStatus)
+            }
+        } else if (plugin === POSTHOG_NETWORK_PLUGIN) {
+            const payload = e.data?.payload
+            if (!payload) {
+                return
+            }
+            this.processNetworkRequest(
+                payload[POSTHOG_NETWORK_DURATION_KEY] as number | undefined,
+                payload[POSTHOG_NETWORK_STATUS_KEY] as number | undefined
+            )
+        }
+    }
+
+    private processNetworkRequest(duration: unknown, status: unknown): void {
+        this.networkRequestCount++
+
+        if (typeof status === 'number' && status >= 400) {
+            this.networkFailedRequestCount++
+        }
+
+        if (typeof duration === 'number' && duration > 0) {
+            this.networkRequestDurationSum += duration
+            this.networkRequestDurationSumOfSquares += duration * duration
+            this.networkRequestDurationCount++
+        }
+    }
+
+    private trackTextSelection(e: RRWebEventData): void {
+        if (e.type !== RRWebEventType.IncrementalSnapshot || e.data?.source !== RRWebEventSource.Selection) {
+            return
+        }
+        this.textSelectionCount++
+    }
+
     public get distinctId(): string {
         if (!this._distinctId) {
             throw new Error('No distinct_id set. No messages recorded yet.')
@@ -454,6 +559,18 @@ export class SessionFeatureRecorder {
 
             consoleErrorCount: this.consoleErrorCount,
             consoleErrorAfterClickCount: this.consoleErrorAfterClickCount,
+
+            networkRequestCount: this.networkRequestCount,
+            networkFailedRequestCount: this.networkFailedRequestCount,
+            networkRequestDurationSum: this.networkRequestDurationSum,
+            networkRequestDurationSumOfSquares: this.networkRequestDurationSumOfSquares,
+            networkRequestDurationCount: this.networkRequestDurationCount,
+
+            maxScrollY: this.maxScrollY,
+
+            uniqueClickTargetCount: this.clickTargetIds.size,
+
+            textSelectionCount: this.textSelectionCount,
         }
     }
 }

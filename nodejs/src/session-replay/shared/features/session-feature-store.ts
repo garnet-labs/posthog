@@ -59,6 +59,14 @@ export class SessionFeatureStore {
             page_revisit_count: block.features.pageRevisitCount,
             console_error_count: block.features.consoleErrorCount,
             console_error_after_click_count: block.features.consoleErrorAfterClickCount,
+            network_request_count: block.features.networkRequestCount,
+            network_failed_request_count: block.features.networkFailedRequestCount,
+            network_request_duration_sum: block.features.networkRequestDurationSum,
+            network_request_duration_sum_of_squares: block.features.networkRequestDurationSumOfSquares,
+            network_request_duration_count: block.features.networkRequestDurationCount,
+            max_scroll_y: block.features.maxScrollY,
+            unique_click_target_count: block.features.uniqueClickTargetCount,
+            text_selection_count: block.features.textSelectionCount,
         }))
 
         await this.producer.queueMessages({

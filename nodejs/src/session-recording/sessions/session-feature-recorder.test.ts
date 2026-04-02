@@ -2,7 +2,7 @@ import { DateTime } from 'luxon'
 
 import { ParsedMessageData, SnapshotEvent } from '../kafka/types'
 import { MouseInteractions, RRWebEventSource, RRWebEventType } from '../rrweb-types'
-import { SessionFeatureRecorder } from './session-feature-recorder'
+import { FeatureEndResult, SessionFeatureRecorder } from './session-feature-recorder'
 
 const createMessage = (events: SnapshotEvent[], distinctId = 'user1'): ParsedMessageData => ({
     distinct_id: distinctId,
@@ -879,6 +879,247 @@ describe('SessionFeatureRecorder', () => {
             const result = recorder.end()
 
             expect(result.consoleErrorAfterClickCount).toBe(1)
+        })
+    })
+
+    describe('Network request tracking', () => {
+        const makeRRWebNetworkEvent = (
+            timestamp: number,
+            requests: Array<{ duration?: number; status?: number; responseStatus?: number }>
+        ): SnapshotEvent =>
+            ({
+                type: RRWebEventType.Plugin,
+                timestamp,
+                data: {
+                    plugin: 'rrweb/network@1',
+                    payload: { requests },
+                },
+            }) as unknown as SnapshotEvent
+
+        const makePostHogNetworkEvent = (timestamp: number, duration?: number, status?: number): SnapshotEvent =>
+            ({
+                type: RRWebEventType.Plugin,
+                timestamp,
+                data: {
+                    plugin: 'posthog/network@1',
+                    payload: { 39: duration, 21: status },
+                },
+            }) as unknown as SnapshotEvent
+
+        it('should count requests from rrweb/network@1 plugin', () => {
+            const events = [
+                makeRRWebNetworkEvent(1000, [
+                    { duration: 100, status: 200 },
+                    { duration: 200, status: 200 },
+                ]),
+            ]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(2)
+        })
+
+        it('should count requests from posthog/network@1 plugin', () => {
+            const events = [makePostHogNetworkEvent(1000, 150, 200), makePostHogNetworkEvent(2000, 300, 200)]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(2)
+        })
+
+        it('should count failed requests with status >= 400', () => {
+            const events = [
+                makeRRWebNetworkEvent(1000, [
+                    { duration: 100, status: 200 },
+                    { duration: 100, status: 404 },
+                    { duration: 100, status: 500 },
+                ]),
+            ]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(3)
+            expect(result.networkFailedRequestCount).toBe(2)
+        })
+
+        it('should use responseStatus when status is not present', () => {
+            const events = [makeRRWebNetworkEvent(1000, [{ duration: 100, responseStatus: 503 }])]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkFailedRequestCount).toBe(1)
+        })
+
+        it('should accumulate duration sufficient statistics', () => {
+            const events = [
+                makeRRWebNetworkEvent(1000, [
+                    { duration: 100, status: 200 },
+                    { duration: 300, status: 200 },
+                ]),
+            ]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestDurationCount).toBe(2)
+            expect(result.networkRequestDurationSum).toBe(400)
+            expect(result.networkRequestDurationSumOfSquares).toBe(100 * 100 + 300 * 300)
+        })
+
+        it('should skip duration stats when duration is missing or zero', () => {
+            const events = [makeRRWebNetworkEvent(1000, [{ status: 200 }, { duration: 0, status: 200 }])]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(2)
+            expect(result.networkRequestDurationCount).toBe(0)
+        })
+
+        it('should skip rrweb/network@1 events with no requests array', () => {
+            const event = {
+                type: RRWebEventType.Plugin,
+                timestamp: 1000,
+                data: { plugin: 'rrweb/network@1', payload: {} },
+            } as unknown as SnapshotEvent
+            recorder.recordMessage(createMessage([event]))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(0)
+        })
+
+        it('should not count non-network plugin events', () => {
+            const events = [makeConsoleErrorEvent(1000)]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(0)
+        })
+
+        it('should aggregate across both plugin types', () => {
+            const events = [
+                makeRRWebNetworkEvent(1000, [{ duration: 100, status: 200 }]),
+                makePostHogNetworkEvent(2000, 200, 500),
+            ]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.networkRequestCount).toBe(2)
+            expect(result.networkFailedRequestCount).toBe(1)
+            expect(result.networkRequestDurationSum).toBe(300)
+        })
+    })
+
+    describe('Scroll depth (maxScrollY)', () => {
+        it('should track the maximum scroll Y position', () => {
+            const events = [makeScrollEvent(1000, 100), makeScrollEvent(2000, 500), makeScrollEvent(3000, 300)]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.maxScrollY).toBe(500)
+        })
+
+        it('should return 0 when no scroll events occur', () => {
+            recorder.recordMessage(createMessage([makeClickEvent(1000)]))
+            const result = recorder.end()
+
+            expect(result.maxScrollY).toBe(0)
+        })
+
+        it('should track maxScrollY across multiple scroll targets', () => {
+            const events = [makeScrollEvent(1000, 200, 1), makeScrollEvent(2000, 800, 2), makeScrollEvent(3000, 400, 1)]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.maxScrollY).toBe(800)
+        })
+    })
+
+    describe('Unique click targets', () => {
+        const makeClickEventWithTarget = (timestamp: number, id: number, x = 100, y = 100): SnapshotEvent =>
+            ({
+                type: RRWebEventType.IncrementalSnapshot,
+                timestamp,
+                data: {
+                    source: RRWebEventSource.MouseInteraction,
+                    type: MouseInteractions.Click,
+                    x,
+                    y,
+                    id,
+                },
+            }) as unknown as SnapshotEvent
+
+        it('should count unique click targets by rrweb node id', () => {
+            const events = [
+                makeClickEventWithTarget(1000, 10),
+                makeClickEventWithTarget(2000, 20),
+                makeClickEventWithTarget(3000, 10), // same target as first
+            ]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.uniqueClickTargetCount).toBe(2)
+        })
+
+        it('should return 0 when no clicks occur', () => {
+            recorder.recordMessage(createMessage([makeKeypressEvent(1000)]))
+            const result = recorder.end()
+
+            expect(result.uniqueClickTargetCount).toBe(0)
+        })
+
+        it('should count each distinct target exactly once across messages', () => {
+            recorder.recordMessage(createMessage([makeClickEventWithTarget(1000, 5)]))
+            recorder.recordMessage(createMessage([makeClickEventWithTarget(2000, 5)]))
+            recorder.recordMessage(createMessage([makeClickEventWithTarget(3000, 15)]))
+            const result = recorder.end()
+
+            expect(result.uniqueClickTargetCount).toBe(2)
+        })
+    })
+
+    describe('Text selection tracking', () => {
+        const makeSelectionEvent = (timestamp: number): SnapshotEvent =>
+            ({
+                type: RRWebEventType.IncrementalSnapshot,
+                timestamp,
+                data: { source: RRWebEventSource.Selection },
+            }) as unknown as SnapshotEvent
+
+        it('should count text selection events', () => {
+            const events = [makeSelectionEvent(1000), makeSelectionEvent(2000)]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.textSelectionCount).toBe(2)
+        })
+
+        it('should return 0 when no selection events occur', () => {
+            recorder.recordMessage(createMessage([makeClickEvent(1000)]))
+            const result = recorder.end()
+
+            expect(result.textSelectionCount).toBe(0)
+        })
+
+        it('should not count other IncrementalSnapshot sources as selections', () => {
+            const events = [makeScrollEvent(1000, 100), makeMouseMoveEvent(2000, [{ x: 1, y: 1 }])]
+            recorder.recordMessage(createMessage(events))
+            const result = recorder.end()
+
+            expect(result.textSelectionCount).toBe(0)
+        })
+    })
+
+    describe('New features return zero by default', () => {
+        it('should return zero for all new features when no events are recorded', () => {
+            const result: FeatureEndResult = recorder.end()
+
+            expect(result.networkRequestCount).toBe(0)
+            expect(result.networkFailedRequestCount).toBe(0)
+            expect(result.networkRequestDurationSum).toBe(0)
+            expect(result.networkRequestDurationSumOfSquares).toBe(0)
+            expect(result.networkRequestDurationCount).toBe(0)
+            expect(result.maxScrollY).toBe(0)
+            expect(result.uniqueClickTargetCount).toBe(0)
+            expect(result.textSelectionCount).toBe(0)
         })
     })
 
