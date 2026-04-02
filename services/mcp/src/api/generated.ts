@@ -9256,7 +9256,7 @@ export namespace Schemas {
       href?: string | null;
       href_matching?: HrefMatching | null;
       /** @nullable */
-      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
+      properties?: (EventPropertyFilter | PersonPropertyFilter | ElementPropertyFilter | EventMetadataPropertyFilter | SessionPropertyFilter | CohortPropertyFilter | RecordingPropertyFilter | LogEntryPropertyFilter | GroupPropertyFilter | FeaturePropertyFilter | FlagPropertyFilter | HogQLPropertyFilter | EmptyPropertyFilter | DataWarehousePropertyFilter | DataWarehousePersonPropertyFilter | ErrorTrackingIssueFilter | LogPropertyFilter | SpanPropertyFilter | RevenueAnalyticsPropertyFilter)[] | null;
       /** @nullable */
       selector?: string | null;
       /** @nullable */
@@ -17068,11 +17068,12 @@ export namespace Schemas {
     * `firebase` - Firebase
     * `jira` - Jira
     * `pinterest-ads` - Pinterest Ads
+    * `apns` - Apple Push
      */
-    export type Kind8d6Enum = typeof Kind8d6Enum[keyof typeof Kind8d6Enum];
+    export type KindD48Enum = typeof KindD48Enum[keyof typeof KindD48Enum];
 
 
-    export const Kind8d6Enum = {
+    export const KindD48Enum = {
       Slack: 'slack',
       SlackPosthogCode: 'slack-posthog-code',
       Salesforce: 'salesforce',
@@ -17101,6 +17102,7 @@ export namespace Schemas {
       Firebase: 'firebase',
       Jira: 'jira',
       PinterestAds: 'pinterest-ads',
+      Apns: 'apns',
     } as const;
 
     /**
@@ -17108,7 +17110,7 @@ export namespace Schemas {
      */
     export interface Integration {
       readonly id: number;
-      kind: Kind8d6Enum;
+      kind: KindD48Enum;
       config?: unknown;
       readonly created_at: string;
       readonly created_by: UserBasic;
@@ -23058,7 +23060,7 @@ export namespace Schemas {
      */
     export interface PatchedIntegration {
       readonly id?: number;
-      kind?: Kind8d6Enum;
+      kind?: KindD48Enum;
       config?: unknown;
       readonly created_at?: string;
       readonly created_by?: UserBasic;
@@ -23970,7 +23972,7 @@ export namespace Schemas {
      */
     export interface SessionRecordingExternalReferenceIntegration {
       readonly id: number;
-      readonly kind: Kind8d6Enum;
+      readonly kind: KindD48Enum;
       readonly display_name: string;
     }
 

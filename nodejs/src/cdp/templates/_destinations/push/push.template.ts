@@ -121,6 +121,7 @@ if (not res.success) {
         {
             name: 'FCM configuration',
             include_by_default: true,
+            use_all_events_by_default: true,
             inputs_schema: [
                 {
                     key: 'push_provider',
@@ -247,6 +248,7 @@ if (not res.success) {
         {
             name: 'APNS (iOS) configuration',
             include_by_default: true,
+            use_all_events_by_default: true,
             inputs_schema: [
                 {
                     key: 'push_provider',
