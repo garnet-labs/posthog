@@ -246,10 +246,14 @@ class ExperimentQueryRunner(QueryRunner):
             experiment_feature_flag_key=self.feature_flag.key,
             experiment_is_data_warehouse_query=self.is_data_warehouse_query,
             experiment_metric_name=metric_name,
-            experiment_execution_path="precomputed" if self._is_precomputed else "direct_scan",
         )
 
         experiment_query_ast = self._get_experiment_query()
+
+        # Tag after _get_experiment_query() which sets _is_precomputed
+        tag_queries(
+            experiment_execution_path="precomputed" if self._is_precomputed else "direct_scan",
+        )
         experiment_query_debug = get_experiment_query_debug(experiment_query_ast, self.team)
         self.hogql = experiment_query_debug[0]
         self.clickhouse_sql = experiment_query_debug[1]
