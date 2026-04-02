@@ -1,11 +1,4 @@
-"""Parse desired-state YAML files into typed Python objects.
-
-Each YAML file declares the complete desired schema for one table ecosystem
-(e.g. events, sessions_v3, person). The system reads these files, diffs them
-against live ClickHouse state, and generates migration plans.
-
-This is the "terraform plan" equivalent for ClickHouse schema management.
-"""
+"""Parse desired-state YAML files into typed Python objects."""
 
 from __future__ import annotations
 
@@ -119,7 +112,6 @@ def _parse_table(name: str, raw: dict[str, Any], all_tables: dict[str, Any]) -> 
 
 
 def parse_desired_state(yaml_path: Path) -> DesiredState:
-    """Parse a single desired-state YAML file into a DesiredState object."""
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
 
@@ -150,7 +142,6 @@ def parse_desired_state(yaml_path: Path) -> DesiredState:
 
 
 def parse_desired_state_dir(schema_dir: Path) -> list[DesiredState]:
-    """Parse all YAML files in a directory into DesiredState objects."""
     states: list[DesiredState] = []
     yaml_files = sorted(schema_dir.glob("*.yaml")) + sorted(schema_dir.glob("*.yml"))
     for yaml_path in yaml_files:

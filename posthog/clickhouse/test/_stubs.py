@@ -1,28 +1,6 @@
-"""Shared Django/ClickHouse stubs for standalone migration tool tests.
+"""Django/CH/celery stubs so migration_tools tests run without infrastructure.
 
-WHY STUBS INSTEAD OF DJANGO TEST RUNNER:
-PostHog's Django startup (posthog/__init__.py, settings, celery) triggers
-ClickHouse client connections, Kafka configuration, and celery app setup.
-Running these tests via `DJANGO_SETTINGS_MODULE=posthog.settings.test pytest`
-requires a full Django environment with live ClickHouse — impractical for
-unit tests that only exercise YAML parsing, diff logic, and plan generation.
-These stubs isolate the migration_tools package from Django/CH/celery so
-tests run fast with zero infrastructure.
-
-Usage at the top of each test file (BEFORE any posthog imports):
-
-    import posthog.clickhouse.test._stubs as _stubs  # noqa: F401
-
-    # _stubs installs itself on import — now posthog.* is safe to import.
-
-Or for standalone execution:
-
-    _BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    sys.path.insert(0, _BASE)
-    import posthog.clickhouse.test._stubs  # noqa: F401
-
-This module installs all stubs on import — no need to call install_stubs() explicitly.
-The stubs are idempotent and safe to import multiple times.
+Import this module before any posthog imports. Installs on import, idempotent.
 """
 
 from __future__ import annotations

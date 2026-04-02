@@ -1,11 +1,5 @@
 # ruff: noqa: T201 allow print statements
-"""Generate desired-state YAML dicts from templates.
-
-Each template produces a dict matching the DesiredState YAML format:
-  ecosystem, cluster, tables: {name: {engine, columns, on_nodes, ...}}
-
-The ch_migrate generate command writes this dict as YAML.
-"""
+"""Generate desired-state YAML dicts from named templates."""
 
 from __future__ import annotations
 
@@ -13,7 +7,6 @@ from typing import Any
 
 
 def generate_schema_yaml(template_name: str, table: str, cluster: str) -> dict[str, Any] | None:
-    """Dispatch to the named template generator. Returns a dict or None on error."""
     generators: dict[str, Any] = {
         "ingestion_pipeline": _ingestion_pipeline,
         "sharded_table": _sharded_table,

@@ -1,8 +1,4 @@
-"""Step execution engine -- routes SQL to correct ClickHouse nodes by role.
-
-Also provides legacy migration support: discover_migrations, get_pending_migrations,
-run_migration_up, run_migration_down, check_active_mutations.
-"""
+"""Step execution engine + legacy migration support."""
 
 from __future__ import annotations
 
@@ -55,16 +51,7 @@ def execute_migration_step(
         return futures_map.result()
 
 
-# ------------------------------------------------------------------
-# Legacy migration support
-# ------------------------------------------------------------------
-
-
 def discover_migrations() -> list[str]:
-    """Find all legacy .py migration modules in the migrations directory.
-
-    Returns sorted module names like ['0001_initial', '0002_add_events', ...].
-    """
     if not MIGRATIONS_DIR.exists():
         return []
 
@@ -84,10 +71,6 @@ def discover_migrations() -> list[str]:
 
 
 def get_pending_migrations() -> list[str]:
-    """Return legacy migrations that haven't been applied yet.
-
-    Checks the infi clickhouse_orm migration tracking.
-    """
     all_migrations = discover_migrations()
     if not all_migrations:
         return []
@@ -114,7 +97,6 @@ def get_pending_migrations() -> list[str]:
 
 
 def check_active_mutations(client: Any, table: str, database: str = "posthog") -> list[dict[str, Any]]:
-    """Check for active mutations on a table."""
     rows = client.execute(
         "SELECT mutation_id, command, create_time, is_done "
         "FROM system.mutations "
@@ -125,7 +107,6 @@ def check_active_mutations(client: Any, table: str, database: str = "posthog") -
 
 
 def run_migration_up(migration_name: str) -> None:
-    """Run a legacy migration's forward operations."""
     module_path = f"posthog.clickhouse.migrations.{migration_name}"
     module = importlib.import_module(module_path)
     operations = getattr(module, "operations", [])
@@ -148,7 +129,6 @@ def run_migration_up(migration_name: str) -> None:
 
 
 def run_migration_down(migration_number: int) -> None:
-    """Roll back a legacy migration by number."""
     migrations = discover_migrations()
     target = None
     for m in migrations:

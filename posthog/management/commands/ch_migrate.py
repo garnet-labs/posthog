@@ -1,22 +1,5 @@
 # ruff: noqa: T201 allow print statements
-"""
-ClickHouse schema management -- declarative, Terraform-style.
-
-Subcommands (10):
-  plan       -- diff schema/*.yaml vs live ClickHouse, show plan
-  apply      -- execute the diff (plan + apply)
-  generate   -- scaffold a new schema YAML from a template
-  drift      -- detect per-host schema divergence
-  schema     -- dump current live schema
-  status     -- show per-host migration state
-  bootstrap  -- create the tracking table
-  check      -- show pending legacy migrations
-  lint       -- lint schema YAML files
-  down       -- roll back a legacy migration
-
-Modules: desired_state, state_diff, plan_generator, schema_graph,
-schema_introspect, tracking.
-"""
+"""ClickHouse schema management: plan, apply, generate, drift, schema, status, bootstrap, check, lint, down."""
 
 import sys
 from typing import Any
@@ -150,19 +133,10 @@ class Command(BaseCommand):
         else:
             self.print_help("manage.py", "ch_migrate")
 
-    # ------------------------------------------------------------------
-    # plan / apply -- desired-state reconciliation
-    # ------------------------------------------------------------------
-
     def _compute_diffs(
         self, database: str, schema_dir: Any, cluster_filter: str | None = None
     ) -> tuple[list, str | None]:
-        """Compute desired-vs-current diffs. Returns (diffs, error_message).
-
-        Connects to the correct ClickHouse host for each logical cluster
-        declared in the YAML files. When *cluster_filter* is set, only YAML
-        files matching that cluster are diffed.
-        """
+        """Connects to the correct ClickHouse host per logical cluster declared in YAML."""
         from collections import defaultdict
 
         from posthog.clickhouse.migration_tools.desired_state import parse_desired_state_dir
@@ -358,10 +332,6 @@ class Command(BaseCommand):
 
         print("\nApply completed successfully.")
 
-    # ------------------------------------------------------------------
-    # generate -- scaffold schema YAML from template
-    # ------------------------------------------------------------------
-
     def handle_generate(self, options: dict[str, Any]) -> None:
         from pathlib import Path
 
@@ -393,9 +363,6 @@ class Command(BaseCommand):
         print(f"Generated: {output_path} ({table_count} table(s))")
         print(f"Edit the YAML, then run: ch_migrate plan")
 
-    # ------------------------------------------------------------------
-    # drift
-    # ------------------------------------------------------------------
 
     def handle_drift(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -429,9 +396,6 @@ class Command(BaseCommand):
 
         sys.exit(1)
 
-    # ------------------------------------------------------------------
-    # schema
-    # ------------------------------------------------------------------
 
     def handle_schema(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -457,9 +421,6 @@ class Command(BaseCommand):
                 print(f"    - {col.name}: {col.type}{default_str}")
             print()
 
-    # ------------------------------------------------------------------
-    # status
-    # ------------------------------------------------------------------
 
     def handle_status(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -502,9 +463,6 @@ class Command(BaseCommand):
             status = "OK" if success else "FAILED"
             print(f"  {number:04d} {name:40s} {direction:4s} {host:20s} {applied_at} {status}")
 
-    # ------------------------------------------------------------------
-    # bootstrap
-    # ------------------------------------------------------------------
 
     def handle_bootstrap(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -516,9 +474,6 @@ class Command(BaseCommand):
         _ensure_tracking_table(client, database)
         print(f"Tracking table ensured in database '{database}'.")
 
-    # ------------------------------------------------------------------
-    # check -- pending legacy migrations
-    # ------------------------------------------------------------------
 
     def handle_check(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.runner import get_pending_migrations
@@ -532,9 +487,6 @@ class Command(BaseCommand):
         for m in pending:
             print(f"  {m}")
 
-    # ------------------------------------------------------------------
-    # lint -- validate schema YAML files
-    # ------------------------------------------------------------------
 
     def handle_lint(self, options: dict[str, Any]) -> None:
         from pathlib import Path
@@ -562,9 +514,6 @@ class Command(BaseCommand):
             print(f"  - {err}")
         sys.exit(1)
 
-    # ------------------------------------------------------------------
-    # orphans -- find undeclared tables
-    # ------------------------------------------------------------------
 
     def handle_orphans(self, options: dict[str, Any]) -> None:
         from pathlib import Path
@@ -602,9 +551,6 @@ class Command(BaseCommand):
             print(f"  {name} (engine={engine})")
         print("\nThese tables may be leftover from old migrations or manual creation.")
 
-    # ------------------------------------------------------------------
-    # version -- show last applied schema version
-    # ------------------------------------------------------------------
 
     def handle_version(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
@@ -626,9 +572,6 @@ class Command(BaseCommand):
         print(f"  Applied by: {host}")
         print(f"  Applied at: {applied_at}")
 
-    # ------------------------------------------------------------------
-    # down -- legacy rollback
-    # ------------------------------------------------------------------
 
     def handle_down(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.runner import run_migration_down

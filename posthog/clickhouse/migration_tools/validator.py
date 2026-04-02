@@ -30,11 +30,7 @@ def _is_mv_engine(engine: str) -> bool:
 
 
 def build_ecosystems_from_yaml(desired_states: list[DesiredState]) -> list[TableEcosystem]:
-    """Build ecosystem objects from desired-state YAML definitions.
-
-    Scans all DesiredState objects and identifies ecosystems by finding
-    Distributed tables that reference MergeTree source tables.
-    """
+    """Identifies ecosystems by finding Distributed tables that reference MergeTree sources."""
     ecosystems: list[TableEcosystem] = []
 
     for state in desired_states:
@@ -82,7 +78,6 @@ def build_ecosystems_from_yaml(desired_states: list[DesiredState]) -> list[Table
 
 
 def validate_desired_states(desired_states: list[DesiredState]) -> list[str]:
-    """Validate a list of desired states. Returns a list of error strings (empty = valid)."""
     errors: list[str] = []
 
     # Build dynamic ecosystems from YAML for completeness checking
@@ -135,7 +130,6 @@ def _check_ecosystem_completeness(
 
 
 def _check_cross_cluster_targeting(state: DesiredState) -> list[str]:
-    """Check that engine types target appropriate node roles."""
     errors: list[str] = []
 
     for table_name, table in state.tables.items():

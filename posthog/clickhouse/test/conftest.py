@@ -1,9 +1,4 @@
-"""Pytest conftest — loads Django/ClickHouse stubs before test modules are imported.
-
-This replaces the importlib.util bootstrap that was duplicated across every
-test file in this directory.  Stubs install themselves on load and are
-idempotent, so re-importing _stubs in a test file is safe but unnecessary.
-"""
+"""Load Django/ClickHouse stubs before test modules are imported."""
 
 from __future__ import annotations
 

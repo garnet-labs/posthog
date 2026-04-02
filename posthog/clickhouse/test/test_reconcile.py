@@ -1,7 +1,4 @@
-"""Unit tests for desired-state reconciliation (desired_state, state_diff, plan_generator).
-
-No Django or ClickHouse connection required.
-"""
+"""Tests for desired-state reconciliation. No Django or ClickHouse required."""
 
 from __future__ import annotations
 
@@ -660,8 +657,6 @@ class TestDetectOrphans(unittest.TestCase):
 
 
 class TestClusterRegistry(unittest.TestCase):
-    """Tests for cluster registry in cluster.py."""
-
     def test_cluster_registry_maps_main(self) -> None:
         from unittest.mock import MagicMock, patch
 

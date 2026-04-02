@@ -1,15 +1,4 @@
-"""Diff engine: compare desired state against current live schema.
-
-Produces a list of StateDiff objects, each representing a single DDL operation
-(CREATE, ALTER, DROP, recreate) with the SQL to execute, target node roles,
-and dependency ordering.
-
-The diff respects ClickHouse ecosystem rules:
-- DROP MV before altering source tables
-- CREATE local tables before Distributed tables
-- CREATE Kafka tables before MVs
-- ALTER all ecosystem tables when adding a column (sharded + writable + readable)
-"""
+"""Diff desired state against live schema -> sorted list[StateDiff]."""
 
 from __future__ import annotations
 
@@ -113,7 +102,6 @@ def _generate_create_sql(
     database: str,
     cluster: str,
 ) -> str:
-    """Generate CREATE TABLE/VIEW SQL from a DesiredTable."""
     cols = _columns_sql(table.columns)
 
     if _is_mv(table.engine):
@@ -160,11 +148,7 @@ def diff_state(
     database: str | None = None,
     cluster: str | None = None,
 ) -> list[StateDiff]:
-    """Compare desired state against current schema and produce a list of diffs.
-
-    Returns StateDiff objects sorted in dependency order (drops before creates,
-    local before distributed, kafka before MV).
-    """
+    """Returns diffs sorted in dependency order: drops, alters, creates, recreates."""
     db = database or desired.database
     cl = cluster or desired.cluster
 
@@ -398,11 +382,6 @@ def detect_orphans(
     current: dict[str, TableSchema],
     exclude_patterns: list[str] | None = None,
 ) -> list[str]:
-    """Find tables in current schema that are not declared in any YAML.
-
-    Returns a sorted list of orphan table names. This is read-only — it
-    only reports, it does not drop anything.
-    """
     declared: set[str] = set()
     for ds in desired_states:
         declared.update(ds.tables.keys())

@@ -40,7 +40,6 @@ class StepRecord:
 
 
 def _ensure_tracking_table(client: Any, database: str) -> None:
-    """Create the tracking table if it doesn't exist (idempotent)."""
     client.execute(TRACKING_TABLE_DDL.format(database=database))
 
 
@@ -73,13 +72,8 @@ def _record_step(
 
 
 def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool = False) -> tuple[bool, str]:
-    """Best-effort advisory lock via INSERT...SELECT WHERE NOT EXISTS. Returns (acquired, message).
-
-    Auto-creates the tracking table if needed. Uses a single query to check
-    for existing locks and insert, but MergeTree is eventually consistent —
-    two concurrent pods could both acquire in the same merge cycle.
-    Sufficient for single-deploy-at-a-time; use --force to break stale locks.
-    """
+    """Best-effort: MergeTree is eventually consistent, so two pods in the same merge cycle
+    could both acquire. Sufficient for single-deploy-at-a-time."""
     _ensure_tracking_table(client, database)
     table_ref = f"{database}.{TRACKING_TABLE_NAME}"
 
@@ -146,7 +140,6 @@ VERSION_STEP_INDEX = -2
 
 
 def record_schema_version(client: Any, database: str, commit_hash: str, hostname: str) -> None:
-    """Record the git commit hash of the schema YAML that was just applied."""
     _record_step(
         client=client,
         record=StepRecord(
@@ -164,7 +157,6 @@ def record_schema_version(client: Any, database: str, commit_hash: str, hostname
 
 
 def get_latest_schema_version(client: Any, database: str) -> tuple[str, str, str] | None:
-    """Return (commit_hash, host, applied_at) of the last applied schema version, or None."""
     table_ref = f"{database}.{TRACKING_TABLE_NAME}"
     sql = f"""
         SELECT migration_name, host, applied_at

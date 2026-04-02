@@ -1,8 +1,4 @@
-"""Unit tests for advisory locking in tracking.py.
-
-Tests acquire_apply_lock and release_apply_lock with mocked ClickHouse
-client — no Django or ClickHouse connection required.
-"""
+"""Tests for advisory locking. No Django or ClickHouse required."""
 
 from __future__ import annotations
 
@@ -16,8 +12,6 @@ from posthog.clickhouse.migration_tools.tracking import acquire_apply_lock, rele
 
 
 class TestAdvisoryLock(unittest.TestCase):
-    """Tests for the advisory lock mechanism."""
-
     def test_advisory_lock_prevents_concurrent_apply(self) -> None:
         """An active lock from another host prevents acquisition."""
         client = MagicMock()

@@ -1,10 +1,4 @@
-"""Generate human-readable plans and executable ManifestStep lists from StateDiffs.
-
-Takes a list[StateDiff] from state_diff.diff_state() and produces:
-1. A human-readable plan (like terraform plan) with +/-/~ symbols
-2. A list of ManifestStep objects that the existing runner can execute
-3. Rollback steps (reverse of the plan)
-"""
+"""StateDiff -> human-readable plan + ManifestStep list + rollback steps."""
 
 from __future__ import annotations
 
@@ -24,7 +18,6 @@ _ACTION_SYMBOL: dict[str, str] = {
 
 
 def generate_plan_text(diffs: list[StateDiff]) -> str:
-    """Generate a human-readable plan string (like terraform plan output)."""
     if not diffs:
         return "No changes. Infrastructure is up to date."
 
@@ -66,7 +59,6 @@ def generate_plan_text(diffs: list[StateDiff]) -> str:
 
 
 def generate_manifest_steps(diffs: list[StateDiff]) -> list[tuple[ManifestStep, str]]:
-    """Convert StateDiffs into ManifestStep + SQL pairs for the existing runner."""
     steps: list[tuple[ManifestStep, str]] = []
 
     for diff in diffs:
@@ -127,16 +119,7 @@ def generate_manifest_steps(diffs: list[StateDiff]) -> list[tuple[ManifestStep, 
 
 
 def generate_rollback_steps(diffs: list[StateDiff]) -> list[tuple[ManifestStep, str]]:
-    """Generate rollback ManifestStep + SQL pairs (reverse of the plan).
-
-    For each diff:
-    - create → DROP
-    - drop → no auto-rollback (data loss)
-    - alter_add_column → ALTER DROP COLUMN
-    - alter_drop_column → no auto-rollback (data loss)
-    - alter_modify_column → no auto-rollback (need old type)
-    - recreate/recreate_mv → no auto-rollback (need original DDL)
-    """
+    """Only create and alter_add_column are auto-reversible; everything else loses data."""
     steps: list[tuple[ManifestStep, str]] = []
 
     for diff in reversed(diffs):
@@ -174,7 +157,6 @@ def generate_rollback_steps(diffs: list[StateDiff]) -> list[tuple[ManifestStep, 
 
 
 def _extract_column_name_from_add(sql: str) -> str | None:
-    """Extract column name from 'ALTER TABLE ... ADD COLUMN IF NOT EXISTS col_name ...' SQL."""
     parts = sql.upper().split("ADD COLUMN")
     if len(parts) < 2:
         return None

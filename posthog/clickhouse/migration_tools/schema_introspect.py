@@ -45,7 +45,6 @@ class SchemaDiff:
 
 
 def dump_schema(client: Any, database: str) -> dict[str, TableSchema]:
-    """Query a single ClickHouse host for its current schema state."""
     tables_rows = client.execute(
         "SELECT name, engine, engine_full, sorting_key, partition_key, primary_key, as_select "
         "FROM system.tables WHERE database = %(database)s",
@@ -87,8 +86,6 @@ def dump_schema(client: Any, database: str) -> dict[str, TableSchema]:
 
 
 def dump_schema_all_hosts(cluster: ClickhouseCluster, database: str) -> dict[HostInfo, dict[str, TableSchema]]:
-    """Run dump_schema on every host in the cluster."""
-
     def _dump(client: Any) -> dict[str, TableSchema]:
         return dump_schema(client, database)
 
@@ -100,7 +97,6 @@ def compare_schemas(
     expected: dict[str, TableSchema],
     actual: dict[str, TableSchema],
 ) -> list[SchemaDiff]:
-    """Compare two schema dumps and return differences."""
     diffs: list[SchemaDiff] = []
 
     expected_names = set(expected.keys())

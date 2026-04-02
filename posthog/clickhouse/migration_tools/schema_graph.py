@@ -43,7 +43,6 @@ class TableEcosystem:
     dictionaries: list[DictRef] = field(default_factory=list)
 
     def all_tables(self) -> set[str]:
-        """Return every table/object name in this ecosystem."""
         names = {self.sharded_table}
         if self.distributed_writable:
             names.add(self.distributed_writable)
@@ -140,12 +139,10 @@ for _eco in KNOWN_ECOSYSTEMS:
 
 
 def lookup_ecosystem(table_name: str) -> TableEcosystem | None:
-    """Find the ecosystem a table belongs to, or None."""
     return _TABLE_TO_ECOSYSTEM.get(table_name)
 
 
 def get_ecosystem_by_name(name: str) -> TableEcosystem | None:
-    """Find an ecosystem by its base_name."""
     for eco in KNOWN_ECOSYSTEMS:
         if eco.base_name == name:
             return eco
