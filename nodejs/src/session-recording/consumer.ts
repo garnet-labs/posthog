@@ -187,7 +187,8 @@ export class SessionRecordingIngester {
         )
         const featureStore = new SessionFeatureStore(
             this.kafkaMetadataProducer,
-            this.config.SESSION_RECORDING_V2_SESSION_FEATURES_KAFKA_TOPIC
+            this.config.SESSION_RECORDING_V2_SESSION_FEATURES_KAFKA_TOPIC,
+            this.config.SESSION_RECORDING_FEATURES_ENABLED
         )
         this.fileStorage = s3Client
             ? new RetentionAwareStorage(

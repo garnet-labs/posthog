@@ -15,12 +15,17 @@ export interface SessionFeatureBlock {
 export class SessionFeatureStore {
     constructor(
         private producer: KafkaProducerWrapper,
-        private kafkaTopic: string
+        private kafkaTopic: string,
+        private enabled: boolean = false
     ) {
-        logger.debug('🧠', 'session_feature_store_created')
+        logger.debug('🧠', 'session_feature_store_created', { enabled })
     }
 
     public async storeSessionFeatures(blocks: SessionFeatureBlock[]): Promise<void> {
+        if (!this.enabled) {
+            return
+        }
+
         logger.info('🧠', 'session_feature_store_storing', { count: blocks.length })
 
         const events = blocks.map((block) => ({
