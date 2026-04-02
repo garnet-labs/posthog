@@ -153,7 +153,6 @@ import {
     LogEntryRequestParams,
     MediaUploadResponse,
     NewEarlyAccessFeatureType,
-    type OAuthApplicationPublicMetadata,
     ObjectMediaPreview,
     OrganizationFeatureFlags,
     OrganizationFeatureFlagsCopyBody,
@@ -1829,10 +1828,6 @@ export class ApiRequest {
 
     public messagingPreferencesOptOuts(): ApiRequest {
         return this.environments().current().addPathComponent('messaging_preferences').addPathComponent('opt_outs')
-    }
-
-    public oauthApplicationPublicMetadata(clientId: string): ApiRequest {
-        return this.addPathComponent('oauth_application').addPathComponent('metadata').addPathComponent(clientId)
     }
 
     public hogFlows(): ApiRequest {
@@ -3615,7 +3610,6 @@ const api = {
             auth_type: string
             api_key?: string
             description?: string
-            oauth_provider_kind?: string
         }): Promise<Record<string, any>> {
             return await new ApiRequest().mcpServerInstallations().withAction('install_custom').create({ data })
         },
@@ -4992,6 +4986,9 @@ const api = {
         async resync(schemaId: ExternalDataSourceSchema['id']): Promise<void> {
             await new ApiRequest().externalDataSourceSchema(schemaId).withAction('resync').create()
         },
+        async cancel(schemaId: ExternalDataSourceSchema['id']): Promise<void> {
+            await new ApiRequest().externalDataSourceSchema(schemaId).withAction('cancel').create()
+        },
         async incremental_fields(schemaId: ExternalDataSourceSchema['id']): Promise<SchemaIncrementalFieldsResponse> {
             return await new ApiRequest().externalDataSourceSchema(schemaId).withAction('incremental_fields').create()
         },
@@ -5422,11 +5419,6 @@ const api = {
                     page: page || 1,
                 })
                 .get()
-        },
-    },
-    oauthApplication: {
-        async getPublicMetadata(clientId: string): Promise<OAuthApplicationPublicMetadata> {
-            return await new ApiRequest().oauthApplicationPublicMetadata(clientId).get()
         },
     },
     hogFlows: {
