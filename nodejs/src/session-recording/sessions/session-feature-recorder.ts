@@ -6,11 +6,9 @@ import { RRWebEventSource, RRWebEventType, hrefFrom, isClick, isKeypress, isMous
 const POSTHOG_NETWORK_PLUGIN = 'posthog/network@1'
 const RRWEB_NETWORK_PLUGIN = 'rrweb/network@1'
 
-// Numeric keys for posthog/network@1 payload
 const POSTHOG_NETWORK_DURATION_KEY = 39
 const POSTHOG_NETWORK_STATUS_KEY = 21
 
-// Typed shape for accessing rrweb event internals
 interface RRWebEventData {
     type?: number
     timestamp: number
@@ -102,10 +100,6 @@ export interface FeatureEndResult {
 
 /**
  * Extracts aggregate features from session recording events for ML scoring.
- *
- * Accumulates sufficient statistics (sums, sums-of-squares, counts) that can be
- * aggregated across blocks in ClickHouse using SimpleAggregateFunction(sum, ...).
- * The actual model score (p_should_surface) is computed at query time via CART splits in SQL.
  */
 export class SessionFeatureRecorder {
     private eventCount: number = 0
