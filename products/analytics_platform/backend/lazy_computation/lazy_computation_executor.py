@@ -574,6 +574,7 @@ def run_lazy_computation_insert(
             settings={
                 "max_execution_time": HOGQL_INCREASED_MAX_EXECUTION_TIME,
                 "insert_quorum": PREAGGREGATION_INSERT_QUORUM,
+                "transform_null_in": 1,
                 **HogQLQuerySettings(load_balancing="in_order").model_dump(exclude_none=True),
             },
         )
@@ -973,6 +974,7 @@ def ensure_precomputed(
                 settings={
                     "max_execution_time": HOGQL_INCREASED_MAX_EXECUTION_TIME,
                     "insert_quorum": PREAGGREGATION_INSERT_QUORUM,
+                    "transform_null_in": 1,
                     **HogQLQuerySettings(load_balancing="in_order").model_dump(exclude_none=True),
                 },
             )

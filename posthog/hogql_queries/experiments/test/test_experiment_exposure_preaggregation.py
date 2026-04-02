@@ -530,6 +530,65 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
         assert lazy_result.variant_results is not None
         assert lazy_result.variant_results[0].number_of_samples == 3, "Should only count test users from Jan 7+"
 
+    def test_precomputed_not_in_filter_with_null_properties(self):
+        """NOT IN test-account filters must not drop users whose person property is
+        unset (NULL). The INSERT sync_execute must use transform_null_in=1 — the
+        same setting execute_hogql_query applies to all regular queries — so that
+        NULL NOT IN (...) evaluates to TRUE rather than NULL."""
+        feature_flag = self.create_feature_flag(key="null-prop-test")
+        experiment = self.create_experiment(
+            feature_flag=feature_flag,
+            start_date=datetime(2024, 1, 1),
+            end_date=datetime(2024, 1, 5),
+        )
+
+        metric = ExperimentMeanMetric(
+            source=EventsNode(event="purchase", math=ExperimentMetricMathType.TOTAL),
+        )
+        experiment.metrics = [metric.model_dump(mode="json")]
+        experiment.save()
+
+        # Set up a NOT IN test account filter on a person property
+        self.team.test_account_filters = [
+            {"key": "environment", "value": ["staging", "dev"], "operator": "is_not", "type": "person"}
+        ]
+        self.team.save()
+
+        feature_flag_property = f"$feature/{feature_flag.key}"
+
+        # Create users WITHOUT the "environment" property set (NULL)
+        for i in range(3):
+            _create_person(distinct_ids=[f"null_control_{i}"], team_id=self.team.pk)
+            self._create_exposure_event(
+                f"null_control_{i}", feature_flag, "control", datetime(2024, 1, 2, 12, 0, 0, tzinfo=UTC)
+            )
+            _create_event(
+                team=self.team,
+                event="purchase",
+                distinct_id=f"null_control_{i}",
+                timestamp=datetime(2024, 1, 2, 13, 0, 0, tzinfo=UTC),
+                properties={feature_flag_property: "control"},
+            )
+
+        for i in range(4):
+            _create_person(distinct_ids=[f"null_test_{i}"], team_id=self.team.pk)
+            self._create_exposure_event(
+                f"null_test_{i}", feature_flag, "test", datetime(2024, 1, 2, 14, 0, 0, tzinfo=UTC)
+            )
+            _create_event(
+                team=self.team,
+                event="purchase",
+                distinct_id=f"null_test_{i}",
+                timestamp=datetime(2024, 1, 2, 15, 0, 0, tzinfo=UTC),
+                properties={feature_flag_property: "test"},
+            )
+
+        # Enable filterTestAccounts via exposure criteria
+        experiment.exposure_criteria = {"filterTestAccounts": True}
+        experiment.save()
+
+        self._lazy_computed_and_compare(experiment, feature_flag, metric)
+
     def test_falls_back_to_events_scan_on_lazy_computation_failure(self):
         feature_flag = self.create_feature_flag()
         experiment = self.create_experiment(
