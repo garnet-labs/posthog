@@ -2568,6 +2568,7 @@ class TestOAuthAPI(APIBaseTest):
         old_db_token = OAuthRefreshToken.objects.get(token=original_refresh_token)
         self.assertIsNotNone(old_db_token.revoked)
 
+    @freeze_time("2025-01-01 00:00:00")
     @override_settings(CLOUD_DEPLOYMENT="US", SITE_URL="https://us.posthog.com")
     def test_token_response_includes_region_for_us_cloud(self):
         grant = OAuthGrant.objects.create(
@@ -2589,6 +2590,7 @@ class TestOAuthAPI(APIBaseTest):
         self.assertEqual(data["posthog_region"], "us")
         self.assertEqual(data["posthog_base_url"], "https://us.posthog.com")
 
+    @freeze_time("2025-01-01 00:00:00")
     @override_settings(CLOUD_DEPLOYMENT="EU", SITE_URL="https://eu.posthog.com")
     def test_token_response_includes_region_for_eu_cloud(self):
         grant = OAuthGrant.objects.create(
@@ -2610,6 +2612,7 @@ class TestOAuthAPI(APIBaseTest):
         self.assertEqual(data["posthog_region"], "eu")
         self.assertEqual(data["posthog_base_url"], "https://eu.posthog.com")
 
+    @freeze_time("2025-01-01 00:00:00")
     @override_settings(CLOUD_DEPLOYMENT=None)
     def test_token_response_excludes_region_for_self_hosted(self):
         grant = OAuthGrant.objects.create(
