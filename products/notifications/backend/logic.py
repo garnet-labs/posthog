@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import transaction
 
 import structlog
@@ -31,6 +32,8 @@ def _publish_to_kafka(event: NotificationEvent) -> None:
                 "body": event.body,
                 "resource_type": event.resource_type or "",
                 "source_url": event.source_url,
+                "source_type": event.source_type,
+                "source_id": event.source_id,
                 "resolved_user_ids": event.resolved_user_ids,
                 "created_at": event.created_at.isoformat(),
             },
@@ -49,12 +52,15 @@ def create_notification(data: NotificationData) -> NotificationEvent | None:
 
     organization = team.organization
 
-    if not posthoganalytics.feature_enabled(
-        "real-time-notifications",
-        str(organization.id),
-        groups={"organization": str(organization.id)},
-        only_evaluate_locally=False,
-        send_feature_flag_events=False,
+    if not (
+        settings.DEBUG
+        or posthoganalytics.feature_enabled(
+            "real-time-notifications",
+            str(organization.id),
+            groups={"organization": str(organization.id)},
+            only_evaluate_locally=False,
+            send_feature_flag_events=False,
+        )
     ):
         return None
 
@@ -80,6 +86,8 @@ def create_notification(data: NotificationData) -> NotificationEvent | None:
         else data.resource_type,
         resource_id=data.resource_id,
         source_url=data.source_url,
+        source_type=data.source_type,
+        source_id=data.source_id,
         target_type=data.target_type,
         target_id=data.target_id,
         resolved_user_ids=resolved_user_ids,

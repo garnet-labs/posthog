@@ -97,7 +97,7 @@ export function NotificationRow({
                 <div className="flex items-center gap-1.5 mt-2">
                     <span className="text-[10px] text-muted">{dayjs(notification.created_at).fromNow()}</span>
                     {otherProjectName && (
-                        <Tooltip title={`Occurred on project ${otherProjectName}`}>
+                        <Tooltip title={`Notified on project ${otherProjectName}`}>
                             <span className="text-[10px] text-muted bg-fill-highlight-100 px-1 py-px rounded truncate max-w-[240px]">
                                 {otherProjectName}
                             </span>

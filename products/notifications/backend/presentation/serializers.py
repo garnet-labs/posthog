@@ -13,4 +13,6 @@ class NotificationEventSerializer(serializers.Serializer):
     resource_type = serializers.CharField(allow_null=True)
     resource_id = serializers.CharField()
     source_url = serializers.CharField()
+    source_type = serializers.CharField(allow_null=True)
+    source_id = serializers.CharField(allow_null=True)
     created_at = serializers.DateTimeField()

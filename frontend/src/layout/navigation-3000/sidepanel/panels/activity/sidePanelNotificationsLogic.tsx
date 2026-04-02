@@ -14,7 +14,7 @@ import { FEATURE_FLAGS } from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
 import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
-import { toParams } from 'lib/utils'
+import { retryWithBackoff, toParams } from 'lib/utils'
 import { liveEventsHostOrigin } from 'lib/utils/apiHost'
 import { organizationLogic } from 'scenes/organizationLogic'
 import { projectLogic } from 'scenes/projectLogic'
@@ -29,7 +29,30 @@ import { sidePanelContextLogic } from '../sidePanelContextLogic'
 import type { sidePanelNotificationsLogicType } from './sidePanelNotificationsLogicType'
 
 const LEGACY_POLL_TIMEOUT = 5 * 60 * 1000
-const MAX_SSE_ERRORS = 3
+const SSE_RETRY_ATTEMPTS = 3
+const SSE_RETRY_INITIAL_DELAY_MS = 30000
+const SSE_RETRY_BACKOFF_MULTIPLIER = 4
+
+const SOURCE_TYPE_TO_PATH: Record<string, (id: string) => string> = {
+    replay: (id) => `/replay/${id}`,
+    notebook: (id) => `/notebooks/${id}`,
+    insight: (id) => `/insights/${id}`,
+    feature_flag: (id) => `/feature_flags/${id}`,
+    dashboard: (id) => `/dashboard/${id}`,
+    survey: (id) => `/surveys/${id}`,
+    experiment: (id) => `/experiments/${id}`,
+    error_tracking: (id) => `/error_tracking/${id}`,
+}
+
+function buildNotificationSourcePath(notification: InAppNotification): string | null {
+    if (notification.source_type && notification.source_id) {
+        const pathBuilder = SOURCE_TYPE_TO_PATH[notification.source_type]
+        if (pathBuilder) {
+            return pathBuilder(notification.source_id)
+        }
+    }
+    return notification.source_url || null
+}
 
 export interface ChangelogFlagPayload {
     notificationDate: dayjs.Dayjs
@@ -89,7 +112,10 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
         errorCounter: [
             0,
             {
-                incrementErrorCount: (state) => (state >= MAX_SSE_ERRORS ? MAX_SSE_ERRORS : state + 1),
+                incrementErrorCount: (state) => {
+                    const MAX_LEGACY_ERRORS = 5
+                    return state >= MAX_LEGACY_ERRORS ? MAX_LEGACY_ERRORS : state + 1
+                },
                 clearErrorCount: () => 0,
             },
         ],
@@ -241,75 +267,80 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
             const abortController = new AbortController()
             cache.sseConnection = abortController
 
-            void api
-                .stream(url, {
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                    signal: abortController.signal,
-                    onMessage: (event) => {
-                        actions.clearErrorCount()
-                        if (!values.isInitialLoadComplete) {
-                            return
-                        }
-                        try {
-                            const notification = JSON.parse(event.data) as InAppNotification
-                            actions.notificationReceived(notification)
-                            if (notification.priority === 'critical') {
-                                const iconMap: Record<string, JSX.Element> = {
-                                    comment_mention: <IconComment className="size-5 text-primary shrink-0" />,
-                                    alert_firing: <IconWarning className="size-5 text-warning shrink-0" />,
-                                    approval_requested: <IconCheckCircle className="size-5 text-success shrink-0" />,
-                                    approval_resolved: <IconCheckCircle className="size-5 text-success shrink-0" />,
-                                    pipeline_failure: <IconPlug className="size-5 text-danger shrink-0" />,
-                                    issue_assigned: <IconBug className="size-5 text-primary shrink-0" />,
-                                }
-                                const icon = iconMap[notification.notification_type] ?? (
-                                    <IconNotification className="size-5 text-secondary shrink-0" />
-                                )
-                                lemonToast.info(
-                                    <div className="flex items-start gap-2">
-                                        {icon}
-                                        <div className="min-w-0">
-                                            <div className="font-semibold text-xs">{notification.title}</div>
-                                            {notification.body && (
-                                                <div className="text-xs text-secondary mt-0.5 line-clamp-1">
-                                                    {notification.body}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>,
-                                    {
-                                        icon: false,
-                                        autoClose: false,
-                                        toastId: `notification-${notification.id}`,
-                                        button: {
-                                            label: 'Open notifications',
-                                            action: () => notificationsMenuLogic.actions.openToUnread(),
-                                        },
-                                    }
-                                )
+            void retryWithBackoff(
+                () =>
+                    api.stream(url, {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                        signal: abortController.signal,
+                        onMessage: (event) => {
+                            if (!values.isInitialLoadComplete) {
+                                return
                             }
-                        } catch {
-                            // Ignore malformed messages
-                        }
-                    },
-                    onError: () => {
-                        actions.incrementErrorCount()
-                        if (values.errorCounter >= MAX_SSE_ERRORS) {
-                            abortController.abort()
-                            throw new Error(`SSE failed ${MAX_SSE_ERRORS} times, giving up`)
-                        }
-                    },
-                })
-                .catch(() => {})
+                            try {
+                                const notification = JSON.parse(event.data) as InAppNotification
+                                actions.notificationReceived(notification)
+                                if (notification.priority === 'critical') {
+                                    const iconMap: Record<string, JSX.Element> = {
+                                        comment_mention: <IconComment className="size-5 text-primary shrink-0" />,
+                                        alert_firing: <IconWarning className="size-5 text-warning shrink-0" />,
+                                        approval_requested: (
+                                            <IconCheckCircle className="size-5 text-success shrink-0" />
+                                        ),
+                                        approval_resolved: <IconCheckCircle className="size-5 text-success shrink-0" />,
+                                        pipeline_failure: <IconPlug className="size-5 text-danger shrink-0" />,
+                                        issue_assigned: <IconBug className="size-5 text-primary shrink-0" />,
+                                    }
+                                    const icon = iconMap[notification.notification_type] ?? (
+                                        <IconNotification className="size-5 text-secondary shrink-0" />
+                                    )
+                                    lemonToast.info(
+                                        <div className="flex items-start gap-2">
+                                            {icon}
+                                            <div className="min-w-0">
+                                                <div className="font-semibold text-xs">{notification.title}</div>
+                                                {notification.body && (
+                                                    <div className="text-xs text-secondary mt-0.5 line-clamp-1">
+                                                        {notification.body}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>,
+                                        {
+                                            icon: false,
+                                            autoClose: false,
+                                            toastId: `notification-${notification.id}`,
+                                            button: {
+                                                label: 'Open notifications',
+                                                action: () => notificationsMenuLogic.actions.openToUnread(),
+                                            },
+                                        }
+                                    )
+                                }
+                            } catch {
+                                // Ignore malformed messages
+                            }
+                        },
+                        onError: () => {
+                            throw new Error('SSE disconnected')
+                        },
+                    }),
+                {
+                    maxAttempts: SSE_RETRY_ATTEMPTS,
+                    initialDelayMs: SSE_RETRY_INITIAL_DELAY_MS,
+                    backoffMultiplier: SSE_RETRY_BACKOFF_MULTIPLIER,
+                    signal: abortController.signal,
+                }
+            ).catch(() => {})
         },
         stopSSE: () => {
             cache.sseConnection?.abort()
             cache.sseConnection = null
         },
         navigateToNotification: ({ notification }) => {
-            if (!notification.source_url) {
+            const path = buildNotificationSourcePath(notification)
+            if (!path) {
                 return
             }
             if (!notification.read) {
@@ -317,14 +348,8 @@ export const sidePanelNotificationsLogic = kea<sidePanelNotificationsLogicType>(
             }
             const isOtherProject = notification.team_id !== null && notification.team_id !== values.currentTeamId
             if (isOtherProject) {
-                const path = notification.source_url.startsWith('/project/')
-                    ? notification.source_url
-                    : urls.project(notification.team_id!, notification.source_url)
-                window.location.href = path
+                window.location.href = urls.project(notification.team_id!, path)
             } else {
-                const path = notification.source_url.startsWith('/project/')
-                    ? notification.source_url
-                    : notification.source_url
                 router.actions.push(path)
             }
         },

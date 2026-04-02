@@ -400,6 +400,8 @@ export interface InAppNotification {
     read_at: string | null
     resource_type: string | null
     source_url: string
+    source_type: string | null
+    source_id: string | null
     created_at: string
 }
 

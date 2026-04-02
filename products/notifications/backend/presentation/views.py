@@ -1,5 +1,6 @@
 from typing import cast
 
+from django.conf import settings
 from django.db.models import Exists, OuterRef, Subquery
 
 import posthoganalytics
@@ -35,6 +36,8 @@ class NotificationsViewSet(TeamAndOrgViewSetMixin, GenericViewSet):
         return cast(User, self.request.user)
 
     def _is_feature_enabled(self) -> bool:
+        if settings.DEBUG:
+            return True
         user = self._get_user()
         if not user.distinct_id:
             return False
