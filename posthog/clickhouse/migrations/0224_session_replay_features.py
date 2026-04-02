@@ -10,7 +10,7 @@ from posthog.session_recordings.sql.session_replay_feature_sql import (
 operations = [
     run_sql_with_exceptions(WRITABLE_SESSION_REPLAY_FEATURES_TABLE_SQL()),
     run_sql_with_exceptions(DISTRIBUTED_SESSION_REPLAY_FEATURES_TABLE_SQL()),
-    run_sql_with_exceptions(SESSION_REPLAY_FEATURES_TABLE_SQL()),
-    run_sql_with_exceptions(KAFKA_SESSION_REPLAY_FEATURES_TABLE_SQL()),
-    run_sql_with_exceptions(SESSION_REPLAY_FEATURES_TABLE_MV_SQL()),
+    run_sql_with_exceptions(SESSION_REPLAY_FEATURES_TABLE_SQL(on_cluster=False)),
+    run_sql_with_exceptions(KAFKA_SESSION_REPLAY_FEATURES_TABLE_SQL(on_cluster=False)),
+    run_sql_with_exceptions(SESSION_REPLAY_FEATURES_TABLE_MV_SQL(on_cluster=False)),
 ]
