@@ -71,7 +71,7 @@ tables:
         engine: MaterializedView
         source: sharded_events
         target: writable_raw_sessions_v3
-        select: "SELECT ... FROM {{ database }}.sharded_events"
+        select: 'SELECT ... FROM {{ database }}.sharded_events'
         on_nodes: DATA
         columns: []
 
@@ -79,6 +79,6 @@ tables:
         engine: MaterializedView
         source: sharded_session_replay_events
         target: writable_raw_sessions_v3
-        select: "SELECT ... FROM {{ database }}.sharded_session_replay_events"
+        select: 'SELECT ... FROM {{ database }}.sharded_session_replay_events'
         on_nodes: DATA
         columns: []
