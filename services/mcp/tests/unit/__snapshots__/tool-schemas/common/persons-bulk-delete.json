@@ -3,33 +3,36 @@
     "properties": {
         "delete_events": {
             "default": false,
-            "description": "If true, queue deletion of all events associated with these persons.",
+            "description": "If true, a task to delete all events associated with this person will be created and queued. The task does not run immediately and instead is batched together and at 5AM UTC every Sunday",
             "type": "boolean"
         },
         "delete_recordings": {
             "default": false,
-            "description": "If true, queue deletion of all recordings associated with these persons.",
+            "description": "If true, a task to delete all recordings associated with this person will be created and queued. The task does not run immediately and instead is batched together and at 5AM UTC every Sunday",
             "type": "boolean"
         },
         "distinct_ids": {
-            "description": "A list of distinct IDs whose associated persons will be deleted (max 1000).",
-            "items": {
+            "additionalProperties": {},
+            "description": "A list of distinct IDs, up to 1000 of them. We'll delete all persons associated with those distinct IDs.",
+            "propertyNames": {
                 "type": "string"
             },
-            "type": "array"
+            "type": "object"
         },
         "ids": {
-            "description": "A list of PostHog person UUIDs to delete (max 1000).",
-            "items": {
+            "additionalProperties": {},
+            "description": "A list of PostHog person IDs, up to 1000 of them. We'll delete all the persons listed.",
+            "propertyNames": {
                 "type": "string"
             },
-            "type": "array"
+            "type": "object"
         },
         "keep_person": {
             "default": false,
-            "description": "If true, keep the person records but delete their events and recordings.",
+            "description": "If true, the person record itself will not be deleted. This is useful if you want to keep the person record for auditing purposes but remove events and recordings associated with them",
             "type": "boolean"
-        }
+        },
+        "properties": {}
     },
     "type": "object"
 }

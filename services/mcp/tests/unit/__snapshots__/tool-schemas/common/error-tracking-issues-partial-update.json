@@ -4,21 +4,7 @@
         "assignee": {
             "properties": {
                 "id": {
-                    "anyOf": [
-                        {
-                            "anyOf": [
-                                {
-                                    "type": "number"
-                                },
-                                {
-                                    "type": "string"
-                                }
-                            ]
-                        },
-                        {
-                            "type": "null"
-                        }
-                    ]
+                    "type": "string"
                 },
                 "type": {
                     "type": "string"
@@ -56,11 +42,9 @@
                             "kind": {
                                 "enum": [
                                     "slack",
-                                    "slack-posthog-code",
                                     "salesforce",
                                     "hubspot",
                                     "google-pubsub",
-                                    "google-cloud-service-account",
                                     "google-cloud-storage",
                                     "google-ads",
                                     "google-sheets",
@@ -81,8 +65,7 @@
                                     "vercel",
                                     "azure-blob",
                                     "firebase",
-                                    "jira",
-                                    "pinterest-ads"
+                                    "jira"
                                 ],
                                 "type": "string"
                             }

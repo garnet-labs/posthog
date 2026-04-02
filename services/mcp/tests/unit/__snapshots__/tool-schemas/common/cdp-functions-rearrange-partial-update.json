@@ -1,15 +1,518 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
-        "orders": {
-            "additionalProperties": {
-                "type": "number"
+        "deleted": {
+            "type": "boolean"
+        },
+        "description": {
+            "type": "string"
+        },
+        "enabled": {
+            "type": "boolean"
+        },
+        "execution_order": {
+            "anyOf": [
+                {
+                    "maximum": 32767,
+                    "minimum": 0,
+                    "type": "number"
+                },
+                {
+                    "type": "null"
+                }
+            ]
+        },
+        "filters": {
+            "properties": {
+                "actions": {
+                    "items": {
+                        "additionalProperties": {},
+                        "propertyNames": {
+                            "type": "string"
+                        },
+                        "type": "object"
+                    },
+                    "type": "array"
+                },
+                "bytecode": {
+                    "anyOf": [
+                        {},
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "bytecode_error": {
+                    "type": "string"
+                },
+                "data_warehouse": {
+                    "items": {
+                        "additionalProperties": {},
+                        "propertyNames": {
+                            "type": "string"
+                        },
+                        "type": "object"
+                    },
+                    "type": "array"
+                },
+                "events": {
+                    "items": {
+                        "additionalProperties": {},
+                        "propertyNames": {
+                            "type": "string"
+                        },
+                        "type": "object"
+                    },
+                    "type": "array"
+                },
+                "filter_test_accounts": {
+                    "type": "boolean"
+                },
+                "properties": {
+                    "items": {
+                        "additionalProperties": {},
+                        "propertyNames": {
+                            "type": "string"
+                        },
+                        "type": "object"
+                    },
+                    "type": "array"
+                },
+                "source": {
+                    "default": "events",
+                    "description": "* `events` - events\n* `person-updates` - person-updates\n* `data-warehouse-table` - data-warehouse-table",
+                    "enum": ["events", "person-updates", "data-warehouse-table"],
+                    "type": "string"
+                },
+                "transpiled": {}
             },
-            "description": "Map of hog function UUIDs to their new execution_order values.",
+            "type": "object"
+        },
+        "hog": {
+            "type": "string"
+        },
+        "icon_url": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ]
+        },
+        "inputs": {
+            "additionalProperties": {
+                "properties": {
+                    "bytecode": {
+                        "items": {},
+                        "type": "array"
+                    },
+                    "order": {
+                        "type": "number"
+                    },
+                    "templating": {
+                        "description": "* `hog` - hog\n* `liquid` - liquid",
+                        "enum": ["hog", "liquid"],
+                        "type": "string"
+                    },
+                    "transpiled": {},
+                    "value": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "propertyNames": {
                 "type": "string"
             },
             "type": "object"
+        },
+        "inputs_schema": {
+            "items": {
+                "properties": {
+                    "choices": {
+                        "items": {
+                            "additionalProperties": {},
+                            "propertyNames": {
+                                "type": "string"
+                            },
+                            "type": "object"
+                        },
+                        "type": "array"
+                    },
+                    "default": {},
+                    "description": {
+                        "type": "string"
+                    },
+                    "hidden": {
+                        "default": false,
+                        "type": "boolean"
+                    },
+                    "integration": {
+                        "type": "string"
+                    },
+                    "integration_field": {
+                        "type": "string"
+                    },
+                    "integration_key": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "required": {
+                        "default": false,
+                        "type": "boolean"
+                    },
+                    "requiredScopes": {
+                        "type": "string"
+                    },
+                    "requires_field": {
+                        "type": "string"
+                    },
+                    "secret": {
+                        "default": false,
+                        "type": "boolean"
+                    },
+                    "templating": {
+                        "anyOf": [
+                            {
+                                "const": true,
+                                "type": "boolean"
+                            },
+                            {
+                                "const": false,
+                                "type": "boolean"
+                            },
+                            {
+                                "const": "hog",
+                                "type": "string"
+                            },
+                            {
+                                "const": "liquid",
+                                "type": "string"
+                            }
+                        ],
+                        "description": "* `True` - True\n* `False` - False\n* `hog` - hog\n* `liquid` - liquid"
+                    },
+                    "type": {
+                        "description": "* `string` - string\n* `number` - number\n* `boolean` - boolean\n* `dictionary` - dictionary\n* `choice` - choice\n* `json` - json\n* `integration` - integration\n* `integration_field` - integration_field\n* `email` - email\n* `native_email` - native_email",
+                        "enum": [
+                            "string",
+                            "number",
+                            "boolean",
+                            "dictionary",
+                            "choice",
+                            "json",
+                            "integration",
+                            "integration_field",
+                            "email",
+                            "native_email"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": ["type", "key"],
+                "type": "object"
+            },
+            "type": "array"
+        },
+        "mappings": {
+            "anyOf": [
+                {
+                    "items": {
+                        "properties": {
+                            "filters": {
+                                "properties": {
+                                    "actions": {
+                                        "items": {
+                                            "additionalProperties": {},
+                                            "propertyNames": {
+                                                "type": "string"
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": "array"
+                                    },
+                                    "bytecode": {
+                                        "anyOf": [
+                                            {},
+                                            {
+                                                "type": "null"
+                                            }
+                                        ]
+                                    },
+                                    "bytecode_error": {
+                                        "type": "string"
+                                    },
+                                    "data_warehouse": {
+                                        "items": {
+                                            "additionalProperties": {},
+                                            "propertyNames": {
+                                                "type": "string"
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": "array"
+                                    },
+                                    "events": {
+                                        "items": {
+                                            "additionalProperties": {},
+                                            "propertyNames": {
+                                                "type": "string"
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": "array"
+                                    },
+                                    "filter_test_accounts": {
+                                        "type": "boolean"
+                                    },
+                                    "properties": {
+                                        "items": {
+                                            "additionalProperties": {},
+                                            "propertyNames": {
+                                                "type": "string"
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": "array"
+                                    },
+                                    "source": {
+                                        "default": "events",
+                                        "description": "* `events` - events\n* `person-updates` - person-updates\n* `data-warehouse-table` - data-warehouse-table",
+                                        "enum": ["events", "person-updates", "data-warehouse-table"],
+                                        "type": "string"
+                                    },
+                                    "transpiled": {}
+                                },
+                                "type": "object"
+                            },
+                            "inputs": {
+                                "additionalProperties": {
+                                    "properties": {
+                                        "bytecode": {
+                                            "items": {},
+                                            "type": "array"
+                                        },
+                                        "order": {
+                                            "type": "number"
+                                        },
+                                        "templating": {
+                                            "description": "* `hog` - hog\n* `liquid` - liquid",
+                                            "enum": ["hog", "liquid"],
+                                            "type": "string"
+                                        },
+                                        "transpiled": {},
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                },
+                                "propertyNames": {
+                                    "type": "string"
+                                },
+                                "type": "object"
+                            },
+                            "inputs_schema": {
+                                "items": {
+                                    "properties": {
+                                        "choices": {
+                                            "items": {
+                                                "additionalProperties": {},
+                                                "propertyNames": {
+                                                    "type": "string"
+                                                },
+                                                "type": "object"
+                                            },
+                                            "type": "array"
+                                        },
+                                        "default": {},
+                                        "description": {
+                                            "type": "string"
+                                        },
+                                        "hidden": {
+                                            "default": false,
+                                            "type": "boolean"
+                                        },
+                                        "integration": {
+                                            "type": "string"
+                                        },
+                                        "integration_field": {
+                                            "type": "string"
+                                        },
+                                        "integration_key": {
+                                            "type": "string"
+                                        },
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        },
+                                        "required": {
+                                            "default": false,
+                                            "type": "boolean"
+                                        },
+                                        "requiredScopes": {
+                                            "type": "string"
+                                        },
+                                        "requires_field": {
+                                            "type": "string"
+                                        },
+                                        "secret": {
+                                            "default": false,
+                                            "type": "boolean"
+                                        },
+                                        "templating": {
+                                            "anyOf": [
+                                                {
+                                                    "const": true,
+                                                    "type": "boolean"
+                                                },
+                                                {
+                                                    "const": false,
+                                                    "type": "boolean"
+                                                },
+                                                {
+                                                    "const": "hog",
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "const": "liquid",
+                                                    "type": "string"
+                                                }
+                                            ],
+                                            "description": "* `True` - True\n* `False` - False\n* `hog` - hog\n* `liquid` - liquid"
+                                        },
+                                        "type": {
+                                            "description": "* `string` - string\n* `number` - number\n* `boolean` - boolean\n* `dictionary` - dictionary\n* `choice` - choice\n* `json` - json\n* `integration` - integration\n* `integration_field` - integration_field\n* `email` - email\n* `native_email` - native_email",
+                                            "enum": [
+                                                "string",
+                                                "number",
+                                                "boolean",
+                                                "dictionary",
+                                                "choice",
+                                                "json",
+                                                "integration",
+                                                "integration_field",
+                                                "email",
+                                                "native_email"
+                                            ],
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": ["type", "key"],
+                                    "type": "object"
+                                },
+                                "type": "array"
+                            },
+                            "name": {
+                                "type": "string"
+                            }
+                        },
+                        "type": "object"
+                    },
+                    "type": "array"
+                },
+                {
+                    "type": "null"
+                }
+            ]
+        },
+        "masking": {
+            "anyOf": [
+                {
+                    "properties": {
+                        "bytecode": {
+                            "anyOf": [
+                                {},
+                                {
+                                    "type": "null"
+                                }
+                            ]
+                        },
+                        "hash": {
+                            "type": "string"
+                        },
+                        "threshold": {
+                            "anyOf": [
+                                {
+                                    "type": "number"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
+                        },
+                        "ttl": {
+                            "maximum": 86400,
+                            "minimum": 60,
+                            "type": "number"
+                        }
+                    },
+                    "required": ["ttl", "hash"],
+                    "type": "object"
+                },
+                {
+                    "type": "null"
+                }
+            ]
+        },
+        "name": {
+            "anyOf": [
+                {
+                    "maxLength": 400,
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ]
+        },
+        "template_id": {
+            "anyOf": [
+                {
+                    "maxLength": 400,
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ]
+        },
+        "type": {
+            "anyOf": [
+                {
+                    "anyOf": [
+                        {
+                            "description": "* `destination` - Destination\n* `site_destination` - Site Destination\n* `internal_destination` - Internal Destination\n* `source_webhook` - Source Webhook\n* `warehouse_source_webhook` - Warehouse Source Webhook\n* `site_app` - Site App\n* `transformation` - Transformation",
+                            "enum": [
+                                "destination",
+                                "site_destination",
+                                "internal_destination",
+                                "source_webhook",
+                                "warehouse_source_webhook",
+                                "site_app",
+                                "transformation"
+                            ],
+                            "type": "string"
+                        },
+                        {
+                            "const": null,
+                            "type": "null"
+                        }
+                    ]
+                },
+                {
+                    "type": "null"
+                }
+            ]
         }
     },
     "type": "object"

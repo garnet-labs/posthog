@@ -2,9 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "description": "Serializer mixin that handles tags for objects.",
     "properties": {
-        "breakdown_colors": {
-            "description": "Custom color mapping for breakdown values."
-        },
+        "breakdown_colors": {},
         "data_color_theme_id": {
             "anyOf": [
                 {
@@ -13,12 +11,10 @@
                 {
                     "type": "null"
                 }
-            ],
-            "description": "ID of the color theme used for chart visualizations."
+            ]
         },
         "delete_insights": {
             "default": false,
-            "description": "When deleting, also delete insights that are only on this dashboard.",
             "type": "boolean"
         },
         "description": {
@@ -37,20 +33,6 @@
         },
         "pinned": {
             "type": "boolean"
-        },
-        "quick_filter_ids": {
-            "anyOf": [
-                {
-                    "items": {
-                        "type": "string"
-                    },
-                    "type": "array"
-                },
-                {
-                    "type": "null"
-                }
-            ],
-            "description": "List of quick filter IDs associated with this dashboard"
         },
         "restriction_level": {
             "anyOf": [
@@ -77,11 +59,9 @@
                 {
                     "type": "null"
                 }
-            ],
-            "description": "ID of an existing dashboard to duplicate."
+            ]
         },
         "use_template": {
-            "description": "Template key to create the dashboard from a predefined template.",
             "type": "string"
         }
     },
