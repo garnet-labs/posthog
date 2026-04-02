@@ -1,11 +1,11 @@
 import { actions, kea, path, props, reducers, selectors, useActions, useValues } from 'kea'
 
-import { IconLetter, IconPlusSmall } from '@posthog/icons'
+import { IconApple, IconAndroid, IconLetter, IconPlusSmall } from '@posthog/icons'
 import { LemonButton, LemonMenu, LemonMenuItems } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
 import { integrationsLogic } from 'lib/integrations/integrationsLogic'
-import { IconAndroidOS, IconAppleIOS, IconSlack, IconTwilio } from 'lib/lemon-ui/icons'
+import { IconSlack, IconTwilio } from 'lib/lemon-ui/icons'
 import { LemonTab, LemonTabs } from 'lib/lemon-ui/LemonTabs'
 import { tabAwareActionToUrl } from 'lib/logic/scenes/tabAwareActionToUrl'
 import { tabAwareScene } from 'lib/logic/scenes/tabAwareScene'
@@ -136,7 +136,7 @@ export function WorkflowsScene(props: WorkflowsSceneProps = {}): JSX.Element {
         {
             label: (
                 <div className="flex gap-1 items-center">
-                    <IconAndroidOS /> Firebase Cloud Messaging
+                    <IconAndroid /> Firebase Cloud Messaging
                 </div>
             ),
             onClick: () => openSetupModal(undefined, 'firebase'),
@@ -144,7 +144,7 @@ export function WorkflowsScene(props: WorkflowsSceneProps = {}): JSX.Element {
         {
             label: (
                 <div className="flex gap-1 items-center">
-                    <IconAppleIOS /> Apple Push Notifications
+                    <IconApple /> Apple Push Notifications
                 </div>
             ),
             onClick: () => openSetupModal(undefined, 'apns'),

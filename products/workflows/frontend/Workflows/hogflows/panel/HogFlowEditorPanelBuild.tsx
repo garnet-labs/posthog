@@ -50,6 +50,12 @@ export const ACTION_NODES_TO_SHOW: CreateActionType[] = [
         description: 'Send a Webhook to the user.',
         config: { template_id: 'template-webhook', inputs: {} },
     },
+    {
+        type: 'function',
+        name: 'Push',
+        description: 'Send a push notification to the user.',
+        config: { template_id: 'template-native-push', inputs: {} },
+    },
 ]
 
 const DEFAULT_DELAY = '10m'
