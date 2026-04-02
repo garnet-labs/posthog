@@ -20,11 +20,11 @@ from posthog.models.feature_flag.feature_flag import FeatureFlag
 from products.experiments.backend.experiment_summary_data_service import (
     ExperimentSummaryDataService,
     get_chance_to_win,
-    get_default_metric_title,
     get_delta_from_interval,
     parse_metric_dict,
     transform_variant_for_max,
 )
+from products.experiments.backend.metric_utils import get_default_metric_title
 from products.experiments.backend.models.experiment import Experiment
 
 
@@ -188,11 +188,27 @@ class TestExperimentSummaryToolHelpers(APIBaseTest):
 
     def test_get_default_metric_title_ratio(self):
         metric_dict = {"metric_type": "ratio"}
-        self.assertEqual(get_default_metric_title(metric_dict), "Ratio metric")
+        self.assertEqual(get_default_metric_title(metric_dict), "Event / Event")
+
+    def test_get_default_metric_title_ratio_with_events(self):
+        metric_dict = {
+            "metric_type": "ratio",
+            "numerator": {"kind": "EventsNode", "event": "$pageview"},
+            "denominator": {"kind": "EventsNode", "event": "experiment timeseries viewed"},
+        }
+        self.assertEqual(get_default_metric_title(metric_dict), "$pageview / experiment timeseries viewed")
 
     def test_get_default_metric_title_retention(self):
         metric_dict = {"metric_type": "retention"}
-        self.assertEqual(get_default_metric_title(metric_dict), "Retention metric")
+        self.assertEqual(get_default_metric_title(metric_dict), "Event / Event")
+
+    def test_get_default_metric_title_retention_with_events(self):
+        metric_dict = {
+            "metric_type": "retention",
+            "start_event": {"kind": "EventsNode", "event": "$pageview"},
+            "completion_event": {"kind": "EventsNode", "event": "purchase"},
+        }
+        self.assertEqual(get_default_metric_title(metric_dict), "$pageview / purchase")
 
 
 @override_settings(IN_UNIT_TESTING=True)
