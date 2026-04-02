@@ -11,10 +11,16 @@ from __future__ import annotations
 from posthog.clickhouse.cluster import ClickhouseCluster, get_cluster
 
 # (host_setting_name, cluster_name_setting_name)
+# Each PostHog ClickHouse installation may have its own ZooKeeper ensemble.
+# The host setting determines which ZK's system.clusters is queried.
 _REGISTRY: dict[str, tuple[str, str]] = {
     "main": ("CLICKHOUSE_HOST", "CLICKHOUSE_CLUSTER"),
     "logs": ("CLICKHOUSE_LOGS_CLUSTER_HOST", "CLICKHOUSE_LOGS_CLUSTER"),
     "migrations": ("CLICKHOUSE_MIGRATIONS_HOST", "CLICKHOUSE_MIGRATIONS_CLUSTER"),
+    "endpoints": ("CLICKHOUSE_ENDPOINTS_HOST", "CLICKHOUSE_CLUSTER"),
+    "single_shard": ("CLICKHOUSE_HOST", "CLICKHOUSE_SINGLE_SHARD_CLUSTER"),
+    "writable": ("CLICKHOUSE_HOST", "CLICKHOUSE_WRITABLE_CLUSTER"),
+    "primary_replica": ("CLICKHOUSE_HOST", "CLICKHOUSE_PRIMARY_REPLICA_CLUSTER"),
 }
 
 
