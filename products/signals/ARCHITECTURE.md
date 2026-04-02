@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Signals** product is a signal clustering and summarization pipeline. Signals from various PostHog products (experiments, web analytics, error tracking, session replay) get grouped into **SignalReports** via embedding similarity + LLM matching. When a group accumulates enough weight, a summary workflow either runs the legacy summarize + judge flow or, behind a feature flag, runs safety first and then agentic report research before deciding whether the report is ready for a coding agent, deferred to a human, or rejected.
+The **Signals** product is a signal clustering and summarization pipeline. Signals from various PostHog products (experiments, web analytics, error tracking, session replay) get grouped into **SignalReports** via embedding similarity + LLM matching. When a group accumulates enough weight, a summary workflow runs a safety check, selects a repository, and then runs agentic report research before deciding whether the report is ready for a coding agent, deferred to a human, or rejected.
 
 ---
 
@@ -120,31 +120,26 @@ Steps 1-4 run in parallel across all signals in the batch. Steps 5-7 run sequent
 
 ### `SignalReportSummaryWorkflow` (`signal-report-summary`)
 
-Runs when a report is promoted to `candidate` status. Uses either the legacy summarize + judge flow or the feature-flagged safety-first agentic research flow to determine the report's fate.
+Runs when a report is promoted to `candidate` status. Runs a safety check, selects a repository, and then runs agentic report research to determine the report's fate.
 
 **Flow:**
 
 1. **Fetch signals** for the report from ClickHouse → `fetch_signals_for_report_activity` (no hard limit — fetches all signals for the report)
 2. **Mark in-progress** in Postgres and advance `signals_at_run` by `SIGNALS_AT_RUN_INCREMENT` (3), so the report must accumulate that many new signals before it can be promoted and re-summarised again → `mark_report_in_progress_activity`
-3. **Choose flow** via feature flag:
-   - **Default path**:
-     - summarize signals into a title + summary via LLM → `summarize_signals_activity` (`summarize_signals.py`)
-     - run **Safety judge** + **Actionability judge** concurrently via `asyncio.gather`
-   - **Feature-flagged path**:
-     - run **Safety judge** → `report_safety_judge_activity` (`report_safety_judge.py`) — assess for prompt injection / manipulation
-     - if safe, **select repository** → `select_repository_activity` (`temporal/agentic/select_repository.py`) — see Repository Selection below
-     - if no repo selected → `mark_report_pending_input_activity`, **stop**
-     - if repo selected, run sandbox-backed agentic research → `run_agentic_report_activity` (`temporal/agentic/report.py`)
-4. **Evaluate results** (safety checked first in both paths):
+3. **Safety judge** → `report_safety_judge_activity` (`report_safety_judge.py`) — assess for prompt injection / manipulation
+4. **Select repository** → `select_repository_activity` (`temporal/agentic/select_repository.py`) — see Repository Selection below
+   - If no repo selected → `mark_report_pending_input_activity`, **stop**
+5. **Agentic research** → `run_agentic_report_activity` (`temporal/agentic/report.py`) — sandbox-backed multi-turn research using code and MCP data
+6. **Evaluate results**:
    - If **unsafe** → `mark_report_failed_activity` with error, **stop**
    - If **not actionable** → `reset_report_to_potential_activity` (weight → 0, status → `potential`), **stop**
    - If **requires human input** → `mark_report_pending_input_activity` (status → `pending_input`, stores draft title/summary), **stop**
    - If **immediately actionable** → continue
-5. **Mark ready** with the generated title and summary → `mark_report_ready_activity`
+7. **Mark ready** with the generated title and summary → `mark_report_ready_activity`
 
 On any unhandled exception, the workflow catches and calls `mark_report_failed_activity`.
 
-The grouping workflow uses a 1-hour `run_timeout` (resets on each `continue_as_new`). The summary workflow uses a 5-hour `execution_timeout` to allow the feature-flagged agentic path to finish. Most activities use 3-attempt retry policies; the sandbox-backed agentic report activity uses a single attempt to avoid spawning duplicate research tasks automatically.
+The grouping workflow uses a 1-hour `run_timeout` (resets on each `continue_as_new`). The summary workflow uses a 5-hour `execution_timeout` to allow the agentic path to finish. Most activities use 3-attempt retry policies; the sandbox-backed agentic report activity uses a single attempt to avoid spawning duplicate research tasks automatically.
 
 #### Repository Selection
 
@@ -159,7 +154,7 @@ The selection result is persisted as a `repo_selection` artefact on the report b
 
 #### Re-promotion
 
-`READY` reports are re-promoted to `candidate` when enough new signals accumulate (`signal_count >= signals_at_run`). On re-promotion:
+`READY` reports are re-promoted to `candidate` on every new signal, so the agentic report always reflects the latest evidence. On re-promotion:
 
 - **Repo selection** reuses the previous `repo_selection` artefact (no sandbox re-run).
 - **Agentic research** loads previous findings, actionability, and priority from artefacts. Signals with matching `signal_id` in the previous findings get lightweight validation (reuse if still valid). Only new signals are fully investigated.
@@ -393,7 +388,7 @@ Read + delete + state transitions. Uses `IsAuthenticated` + `APIScopePermission`
 
 | Method | Path                              | Description                                                                                                                                                                                                                                                                   |
 | ------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/signal_reports/`                | List reports (excludes `deleted` always, excludes `suppressed` by default), filterable by `?status=` query param, ordered by `-signal_count` by default                                                                                                                       |
+| GET    | `/signal_reports/`                | List reports (excludes `deleted` always, excludes `suppressed` by default), filterable by `?status=` query param (comma-separated), searchable via `?search=`, ordered by `status,-updated_at` by default                                                                     |
 | GET    | `/signal_reports/{id}/`           | Retrieve a single report                                                                                                                                                                                                                                                      |
 | DELETE | `/signal_reports/{id}/`           | Soft-delete a report and its signals. Starts `SignalReportDeletionWorkflow` and returns `202 Accepted`.                                                                                                                                                                       |
 | POST   | `/signal_reports/{id}/state/`     | Transition report state. Body: `{ "state": "suppressed" \| "potential", ...transition_to kwargs }`. Only `suppressed` and `potential` are exposed via API. Validates transitions via `SignalReport.transition_to()`. Returns 409 on invalid transition, 400 on bad arguments. |
@@ -401,12 +396,12 @@ Read + delete + state transitions. Uses `IsAuthenticated` + `APIScopePermission`
 | GET    | `/signal_reports/{id}/artefacts/` | List video segment artefacts for a report                                                                                                                                                                                                                                     |
 | GET    | `/signal_reports/{id}/signals/`   | Fetch all signals for a report from ClickHouse, including full metadata                                                                                                                                                                                                       |
 
-**Ordering:** Configurable via query params. Supported fields: `signal_count`, `total_weight`, `created_at`, `updated_at`. Default: `-signal_count`.
+**Ordering:** Configurable via `?ordering=` query param with comma-separated fields (e.g., `?ordering=status,-updated_at`). Supported fields: `status`, `signal_count`, `total_weight`, `created_at`, `updated_at`, `id`. The `status` field uses semantic pipeline stage ranking (ready=0, pending_input=1, in_progress=2, candidate=3, potential=4, failed=5, suppressed=6, deleted=7). Default: `status,-updated_at`.
 
 ### Serializers (`backend/serializers.py`)
 
 - **`SignalSourceConfigSerializer`** — Exposes `id`, `source_product`, `source_type`, `enabled`, `config`, `created_at`, `updated_at`. Validates that `recording_filters` in config is a dict when `source_product` is `session_replay`.
-- **`SignalReportSerializer`** — Exposes `id`, `title`, `summary`, `status`, `total_weight`, `signal_count`, `signals_at_run`, `created_at`, `updated_at`, `artefact_count`.
+- **`SignalReportSerializer`** — Exposes `id`, `title`, `summary`, `status`, `total_weight`, `signal_count`, `signals_at_run`, `created_at`, `updated_at`, `artefact_count`, `priority`. The `priority` field (read-only) extracts P0–P4 from the latest `PRIORITY_JUDGMENT` artefact when present, otherwise returns `null`.
 - **`SignalReportArtefactSerializer`** — Exposes `id`, `type`, `content` (parsed from JSON text), `created_at`.
 
 ---
