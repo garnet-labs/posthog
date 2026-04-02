@@ -115,7 +115,7 @@ def get_ducklake_catalog_for_team(team_id: int) -> DuckLakeCatalog | None:
 
 DUCKGRES_DEFAULTS: dict[str, str] = {
     "DUCKGRES_HOST": "localhost",
-    "DUCKGRES_PORT": "5432",
+    "DUCKGRES_PORT": "15432",
     "DUCKGRES_FLIGHT_PORT": "8815",
     "DUCKGRES_DATABASE": "ducklake",
     "DUCKGRES_USERNAME": "posthog",
