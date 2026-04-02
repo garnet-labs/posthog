@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     group4_created_at DateTime64,
     person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
     historical_migration Bool,
-    validated_schema_version Int32 DEFAULT 0
+    validated_schema_version Int32
     {dynamically_materialized_columns}
     {materialized_columns}
     {extra_fields}
