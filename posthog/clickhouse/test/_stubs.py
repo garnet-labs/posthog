@@ -112,6 +112,14 @@ def _install() -> None:
     fake_cluster.Query = _FakeQuery  # type: ignore[attr-defined]
     fake_cluster.get_cluster = _fake_get_cluster  # type: ignore[attr-defined]
     fake_cluster.ClickhouseCluster = MagicMock  # type: ignore[attr-defined]
+
+    # HostInfo is a NamedTuple used by schema_introspect — provide a lightweight stand-in
+    from collections import namedtuple as _nt
+
+    fake_cluster.HostInfo = _nt(  # type: ignore[attr-defined]
+        "HostInfo",
+        ["connection_info", "shard_num", "replica_num", "host_cluster_type", "host_cluster_role"],
+    )
     sys.modules.setdefault("posthog.clickhouse.cluster", fake_cluster)
 
     # infi.clickhouse_orm
