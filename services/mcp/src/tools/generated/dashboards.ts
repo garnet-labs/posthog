@@ -8,8 +8,6 @@ import {
     DashboardsListQueryParams,
     DashboardsPartialUpdateBody,
     DashboardsPartialUpdateParams,
-    DashboardsReorderTilesCreateBody,
-    DashboardsReorderTilesCreateParams,
     DashboardsRetrieveParams,
 } from '@/generated/dashboards/api'
 import { withPostHogUrl, type WithPostHogUrl } from '@/tools/tool-utils'
@@ -75,9 +73,6 @@ const dashboardCreate = (): ToolBase<typeof DashboardCreateSchema, WithPostHogUr
         if (params.restriction_level !== undefined) {
             body['restriction_level'] = params.restriction_level
         }
-        if (params.quick_filter_ids !== undefined) {
-            body['quick_filter_ids'] = params.quick_filter_ids
-        }
         if (params.use_template !== undefined) {
             body['use_template'] = params.use_template
         }
@@ -142,9 +137,6 @@ const dashboardUpdate = (): ToolBase<typeof DashboardUpdateSchema, WithPostHogUr
         if (params.restriction_level !== undefined) {
             body['restriction_level'] = params.restriction_level
         }
-        if (params.quick_filter_ids !== undefined) {
-            body['quick_filter_ids'] = params.quick_filter_ids
-        }
         if (params.use_template !== undefined) {
             body['use_template'] = params.use_template
         }
@@ -179,33 +171,10 @@ const dashboardDelete = (): ToolBase<typeof DashboardDeleteSchema, Schemas.Dashb
     },
 })
 
-const DashboardReorderTilesSchema = DashboardsReorderTilesCreateParams.omit({ project_id: true }).extend(
-    DashboardsReorderTilesCreateBody.shape
-)
-
-const dashboardReorderTiles = (): ToolBase<typeof DashboardReorderTilesSchema, WithPostHogUrl<Schemas.Dashboard>> => ({
-    name: 'dashboard-reorder-tiles',
-    schema: DashboardReorderTilesSchema,
-    handler: async (context: Context, params: z.infer<typeof DashboardReorderTilesSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const body: Record<string, unknown> = {}
-        if (params.tile_order !== undefined) {
-            body['tile_order'] = params.tile_order
-        }
-        const result = await context.api.request<Schemas.Dashboard>({
-            method: 'POST',
-            path: `/api/projects/${projectId}/dashboards/${params.id}/reorder_tiles/`,
-            body,
-        })
-        return await withPostHogUrl(context, result, `/dashboard/${result.id}`)
-    },
-})
-
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'dashboards-get-all': dashboardsGetAll,
     'dashboard-create': dashboardCreate,
     'dashboard-get': dashboardGet,
     'dashboard-update': dashboardUpdate,
     'dashboard-delete': dashboardDelete,
-    'dashboard-reorder-tiles': dashboardReorderTiles,
 }

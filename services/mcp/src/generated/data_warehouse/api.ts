@@ -39,23 +39,8 @@ export const warehouseSavedQueriesCreateBodyNameMax = 128
 
 export const WarehouseSavedQueriesCreateBody = /* @__PURE__ */ zod
     .object({
-        name: zod
-            .string()
-            .max(warehouseSavedQueriesCreateBodyNameMax)
-            .describe(
-                'Unique name for the view. Used as the table name in HogQL queries and the node name in the data modeling Node.'
-            ),
-        query: zod
-            .unknown()
-            .nullish()
-            .describe(
-                'HogQL query definition as a JSON object with a "query" key containing the SQL string and a "kind" key containing the query type. Example: {"query": "SELECT * FROM events LIMIT 100", "kind": "HogQLQuery"}'
-            ),
-        folder_id: zod
-            .string()
-            .nullish()
-            .describe('Optional folder ID used to organize this view in the SQL editor sidebar.'),
-        is_test: zod.boolean().optional().describe('Whether this view is for testing only and will auto-expire.'),
+        name: zod.string().max(warehouseSavedQueriesCreateBodyNameMax),
+        query: zod.unknown().nullish().describe('HogQL query'),
     })
     .describe(
         'Shared methods for DataWarehouseSavedQuery serializers.\n\nThis mixin is intended to be used with serializers.ModelSerializer subclasses.'
@@ -89,28 +74,9 @@ export const warehouseSavedQueriesPartialUpdateBodyNameMax = 128
 
 export const WarehouseSavedQueriesPartialUpdateBody = /* @__PURE__ */ zod
     .object({
-        name: zod
-            .string()
-            .max(warehouseSavedQueriesPartialUpdateBodyNameMax)
-            .optional()
-            .describe(
-                'Unique name for the view. Used as the table name in HogQL queries and the node name in the data modeling Node.'
-            ),
-        query: zod
-            .unknown()
-            .nullish()
-            .describe(
-                'HogQL query definition as a JSON object with a "query" key containing the SQL string and a "kind" key containing the query type. Example: {"query": "SELECT * FROM events LIMIT 100", "kind": "HogQLQuery"}'
-            ),
-        folder_id: zod
-            .string()
-            .nullish()
-            .describe('Optional folder ID used to organize this view in the SQL editor sidebar.'),
-        edited_history_id: zod
-            .string()
-            .nullish()
-            .describe('Activity log ID from the last known edit. Used for conflict detection.'),
-        is_test: zod.boolean().optional().describe('Whether this view is for testing only and will auto-expire.'),
+        name: zod.string().max(warehouseSavedQueriesPartialUpdateBodyNameMax).optional(),
+        query: zod.unknown().nullish().describe('HogQL query'),
+        edited_history_id: zod.string().nullish(),
     })
     .describe(
         'Shared methods for DataWarehouseSavedQuery serializers.\n\nThis mixin is intended to be used with serializers.ModelSerializer subclasses.'
@@ -145,31 +111,10 @@ export const warehouseSavedQueriesMaterializeCreateBodyNameMax = 128
 export const WarehouseSavedQueriesMaterializeCreateBody = /* @__PURE__ */ zod
     .object({
         deleted: zod.boolean().nullish(),
-        name: zod
-            .string()
-            .max(warehouseSavedQueriesMaterializeCreateBodyNameMax)
-            .describe(
-                'Unique name for the view. Used as the table name in HogQL queries and the node name in the data modeling Node.'
-            ),
-        query: zod
-            .unknown()
-            .nullish()
-            .describe(
-                'HogQL query definition as a JSON object with a "query" key containing the SQL string and a "kind" key containing the query type. Example: {"query": "SELECT * FROM events LIMIT 100", "kind": "HogQLQuery"}'
-            ),
-        folder_id: zod
-            .string()
-            .nullish()
-            .describe('Optional folder ID used to organize this view in the SQL editor sidebar.'),
-        edited_history_id: zod
-            .string()
-            .nullish()
-            .describe('Activity log ID from the last known edit. Used for conflict detection.'),
-        soft_update: zod
-            .boolean()
-            .nullish()
-            .describe('If true, skip column inference and validation. For saving drafts.'),
-        is_test: zod.boolean().optional().describe('Whether this view is for testing only and will auto-expire.'),
+        name: zod.string().max(warehouseSavedQueriesMaterializeCreateBodyNameMax),
+        query: zod.unknown().nullish().describe('HogQL query'),
+        edited_history_id: zod.string().nullish(),
+        soft_update: zod.boolean().nullish(),
     })
     .describe(
         'Shared methods for DataWarehouseSavedQuery serializers.\n\nThis mixin is intended to be used with serializers.ModelSerializer subclasses.'
@@ -193,31 +138,10 @@ export const warehouseSavedQueriesRevertMaterializationCreateBodyNameMax = 128
 export const WarehouseSavedQueriesRevertMaterializationCreateBody = /* @__PURE__ */ zod
     .object({
         deleted: zod.boolean().nullish(),
-        name: zod
-            .string()
-            .max(warehouseSavedQueriesRevertMaterializationCreateBodyNameMax)
-            .describe(
-                'Unique name for the view. Used as the table name in HogQL queries and the node name in the data modeling Node.'
-            ),
-        query: zod
-            .unknown()
-            .nullish()
-            .describe(
-                'HogQL query definition as a JSON object with a "query" key containing the SQL string and a "kind" key containing the query type. Example: {"query": "SELECT * FROM events LIMIT 100", "kind": "HogQLQuery"}'
-            ),
-        folder_id: zod
-            .string()
-            .nullish()
-            .describe('Optional folder ID used to organize this view in the SQL editor sidebar.'),
-        edited_history_id: zod
-            .string()
-            .nullish()
-            .describe('Activity log ID from the last known edit. Used for conflict detection.'),
-        soft_update: zod
-            .boolean()
-            .nullish()
-            .describe('If true, skip column inference and validation. For saving drafts.'),
-        is_test: zod.boolean().optional().describe('Whether this view is for testing only and will auto-expire.'),
+        name: zod.string().max(warehouseSavedQueriesRevertMaterializationCreateBodyNameMax),
+        query: zod.unknown().nullish().describe('HogQL query'),
+        edited_history_id: zod.string().nullish(),
+        soft_update: zod.boolean().nullish(),
     })
     .describe(
         'Shared methods for DataWarehouseSavedQuery serializers.\n\nThis mixin is intended to be used with serializers.ModelSerializer subclasses.'
@@ -240,31 +164,10 @@ export const warehouseSavedQueriesRunCreateBodyNameMax = 128
 export const WarehouseSavedQueriesRunCreateBody = /* @__PURE__ */ zod
     .object({
         deleted: zod.boolean().nullish(),
-        name: zod
-            .string()
-            .max(warehouseSavedQueriesRunCreateBodyNameMax)
-            .describe(
-                'Unique name for the view. Used as the table name in HogQL queries and the node name in the data modeling Node.'
-            ),
-        query: zod
-            .unknown()
-            .nullish()
-            .describe(
-                'HogQL query definition as a JSON object with a "query" key containing the SQL string and a "kind" key containing the query type. Example: {"query": "SELECT * FROM events LIMIT 100", "kind": "HogQLQuery"}'
-            ),
-        folder_id: zod
-            .string()
-            .nullish()
-            .describe('Optional folder ID used to organize this view in the SQL editor sidebar.'),
-        edited_history_id: zod
-            .string()
-            .nullish()
-            .describe('Activity log ID from the last known edit. Used for conflict detection.'),
-        soft_update: zod
-            .boolean()
-            .nullish()
-            .describe('If true, skip column inference and validation. For saving drafts.'),
-        is_test: zod.boolean().optional().describe('Whether this view is for testing only and will auto-expire.'),
+        name: zod.string().max(warehouseSavedQueriesRunCreateBodyNameMax),
+        query: zod.unknown().nullish().describe('HogQL query'),
+        edited_history_id: zod.string().nullish(),
+        soft_update: zod.boolean().nullish(),
     })
     .describe(
         'Shared methods for DataWarehouseSavedQuery serializers.\n\nThis mixin is intended to be used with serializers.ModelSerializer subclasses.'

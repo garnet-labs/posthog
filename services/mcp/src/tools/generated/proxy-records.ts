@@ -5,23 +5,26 @@ import type { Schemas } from '@/api/generated'
 import {
     ProxyRecordsCreateBody,
     ProxyRecordsDestroyParams,
+    ProxyRecordsListQueryParams,
     ProxyRecordsRetrieveParams,
-    ProxyRecordsRetryCreateParams,
 } from '@/generated/proxy-records/api'
 import { withPostHogUrl, type WithPostHogUrl } from '@/tools/tool-utils'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
 
-const ProxyListSchema = z.object({})
+const ProxyListSchema = ProxyRecordsListQueryParams
 
-const proxyList = (): ToolBase<typeof ProxyListSchema, WithPostHogUrl<Schemas.ProxyRecordListResponse[]>> => ({
+const proxyList = (): ToolBase<typeof ProxyListSchema, WithPostHogUrl<Schemas.PaginatedProxyRecordList>> => ({
     name: 'proxy-list',
     schema: ProxyListSchema,
-    // eslint-disable-next-line no-unused-vars
     handler: async (context: Context, params: z.infer<typeof ProxyListSchema>) => {
         const orgId = await context.stateManager.getOrgID()
-        const result = await context.api.request<Schemas.ProxyRecordListResponse[]>({
+        const result = await context.api.request<Schemas.PaginatedProxyRecordList>({
             method: 'GET',
             path: `/api/organizations/${orgId}/proxy_records/`,
+            query: {
+                limit: params.limit,
+                offset: params.offset,
+            },
         })
         return await withPostHogUrl(context, result, '/settings/organization-proxy')
     },
@@ -62,21 +65,6 @@ const proxyCreate = (): ToolBase<typeof ProxyCreateSchema, Schemas.ProxyRecord> 
     },
 })
 
-const ProxyRetrySchema = ProxyRecordsRetryCreateParams.omit({ organization_id: true })
-
-const proxyRetry = (): ToolBase<typeof ProxyRetrySchema, Schemas.ProxyRecord> => ({
-    name: 'proxy-retry',
-    schema: ProxyRetrySchema,
-    handler: async (context: Context, params: z.infer<typeof ProxyRetrySchema>) => {
-        const orgId = await context.stateManager.getOrgID()
-        const result = await context.api.request<Schemas.ProxyRecord>({
-            method: 'POST',
-            path: `/api/organizations/${orgId}/proxy_records/${params.id}/retry/`,
-        })
-        return result
-    },
-})
-
 const ProxyDeleteSchema = ProxyRecordsDestroyParams.omit({ organization_id: true })
 
 const proxyDelete = (): ToolBase<typeof ProxyDeleteSchema, unknown> => ({
@@ -96,6 +84,5 @@ export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'proxy-list': proxyList,
     'proxy-get': proxyGet,
     'proxy-create': proxyCreate,
-    'proxy-retry': proxyRetry,
     'proxy-delete': proxyDelete,
 }

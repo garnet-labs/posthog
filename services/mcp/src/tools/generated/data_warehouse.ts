@@ -65,12 +65,6 @@ const viewCreate = (): ToolBase<typeof ViewCreateSchema, WithPostHogUrl<Schemas.
         if (params.query !== undefined) {
             body['query'] = params.query
         }
-        if (params.folder_id !== undefined) {
-            body['folder_id'] = params.folder_id
-        }
-        if (params.is_test !== undefined) {
-            body['is_test'] = params.is_test
-        }
         const result = await context.api.request<Schemas.DataWarehouseSavedQuery>({
             method: 'POST',
             path: `/api/projects/${projectId}/warehouse_saved_queries/`,
@@ -111,14 +105,8 @@ const viewUpdate = (): ToolBase<typeof ViewUpdateSchema, WithPostHogUrl<Schemas.
         if (params.query !== undefined) {
             body['query'] = params.query
         }
-        if (params.folder_id !== undefined) {
-            body['folder_id'] = params.folder_id
-        }
         if (params.edited_history_id !== undefined) {
             body['edited_history_id'] = params.edited_history_id
-        }
-        if (params.is_test !== undefined) {
-            body['is_test'] = params.is_test
         }
         const result = await context.api.request<Schemas.DataWarehouseSavedQuery>({
             method: 'PATCH',
@@ -167,17 +155,11 @@ const viewMaterialize = (): ToolBase<
         if (params.query !== undefined) {
             body['query'] = params.query
         }
-        if (params.folder_id !== undefined) {
-            body['folder_id'] = params.folder_id
-        }
         if (params.edited_history_id !== undefined) {
             body['edited_history_id'] = params.edited_history_id
         }
         if (params.soft_update !== undefined) {
             body['soft_update'] = params.soft_update
-        }
-        if (params.is_test !== undefined) {
-            body['is_test'] = params.is_test
         }
         const result = await context.api.request<Schemas.DataWarehouseSavedQuery>({
             method: 'POST',
@@ -210,17 +192,11 @@ const viewUnmaterialize = (): ToolBase<
         if (params.query !== undefined) {
             body['query'] = params.query
         }
-        if (params.folder_id !== undefined) {
-            body['folder_id'] = params.folder_id
-        }
         if (params.edited_history_id !== undefined) {
             body['edited_history_id'] = params.edited_history_id
         }
         if (params.soft_update !== undefined) {
             body['soft_update'] = params.soft_update
-        }
-        if (params.is_test !== undefined) {
-            body['is_test'] = params.is_test
         }
         const result = await context.api.request<Schemas.DataWarehouseSavedQuery>({
             method: 'POST',
@@ -250,17 +226,11 @@ const viewRun = (): ToolBase<typeof ViewRunSchema, WithPostHogUrl<Schemas.DataWa
         if (params.query !== undefined) {
             body['query'] = params.query
         }
-        if (params.folder_id !== undefined) {
-            body['folder_id'] = params.folder_id
-        }
         if (params.edited_history_id !== undefined) {
             body['edited_history_id'] = params.edited_history_id
         }
         if (params.soft_update !== undefined) {
             body['soft_update'] = params.soft_update
-        }
-        if (params.is_test !== undefined) {
-            body['is_test'] = params.is_test
         }
         const result = await context.api.request<Schemas.DataWarehouseSavedQuery>({
             method: 'POST',
