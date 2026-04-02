@@ -79,7 +79,7 @@ export class PushNotificationService {
             app_source_id: invocation.parentRunId ?? invocation.functionId,
             instance_id: invocation.state.actionId || invocation.id,
             metric_kind: 'other',
-            metric_name: 'push_sent' as const,
+            metric_name: success ? ('push_sent' as const) : ('push_failed' as const),
             count: 1,
         })
 
@@ -274,7 +274,7 @@ export class PushNotificationService {
         const signingInput = `${header}.${claims}`
         const sign = createSign('SHA256')
         sign.update(signingInput)
-        const signature = sign.sign(signingKey, 'base64url')
+        const signature = sign.sign({ key: signingKey, dsaEncoding: 'ieee-p1363' }, 'base64url')
         return `${signingInput}.${signature}`
     }
 
@@ -285,11 +285,6 @@ export class PushNotificationService {
         }
         if (payload.apns?.subtitle) {
             alert.subtitle = payload.apns.subtitle
-        }
-        if (payload.image) {
-            // Image delivery on APNS requires a notification service extension on the client.
-            // We set mutable-content and pass the URL in a custom key for the extension to download.
-            alert['launch-image'] = payload.image
         }
 
         const aps: Record<string, unknown> = { alert }
