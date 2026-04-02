@@ -778,10 +778,12 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                     "schema_metadata": schema_metadata,
                 }
             elif is_cdc_schema:
+                cdc_table_mode = schema.get("cdc_table_mode", "consolidated")
                 sync_type_config = {
                     "cdc_mode": "snapshot",
                     "primary_key_columns": pk_columns_by_table.get(schema_name, []),
                     "schema_metadata": schema_metadata,
+                    "cdc_table_mode": cdc_table_mode,
                 }
             else:
                 sync_type_config = {"schema_metadata": schema_metadata}

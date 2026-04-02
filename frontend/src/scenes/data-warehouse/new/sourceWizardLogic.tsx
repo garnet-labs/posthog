@@ -251,12 +251,14 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             schema: ExternalDataSourceSyncSchema,
             syncType: ExternalDataSourceSyncSchema['sync_type'],
             incrementalField: string | null,
-            incrementalFieldType: string | null
+            incrementalFieldType: string | null,
+            cdcTableMode?: 'consolidated' | 'cdc_only' | 'both'
         ) => ({
             schema,
             syncType,
             incrementalField,
             incrementalFieldType,
+            cdcTableMode,
         }),
         clearSource: true,
         updateSource: (source: Partial<ExternalDataSourceCreatePayload>) => ({
@@ -344,13 +346,19 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                         should_sync: s.table === schema.table ? shouldSync : s.should_sync,
                     }))
                 },
-                updateSchemaSyncType: (state, { schema, syncType, incrementalField, incrementalFieldType }) => {
+                updateSchemaSyncType: (
+                    state,
+                    { schema, syncType, incrementalField, incrementalFieldType, cdcTableMode }
+                ) => {
                     return state.map((s) => ({
                         ...s,
                         sync_type: s.table === schema.table ? syncType : s.sync_type,
                         incremental_field: s.table === schema.table ? incrementalField : s.incremental_field,
                         incremental_field_type:
                             s.table === schema.table ? incrementalFieldType : s.incremental_field_type,
+                        ...(s.table === schema.table && syncType === 'cdc' && cdcTableMode
+                            ? { cdc_table_mode: cdcTableMode }
+                            : {}),
                     }))
                 },
             },
@@ -419,11 +427,15 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             {
                 openSyncMethodModal: (_, { schema }) => schema,
                 cancelSyncMethodModal: () => null,
-                updateSchemaSyncType: (_, { schema, syncType, incrementalField, incrementalFieldType }) => ({
+                updateSchemaSyncType: (
+                    _,
+                    { schema, syncType, incrementalField, incrementalFieldType, cdcTableMode }
+                ) => ({
                     ...schema,
                     sync_type: syncType,
                     incremental_field: incrementalField,
                     incremental_field_type: incrementalFieldType,
+                    ...(syncType === 'cdc' && cdcTableMode ? { cdc_table_mode: cdcTableMode } : {}),
                 }),
             },
         ],
@@ -833,6 +845,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                                         incremental_field: schema.incremental_field,
                                         incremental_field_type: schema.incremental_field_type,
                                         sync_time_of_day: schema.sync_time_of_day,
+                                        ...(schema.sync_type === 'cdc' && schema.cdc_table_mode
+                                            ? { cdc_table_mode: schema.cdc_table_mode }
+                                            : {}),
                                     })),
                                 },
                             })
@@ -1039,6 +1054,9 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                                 incremental_field: schema.incremental_field,
                                 incremental_field_type: schema.incremental_field_type,
                                 sync_time_of_day: schema.sync_time_of_day ?? null,
+                                ...(schema.sync_type === 'cdc' && schema.cdc_table_mode
+                                    ? { cdc_table_mode: schema.cdc_table_mode }
+                                    : {}),
                             })),
                         },
                     })

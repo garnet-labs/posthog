@@ -57,7 +57,8 @@ interface SyncMethodFormProps {
     onSave: (
         syncType: ExternalDataSourceSyncSchema['sync_type'],
         incrementalField: string | null,
-        incrementalFieldType: string | null
+        incrementalFieldType: string | null,
+        cdcTableMode?: 'consolidated' | 'cdc_only' | 'both'
     ) => void
     saveButtonIsLoading?: boolean
     isNewSource?: boolean
@@ -132,6 +133,9 @@ export const SyncMethodForm = ({
     )
     const [incrementalFieldValue, setIncrementalFieldValue] = useState(schema.incremental_field ?? null)
     const [appendFieldValue, setAppendFieldValue] = useState(schema.incremental_field ?? null)
+    const [cdcTableMode, setCdcTableMode] = useState<'consolidated' | 'cdc_only' | 'both'>(
+        schema.cdc_table_mode ?? 'consolidated'
+    )
 
     useEffect(() => {
         setRadioValue(
@@ -317,6 +321,53 @@ export const SyncMethodForm = ({
                 options={radioOptions}
                 onChange={(newValue) => setRadioValue(newValue)}
             />
+            {radioValue === 'cdc' && (
+                <div className="mt-4 ml-6 border-l-2 border-border pl-4">
+                    <p className="text-sm font-semibold mb-2">Output tables</p>
+                    <LemonRadio
+                        radioPosition="top"
+                        value={cdcTableMode}
+                        onChange={(newValue) => setCdcTableMode(newValue as 'consolidated' | 'cdc_only' | 'both')}
+                        options={[
+                            {
+                                value: 'consolidated',
+                                label: (
+                                    <div className="font-normal mb-2">
+                                        <div className="font-semibold">Consolidated table only</div>
+                                        <p className="m-0 text-secondary text-sm">
+                                            Deduplicates changes — only the latest state per row is stored.
+                                        </p>
+                                    </div>
+                                ),
+                            },
+                            {
+                                value: 'cdc_only',
+                                label: (
+                                    <div className="font-normal mb-2">
+                                        <div className="font-semibold">CDC history table only</div>
+                                        <p className="m-0 text-secondary text-sm">
+                                            Full audit trail in a <code>_cdc</code>-suffixed table with{' '}
+                                            <code>valid_from</code> / <code>valid_to</code> columns.
+                                        </p>
+                                    </div>
+                                ),
+                            },
+                            {
+                                value: 'both',
+                                label: (
+                                    <div className="font-normal mb-2">
+                                        <div className="font-semibold">Both</div>
+                                        <p className="m-0 text-secondary text-sm">
+                                            CDC history table plus an auto-generated view for the current state (
+                                            <code>valid_to IS NULL</code>).
+                                        </p>
+                                    </div>
+                                ),
+                            },
+                        ]}
+                    />
+                </div>
+            )}
             <div className="flex flex-row justify-end w-full">
                 <LemonButton className="mr-3" type="secondary" onClick={onClose}>
                     Close
@@ -329,7 +380,7 @@ export const SyncMethodForm = ({
                         if (radioValue === 'webhook') {
                             onSave('webhook', null, null)
                         } else if (radioValue === 'cdc') {
-                            onSave('cdc', null, null)
+                            onSave('cdc', null, null, cdcTableMode)
                         } else if (radioValue === 'incremental') {
                             const fieldSelected = schema.incremental_fields.find(
                                 (n) => n.field === incrementalFieldValue

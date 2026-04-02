@@ -5630,6 +5630,7 @@ export interface ExternalDataSourceSyncSchema {
     incremental_available: boolean
     append_available: boolean
     cdc_available?: boolean
+    cdc_table_mode?: 'consolidated' | 'cdc_only' | 'both'
     supports_webhooks: boolean
     description?: string | null
     should_sync_default: boolean
@@ -5647,6 +5648,7 @@ export interface ExternalDataSourceSchema extends SimpleExternalDataSourceSchema
     sync_frequency: DataWarehouseSyncInterval
     description?: string | null
     should_sync_default?: boolean
+    cdc_table_mode?: 'consolidated' | 'cdc_only' | 'both'
 }
 
 export enum ExternalDataSchemaStatus {

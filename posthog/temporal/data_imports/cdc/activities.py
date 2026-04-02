@@ -16,10 +16,16 @@ import dataclasses
 
 from django.db import close_old_connections
 
+import pyarrow as pa
 import structlog
 from temporalio import activity
 
-from posthog.temporal.data_imports.cdc.batcher import ChangeEventBatcher
+from posthog.temporal.data_imports.cdc.batcher import (
+    ChangeEventBatcher,
+    build_scd2_table,
+    deduplicate_table,
+    enrich_delete_rows,
+)
 from posthog.temporal.data_imports.pipelines.pipeline_v3.kafka.common import SyncTypeLiteral
 from posthog.temporal.data_imports.pipelines.pipeline_v3.kafka.producer import KafkaBatchProducer
 from posthog.temporal.data_imports.pipelines.pipeline_v3.s3.writer import S3BatchWriter
@@ -117,6 +123,8 @@ def _flush_deferred_runs(
             run_uuid=run_uuid,
             logger=log,
             primary_keys=run_meta.get("primary_keys"),
+            cdc_write_mode=run_meta.get("cdc_write_mode", "incremental_merge"),
+            cdc_table_mode=run_meta.get("cdc_table_mode"),
         )
 
         from posthog.temporal.data_imports.pipelines.pipeline_v3.s3 import BatchWriteResult
@@ -209,89 +217,38 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
 
         log.info("pk_columns_loaded", tables=list(pk_columns_by_table.keys()))
 
-        batcher = ChangeEventBatcher()
-        last_end_lsn: str | None = None
-        event_count = 0
+        # ------------------------------------------------------------------
+        # Per-resource tracker: reused across micro-batch flushes so that
+        # each (table × write_mode) produces ONE job with sequential
+        # S3 batch files, matching the multi-batch pattern of pipeline V3.
+        # ------------------------------------------------------------------
+        @dataclasses.dataclass
+        class _WriteTracker:
+            table_name: str
+            write_resource_name: str
+            cdc_write_mode: str
+            cdc_table_mode: str
+            key_columns: list[str]
+            job: ExternalDataJob
+            s3_writer: S3BatchWriter
+            run_uuid: str
+            batch_results: list  # list[BatchWriteResult]
+            batch_index: int = 0
+            total_rows: int = 0
 
-        for event in reader.read_changes():
-            activity.heartbeat()
+        write_trackers: dict[str, _WriteTracker] = {}
 
-            if event.table_name not in cdc_table_names:
-                continue
-
-            batcher.add(event)
-            last_end_lsn = event.position_serialized
-            event_count += 1
-
-        log.info("wal_changes_read", event_count=event_count, tables=batcher.table_names)
-
-        # Detect PK changes from decoder's Relation messages
-        for table_name in batcher.table_names:
-            decoder_pks = reader._decoder.get_key_columns(table_name)
-            stored_pks = pk_columns_by_table.get(table_name, [])
-            if decoder_pks and decoder_pks != stored_pks:
-                log.warning("pk_columns_changed", table=table_name, old=stored_pks, new=decoder_pks)
-                pk_columns_by_table[table_name] = decoder_pks
-                schema = schema_by_name.get(table_name)
-                if schema is not None:
-                    schema.sync_type_config["primary_key_columns"] = decoder_pks
-                    schema.save(update_fields=["sync_type_config", "updated_at"])
-
-        # Check for truncated tables — mark for re-snapshot.
-        # This must happen before the event_count == 0 early return: a TRUNCATE
-        # produces no ChangeEvents, so a truncate-only batch would otherwise be
-        # silently ignored and the slot never advanced.
-        truncated_tables = list(reader.truncated_tables)
-        reader.clear_truncated_tables()
-        for table_name in truncated_tables:
-            schema = schema_by_name.get(table_name)
-            if schema is not None:
-                log.warning("truncate_detected", table=table_name, schema_id=str(schema.id))
-                schema.sync_type_config["cdc_mode"] = "snapshot"
-                schema.sync_type_config.pop("cdc_last_log_position", None)
-                schema.initial_sync_complete = False
-                schema.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
-                # Unpause the per-schema ExternalDataJobWorkflow schedule so
-                # the initial snapshot can run again
-                try:
-                    from products.data_warehouse.backend.data_load.service import unpause_external_data_schedule
-
-                    unpause_external_data_schedule(str(schema.id))
-                    log.info("unpaused_schema_schedule_for_resnapshot", schema_id=str(schema.id))
-                except Exception:
-                    log.warning("failed_to_unpause_schema_schedule", schema_id=str(schema.id))
-
-        if event_count == 0:
-            # No DML events. If there were truncates, advance the slot past them so
-            # they don't replay on the next run; otherwise nothing to do.
-            if truncated_tables:
-                truncate_end_lsn = reader.last_commit_end_lsn
-                if truncate_end_lsn is not None:
-                    reader.confirm_position(truncate_end_lsn)
-                    log.info("slot_advanced_past_truncate", position=truncate_end_lsn)
-            now = dt.datetime.now(tz=dt.UTC)
-            for schema in cdc_schemas:
-                schema.status = ExternalDataSchema.Status.COMPLETED
-                schema.latest_error = None
-                schema.last_synced_at = now
-                schema.save(update_fields=["status", "latest_error", "last_synced_at", "updated_at"])
-            log.info("no_wal_changes")
-            return
-
-        # Flush deferred runs for schemas that just transitioned to streaming
-        for schema in cdc_schemas:
-            if schema.cdc_mode == "streaming" and schema.sync_type_config.get("cdc_deferred_runs"):
-                _flush_deferred_runs(schema, source, log)
-
-        # Process new events
-        tables = batcher.flush()
-
-        for table_name, pa_table in tables.items():
-            schema = schema_by_name.get(table_name)
-            if schema is None:
-                continue
-
-            activity.heartbeat()
+        def _get_or_create_tracker(
+            table_name: str,
+            write_resource_name: str,
+            cdc_write_mode: str,
+            cdc_table_mode: str,
+            key_columns: list[str],
+            schema: ExternalDataSchema,
+        ) -> _WriteTracker:
+            tracker = write_trackers.get(write_resource_name)
+            if tracker is not None:
+                return tracker
 
             job = ExternalDataJob.objects.create(
                 team_id=inputs.team_id,
@@ -313,79 +270,293 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
                 run_uuid=run_uuid,
             )
 
-            batch_result = s3_writer.write_batch(pa_table, batch_index=0)
-            schema_path = s3_writer.write_schema()
-
-            log.info(
-                "cdc_batch_written",
-                table=table_name,
-                rows=pa_table.num_rows,
-                s3_path=batch_result.s3_path,
-                cdc_mode=schema.cdc_mode,
+            tracker = _WriteTracker(
+                table_name=table_name,
+                write_resource_name=write_resource_name,
+                cdc_write_mode=cdc_write_mode,
+                cdc_table_mode=cdc_table_mode,
+                key_columns=key_columns,
+                job=job,
+                s3_writer=s3_writer,
+                run_uuid=run_uuid,
+                batch_results=[],
             )
+            write_trackers[write_resource_name] = tracker
+            return tracker
 
-            key_columns = pk_columns_by_table.get(table_name, [])
+        def _send_kafka_batch(tracker: _WriteTracker, batch_result: typing.Any, is_final_batch: bool) -> None:
+            """Send a single Kafka notification for a streaming tracker."""
+            schema = schema_by_name[tracker.table_name]
+            producer = KafkaBatchProducer(
+                team_id=inputs.team_id,
+                job_id=str(tracker.job.id),
+                schema_id=str(schema.id),
+                source_id=str(source.id),
+                resource_name=tracker.write_resource_name,
+                sync_type=typing.cast(SyncTypeLiteral, "cdc"),
+                run_uuid=tracker.run_uuid,
+                logger=log,
+                primary_keys=tracker.key_columns or None,
+                cdc_write_mode=tracker.cdc_write_mode,
+                cdc_table_mode=tracker.cdc_table_mode,
+            )
+            producer.send_batch_notification(
+                batch_result=batch_result,
+                is_final_batch=is_final_batch,
+                total_batches=tracker.batch_index if is_final_batch else None,
+                total_rows=tracker.total_rows if is_final_batch else None,
+                data_folder=tracker.s3_writer.get_data_folder() if is_final_batch else None,
+                schema_path=tracker.s3_writer.write_schema() if is_final_batch else None,
+            )
+            producer.flush()
+
+        def _store_deferred_batch(tracker: _WriteTracker, batch_result: typing.Any, schema: ExternalDataSchema) -> None:
+            """Persist a batch result into the tracker's deferred entry in sync_type_config.
+
+            Creates the entry on first call (keyed by run_uuid), appends to it on
+            subsequent calls.  Saves immediately so progress survives process failures.
+            """
+            deferred = schema.sync_type_config.setdefault("cdc_deferred_runs", [])
+
+            # Find existing entry for this run
+            entry: dict | None = None
+            for d in deferred:
+                if d.get("run_uuid") == tracker.run_uuid:
+                    entry = d
+                    break
+
+            if entry is None:
+                entry = {
+                    "job_id": str(tracker.job.id),
+                    "run_uuid": tracker.run_uuid,
+                    "data_folder": tracker.s3_writer.get_data_folder(),
+                    "schema_path": None,  # written on finalization
+                    "total_batches": 0,
+                    "total_rows": 0,
+                    "primary_keys": tracker.key_columns or None,
+                    "cdc_write_mode": tracker.cdc_write_mode,
+                    "cdc_table_mode": tracker.cdc_table_mode,
+                    "batch_results": [],
+                }
+                deferred.append(entry)
+
+            entry["batch_results"].append(
+                {
+                    "s3_path": batch_result.s3_path,
+                    "row_count": batch_result.row_count,
+                    "byte_size": batch_result.byte_size,
+                    "batch_index": batch_result.batch_index,
+                    "timestamp_ns": batch_result.timestamp_ns,
+                }
+            )
+            entry["total_batches"] = tracker.batch_index
+            entry["total_rows"] = tracker.total_rows
+
+            schema.save(update_fields=["sync_type_config", "updated_at"])
+
+        def _process_flush(tables: dict[str, pa.Table], is_final: bool = False) -> set[str]:
+            """Enrich, transform, write to S3, and dispatch one micro-batch.
+
+            Streaming schemas: Kafka sent immediately after each S3 write.
+            Snapshot schemas: batch result persisted to sync_type_config immediately.
+
+            Returns the set of write_resource_names that received data.
+            """
+            flushed: set[str] = set()
+
+            for table_name, raw_table in tables.items():
+                schema = schema_by_name.get(table_name)
+                if schema is None:
+                    continue
+
+                activity.heartbeat()
+
+                key_columns = pk_columns_by_table.get(table_name, [])
+                cdc_table_mode = schema.cdc_table_mode
+
+                enriched_table = enrich_delete_rows(raw_table, key_columns)
+
+                batch_writes: list[tuple[pa.Table, str, str]] = []
+                if cdc_table_mode == "consolidated":
+                    batch_writes.append(
+                        (deduplicate_table(enriched_table, key_columns), schema.name, "incremental_merge")
+                    )
+                elif cdc_table_mode == "cdc_only":
+                    batch_writes.append(
+                        (build_scd2_table(enriched_table, key_columns), f"{schema.name}_cdc", "scd2_append")
+                    )
+                elif cdc_table_mode == "both":
+                    batch_writes.append(
+                        (deduplicate_table(enriched_table, key_columns), schema.name, "incremental_merge")
+                    )
+                    batch_writes.append(
+                        (build_scd2_table(enriched_table, key_columns), f"{schema.name}_cdc", "scd2_append")
+                    )
+
+                for write_table, write_resource_name, cdc_write_mode in batch_writes:
+                    tracker = _get_or_create_tracker(
+                        table_name,
+                        write_resource_name,
+                        cdc_write_mode,
+                        cdc_table_mode,
+                        key_columns,
+                        schema,
+                    )
+                    batch_result = tracker.s3_writer.write_batch(write_table, batch_index=tracker.batch_index)
+                    tracker.batch_results.append(batch_result)
+                    tracker.batch_index += 1
+                    tracker.total_rows += write_table.num_rows
+                    flushed.add(write_resource_name)
+
+                    log.info(
+                        "cdc_batch_written",
+                        table=table_name,
+                        resource=write_resource_name,
+                        rows=write_table.num_rows,
+                        batch_index=tracker.batch_index - 1,
+                        s3_path=batch_result.s3_path,
+                    )
+
+                    # Dispatch immediately so progress survives process failures.
+                    if schema.cdc_mode == "streaming":
+                        _send_kafka_batch(tracker, batch_result, is_final_batch=is_final)
+                    elif schema.cdc_mode == "snapshot":
+                        _store_deferred_batch(tracker, batch_result, schema)
+
+            return flushed
+
+        # ------------------------------------------------------------------
+        # 1. Read WAL events with periodic micro-batch flushes.
+        #    Streaming schemas get Kafka messages immediately after each S3 write.
+        # ------------------------------------------------------------------
+        batcher = ChangeEventBatcher()
+        last_end_lsn: str | None = None
+        event_count = 0
+        all_table_names: set[str] = set()
+
+        for event in reader.read_changes():
+            activity.heartbeat()
+
+            if event.table_name not in cdc_table_names:
+                continue
+
+            batcher.add(event)
+            last_end_lsn = event.position_serialized
+            event_count += 1
+
+            if batcher.should_flush:
+                tables = batcher.flush()
+                all_table_names.update(tables.keys())
+                _process_flush(tables, is_final=False)
+                log.info("cdc_micro_batch_flushed", events_so_far=event_count, trackers=len(write_trackers))
+
+        # Capture remaining table names before final flush
+        all_table_names.update(batcher.table_names)
+
+        log.info("wal_changes_read", event_count=event_count, tables=list(all_table_names))
+
+        # ------------------------------------------------------------------
+        # 2. Post-WAL: PK change detection, truncate handling
+        # ------------------------------------------------------------------
+        for table_name in all_table_names:
+            decoder_pks = reader._decoder.get_key_columns(table_name)
+            stored_pks = pk_columns_by_table.get(table_name, [])
+            if decoder_pks and decoder_pks != stored_pks:
+                log.warning("pk_columns_changed", table=table_name, old=stored_pks, new=decoder_pks)
+                pk_columns_by_table[table_name] = decoder_pks
+                schema = schema_by_name.get(table_name)
+                if schema is not None:
+                    schema.sync_type_config["primary_key_columns"] = decoder_pks
+                    schema.save(update_fields=["sync_type_config", "updated_at"])
+
+        truncated_tables = list(reader.truncated_tables)
+        reader.clear_truncated_tables()
+        for table_name in truncated_tables:
+            schema = schema_by_name.get(table_name)
+            if schema is not None:
+                log.warning("truncate_detected", table=table_name, schema_id=str(schema.id))
+                schema.sync_type_config["cdc_mode"] = "snapshot"
+                schema.sync_type_config.pop("cdc_last_log_position", None)
+                schema.initial_sync_complete = False
+                schema.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
+                try:
+                    from products.data_warehouse.backend.data_load.service import unpause_external_data_schedule
+
+                    unpause_external_data_schedule(str(schema.id))
+                    log.info("unpaused_schema_schedule_for_resnapshot", schema_id=str(schema.id))
+                except Exception:
+                    log.warning("failed_to_unpause_schema_schedule", schema_id=str(schema.id))
+
+        if event_count == 0:
+            if truncated_tables:
+                truncate_end_lsn = reader.last_commit_end_lsn
+                if truncate_end_lsn is not None:
+                    reader.confirm_position(truncate_end_lsn)
+                    log.info("slot_advanced_past_truncate", position=truncate_end_lsn)
+            now = dt.datetime.now(tz=dt.UTC)
+            for schema in cdc_schemas:
+                schema.status = ExternalDataSchema.Status.COMPLETED
+                schema.latest_error = None
+                schema.last_synced_at = now
+                schema.save(update_fields=["status", "latest_error", "last_synced_at", "updated_at"])
+            log.info("no_wal_changes")
+            return
+
+        # ------------------------------------------------------------------
+        # 3. Flush deferred runs for schemas that transitioned to streaming
+        # ------------------------------------------------------------------
+        for schema in cdc_schemas:
+            if schema.cdc_mode == "streaming" and schema.sync_type_config.get("cdc_deferred_runs"):
+                _flush_deferred_runs(schema, source, log)
+
+        # ------------------------------------------------------------------
+        # 4. Final flush: remaining buffered events get is_final_batch=True
+        # ------------------------------------------------------------------
+        final_flushed: set[str] = set()
+        if batcher.event_count > 0:
+            tables = batcher.flush()
+            final_flushed = _process_flush(tables, is_final=True)
+
+        # ------------------------------------------------------------------
+        # 5. Finalize trackers.
+        #    - Streaming trackers that had no data in the final flush need an
+        #      empty finalization batch so the consumer triggers post-load ops.
+        #    - Snapshot trackers: batch results were already persisted to
+        #      sync_type_config by _store_deferred_batch; write schema file
+        #      and update the deferred entry with the final schema_path.
+        # ------------------------------------------------------------------
+        for resource_name, tracker in write_trackers.items():
+            schema = schema_by_name[tracker.table_name]
 
             if schema.cdc_mode == "streaming":
-                producer = KafkaBatchProducer(
-                    team_id=inputs.team_id,
-                    job_id=str(job.id),
-                    schema_id=str(schema.id),
-                    source_id=str(source.id),
-                    resource_name=schema.name,
-                    sync_type=typing.cast(SyncTypeLiteral, "cdc"),
-                    run_uuid=run_uuid,
-                    logger=log,
-                    primary_keys=key_columns or None,
-                )
-                producer.send_batch_notification(
-                    batch_result=batch_result,
-                    is_final_batch=True,
-                    total_batches=1,
-                    total_rows=pa_table.num_rows,
-                    data_folder=s3_writer.get_data_folder(),
-                    schema_path=schema_path,
-                )
-                producer.flush()
+                if resource_name not in final_flushed:
+                    # Write a zero-row parquet so the consumer has a valid s3_path to
+                    # read.  It processes 0 rows (DeltaLake no-op) but still runs
+                    # post-load ops and marks the job completed.
+                    empty = pa.table({"_empty": pa.array([], type=pa.int8())})
+                    finalize_result = tracker.s3_writer.write_batch(empty, batch_index=tracker.batch_index)
+                    tracker.batch_index += 1
+                    _send_kafka_batch(tracker, finalize_result, is_final_batch=True)
 
-                # Don't mark job as COMPLETED here — the Kafka consumer will
-                # mark it after successfully loading data into DeltaLake.
-                job.rows_synced = pa_table.num_rows
-                job.save(update_fields=["rows_synced", "updated_at"])
+                tracker.job.rows_synced = tracker.total_rows
+                tracker.job.save(update_fields=["rows_synced", "updated_at"])
 
             elif schema.cdc_mode == "snapshot":
-                # Defer Kafka notification — store run metadata
-                deferred = schema.sync_type_config.setdefault("cdc_deferred_runs", [])
-                deferred.append(
-                    {
-                        "job_id": str(job.id),
-                        "run_uuid": run_uuid,
-                        "data_folder": s3_writer.get_data_folder(),
-                        "schema_path": schema_path,
-                        "total_batches": 1,
-                        "total_rows": pa_table.num_rows,
-                        "primary_keys": key_columns or None,
-                        "batch_results": [
-                            {
-                                "s3_path": batch_result.s3_path,
-                                "row_count": batch_result.row_count,
-                                "byte_size": batch_result.byte_size,
-                                "batch_index": batch_result.batch_index,
-                                "timestamp_ns": batch_result.timestamp_ns,
-                            }
-                        ],
-                    }
-                )
+                # Write schema file and update the deferred entry with final metadata.
+                schema_path = tracker.s3_writer.write_schema()
+                deferred = schema.sync_type_config.get("cdc_deferred_runs", [])
+                for entry in deferred:
+                    if entry.get("run_uuid") == tracker.run_uuid:
+                        entry["schema_path"] = schema_path
+                        entry["total_batches"] = tracker.batch_index
+                        entry["total_rows"] = tracker.total_rows
+                        break
                 schema.save(update_fields=["sync_type_config", "updated_at"])
-                log.info("cdc_batch_deferred", table=table_name, run_uuid=run_uuid)
 
-                # For snapshot mode, the Kafka message is deferred so the consumer
-                # won't process it yet. Mark the job as completed here since there's
-                # nothing else to do until the schema transitions to streaming.
-                job.rows_synced = pa_table.num_rows
-                job.status = ExternalDataJob.Status.COMPLETED
-                job.finished_at = dt.datetime.now(tz=dt.UTC)
-                job.save(update_fields=["rows_synced", "status", "finished_at", "updated_at"])
+                tracker.job.rows_synced = tracker.total_rows
+                tracker.job.status = ExternalDataJob.Status.COMPLETED
+                tracker.job.finished_at = dt.datetime.now(tz=dt.UTC)
+                tracker.job.save(update_fields=["rows_synced", "status", "finished_at", "updated_at"])
 
         # Advance slot after successful S3 writes
         if last_end_lsn is not None:

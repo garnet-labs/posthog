@@ -114,6 +114,12 @@ class ExternalDataSchema(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
         return None
 
     @property
+    def cdc_table_mode(self) -> Literal["consolidated", "cdc_only", "both"]:
+        if self.sync_type_config:
+            return self.sync_type_config.get("cdc_table_mode", "consolidated")
+        return "consolidated"
+
+    @property
     def should_use_incremental_field(self):
         return self.is_incremental or self.is_append or self.is_webhook
 

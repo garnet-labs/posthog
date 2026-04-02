@@ -22,6 +22,28 @@ from products.data_warehouse.backend.models import ExternalDataJob
 from products.data_warehouse.backend.s3 import aget_s3_client, ensure_bucket_exists
 
 
+def _first_per_pk_table(pa_table: pa.Table, pk_columns: list[str]) -> pa.Table:
+    """Return a table containing only the first row per PK tuple (in original row order).
+
+    Used when closing existing "current" rows during SCD2 append: we pass a
+    deduplicated table to the merge so that only one source row matches each
+    target row, avoiding ambiguous multi-match merge semantics.
+    """
+    if not pk_columns or pa_table.num_rows == 0:
+        return pa_table
+
+    pk_arrays = [pa_table.column(col).to_pylist() for col in pk_columns]
+    seen: set[tuple] = set()
+    indices: list[int] = []
+    for i in range(pa_table.num_rows):
+        key = tuple(arr[i] for arr in pk_arrays)
+        if key not in seen:
+            seen.add(key)
+            indices.append(i)
+
+    return pa_table.take(indices)
+
+
 class DeltaTableHelper:
     _resource_name: str
     _job: ExternalDataJob
@@ -298,6 +320,81 @@ class DeltaTableHelper:
         delta_table = await self.get_delta_table()
         assert delta_table is not None
 
+        return delta_table
+
+    async def write_scd2_to_deltalake(
+        self,
+        data: pa.Table,
+        primary_keys: Sequence[Any],
+    ) -> deltalake.DeltaTable:
+        """Write CDC SCD Type 2 data: close existing current rows, then append new rows.
+
+        For each PK that appears in `data`:
+        1. Find the existing row in the target with matching PK and valid_to IS NULL
+           (the current row) and update its valid_to to the earliest valid_from of the
+           new events for that PK.
+        2. Append all rows from `data` as new history entries.
+
+        `data` is expected to already have valid_from / valid_to columns as produced
+        by batcher.build_scd2_table().
+        """
+        delta_table = await self.get_delta_table()
+
+        if delta_table:
+            delta_table = await self._evolve_delta_schema(data.schema)
+
+        # Step 1: Close existing current rows for PKs in this batch
+        if delta_table is not None and primary_keys and "valid_from" in data.column_names:
+            py_column_names = data.column_names
+            normalized_pks = [
+                normalize_column_name(x) for x in primary_keys if normalize_column_name(x) in py_column_names
+            ]
+
+            if normalized_pks:
+                # Use only the first row per PK to avoid ambiguous multi-match merge
+                first_per_pk = _first_per_pk_table(data, normalized_pks)
+
+                predicate_parts = [f"source.{col} = target.{col}" for col in normalized_pks]
+                predicate_parts.append("target.valid_to IS NULL")
+                predicate = " AND ".join(predicate_parts)
+
+                def _do_scd2_close(first_per_pk: pa.Table, predicate: str) -> dict:
+                    return (
+                        delta_table.merge(
+                            source=first_per_pk,
+                            source_alias="source",
+                            target_alias="target",
+                            predicate=predicate,
+                            streamed_exec=False,
+                        )
+                        .when_matched_update(updates={"valid_to": "source.valid_from"})
+                        .execute()
+                    )
+
+                close_stats = await asyncio.to_thread(_do_scd2_close, first_per_pk, predicate)
+                await self._logger.adebug(f"SCD2 close stats: {json.dumps(close_stats)}")
+
+        # Step 2: Append all new rows
+        if delta_table is None:
+            storage_options = self._get_credentials()
+            delta_uri = await self._get_delta_table_uri()
+            delta_table = await asyncio.to_thread(
+                deltalake.DeltaTable.create,
+                table_uri=delta_uri,
+                schema=data.schema,
+                storage_options=storage_options,
+            )
+
+        await asyncio.to_thread(
+            deltalake.write_deltalake,
+            table_or_uri=delta_table,
+            data=data,
+            mode="append",
+            schema_mode="merge",
+        )
+
+        delta_table = await self.get_delta_table()
+        assert delta_table is not None
         return delta_table
 
     async def compact_table(self) -> None:

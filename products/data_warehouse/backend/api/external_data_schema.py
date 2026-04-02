@@ -59,6 +59,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
     sync_frequency = serializers.SerializerMethodField(read_only=True)
     status = serializers.SerializerMethodField(read_only=True)
     sync_time_of_day = serializers.SerializerMethodField(read_only=True)
+    cdc_table_mode = serializers.SerializerMethodField(read_only=False)
 
     class Meta:
         model = ExternalDataSchema
@@ -79,6 +80,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             "sync_frequency",
             "sync_time_of_day",
             "description",
+            "cdc_table_mode",
         ]
 
         read_only_fields = [
@@ -133,6 +135,10 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
     def get_sync_time_of_day(self, schema: ExternalDataSchema):
         return schema.sync_time_of_day
 
+    @extend_schema_field(serializers.CharField())
+    def get_cdc_table_mode(self, schema: ExternalDataSchema) -> str:
+        return schema.cdc_table_mode
+
     def update(self, instance: ExternalDataSchema, validated_data: dict[str, Any]) -> ExternalDataSchema:
         data = self.context["request"].data
 
@@ -185,10 +191,18 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             payload = instance.sync_type_config
             if payload.get("cdc_mode") is None:
                 payload["cdc_mode"] = "snapshot"
+            cdc_table_mode = data.get("cdc_table_mode")
+            if cdc_table_mode in ("consolidated", "cdc_only", "both"):
+                payload["cdc_table_mode"] = cdc_table_mode
             validated_data["sync_type_config"] = payload
         else:
-            # No need to update sync_type_config for full refresh sync_type - it'll happen on the next sync
-            pass
+            # For CDC schemas where sync_type isn't being changed, still allow cdc_table_mode updates
+            if instance.sync_type == ExternalDataSchema.SyncType.CDC and "cdc_table_mode" in data:
+                cdc_table_mode = data.get("cdc_table_mode")
+                if cdc_table_mode in ("consolidated", "cdc_only", "both"):
+                    payload = instance.sync_type_config
+                    payload["cdc_table_mode"] = cdc_table_mode
+                    validated_data["sync_type_config"] = payload
 
         should_sync = validated_data.get("should_sync", None)
         sync_frequency = data.get("sync_frequency", None)

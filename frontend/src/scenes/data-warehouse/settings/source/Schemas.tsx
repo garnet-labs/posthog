@@ -572,7 +572,56 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                                                         fullWidth
                                                                         key={`resync-data-warehouse-schema-${schema.id}`}
                                                                         id="data-warehouse-schema-resync"
-                                                                        onClick={() => resyncSchema(schema)}
+                                                                        onClick={() => {
+                                                                            const hasCdcTable =
+                                                                                schema.cdc_table_mode === 'cdc_only' ||
+                                                                                schema.cdc_table_mode === 'both'
+                                                                            LemonDialog.open({
+                                                                                title: 'Full resync — all existing data will be replaced',
+                                                                                content: (
+                                                                                    <div className="text-sm text-secondary space-y-2">
+                                                                                        <p>
+                                                                                            This will re-snapshot the
+                                                                                            entire table from the source
+                                                                                            database. All rows currently
+                                                                                            in the{' '}
+                                                                                            <strong>
+                                                                                                {schema.table?.name ??
+                                                                                                    schema.name}
+                                                                                            </strong>{' '}
+                                                                                            table will be replaced with
+                                                                                            the new snapshot.
+                                                                                        </p>
+                                                                                        {hasCdcTable && (
+                                                                                            <p>
+                                                                                                The{' '}
+                                                                                                <strong>
+                                                                                                    {(schema.table
+                                                                                                        ?.name ??
+                                                                                                        schema.name) +
+                                                                                                        '_cdc'}
+                                                                                                </strong>{' '}
+                                                                                                history table will also
+                                                                                                be reset — all change
+                                                                                                history will be lost and
+                                                                                                replaced with the new
+                                                                                                snapshot as the starting
+                                                                                                point.
+                                                                                            </p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ),
+                                                                                primaryButton: {
+                                                                                    children: 'Full resync',
+                                                                                    status: 'danger',
+                                                                                    onClick: () => resyncSchema(schema),
+                                                                                },
+                                                                                secondaryButton: {
+                                                                                    children: 'Cancel',
+                                                                                    type: 'tertiary',
+                                                                                },
+                                                                            })
+                                                                        }}
                                                                         status="danger"
                                                                         disabledReason={disabledReason}
                                                                     >
@@ -710,6 +759,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         incremental_available: schemaIncrementalFields.incremental_available,
                         append_available: schemaIncrementalFields.append_available,
                         cdc_available: schemaIncrementalFields.cdc_available,
+                        cdc_table_mode: currentSyncMethodModalSchema.cdc_table_mode,
                         incremental_fields: schemaIncrementalFields.incremental_fields,
                         supports_webhooks: schemaIncrementalFields?.supports_webhooks ?? false,
                     }}
@@ -717,7 +767,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         resetSchemaIncrementalFields()
                         closeSyncMethodModal()
                     }}
-                    onSave={(syncType, incrementalField, incrementalFieldType) => {
+                    onSave={(syncType, incrementalField, incrementalFieldType, cdcTableMode) => {
                         const noIncrementalField = syncType === 'full_refresh' || syncType === 'cdc'
                         updateSchema({
                             ...currentSyncMethodModalSchema,
@@ -726,6 +776,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                             incremental_field: noIncrementalField ? null : incrementalField,
                             incremental_field_type: noIncrementalField ? null : incrementalFieldType,
                             sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
+                            ...(syncType === 'cdc' && cdcTableMode ? { cdc_table_mode: cdcTableMode } : {}),
                         })
                     }}
                 />
