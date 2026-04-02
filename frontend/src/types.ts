@@ -4962,6 +4962,7 @@ export const INTEGRATION_KINDS = [
     'firebase',
     'jira',
     'pinterest-ads',
+    'apns',
 ] as const
 
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number]

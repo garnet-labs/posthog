@@ -2,6 +2,7 @@ import { capitalizeFirstLetter } from 'lib/utils'
 
 import { IntegrationKind } from '~/types'
 
+import IconApple from 'public/services/apple_search_ads.png'
 import IconAzureBlob from 'public/services/azure-blob-storage.png'
 import IconBingAds from 'public/services/bing-ads.svg'
 import IconClickUp from 'public/services/clickup.svg'
@@ -58,6 +59,7 @@ export const ICONS: Record<IntegrationKind, any> = {
     firebase: IconFirebase,
     jira: IconJira,
     'pinterest-ads': IconPinterest,
+    apns: IconApple,
 }
 
 export const getIntegrationNameFromKind = (kind: string): string => {
@@ -90,6 +92,8 @@ export const getIntegrationNameFromKind = (kind: string): string => {
             return 'GitHub'
         case 'firebase':
             return 'Firebase'
+        case 'apns':
+            return 'Apple Push Notification Service'
         default:
             return capitalizeFirstLetter(kind)
     }
