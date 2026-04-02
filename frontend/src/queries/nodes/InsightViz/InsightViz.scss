@@ -68,8 +68,9 @@
             }
         }
 
-        // If horizontal, hide the inline add filter group button and display the one after
-        .PropertyGroupFilters__add-filter-group-inline {
+        // If horizontal, hide the inline add filter group button (and its wrapper) and display the one after
+        .PropertyGroupFilters__add-filter-group-inline,
+        .PropertyGroupFilters__add-filter-group-inline-wrapper {
             display: none;
         }
 

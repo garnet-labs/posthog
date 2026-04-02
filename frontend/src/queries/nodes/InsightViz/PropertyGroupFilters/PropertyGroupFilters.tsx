@@ -56,8 +56,8 @@ export function PropertyGroupFilters({
         <div className="deprecated-space-y-2 PropertyGroupFilters @container">
             {propertyGroupFilter.values && (
                 <BindLogic logic={propertyGroupFilterLogic} props={logicProps}>
-                    <div className="flex flex-col gap-2 @lg:flex-row @lg:gap-0 @lg:items-center">
-                        <div className="order-2 @lg:order-none">
+                    <div className="flex flex-col gap-2 @lg:flex-row @lg:items-center">
+                        <div className="order-2 @lg:order-none PropertyGroupFilters__add-filter-group-inline-wrapper">
                             <LemonButton
                                 data-attr={`${pageKey}-add-filter-group-inline`}
                                 type="secondary"

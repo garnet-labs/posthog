@@ -3030,7 +3030,7 @@ export type InsightEditorFilterGroup = {
     /** Summary shown next to the title when the section is collapsed (e.g. "3 filters", "$browser, $os") */
     collapsedSummary?: string | null
     /** Extra content rendered in the tile header next to the title */
-    headerExtra?: JSX.Element | null
+    headerExtra?: ReactNode
 }
 
 export interface SystemStatusSubrows {
