@@ -1760,7 +1760,6 @@ def cmd_cloud_code(branch: str) -> None:
         fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
 
     hostname = _cloud_get_tag(instance, "sandbox:hostname")
-    ssh_port = 2222  # Container SSH port, forwarded through host
 
     code_cmd = shutil.which("code")
     if not code_cmd:
@@ -1770,6 +1769,38 @@ def cmd_cloud_code(branch: str) -> None:
 
     info(f"Opening VSCode Remote-SSH to {hostname}...")
     subprocess.Popen([code_cmd, "--remote", f"ssh-remote+ubuntu@{hostname}", "/home/ubuntu/posthog"])
+
+
+def cmd_cloud_idea(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if instance["State"]["Name"] != "running":
+        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+
+    from urllib.parse import quote
+
+    uri = (
+        f"jetbrains-gateway://connect#type=ssh&deploy=false"
+        f"&host={hostname}&port=2222&user=sandbox"
+        f"&projectPath={quote('/workspace')}"
+        f"&idePath={quote('/opt/idea')}"
+    )
+
+    for cmd_name in ["gateway", "jetbrains-gateway", "xdg-open", "open"]:
+        cmd = shutil.which(cmd_name)
+        if cmd:
+            info(f"Opening JetBrains Gateway for sandbox at {hostname}...")
+            subprocess.Popen([cmd, uri])
+            return
+
+    info("Could not auto-open Gateway.")
+    info(f"Connect manually: File -> Remote Development -> SSH")
+    info(f"  Host: {hostname}  Port: 2222  User: sandbox")
+    info(f"  Project: /workspace")
 
 
 # ---------------------------------------------------------------------------
@@ -1837,6 +1868,7 @@ examples:
         ("open", "Open PostHog web UI in browser"),
         ("logs", "Tail boot and app logs"),
         ("code", "Open VSCode Remote-SSH to the sandbox"),
+        ("idea", "Open JetBrains Gateway for the sandbox"),
     ]:
         p = cloud_sub.add_parser(name, help=help_text)
         p.add_argument("branch")
@@ -1869,6 +1901,7 @@ def main() -> None:
             "open": lambda: cmd_cloud_open(args.branch),
             "logs": lambda: cmd_cloud_logs(args.branch),
             "code": lambda: cmd_cloud_code(args.branch),
+            "idea": lambda: cmd_cloud_idea(args.branch),
         }
         dispatch = {args.command: lambda: cloud_dispatch[args.cloud_command]()}
     else:
