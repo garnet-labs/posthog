@@ -1,4 +1,6 @@
 import { BindLogic, useActions, useValues } from 'kea'
+import { CSSProperties, useCallback, useMemo } from 'react'
+import { List } from 'react-window'
 
 import { IconChevronDown } from '@posthog/icons'
 import { LemonButton, LemonCheckbox, LemonDropdown, LemonInput, LemonTag } from '@posthog/lemon-ui'
@@ -7,26 +9,37 @@ import { DateRange, LogsQuery } from '~/queries/schema/schema-general'
 
 import { serviceFilterLogic, ServiceFilterLogicProps } from './serviceFilterLogic'
 
-function ServiceOption({
-    name,
-    checked,
-    onClick,
-}: {
-    name: string
-    checked: boolean
-    onClick: () => void
-}): JSX.Element {
+const SERVICE_ROW_HEIGHT = 32
+
+interface ServiceRowProps {
+    serviceNames: string[]
+    selected: string[]
+    onToggle: (name: string) => void
+}
+
+function ServiceRowComponent({
+    index,
+    style,
+    serviceNames,
+    selected,
+    onToggle,
+}: ServiceRowProps & { index: number; style: CSSProperties; ariaAttributes: Record<string, unknown> }): JSX.Element {
+    const name = serviceNames[index]
+    const isSelected = selected.includes(name)
     return (
-        <LemonButton
-            type="tertiary"
-            size="small"
-            fullWidth
-            icon={<LemonCheckbox checked={checked} className="pointer-events-none" />}
-            onClick={onClick}
-            data-attr={`logs-service-option-${name}`}
-        >
-            {name}
-        </LemonButton>
+        // eslint-disable-next-line react/forbid-dom-props
+        <div style={style}>
+            <LemonButton
+                type="tertiary"
+                size="small"
+                fullWidth
+                icon={<LemonCheckbox checked={isSelected} className="pointer-events-none" />}
+                onClick={() => onToggle(name)}
+                data-attr={`logs-service-option-${name}`}
+            >
+                {name}
+            </LemonButton>
+        </div>
     )
 }
 
@@ -57,7 +70,28 @@ function ServiceFilterInner({
     const { serviceNames, allServiceNames, allServiceNamesLoading, search } = useValues(serviceFilterLogic)
     const { setSearch } = useActions(serviceFilterLogic)
 
-    const selected = value ?? []
+    const selected = useMemo(() => value ?? [], [value])
+
+    const onToggle = useCallback(
+        (name: string) => {
+            const isSelected = selected.includes(name)
+            const newNames = isSelected ? selected.filter((n) => n !== name) : [...selected, name]
+            onChange(newNames)
+        },
+        [selected, onChange]
+    )
+
+    const rowProps: ServiceRowProps = useMemo(
+        () => ({
+            serviceNames,
+            selected,
+            onToggle,
+        }),
+        [serviceNames, selected, onToggle]
+    )
+
+    // Calculate height: show up to 10 items, max 300px
+    const listHeight = Math.min(serviceNames.length * SERVICE_ROW_HEIGHT, 300)
 
     return (
         <LemonDropdown
@@ -75,7 +109,7 @@ function ServiceFilterInner({
                             autoFocus
                         />
                     </div>
-                    <div className="max-h-[300px] overflow-y-auto">
+                    <div>
                         {allServiceNamesLoading && allServiceNames.length === 0 ? (
                             <div className="p-2 text-muted text-center text-xs">Loading...</div>
                         ) : serviceNames.length === 0 ? (
@@ -104,22 +138,14 @@ function ServiceFilterInner({
                                         <div className="border-b border-border my-1" />
                                     </>
                                 )}
-                                {serviceNames.map((name: string) => {
-                                    const isSelected = selected.includes(name)
-                                    return (
-                                        <ServiceOption
-                                            key={name}
-                                            name={name}
-                                            checked={isSelected}
-                                            onClick={() => {
-                                                const newNames = isSelected
-                                                    ? selected.filter((n) => n !== name)
-                                                    : [...selected, name]
-                                                onChange(newNames)
-                                            }}
-                                        />
-                                    )
-                                })}
+                                <List<ServiceRowProps>
+                                    style={{ height: listHeight, width: 250 }}
+                                    rowCount={serviceNames.length}
+                                    rowHeight={SERVICE_ROW_HEIGHT}
+                                    overscanCount={10}
+                                    rowProps={rowProps}
+                                    rowComponent={ServiceRowComponent}
+                                />
                             </>
                         )}
                     </div>
