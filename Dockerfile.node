@@ -103,8 +103,14 @@ RUN apt-get update && \
     "libssl3=3.0.18-1~deb12u2" \
     "curl" \
     "gettext-base" \
+    "libjemalloc2" \
     && \
     rm -rf /var/lib/apt/lists/*
+# libjemalloc2: Replaces glibc malloc via LD_PRELOAD to prevent RSS growth from fragmentation
+
+# Create arch-independent symlink for jemalloc (actual path varies by arch)
+RUN ln -sf $(find /usr/lib -name 'libjemalloc.so.2' -print -quit) /usr/lib/libjemalloc.so.2
+
 # curl: Required by bin/nodejs startup script to fetch EC2 metadata when INJECT_EC2_CLIENT_RACK is set
 # gettext-base: Provides envsubst command used by bin/nodejs to substitute environment variables in Kafka client IDs
 
