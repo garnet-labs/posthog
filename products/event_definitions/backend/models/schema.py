@@ -136,6 +136,8 @@ class EventSchema(UUIDTModel):
 
 
 # Signal handlers to auto-increment EventDefinition.schema_version when the schema structure changes.
+# NOTE: These use @mutable_receiver, so callers using mute_selected_signals() will skip version bumps.
+# If bulk-deleting schemas, ensure schema_version is bumped manually afterward.
 
 
 @mutable_receiver([post_save, post_delete], sender=EventSchema)
@@ -145,8 +147,6 @@ def bump_version_on_event_schema_change(sender, instance: EventSchema, **kwargs)
 
 @mutable_receiver([post_save, post_delete], sender=SchemaPropertyGroupProperty)
 def bump_version_on_property_change(sender, instance: SchemaPropertyGroupProperty, **kwargs):
-    event_definition_ids = EventSchema.objects.filter(property_group_id=instance.property_group_id).values_list(
-        "event_definition_id", flat=True
-    )
-    if event_definition_ids:
-        EventDefinition.objects.filter(pk__in=event_definition_ids).update(schema_version=F("schema_version") + 1)
+    EventDefinition.objects.filter(
+        pk__in=EventSchema.objects.filter(property_group_id=instance.property_group_id).values("event_definition_id")
+    ).update(schema_version=F("schema_version") + 1)
