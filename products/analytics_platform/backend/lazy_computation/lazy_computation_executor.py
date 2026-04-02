@@ -20,6 +20,7 @@ from clickhouse_driver.errors import ServerException
 from posthog.hogql import ast
 from posthog.hogql.constants import HogQLQuerySettings
 from posthog.hogql.context import HogQLContext
+from posthog.hogql.modifiers import create_default_modifiers_for_team
 from posthog.hogql.parser import parse_select
 from posthog.hogql.printer import prepare_and_print_ast
 
@@ -1029,7 +1030,13 @@ def _build_manual_insert_sql(
     query.select.append(expires_at_expr)
 
     # Print to SQL
-    context = HogQLContext(team_id=team.id, team=team, enable_select_queries=True, limit_top_select=False)
+    context = HogQLContext(
+        team_id=team.id,
+        team=team,
+        enable_select_queries=True,
+        limit_top_select=False,
+        modifiers=create_default_modifiers_for_team(team),
+    )
     select_sql, _ = prepare_and_print_ast(
         query,
         context=context,
