@@ -44,12 +44,14 @@ import { userLogic } from 'scenes/userLogic'
 
 import { dataNodeLogic } from '~/queries/nodes/DataNode/dataNodeLogic'
 import { dataVisualizationLogic } from '~/queries/nodes/DataVisualization/dataVisualizationLogic'
-import { queryExportContext } from '~/queries/query'
+import { performQuery, queryExportContext } from '~/queries/query'
 import { Query } from '~/queries/Query/Query'
 import {
     DataVisualizationNode,
     DatabaseSchemaViewTable,
     FileSystemIconType,
+    HogLanguage,
+    HogQLMetadata,
     HogQLMetadataResponse,
     HogQLQuery,
     NodeKind,
@@ -1814,33 +1816,55 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             const queries = splitQueries(fullText)
             const cursorOffset = model.getOffsetAt(position)
 
+            // Helper to validate a subquery standalone and return the appropriate CSS class
+            const validateSubquery = async (subqueryText: string): Promise<string> => {
+                try {
+                    const response = await performQuery<HogQLMetadata>({
+                        kind: NodeKind.HogQLMetadata,
+                        language: HogLanguage.hogQL,
+                        query: subqueryText,
+                    })
+                    const hasErrors = (response?.errors?.length ?? 0) > 0
+                    return hasErrors ? 'active-subquery-highlight-invalid' : 'active-subquery-highlight'
+                } catch {
+                    return 'active-subquery-highlight-invalid'
+                }
+            }
+
+            // Helper to find subquery and build its decoration
+            const buildSubqueryDecoration = async (
+                activeQuery: QueryRange,
+                offset: number
+            ): Promise<editor.IModelDeltaDecoration | null> => {
+                const subquery = await findInnermostSelectAtOffset(activeQuery.query, offset, activeQuery.start)
+                if (!subquery) {
+                    return null
+                }
+                const subStart = model.getPositionAt(subquery.start)
+                const subEnd = model.getPositionAt(subquery.end)
+                const className = await validateSubquery(subquery.query)
+                return {
+                    range: {
+                        startLineNumber: subStart.lineNumber,
+                        startColumn: subStart.column,
+                        endLineNumber: subEnd.lineNumber,
+                        endColumn: subEnd.column,
+                    },
+                    options: { className },
+                }
+            }
+
             // Single query — check for subqueries only
             if (queries.length <= 1) {
                 const singleQuery = queries.length === 1 ? queries[0] : null
                 actions.setActiveQueryText(singleQuery?.query ?? null, 0)
 
                 if (singleQuery) {
-                    const subquery = await findInnermostSelectAtOffset(
-                        singleQuery.query,
-                        cursorOffset,
-                        singleQuery.start
-                    )
-                    if (subquery) {
-                        const subStart = model.getPositionAt(subquery.start)
-                        const subEnd = model.getPositionAt(subquery.end)
+                    const subDeco = await buildSubqueryDecoration(singleQuery, cursorOffset)
+                    if (subDeco) {
                         cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
                             cache.activeQueryDecorationIds ?? [],
-                            [
-                                {
-                                    range: {
-                                        startLineNumber: subStart.lineNumber,
-                                        startColumn: subStart.column,
-                                        endLineNumber: subEnd.lineNumber,
-                                        endColumn: subEnd.column,
-                                    },
-                                    options: { className: 'active-subquery-highlight' },
-                                },
-                            ]
+                            [subDeco]
                         )
                         return
                     }
@@ -1881,20 +1905,9 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 },
             ]
 
-            // Check for subquery within the active query
-            const subquery = await findInnermostSelectAtOffset(match.query, cursorOffset, match.start)
-            if (subquery) {
-                const subStart = model.getPositionAt(subquery.start)
-                const subEnd = model.getPositionAt(subquery.end)
-                decorations.push({
-                    range: {
-                        startLineNumber: subStart.lineNumber,
-                        startColumn: subStart.column,
-                        endLineNumber: subEnd.lineNumber,
-                        endColumn: subEnd.column,
-                    },
-                    options: { className: 'active-subquery-highlight' },
-                })
+            const subDeco = await buildSubqueryDecoration(match, cursorOffset)
+            if (subDeco) {
+                decorations.push(subDeco)
             }
 
             cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
