@@ -363,7 +363,6 @@ class Command(BaseCommand):
         print(f"Generated: {output_path} ({table_count} table(s))")
         print(f"Edit the YAML, then run: ch_migrate plan")
 
-
     def handle_drift(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
 
@@ -396,7 +395,6 @@ class Command(BaseCommand):
 
         sys.exit(1)
 
-
     def handle_schema(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
         cluster = get_cluster_by_name("main")
@@ -420,7 +418,6 @@ class Command(BaseCommand):
                 default_str = f" DEFAULT {col.default_expression}" if col.default_expression else ""
                 print(f"    - {col.name}: {col.type}{default_str}")
             print()
-
 
     def handle_status(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -463,7 +460,6 @@ class Command(BaseCommand):
             status = "OK" if success else "FAILED"
             print(f"  {number:04d} {name:40s} {direction:4s} {host:20s} {applied_at} {status}")
 
-
     def handle_bootstrap(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
         cluster = get_cluster_by_name("main")
@@ -473,7 +469,6 @@ class Command(BaseCommand):
 
         _ensure_tracking_table(client, database)
         print(f"Tracking table ensured in database '{database}'.")
-
 
     def handle_check(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.runner import get_pending_migrations
@@ -486,7 +481,6 @@ class Command(BaseCommand):
         print(f"{len(pending)} pending legacy migration(s):\n")
         for m in pending:
             print(f"  {m}")
-
 
     def handle_lint(self, options: dict[str, Any]) -> None:
         from pathlib import Path
@@ -513,7 +507,6 @@ class Command(BaseCommand):
         for err in errors:
             print(f"  - {err}")
         sys.exit(1)
-
 
     def handle_orphans(self, options: dict[str, Any]) -> None:
         from pathlib import Path
@@ -551,7 +544,6 @@ class Command(BaseCommand):
             print(f"  {name} (engine={engine})")
         print("\nThese tables may be leftover from old migrations or manual creation.")
 
-
     def handle_version(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
 
@@ -571,7 +563,6 @@ class Command(BaseCommand):
         print(f"  Commit:     {commit_hash}")
         print(f"  Applied by: {host}")
         print(f"  Applied at: {applied_at}")
-
 
     def handle_down(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.runner import run_migration_down
