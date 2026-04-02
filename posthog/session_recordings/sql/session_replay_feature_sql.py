@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from posthog.clickhouse.cluster import ON_CLUSTER_CLAUSE
 from posthog.clickhouse.kafka_engine import CONSUMER_GROUP_SESSION_REPLAY_FEATURES, kafka_engine
 from posthog.clickhouse.table_engines import AggregatingMergeTree, Distributed, ReplicationScheme
@@ -137,9 +139,10 @@ def KAFKA_SESSION_REPLAY_FEATURES_TABLE_SQL(on_cluster=True):
 
 
 def SESSION_REPLAY_FEATURES_TABLE_MV_SQL(on_cluster=True):
+    database = settings.CLICKHOUSE_DATABASE
     return f"""
 CREATE MATERIALIZED VIEW IF NOT EXISTS session_replay_features_mv {ON_CLUSTER_CLAUSE(on_cluster)}
-TO writable_session_replay_features
+TO {database}.writable_session_replay_features
 AS SELECT
 session_id,
 team_id,
@@ -183,7 +186,7 @@ sum(network_request_duration_count) as network_request_duration_count,
 max(max_scroll_y) as max_scroll_y,
 sum(unique_click_target_count) as unique_click_target_count,
 sum(text_selection_count) as text_selection_count
-FROM kafka_session_replay_features
+FROM {database}.kafka_session_replay_features
 GROUP BY session_id, team_id
 """
 
@@ -208,3 +211,19 @@ def DISTRIBUTED_SESSION_REPLAY_FEATURES_TABLE_SQL(on_cluster=False):
             sharding_key="sipHash64(distinct_id)",
         ),
     )
+
+
+def DROP_SESSION_REPLAY_FEATURES_TABLE_SQL():
+    return f"DROP TABLE IF EXISTS {SESSION_REPLAY_FEATURES_DATA_TABLE()}"
+
+
+def DROP_KAFKA_SESSION_REPLAY_FEATURES_TABLE_SQL():
+    return "DROP TABLE IF EXISTS kafka_session_replay_features"
+
+
+def DROP_SESSION_REPLAY_FEATURES_TABLE_MV_SQL():
+    return "DROP TABLE IF EXISTS session_replay_features_mv"
+
+
+def TRUNCATE_SESSION_REPLAY_FEATURES_TABLE_SQL():
+    return f"TRUNCATE TABLE IF EXISTS {SESSION_REPLAY_FEATURES_DATA_TABLE()}"
