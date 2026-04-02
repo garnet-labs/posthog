@@ -1100,7 +1100,7 @@ const createTopLevelFolderNode = (
 
 const flattenViewNodes = (nodes: TreeDataItem[], flattenedViews: TreeDataItem[]): void => {
     nodes.forEach((node) => {
-        if (node.record?.type === 'view-table') {
+        if (node.record?.type === 'view-table' || node.record?.type === 'endpoint') {
             flattenedViews.push(node)
             return
         }
