@@ -13,6 +13,7 @@ use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::api::{Api, ListParams, Patch, PatchParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::Client;
+use serial_test::serial;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ImageExt;
 use testcontainers_modules::k3s::{K3s, KUBE_SECURE_PORT};
@@ -40,7 +41,7 @@ use common::{
 
 const NAMESPACE: &str = "default";
 const NUM_PARTITIONS: u32 = 8;
-const E2E_TIMEOUT: Duration = Duration::from_secs(30);
+const E2E_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ── K3s helpers ──────────────────────────────────────────
 
@@ -280,20 +281,24 @@ async fn wait_for_departure_reason(
 
 async fn trigger_deployment_rollout(client: &Client, name: &str) {
     let deployments: Api<Deployment> = Api::namespaced(client.clone(), NAMESPACE);
+    // Trigger a rollout by adding an env var instead of changing the image.
+    // Changing the image forces k3s to pull a new image inside the container,
+    // which can make the k3s API server unreachable due to resource pressure.
+    // Use Strategic merge so the containers array is merged by name, not replaced.
     let patch = serde_json::json!({
         "spec": {
             "template": {
                 "spec": {
                     "containers": [{
                         "name": "pause",
-                        "image": "registry.k8s.io/pause:3.10"
+                        "env": [{"name": "ROLLOUT_TRIGGER", "value": "1"}]
                     }]
                 }
             }
         }
     });
     deployments
-        .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+        .patch(name, &PatchParams::default(), &Patch::Strategic(&patch))
         .await
         .expect("failed to patch deployment");
 }
@@ -306,14 +311,14 @@ async fn trigger_statefulset_rollout(client: &Client, name: &str) {
                 "spec": {
                     "containers": [{
                         "name": "pause",
-                        "image": "registry.k8s.io/pause:3.10"
+                        "env": [{"name": "ROLLOUT_TRIGGER", "value": "1"}]
                     }]
                 }
             }
         }
     });
     statefulsets
-        .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+        .patch(name, &PatchParams::default(), &Patch::Strategic(&patch))
         .await
         .expect("failed to patch statefulset");
 }
@@ -419,6 +424,11 @@ fn start_assigner_k8s(
 }
 
 // ── Tests ────────────────────────────────────────────────
+//
+// Tests run sequentially via `#[serial]` — each spins up its own k3s
+// container which is dropped (and cleaned up by Docker) when the test ends.
+// This avoids running multiple k3s clusters in parallel which exhausts
+// Docker memory.
 
 /// Full Deployment rollout lifecycle with K8s-aware assigner + gRPC.
 ///
@@ -434,6 +444,7 @@ fn start_assigner_k8s(
 /// 4. Assigner excludes old-gen, creates handoffs to new-gen
 /// 5. Drive handoffs to completion → all partitions on new-gen
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn deployment_rollout_reassigns_partitions() {
     let (_container, k8s_client, _tmp) = setup_k3s().await;
 
@@ -603,6 +614,7 @@ async fn deployment_rollout_reassigns_partitions() {
 /// 2. Trigger rollout in k3s → K8sAwareness detects rollout
 /// 3. Consumer calls Deregister → action = ShutdownNow
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn statefulset_rollout_deregister_returns_shutdown_now() {
     let (_container, k8s_client, _tmp) = setup_k3s().await;
 
@@ -689,6 +701,7 @@ async fn statefulset_rollout_deregister_returns_shutdown_now() {
 /// 2. Scale down in k3s → K8sAwareness detects Downscale
 /// 3. Consumer calls Deregister → action = WaitForDrain
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn scale_down_deregister_returns_wait_for_drain() {
     let (_container, k8s_client, _tmp) = setup_k3s().await;
 

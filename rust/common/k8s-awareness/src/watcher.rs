@@ -234,60 +234,50 @@ async fn handle_deployment_event(
         })
         .unwrap_or_default();
 
-    // Snapshot previously cached generation info before the async RS list
-    // call, so we can preserve it if the API call fails (avoids overwriting
-    // correct cached state with empty values during transient errors).
-    let prev_generations = {
-        let map = controllers.read().await;
-        map.get(controller)
-            .map(|p| (p.current_generation.clone(), p.target_generation.clone()))
-    };
-
-    // Determine generations by inspecting owned ReplicaSets
+    // Determine generations by inspecting owned ReplicaSets.
+    // If this fails, skip the entire intent update to avoid mixing fresh
+    // deployment fields (like rollout_in_progress) with stale generation data,
+    // which would create an inconsistent ClusterIntent.
     let owned_rses =
         list_owned_replicasets(client, namespace, &controller.name, &label_selector).await;
-    let (current_gen, target_gen) = match owned_rses {
-        Ok(rses) => {
-            if rollout_in_progress {
-                let target = rses
-                    .first()
-                    .map(|(_, hash, _)| hash.clone())
-                    .unwrap_or_default();
-                let current = rses
-                    .iter()
-                    .skip(1)
-                    .find(|(_, _, replicas)| *replicas > 0)
-                    .map(|(_, hash, _)| hash.clone())
-                    .unwrap_or_default();
-                (current, Some(target))
-            } else {
-                let gen = rses
-                    .first()
-                    .map(|(_, hash, _)| hash.clone())
-                    .unwrap_or_default();
-                (gen, None)
-            }
-        }
+    let rses = match owned_rses {
+        Ok(rses) => rses,
         Err(e) => {
             if rollout_in_progress {
                 warn!(
                     controller = %controller,
                     error = %e,
-                    "failed to discover deployment generations during rollout, preserving cached state"
+                    "failed to list ReplicaSets during rollout, skipping intent update"
                 );
             } else {
                 debug!(
                     controller = %controller,
                     error = %e,
-                    "failed to discover active generation, preserving cached state"
+                    "failed to list ReplicaSets, skipping intent update"
                 );
             }
-            // Preserve previously cached generation info instead of empty strings
-            match prev_generations {
-                Some((current, target)) => (current, target),
-                None => (String::new(), None),
-            }
+            return;
         }
+    };
+
+    let (current_gen, target_gen) = if rollout_in_progress {
+        let target = rses
+            .first()
+            .map(|(_, hash, _)| hash.clone())
+            .unwrap_or_default();
+        let current = rses
+            .iter()
+            .skip(1)
+            .find(|(_, _, replicas)| *replicas > 0)
+            .map(|(_, hash, _)| hash.clone())
+            .unwrap_or_default();
+        (current, Some(target))
+    } else {
+        let gen = rses
+            .first()
+            .map(|(_, hash, _)| hash.clone())
+            .unwrap_or_default();
+        (gen, None)
     };
 
     let mut map = controllers.write().await;
