@@ -73,48 +73,111 @@ def _record_step(
 
 
 def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool = False) -> tuple[bool, str]:
-    """Best-effort advisory lock via MergeTree INSERT. Returns (acquired, message).
+    """Atomic advisory lock via INSERT...SELECT WHERE NOT EXISTS. Returns (acquired, message).
 
-    Auto-creates the tracking table if it doesn't exist.
+    Auto-creates the tracking table if it doesn't exist. Uses a single atomic
+    query to check for existing locks and insert a new one, eliminating the
+    race window of the old SELECT-then-INSERT pattern.
     """
     _ensure_tracking_table(client, database)
+    table_ref = f"{database}.{TRACKING_TABLE_NAME}"
 
-    if not force:
-        check_sql = f"""
-            SELECT host, applied_at
-            FROM {database}.{TRACKING_TABLE_NAME}
+    if force:
+        _record_step(
+            client=client,
+            record=StepRecord(
+                migration_number=LOCK_MIGRATION_NUMBER,
+                migration_name="__lock__",
+                step_index=LOCK_STEP_INDEX,
+                host=hostname,
+                node_role="*",
+                direction="up",
+                checksum="lock",
+                success=True,
+            ),
+            database=database,
+        )
+        return (True, "")
+
+    # Atomic: INSERT only if no active lock from another host
+    atomic_sql = f"""
+        INSERT INTO {table_ref}
+        (migration_number, migration_name, step_index, host, node_role, direction, checksum, applied_at, success)
+        SELECT
+            {LOCK_MIGRATION_NUMBER}, '__lock__', {LOCK_STEP_INDEX},
+            %(hostname)s, '*', 'up', 'lock', now64(), 1
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {table_ref}
             WHERE migration_number = {LOCK_MIGRATION_NUMBER}
               AND step_index = {LOCK_STEP_INDEX}
               AND success = 1
               AND applied_at > now() - INTERVAL {LOCK_TIMEOUT_MINUTES} MINUTE
-            ORDER BY applied_at DESC
-            LIMIT 1
-        """
-        rows = client.execute(check_sql)
-        if rows:
-            lock_host = rows[0][0]
-            lock_time = rows[0][1]
-            if lock_host != hostname:
-                return (
-                    False,
-                    f"Another ch_migrate apply is running on {lock_host} "
-                    f"(started {lock_time}). Use --force to override.",
-                )
+              AND host != %(hostname)s
+        )
+    """
+    client.execute(atomic_sql, {"hostname": hostname})
 
+    # Verify we got the lock by checking if our row is the latest
+    verify_sql = f"""
+        SELECT host, applied_at
+        FROM {table_ref}
+        WHERE migration_number = {LOCK_MIGRATION_NUMBER}
+          AND step_index = {LOCK_STEP_INDEX}
+          AND success = 1
+          AND applied_at > now() - INTERVAL {LOCK_TIMEOUT_MINUTES} MINUTE
+        ORDER BY applied_at DESC
+        LIMIT 1
+    """
+    rows = client.execute(verify_sql)
+    if rows and rows[0][0] != hostname:
+        lock_host = rows[0][0]
+        lock_time = rows[0][1]
+        return (
+            False,
+            f"Another ch_migrate apply is running on {lock_host} (started {lock_time}). Use --force to override.",
+        )
+
+    return (True, "")
+
+
+# Schema version sentinel: records which git commit was last applied.
+VERSION_STEP_INDEX = -2
+
+
+def record_schema_version(client: Any, database: str, commit_hash: str, hostname: str) -> None:
+    """Record the git commit hash of the schema YAML that was just applied."""
     _record_step(
         client=client,
         record=StepRecord(
             migration_number=LOCK_MIGRATION_NUMBER,
-            migration_name="__lock__",
-            step_index=LOCK_STEP_INDEX,
+            migration_name=commit_hash,
+            step_index=VERSION_STEP_INDEX,
             host=hostname,
             node_role="*",
             direction="up",
-            checksum="lock",
+            checksum="version",
             success=True,
         ),
+        database=database,
     )
-    return (True, "")
+
+
+def get_latest_schema_version(client: Any, database: str) -> tuple[str, str, str] | None:
+    """Return (commit_hash, host, applied_at) of the last applied schema version, or None."""
+    table_ref = f"{database}.{TRACKING_TABLE_NAME}"
+    sql = f"""
+        SELECT migration_name, host, applied_at
+        FROM {table_ref}
+        WHERE migration_number = {LOCK_MIGRATION_NUMBER}
+          AND step_index = {VERSION_STEP_INDEX}
+          AND success = 1
+        ORDER BY applied_at DESC
+        LIMIT 1
+    """
+    rows = client.execute(sql)
+    if rows:
+        return (rows[0][0], rows[0][1], str(rows[0][2]))
+    return None
 
 
 def release_apply_lock(client: Any, database: str, hostname: str) -> None:

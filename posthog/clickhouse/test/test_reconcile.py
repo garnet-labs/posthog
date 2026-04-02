@@ -558,5 +558,106 @@ class TestReconcileImportYamlRoundTrip(unittest.TestCase):
             )
 
 
+class TestMvSelectChange(unittest.TestCase):
+    def test_mv_select_change_detected(self) -> None:
+        """When an MV's SELECT changes, state_diff should generate DROP + CREATE."""
+        desired = _make_desired_state(
+            {
+                "my_mv": DesiredTable(
+                    name="my_mv",
+                    engine="MaterializedView",
+                    columns=[],
+                    on_nodes=["ALL"],
+                    target="writable_t",
+                    select="SELECT id, new_col FROM posthog.kafka_t",
+                ),
+            }
+        )
+        current = {
+            "my_mv": TableSchema(
+                name="my_mv",
+                engine="MaterializedView",
+                as_select="SELECT * FROM posthog.kafka_t",
+            ),
+        }
+        diffs = diff_state(desired, current)
+
+        drop_diffs = [d for d in diffs if d.action == "drop"]
+        create_diffs = [d for d in diffs if d.action == "create"]
+
+        self.assertEqual(len(drop_diffs), 1, "Should generate a DROP for the old MV")
+        self.assertEqual(drop_diffs[0].table, "my_mv")
+        self.assertEqual(len(create_diffs), 1, "Should generate a CREATE for the new MV")
+        self.assertEqual(create_diffs[0].table, "my_mv")
+        self.assertIn("CREATE MATERIALIZED VIEW", create_diffs[0].sql)
+
+    def test_mv_select_unchanged_no_diff(self) -> None:
+        """When an MV's SELECT matches, no diff should be generated."""
+        select_stmt = "SELECT * FROM posthog.kafka_t"
+        desired = _make_desired_state(
+            {
+                "my_mv": DesiredTable(
+                    name="my_mv",
+                    engine="MaterializedView",
+                    columns=[],
+                    on_nodes=["ALL"],
+                    target="writable_t",
+                    select=select_stmt,
+                ),
+            }
+        )
+        current = {
+            "my_mv": TableSchema(
+                name="my_mv",
+                engine="MaterializedView",
+                as_select=select_stmt,
+            ),
+        }
+        diffs = diff_state(desired, current)
+        self.assertEqual(len(diffs), 0, "No diffs when MV SELECT is unchanged")
+
+
+class TestDetectOrphans(unittest.TestCase):
+    def test_finds_undeclared_tables(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import detect_orphans
+
+        desired_states = [
+            _make_desired_state({"t1": _make_desired_table("t1", columns=[ColumnDef(name="id", type="UUID")])}),
+        ]
+        current = {
+            "t1": _make_table_schema("t1"),
+            "orphan_table": _make_table_schema("orphan_table"),
+        }
+        orphans = detect_orphans(desired_states, current)
+        self.assertEqual(orphans, ["orphan_table"])
+
+    def test_excludes_system_tables(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import detect_orphans
+
+        desired_states = [
+            _make_desired_state({"t1": _make_desired_table("t1", columns=[ColumnDef(name="id", type="UUID")])}),
+        ]
+        current = {
+            "t1": _make_table_schema("t1"),
+            "clickhouse_schema_migrations": _make_table_schema("clickhouse_schema_migrations"),
+            "_tmp_backup": _make_table_schema("_tmp_backup"),
+        }
+        orphans = detect_orphans(desired_states, current)
+        self.assertEqual(orphans, [])
+
+    def test_excludes_custom_patterns(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import detect_orphans
+
+        desired_states = [
+            _make_desired_state({"t1": _make_desired_table("t1", columns=[ColumnDef(name="id", type="UUID")])}),
+        ]
+        current = {
+            "t1": _make_table_schema("t1"),
+            "legacy_table": _make_table_schema("legacy_table"),
+        }
+        orphans = detect_orphans(desired_states, current, exclude_patterns=["legacy_table"])
+        self.assertEqual(orphans, [])
+
+
 if __name__ == "__main__":
     unittest.main()

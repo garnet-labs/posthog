@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from posthog.clickhouse.migration_tools.desired_state import DesiredState
-from posthog.clickhouse.migration_tools.schema_graph import lookup_ecosystem
+from posthog.clickhouse.migration_tools.schema_graph import TableEcosystem, lookup_ecosystem
 
 # Expected node roles by engine type
 _EXPECTED_ROLES: dict[str, set[str]] = {
@@ -13,23 +13,110 @@ _EXPECTED_ROLES: dict[str, set[str]] = {
 }
 
 
+def _is_mergetree_engine(engine: str) -> bool:
+    return "mergetree" in engine.lower()
+
+
+def _is_distributed_engine(engine: str) -> bool:
+    return engine.lower() == "distributed"
+
+
+def _is_kafka_engine(engine: str) -> bool:
+    return engine.lower() == "kafka"
+
+
+def _is_mv_engine(engine: str) -> bool:
+    return engine.lower() == "materializedview"
+
+
+def build_ecosystems_from_yaml(desired_states: list[DesiredState]) -> list[TableEcosystem]:
+    """Build ecosystem objects from desired-state YAML definitions.
+
+    Scans all DesiredState objects and identifies ecosystems by finding
+    Distributed tables that reference MergeTree source tables.
+    """
+    ecosystems: list[TableEcosystem] = []
+
+    for state in desired_states:
+        tables = state.tables
+
+        local_tables = {n: t for n, t in tables.items() if _is_mergetree_engine(t.engine)}
+        distributed = {n: t for n, t in tables.items() if _is_distributed_engine(t.engine)}
+        kafka = {n: t for n, t in tables.items() if _is_kafka_engine(t.engine)}
+        mvs = {n: t for n, t in tables.items() if _is_mv_engine(t.engine)}
+
+        for local_name in local_tables:
+            writable = next(
+                (n for n, t in distributed.items() if t.source == local_name and "writable" in n),
+                None,
+            )
+            readable = next(
+                (n for n, t in distributed.items() if t.source == local_name and "writable" not in n),
+                None,
+            )
+
+            base_name = local_name.replace("sharded_", "")
+
+            kafka_tbl = next(
+                (n for n in kafka if base_name in n),
+                None,
+            )
+            mv_tbl = next(
+                (n for n in mvs if base_name in n),
+                None,
+            )
+
+            if writable or readable:
+                ecosystems.append(
+                    TableEcosystem(
+                        base_name=base_name,
+                        sharded_table=local_name,
+                        distributed_writable=writable,
+                        distributed_readable=readable,
+                        kafka_table=kafka_tbl,
+                        materialized_view=mv_tbl,
+                    )
+                )
+
+    return ecosystems
+
+
 def validate_desired_states(desired_states: list[DesiredState]) -> list[str]:
     """Validate a list of desired states. Returns a list of error strings (empty = valid)."""
     errors: list[str] = []
 
+    # Build dynamic ecosystems from YAML for completeness checking
+    dynamic_ecosystems = build_ecosystems_from_yaml(desired_states)
+    dynamic_lookup: dict[str, TableEcosystem] = {}
+    for eco in dynamic_ecosystems:
+        for tbl in eco.all_tables():
+            dynamic_lookup[tbl] = eco
+
     for state in desired_states:
-        errors.extend(_check_ecosystem_completeness(state))
+        errors.extend(_check_ecosystem_completeness(state, dynamic_lookup))
         errors.extend(_check_cross_cluster_targeting(state))
 
     return errors
 
 
-def _check_ecosystem_completeness(state: DesiredState) -> list[str]:
-    """Warn if a known ecosystem is partially declared (e.g. sharded without distributed)."""
+def _check_ecosystem_completeness(
+    state: DesiredState,
+    dynamic_lookup: dict[str, TableEcosystem] | None = None,
+) -> list[str]:
+    """Warn if an ecosystem is partially declared (e.g. sharded without distributed).
+
+    Uses dynamic ecosystems built from YAML when available, falls back to
+    the hardcoded registry in schema_graph.py.
+    """
     errors: list[str] = []
 
     for table_name in state.tables:
-        eco = lookup_ecosystem(table_name)
+        # Try dynamic lookup first, then hardcoded
+        eco = None
+        if dynamic_lookup:
+            eco = dynamic_lookup.get(table_name)
+        if eco is None:
+            eco = lookup_ecosystem(table_name)
         if eco is None:
             continue
 

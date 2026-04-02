@@ -36,7 +36,7 @@ def _any_client(cluster: Any) -> Any:
 
 
 class Command(BaseCommand):
-    help = "ClickHouse schema management -- plan, apply, generate, drift, schema, status, bootstrap, check, lint, down"
+    help = "ClickHouse schema management -- plan, apply, generate, drift, schema, status, bootstrap, check, lint, down, orphans, version"
 
     def add_arguments(self, parser: Any) -> None:
         subparsers = parser.add_subparsers(dest="subcommand")
@@ -98,6 +98,25 @@ class Command(BaseCommand):
             help="Directory with desired-state YAML files",
         )
 
+        # orphans
+        orphans_parser = subparsers.add_parser("orphans", help="List production tables not declared in any YAML")
+        orphans_parser.add_argument(
+            "--schema-dir",
+            type=str,
+            default=DEFAULT_SCHEMA_DIR,
+            help="Directory with desired-state YAML files",
+        )
+        orphans_parser.add_argument(
+            "--exclude",
+            type=str,
+            nargs="*",
+            default=[],
+            help="Additional table names to exclude",
+        )
+
+        # version
+        subparsers.add_parser("version", help="Show the last applied schema version (git commit)")
+
         # down (legacy)
         down_parser = subparsers.add_parser("down", help="Roll back a legacy migration by number")
         down_parser.add_argument("migration_number", type=int, help="Migration number to roll back")
@@ -114,6 +133,8 @@ class Command(BaseCommand):
             "bootstrap": self.handle_bootstrap,
             "check": self.handle_check,
             "lint": self.handle_lint,
+            "orphans": self.handle_orphans,
+            "version": self.handle_version,
             "down": self.handle_down,
         }
         handler = handlers.get(subcommand or "")
@@ -171,6 +192,7 @@ class Command(BaseCommand):
         import time
         import socket
         import hashlib
+        import subprocess
         from pathlib import Path
 
         from posthog.clickhouse.client.migration_tools import get_migrations_cluster
@@ -180,6 +202,7 @@ class Command(BaseCommand):
             StepRecord,
             _record_step,
             acquire_apply_lock,
+            record_schema_version,
             release_apply_lock,
         )
 
@@ -275,6 +298,20 @@ class Command(BaseCommand):
                     )
         finally:
             release_apply_lock(client, database, hostname)
+
+        # Record the git commit hash of the schema that was applied
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                record_schema_version(client, database, result.stdout.strip(), hostname)
+                print(f"Schema version recorded: {result.stdout.strip()[:12]}")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass  # git not available — skip version recording
 
         print("\nApply completed successfully.")
 
@@ -474,6 +511,70 @@ class Command(BaseCommand):
         for err in errors:
             print(f"  - {err}")
         sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # orphans -- find undeclared tables
+    # ------------------------------------------------------------------
+
+    def handle_orphans(self, options: dict[str, Any]) -> None:
+        from pathlib import Path
+
+        from posthog.clickhouse.migration_tools.desired_state import parse_desired_state_dir
+        from posthog.clickhouse.migration_tools.schema_introspect import dump_schema
+        from posthog.clickhouse.migration_tools.state_diff import detect_orphans
+
+        database: str = settings.CLICKHOUSE_DATABASE
+        cluster = get_cluster()
+        schema_dir = Path(options.get("schema_dir", DEFAULT_SCHEMA_DIR))
+
+        if not schema_dir.exists():
+            print(f"Schema directory not found: {schema_dir}")
+            return
+
+        desired_states = parse_desired_state_dir(schema_dir)
+        if not desired_states:
+            print(f"No YAML files found in {schema_dir}")
+            return
+
+        client = _any_client(cluster)
+        current = dump_schema(client, database)
+        exclude = options.get("exclude") or []
+
+        orphans = detect_orphans(desired_states, current, exclude)
+
+        if not orphans:
+            print("No orphan tables found. All production tables are declared in YAML.")
+            return
+
+        print(f"Orphan tables ({len(orphans)}) — in production but not declared in any YAML:\n")
+        for name in orphans:
+            engine = current[name].engine if name in current else "?"
+            print(f"  {name} (engine={engine})")
+        print("\nThese tables may be leftover from old migrations or manual creation.")
+
+    # ------------------------------------------------------------------
+    # version -- show last applied schema version
+    # ------------------------------------------------------------------
+
+    def handle_version(self, options: dict[str, Any]) -> None:
+        from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
+
+        database: str = settings.CLICKHOUSE_DATABASE
+        cluster = get_cluster()
+        client = _any_client(cluster)
+
+        _ensure_tracking_table(client, database)
+        version = get_latest_schema_version(client, database)
+
+        if version is None:
+            print("No schema version recorded. Run 'ch_migrate apply' to record one.")
+            return
+
+        commit_hash, host, applied_at = version
+        print(f"Last applied schema version:")
+        print(f"  Commit:     {commit_hash}")
+        print(f"  Applied by: {host}")
+        print(f"  Applied at: {applied_at}")
 
     # ------------------------------------------------------------------
     # down -- legacy rollback

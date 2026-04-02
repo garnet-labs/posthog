@@ -391,3 +391,34 @@ def diff_state(
     creates.sort(key=_create_sort_key)
 
     return drops + alters + creates + recreates
+
+
+def detect_orphans(
+    desired_states: list[DesiredState],
+    current: dict[str, TableSchema],
+    exclude_patterns: list[str] | None = None,
+) -> list[str]:
+    """Find tables in current schema that are not declared in any YAML.
+
+    Returns a sorted list of orphan table names. This is read-only — it
+    only reports, it does not drop anything.
+    """
+    declared: set[str] = set()
+    for ds in desired_states:
+        declared.update(ds.tables.keys())
+
+    default_exclude = {"infi_clickhouse_orm_migrations", "clickhouse_schema_migrations"}
+    exclude = default_exclude | set(exclude_patterns or [])
+
+    orphans = []
+    for name in current:
+        if name in declared or name in exclude:
+            continue
+        engine = current[name].engine.lower()
+        if engine in ("view", "join"):
+            continue
+        if name.startswith("_tmp") or name.startswith("pending_deletes"):
+            continue
+        orphans.append(name)
+
+    return sorted(orphans)

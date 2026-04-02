@@ -22,10 +22,11 @@ class TestAdvisoryLock(unittest.TestCase):
         """An active lock from another host prevents acquisition."""
         client = MagicMock()
         now = datetime.now(tz=UTC)
-        # Simulate: ensure table (CREATE IF NOT EXISTS), then check for existing lock
+        # Atomic pattern: ensure table, INSERT...SELECT WHERE NOT EXISTS, verify SELECT
         client.execute.side_effect = [
             None,  # CREATE TABLE IF NOT EXISTS (ensure tracking table)
-            [("other-pod", now)],  # Check for existing lock — returns a row
+            None,  # INSERT...SELECT WHERE NOT EXISTS (atomic — no rows inserted due to existing lock)
+            [("other-pod", now)],  # Verify SELECT — another host holds the lock
         ]
 
         acquired, reason = acquire_apply_lock(client, "default", "my-pod")
@@ -37,17 +38,18 @@ class TestAdvisoryLock(unittest.TestCase):
     def test_advisory_lock_expired_allows_apply(self) -> None:
         """No active lock (expired or absent) allows acquisition."""
         client = MagicMock()
+        now = datetime.now(tz=UTC)
         client.execute.side_effect = [
             None,  # CREATE TABLE IF NOT EXISTS (ensure tracking table)
-            [],  # No active lock
-            None,  # INSERT lock row
+            None,  # INSERT...SELECT WHERE NOT EXISTS (atomic — row inserted)
+            [("my-pod", now)],  # Verify SELECT — our lock is latest
         ]
 
         acquired, reason = acquire_apply_lock(client, "default", "my-pod")
 
         self.assertTrue(acquired)
         self.assertEqual(reason, "")
-        # Should have called execute three times: CREATE IF NOT EXISTS + SELECT check + INSERT lock
+        # Three calls: CREATE IF NOT EXISTS + INSERT...SELECT + verify SELECT
         self.assertEqual(client.execute.call_count, 3)
 
     def test_advisory_lock_same_host_allows_reacquire(self) -> None:
@@ -56,8 +58,8 @@ class TestAdvisoryLock(unittest.TestCase):
         now = datetime.now(tz=UTC)
         client.execute.side_effect = [
             None,  # CREATE TABLE IF NOT EXISTS (ensure tracking table)
-            [("my-pod", now)],  # Existing lock from same host
-            None,  # INSERT lock row
+            None,  # INSERT...SELECT WHERE NOT EXISTS (atomic)
+            [("my-pod", now)],  # Verify SELECT — our own host holds the lock
         ]
 
         acquired, reason = acquire_apply_lock(client, "default", "my-pod")
@@ -70,14 +72,14 @@ class TestAdvisoryLock(unittest.TestCase):
         client = MagicMock()
         client.execute.side_effect = [
             None,  # CREATE TABLE IF NOT EXISTS (ensure tracking table)
-            None,  # INSERT lock row (no SELECT check with force=True)
+            None,  # INSERT lock row directly (no atomic check with force=True)
         ]
 
         acquired, reason = acquire_apply_lock(client, "default", "my-pod", force=True)
 
         self.assertTrue(acquired)
         self.assertEqual(reason, "")
-        # Two calls: CREATE IF NOT EXISTS + INSERT. No SELECT check.
+        # Two calls: CREATE IF NOT EXISTS + INSERT (via _record_step). No verify needed.
         self.assertEqual(client.execute.call_count, 2)
 
     def test_release_apply_lock_inserts_shadow_row(self) -> None:
