@@ -1,4 +1,4 @@
-import type { Region } from '@/lib/constants'
+import { type Region, baseUrlForRegion } from '@/lib/constants'
 import { getCallbackRedirectUri, getClientMapping, getRegionSelection } from '@/lib/kv'
 import { proxyPostWithClientId, tryBothRegions } from '@/lib/proxy'
 
@@ -69,7 +69,7 @@ export async function handleToken(request: Request, kv: KVNamespace): Promise<Re
                     status: response.status,
                 })
             )
-            return response
+            return enrichWithRegion(response, region)
         }
     }
 
@@ -114,7 +114,28 @@ export async function handleToken(request: Request, kv: KVNamespace): Promise<Re
             status: response.status,
         })
     )
-    return response
+    return enrichWithRegion(response, region)
+}
+
+/**
+ * Enrich a successful token response with the resolved region so the client
+ * knows which PostHog host to talk to for API calls.
+ */
+async function enrichWithRegion(response: Response, region: Region): Promise<Response> {
+    if (!response.ok) {
+        return response
+    }
+    const json = await response.json<Record<string, unknown>>()
+    json.posthog_region = region
+    json.posthog_base_url = baseUrlForRegion(region)
+
+    const headers = new Headers(response.headers)
+    // Body was rewritten so content-length is stale
+    headers.delete('content-length')
+    return new Response(JSON.stringify(json), {
+        status: response.status,
+        headers,
+    })
 }
 
 async function proxyWithMapping(
