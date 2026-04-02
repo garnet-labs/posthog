@@ -47,6 +47,8 @@ WORKTREE_CMD = REPO_ROOT / "bin" / "posthog-worktree"
 REGISTRY_DIR = Path.home() / ".posthog-sandboxes"
 REGISTRY_FILE = REGISTRY_DIR / "registry.json"
 CONFIG_FILE = REGISTRY_DIR / "config.json"
+CLOUD_CONFIG_FILE = REGISTRY_DIR / "cloud-config.json"
+CLOUD_INIT_TEMPLATE = REPO_ROOT / "infra" / "cloud-sandbox" / "cloud-init.sh"
 
 PORT_BASE = 48001
 
@@ -1279,6 +1281,498 @@ def _require_registered(registry: Registry, branch: str) -> SandboxEntry:
 
 
 # ---------------------------------------------------------------------------
+# Cloud sandbox management
+# ---------------------------------------------------------------------------
+
+
+def _load_cloud_config() -> dict:
+    """Load cloud sandbox config from ~/.posthog-sandboxes/cloud-config.json."""
+    try:
+        return json.loads(CLOUD_CONFIG_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_cloud_config(config: dict) -> None:
+    CLOUD_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CLOUD_CONFIG_FILE.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def _ensure_cloud_config() -> dict:
+    """Ensure cloud config exists with required fields. Prompt if missing."""
+    config = _load_cloud_config()
+    changed = False
+
+    if "launch_template_id" not in config:
+        config["launch_template_id"] = input("Launch template ID (from Terraform output): ").strip()
+        changed = True
+    if "subnet_id" not in config:
+        config["subnet_id"] = input("Subnet ID (private subnet): ").strip()
+        changed = True
+    if "region" not in config:
+        config["region"] = input("AWS region [us-east-1]: ").strip() or "us-east-1"
+        changed = True
+    if "aws_profile" not in config:
+        profile = input("AWS CLI profile name [default]: ").strip() or "default"
+        config["aws_profile"] = profile
+        changed = True
+
+    if changed:
+        _save_cloud_config(config)
+
+    return config
+
+
+def _cloud_hostname(owner: str, branch: str) -> str:
+    """Generate a Tailscale hostname for a cloud sandbox."""
+    slug = slugify(branch)
+    hostname = f"sandbox-{owner}-{slug}"
+    # Tailscale hostnames max 63 chars
+    if len(hostname) > 63:
+        import hashlib
+
+        h = hashlib.sha256(hostname.encode()).hexdigest()[:6]
+        hostname = hostname[:56] + "-" + h
+    return hostname
+
+
+def _aws(config: dict, *args: str, capture: bool = True) -> subprocess.CompletedProcess:
+    """Run an aws CLI command with the configured profile and region."""
+    cmd = [
+        "aws",
+        "--region",
+        config["region"],
+        "--profile",
+        config["aws_profile"],
+        "--output",
+        "json",
+        *args,
+    ]
+    return subprocess.run(
+        cmd,
+        check=True,
+        capture_output=capture,
+        text=capture,
+    )
+
+
+def _cloud_get_owner() -> str:
+    """Get the current user's identity for sandbox ownership."""
+    result = subprocess.run(
+        ["git", "config", "user.email"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        # Use the part before @ as the owner
+        email = result.stdout.strip()
+        return email.split("@")[0].replace(".", "-")
+    return os.environ.get("USER", "unknown")
+
+
+def _cloud_find_instance(config: dict, branch: str) -> dict | None:
+    """Find a cloud sandbox instance by branch tag."""
+    owner = _cloud_get_owner()
+    result = _aws(
+        config,
+        "ec2",
+        "describe-instances",
+        "--filters",
+        f"Name=tag:sandbox:owner,Values={owner}",
+        f"Name=tag:sandbox:branch,Values={branch}",
+        "Name=instance-state-name,Values=running,stopped,pending,stopping",
+    )
+    data = json.loads(result.stdout)
+    for reservation in data.get("Reservations", []):
+        for instance in reservation.get("Instances", []):
+            return instance
+    return None
+
+
+def _cloud_list_instances(config: dict) -> list[dict]:
+    """List all cloud sandbox instances for the current user."""
+    owner = _cloud_get_owner()
+    result = _aws(
+        config,
+        "ec2",
+        "describe-instances",
+        "--filters",
+        f"Name=tag:sandbox:owner,Values={owner}",
+        "Name=tag:sandbox,Values=true",
+        "Name=instance-state-name,Values=running,stopped,pending,stopping",
+    )
+    data = json.loads(result.stdout)
+    instances = []
+    for reservation in data.get("Reservations", []):
+        instances.extend(reservation.get("Instances", []))
+    return instances
+
+
+def _cloud_get_tag(instance: dict, key: str) -> str:
+    """Get a tag value from an EC2 instance."""
+    for tag in instance.get("Tags", []):
+        if tag["Key"] == key:
+            return tag["Value"]
+    return ""
+
+
+def _cloud_render_user_data(
+    branch: str,
+    owner: str,
+    hostname: str,
+    tailscale_key: str,
+    ssh_keys: str,
+    claude_credentials: str,
+    claude_settings: str,
+    claude_json: str,
+) -> str:
+    """Render the cloud-init script with sandbox-specific values."""
+    import base64
+
+    template = CLOUD_INIT_TEMPLATE.read_text()
+
+    replacements = {
+        "__SANDBOX_BRANCH__": branch,
+        "__SANDBOX_OWNER__": owner,
+        "__SANDBOX_HOSTNAME__": hostname,
+        "__TAILSCALE_AUTH_KEY__": tailscale_key,
+        "__SSH_AUTHORIZED_KEYS__": ssh_keys,
+        "__CLAUDE_CREDENTIALS__": claude_credentials,
+        "__CLAUDE_SETTINGS__": claude_settings,
+        "__CLAUDE_JSON__": claude_json,
+    }
+    for placeholder, value in replacements.items():
+        template = template.replace(placeholder, value)
+
+    return base64.b64encode(template.encode()).decode()
+
+
+def _cloud_get_tailscale_key(config: dict) -> str:
+    """Get the Tailscale auth key from config or Secrets Manager."""
+    # Check local config first
+    if "tailscale_auth_key" in config:
+        return config["tailscale_auth_key"]
+
+    # Try Secrets Manager
+    secret_arn = config.get("tailscale_secret_arn")
+    if secret_arn:
+        result = _aws(config, "secretsmanager", "get-secret-value", "--secret-id", secret_arn)
+        data = json.loads(result.stdout)
+        return data["SecretString"]
+
+    # Prompt and save
+    key = input("Tailscale reusable auth key: ").strip()
+    config["tailscale_auth_key"] = key
+    _save_cloud_config(config)
+    return key
+
+
+def _cloud_gather_auth() -> tuple[str, str, str, str]:
+    """Gather SSH keys and Claude auth for the cloud sandbox."""
+    # SSH keys
+    ssh_dir = Path.home() / ".ssh"
+    ssh_keys = []
+    if ssh_dir.is_dir():
+        for pub in ssh_dir.glob("*.pub"):
+            ssh_keys.append(pub.read_text().strip())
+    ssh_keys_str = "\n".join(ssh_keys)
+
+    # Claude auth
+    claude_dir = Path.home() / ".claude"
+    claude_credentials = ""
+    claude_settings = ""
+    claude_json = ""
+
+    creds_file = claude_dir / ".credentials.json"
+    if creds_file.exists():
+        claude_credentials = creds_file.read_text().strip()
+    elif sys.platform == "darwin":
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            claude_credentials = result.stdout.strip()
+
+    settings_file = claude_dir / "settings.json"
+    if settings_file.exists():
+        claude_settings = settings_file.read_text().strip()
+
+    claude_json_file = Path.home() / ".claude.json"
+    if claude_json_file.exists():
+        claude_json = claude_json_file.read_text().strip()
+
+    return ssh_keys_str, claude_credentials, claude_settings, claude_json
+
+
+def cmd_cloud_create(branch: str) -> None:
+    config = _ensure_cloud_config()
+    owner = _cloud_get_owner()
+    hostname = _cloud_hostname(owner, branch)
+
+    # Check if sandbox already exists
+    existing = _cloud_find_instance(config, branch)
+    if existing:
+        state = existing["State"]["Name"]
+        if state == "stopped":
+            info(f"Sandbox for '{branch}' exists but is sleeping. Use 'sandbox cloud wake {branch}'")
+        else:
+            info(f"Sandbox for '{branch}' already exists (state: {state})")
+        return
+
+    info(f"Creating cloud sandbox for '{branch}'...")
+    info(f"  Tailscale hostname: {hostname}")
+
+    tailscale_key = _cloud_get_tailscale_key(config)
+    ssh_keys, claude_credentials, claude_settings, claude_json = _cloud_gather_auth()
+
+    user_data = _cloud_render_user_data(
+        branch=branch,
+        owner=owner,
+        hostname=hostname,
+        tailscale_key=tailscale_key,
+        ssh_keys=ssh_keys,
+        claude_credentials=claude_credentials,
+        claude_settings=claude_settings,
+        claude_json=claude_json,
+    )
+
+    result = _aws(
+        config,
+        "ec2",
+        "run-instances",
+        "--launch-template",
+        f"LaunchTemplateId={config['launch_template_id']}",
+        "--subnet-id",
+        config["subnet_id"],
+        "--user-data",
+        user_data,
+        "--tag-specifications",
+        json.dumps(
+            [
+                {
+                    "ResourceType": "instance",
+                    "Tags": [
+                        {"Key": "Name", "Value": f"sandbox-{owner}-{slugify(branch)}"},
+                        {"Key": "sandbox", "Value": "true"},
+                        {"Key": "sandbox:owner", "Value": owner},
+                        {"Key": "sandbox:branch", "Value": branch},
+                        {"Key": "sandbox:hostname", "Value": hostname},
+                        {"Key": "sandbox:created", "Value": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                    ],
+                }
+            ]
+        ),
+    )
+
+    data = json.loads(result.stdout)
+    instance_id = data["Instances"][0]["InstanceId"]
+    info(f"  Instance: {instance_id}")
+
+    info("Waiting for instance to start...")
+    _aws(config, "ec2", "wait", "instance-running", "--instance-ids", instance_id)
+
+    success(f"Cloud sandbox created for '{branch}'")
+    print()
+    print(f"  Instance:  {instance_id}")
+    print(f"  Hostname:  {hostname}")
+    print()
+    print("  The sandbox is booting. It will take a few minutes for Tailscale to connect")
+    print("  and Docker Compose to start. Then:")
+    print()
+    print(f"    sandbox cloud shell {branch}")
+    print(f"    sandbox cloud open {branch}")
+
+
+def cmd_cloud_destroy(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+
+    instance_id = instance["InstanceId"]
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+
+    warn(f"Destroying cloud sandbox for '{branch}' (instance {instance_id})...")
+
+    _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)
+    success("Instance terminating.")
+
+    # Remove Tailscale node
+    if hostname:
+        info(f"Removing Tailscale node '{hostname}'...")
+        subprocess.run(
+            ["tailscale", "admin", "remove", hostname],
+            check=False,
+            capture_output=True,
+        )
+
+
+def cmd_cloud_list() -> None:
+    config = _ensure_cloud_config()
+    instances = _cloud_list_instances(config)
+
+    if not instances:
+        print("No cloud sandboxes found. Create one with: sandbox cloud create <branch>")
+        return
+
+    print(f"{'BRANCH':<40} {'STATE':<12} {'INSTANCE':<22} HOSTNAME")
+    print(f"{'------':<40} {'-----':<12} {'--------':<22} --------")
+
+    for inst in instances:
+        branch = _cloud_get_tag(inst, "sandbox:branch")
+        hostname = _cloud_get_tag(inst, "sandbox:hostname")
+        state = inst["State"]["Name"]
+        instance_id = inst["InstanceId"]
+        print(f"{branch:<40} {state:<12} {instance_id:<22} {hostname}")
+
+
+def cmd_cloud_sleep(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if instance["State"]["Name"] != "running":
+        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+
+    instance_id = instance["InstanceId"]
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+
+    info(f"Sleeping cloud sandbox for '{branch}'...")
+
+    # Graceful docker compose stop before stopping the instance
+    if hostname:
+        info("Stopping Docker Compose gracefully...")
+        subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "ConnectTimeout=5",
+                f"ubuntu@{hostname}",
+                "cd /home/ubuntu/posthog && docker compose -f docker-compose.sandbox.yml stop",
+            ],
+            check=False,
+            capture_output=True,
+        )
+
+    _aws(config, "ec2", "stop-instances", "--instance-ids", instance_id)
+    success(f"Sandbox sleeping. EBS persists (~$8/mo). Wake with: sandbox cloud wake {branch}")
+
+
+def cmd_cloud_wake(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if instance["State"]["Name"] != "stopped":
+        fatal(f"Sandbox is not stopped (state: {instance['State']['Name']})")
+
+    instance_id = instance["InstanceId"]
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+
+    info(f"Waking cloud sandbox for '{branch}'...")
+    _aws(config, "ec2", "start-instances", "--instance-ids", instance_id)
+
+    info("Waiting for instance to start...")
+    _aws(config, "ec2", "wait", "instance-running", "--instance-ids", instance_id)
+
+    success(f"Sandbox waking up. Tailscale will reconnect shortly.")
+    print(f"  Connect: sandbox cloud shell {branch}")
+
+
+def cmd_cloud_shell(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if instance["State"]["Name"] != "running":
+        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    if not hostname:
+        fatal("No Tailscale hostname found for this sandbox")
+
+    # SSH to the host, then attach to the container's tmux session
+    os.execvp(
+        "ssh",
+        [
+            "ssh",
+            "-A",  # Forward SSH agent for git auth
+            "-t",  # Force TTY allocation
+            "-o",
+            "StrictHostKeyChecking=no",
+            f"ubuntu@{hostname}",
+            "docker exec -it -u 1000:1000 sandbox-cloud-app-1 tmux -L sandbox attach-session -t posthog",
+        ],
+    )
+
+
+def cmd_cloud_open(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if instance["State"]["Name"] != "running":
+        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    url = f"http://{hostname}:8000"
+    info(f"Opening {url}...")
+    webbrowser.open(url)
+
+
+def cmd_cloud_logs(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    if not hostname:
+        fatal("No Tailscale hostname found for this sandbox")
+
+    # SSH to host and tail the boot log + docker compose logs
+    os.execvp(
+        "ssh",
+        [
+            "ssh",
+            "-t",
+            "-o",
+            "StrictHostKeyChecking=no",
+            f"ubuntu@{hostname}",
+            "tail -f /var/log/sandbox-boot.log 2>/dev/null; "
+            "cd /home/ubuntu/posthog && docker compose -f docker-compose.sandbox.yml logs -f app",
+        ],
+    )
+
+
+def cmd_cloud_code(branch: str) -> None:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if instance["State"]["Name"] != "running":
+        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    ssh_port = 2222  # Container SSH port, forwarded through host
+
+    code_cmd = shutil.which("code")
+    if not code_cmd:
+        info("VSCode 'code' CLI not found on PATH.")
+        info(f"Connect manually: code --remote ssh-remote+ubuntu@{hostname} /workspace")
+        return
+
+    info(f"Opening VSCode Remote-SSH to {hostname}...")
+    subprocess.Popen([code_cmd, "--remote", f"ssh-remote+ubuntu@{hostname}", "/home/ubuntu/posthog"])
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1328,6 +1822,27 @@ examples:
     sub.add_parser("rebuild-cache", help="Rebuild the database cache from master")
     sub.add_parser("nuke", help="Destroy all sandboxes and clear the cache")
 
+    # --- Cloud subcommands ---
+    cloud_parser = sub.add_parser("cloud", help="Manage cloud sandboxes (EC2 + Tailscale)")
+    cloud_sub = cloud_parser.add_subparsers(dest="cloud_command")
+
+    p = cloud_sub.add_parser("create", help="Create a cloud sandbox for a branch")
+    p.add_argument("branch")
+
+    for name, help_text in [
+        ("destroy", "Terminate a cloud sandbox"),
+        ("sleep", "Stop instance, keep disk (~$8/mo)"),
+        ("wake", "Restart a sleeping sandbox (~1-2 min)"),
+        ("shell", "SSH into the sandbox (attaches to mprocs)"),
+        ("open", "Open PostHog web UI in browser"),
+        ("logs", "Tail boot and app logs"),
+        ("code", "Open VSCode Remote-SSH to the sandbox"),
+    ]:
+        p = cloud_sub.add_parser(name, help=help_text)
+        p.add_argument("branch")
+
+    cloud_sub.add_parser("list", aliases=["ls"], help="List your cloud sandboxes")
+
     return parser
 
 
@@ -1339,24 +1854,42 @@ def main() -> None:
         parser.print_help()
         return
 
-    if args.command == "create":
-        os.environ["SANDBOX_INTENTS"] = args.intents
+    if args.command == "cloud":
+        if not getattr(args, "cloud_command", None):
+            parser.parse_args(["cloud", "--help"])
+            return
+        cloud_dispatch = {
+            "create": lambda: cmd_cloud_create(args.branch),
+            "destroy": lambda: cmd_cloud_destroy(args.branch),
+            "list": cmd_cloud_list,
+            "ls": cmd_cloud_list,
+            "sleep": lambda: cmd_cloud_sleep(args.branch),
+            "wake": lambda: cmd_cloud_wake(args.branch),
+            "shell": lambda: cmd_cloud_shell(args.branch),
+            "open": lambda: cmd_cloud_open(args.branch),
+            "logs": lambda: cmd_cloud_logs(args.branch),
+            "code": lambda: cmd_cloud_code(args.branch),
+        }
+        dispatch = {args.command: lambda: cloud_dispatch[args.cloud_command]()}
+    else:
+        if args.command == "create":
+            os.environ["SANDBOX_INTENTS"] = args.intents
 
-    dispatch = {
-        "create": lambda: cmd_create(args.branch, args.base_branch),
-        "start": lambda: cmd_start(args.branch),
-        "stop": lambda: cmd_stop(args.branch),
-        "destroy": lambda: cmd_destroy(args.branch, clean=args.clean),
-        "rm": lambda: cmd_destroy(args.branch, clean=args.clean),
-        "list": cmd_list,
-        "ls": cmd_list,
-        "shell": lambda: cmd_shell(args.branch),
-        "code": lambda: cmd_code(args.branch),
-        "idea": lambda: cmd_idea(args.branch),
-        "logs": lambda: cmd_logs(args.branch),
-        "rebuild-cache": cmd_rebuild_cache,
-        "nuke": cmd_nuke,
-    }
+        dispatch = {
+            "create": lambda: cmd_create(args.branch, args.base_branch),
+            "start": lambda: cmd_start(args.branch),
+            "stop": lambda: cmd_stop(args.branch),
+            "destroy": lambda: cmd_destroy(args.branch, clean=args.clean),
+            "rm": lambda: cmd_destroy(args.branch, clean=args.clean),
+            "list": cmd_list,
+            "ls": cmd_list,
+            "shell": lambda: cmd_shell(args.branch),
+            "code": lambda: cmd_code(args.branch),
+            "idea": lambda: cmd_idea(args.branch),
+            "logs": lambda: cmd_logs(args.branch),
+            "rebuild-cache": cmd_rebuild_cache,
+            "nuke": cmd_nuke,
+        }
 
     try:
         dispatch[args.command]()

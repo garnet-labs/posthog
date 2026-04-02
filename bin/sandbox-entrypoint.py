@@ -22,6 +22,7 @@ from textwrap import dedent
 WORKSPACE = Path("/workspace")
 SANDBOX_HOME = Path("/tmp/sandbox-home")
 PROGRESS_FILE = Path("/tmp/sandbox-progress")
+IS_CLOUD = os.environ.get("SANDBOX_MODE") == "cloud"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -195,17 +196,23 @@ def root_phase() -> None:
     # points at /repo.git (where the main repo's .git is mounted).
     # This avoids setting GIT_DIR globally, which would poison every
     # subprocess that runs `git` (uv sync, cargo fetch, etc.).
-    gitdir_line = (WORKSPACE / ".git").read_text().strip()
-    worktree_name = gitdir_line.rsplit("/", 1)[-1]
-    container_gitdir = f"/repo.git/worktrees/{worktree_name}"
-    patched_gitfile = Path("/tmp/sandbox-gitfile")
-    patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
-    run(["mount", "--bind", str(patched_gitfile), str(WORKSPACE / ".git")])
+    # In cloud mode, the workspace is a normal git checkout (not a worktree),
+    # so .git is a directory and no patching is needed.
+    if not IS_CLOUD:
+        gitdir_line = (WORKSPACE / ".git").read_text().strip()
+        worktree_name = gitdir_line.rsplit("/", 1)[-1]
+        container_gitdir = f"/repo.git/worktrees/{worktree_name}"
+        patched_gitfile = Path("/tmp/sandbox-gitfile")
+        patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
+        run(["mount", "--bind", str(patched_gitfile), str(WORKSPACE / ".git")])
 
     export_environment(uid, gid)
     start_sshd(uid, gid)
     copy_claude_auth(uid, gid)
-    bind_mount_node_modules(uid, gid)
+    # In cloud mode, EBS is fast enough that we don't need the bind-mount
+    # workaround for node_modules (which exists to avoid slow VirtioFS on macOS).
+    if not IS_CLOUD:
+        bind_mount_node_modules(uid, gid)
 
     # Re-exec as the sandbox user.
     os.execvp("gosu", ["gosu", f"{uid}:{gid}", sys.executable, __file__, *sys.argv[1:]])
