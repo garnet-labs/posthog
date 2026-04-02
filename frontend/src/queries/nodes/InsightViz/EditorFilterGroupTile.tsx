@@ -45,13 +45,13 @@ export function EditorFilterGroupTile({
                     data-attr={'editor-filter-group-collapse-' + slugify(title)}
                     className={clsx('rounded-b-none px-1 py-1', isRowExpanded && 'border-b')}
                 >
-                    <div className="flex items-center gap-2 font-semibold flex-1">
+                    <div className="flex items-baseline gap-2 font-semibold flex-1">
                         <span>{title}</span>
                         {!isRowExpanded && collapsedSummary && (
                             <span className="text-xs font-normal text-secondary">{collapsedSummary}</span>
                         )}
                         {headerExtra && (
-                            <div className="ml-auto" onClick={(e) => e.stopPropagation()}>
+                            <div className="ml-auto self-center" onClick={(e) => e.stopPropagation()}>
                                 {headerExtra}
                             </div>
                         )}
