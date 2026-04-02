@@ -60,6 +60,33 @@ async fn read_chunk_cancellable(
     }
 }
 
+/// Hint the kernel to evict page cache for the byte range [0, len) of an open file.
+///
+/// Checkpoint SST files are hardlinked to live RocksDB inodes. Reading them for upload
+/// fills the kernel page cache, inflating container_memory_working_set_bytes. Calling
+/// this incrementally after each chunk read keeps page cache per file to ~chunk_size
+/// instead of accumulating the entire file (e.g. 256MB) before eviction.
+///
+/// Best-effort: failure is logged at debug level and does not abort the upload.
+/// Only effective on Linux; a no-op on other platforms.
+fn advise_dontneed_range(file: &File, path: &Path, offset: i64, len: i64) {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        // SAFETY: posix_fadvise is safe to call with any fd/offset/len combination;
+        // invalid values simply return an error code.
+        let ret = unsafe { libc::posix_fadvise(fd, offset, len, libc::POSIX_FADV_DONTNEED) };
+        if ret != 0 {
+            tracing::debug!("posix_fadvise(DONTNEED) returned {ret} for {path:?} (non-fatal)");
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (file, path, offset, len);
+    }
+}
+
 /// S3Uploader using `object_store` crate with `LimitStore` for bounded concurrency.
 /// The LimitStore wraps the S3 client with a semaphore that limits concurrent requests.
 #[derive(Debug)]
@@ -118,9 +145,13 @@ impl S3Uploader {
 
         // BufWriter implements AsyncWrite and handles multipart upload internally.
         // It buffers data and automatically uses multipart upload for large files.
-        let mut upload = BufWriter::new(Arc::clone(&self.store), path.clone());
+        // Default max_concurrency is 8 (up to 8 in-flight 10MB multipart parts per writer).
+        // We cap it to limit per-upload RSS from ~98MB down to ~28MB.
+        let mut upload = BufWriter::new(Arc::clone(&self.store), path.clone())
+            .with_max_concurrency(self.config.upload_writer_max_concurrency);
 
         let mut buf = vec![0u8; UPLOAD_CHUNK_SIZE];
+        let mut bytes_read: i64 = 0;
 
         loop {
             let chunk_result = read_chunk_cancellable(&mut file, &mut buf, cancel_token).await;
@@ -134,6 +165,10 @@ impl S3Uploader {
                         return Err(anyhow::Error::new(e))
                             .with_context(|| format!("Failed to write chunk to S3: {s3_key}"));
                     }
+                    bytes_read += n as i64;
+                    // Incrementally evict pages we just read — keeps page cache to ~chunk_size
+                    // per file instead of accumulating the full file (up to 256MB SSTs).
+                    advise_dontneed_range(&file, local_path, 0, bytes_read);
                 }
                 ChunkResult::EndOfStream => break,
                 ChunkResult::Cancelled => {
@@ -156,6 +191,9 @@ impl S3Uploader {
                 }
             }
         }
+
+        // Final eviction for any trailing pages / kernel read-ahead
+        advise_dontneed_range(&file, local_path, 0, bytes_read);
 
         // Finalize the upload (triggers CompleteMultipartUpload API call for large files)
         upload
@@ -217,7 +255,7 @@ impl CheckpointUploader for S3Uploader {
         // buffer_unordered(N) only polls N futures concurrently, so only N files
         // are open with read buffers and BufWriters allocated at any time.
         // Futures outside the window aren't started, bounding memory to
-        // N * ~18MB (8MB read buffer + ~10MB BufWriter) instead of all files at once.
+        // N * (8MB read buf + 10MB BufWriter chunk + max_concurrency * 10MB in-flight parts).
         //
         // Pre-collect owned (src, dest) pairs to avoid lifetime issues with
         // buffer_unordered's lazy stream requiring closures general over all lifetimes.

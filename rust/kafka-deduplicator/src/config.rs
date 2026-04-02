@@ -302,6 +302,13 @@ pub struct Config {
     #[envconfig(default = "40")]
     pub max_upload_buffers_per_partition: usize,
 
+    // Maximum in-flight multipart upload parts per BufWriter instance.
+    // The object_store BufWriter defaults to 8, holding up to 80MB per writer.
+    // Set to 1 to minimize per-writer memory; file-level parallelism from
+    // buffer_unordered still provides overall upload throughput.
+    #[envconfig(default = "1")]
+    pub upload_writer_max_concurrency: usize,
+
     // Maximum time allowed for a complete checkpoint import for a single partition (seconds).
     // This includes listing checkpoints, downloading metadata, and downloading all files.
     // Should be less than kafka max.poll.interval.ms to prevent consumer group kicks.

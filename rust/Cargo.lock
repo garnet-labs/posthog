@@ -5059,6 +5059,7 @@ dependencies = [
  "health",
  "itertools 0.14.0",
  "kafka-assigner-proto",
+ "libc",
  "metrics",
  "metrics-exporter-prometheus",
  "object_store",

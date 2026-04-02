@@ -85,6 +85,13 @@ pub struct CheckpointConfig {
     /// Each active buffer consumes ~18MB (8MB read buffer + ~10MB BufWriter).
     pub max_upload_buffers_per_partition: usize,
 
+    /// Maximum number of in-flight multipart upload parts per BufWriter.
+    /// The object_store BufWriter defaults to max_concurrency=8, meaning each writer
+    /// can hold up to 8 * 10MB = 80MB of in-flight parts. Setting this to 1 reduces
+    /// per-writer overhead to ~10MB while file-level parallelism from
+    /// buffer_unordered still provides overall upload throughput.
+    pub upload_writer_max_concurrency: usize,
+
     /// Maximum time allowed for a complete checkpoint import for a single partition.
     /// This includes listing checkpoints, downloading metadata, and downloading all files.
     /// Should be less than kafka max.poll.interval.ms to prevent consumer group kicks.
@@ -123,6 +130,7 @@ impl Default for CheckpointConfig {
             max_concurrent_checkpoint_file_downloads: 40,
             max_concurrent_checkpoint_file_uploads: 40,
             max_upload_buffers_per_partition: 40,
+            upload_writer_max_concurrency: 1,
             checkpoint_partition_import_timeout: Duration::from_secs(240),
             local_checkpoint_max_staleness: Duration::from_secs(
                 DEFAULT_LOCAL_CHECKPOINT_MAX_STALENESS_SECS,
