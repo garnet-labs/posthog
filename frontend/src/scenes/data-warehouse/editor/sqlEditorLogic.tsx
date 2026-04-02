@@ -71,6 +71,7 @@ import { dataWarehouseViewsLogic } from '../saved_queries/dataWarehouseViewsLogi
 import { draftsLogic } from './draftsLogic'
 import { editorSceneLogic } from './editorSceneLogic'
 import { fixSQLErrorsLogic } from './fixSQLErrorsLogic'
+import { findQueryAtCursor, splitQueries } from './multiQueryUtils'
 import { OutputTab, outputPaneLogic } from './outputPaneLogic'
 import type { sqlEditorLogicType } from './sqlEditorLogicType'
 import { SQLEditorMode, isEmbeddedSQLEditorMode } from './sqlEditorModes'
@@ -225,6 +226,10 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             tablesAndColumns,
         }),
         setQueryInput: (queryInput: string | null) => ({ queryInput }),
+        setActiveQueryText: (activeQueryText: string | null, activeQueryOffset: number) => ({
+            activeQueryText,
+            activeQueryOffset,
+        }),
         runQuery: (queryOverride?: string, switchTab?: boolean) => ({
             queryOverride,
             switchTab,
@@ -300,9 +305,15 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         insertTextAtCursor: (text: string) => ({ text }),
         setEditorSource: (source: SqlEditorSource) => ({ source }),
     })),
-    propsChanged(({ actions, props }, oldProps) => {
+    propsChanged(({ actions, props, cache }, oldProps) => {
         if (!oldProps.monaco && !oldProps.editor && props.monaco && props.editor) {
             actions.initialize()
+
+            // Listen for cursor position changes to update the active query highlight
+            cache.cursorDisposable?.dispose()
+            cache.cursorDisposable = props.editor.onDidChangeCursorPosition(() => {
+                cache.updateActiveQueryDecoration?.()
+            })
         }
     }),
     loaders(() => ({
@@ -351,6 +362,18 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             null as string | null,
             {
                 setQueryInput: (_, { queryInput }) => queryInput,
+            },
+        ],
+        activeQueryText: [
+            null as string | null,
+            {
+                setActiveQueryText: (_, { activeQueryText }) => activeQueryText,
+            },
+        ],
+        activeQueryOffset: [
+            0 as number,
+            {
+                setActiveQueryText: (_, { activeQueryOffset }) => activeQueryOffset,
             },
         ],
         editorSource: [
@@ -766,7 +789,28 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             actions.updateTab({ ...tabToUpdate, name: draft.name, draft: draft })
         },
         runQuery: ({ queryOverride, switchTab }) => {
-            const query = (queryOverride || values.queryInput) ?? ''
+            let query: string
+            if (queryOverride) {
+                // Explicit override (e.g. user selected text and pressed Cmd+Enter)
+                query = queryOverride
+            } else {
+                // No override — find the query under the cursor
+                const fullText = values.queryInput ?? ''
+                const queries = splitQueries(fullText)
+                if (queries.length > 1 && props.editor) {
+                    const model = props.editor.getModel()
+                    const position = props.editor.getPosition()
+                    if (model && position) {
+                        const cursorOffset = model.getOffsetAt(position)
+                        const match = findQueryAtCursor(queries, cursorOffset)
+                        query = match?.query ?? fullText
+                    } else {
+                        query = fullText
+                    }
+                } else {
+                    query = fullText
+                }
+            }
 
             const newSource = {
                 ...values.sourceQuery.source,
@@ -1123,6 +1167,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         queryInput: async (queryInput: string | null) => {
             const result = await parseQueryTablesAndColumns(queryInput)
             actions.setSelectedQueryTablesAndColumns(result)
+            cache.updateActiveQueryDecoration?.()
         },
         showLegacyFilters: (showLegacyFilters: boolean) => {
             if (showLegacyFilters) {
@@ -1703,6 +1748,62 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
     })),
     afterMount(({ actions, props, values, cache }) => {
         cache.lastSelectedConnectionId = values.selectedConnectionId
+        cache.activeQueryDecorationIds = [] as string[]
+
+        cache.updateActiveQueryDecoration = (): void => {
+            const editorInstance = props.editor
+            if (!editorInstance) {
+                return
+            }
+            const model = editorInstance.getModel()
+            const position = editorInstance.getPosition()
+            if (!model || !position) {
+                return
+            }
+
+            const fullText = values.queryInput ?? ''
+            const queries = splitQueries(fullText)
+
+            // Only show decoration when there are multiple queries
+            if (queries.length <= 1) {
+                cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
+                    cache.activeQueryDecorationIds ?? [],
+                    []
+                )
+                actions.setActiveQueryText(queries.length === 1 ? queries[0].query : null, 0)
+                return
+            }
+
+            const cursorOffset = model.getOffsetAt(position)
+            const match = findQueryAtCursor(queries, cursorOffset)
+            if (!match) {
+                cache.activeQueryDecorationIds = editorInstance.deltaDecorations(
+                    cache.activeQueryDecorationIds ?? [],
+                    []
+                )
+                actions.setActiveQueryText(null, 0)
+                return
+            }
+
+            actions.setActiveQueryText(match.query, match.start)
+
+            const startPos = model.getPositionAt(match.start)
+            const endPos = model.getPositionAt(match.end)
+
+            cache.activeQueryDecorationIds = editorInstance.deltaDecorations(cache.activeQueryDecorationIds ?? [], [
+                {
+                    range: {
+                        startLineNumber: startPos.lineNumber,
+                        startColumn: startPos.column,
+                        endLineNumber: endPos.lineNumber,
+                        endColumn: endPos.column,
+                    },
+                    options: {
+                        className: 'active-query-highlight',
+                    },
+                },
+            ])
+        }
 
         if (
             isEmbeddedSQLEditorMode(props.mode ?? SQLEditorMode.FullScene) &&
@@ -1714,6 +1815,8 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         }
     }),
     beforeUnmount(({ cache }) => {
+        cache.cursorDisposable?.dispose()
+        cache.cursorDisposable = null
         cache.umountDataNode?.()
 
         cache.createdModels?.forEach((m: editor.ITextModel) => {

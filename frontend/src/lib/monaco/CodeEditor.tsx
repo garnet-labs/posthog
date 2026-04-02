@@ -41,6 +41,10 @@ export interface CodeEditorProps extends Omit<EditorProps, 'loading' | 'theme'> 
     onMetadataLoading?: (loading: boolean) => void
     onFixWithAI?: (prompt: string) => void
     onError?: (error: string | null) => void
+    /** Override the query sent for metadata validation (e.g. active query in multi-query mode) */
+    metadataQuery?: string
+    /** Character offset of metadataQuery within the full editor text, for correct marker positioning */
+    metadataQueryOffset?: number
     /** The original value to compare against - renders it in diff mode */
     originalValue?: string
     /** Enable vim keybindings */
@@ -136,6 +140,8 @@ export function CodeEditor({
     onMetadata,
     onMetadataLoading,
     onFixWithAI,
+    metadataQuery,
+    metadataQueryOffset,
     originalValue,
     enableVimMode,
     ...editorProps
@@ -157,6 +163,8 @@ export function CodeEditor({
     const builtCodeEditorLogic = codeEditorLogic({
         key: queryKey ?? `new/${realKey}`,
         query: value ?? '',
+        metadataQuery: metadataQuery,
+        metadataQueryOffset: metadataQueryOffset,
         language: editorProps.language ?? 'text',
         globals,
         sourceQuery,

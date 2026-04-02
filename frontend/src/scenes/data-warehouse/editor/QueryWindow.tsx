@@ -49,7 +49,15 @@ export function QueryWindow({
 }: QueryWindowProps): JSX.Element {
     const codeEditorKey = `hogql-editor-${tabId}`
 
-    const { queryInput, sourceQuery, originalQueryInput, suggestedQueryInput, editingView } = useValues(sqlEditorLogic)
+    const {
+        queryInput,
+        sourceQuery,
+        originalQueryInput,
+        suggestedQueryInput,
+        editingView,
+        activeQueryText,
+        activeQueryOffset,
+    } = useValues(sqlEditorLogic)
 
     const { setQueryInput, runQuery, setError, setMetadata, setMetadataLoading } = useActions(sqlEditorLogic)
 
@@ -153,6 +161,8 @@ export function QueryWindow({
                 editorVimModeEnabled={vimModeFeatureEnabled && editorVimModeEnabled}
                 codeEditorProps={{
                     queryKey: codeEditorKey,
+                    metadataQuery: activeQueryText ?? undefined,
+                    metadataQueryOffset: activeQueryOffset,
                     onChange: (v) => {
                         setQueryInput(v ?? '')
                     },
