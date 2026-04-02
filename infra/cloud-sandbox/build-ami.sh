@@ -30,6 +30,8 @@
 #   AWS_REGION                 (default: us-east-1)
 #   BUILD_INSTANCE_TYPE        (default: m6i.2xlarge)
 #   AWS_KEY_NAME               (optional, for SSH debug access)
+#   DOCKERHUB_USER             (optional — Docker Hub username for authenticated pulls)
+#   DOCKERHUB_TOKEN            (optional — Docker Hub access token)
 #
 set -euo pipefail
 
@@ -133,6 +135,12 @@ export SANDBOX_SSH_AUTHORIZED_KEYS=/dev/null
 export SANDBOX_IDE_VOLUME=sandbox-intellij
 
 # --- Build sandbox Docker image + pull compose images ---
+# --- Docker Hub auth (avoids rate limiting) ---
+if [ -n "__DOCKERHUB_USER__" ] && [ "__DOCKERHUB_USER__" != "__" ]; then
+    echo "==> Logging into Docker Hub..."
+    echo "__DOCKERHUB_TOKEN__" | sudo -u ubuntu docker login -u "__DOCKERHUB_USER__" --password-stdin
+fi
+
 echo "==> Building sandbox image..."
 build_status "building-image"
 sudo -u ubuntu docker build -f Dockerfile.sandbox -t posthog-sandbox:latest .
@@ -200,6 +208,12 @@ if [ -n "$BUILD_BRANCH" ]; then
 else
     USER_DATA=$(echo "$USER_DATA" | sed 's|__BUILD_BRANCH__||g')
 fi
+
+# Inject Docker Hub credentials if specified
+DOCKERHUB_USER="${DOCKERHUB_USER:-}"
+DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN:-}"
+USER_DATA=$(echo "$USER_DATA" | sed "s|__DOCKERHUB_USER__|$DOCKERHUB_USER|g")
+USER_DATA=$(echo "$USER_DATA" | sed "s|__DOCKERHUB_TOKEN__|$DOCKERHUB_TOKEN|g")
 
 # Base64 encode the user data
 USER_DATA_B64=$(echo "$USER_DATA" | base64 -w 0 2>/dev/null || echo "$USER_DATA" | base64)
