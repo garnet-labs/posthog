@@ -85,6 +85,23 @@ NON_RETRYABLE_ERROR_TYPES: list[str] = [
 DatabricksField = tuple[str, str]
 
 
+def _escape_identifier(value: str) -> str:
+    """Escape a value for use in a backtick-quoted Databricks SQL identifier.
+
+    Doubles any backtick characters to prevent SQL injection.
+    See: https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-identifiers
+    """
+    return value.replace("`", "``")
+
+
+def _escape_path_component(value: str) -> str:
+    """Escape a value for use in a single-quoted Databricks SQL path.
+
+    Escapes backslashes and single quotes.
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 class DatabricksConnectionError(Exception):
     """Error for Databricks connection."""
 
@@ -356,7 +373,11 @@ class DatabricksClient:
             self._connection = None
 
     async def execute_query(
-        self, query: str, parameters: dict | None = None, query_kwargs: dict | None = None, fetch_results: bool = True
+        self,
+        query: str,
+        parameters: dict[str, t.Any] | None = None,
+        query_kwargs: dict[str, t.Any] | None = None,
+        fetch_results: bool = True,
     ) -> list[Row] | None:
         """Execute a query and wait for it to complete.
 
@@ -440,7 +461,7 @@ class DatabricksClient:
 
     async def use_catalog(self, catalog: str):
         try:
-            await self.execute_query(f"USE CATALOG `{catalog}`", fetch_results=False)
+            await self.execute_query(f"USE CATALOG `{_escape_identifier(catalog)}`", fetch_results=False)
         except ServerOperationError as err:
             if err.message and "[NO_SUCH_CATALOG_EXCEPTION]" in err.message:
                 raise DatabricksCatalogNotFoundError(catalog)
@@ -450,7 +471,7 @@ class DatabricksClient:
 
     async def use_schema(self, schema: str):
         try:
-            await self.execute_query(f"USE SCHEMA `{schema}`", fetch_results=False)
+            await self.execute_query(f"USE SCHEMA `{_escape_identifier(schema)}`", fetch_results=False)
         except ServerOperationError as err:
             if err.message and "[SCHEMA_NOT_FOUND]" in err.message:
                 raise DatabricksSchemaNotFoundError(schema)
@@ -488,10 +509,10 @@ class DatabricksClient:
 
     async def acreate_table(self, table_name: str, fields: list[DatabricksField]):
         """Asynchronously create the Databricks delta table if it doesn't exist."""
-        field_ddl = ", ".join(f"`{field[0]}` {field[1]}" for field in fields)
+        field_ddl = ", ".join(f"`{_escape_identifier(field[0])}` {field[1]}" for field in fields)
         try:
             query = f"""
-                CREATE TABLE IF NOT EXISTS `{table_name}` (
+                CREATE TABLE IF NOT EXISTS `{_escape_identifier(table_name)}` (
                     {field_ddl}
                 )
                 USING DELTA
@@ -506,7 +527,7 @@ class DatabricksClient:
     async def adelete_table(self, table_name: str):
         """Asynchronously delete the Databricks delta table if it exists."""
         try:
-            await self.execute_query(f"DROP TABLE IF EXISTS `{table_name}`", fetch_results=False)
+            await self.execute_query(f"DROP TABLE IF EXISTS `{_escape_identifier(table_name)}`", fetch_results=False)
         except ServerOperationError as err:
             if _is_insufficient_permissions_error(err):
                 raise DatabricksInsufficientPermissionsError("DROP TABLE", err.message)
@@ -514,8 +535,9 @@ class DatabricksClient:
 
     async def aput_file_stream_to_volume(self, file: io.BytesIO, volume_path: str, file_name: str):
         """Asynchronously put a local file stream to a Databricks volume."""
+        escaped_path = f"{_escape_path_component(volume_path)}/{_escape_path_component(file_name)}"
         await self.execute_query(
-            f"PUT '__input_stream__' INTO '{volume_path}/{file_name}' OVERWRITE",
+            f"PUT '__input_stream__' INTO '{escaped_path}' OVERWRITE",
             query_kwargs={"input_stream": file},
         )
 
@@ -558,22 +580,24 @@ class DatabricksClient:
         """
         select_fields = []
         for field in fields:
+            escaped_name = _escape_identifier(field[0])
             if field[1] == "VARIANT":
-                select_fields.append(f"PARSE_JSON(`{field[0]}`) as `{field[0]}`")
+                select_fields.append(f"PARSE_JSON(`{escaped_name}`) as `{escaped_name}`")
             elif field[1] == "BIGINT":
-                select_fields.append(f"CAST(`{field[0]}` as BIGINT) as `{field[0]}`")
+                select_fields.append(f"CAST(`{escaped_name}` as BIGINT) as `{escaped_name}`")
             elif field[1] == "INTEGER":
-                select_fields.append(f"CAST(`{field[0]}` as INTEGER) as `{field[0]}`")
+                select_fields.append(f"CAST(`{escaped_name}` as INTEGER) as `{escaped_name}`")
             else:
-                select_fields.append(f"`{field[0]}`")
+                select_fields.append(f"`{escaped_name}`")
         select_fields_str = ", ".join(select_fields)
 
-        merge_schema = f"true" if with_schema_evolution else "false"
+        merge_schema = "true" if with_schema_evolution else "false"
+        escaped_volume_path = _escape_path_component(volume_path)
 
         return f"""
-        COPY INTO `{table_name}`
+        COPY INTO `{_escape_identifier(table_name)}`
         FROM (
-            SELECT {select_fields_str} FROM '{volume_path}'
+            SELECT {select_fields_str} FROM '{escaped_volume_path}'
         )
         FILEFORMAT = PARQUET
         COPY_OPTIONS ('force' = 'true', 'mergeSchema' = '{merge_schema}')
@@ -601,7 +625,7 @@ class DatabricksClient:
         """Asynchronously create a Databricks volume."""
         try:
             await self.execute_query(
-                f"CREATE VOLUME IF NOT EXISTS `{volume}` COMMENT 'PostHog generated volume'",
+                f"CREATE VOLUME IF NOT EXISTS `{_escape_identifier(volume)}` COMMENT 'PostHog generated volume'",
                 fetch_results=False,
             )
         except ServerOperationError as err:
@@ -613,7 +637,7 @@ class DatabricksClient:
         """Asynchronously delete a Databricks volume."""
         try:
             await self.execute_query(
-                f"DROP VOLUME IF EXISTS `{volume}`",
+                f"DROP VOLUME IF EXISTS `{_escape_identifier(volume)}`",
                 fetch_results=False,
             )
         except ServerOperationError as err:
@@ -719,12 +743,16 @@ class DatabricksClient:
         merge_key: collections.abc.Iterable[str],
         update_key: collections.abc.Iterable[str],
     ) -> str:
-        merge_condition = " AND ".join([f"target.`{field}` = source.`{field}`" for field in merge_key])
-        update_condition = " OR ".join([f"target.`{field}` < source.`{field}`" for field in update_key])
+        merge_condition = " AND ".join(
+            [f"target.`{_escape_identifier(field)}` = source.`{_escape_identifier(field)}`" for field in merge_key]
+        )
+        update_condition = " OR ".join(
+            [f"target.`{_escape_identifier(field)}` < source.`{_escape_identifier(field)}`" for field in update_key]
+        )
 
         return f"""
-        MERGE WITH SCHEMA EVOLUTION INTO `{target_table}` AS target
-        USING `{source_table}` AS source
+        MERGE WITH SCHEMA EVOLUTION INTO `{_escape_identifier(target_table)}` AS target
+        USING `{_escape_identifier(source_table)}` AS source
         ON {merge_condition}
         WHEN MATCHED AND ({update_condition}) THEN
             UPDATE SET *
@@ -741,25 +769,37 @@ class DatabricksClient:
         source_table_fields: collections.abc.Iterable[DatabricksField],
         target_table_field_names: list[str],
     ) -> str:
-        merge_condition = " AND ".join([f"target.`{field}` = source.`{field}`" for field in merge_key])
-        update_condition = " OR ".join([f"target.`{field}` < source.`{field}`" for field in update_key])
+        merge_condition = " AND ".join(
+            [f"target.`{_escape_identifier(field)}` = source.`{_escape_identifier(field)}`" for field in merge_key]
+        )
+        update_condition = " OR ".join(
+            [f"target.`{_escape_identifier(field)}` < source.`{_escape_identifier(field)}`" for field in update_key]
+        )
         update_clause = ", ".join(
             [
-                f"target.`{field[0]}` = source.`{field[0]}`"
+                f"target.`{_escape_identifier(field[0])}` = source.`{_escape_identifier(field[0])}`"
                 for field in source_table_fields
                 if field[0] in target_table_field_names
             ]
         )
         field_names = ", ".join(
-            [f"`{field[0]}`" for field in source_table_fields if field[0] in target_table_field_names]
+            [
+                f"`{_escape_identifier(field[0])}`"
+                for field in source_table_fields
+                if field[0] in target_table_field_names
+            ]
         )
         values = ", ".join(
-            [f"source.`{field[0]}`" for field in source_table_fields if field[0] in target_table_field_names]
+            [
+                f"source.`{_escape_identifier(field[0])}`"
+                for field in source_table_fields
+                if field[0] in target_table_field_names
+            ]
         )
 
         return f"""
-        MERGE INTO `{target_table}` AS target
-        USING `{source_table}` AS source
+        MERGE INTO `{_escape_identifier(target_table)}` AS target
+        USING `{_escape_identifier(source_table)}` AS source
         ON {merge_condition}
         WHEN MATCHED AND ({update_condition}) THEN
             UPDATE SET
