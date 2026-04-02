@@ -58,7 +58,7 @@ const PersonsPropertyDeleteSchema = PersonsDeletePropertyCreateParams.omit({ pro
     .extend(PersonsDeletePropertyCreateQueryParams.omit({ format: true }).shape)
     .extend(PersonsDeletePropertyCreateBody.shape)
     .omit({ $unset: true })
-    .extend({ unset: PersonsDeletePropertyCreateBody.shape['$unset'] })
+    .extend({ unset: PersonsDeletePropertyCreateQueryParams.shape['$unset'] })
 
 const personsPropertyDelete = (): ToolBase<typeof PersonsPropertyDeleteSchema, unknown> => ({
     name: 'persons-property-delete',
@@ -74,7 +74,7 @@ const personsPropertyDelete = (): ToolBase<typeof PersonsPropertyDeleteSchema, u
             path: `/api/projects/${projectId}/persons/${params.id}/delete_property/`,
             body,
             query: {
-                $unset: params.$unset,
+                $unset: params.unset,
             },
         })
         return result

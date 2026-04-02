@@ -222,7 +222,7 @@ function objectToZod(schema: JsonSchema, ctx: ConvertContext): string {
         let zodType = schemaToZod(propSchema, ctx)
 
         // Add .describe() if there's a description
-        if (propSchema.description) {
+        if (propSchema.description && ctx.isTopLevel) {
             const escaped = propSchema.description.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
             zodType = `${zodType}.describe('${escaped}')`
         }
