@@ -553,7 +553,13 @@ class TestConversation(APIBaseTest):
         with patch("langgraph.graph.state.CompiledStateGraph.aget_state", new_callable=AsyncMock):
             response = self.client.get(f"/api/environments/{self.team.id}/conversations/{conversation.id}/")
             self.assertEqual(response.status_code, status.HTTP_200_OK)
-            self.assertEqual(response.json()["id"], str(conversation.id))
+            data = response.json()
+            self.assertEqual(data["id"], str(conversation.id))
+            self.assertIn("messages", data)
+            self.assertIn("has_unsupported_content", data)
+            self.assertIn("agent_mode", data)
+            self.assertIn("is_sandbox", data)
+            self.assertIn("pending_approvals", data)
 
     def test_retrieve_other_users_conversation_succeeds(self):
         """Test that user can retrieve another user's conversation in the same team"""
