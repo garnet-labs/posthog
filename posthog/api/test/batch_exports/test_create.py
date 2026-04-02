@@ -637,6 +637,75 @@ def test_create_snowflake_batch_export_validates_credentials(
 
 
 @pytest.mark.parametrize(
+    "identifiers,expected_status,expected_identifiers",
+    [
+        (
+            {"database": 'my"db'},
+            status.HTTP_201_CREATED,
+            {"database": 'my""db'},
+        ),
+        (
+            {"warehouse": 'my"warehouse'},
+            status.HTTP_201_CREATED,
+            {"warehouse": 'my""warehouse'},
+        ),
+        (
+            {"schema": 'my"schema'},
+            status.HTTP_201_CREATED,
+            {"schema": 'my""schema'},
+        ),
+        (
+            {"table_name": 'my"table'},
+            status.HTTP_201_CREATED,
+            {"table_name": 'my""table'},
+        ),
+    ],
+)
+def test_create_snowflake_batch_export_escapes_identifiers(
+    client: HttpClient, identifiers, expected_status, expected_identifiers, temporal, organization, team, user
+):
+    """Test creating a BatchExport with Snowflake escapes double quotes."""
+
+    destination_data = {
+        "type": "Snowflake",
+        "config": {
+            "account": "my-account",
+            "user": "user",
+            "database": "my-db",
+            "warehouse": "COMPUTE_WH",
+            "schema": "public",
+            "table_name": "my_events",
+            "authentication_type": "password",
+            "password": "abc123",
+            **identifiers,
+        },
+    }
+
+    batch_export_data = {
+        "name": "my-production-snowflake-destination",
+        "destination": destination_data,
+        "interval": "hour",
+    }
+
+    client.force_login(user)
+
+    response = create_batch_export(
+        client,
+        team.pk,
+        batch_export_data,
+    )
+
+    assert response.status_code == expected_status
+
+    config = response.json()["destination"]["config"]
+    for identifier, expected_value in expected_identifiers.items():
+        identifier_value = config[identifier]
+        assert identifier_value == expected_value, (
+            f"Expected identifier {identifier} to be '{expected_value}', but got '{identifier_value}'"
+        )
+
+
+@pytest.mark.parametrize(
     "mode,copy_inputs,expected_status",
     [
         (
