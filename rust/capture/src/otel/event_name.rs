@@ -1,8 +1,18 @@
 use serde_json::Value;
 
-/// A classifier checks a single span attribute and maps its value to a PostHog
-/// event name. Classifiers are tried in order; the first match wins.
-struct EventClassifier {
+/// Configuration for a single supported AI SDK. Adding a new SDK means adding
+/// one entry here — both the namespace prefix (for broad span acceptance) and
+/// the optional classifier (for specific event type mapping) live together, so
+/// they can't get out of sync.
+struct SupportedSdk {
+    /// Accept any span whose attribute key starts with this prefix.
+    prefix: &'static str,
+    /// If set, a span with exactly this attribute key is mapped to a specific
+    /// PostHog event type rather than the generic `$ai_span`.
+    classifier: Option<Classifier>,
+}
+
+struct Classifier {
     attr_key: &'static str,
     classify: fn(&str) -> &'static str,
 }
@@ -31,58 +41,67 @@ fn classify_vercel_ai_operation(op_id: &str) -> &'static str {
     }
 }
 
-const EVENT_CLASSIFIERS: &[EventClassifier] = &[
-    EventClassifier {
-        attr_key: "gen_ai.operation.name",
-        classify: classify_gen_ai_operation,
+/// The complete list of supported AI SDKs. This is the single source of truth
+/// for both span acceptance (via `prefix`) and event type classification (via
+/// `classifier`). To add a new SDK: add one entry here.
+///
+/// Note: Traceloop's classifier key (`llm.request.type`) does not share the
+/// `traceloop.` prefix — both are needed to catch all Traceloop spans.
+const SUPPORTED_SDKS: &[SupportedSdk] = &[
+    SupportedSdk {
+        prefix: "gen_ai.",
+        classifier: Some(Classifier {
+            attr_key: "gen_ai.operation.name",
+            classify: classify_gen_ai_operation,
+        }),
     },
-    EventClassifier {
-        attr_key: "llm.request.type",
-        classify: classify_traceloop_request_type,
+    SupportedSdk {
+        prefix: "ai.",
+        classifier: Some(Classifier {
+            attr_key: "ai.operationId",
+            classify: classify_vercel_ai_operation,
+        }),
     },
-    EventClassifier {
-        attr_key: "ai.operationId",
-        classify: classify_vercel_ai_operation,
+    SupportedSdk {
+        prefix: "traceloop.",
+        classifier: Some(Classifier {
+            attr_key: "llm.request.type",
+            classify: classify_traceloop_request_type,
+        }),
+    },
+    SupportedSdk {
+        prefix: "pydantic_ai.",
+        classifier: None,
     },
 ];
 
-/// Attribute key prefixes for explicitly supported AI SDK namespaces. Only
-/// spans from these SDKs (or those matched by `EVENT_CLASSIFIERS`) are ingested;
-/// everything else is dropped. This is intentional — the OTEL endpoint exists
-/// solely for LLM analytics, so we only accept spans we have processing
-/// middleware for.
-///
-/// Supported SDKs and their prefixes:
-/// - OpenTelemetry GenAI semantic conventions: `gen_ai.`
-/// - Vercel AI SDK: `ai.` (also uses `ai.operationId` as a classifier key)
-/// - pydantic-ai: `pydantic_ai.`
-/// - Traceloop/OpenLLMetry: `traceloop.`
-const AI_ATTRIBUTE_PREFIXES: &[&str] = &["gen_ai.", "ai.", "pydantic_ai.", "traceloop."];
-
-/// Lightweight pre-filter on raw protobuf attributes to avoid converting irrelevant
-/// spans into JSON. A span passes if it carries an attribute from a supported SDK
-/// namespace (`AI_ATTRIBUTE_PREFIXES`) or exactly matches a classifier key from
-/// `EVENT_CLASSIFIERS`. These two checks mirror the logic in `get_event_name` so
-/// every span that passes this gate will also produce a `Some` result there.
+/// Lightweight pre-filter on raw protobuf attributes to avoid converting
+/// irrelevant spans into JSON. Mirrors the logic in `get_event_name` so every
+/// span that passes this gate produces a `Some` result there.
 pub fn has_ai_attributes_raw(attrs: &[opentelemetry_proto::tonic::common::v1::KeyValue]) -> bool {
     attrs.iter().any(|kv| {
-        AI_ATTRIBUTE_PREFIXES
-            .iter()
-            .any(|prefix| kv.key.starts_with(prefix))
-            || EVENT_CLASSIFIERS.iter().any(|c| c.attr_key == kv.key)
+        SUPPORTED_SDKS.iter().any(|sdk| {
+            kv.key.starts_with(sdk.prefix)
+                || sdk
+                    .classifier
+                    .as_ref()
+                    .is_some_and(|c| c.attr_key == kv.key)
+        })
     })
 }
 
 pub fn get_event_name(attrs: &serde_json::Map<String, Value>) -> Option<&'static str> {
-    for c in EVENT_CLASSIFIERS {
-        if let Some(value) = attrs.get(c.attr_key).and_then(|v| v.as_str()) {
-            return Some((c.classify)(value));
+    for sdk in SUPPORTED_SDKS {
+        if let Some(c) = &sdk.classifier {
+            if let Some(value) = attrs.get(c.attr_key).and_then(|v| v.as_str()) {
+                return Some((c.classify)(value));
+            }
         }
     }
 
     if attrs
         .keys()
-        .any(|key| AI_ATTRIBUTE_PREFIXES.iter().any(|prefix| key.starts_with(prefix)))
+        .any(|key| SUPPORTED_SDKS.iter().any(|sdk| key.starts_with(sdk.prefix)))
     {
         Some("$ai_span")
     } else {
