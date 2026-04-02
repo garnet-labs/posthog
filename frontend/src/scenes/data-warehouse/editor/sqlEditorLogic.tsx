@@ -1816,18 +1816,30 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             const queries = splitQueries(fullText)
             const cursorOffset = model.getOffsetAt(position)
 
-            // Helper to validate a subquery standalone and return the appropriate CSS class
-            const validateSubquery = async (subqueryText: string): Promise<string> => {
+            // Helper to validate a subquery standalone
+            const validateSubquery = async (
+                subqueryText: string
+            ): Promise<{ className: string; errorMessage: string | null }> => {
                 try {
                     const response = await performQuery<HogQLMetadata>({
                         kind: NodeKind.HogQLMetadata,
                         language: HogLanguage.hogQL,
                         query: subqueryText,
                     })
-                    const hasErrors = (response?.errors?.length ?? 0) > 0
-                    return hasErrors ? 'active-subquery-highlight-invalid' : 'active-subquery-highlight'
+                    const errors = response?.errors ?? []
+                    if (errors.length > 0) {
+                        const message = errors.map((e) => e.message).join('\n')
+                        return {
+                            className: 'active-subquery-highlight-invalid',
+                            errorMessage: `This subquery may fail standalone:\n${message}`,
+                        }
+                    }
+                    return { className: 'active-subquery-highlight', errorMessage: null }
                 } catch {
-                    return 'active-subquery-highlight-invalid'
+                    return {
+                        className: 'active-subquery-highlight-invalid',
+                        errorMessage: 'This subquery may fail standalone',
+                    }
                 }
             }
 
@@ -1842,7 +1854,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 }
                 const subStart = model.getPositionAt(subquery.start)
                 const subEnd = model.getPositionAt(subquery.end)
-                const className = await validateSubquery(subquery.query)
+                const { className, errorMessage } = await validateSubquery(subquery.query)
                 return {
                     range: {
                         startLineNumber: subStart.lineNumber,
@@ -1850,7 +1862,11 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                         endLineNumber: subEnd.lineNumber,
                         endColumn: subEnd.column,
                     },
-                    options: { className },
+                    options: {
+                        className,
+                        inlineClassName: errorMessage ? 'active-subquery-underline-invalid' : undefined,
+                        hoverMessage: errorMessage ? { value: errorMessage } : undefined,
+                    },
                 }
             }
 
