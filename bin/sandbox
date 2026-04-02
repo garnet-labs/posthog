@@ -1303,18 +1303,29 @@ def _ensure_cloud_config() -> dict:
     config = _load_cloud_config()
     changed = False
 
-    if "launch_template_id" not in config:
-        config["launch_template_id"] = input("Launch template ID (from Terraform output): ").strip()
+    if "ami_id" not in config:
+        val = input("AMI ID (from build-ami.sh output): ").strip()
+        if not val:
+            fatal("AMI ID is required. Run infra/cloud-sandbox/build-ami.sh first.")
+        config["ami_id"] = val
+        changed = True
+    if "security_group_id" not in config:
+        val = input("Security group ID: ").strip()
+        if not val:
+            fatal("Security group ID is required.")
+        config["security_group_id"] = val
         changed = True
     if "subnet_id" not in config:
-        config["subnet_id"] = input("Subnet ID (private subnet): ").strip()
+        val = input("Subnet ID (with internet access): ").strip()
+        if not val:
+            fatal("Subnet ID is required.")
+        config["subnet_id"] = val
         changed = True
     if "region" not in config:
         config["region"] = input("AWS region [us-east-1]: ").strip() or "us-east-1"
         changed = True
     if "aws_profile" not in config:
-        profile = input("AWS CLI profile name [default]: ").strip() or "default"
-        config["aws_profile"] = profile
+        config["aws_profile"] = input("AWS CLI profile name [default]: ").strip() or "default"
         changed = True
 
     if changed:
@@ -1348,12 +1359,23 @@ def _aws(config: dict, *args: str, capture: bool = True) -> subprocess.Completed
         "json",
         *args,
     ]
-    return subprocess.run(
-        cmd,
-        check=True,
-        capture_output=capture,
-        text=capture,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            check=True,
+            capture_output=capture,
+            text=capture,
+        )
+    except FileNotFoundError:
+        fatal("AWS CLI not found. Install it: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html")
+    except subprocess.CalledProcessError as e:
+        # Re-raise with a cleaner message — the generic handler in main()
+        # would show the full command including --profile and --region.
+        aws_args = " ".join(args)
+        error(f"aws {aws_args} failed (exit {e.returncode})")
+        for line in (e.stderr or "").strip().splitlines():
+            print(f"  {line}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cloud_get_owner() -> str:
@@ -1463,6 +1485,8 @@ def _cloud_get_tailscale_key(config: dict) -> str:
 
     # Prompt and save
     key = input("Tailscale reusable auth key: ").strip()
+    if not key:
+        fatal("Tailscale auth key is required. Generate one at https://login.tailscale.com/admin/settings/keys")
     config["tailscale_auth_key"] = key
     _save_cloud_config(config)
     return key
@@ -1477,6 +1501,13 @@ def _cloud_gather_auth() -> tuple[str, str, str, str]:
         for pub in ssh_dir.glob("*.pub"):
             ssh_keys.append(pub.read_text().strip())
     ssh_keys_str = "\n".join(ssh_keys)
+
+    if not ssh_keys:
+        fatal(
+            "No SSH public keys found in ~/.ssh/.\n"
+            "  You need at least one SSH key to connect to the sandbox.\n"
+            "  Generate one with: ssh-keygen -t ed25519"
+        )
 
     # Claude auth
     claude_dir = Path.home() / ".claude"
@@ -1496,6 +1527,9 @@ def _cloud_gather_auth() -> tuple[str, str, str, str]:
         )
         if result.returncode == 0 and result.stdout.strip():
             claude_credentials = result.stdout.strip()
+
+    if not claude_credentials:
+        warn("No Claude Code credentials found. Claude Code won't work on the sandbox until you log in manually.")
 
     settings_file = claude_dir / "settings.json"
     if settings_file.exists():
@@ -1517,11 +1551,12 @@ def cmd_cloud_create(branch: str) -> None:
     existing = _cloud_find_instance(config, branch)
     if existing:
         state = existing["State"]["Name"]
-        if state == "stopped":
-            info(f"Sandbox for '{branch}' exists but is sleeping. Use 'sandbox cloud wake {branch}'")
-        else:
-            info(f"Sandbox for '{branch}' already exists (state: {state})")
-        return
+        instance_id = existing["InstanceId"]
+        error(f"Sandbox for '{branch}' already exists ({instance_id}, state: {state})")
+        if state == "running":
+            print(f"  Connect:    sandbox cloud shell {branch}")
+        print(f"  Destroy it: sandbox cloud destroy {branch}")
+        sys.exit(1)
 
     info(f"Creating cloud sandbox for '{branch}'...")
     info(f"  Tailscale hostname: {hostname}")
@@ -1540,14 +1575,32 @@ def cmd_cloud_create(branch: str) -> None:
         claude_json=claude_json,
     )
 
+    # AWS user data limit is 16KB. The base64-encoded template with credentials
+    # can exceed this if settings or keys are unusually large.
+    user_data_bytes = len(user_data)
+    if user_data_bytes > 16384:
+        fatal(
+            f"User data is {user_data_bytes} bytes, exceeding AWS 16KB limit.\n"
+            "  This usually means Claude settings or SSH keys are too large.\n"
+            "  Check ~/.claude/settings.json and ~/.ssh/*.pub"
+        )
+
     result = _aws(
         config,
         "ec2",
         "run-instances",
-        "--launch-template",
-        f"LaunchTemplateId={config['launch_template_id']}",
+        "--image-id",
+        config["ami_id"],
+        "--instance-type",
+        "m6i.2xlarge",
         "--subnet-id",
         config["subnet_id"],
+        "--security-group-ids",
+        config["security_group_id"],
+        "--block-device-mappings",
+        "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}",
+        "--metadata-options",
+        "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2",
         "--user-data",
         user_data,
         "--tag-specifications",
@@ -1601,14 +1654,8 @@ def cmd_cloud_destroy(branch: str) -> None:
     _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)
     success("Instance terminating.")
 
-    # Remove Tailscale node
     if hostname:
-        info(f"Removing Tailscale node '{hostname}'...")
-        subprocess.run(
-            ["tailscale", "admin", "remove", hostname],
-            check=False,
-            capture_output=True,
-        )
+        info(f"Note: Tailscale node '{hostname}' will appear offline. Remove it manually from the Tailscale admin console if desired.")
 
 
 def cmd_cloud_list() -> None:
@@ -1630,60 +1677,6 @@ def cmd_cloud_list() -> None:
         print(f"{branch:<40} {state:<12} {instance_id:<22} {hostname}")
 
 
-def cmd_cloud_sleep(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-    if instance["State"]["Name"] != "running":
-        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
-
-    instance_id = instance["InstanceId"]
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
-
-    info(f"Sleeping cloud sandbox for '{branch}'...")
-
-    # Graceful docker compose stop before stopping the instance
-    if hostname:
-        info("Stopping Docker Compose gracefully...")
-        subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "ConnectTimeout=5",
-                f"ubuntu@{hostname}",
-                "cd /home/ubuntu/posthog && docker compose -f docker-compose.sandbox.yml stop",
-            ],
-            check=False,
-            capture_output=True,
-        )
-
-    _aws(config, "ec2", "stop-instances", "--instance-ids", instance_id)
-    success(f"Sandbox sleeping. EBS persists (~$8/mo). Wake with: sandbox cloud wake {branch}")
-
-
-def cmd_cloud_wake(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-    if instance["State"]["Name"] != "stopped":
-        fatal(f"Sandbox is not stopped (state: {instance['State']['Name']})")
-
-    instance_id = instance["InstanceId"]
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
-
-    info(f"Waking cloud sandbox for '{branch}'...")
-    _aws(config, "ec2", "start-instances", "--instance-ids", instance_id)
-
-    info("Waiting for instance to start...")
-    _aws(config, "ec2", "wait", "instance-running", "--instance-ids", instance_id)
-
-    success(f"Sandbox waking up. Tailscale will reconnect shortly.")
-    print(f"  Connect: sandbox cloud shell {branch}")
-
 
 def cmd_cloud_shell(branch: str) -> None:
     config = _ensure_cloud_config()
@@ -1697,15 +1690,17 @@ def cmd_cloud_shell(branch: str) -> None:
     if not hostname:
         fatal("No Tailscale hostname found for this sandbox")
 
-    # SSH to the host, then attach to the container's tmux session
+    # SSH to the host, then attach to the container's tmux session.
+    # UserKnownHostsFile=/dev/null avoids polluting known_hosts — Tailscale
+    # handles host identity, and the host key changes on every EC2 instance.
     os.execvp(
         "ssh",
         [
             "ssh",
             "-A",  # Forward SSH agent for git auth
             "-t",  # Force TTY allocation
-            "-o",
-            "StrictHostKeyChecking=no",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
             f"ubuntu@{hostname}",
             "docker exec -it -u 1000:1000 sandbox-cloud-app-1 tmux -L sandbox attach-session -t posthog",
         ],
@@ -1736,17 +1731,19 @@ def cmd_cloud_logs(branch: str) -> None:
     if not hostname:
         fatal("No Tailscale hostname found for this sandbox")
 
-    # SSH to host and tail the boot log + docker compose logs
+    # Show the boot log (one-shot), then follow the app container logs.
+    # We use `docker logs` directly rather than `docker compose logs` because
+    # the compose file requires env vars that aren't set in the SSH session.
     os.execvp(
         "ssh",
         [
             "ssh",
             "-t",
-            "-o",
-            "StrictHostKeyChecking=no",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
             f"ubuntu@{hostname}",
-            "tail -f /var/log/sandbox-boot.log 2>/dev/null; "
-            "cd /home/ubuntu/posthog && docker compose -f docker-compose.sandbox.yml logs -f app",
+            "echo '=== Boot log ===' && cat /var/log/sandbox-boot.log 2>/dev/null; "
+            "echo '\\n=== App container logs ===' && docker logs -f sandbox-cloud-app-1",
         ],
     )
 
@@ -1862,8 +1859,6 @@ examples:
 
     for name, help_text in [
         ("destroy", "Terminate a cloud sandbox"),
-        ("sleep", "Stop instance, keep disk (~$8/mo)"),
-        ("wake", "Restart a sleeping sandbox (~1-2 min)"),
         ("shell", "SSH into the sandbox (attaches to mprocs)"),
         ("open", "Open PostHog web UI in browser"),
         ("logs", "Tail boot and app logs"),
@@ -1895,8 +1890,6 @@ def main() -> None:
             "destroy": lambda: cmd_cloud_destroy(args.branch),
             "list": cmd_cloud_list,
             "ls": cmd_cloud_list,
-            "sleep": lambda: cmd_cloud_sleep(args.branch),
-            "wake": lambda: cmd_cloud_wake(args.branch),
             "shell": lambda: cmd_cloud_shell(args.branch),
             "open": lambda: cmd_cloud_open(args.branch),
             "logs": lambda: cmd_cloud_logs(args.branch),

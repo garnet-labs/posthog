@@ -2,9 +2,8 @@
 #
 # Cloud-init user data script for cloud sandboxes.
 #
-# This script runs at instance boot (both first boot and wake from sleep).
-# It's templated by bin/sandbox — variables like SANDBOX_BRANCH are replaced
-# at launch time.
+# This script runs ONCE at first boot only. It's templated by bin/sandbox —
+# placeholders like __SANDBOX_BRANCH__ are replaced at launch time.
 #
 # What it does:
 #   1. Join Tailscale network
@@ -31,7 +30,7 @@ REPO_DIR="/home/ubuntu/posthog"
 
 # --- Tailscale ---
 echo "==> Joining Tailscale network..."
-sudo tailscale up \
+tailscale up \
     --authkey="$TAILSCALE_AUTH_KEY" \
     --hostname="$SANDBOX_HOSTNAME" \
     --ssh
@@ -68,34 +67,30 @@ chown -R ubuntu:ubuntu "$CLAUDE_AUTH_DIR"
 # --- Git fetch + checkout branch ---
 echo "==> Fetching branch: $SANDBOX_BRANCH..."
 cd "$REPO_DIR"
-git fetch origin --quiet
+sudo -u ubuntu git fetch origin --quiet
 
 # Check if the branch exists on remote
-if git show-ref --verify --quiet "refs/remotes/origin/$SANDBOX_BRANCH" 2>/dev/null; then
-    git checkout -B "$SANDBOX_BRANCH" "origin/$SANDBOX_BRANCH"
+if sudo -u ubuntu git show-ref --verify --quiet "refs/remotes/origin/$SANDBOX_BRANCH" 2>/dev/null; then
+    sudo -u ubuntu git checkout -B "$SANDBOX_BRANCH" "origin/$SANDBOX_BRANCH"
 else
-    # Branch doesn't exist on remote yet - create it from master
-    git checkout -B "$SANDBOX_BRANCH" origin/master
+    echo "==> Branch '$SANDBOX_BRANCH' not found on remote — creating from master"
+    sudo -u ubuntu git checkout -B "$SANDBOX_BRANCH" origin/master
 fi
-
-chown -R ubuntu:ubuntu "$REPO_DIR"
 
 # --- Start Docker Compose ---
 echo "==> Starting Docker Compose..."
-cd "$REPO_DIR"
-
 export COMPOSE_PROJECT_NAME=sandbox-cloud
 export SANDBOX_PORT=8000
 export SANDBOX_VITE_PORT=8234
 export SANDBOX_SSH_PORT=2222
-export SANDBOX_CODE="$REPO_DIR"
-export SANDBOX_GIT_DIR="$REPO_DIR/.git"
+export SANDBOX_CODE=$REPO_DIR
+export SANDBOX_GIT_DIR=$REPO_DIR/.git
 export SANDBOX_UID=1000
 export SANDBOX_GID=1000
 export SANDBOX_MODE=cloud
-export SANDBOX_CLAUDE_AUTH="$CLAUDE_AUTH_DIR"
-export SANDBOX_CLAUDE_JSON="$CLAUDE_JSON_FILE"
-export SANDBOX_SSH_AUTHORIZED_KEYS="$UBUNTU_SSH_DIR/authorized_keys"
+export SANDBOX_CLAUDE_AUTH=$CLAUDE_AUTH_DIR
+export SANDBOX_CLAUDE_JSON=$CLAUDE_JSON_FILE
+export SANDBOX_SSH_AUTHORIZED_KEYS=$UBUNTU_SSH_DIR/authorized_keys
 export SANDBOX_IDE_VOLUME=sandbox-intellij
 
 sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml up -d

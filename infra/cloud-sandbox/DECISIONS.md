@@ -44,12 +44,17 @@ org-level reusable auth key tagged `tag:sandbox`.
 - [x] **Retention**: Keep last 3 AMIs (handled by build-ami.sh)
 - [x] **Base AMI**: Auto-discovered Ubuntu 24.04 x86_64
 
+## Boot architecture
+
+- cloud-init.sh runs ONCE at first boot — joins Tailscale, checks out branch, runs `docker compose up -d`
+- Instances are destroyed when done (`sandbox cloud destroy`) — no sleep/wake for MVP
+
 ## To deploy
 
 1. Get AWS CLI access to the remote-dev account
 2. `cd posthog-cloud-infra/terraform/environments/aws-accnt-remote-dev/us-east-1/cloud-sandbox`
 3. `terragrunt apply`
-4. Note the `launch_template_id` and `subnet_ids` from the output
-5. Run `build-ami.sh` from the posthog repo to create the first AMI
+4. Note the `launch_template_id`, `subnet_ids`, and `security_group_id` from the output
+5. Run `build-ami.sh` with `SANDBOX_SECURITY_GROUP` and `SANDBOX_SUBNET_ID` env vars
 6. Update `ami_id` in terragrunt.hcl and re-apply
-7. Run `sandbox cloud create <branch>` -- it will prompt for config on first use
+7. Run `sandbox cloud create <branch>` — it will prompt for config on first use
