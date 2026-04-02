@@ -17,7 +17,7 @@ import {
 import { LemonButton, LemonInput, SideAction, Tooltip } from '@posthog/lemon-ui'
 
 import { FEATURE_FLAGS } from 'lib/constants'
-import { IconOpenInNew, IconUnverifiedEvent } from 'lib/lemon-ui/icons'
+import { IconUnverifiedEvent } from 'lib/lemon-ui/icons'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { capitalizeFirstLetter } from 'lib/utils'
 import { SettingsBar, SettingsButton, SettingsToggle } from 'scenes/session-recordings/components/PanelSettings'
@@ -277,26 +277,6 @@ function LogsFilterSettingsButton(): JSX.Element {
     const { hasLogs } = useValues(logsIngestionLogic)
 
     const hasLogItems = allItemsByItemType['logs']?.length > 0
-    const sessionId = logicProps.sessionRecordingId
-
-    const logsUrlWithSessionFilter = `${urls.logs()}?filterGroup=${encodeURIComponent(
-        JSON.stringify({
-            type: 'AND',
-            values: [
-                {
-                    type: 'AND',
-                    values: [
-                        {
-                            key: 'session_id',
-                            value: sessionId,
-                            operator: 'exact',
-                            type: 'log_entry',
-                        },
-                    ],
-                },
-            ],
-        })
-    )}`
 
     const upsellAction: SideAction | undefined =
         !hasLogs && !logsLoading
@@ -320,14 +300,7 @@ function LogsFilterSettingsButton(): JSX.Element {
                       ),
                   },
               }
-            : hasLogItems
-              ? {
-                    icon: <IconOpenInNew />,
-                    tooltip: 'View logs for this session',
-                    to: logsUrlWithSessionFilter,
-                    targetBlank: true,
-                }
-              : undefined
+            : undefined
 
     return (
         <FilterSettingsButton
