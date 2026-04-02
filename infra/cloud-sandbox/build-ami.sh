@@ -129,9 +129,12 @@ export SANDBOX_GIT_DIR=/home/ubuntu/posthog/.git
 export SANDBOX_UID=1000
 export SANDBOX_GID=1000
 export SANDBOX_MODE=cloud
-export SANDBOX_CLAUDE_AUTH=/dev/null
-export SANDBOX_CLAUDE_JSON=/dev/null
-export SANDBOX_SSH_AUTHORIZED_KEYS=/dev/null
+# Use empty dirs/files instead of /dev/null — Docker needs real bind mount sources
+mkdir -p /tmp/empty-claude-auth
+touch /tmp/empty-claude-json /tmp/empty-ssh-keys
+export SANDBOX_CLAUDE_AUTH=/tmp/empty-claude-auth
+export SANDBOX_CLAUDE_JSON=/tmp/empty-claude-json
+export SANDBOX_SSH_AUTHORIZED_KEYS=/tmp/empty-ssh-keys
 export SANDBOX_IDE_VOLUME=sandbox-intellij
 
 # --- Build sandbox Docker image + pull compose images ---
@@ -174,7 +177,7 @@ for i in $(seq 1 300); do
     fi
     if [ "$i" -eq 300 ]; then
         echo "ERROR: Stack did not become healthy in time"
-        sudo -u ubuntu docker compose -f docker-compose.sandbox.yml logs app --tail=50
+        sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml logs app --tail=50
         build_status "failed"
         exit 1
     fi
