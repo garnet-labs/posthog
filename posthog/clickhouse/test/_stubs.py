@@ -111,6 +111,7 @@ def _install() -> None:
     fake_cluster = types.ModuleType("posthog.clickhouse.cluster")
     fake_cluster.Query = _FakeQuery  # type: ignore[attr-defined]
     fake_cluster.get_cluster = _fake_get_cluster  # type: ignore[attr-defined]
+    fake_cluster.ClickhouseCluster = MagicMock  # type: ignore[attr-defined]
     sys.modules.setdefault("posthog.clickhouse.cluster", fake_cluster)
 
     # infi.clickhouse_orm
@@ -141,6 +142,9 @@ def _install() -> None:
     fake_mt.get_migrations_cluster = _fake_get_cluster  # type: ignore[attr-defined]
     sys.modules.setdefault("posthog.clickhouse.client.migration_tools", fake_mt)
 
+    # posthog.clickhouse.migration_tools.cluster_registry — let real module load
+    # (its only dependency is posthog.clickhouse.cluster which is already stubbed above)
+
     # yaml (for manifest.py)
 
     _yaml_stub = types.ModuleType("yaml")
@@ -167,7 +171,15 @@ def _install() -> None:
         sys.modules.setdefault(mod_name, m)
 
     if not hasattr(sys.modules.get("django.conf"), "settings"):
-        settings_ns = types.SimpleNamespace(CLICKHOUSE_DATABASE="default")
+        settings_ns = types.SimpleNamespace(
+            CLICKHOUSE_DATABASE="default",
+            CLICKHOUSE_HOST="localhost",
+            CLICKHOUSE_CLUSTER="posthog",
+            CLICKHOUSE_LOGS_CLUSTER_HOST="localhost",
+            CLICKHOUSE_LOGS_CLUSTER="posthog_single_shard",
+            CLICKHOUSE_MIGRATIONS_HOST="localhost",
+            CLICKHOUSE_MIGRATIONS_CLUSTER="posthog_migrations",
+        )
         sys.modules["django.conf"].settings = settings_ns  # type: ignore[attr-defined]
 
     class _FakeBaseCommand:

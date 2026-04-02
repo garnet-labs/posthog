@@ -24,7 +24,11 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from posthog.clickhouse.cluster import get_cluster
+from posthog.clickhouse.migration_tools.cluster_registry import (
+    get_all_cluster_names,
+    get_cluster_for,
+    validate_cluster_name,
+)
 from posthog.clickhouse.migration_tools.schema_introspect import detect_drift, dump_schema
 
 MAX_DRIFT_DISPLAY = 10
@@ -155,12 +159,16 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
 
     def _compute_diffs(
-        self, client: Any, database: str, schema_dir: Any, cluster_filter: str | None = None
+        self, database: str, schema_dir: Any, cluster_filter: str | None = None
     ) -> tuple[list, str | None]:
         """Compute desired-vs-current diffs. Returns (diffs, error_message).
 
-        When cluster_filter is set, only YAML files matching that cluster are diffed.
+        Connects to the correct ClickHouse host for each logical cluster
+        declared in the YAML files. When *cluster_filter* is set, only YAML
+        files matching that cluster are diffed.
         """
+        from collections import defaultdict
+
         from posthog.clickhouse.migration_tools.desired_state import parse_desired_state_dir
         from posthog.clickhouse.migration_tools.state_diff import diff_state
 
@@ -173,13 +181,33 @@ class Command(BaseCommand):
             if not desired_states:
                 return [], f"No YAML files for cluster '{cluster_filter}' in {schema_dir}"
 
-        current = dump_schema(client, database)
+        # Validate cluster names
+        for ds in desired_states:
+            if not validate_cluster_name(ds.cluster):
+                known = ", ".join(get_all_cluster_names())
+                return [], (
+                    f"Schema file for ecosystem '{ds.ecosystem}' references cluster "
+                    f"'{ds.cluster}' which is not in the cluster registry. "
+                    f"Known clusters: {known}. "
+                    f"Add '{ds.cluster}' to _REGISTRY in cluster_registry.py with the "
+                    f"appropriate CLICKHOUSE_*_HOST and CLICKHOUSE_*_CLUSTER settings."
+                )
+
+        # Group desired states by cluster so we connect once per cluster
+        by_cluster: dict[str, list] = defaultdict(list)
+        for ds in desired_states:
+            by_cluster[ds.cluster].append(ds)
 
         all_diffs = []
-        for desired in desired_states:
-            ecosystem_current = {name: table for name, table in current.items() if name in desired.tables}
-            diffs = diff_state(desired, ecosystem_current, database=database)
-            all_diffs.extend(diffs)
+        for cluster_name, states in by_cluster.items():
+            cluster_obj = get_cluster_for(cluster_name)
+            client = _any_client(cluster_obj)
+            current = dump_schema(client, database)
+
+            for desired in states:
+                ecosystem_current = {name: table for name, table in current.items() if name in desired.tables}
+                diffs = diff_state(desired, ecosystem_current, database=database)
+                all_diffs.extend(diffs)
 
         return all_diffs, None
 
@@ -189,7 +217,6 @@ class Command(BaseCommand):
         from posthog.clickhouse.migration_tools.plan_generator import generate_plan_text
 
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
         schema_dir = Path(options.get("schema_dir", DEFAULT_SCHEMA_DIR))
 
         if not schema_dir.exists():
@@ -197,9 +224,8 @@ class Command(BaseCommand):
             print("Run 'ch_migrate generate' to create schema YAML files.")
             return
 
-        client = _any_client(cluster)
         cluster_filter = options.get("cluster")
-        all_diffs, err = self._compute_diffs(client, database, schema_dir, cluster_filter=cluster_filter)
+        all_diffs, err = self._compute_diffs(database, schema_dir, cluster_filter=cluster_filter)
         if err:
             print(err)
             return
@@ -239,7 +265,7 @@ class Command(BaseCommand):
         hostname = socket.gethostname()
 
         cluster_filter = options.get("cluster")
-        all_diffs, err = self._compute_diffs(client, database, schema_dir, cluster_filter=cluster_filter)
+        all_diffs, err = self._compute_diffs(database, schema_dir, cluster_filter=cluster_filter)
         if err:
             print(err)
             return
@@ -377,26 +403,33 @@ class Command(BaseCommand):
 
     def handle_drift(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
 
-        print(f"Checking schema drift across cluster hosts (database={database})...")
-        diffs = detect_drift(cluster, database)
+        print(f"Checking schema drift across all registered clusters (database={database})...")
 
-        if not diffs:
-            print("No schema drift detected. All hosts are in sync.")
+        all_diffs = []
+        for name in get_all_cluster_names():
+            try:
+                cluster = get_cluster_for(name)
+                diffs = detect_drift(cluster, database)
+                if diffs:
+                    print(f"\nDrift detected on cluster '{name}':")
+                    for diff in diffs:
+                        host_label = f" [{diff.host}]" if diff.host else ""
+                        if diff.column:
+                            print(f"  {diff.diff_type}: {diff.table}.{diff.column}{host_label}")
+                        else:
+                            print(f"  {diff.diff_type}: {diff.table}{host_label}")
+                        if diff.expected:
+                            print(f"    expected: {diff.expected}")
+                        if diff.actual:
+                            print(f"    actual:   {diff.actual}")
+                    all_diffs.extend(diffs)
+            except Exception as e:
+                print(f"  Warning: could not connect to cluster '{name}': {e}")
+
+        if not all_diffs:
+            print("No schema drift detected across all clusters.")
             return
-
-        print(f"\nSchema drift detected ({len(diffs)} difference(s)):\n")
-        for diff in diffs:
-            host_label = f" [{diff.host}]" if diff.host else ""
-            if diff.column:
-                print(f"  {diff.diff_type}: {diff.table}.{diff.column}{host_label}")
-            else:
-                print(f"  {diff.diff_type}: {diff.table}{host_label}")
-            if diff.expected:
-                print(f"    expected: {diff.expected}")
-            if diff.actual:
-                print(f"    actual:   {diff.actual}")
 
         sys.exit(1)
 
@@ -406,7 +439,7 @@ class Command(BaseCommand):
 
     def handle_schema(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
+        cluster = get_cluster_for("main")
 
         client = _any_client(cluster)
         schema = dump_schema(client, database)
@@ -434,7 +467,7 @@ class Command(BaseCommand):
 
     def handle_status(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
+        cluster = get_cluster_for("main")
         client = _any_client(cluster)
 
         from posthog.clickhouse.migration_tools.tracking import TRACKING_TABLE_NAME, _ensure_tracking_table
@@ -479,7 +512,7 @@ class Command(BaseCommand):
 
     def handle_bootstrap(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
+        cluster = get_cluster_for("main")
         client = _any_client(cluster)
 
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table
@@ -545,7 +578,6 @@ class Command(BaseCommand):
         from posthog.clickhouse.migration_tools.state_diff import detect_orphans
 
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
         schema_dir = Path(options.get("schema_dir", DEFAULT_SCHEMA_DIR))
 
         if not schema_dir.exists():
@@ -557,6 +589,7 @@ class Command(BaseCommand):
             print(f"No YAML files found in {schema_dir}")
             return
 
+        cluster = get_cluster_for("main")
         client = _any_client(cluster)
         current = dump_schema(client, database)
         exclude = options.get("exclude") or []
@@ -581,7 +614,7 @@ class Command(BaseCommand):
         from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
 
         database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster()
+        cluster = get_cluster_for("main")
         client = _any_client(cluster)
 
         _ensure_tracking_table(client, database)

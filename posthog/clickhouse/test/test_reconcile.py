@@ -659,5 +659,99 @@ class TestDetectOrphans(unittest.TestCase):
         self.assertEqual(orphans, [])
 
 
+class TestClusterRegistry(unittest.TestCase):
+    """Tests for cluster_registry module."""
+
+    def test_cluster_registry_maps_main(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        mock_settings.CLICKHOUSE_HOST = "main-host"
+        mock_settings.CLICKHOUSE_CLUSTER = "posthog"
+
+        with (
+            patch("posthog.clickhouse.migration_tools.cluster_registry.get_cluster") as mock_get_cluster,
+            patch("django.conf.settings", mock_settings),
+        ):
+            from posthog.clickhouse.migration_tools.cluster_registry import get_cluster_for
+
+            get_cluster_for("main")
+            mock_get_cluster.assert_called_once_with(host="main-host", cluster="posthog")
+
+    def test_cluster_registry_maps_logs(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        mock_settings.CLICKHOUSE_LOGS_CLUSTER_HOST = "logs-host"
+        mock_settings.CLICKHOUSE_LOGS_CLUSTER = "posthog_single_shard"
+
+        with (
+            patch("posthog.clickhouse.migration_tools.cluster_registry.get_cluster") as mock_get_cluster,
+            patch("django.conf.settings", mock_settings),
+        ):
+            from posthog.clickhouse.migration_tools.cluster_registry import get_cluster_for
+
+            get_cluster_for("logs")
+            mock_get_cluster.assert_called_once_with(host="logs-host", cluster="posthog_single_shard")
+
+    def test_cluster_registry_unknown_falls_back(self) -> None:
+        from unittest.mock import patch
+
+        with patch("posthog.clickhouse.migration_tools.cluster_registry.get_cluster") as mock_get_cluster:
+            from posthog.clickhouse.migration_tools.cluster_registry import get_cluster_for
+
+            get_cluster_for("unknown_cluster")
+            mock_get_cluster.assert_called_once_with()
+
+    def test_plan_groups_by_cluster(self) -> None:
+        """Desired states with different clusters should each connect to their own cluster host."""
+        ds_main = _make_desired_state({"t1": _make_desired_table("t1", columns=[ColumnDef(name="id", type="UUID")])})
+        ds_main.cluster = "main"
+
+        ds_logs = DesiredState(
+            ecosystem="logs_eco",
+            cluster="logs",
+            tables={"t2": _make_desired_table("t2", columns=[ColumnDef(name="id", type="UUID")])},
+        )
+
+        # Both clusters exist in the registry
+        from posthog.clickhouse.migration_tools.cluster_registry import validate_cluster_name
+
+        self.assertTrue(validate_cluster_name("main"))
+        self.assertTrue(validate_cluster_name("logs"))
+        # And they produce separate groupings
+        from collections import defaultdict
+
+        by_cluster: dict[str, list] = defaultdict(list)
+        for ds in [ds_main, ds_logs]:
+            by_cluster[ds.cluster].append(ds)
+
+        self.assertEqual(sorted(by_cluster.keys()), ["logs", "main"])
+        self.assertEqual(len(by_cluster["main"]), 1)
+        self.assertEqual(len(by_cluster["logs"]), 1)
+
+    def test_unknown_cluster_in_yaml_errors(self) -> None:
+        """A YAML referencing an unknown cluster should produce a clear error."""
+        from posthog.clickhouse.migration_tools.cluster_registry import get_all_cluster_names, validate_cluster_name
+
+        self.assertFalse(validate_cluster_name("sessions"))
+
+        known = ", ".join(get_all_cluster_names())
+        self.assertIn("logs", known)
+        self.assertIn("main", known)
+        self.assertIn("migrations", known)
+
+        # Simulate the validation error message
+        cluster_name = "sessions"
+        ecosystem = "sessions_v3"
+        msg = (
+            f"Schema file for ecosystem '{ecosystem}' references cluster "
+            f"'{cluster_name}' which is not in the cluster registry. "
+            f"Known clusters: {known}."
+        )
+        self.assertIn("sessions", msg)
+        self.assertIn("not in the cluster registry", msg)
+
+
 if __name__ == "__main__":
     unittest.main()
