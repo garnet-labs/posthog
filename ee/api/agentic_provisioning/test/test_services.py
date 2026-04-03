@@ -71,7 +71,7 @@ class TestProvisioningServices(StripeProvisioningTestBase):
         data = res.json()
         services = data["data"]
         assert len(services) == 1
-        assert data["next_cursor"] == ""
+        assert "next_cursor" not in data
 
     @patch("ee.api.agentic_provisioning.views.requests.get", return_value=_mock_billing_response())
     @patch("ee.api.agentic_provisioning.views.cache", new_callable=_mock_cache_empty)
