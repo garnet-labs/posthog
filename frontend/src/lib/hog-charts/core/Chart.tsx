@@ -7,6 +7,7 @@ import { GoalLines } from '../overlays/GoalLines'
 import { Tooltip } from '../overlays/Tooltip'
 import { ChartContext } from './chart-context'
 import { ChartErrorBoundary } from './ChartErrorBoundary'
+import { createXAxisTickCallback } from './date-formatter'
 import { useChartCanvas } from './hooks/useChartCanvas'
 import { useChartDraw } from './hooks/useChartDraw'
 import { useChartInteraction } from './hooks/useChartInteraction'
@@ -68,7 +69,9 @@ export function Chart({
     resolveValue,
 }: ChartProps): React.ReactElement {
     const {
-        xTickFormatter,
+        xTickFormatter: explicitXFormatter,
+        xAxisType,
+        dateConfig,
         yTickFormatter,
         hideXAxis = false,
         hideYAxis = false,
@@ -76,6 +79,20 @@ export function Chart({
         showCrosshair = false,
         goalLines,
     } = config ?? {}
+
+    const xTickFormatter = useMemo(() => {
+        if (explicitXFormatter) {
+            return explicitXFormatter
+        }
+        if (xAxisType === 'date' && dateConfig) {
+            return createXAxisTickCallback({
+                interval: dateConfig.interval,
+                allDays: labels,
+                timezone: dateConfig.timezone,
+            })
+        }
+        return undefined
+    }, [explicitXFormatter, xAxisType, dateConfig, labels])
 
     const margins = useMemo<ChartMargins>(() => {
         const m = { ...DEFAULT_MARGINS }

@@ -96,6 +96,14 @@ export interface ChartConfig {
     yScaleType?: 'linear' | 'log'
     // — Axis formatting —
 
+    /** When set to 'date', applies built-in smart date formatting to x-axis labels.
+     *  Requires `dateConfig` to be provided. Overridden by `xTickFormatter` if both are set. */
+    xAxisType?: 'date'
+    /** Configuration for the built-in date formatter. Only used when `xAxisType` is 'date'. */
+    dateConfig?: {
+        interval?: 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month'
+        timezone: string
+    }
     /** Custom x-axis tick label formatter. Return null to skip a tick. Called with (label, index). */
     xTickFormatter?: (value: string, index: number) => string | null
     /** Custom y-axis tick label formatter. Overrides the built-in auto-precision formatter. */

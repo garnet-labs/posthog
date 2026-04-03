@@ -1,7 +1,6 @@
 import { useValues } from 'kea'
 import { useMemo } from 'react'
 
-import { createXAxisTickCallback } from 'lib/charts/utils/dates'
 import { buildTheme } from 'lib/charts/utils/theme'
 import { LineChart } from 'lib/hog-charts'
 import type { LineChartConfig, Series } from 'lib/hog-charts'
@@ -61,18 +60,16 @@ export function TrendsLineChartD3({ context }: TrendsLineChartD3Props): JSX.Elem
             fillArea: display === ChartDisplayType.ActionsAreaGraph,
         }))
 
-    const xTickFormatter = createXAxisTickCallback({
-        interval: interval ?? 'day',
-        allDays: currentPeriodResult?.days ?? [],
-        timezone,
-    })
-
     const chartConfig: LineChartConfig = {
         showGrid: true,
         showCrosshair: true,
         yScaleType: yAxisScaleType === 'log10' ? 'log' : 'linear',
         percentStackView: !!showPercentStackView && !!supportsPercentStackView,
-        xTickFormatter: xTickFormatter,
+        xAxisType: 'date',
+        dateConfig: {
+            interval: interval ?? 'day',
+            timezone,
+        },
         goalLines: goalLines?.map((g: SchemaGoalLine) => ({
             value: g.value,
             label: g.label ?? undefined,

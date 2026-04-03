@@ -10,6 +10,10 @@ export type { ChartProps } from './core/Chart'
 export { useChart } from './core/chart-context'
 export type { BaseChartContext } from './core/chart-context'
 
+// Date formatting
+export { createXAxisTickCallback } from './core/date-formatter'
+export type { DateInterval } from './core/date-formatter'
+
 // Core types
 export type {
     ChartConfig,
