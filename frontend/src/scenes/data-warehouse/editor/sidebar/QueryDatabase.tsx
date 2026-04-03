@@ -12,6 +12,7 @@ import {
     IconCode,
     IconCode2,
     IconDatabase,
+    IconExternal,
     IconPlusSmall,
 } from '@posthog/icons'
 import { LemonDialog } from '@posthog/lemon-ui'
@@ -69,7 +70,8 @@ export const QueryDatabase = ({
     } = useActions(dataWarehouseViewsLogic)
     const { deleteJoin } = useActions(dataWarehouseSettingsLogic)
     const { deleteDraft } = useActions(draftsLogic)
-    const { setActiveTab, setQueryInput, setSourceQuery } = useActions(sqlEditorLogic)
+    const { openMaterializationModal, runQuery, setActiveTab, setQueryInput, setSourceQuery } =
+        useActions(sqlEditorLogic)
     const { isEmbeddedMode, sourceQuery } = useValues(sqlEditorLogic)
     const builtTabLogic = useMountedLogic(sqlEditorLogic)
     const formatTraversalChain = (chain?: (string | number)[]): string | null => {
@@ -187,6 +189,55 @@ export const QueryDatabase = ({
         }
     }
 
+    const isPreviewableViewItem = (item: TreeDataItem): boolean => {
+        return ['view', 'managed-view', 'endpoint'].includes(item.record?.type)
+    }
+
+    const previewItem = (item: TreeDataItem): void => {
+        if (!isPreviewableViewItem(item)) {
+            return
+        }
+
+        const table = item.record?.tableName || item.name
+        const previewQuery = `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
+        const nextConnectionId = connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
+
+        if (isEmbeddedMode) {
+            setActiveTab(OutputTab.Results)
+            setSourceQuery({
+                ...sourceQuery,
+                source: {
+                    ...sourceQuery.source,
+                    connectionId: nextConnectionId,
+                    query: previewQuery,
+                },
+            })
+            setQueryInput(previewQuery)
+            runQuery(previewQuery, true)
+            return
+        }
+
+        router.actions.push(
+            urls.sqlEditor({
+                query: previewQuery,
+                outputTab: OutputTab.Results,
+                connectionId: nextConnectionId,
+            })
+        )
+    }
+
+    const openItemEditor = (item: TreeDataItem, newTab = false): void => {
+        const url =
+            item.record?.type === 'endpoint' ? getEndpointUrl(item) : urls.sqlEditor({ view_id: item.record?.view.id })
+
+        if (newTab) {
+            newInternalTab(url)
+            return
+        }
+
+        router.actions.push(url)
+    }
+
     const getEndpointUrl = (item: TreeDataItem): string => {
         if (item.record?.endpoint?.current_version) {
             return urls.endpoint(item.name, item.record.endpoint.current_version)
@@ -266,7 +317,16 @@ export const QueryDatabase = ({
                 const tableKindLabel = !isColumn && item.children?.length ? getTableKindLabel(item) : null
 
                 return (
-                    <span className="truncate">
+                    <span
+                        className="truncate"
+                        onDoubleClick={(e) => {
+                            if (!isPreviewableViewItem(item)) {
+                                return
+                            }
+                            e.stopPropagation()
+                            previewItem(item)
+                        }}
+                    >
                         <div className="flex flex-row gap-1 justify-between">
                             <div className="shrink-0 flex min-w-0 items-center gap-2">
                                 {hasMatches && searchTerm ? (
@@ -535,72 +595,77 @@ export const QueryDatabase = ({
                     item.record?.type === 'view' ||
                     item.record?.type === 'managed-view'
                 ) {
-                    // const viewUrl = getViewUrl(item) ||
-                    const url =
-                        item.record?.type === 'endpoint'
-                            ? getEndpointUrl(item)
-                            : urls.sqlEditor({ view_id: item.record?.view.id })
                     const table = item.record?.tableName
                     const selectAllQuery = table
                         ? `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
                         : null
-                    const nextConnectionId =
-                        connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
+                    const editLabel = item.record.type === 'endpoint' ? 'Edit endpoint' : 'Edit view'
 
                     return (
                         <DropdownMenuGroup>
-                            {table &&
-                            selectAllQuery &&
-                            (item.record.type !== 'endpoint' || item.record.isMaterialized) ? (
-                                <DropdownMenuItem
-                                    asChild
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        if (isEmbeddedMode) {
-                                            setActiveTab(OutputTab.Results)
-                                            setSourceQuery({
-                                                ...sourceQuery,
-                                                source: {
-                                                    ...sourceQuery.source,
-                                                    connectionId: nextConnectionId,
-                                                },
-                                            })
-                                            setQueryInput(selectAllQuery)
-                                            return
-                                        }
-
-                                        router.actions.push(
-                                            urls.sqlEditor({
-                                                query: selectAllQuery,
-                                                outputTab: OutputTab.Results,
-                                                connectionId: nextConnectionId,
-                                            })
-                                        )
-                                    }}
-                                >
-                                    <ButtonPrimitive menuItem>Select all</ButtonPrimitive>
-                                </DropdownMenuItem>
-                            ) : null}
-                            {!isEmbeddedMode && item.record.type !== 'endpoint' ? (
-                                <DropdownMenuItem
-                                    asChild
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        router.actions.push(url)
-                                    }}
-                                >
-                                    <ButtonPrimitive menuItem>Edit view definition</ButtonPrimitive>
-                                </DropdownMenuItem>
-                            ) : null}
+                            <div className="flex gap-px">
+                                {!isEmbeddedMode && item.record.type !== 'endpoint' ? (
+                                    <>
+                                        <DropdownMenuItem
+                                            asChild
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                openItemEditor(item)
+                                            }}
+                                        >
+                                            <ButtonPrimitive menuItem className="flex-1 rounded-r-none">
+                                                {editLabel}
+                                            </ButtonPrimitive>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                            asChild
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                openItemEditor(item, true)
+                                            }}
+                                        >
+                                            <ButtonPrimitive
+                                                menuItem
+                                                className="px-2 rounded-l-none"
+                                                iconOnly
+                                                tooltip={editLabel}
+                                            >
+                                                <IconExternal />
+                                            </ButtonPrimitive>
+                                        </DropdownMenuItem>
+                                    </>
+                                ) : (
+                                    <DropdownMenuItem
+                                        asChild
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            openItemEditor(item, true)
+                                        }}
+                                    >
+                                        <ButtonPrimitive menuItem>{editLabel}</ButtonPrimitive>
+                                    </DropdownMenuItem>
+                                )}
+                            </div>
                             <DropdownMenuItem
                                 asChild
                                 onClick={(e) => {
                                     e.stopPropagation()
-                                    newInternalTab(url)
+                                    previewItem(item)
                                 }}
                             >
-                                <ButtonPrimitive menuItem>Edit in new tab</ButtonPrimitive>
+                                <ButtonPrimitive menuItem>Query</ButtonPrimitive>
                             </DropdownMenuItem>
+                            {item.record.type === 'view' ? (
+                                <DropdownMenuItem
+                                    asChild
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        openMaterializationModal(item.record?.view)
+                                    }}
+                                >
+                                    <ButtonPrimitive menuItem>Materialization</ButtonPrimitive>
+                                </DropdownMenuItem>
+                            ) : null}
                             <DropdownMenuItem
                                 asChild
                                 onClick={(e) => {
