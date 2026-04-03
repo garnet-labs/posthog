@@ -37,7 +37,7 @@ set -euo pipefail
 
 # --- Configuration ---
 REGION="${AWS_REGION:-us-east-1}"
-INSTANCE_TYPE="${BUILD_INSTANCE_TYPE:-m6i.2xlarge}"
+INSTANCE_TYPE="${BUILD_INSTANCE_TYPE:-m6id.2xlarge}"
 VOLUME_SIZE=40
 KEY_NAME="${AWS_KEY_NAME:-}"
 BUILD_BRANCH="${BUILD_BRANCH:-}"
@@ -77,6 +77,9 @@ USER_DATA=$(cat << 'USERDATA_EOF'
 set -euo pipefail
 exec > /var/log/sandbox-ami-build.log 2>&1
 
+SECONDS=0
+log() { echo "==> [${SECONDS}s] $*"; }
+
 # Write status markers to the serial console so the local build script
 # can poll via `aws ec2 get-console-output`. Regular output goes to the
 # log file (via the exec redirect above), but /dev/ttyS0 bypasses that.
@@ -90,10 +93,38 @@ trap 'build_status "failed"; echo "=== LAST 30 LINES ===" > /dev/ttyS0 2>/dev/nu
 
 build_status "provisioning"
 
+# --- Set up NVMe instance store for Docker (if available) ---
+# m6id instances have a local NVMe SSD. Using it for Docker builds
+# avoids EBS IOPS bottlenecks during image builds and pnpm installs.
+ROOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" | head -1)
+log "Root device: $ROOT_DEV"
+log "Available NVMe devices: $(ls /dev/nvme*n1 2>/dev/null || echo 'none')"
+
+NVME_DEV=""
+for dev in /dev/nvme*n1; do
+    name=$(basename "$dev")
+    if [ "$name" != "$ROOT_DEV" ] && [ -b "$dev" ]; then
+        NVME_DEV="$dev"
+        break
+    fi
+done
+
+USE_NVME=false
+if [ -n "$NVME_DEV" ]; then
+    log "Found NVMe instance store: $NVME_DEV ($(lsblk -no SIZE "$NVME_DEV"))"
+    mkfs.ext4 -F -L nvme-docker "$NVME_DEV"
+    mkdir -p /mnt/nvme
+    mount "$NVME_DEV" /mnt/nvme
+    log "NVMe mounted at /mnt/nvme ($(df -h /mnt/nvme | tail -1 | awk '{print $2}') total)"
+    USE_NVME=true
+else
+    log "No NVMe instance store found, building on EBS"
+fi
+
 # --- Install Docker ---
-echo "==> Installing Docker..."
+log "Installing Docker..."
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg
+apt-get install -y -qq ca-certificates curl gnupg zstd
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
@@ -101,38 +132,82 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt-get update -qq
 apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
 usermod -aG docker ubuntu
+log "Docker installed"
+
+# Point Docker at NVMe if available — all builds run on fast local storage
+if [ "$USE_NVME" = true ]; then
+    log "Docker data before move: $(du -sh /var/lib/docker 2>/dev/null | cut -f1 || echo 'empty')"
+    systemctl stop docker.socket docker
+    mkdir -p /mnt/nvme/docker
+    if [ -n "$(ls -A /var/lib/docker 2>/dev/null)" ]; then
+        mv /var/lib/docker/* /mnt/nvme/docker/
+        log "Moved Docker data to NVMe"
+    else
+        log "No Docker data to move (fresh install)"
+    fi
+    rm -rf /var/lib/docker
+    ln -s /mnt/nvme/docker /var/lib/docker
+    log "Symlinked /var/lib/docker -> /mnt/nvme/docker"
+    systemctl start docker
+    log "Docker restarted on NVMe"
+fi
 
 # --- Install Tailscale ---
-echo "==> Installing Tailscale..."
+log "Installing Tailscale..."
 curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable tailscaled
+log "Tailscale installed"
 
 # --- Clone PostHog repo ---
-echo "==> Cloning PostHog repo..."
+log "Cloning PostHog repo..."
 build_status "cloning-repo"
 cd /home/ubuntu
 sudo -u ubuntu git clone https://github.com/PostHog/posthog.git
 cd posthog
 if [ -n "__BUILD_BRANCH__" ] && [ "__BUILD_BRANCH__" != "__" ]; then
-    echo "==> Checking out branch: __BUILD_BRANCH__"
+    log "Checking out branch: __BUILD_BRANCH__"
     sudo -u ubuntu git fetch origin "__BUILD_BRANCH__"
     sudo -u ubuntu git checkout "__BUILD_BRANCH__"
 fi
+log "Repo ready at $(git rev-parse --short HEAD)"
 
 # --- Docker Hub auth (avoids rate limiting) ---
 if [ -n "__DOCKERHUB_USER__" ] && [ "__DOCKERHUB_USER__" != "__" ]; then
-    echo "==> Logging into Docker Hub..."
+    log "Logging into Docker Hub as __DOCKERHUB_USER__..."
     sudo -u ubuntu sg docker -c "echo __DOCKERHUB_TOKEN__ | docker login -u __DOCKERHUB_USER__ --password-stdin"
+    log "Docker Hub login complete"
 fi
 
 # --- Build database cache (same command as local) ---
-echo "==> Building database cache..."
+log "Building database cache..."
 build_status "building-cache"
 apt-get install -y -qq python3-yaml
 sudo -u ubuntu sg docker -c "python3 bin/sandbox rebuild-cache"
+log "Database cache built"
+
+# --- Archive Docker data for fast NVMe restore at boot ---
+# At boot, cloud-init extracts this single archive to NVMe instead of
+# copying 200k small files from EBS (throughput-bound vs IOPS-bound).
+log "Archiving Docker data..."
+build_status "archiving"
+log "Docker data size: $(du -sh /var/lib/docker | cut -f1)"
+systemctl stop docker.socket docker
+tar -C /var/lib/docker -I 'zstd -T0 -3' -cf /var/cache/docker-data.tar.zst .
+log "Archive created: $(du -h /var/cache/docker-data.tar.zst | cut -f1)"
+# Remove loose Docker files — only the archive is needed in the AMI snapshot.
+# This makes the snapshot smaller and faster to initialize from S3.
+rm -rf /var/lib/docker
+mkdir -p /var/lib/docker
+log "Loose Docker files removed"
+
+# If we used NVMe, unmount it — it won't be in the AMI snapshot
+if [ "$USE_NVME" = true ]; then
+    umount /mnt/nvme
+    log "NVMe unmounted"
+fi
 
 # --- Clean up for snapshotting ---
-echo "==> Cleaning up..."
+log "Cleaning up for snapshot..."
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
@@ -141,7 +216,7 @@ rm -f /home/ubuntu/.docker/config.json
 cloud-init clean --logs
 
 build_status "complete"
-echo "==> AMI build provisioning complete!"
+log "AMI build complete! Total time: ${SECONDS}s"
 
 # Stop the instance to signal completion to the local script.
 # The local script detects "stopped" state as the success signal,

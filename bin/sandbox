@@ -1623,7 +1623,7 @@ def cmd_cloud_create(branch: str) -> None:
         "--security-group-ids",
         config["security_group_id"],
         "--block-device-mappings",
-        "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,Iops=10000,Encrypted=true,DeleteOnTermination=true}",
+        "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}",
         "--metadata-options",
         "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2",
         "--user-data",
@@ -1653,16 +1653,92 @@ def cmd_cloud_create(branch: str) -> None:
     info("Waiting for instance to start...")
     _aws(config, "ec2", "wait", "instance-running", "--instance-ids", instance_id)
 
-    success(f"Cloud sandbox created for '{branch}'")
+    info(f"Instance {instance_id} running. Waiting for Tailscale SSH...")
+
+    # Poll until we can SSH in via Tailscale
+    ssh_base = [
+        "ssh",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ConnectTimeout=5",
+        "-o", "LogLevel=ERROR",
+        f"ubuntu@{hostname}",
+    ]
+    deadline = time.monotonic() + 180  # 3 min for Tailscale to join
+    while time.monotonic() < deadline:
+        result = run(ssh_base + ["true"], check=False, capture=True)
+        if result.returncode == 0:
+            break
+        time.sleep(5)
+    else:
+        fatal(
+            f"Timed out waiting for Tailscale SSH on {hostname}.\n"
+            f"  Instance: {instance_id}\n"
+            f"  Try manually: ssh ubuntu@{hostname}"
+        )
+
+    success(f"SSH connected to {hostname}")
+    info("Tailing boot log (Ctrl-C to detach, sandbox keeps booting)...")
     print()
-    print(f"  Instance:  {instance_id}")
-    print(f"  Hostname:  {hostname}")
+
+    # Tail the boot log until sandbox creation finishes, then attach.
+    # We use tail -f and watch for the completion marker.
+    boot_done = False
+    try:
+        proc = subprocess.Popen(
+            ssh_base + ["tail -n +1 -f /var/log/sandbox-boot.log"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            print(line, end="")
+            if "Cloud sandbox boot complete" in line:
+                boot_done = True
+                proc.terminate()
+                proc.wait()
+                break
+    except KeyboardInterrupt:
+        proc.terminate()
+        proc.wait()
+        info("\nDetached from boot log. Sandbox is still booting.")
+        print(f"  Reattach:  sandbox cloud logs {branch}")
+        print(f"  Shell:     sandbox cloud shell {branch}")
+        return
+
+    if not boot_done:
+        fatal(
+            "Boot log ended without completion marker.\n"
+            f"  Check logs: sandbox cloud logs {branch}"
+        )
+
     print()
-    print("  The sandbox is booting. It will take a few minutes for Tailscale to connect")
-    print("  and Docker Compose to start. Then:")
-    print()
-    print(f"    sandbox cloud shell {branch}")
-    print(f"    sandbox cloud open {branch}")
+    success(f"Cloud sandbox ready for '{branch}'")
+
+    # Open browser in background, then attach to mprocs (like local flow)
+    url = f"http://{hostname}:{PORT_BASE}"
+    subprocess.Popen(
+        [sys.executable, "-c", f"import webbrowser; webbrowser.open({url!r})"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    info("Attaching to mprocs... (detach with Ctrl-b d)")
+    os.execvp(
+        "ssh",
+        [
+            "ssh",
+            "-A",
+            "-t",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            f"ubuntu@{hostname}",
+            f"cd /home/ubuntu/posthog && python3 bin/sandbox shell {branch}",
+        ],
+    )
 
 
 def cmd_cloud_destroy(branch: str) -> None:
