@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka::error::RDKafkaErrorCode;
 
 use crate::config::{CaptureMode, ClusterName, V1KafkaClusterConfig};
+use crate::v1::sinks::kafka::producer::error_code_tag;
 
 /// Kafka topic routing for a processed event.
 /// `Drop` means the event should not be produced at all.
@@ -84,39 +86,44 @@ pub trait SinkResult: Send + Sync {
 pub struct KafkaResult {
     uuid_key: String,
     outcome: Outcome,
-    kafka_error: Option<KafkaError>,
-    cause: Option<String>,
+    error_code: Option<RDKafkaErrorCode>,
+    /// Static cause string for non-Kafka errors (timeout, health gate, etc.)
+    cause_override: Option<&'static str>,
     enqueued_at: DateTime<Utc>,
     completed_at: DateTime<Utc>,
 }
 
 impl KafkaResult {
-    pub(crate) fn new(
+    pub(crate) fn ok(uuid_key: String, enqueued_at: DateTime<Utc>) -> Self {
+        Self {
+            uuid_key,
+            outcome: Outcome::Success,
+            error_code: None,
+            cause_override: None,
+            enqueued_at,
+            completed_at: Utc::now(),
+        }
+    }
+
+    pub(crate) fn err(
         uuid_key: String,
         outcome: Outcome,
-        kafka_error: Option<KafkaError>,
-        cause: Option<String>,
+        error_code: Option<RDKafkaErrorCode>,
+        cause_override: Option<&'static str>,
         enqueued_at: DateTime<Utc>,
-        completed_at: DateTime<Utc>,
     ) -> Self {
         Self {
             uuid_key,
             outcome,
-            kafka_error,
-            cause,
+            error_code,
+            cause_override,
             enqueued_at,
-            completed_at,
+            completed_at: Utc::now(),
         }
     }
 
-    pub fn kafka_error(&self) -> Option<&KafkaError> {
-        self.kafka_error.as_ref()
-    }
-
     pub fn error_code(&self) -> Option<RDKafkaErrorCode> {
-        self.kafka_error
-            .as_ref()
-            .and_then(|e| e.rdkafka_error_code())
+        self.error_code
     }
 }
 
@@ -130,10 +137,89 @@ impl SinkResult for KafkaResult {
     }
 
     fn cause(&self) -> Option<&str> {
-        self.cause.as_deref()
+        if let Some(o) = self.cause_override {
+            return Some(o);
+        }
+        self.error_code.map(error_code_tag)
     }
 
     fn elapsed(&self) -> chrono::Duration {
         self.completed_at.signed_duration_since(self.enqueued_at)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BatchSummary
+// ---------------------------------------------------------------------------
+
+/// Aggregated stats for a batch of publish results.
+pub struct BatchSummary {
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub timed_out: usize,
+    /// Counts keyed by cause tag (e.g. "queue_full", "timeout").
+    pub errors: HashMap<String, usize>,
+}
+
+impl BatchSummary {
+    pub fn from_results(results: &[Box<dyn SinkResult>]) -> Self {
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        let mut timed_out = 0usize;
+        let mut errors: HashMap<String, usize> = HashMap::new();
+
+        for r in results {
+            match r.outcome() {
+                Outcome::Success => succeeded += 1,
+                Outcome::Timeout => {
+                    timed_out += 1;
+                    if let Some(tag) = r.cause() {
+                        *errors.entry(tag.to_string()).or_default() += 1;
+                    }
+                }
+                Outcome::RetriableError | Outcome::FatalError => {
+                    failed += 1;
+                    if let Some(tag) = r.cause() {
+                        *errors.entry(tag.to_string()).or_default() += 1;
+                    }
+                }
+            }
+        }
+
+        Self {
+            total: results.len(),
+            succeeded,
+            failed,
+            timed_out,
+            errors,
+        }
+    }
+
+    pub fn all_ok(&self) -> bool {
+        self.failed == 0 && self.timed_out == 0
+    }
+}
+
+impl fmt::Display for BatchSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} total, {} ok, {} failed, {} timed_out",
+            self.total, self.succeeded, self.failed, self.timed_out
+        )?;
+        if !self.errors.is_empty() {
+            let mut pairs: Vec<_> = self.errors.iter().collect();
+            pairs.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+            write!(f, " (")?;
+            for (i, (tag, count)) in pairs.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}={}", tag, count)?;
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
     }
 }

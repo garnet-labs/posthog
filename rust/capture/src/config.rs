@@ -436,6 +436,16 @@ pub struct V1KafkaClusterConfig {
     pub batch_num_messages: u32,
     #[envconfig(default = "1000000")]
     pub batch_size: u32,
+    /// How often librdkafka refreshes topic metadata from brokers (ms).
+    #[envconfig(default = "20000")]
+    pub metadata_refresh_interval_ms: u32,
+    /// Max age of cached metadata before forced refresh (ms). Should be
+    /// ≥ 3x metadata_refresh_interval_ms. Keeping this low ensures stale
+    /// broker state is flushed promptly after recovery.
+    #[envconfig(default = "60000")]
+    pub metadata_max_age_ms: u32,
+    #[envconfig(default = "60000")]
+    pub socket_timeout_ms: u32,
 
     // -- Topics (all required — envconfig errors if any are missing) --
     pub topic_main: String,

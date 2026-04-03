@@ -24,11 +24,9 @@ pub enum ProduceError {
     #[error("event too big: {message}")]
     EventTooBig { message: String },
 
-    #[error("kafka error: {source}")]
+    #[error("kafka error: {code}")]
     Kafka {
-        #[source]
-        source: KafkaError,
-        code: Option<RDKafkaErrorCode>,
+        code: RDKafkaErrorCode,
         retriable: bool,
     },
 
@@ -45,18 +43,38 @@ impl ProduceError {
         }
     }
 
-    pub fn kafka_error(&self) -> Option<&KafkaError> {
+    pub fn error_code(&self) -> Option<RDKafkaErrorCode> {
         match self {
-            Self::Kafka { source, .. } => Some(source),
+            Self::Kafka { code, .. } => Some(*code),
             _ => None,
         }
     }
 
-    pub fn error_code(&self) -> Option<RDKafkaErrorCode> {
+    /// Stable, low-cardinality tag for metrics and log aggregation.
+    pub fn as_tag(&self) -> &'static str {
         match self {
-            Self::Kafka { code, .. } => *code,
-            _ => None,
+            Self::EventTooBig { .. } => "event_too_big",
+            Self::DeliveryCancelled => "delivery_cancelled",
+            Self::Kafka { code, .. } => error_code_tag(*code),
         }
+    }
+}
+
+/// Stable, low-cardinality snake_case tag for an RDKafkaErrorCode.
+/// Usable anywhere — producer, sink, handler, logging.
+pub fn error_code_tag(code: RDKafkaErrorCode) -> &'static str {
+    match code {
+        RDKafkaErrorCode::QueueFull => "queue_full",
+        RDKafkaErrorCode::MessageSizeTooLarge => "message_size_too_large",
+        RDKafkaErrorCode::MessageTimedOut => "message_timed_out",
+        RDKafkaErrorCode::UnknownTopicOrPartition => "unknown_topic_or_partition",
+        RDKafkaErrorCode::TopicAuthorizationFailed => "topic_authorization_failed",
+        RDKafkaErrorCode::ClusterAuthorizationFailed => "cluster_authorization_failed",
+        RDKafkaErrorCode::InvalidMessage => "invalid_message",
+        RDKafkaErrorCode::InvalidMessageSize => "invalid_message_size",
+        RDKafkaErrorCode::NotLeaderForPartition => "not_leader_for_partition",
+        RDKafkaErrorCode::RequestTimedOut => "request_timed_out",
+        _ => "rdkafka_other",
     }
 }
 
@@ -128,7 +146,16 @@ impl KafkaProducer {
             .set("acks", &config.acks)
             .set("batch.num.messages", config.batch_num_messages.to_string())
             .set("batch.size", config.batch_size.to_string())
-            .set("enable.idempotence", config.enable_idempotence.to_string());
+            .set("enable.idempotence", config.enable_idempotence.to_string())
+            .set(
+                "topic.metadata.refresh.interval.ms",
+                config.metadata_refresh_interval_ms.to_string(),
+            )
+            .set(
+                "metadata.max.age.ms",
+                config.metadata_max_age_ms.to_string(),
+            )
+            .set("socket.timeout.ms", config.socket_timeout_ms.to_string());
 
         if !config.client_id.is_empty() {
             client_config.set("client.id", &config.client_id);
@@ -200,30 +227,27 @@ impl super::KafkaProducerTrait for KafkaProducer {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn is_fatal_kafka_error(e: &KafkaError) -> bool {
+fn is_fatal_kafka_error(code: RDKafkaErrorCode) -> bool {
     matches!(
-        e.rdkafka_error_code(),
-        Some(
-            RDKafkaErrorCode::MessageSizeTooLarge
-                | RDKafkaErrorCode::InvalidMessageSize
-                | RDKafkaErrorCode::InvalidMessage
-                | RDKafkaErrorCode::TopicAuthorizationFailed
-                | RDKafkaErrorCode::ClusterAuthorizationFailed
-        )
+        code,
+        RDKafkaErrorCode::MessageSizeTooLarge
+            | RDKafkaErrorCode::InvalidMessageSize
+            | RDKafkaErrorCode::InvalidMessage
+            | RDKafkaErrorCode::TopicAuthorizationFailed
+            | RDKafkaErrorCode::ClusterAuthorizationFailed
     )
 }
 
 pub(crate) fn produce_error_from_kafka(e: KafkaError) -> ProduceError {
-    let code = e.rdkafka_error_code();
-    if code == Some(RDKafkaErrorCode::MessageSizeTooLarge) {
+    let code = e.rdkafka_error_code().unwrap_or(RDKafkaErrorCode::Unknown);
+    if code == RDKafkaErrorCode::MessageSizeTooLarge {
         ProduceError::EventTooBig {
             message: e.to_string(),
         }
     } else {
         ProduceError::Kafka {
-            retriable: !is_fatal_kafka_error(&e),
+            retriable: !is_fatal_kafka_error(code),
             code,
-            source: e,
         }
     }
 }
