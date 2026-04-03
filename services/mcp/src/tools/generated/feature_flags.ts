@@ -5,7 +5,9 @@ import type { Schemas } from '@/api/generated'
 import {
     FeatureFlagsActivityRetrieve2Params,
     FeatureFlagsActivityRetrieve2QueryParams,
+    FeatureFlagsCopyFlagsCreateBody,
     FeatureFlagsCreateBody,
+    FeatureFlagsDependentFlagsListParams,
     FeatureFlagsDestroyParams,
     FeatureFlagsEvaluationReasonsRetrieveQueryParams,
     FeatureFlagsListQueryParams,
@@ -42,7 +44,7 @@ const featureFlagGetAll = (): ToolBase<
                 created_by_id: params.created_by_id,
                 evaluation_runtime: params.evaluation_runtime,
                 excluded_properties: params.excluded_properties,
-                has_evaluation_tags: params.has_evaluation_tags,
+                has_evaluation_contexts: params.has_evaluation_contexts,
                 limit: params.limit,
                 offset: params.offset,
                 search: params.search,
@@ -81,25 +83,7 @@ const featureFlagGetDefinition = (): ToolBase<
     },
 })
 
-const CreateFeatureFlagSchema = FeatureFlagsCreateBody.omit({
-    deleted: true,
-    created_at: true,
-    version: true,
-    ensure_experience_continuity: true,
-    rollback_conditions: true,
-    performed_rollback: true,
-    evaluation_tags: true,
-    analytics_dashboards: true,
-    has_enriched_analytics: true,
-    creation_context: true,
-    is_remote_configuration: true,
-    has_encrypted_payloads: true,
-    evaluation_runtime: true,
-    bucketing_identifier: true,
-    last_called_at: true,
-    _create_in_folder: true,
-    _should_create_usage_dashboard: true,
-})
+const CreateFeatureFlagSchema = FeatureFlagsCreateBody
 
 const createFeatureFlag = (): ToolBase<typeof CreateFeatureFlagSchema, WithPostHogUrl<Schemas.FeatureFlag>> => ({
     name: 'create-feature-flag',
@@ -107,11 +91,11 @@ const createFeatureFlag = (): ToolBase<typeof CreateFeatureFlagSchema, WithPostH
     handler: async (context: Context, params: z.infer<typeof CreateFeatureFlagSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.name !== undefined) {
-            body['name'] = params.name
-        }
         if (params.key !== undefined) {
             body['key'] = params.key
+        }
+        if (params.name !== undefined) {
+            body['name'] = params.name
         }
         if (params.filters !== undefined) {
             body['filters'] = params.filters
@@ -121,6 +105,9 @@ const createFeatureFlag = (): ToolBase<typeof CreateFeatureFlagSchema, WithPostH
         }
         if (params.tags !== undefined) {
             body['tags'] = params.tags
+        }
+        if (params.evaluation_contexts !== undefined) {
+            body['evaluation_contexts'] = params.evaluation_contexts
         }
         const result = await context.api.request<Schemas.FeatureFlag>({
             method: 'POST',
@@ -132,25 +119,7 @@ const createFeatureFlag = (): ToolBase<typeof CreateFeatureFlagSchema, WithPostH
 })
 
 const UpdateFeatureFlagSchema = FeatureFlagsPartialUpdateParams.omit({ project_id: true }).extend(
-    FeatureFlagsPartialUpdateBody.omit({
-        deleted: true,
-        created_at: true,
-        version: true,
-        ensure_experience_continuity: true,
-        rollback_conditions: true,
-        performed_rollback: true,
-        evaluation_tags: true,
-        analytics_dashboards: true,
-        has_enriched_analytics: true,
-        creation_context: true,
-        is_remote_configuration: true,
-        has_encrypted_payloads: true,
-        evaluation_runtime: true,
-        bucketing_identifier: true,
-        last_called_at: true,
-        _create_in_folder: true,
-        _should_create_usage_dashboard: true,
-    }).shape
+    FeatureFlagsPartialUpdateBody.shape
 )
 
 const updateFeatureFlag = (): ToolBase<typeof UpdateFeatureFlagSchema, WithPostHogUrl<Schemas.FeatureFlag>> => ({
@@ -159,11 +128,11 @@ const updateFeatureFlag = (): ToolBase<typeof UpdateFeatureFlagSchema, WithPostH
     handler: async (context: Context, params: z.infer<typeof UpdateFeatureFlagSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.name !== undefined) {
-            body['name'] = params.name
-        }
         if (params.key !== undefined) {
             body['key'] = params.key
+        }
+        if (params.name !== undefined) {
+            body['name'] = params.name
         }
         if (params.filters !== undefined) {
             body['filters'] = params.filters
@@ -173,6 +142,9 @@ const updateFeatureFlag = (): ToolBase<typeof UpdateFeatureFlagSchema, WithPostH
         }
         if (params.tags !== undefined) {
             body['tags'] = params.tags
+        }
+        if (params.evaluation_contexts !== undefined) {
+            body['evaluation_contexts'] = params.evaluation_contexts
         }
         const result = await context.api.request<Schemas.FeatureFlag>({
             method: 'PATCH',
@@ -223,14 +195,35 @@ const featureFlagsActivityRetrieve = (): ToolBase<
     },
 })
 
+const FeatureFlagsDependentFlagsRetrieveSchema = FeatureFlagsDependentFlagsListParams.omit({ project_id: true })
+
+const featureFlagsDependentFlagsRetrieve = (): ToolBase<
+    typeof FeatureFlagsDependentFlagsRetrieveSchema,
+    Schemas.DependentFlag[]
+> => ({
+    name: 'feature-flags-dependent-flags-retrieve',
+    schema: FeatureFlagsDependentFlagsRetrieveSchema,
+    handler: async (context: Context, params: z.infer<typeof FeatureFlagsDependentFlagsRetrieveSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.DependentFlag[]>({
+            method: 'GET',
+            path: `/api/projects/${projectId}/feature_flags/${params.id}/dependent_flags/`,
+        })
+        return result
+    },
+})
+
 const FeatureFlagsStatusRetrieveSchema = FeatureFlagsStatusRetrieveParams.omit({ project_id: true })
 
-const featureFlagsStatusRetrieve = (): ToolBase<typeof FeatureFlagsStatusRetrieveSchema, unknown> => ({
+const featureFlagsStatusRetrieve = (): ToolBase<
+    typeof FeatureFlagsStatusRetrieveSchema,
+    Schemas.FeatureFlagStatusResponse
+> => ({
     name: 'feature-flags-status-retrieve',
     schema: FeatureFlagsStatusRetrieveSchema,
     handler: async (context: Context, params: z.infer<typeof FeatureFlagsStatusRetrieveSchema>) => {
         const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<unknown>({
+        const result = await context.api.request<Schemas.FeatureFlagStatusResponse>({
             method: 'GET',
             path: `/api/projects/${projectId}/feature_flags/${params.id}/status/`,
         })
@@ -260,78 +253,24 @@ const featureFlagsEvaluationReasonsRetrieve = (): ToolBase<
     },
 })
 
-const FeatureFlagsUserBlastRadiusCreateSchema = FeatureFlagsUserBlastRadiusCreateBody.omit({
-    _create_in_folder: true,
-    _should_create_usage_dashboard: true,
-})
+const FeatureFlagsUserBlastRadiusCreateSchema = FeatureFlagsUserBlastRadiusCreateBody
 
-const featureFlagsUserBlastRadiusCreate = (): ToolBase<typeof FeatureFlagsUserBlastRadiusCreateSchema, unknown> => ({
+const featureFlagsUserBlastRadiusCreate = (): ToolBase<
+    typeof FeatureFlagsUserBlastRadiusCreateSchema,
+    Schemas.UserBlastRadiusResponse
+> => ({
     name: 'feature-flags-user-blast-radius-create',
     schema: FeatureFlagsUserBlastRadiusCreateSchema,
     handler: async (context: Context, params: z.infer<typeof FeatureFlagsUserBlastRadiusCreateSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.name !== undefined) {
-            body['name'] = params.name
+        if (params.condition !== undefined) {
+            body['condition'] = params.condition
         }
-        if (params.key !== undefined) {
-            body['key'] = params.key
+        if (params.group_type_index !== undefined) {
+            body['group_type_index'] = params.group_type_index
         }
-        if (params.filters !== undefined) {
-            body['filters'] = params.filters
-        }
-        if (params.deleted !== undefined) {
-            body['deleted'] = params.deleted
-        }
-        if (params.active !== undefined) {
-            body['active'] = params.active
-        }
-        if (params.created_at !== undefined) {
-            body['created_at'] = params.created_at
-        }
-        if (params.version !== undefined) {
-            body['version'] = params.version
-        }
-        if (params.ensure_experience_continuity !== undefined) {
-            body['ensure_experience_continuity'] = params.ensure_experience_continuity
-        }
-        if (params.rollback_conditions !== undefined) {
-            body['rollback_conditions'] = params.rollback_conditions
-        }
-        if (params.performed_rollback !== undefined) {
-            body['performed_rollback'] = params.performed_rollback
-        }
-        if (params.tags !== undefined) {
-            body['tags'] = params.tags
-        }
-        if (params.evaluation_tags !== undefined) {
-            body['evaluation_tags'] = params.evaluation_tags
-        }
-        if (params.analytics_dashboards !== undefined) {
-            body['analytics_dashboards'] = params.analytics_dashboards
-        }
-        if (params.has_enriched_analytics !== undefined) {
-            body['has_enriched_analytics'] = params.has_enriched_analytics
-        }
-        if (params.creation_context !== undefined) {
-            body['creation_context'] = params.creation_context
-        }
-        if (params.is_remote_configuration !== undefined) {
-            body['is_remote_configuration'] = params.is_remote_configuration
-        }
-        if (params.has_encrypted_payloads !== undefined) {
-            body['has_encrypted_payloads'] = params.has_encrypted_payloads
-        }
-        if (params.evaluation_runtime !== undefined) {
-            body['evaluation_runtime'] = params.evaluation_runtime
-        }
-        if (params.bucketing_identifier !== undefined) {
-            body['bucketing_identifier'] = params.bucketing_identifier
-        }
-        if (params.last_called_at !== undefined) {
-            body['last_called_at'] = params.last_called_at
-        }
-        const result = await context.api.request<unknown>({
+        const result = await context.api.request<Schemas.UserBlastRadiusResponse>({
             method: 'POST',
             path: `/api/projects/${projectId}/feature_flags/user_blast_radius/`,
             body,
@@ -340,17 +279,33 @@ const featureFlagsUserBlastRadiusCreate = (): ToolBase<typeof FeatureFlagsUserBl
     },
 })
 
-const FeatureFlagsCopyFlagsCreateSchema = z.object({})
+const FeatureFlagsCopyFlagsCreateSchema = FeatureFlagsCopyFlagsCreateBody
 
-const featureFlagsCopyFlagsCreate = (): ToolBase<typeof FeatureFlagsCopyFlagsCreateSchema, unknown> => ({
+const featureFlagsCopyFlagsCreate = (): ToolBase<
+    typeof FeatureFlagsCopyFlagsCreateSchema,
+    Schemas.CopyFlagsResponse
+> => ({
     name: 'feature-flags-copy-flags-create',
     schema: FeatureFlagsCopyFlagsCreateSchema,
-    // eslint-disable-next-line no-unused-vars
     handler: async (context: Context, params: z.infer<typeof FeatureFlagsCopyFlagsCreateSchema>) => {
         const orgId = await context.stateManager.getOrgID()
-        const result = await context.api.request<unknown>({
+        const body: Record<string, unknown> = {}
+        if (params.feature_flag_key !== undefined) {
+            body['feature_flag_key'] = params.feature_flag_key
+        }
+        if (params.from_project !== undefined) {
+            body['from_project'] = params.from_project
+        }
+        if (params.target_project_ids !== undefined) {
+            body['target_project_ids'] = params.target_project_ids
+        }
+        if (params.copy_schedule !== undefined) {
+            body['copy_schedule'] = params.copy_schedule
+        }
+        const result = await context.api.request<Schemas.CopyFlagsResponse>({
             method: 'POST',
             path: `/api/organizations/${orgId}/feature_flags/copy_flags/`,
+            body,
         })
         return result
     },
@@ -371,7 +326,9 @@ const scheduledChangesList = (): ToolBase<
             path: `/api/projects/${projectId}/scheduled_changes/`,
             query: {
                 limit: params.limit,
+                model_name: params.model_name,
                 offset: params.offset,
+                record_id: params.record_id,
             },
         })
         return await withPostHogUrl(context, result, '/feature_flags')
@@ -419,6 +376,9 @@ const scheduledChangesCreate = (): ToolBase<typeof ScheduledChangesCreateSchema,
         if (params.recurrence_interval !== undefined) {
             body['recurrence_interval'] = params.recurrence_interval
         }
+        if (params.cron_expression !== undefined) {
+            body['cron_expression'] = params.cron_expression
+        }
         if (params.end_date !== undefined) {
             body['end_date'] = params.end_date
         }
@@ -459,6 +419,9 @@ const scheduledChangesUpdate = (): ToolBase<typeof ScheduledChangesUpdateSchema,
         if (params.recurrence_interval !== undefined) {
             body['recurrence_interval'] = params.recurrence_interval
         }
+        if (params.cron_expression !== undefined) {
+            body['cron_expression'] = params.cron_expression
+        }
         if (params.end_date !== undefined) {
             body['end_date'] = params.end_date
         }
@@ -493,6 +456,7 @@ export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'update-feature-flag': updateFeatureFlag,
     'delete-feature-flag': deleteFeatureFlag,
     'feature-flags-activity-retrieve': featureFlagsActivityRetrieve,
+    'feature-flags-dependent-flags-retrieve': featureFlagsDependentFlagsRetrieve,
     'feature-flags-status-retrieve': featureFlagsStatusRetrieve,
     'feature-flags-evaluation-reasons-retrieve': featureFlagsEvaluationReasonsRetrieve,
     'feature-flags-user-blast-radius-create': featureFlagsUserBlastRadiusCreate,

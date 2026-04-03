@@ -51,7 +51,7 @@ export const ErrorTrackingIssuesPartialUpdateBody = /* @__PURE__ */ zod.object({
     first_seen: zod.iso.datetime({}).optional(),
     assignee: zod
         .object({
-            id: zod.string().optional(),
+            id: zod.union([zod.number(), zod.string()]).nullish(),
             type: zod.string().optional(),
         })
         .optional(),
@@ -65,9 +65,11 @@ export const ErrorTrackingIssuesPartialUpdateBody = /* @__PURE__ */ zod.object({
                     id: zod.number(),
                     kind: zod.enum([
                         'slack',
+                        'slack-posthog-code',
                         'salesforce',
                         'hubspot',
                         'google-pubsub',
+                        'google-cloud-service-account',
                         'google-cloud-storage',
                         'google-ads',
                         'google-sheets',
@@ -89,6 +91,7 @@ export const ErrorTrackingIssuesPartialUpdateBody = /* @__PURE__ */ zod.object({
                         'azure-blob',
                         'firebase',
                         'jira',
+                        'pinterest-ads',
                     ]),
                 }),
             })
