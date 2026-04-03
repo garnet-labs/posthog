@@ -207,8 +207,11 @@ class TestPostgresSchemaDiscovery:
             )
 
         cursor = connection.cursor.return_value.__enter__.return_value
-        information_schema_query = str(cursor.execute.call_args_list[1].args[0])
-        information_schema_params = cursor.execute.call_args_list[1].args[1]
+        information_schema_call = next(
+            call for call in cursor.execute.call_args_list if "FROM information_schema.tables" in str(call.args[0])
+        )
+        information_schema_query = str(information_schema_call.args[0])
+        information_schema_params = information_schema_call.args[1]
 
         assert "table_catalog = %(current_database)s" in information_schema_query
         assert information_schema_params["current_database"] == "ducklake"
