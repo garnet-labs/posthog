@@ -1920,6 +1920,7 @@ class TestExternalDataSource(APIBaseTest):
         "posthog.temporal.data_imports.sources.postgres.source.get_postgres_schemas",
         return_value={
             "table_1": PostgresDiscoveredSchema(
+                source_catalog=None,
                 source_schema="public",
                 source_table_name="table_1",
                 columns=[("id", "integer", True)],
@@ -2060,6 +2061,7 @@ class TestExternalDataSource(APIBaseTest):
         "posthog.temporal.data_imports.sources.postgres.source.get_postgres_schemas",
         return_value={
             "table_1": PostgresDiscoveredSchema(
+                source_catalog=None,
                 source_schema="public",
                 source_table_name="table_1",
                 columns=[("id", "integer", True)],

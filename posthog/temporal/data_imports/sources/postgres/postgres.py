@@ -300,7 +300,7 @@ def get_postgres_row_count(
                     schema=sql.Identifier(schema_name),
                     table=sql.Identifier(table_name),
                 )
-                for display_name, (schema_name, table_name) in discovered_tables.items()
+                for display_name, (_source_catalog, schema_name, table_name) in discovered_tables.items()
             ]
 
             union_counts = sql.SQL(" UNION ALL ").join(counts)
