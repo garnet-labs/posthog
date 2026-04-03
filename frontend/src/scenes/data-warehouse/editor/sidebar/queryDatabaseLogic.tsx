@@ -975,7 +975,7 @@ const createEndpointNode = (
         record: {
             type: 'endpoint',
             endpoint,
-            tableName: endpoint.saved_query_id ? endpointTableName : null,
+            tableName: endpoint.is_materialized ? endpointTableName : null,
             savedQueryId: endpoint.saved_query_id ?? null,
             folderId: endpoint.folder_id ?? null,
             isMaterialized: endpoint.is_materialized,
