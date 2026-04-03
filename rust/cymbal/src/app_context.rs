@@ -9,7 +9,8 @@ use health::{HealthHandle, HealthRegistry};
 use limiters::redis::{QuotaResource, RedisLimiter, ServiceName, QUOTA_LIMITER_CACHE_KEY};
 use rdkafka::producer::FutureProducer;
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use std::{sync::Arc, time::Duration};
+use std::sync::{atomic::AtomicBool, Arc};
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::info;
 use uuid::Uuid;
@@ -58,6 +59,10 @@ pub struct AppContext {
     pub filtered_teams: Vec<i32>,
     pub filter_mode: FilterMode,
     pub signal_client: MaybeSignalClient,
+
+    pub ss_cache: Arc<Mutex<SymbolSetCache>>,
+    pub s3_client: Arc<dyn BlobClient>,
+    pub cache_warmed: Arc<AtomicBool>,
 }
 
 impl AppContext {
@@ -111,7 +116,7 @@ impl AppContext {
 
         AppContext::new(
             config,
-            s3_client,
+            s3_client.clone(),
             posthog_pool,
             persons_pool,
             redis_client,
@@ -262,6 +267,8 @@ impl AppContext {
             posthog_pool.clone(),
         ));
 
+        let cache_warmed = Arc::new(AtomicBool::new(!config.cache_warming_enabled));
+
         Ok(Self {
             health_registry,
             worker_liveness,
@@ -280,6 +287,9 @@ impl AppContext {
             filter_mode,
             signal_client,
             symbol_resolver,
+            ss_cache,
+            s3_client,
+            cache_warmed,
         })
     }
 }

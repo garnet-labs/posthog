@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use cymbal::consumer::start_consumer;
+use cymbal::symbol_store::warming::warm_cache;
 use cymbal::{app_context::AppContext, config::Config, server::start_server};
 use tracing::level_filters::LevelFilter;
 use tracing::{error, info, warn};
@@ -56,8 +57,31 @@ async fn main() {
 
     let context = Arc::new(AppContext::from_config(&config).await.unwrap());
 
+    // Start the HTTP server immediately so liveness probes work during warming.
+    // Readiness will return 503 until warming completes.
+    let server_handle = tokio::spawn(start_server(config.clone(), context.clone()));
+
+    if config.cache_warming_enabled {
+        info!("Starting cache warming\u{2026}");
+        match warm_cache(
+            &context.posthog_pool,
+            &context.s3_client,
+            &config.object_storage_bucket,
+            &context.ss_cache,
+            &config,
+        )
+        .await
+        {
+            Ok(()) => info!("Cache warming complete"),
+            Err(e) => error!("Cache warming failed: {e}, proceeding with cold cache"),
+        }
+    }
+
+    context.cache_warmed.store(true, Ordering::Relaxed);
+    info!("Pod is ready to serve traffic");
+
     tokio::join!(
-        start_server(config.clone(), context.clone()),
+        async { server_handle.await.unwrap() },
         start_consumer(&config, context.clone())
     );
 }

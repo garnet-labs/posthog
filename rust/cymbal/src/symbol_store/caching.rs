@@ -93,6 +93,10 @@ impl SymbolSetCache {
         }
     }
 
+    pub fn held_bytes(&self) -> usize {
+        self.held_bytes
+    }
+
     pub fn insert<T>(&mut self, key: String, value: Arc<T>, bytes: usize)
     where
         T: Any + Send + Sync,
@@ -167,5 +171,40 @@ pub trait Countable {
 impl Countable for Vec<u8> {
     fn byte_count(&self) -> usize {
         self.len()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn held_bytes_starts_at_zero() {
+        let cache = SymbolSetCache::new(1_000_000);
+        assert_eq!(cache.held_bytes(), 0);
+    }
+
+    #[test]
+    fn held_bytes_tracks_inserts() {
+        let mut cache = SymbolSetCache::new(1_000_000);
+        cache.insert("a".to_string(), Arc::new(vec![0u8; 100]), 100);
+        assert_eq!(cache.held_bytes(), 100);
+        cache.insert("b".to_string(), Arc::new(vec![0u8; 200]), 200);
+        assert_eq!(cache.held_bytes(), 300);
+    }
+
+    #[test]
+    fn held_bytes_decreases_after_eviction() {
+        let mut cache = SymbolSetCache::new(250);
+        cache.insert("a".to_string(), Arc::new(vec![0u8; 100]), 100);
+        cache.insert("b".to_string(), Arc::new(vec![0u8; 100]), 100);
+        assert_eq!(cache.held_bytes(), 200);
+
+        // Pushing past 250 bytes triggers eviction of the oldest entry
+        cache.insert("c".to_string(), Arc::new(vec![0u8; 200]), 200);
+        assert!(cache.held_bytes() <= 250);
+        // "a" should have been evicted (oldest), leaving "b" + "c" = 300,
+        // but 300 > 250 so "b" gets evicted too, leaving just "c" = 200
+        assert_eq!(cache.held_bytes(), 200);
     }
 }
