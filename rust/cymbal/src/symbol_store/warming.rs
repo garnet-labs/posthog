@@ -138,12 +138,13 @@ pub async fn warm_cache(
     }
 
     if timed_out {
+        let aborted = total as u64 - loaded - failed - skipped;
         for handle in &handles {
             handle.abort();
         }
         warn!(
             timeout_seconds = config.cache_warming_timeout_seconds,
-            loaded, failed, skipped, "Cache warming timed out, aborting remaining tasks"
+            loaded, failed, skipped, aborted, "Cache warming timed out, aborting remaining tasks"
         );
     }
 
