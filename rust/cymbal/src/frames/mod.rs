@@ -96,14 +96,10 @@ impl RawFrame {
         };
 
         // The raw id of the frame is set after it's resolved.
-        // Some platforms (e.g. Apple inlined frames) assign their own frame_id
-        // during resolution, so we only fill in the placeholder here.
         let res = res.map(|mut fs| {
-            fs.iter_mut().enumerate().for_each(|(index, f)| {
-                if f.frame_id == FrameId::placeholder() {
-                    f.frame_id = self.frame_id(team_id, index);
-                }
-            });
+            fs.iter_mut()
+                .enumerate()
+                .for_each(|(index, f)| f.frame_id = self.frame_id(team_id, index));
             fs
         });
 
