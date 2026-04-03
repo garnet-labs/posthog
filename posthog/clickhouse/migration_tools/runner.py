@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import importlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,8 @@ from posthog.clickhouse.migration_tools.manifest import ROLE_MAP, ManifestStep
 
 if TYPE_CHECKING:
     from posthog.clickhouse.cluster import ClickhouseCluster
+
+logger = logging.getLogger("migrations")
 
 # Legacy migrations live here
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
@@ -81,7 +84,6 @@ def get_pending_migrations() -> list[str]:
         cluster = get_migrations_cluster()
         client = cluster.any_host(lambda c: c).result()
 
-        # Check what's been recorded in the infi tracking system
         rows = client.execute(
             "SELECT name FROM system.tables WHERE database = 'default' AND name = 'clickhouseorm_migrations'"
         )
@@ -92,7 +94,8 @@ def get_pending_migrations() -> list[str]:
         applied = {row[0] for row in applied_rows}
 
         return [m for m in all_migrations if m not in applied]
-    except Exception:
+    except Exception as exc:
+        logger.warning("Could not check applied migrations, assuming all pending: %s", exc)
         return all_migrations
 
 
@@ -106,19 +109,21 @@ def check_active_mutations(client: Any, table: str, database: str = "posthog") -
     return [{"mutation_id": r[0], "command": r[1], "create_time": r[2], "is_done": r[3]} for r in rows]
 
 
-def run_migration_up(migration_name: str) -> None:
-    module_path = f"posthog.clickhouse.migrations.{migration_name}"
-    module = importlib.import_module(module_path)
-    operations = getattr(module, "operations", [])
+def _run_migration_ops(migration_module_path: str, ops_attr: str) -> None:
+    """Shared logic for running migration operations (up or down)."""
+    module = importlib.import_module(migration_module_path)
+    ops = getattr(module, ops_attr, [])
 
-    if not operations:
+    if not ops:
+        if ops_attr == "rollback_operations":
+            raise ValueError(f"Migration {migration_module_path} has no rollback_operations")
         return
 
     from posthog.clickhouse.client.migration_tools import get_migrations_cluster
 
     cluster = get_migrations_cluster()
 
-    for op in operations:
+    for op in ops:
         if hasattr(op, "sql"):
             from posthog.clickhouse.cluster import Query
 
@@ -126,35 +131,17 @@ def run_migration_up(migration_name: str) -> None:
         elif hasattr(op, "fn"):
             client = cluster.any_host(lambda c: c).result()
             op.fn(client)
+
+
+def run_migration_up(migration_name: str) -> None:
+    _run_migration_ops(f"posthog.clickhouse.migrations.{migration_name}", "operations")
 
 
 def run_migration_down(migration_number: int) -> None:
     migrations = discover_migrations()
-    target = None
-    for m in migrations:
-        if m.startswith(f"{migration_number:04d}_"):
-            target = m
-            break
+    target = next((m for m in migrations if m.startswith(f"{migration_number:04d}_")), None)
 
     if target is None:
         raise ValueError(f"Migration {migration_number} not found")
 
-    module_path = f"posthog.clickhouse.migrations.{target}"
-    module = importlib.import_module(module_path)
-    rollback_ops = getattr(module, "rollback_operations", [])
-
-    if not rollback_ops:
-        raise ValueError(f"Migration {target} has no rollback_operations")
-
-    from posthog.clickhouse.client.migration_tools import get_migrations_cluster
-
-    cluster = get_migrations_cluster()
-
-    for op in rollback_ops:
-        if hasattr(op, "sql"):
-            from posthog.clickhouse.cluster import Query
-
-            cluster.map_all_hosts(Query(op.sql)).result()
-        elif hasattr(op, "fn"):
-            client = cluster.any_host(lambda c: c).result()
-            op.fn(client)
+    _run_migration_ops(f"posthog.clickhouse.migrations.{target}", "rollback_operations")

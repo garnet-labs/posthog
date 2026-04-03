@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 
@@ -115,17 +116,13 @@ def _sharded_table(table: str, cluster: str) -> dict[str, Any]:
     }
 
 
-def _add_column(table: str, cluster: str) -> dict[str, Any]:
-    """Placeholder for add-column -- user should edit an existing YAML file instead."""
-    print(f"To add a column, edit the existing schema file: posthog/clickhouse/schema/{table}.yaml")
-    print("Add the column to the sharded table's columns list.")
-    print("Inherited columns will propagate automatically.")
-    print("Then run: ch_migrate plan")
-    return {
-        "ecosystem": table,
-        "cluster": cluster,
-        "tables": {},
-    }
+def _add_column(table: str, cluster: str) -> None:
+    """Not a real template — prints instructions and returns None so no empty file is created."""
+    print(f"To add a column, edit the existing schema file: posthog/clickhouse/schema/{table}.yaml", file=sys.stderr)
+    print("Add the column to the sharded table's columns list.", file=sys.stderr)
+    print("Inherited columns will propagate automatically.", file=sys.stderr)
+    print("Then run: ch_migrate plan", file=sys.stderr)
+    return None
 
 
 def _cross_cluster_readable(table: str, cluster: str) -> dict[str, Any]:
@@ -162,12 +159,8 @@ def _materialized_view(table: str, cluster: str) -> dict[str, Any]:
     }
 
 
-def _drop_table(table: str, cluster: str) -> dict[str, Any]:
-    """Empty ecosystem -- plan will show drops for existing tables not in desired state."""
-    print(f"To drop tables, remove them from posthog/clickhouse/schema/{table}.yaml")
-    print("or delete the file entirely. Then run: ch_migrate plan")
-    return {
-        "ecosystem": table,
-        "cluster": cluster,
-        "tables": {},
-    }
+def _drop_table(table: str, cluster: str) -> None:
+    """Not a real template — prints instructions and returns None so no empty file is created."""
+    print(f"To drop tables, remove them from posthog/clickhouse/schema/{table}.yaml", file=sys.stderr)
+    print("or delete the file entirely. Then run: ch_migrate plan", file=sys.stderr)
+    return None

@@ -21,6 +21,46 @@ ROLE_MAP: dict[str, str] = {
 
 VALID_NODE_ROLES = frozenset(ROLE_MAP.keys())
 
+# Engine tier determines creation order: Kafka(0) → MergeTree(1) → Distributed(2) → MV/Dict(3)
+ENGINE_TIER: dict[str, int] = {
+    "kafka": 0,
+    "mergetree": 1,
+    "replacingmergetree": 1,
+    "replicatedmergetree": 1,
+    "replicatedreplacingmergetree": 1,
+    "collapsingmergetree": 1,
+    "replicatedcollapsingmergetree": 1,
+    "versionedcollapsingmergetree": 1,
+    "replicatedversionedcollapsingmergetree": 1,
+    "summingmergetree": 1,
+    "replicatedsummingmergetree": 1,
+    "aggregatingmergetree": 1,
+    "replicatedaggregatingmergetree": 1,
+    "distributed": 2,
+    "materializedview": 3,
+    "dictionary": 3,
+}
+
+
+def engine_tier(engine: str) -> int:
+    return ENGINE_TIER.get(engine.lower(), 1)
+
+
+def is_mergetree(engine: str) -> bool:
+    return "mergetree" in engine.lower()
+
+
+def is_distributed(engine: str) -> bool:
+    return engine.lower() == "distributed"
+
+
+def is_mv(engine: str) -> bool:
+    return engine.lower() == "materializedview"
+
+
+def is_kafka(engine: str) -> bool:
+    return engine.lower() == "kafka"
+
 
 @dataclass
 class ManifestStep:

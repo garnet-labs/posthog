@@ -73,7 +73,7 @@ class TestAdvisoryLock(unittest.TestCase):
 
         self.assertTrue(acquired)
         self.assertEqual(reason, "")
-        # Two calls: CREATE IF NOT EXISTS + INSERT (via _record_step). No verify needed.
+        # Two calls: CREATE IF NOT EXISTS + INSERT (via record_step). No verify needed.
         self.assertEqual(client.execute.call_count, 2)
 
     def test_release_apply_lock_inserts_shadow_row(self) -> None:
@@ -83,7 +83,7 @@ class TestAdvisoryLock(unittest.TestCase):
 
         release_apply_lock(client, "default", "my-pod")
 
-        # Should have inserted a row (via _record_step which calls client.execute)
+        # Should have inserted a row (via record_step which calls client.execute)
         client.execute.assert_called_once()
 
 

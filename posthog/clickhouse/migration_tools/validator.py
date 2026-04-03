@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from posthog.clickhouse.migration_tools.desired_state import DesiredState
+from posthog.clickhouse.migration_tools.manifest import is_distributed, is_kafka, is_mergetree, is_mv
 from posthog.clickhouse.migration_tools.schema_graph import TableEcosystem, lookup_ecosystem
 
 # Expected node roles by engine type
@@ -13,22 +14,6 @@ _EXPECTED_ROLES: dict[str, set[str]] = {
 }
 
 
-def _is_mergetree_engine(engine: str) -> bool:
-    return "mergetree" in engine.lower()
-
-
-def _is_distributed_engine(engine: str) -> bool:
-    return engine.lower() == "distributed"
-
-
-def _is_kafka_engine(engine: str) -> bool:
-    return engine.lower() == "kafka"
-
-
-def _is_mv_engine(engine: str) -> bool:
-    return engine.lower() == "materializedview"
-
-
 def build_ecosystems_from_yaml(desired_states: list[DesiredState]) -> list[TableEcosystem]:
     """Identifies ecosystems by finding Distributed tables that reference MergeTree sources."""
     ecosystems: list[TableEcosystem] = []
@@ -36,10 +21,10 @@ def build_ecosystems_from_yaml(desired_states: list[DesiredState]) -> list[Table
     for state in desired_states:
         tables = state.tables
 
-        local_tables = {n: t for n, t in tables.items() if _is_mergetree_engine(t.engine)}
-        distributed = {n: t for n, t in tables.items() if _is_distributed_engine(t.engine)}
-        kafka = {n: t for n, t in tables.items() if _is_kafka_engine(t.engine)}
-        mvs = {n: t for n, t in tables.items() if _is_mv_engine(t.engine)}
+        local_tables = {n: t for n, t in tables.items() if is_mergetree(t.engine)}
+        distributed = {n: t for n, t in tables.items() if is_distributed(t.engine)}
+        kafka = {n: t for n, t in tables.items() if is_kafka(t.engine)}
+        mvs = {n: t for n, t in tables.items() if is_mv(t.engine)}
 
         for local_name in local_tables:
             writable = next(

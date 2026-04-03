@@ -23,6 +23,7 @@ ORDER BY (migration_number, step_index, host, direction, applied_at)
 
 # Advisory lock constants.
 LOCK_MIGRATION_NUMBER = 0
+# Must not collide with VERSION_STEP_INDEX (-2) or any real step index (>= 0)
 LOCK_STEP_INDEX = -999
 LOCK_TIMEOUT_MINUTES = 30
 
@@ -39,11 +40,11 @@ class StepRecord:
     success: bool
 
 
-def _ensure_tracking_table(client: Any, database: str) -> None:
+def ensure_tracking_table(client: Any, database: str) -> None:
     client.execute(TRACKING_TABLE_DDL.format(database=database))
 
 
-def _record_step(
+def record_step(
     client: Any,
     record: StepRecord,
     database: str = "",
@@ -74,11 +75,11 @@ def _record_step(
 def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool = False) -> tuple[bool, str]:
     """Best-effort: MergeTree is eventually consistent, so two pods in the same merge cycle
     could both acquire. Sufficient for single-deploy-at-a-time."""
-    _ensure_tracking_table(client, database)
+    ensure_tracking_table(client, database)
     table_ref = f"{database}.{TRACKING_TABLE_NAME}"
 
     if force:
-        _record_step(
+        record_step(
             client=client,
             record=StepRecord(
                 migration_number=LOCK_MIGRATION_NUMBER,
@@ -140,7 +141,7 @@ VERSION_STEP_INDEX = -2
 
 
 def record_schema_version(client: Any, database: str, commit_hash: str, hostname: str) -> None:
-    _record_step(
+    record_step(
         client=client,
         record=StepRecord(
             migration_number=LOCK_MIGRATION_NUMBER,
@@ -175,7 +176,7 @@ def get_latest_schema_version(client: Any, database: str) -> tuple[str, str, str
 
 def release_apply_lock(client: Any, database: str, hostname: str) -> None:
     """Release the advisory lock by inserting a success=False row that shadows the lock."""
-    _record_step(
+    record_step(
         client=client,
         record=StepRecord(
             migration_number=LOCK_MIGRATION_NUMBER,

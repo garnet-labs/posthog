@@ -19,7 +19,7 @@ def _any_client(cluster: Any) -> Any:
 
 
 class Command(BaseCommand):
-    help = "ClickHouse schema management -- plan, apply, generate, drift, schema, status, bootstrap, check, lint, down, orphans, version"
+    help = "ClickHouse schema management -- plan, apply, generate, drift, schema, status, check, lint, down, orphans"
 
     def add_arguments(self, parser: Any) -> None:
         subparsers = parser.add_subparsers(dest="subcommand")
@@ -39,7 +39,7 @@ class Command(BaseCommand):
             help="Filter to a specific cluster (e.g. main, logs). Default: all clusters.",
         )
 
-        # apply -- execute the diff
+        # apply -- execute the diff (auto-bootstraps tracking table)
         apply_parser = subparsers.add_parser("apply", help="Execute the reconciliation plan")
         apply_parser.add_argument(
             "--schema-dir",
@@ -70,7 +70,7 @@ class Command(BaseCommand):
         subparsers.add_parser("schema", help="Dump current schema state from ClickHouse")
 
         # status
-        status_parser = subparsers.add_parser("status", help="Show per-host migration state")
+        status_parser = subparsers.add_parser("status", help="Show per-host migration state and schema version")
         status_parser.add_argument("--node", type=str, default=None, help="Filter by hostname")
 
         # bootstrap
@@ -104,9 +104,6 @@ class Command(BaseCommand):
             help="Additional table names to exclude",
         )
 
-        # version
-        subparsers.add_parser("version", help="Show the last applied schema version (git commit)")
-
         # down (legacy)
         down_parser = subparsers.add_parser("down", help="Roll back a legacy migration by number")
         down_parser.add_argument("migration_number", type=int, help="Migration number to roll back")
@@ -124,7 +121,6 @@ class Command(BaseCommand):
             "check": self.handle_check,
             "lint": self.handle_lint,
             "orphans": self.handle_orphans,
-            "version": self.handle_version,
             "down": self.handle_down,
         }
         handler = handlers.get(subcommand or "")
@@ -205,7 +201,6 @@ class Command(BaseCommand):
         print(generate_plan_text(all_diffs))
 
     def handle_apply(self, options: dict[str, Any]) -> None:
-        import time
         import socket
         import hashlib
         import subprocess
@@ -213,12 +208,11 @@ class Command(BaseCommand):
 
         from posthog.clickhouse.client.migration_tools import get_migrations_cluster
         from posthog.clickhouse.migration_tools.plan_generator import generate_manifest_steps, generate_plan_text
-        from posthog.clickhouse.migration_tools.runner import execute_migration_step
         from posthog.clickhouse.migration_tools.tracking import (
-            StepRecord,
-            _record_step,
             acquire_apply_lock,
+            ensure_tracking_table,
             record_schema_version,
+            record_step,
             release_apply_lock,
         )
 
@@ -233,6 +227,9 @@ class Command(BaseCommand):
         cluster_obj = get_migrations_cluster()
         client = _any_client(cluster_obj)
         hostname = socket.gethostname()
+
+        # Auto-bootstrap tracking table (idempotent)
+        ensure_tracking_table(client, database)
 
         cluster_filter = options.get("cluster")
         all_diffs, err = self._compute_diffs(database, schema_dir, cluster_filter=cluster_filter)
@@ -263,56 +260,21 @@ class Command(BaseCommand):
             steps = generate_manifest_steps(all_diffs)
             print(f"Applying {len(steps)} step(s)...\n")
 
-            max_retries = 3
             for i, (step, rendered_sql) in enumerate(steps):
-                print(f"  Step {i}: {step.comment}...", end=" ", flush=True)
                 checksum = hashlib.sha256(rendered_sql.encode()).hexdigest()
-                success = False
-                for attempt in range(max_retries):
-                    try:
-                        execute_migration_step(cluster_obj, step, rendered_sql)
-                        success = True
-                        break
-                    except Exception as exc:
-                        if attempt < max_retries - 1:
-                            wait = 2**attempt
-                            print(f"\n    Retry {attempt + 1}/{max_retries} in {wait}s: {exc}", flush=True)
-                            time.sleep(wait)
-                        else:
-                            print(f"FAILED after {max_retries} attempts: {exc}")
-                            _record_step(
-                                client=client,
-                                record=StepRecord(
-                                    migration_number=0,
-                                    migration_name=step.comment or "reconcile",
-                                    step_index=i,
-                                    host=hostname,
-                                    node_role="*",
-                                    direction="up",
-                                    checksum=checksum,
-                                    success=False,
-                                ),
-                                database=database,
-                            )
-                            print("\nApply halted. Review the error and retry.")
-                            return
-
-                if success:
-                    print("OK")
-                    _record_step(
-                        client=client,
-                        record=StepRecord(
-                            migration_number=0,
-                            migration_name=step.comment or "reconcile",
-                            step_index=i,
-                            host=hostname,
-                            node_role="*",
-                            direction="up",
-                            checksum=checksum,
-                            success=True,
-                        ),
-                        database=database,
-                    )
+                success = _execute_step_with_retry(
+                    cluster_obj,
+                    step,
+                    rendered_sql,
+                    i,
+                    hostname,
+                    database,
+                    client,
+                    record_step,
+                    checksum,
+                )
+                if not success:
+                    return
         finally:
             release_apply_lock(client, database, hostname)
 
@@ -361,7 +323,7 @@ class Command(BaseCommand):
 
         table_count = len(yaml_data.get("tables", {}))
         print(f"Generated: {output_path} ({table_count} table(s))")
-        print(f"Edit the YAML, then run: ch_migrate plan")
+        print("Edit the YAML, then run: ch_migrate plan")
 
     def handle_drift(self, options: dict[str, Any]) -> None:
         database: str = settings.CLICKHOUSE_DATABASE
@@ -424,9 +386,19 @@ class Command(BaseCommand):
         cluster = get_cluster_by_name("main")
         client = _any_client(cluster)
 
-        from posthog.clickhouse.migration_tools.tracking import TRACKING_TABLE_NAME, _ensure_tracking_table
+        from posthog.clickhouse.migration_tools.tracking import (
+            TRACKING_TABLE_NAME,
+            ensure_tracking_table,
+            get_latest_schema_version,
+        )
 
-        _ensure_tracking_table(client, database)
+        ensure_tracking_table(client, database)
+
+        # Show schema version at top
+        version = get_latest_schema_version(client, database)
+        if version:
+            commit_hash, host, applied_at = version
+            print(f"Schema version: {commit_hash[:12]} (applied by {host} at {applied_at})\n")
 
         node_filter = options.get("node")
 
@@ -465,9 +437,9 @@ class Command(BaseCommand):
         cluster = get_cluster_by_name("main")
         client = _any_client(cluster)
 
-        from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table
+        from posthog.clickhouse.migration_tools.tracking import ensure_tracking_table
 
-        _ensure_tracking_table(client, database)
+        ensure_tracking_table(client, database)
         print(f"Tracking table ensured in database '{database}'.")
 
     def handle_check(self, options: dict[str, Any]) -> None:
@@ -544,26 +516,6 @@ class Command(BaseCommand):
             print(f"  {name} (engine={engine})")
         print("\nThese tables may be leftover from old migrations or manual creation.")
 
-    def handle_version(self, options: dict[str, Any]) -> None:
-        from posthog.clickhouse.migration_tools.tracking import _ensure_tracking_table, get_latest_schema_version
-
-        database: str = settings.CLICKHOUSE_DATABASE
-        cluster = get_cluster_by_name("main")
-        client = _any_client(cluster)
-
-        _ensure_tracking_table(client, database)
-        version = get_latest_schema_version(client, database)
-
-        if version is None:
-            print("No schema version recorded. Run 'ch_migrate apply' to record one.")
-            return
-
-        commit_hash, host, applied_at = version
-        print(f"Last applied schema version:")
-        print(f"  Commit:     {commit_hash}")
-        print(f"  Applied by: {host}")
-        print(f"  Applied at: {applied_at}")
-
     def handle_down(self, options: dict[str, Any]) -> None:
         from posthog.clickhouse.migration_tools.runner import run_migration_down
 
@@ -571,3 +523,69 @@ class Command(BaseCommand):
         print(f"Rolling back migration {migration_number}...")
         run_migration_down(migration_number)
         print("Done.")
+
+
+def _execute_step_with_retry(
+    cluster: Any,
+    step: Any,
+    rendered_sql: str,
+    step_index: int,
+    hostname: str,
+    database: str,
+    client: Any,
+    record_step_fn: Any,
+    checksum: str,
+    max_retries: int = 3,
+) -> bool:
+    """Execute a single migration step with retry and tracking. Returns True on success."""
+    import time
+
+    from posthog.clickhouse.migration_tools.runner import execute_migration_step
+    from posthog.clickhouse.migration_tools.tracking import StepRecord
+
+    print(f"  Step {step_index}: {step.comment}...", end=" ", flush=True)
+
+    for attempt in range(max_retries):
+        try:
+            execute_migration_step(cluster, step, rendered_sql)
+            print("OK")
+            record_step_fn(
+                client=client,
+                record=StepRecord(
+                    migration_number=0,
+                    migration_name=step.comment or "reconcile",
+                    step_index=step_index,
+                    host=hostname,
+                    node_role="*",
+                    direction="up",
+                    checksum=checksum,
+                    success=True,
+                ),
+                database=database,
+            )
+            return True
+        except Exception as exc:
+            if attempt < max_retries - 1:
+                wait = 2**attempt
+                print(f"\n    Retry {attempt + 1}/{max_retries} in {wait}s: {exc}", flush=True)
+                time.sleep(wait)
+            else:
+                print(f"FAILED after {max_retries} attempts: {exc}")
+                record_step_fn(
+                    client=client,
+                    record=StepRecord(
+                        migration_number=0,
+                        migration_name=step.comment or "reconcile",
+                        step_index=step_index,
+                        host=hostname,
+                        node_role="*",
+                        direction="up",
+                        checksum=checksum,
+                        success=False,
+                    ),
+                    database=database,
+                )
+                print("\nApply halted. Review the error and retry.")
+                return False
+
+    return False  # unreachable, but satisfies type checker
