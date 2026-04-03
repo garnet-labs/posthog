@@ -207,8 +207,6 @@ services:
             service: clickhouse
         mem_limit: 8g
         cpus: 2
-        healthcheck:
-            start_period: 60s
         environment:
             AWS_ACCESS_KEY_ID: object_storage_root_user
             AWS_SECRET_ACCESS_KEY: object_storage_root_password

@@ -133,7 +133,7 @@ services:
             interval: 5s
             timeout: 30s
             retries: 30
-            start_period: 10s
+            start_period: 60s
         volumes:
             - ./docker/postgres-init-scripts:/docker-entrypoint-initdb.d
             - ./products:/products:ro
@@ -147,6 +147,7 @@ services:
             interval: 3s
             timeout: 10s
             retries: 10
+            start_period: 60s
 
     clickhouse:
         #
@@ -163,6 +164,7 @@ services:
             interval: 3s
             timeout: 10s
             retries: 10
+            start_period: 60s
 
     zookeeper:
         image: zookeeper:3.7.0
@@ -198,6 +200,7 @@ services:
             interval: 3s
             timeout: 10s
             retries: 10
+            start_period: 60s
 
     kafka_ui:
         image: provectuslabs/kafka-ui:latest
