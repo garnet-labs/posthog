@@ -363,10 +363,29 @@ AMI_ID=$(aws ec2 create-image \
     --query 'ImageId' \
     --output text)
 
-echo "==> Waiting for AMI to be available (100GB snapshot, may take 15-20 min)..."
-# Default waiter: 40 attempts × 15s = 10 min, which isn't enough for a 100GB EBS snapshot.
-# Bump to 80 attempts (~20 min).
-AWS_MAX_ATTEMPTS=80 aws ec2 wait image-available --region "$REGION" --image-ids "$AMI_ID"
+echo "==> Waiting for AMI to be available..."
+# Default waiter: 40 attempts × 15s = 10 min. EBS snapshots can take 20-30 min.
+# Poll every 30s for up to 40 min.
+WAITER_ELAPSED=0
+while [ $WAITER_ELAPSED -lt 2400 ]; do
+    AMI_STATE=$(aws ec2 describe-images --region "$REGION" --image-ids "$AMI_ID" \
+        --query 'Images[0].State' --output text 2>/dev/null) || AMI_STATE="unknown"
+    if [ "$AMI_STATE" = "available" ]; then
+        echo "  AMI is available!"
+        break
+    elif [ "$AMI_STATE" = "failed" ]; then
+        echo "ERROR: AMI creation failed"
+        exit 1
+    fi
+    echo "  [$((WAITER_ELAPSED / 60))m] AMI state: $AMI_STATE"
+    sleep 30
+    WAITER_ELAPSED=$((WAITER_ELAPSED + 30))
+done
+
+if [ "$AMI_STATE" != "available" ]; then
+    echo "ERROR: AMI did not become available within 40 minutes (state: $AMI_STATE)"
+    exit 1
+fi
 
 echo ""
 echo "=== AMI Build Complete ==="
