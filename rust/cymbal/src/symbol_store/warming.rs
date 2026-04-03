@@ -4,6 +4,7 @@ use std::time::Instant;
 use posthog_symbol_data::{sniff_data_type, SymbolDataType};
 use sqlx::PgPool;
 use tokio::sync::{Mutex, Semaphore};
+use tokio::time::{error::Elapsed, timeout_at, Duration, Instant as TokioInstant};
 use tracing::{info, warn};
 
 use crate::{
@@ -109,12 +110,11 @@ pub async fn warm_cache(
     // Collect results one at a time under a shared deadline. If we exceed the
     // timeout, abort remaining tasks so they don't compete with real traffic
     // after the pod is marked ready.
-    let deadline =
-        tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.cache_warming_timeout_seconds);
+    let deadline = TokioInstant::now() + Duration::from_secs(config.cache_warming_timeout_seconds);
     let mut timed_out = false;
 
     for handle in handles.iter_mut() {
-        match tokio::time::timeout_at(deadline, handle).await {
+        match timeout_at(deadline, handle).await {
             Ok(Ok((_, Ok(Some(bytes))))) => {
                 loaded += 1;
                 bytes_loaded += bytes as u64;
@@ -130,7 +130,7 @@ pub async fn warm_cache(
                 warn!(error = %e, "Warming task panicked");
                 failed += 1;
             }
-            Err(_) => {
+            Err(Elapsed { .. }) => {
                 timed_out = true;
                 break;
             }
@@ -410,5 +410,77 @@ mod test {
             .unwrap();
 
         assert!(cache.lock().await.held_bytes() > 0);
+    }
+
+    /// A BlobClient that sleeps before returning, simulating slow S3 fetches.
+    struct SlowBlobClient {
+        data: Vec<u8>,
+        delay: std::time::Duration,
+    }
+
+    #[async_trait::async_trait]
+    impl BlobClient for SlowBlobClient {
+        async fn get(
+            &self,
+            _bucket: &str,
+            _key: &str,
+        ) -> Result<Option<Vec<u8>>, crate::error::UnhandledError> {
+            tokio::time::sleep(self.delay).await;
+            Ok(Some(self.data.clone()))
+        }
+        async fn put(
+            &self,
+            _bucket: &str,
+            _key: &str,
+            _data: Vec<u8>,
+        ) -> Result<(), crate::error::UnhandledError> {
+            Ok(())
+        }
+        async fn ping_bucket(&self, _bucket: &str) -> Result<(), crate::error::UnhandledError> {
+            Ok(())
+        }
+    }
+
+    #[sqlx::test(migrations = "./tests/test_migrations")]
+    async fn warm_cache_aborts_on_timeout(db: PgPool) {
+        for i in 0..5 {
+            sqlx::query(
+                "INSERT INTO posthog_errortrackingsymbolset \
+                 (id, team_id, ref, storage_ptr, content_hash, last_used, created_at) \
+                 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())",
+            )
+            .bind(Uuid::now_v7())
+            .bind(1i32)
+            .bind(format!("http://example.com/test-{i}.js"))
+            .bind(format!("symbolsets/test-{i}"))
+            .bind("somehash")
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+
+        let s3_client: Arc<dyn BlobClient> = Arc::new(SlowBlobClient {
+            data: test_symbol_data(),
+            delay: std::time::Duration::from_secs(5),
+        });
+        let cache = Arc::new(Mutex::new(SymbolSetCache::new(100_000_000)));
+
+        let mut config = Config::init_with_defaults().unwrap();
+        config.cache_warming_lookback_hours = 1;
+        config.cache_warming_max_entries = 100;
+        config.cache_warming_concurrency = 1; // Sequential so the first task blocks
+        config.cache_warming_timeout_seconds = 1;
+        config.symbol_store_cache_max_bytes = 100_000_000;
+
+        let before = Instant::now();
+        warm_cache(&db, &s3_client, "bucket", &cache, &config)
+            .await
+            .unwrap();
+        let elapsed = before.elapsed();
+
+        // Should return after ~1s (the timeout), not ~25s (5 entries * 5s each)
+        assert!(elapsed.as_secs() < 3);
+        // No entries should have loaded since every S3 fetch takes 5s but the timeout is 1s
+        assert_eq!(cache.lock().await.held_bytes(), 0);
     }
 }
