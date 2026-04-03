@@ -330,12 +330,16 @@ pub struct KafkaConfig {
 // ---------------------------------------------------------------------------
 // v1 multi-cluster Kafka config
 //
-// Each v1 capture deploy can write to one or more Kafka clusters (e.g. MSK
-// and WarpStream). Which clusters are active is controlled by a single CSV
-// env var:
+// Each v1 capture deploy can write to one or more Kafka clusters. Which
+// clusters are active is controlled by a single CSV env var:
 //
-//   CAPTURE_V1_KAFKA_CLUSTERS=msk            # single cluster
-//   CAPTURE_V1_KAFKA_CLUSTERS=msk,warpstream # dual-write / migration
+//   CAPTURE_V1_KAFKA_CLUSTERS=msk              # single cluster
+//   CAPTURE_V1_KAFKA_CLUSTERS=msk,msk_alt      # dual-write for MSK upgrade/cutover
+//   CAPTURE_V1_KAFKA_CLUSTERS=msk,ws           # dual-write MSK + WarpStream
+//
+// The first entry is the default cluster used in single-write mode.
+// Dual-write / migration logic is handled separately by the handler when
+// more than one cluster is listed.
 //
 // Per-cluster settings use a naming convention: the cluster name becomes an
 // env var prefix. For the "msk" cluster every field in V1KafkaClusterConfig
@@ -354,26 +358,32 @@ pub struct KafkaConfig {
 // their env vars are present, making cutover a one-line CSV change.
 // ---------------------------------------------------------------------------
 
-/// Identity of a v1 Kafka cluster. Adding a third cluster requires a new
+/// Identity of a v1 Kafka cluster. Adding a new cluster requires a new
 /// variant here plus its `as_str()`, `env_prefix()`, and `FromStr` arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClusterName {
+    /// Primary MSK cluster.
     Msk,
-    Warpstream,
+    /// Secondary MSK cluster for upgrades, cutovers, or dual-writes.
+    MskAlt,
+    /// WarpStream cluster for upgrades, cutovers, or dual-writes.
+    Ws,
 }
 
 impl ClusterName {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Msk => "msk",
-            Self::Warpstream => "warpstream",
+            Self::MskAlt => "msk_alt",
+            Self::Ws => "ws",
         }
     }
 
     pub fn env_prefix(&self) -> &'static str {
         match self {
             Self::Msk => "CAPTURE_V1_KAFKA_MSK_",
-            Self::Warpstream => "CAPTURE_V1_KAFKA_WARPSTREAM_",
+            Self::MskAlt => "CAPTURE_V1_KAFKA_MSK_ALT_",
+            Self::Ws => "CAPTURE_V1_KAFKA_WS_",
         }
     }
 }
@@ -383,7 +393,8 @@ impl FromStr for ClusterName {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_lowercase().as_str() {
             "msk" => Ok(Self::Msk),
-            "warpstream" => Ok(Self::Warpstream),
+            "msk_alt" => Ok(Self::MskAlt),
+            "ws" => Ok(Self::Ws),
             other => Err(format!("unknown cluster: {other}")),
         }
     }
@@ -395,9 +406,10 @@ impl std::fmt::Display for ClusterName {
     }
 }
 
-/// Single config struct for any v1 Kafka cluster. Loaded N times with different
-/// env var prefixes via `init_from_hashmap` (e.g. `CAPTURE_V1_KAFKA_MSK_*`,
-/// `CAPTURE_V1_KAFKA_WARPSTREAM_*`). Every listed cluster is a complete,
+/// Single config struct for any v1 Kafka cluster. Loaded N times with
+/// different env var prefixes via `init_from_hashmap` (e.g.
+/// `CAPTURE_V1_KAFKA_MSK_*`, `CAPTURE_V1_KAFKA_MSK_ALT_*`,
+/// `CAPTURE_V1_KAFKA_WS_*`). Every listed cluster is a complete,
 /// independent setup — connection, producer tuning, and all topics.
 ///
 /// Field names map directly to the env var suffix after the prefix is stripped.
@@ -464,10 +476,16 @@ fn load_cluster_config(cluster: ClusterName) -> Result<V1KafkaClusterConfig, env
     V1KafkaClusterConfig::init_from_hashmap(&map)
 }
 
+/// Parsed v1 Kafka cluster config. The first entry in the CSV is the
+/// default cluster for single-write mode.
+pub struct V1KafkaClusters {
+    pub default: ClusterName,
+    pub clusters: HashMap<ClusterName, V1KafkaClusterConfig>,
+}
+
 /// Parse `CAPTURE_V1_KAFKA_CLUSTERS` CSV and load each cluster's config.
-pub fn load_v1_kafka_clusters(
-    clusters_csv: &str,
-) -> anyhow::Result<HashMap<ClusterName, V1KafkaClusterConfig>> {
+/// The first entry becomes the default cluster for single-write mode.
+pub fn load_v1_kafka_clusters(clusters_csv: &str) -> anyhow::Result<V1KafkaClusters> {
     let names: Vec<ClusterName> = clusters_csv
         .split(',')
         .filter(|s| !s.trim().is_empty())
@@ -475,11 +493,14 @@ pub fn load_v1_kafka_clusters(
         .collect::<Result<_, _>>()
         .map_err(|e| anyhow::anyhow!("bad CAPTURE_V1_KAFKA_CLUSTERS: {e}"))?;
 
+    anyhow::ensure!(!names.is_empty(), "CAPTURE_V1_KAFKA_CLUSTERS is empty");
+    let default = names[0];
+
     let mut clusters = HashMap::new();
     for name in names {
         let config = load_cluster_config(name)
             .map_err(|e| anyhow::anyhow!("cluster {}: {e}", name.as_str()))?;
         clusters.insert(name, config);
     }
-    Ok(clusters)
+    Ok(V1KafkaClusters { default, clusters })
 }
