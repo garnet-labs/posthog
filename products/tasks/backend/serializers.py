@@ -8,14 +8,56 @@ from posthog.api.shared import UserBasicSerializer
 from posthog.models.integration import Integration
 from posthog.storage import object_storage
 
-from .models import SandboxEnvironment, Task, TaskRun
+from .models import SandboxEnvironment, Task, TaskRepository, TaskRun
 from .services.title_generator import generate_task_title
 
 PRESIGNED_URL_CACHE_TTL = 55 * 60  # 55 minutes (less than 1 hour URL expiry)
 
 
+class TaskRepositorySerializer(serializers.Serializer):
+    repository = serializers.CharField(
+        max_length=400,
+        help_text="Repository in org/repo format (e.g. posthog/posthog-js)",
+    )
+    github_integration = serializers.PrimaryKeyRelatedField(
+        queryset=Integration.objects.filter(kind="github"),
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text="GitHub integration ID",
+    )
+
+    def validate_repository(self, value):
+        if not value:
+            return value
+        parts = value.split("/")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise serializers.ValidationError("Repository must be in the format organization/repository")
+        return value.lower()
+
+    def validate_github_integration(self, value):
+        team = self.context.get("team")
+        if value and team and value.team_id != team.id:
+            raise serializers.ValidationError("Integration must belong to the same team")
+        return value
+
+
 class TaskSerializer(serializers.ModelSerializer):
-    repository = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
+    # Deprecated: kept for backward compatibility, returns the first repository
+    repository = serializers.SerializerMethodField(
+        help_text="First repository (deprecated, use repositories instead)",
+    )
+    github_integration = serializers.SerializerMethodField(
+        help_text="First repository's GitHub integration (deprecated, use repositories instead)",
+    )
+
+    repositories = TaskRepositorySerializer(
+        many=True,
+        required=False,
+        source="task_repositories",
+        help_text="Repositories associated with this task",
+    )
+
     latest_run = serializers.SerializerMethodField()
     created_by = UserBasicSerializer(read_only=True)
 
@@ -35,6 +77,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "origin_product",
             "repository",
             "github_integration",
+            "repositories",
             "json_schema",
             "internal",
             "latest_run",
@@ -46,11 +89,29 @@ class TaskSerializer(serializers.ModelSerializer):
             "id",
             "task_number",
             "slug",
+            "repository",
+            "github_integration",
             "created_at",
             "updated_at",
             "created_by",
             "latest_run",
         ]
+
+    def get_repository(self, obj) -> str | None:
+        repos = self._get_task_repositories(obj)
+        return repos[0].repository if repos else obj.repository
+
+    def get_github_integration(self, obj) -> int | None:
+        repos = self._get_task_repositories(obj)
+        if repos:
+            return repos[0].github_integration_id
+        return obj.github_integration_id
+
+    def _get_task_repositories(self, obj) -> list:
+        """Return task_repositories, using prefetch cache when available."""
+        if hasattr(obj, "_prefetched_objects_cache") and "task_repositories" in obj._prefetched_objects_cache:
+            return list(obj._prefetched_objects_cache["task_repositories"])
+        return list(obj.task_repositories.all())
 
     @extend_schema_field(serializers.DictField(allow_null=True, help_text="Latest run details for this task"))
     def get_latest_run(self, obj):
@@ -59,34 +120,27 @@ class TaskSerializer(serializers.ModelSerializer):
             return TaskRunDetailSerializer(latest_run, context=self.context).data
         return None
 
-    def validate_github_integration(self, value):
-        """Validate that the GitHub integration belongs to the same team"""
-        if value and value.team_id != self.context["team"].id:
-            raise serializers.ValidationError("Integration must belong to the same team")
-        return value
+    def to_internal_value(self, data):
+        # Handle legacy create: if `repository` string is sent without `repositories` array,
+        # convert it into the new format so the rest of the pipeline is uniform.
+        if isinstance(data, dict) and "repository" in data and "repositories" not in data:
+            repo_str = data.pop("repository")
+            gh_int = data.pop("github_integration", None)
+            if repo_str:
+                entry: dict = {"repository": repo_str}
+                if gh_int is not None:
+                    entry["github_integration"] = gh_int
+                data["repositories"] = [entry]
 
-    def validate_repository(self, value):
-        """Validate repository configuration"""
-        if not value:
-            return value
-
-        parts = value.split("/")
-        if len(parts) != 2 or not parts[0] or not parts[1]:
-            raise serializers.ValidationError("Repository must be in the format organization/repository")
-
-        return value.lower()
+        return super().to_internal_value(data)
 
     def create(self, validated_data):
+        repositories_data = validated_data.pop("task_repositories", [])
+
         validated_data["team"] = self.context["team"]
 
         if "request" in self.context and hasattr(self.context["request"], "user"):
             validated_data["created_by"] = self.context["request"].user
-
-        # Set default GitHub integration if not provided
-        if not validated_data.get("github_integration"):
-            default_integration = Integration.objects.filter(team=self.context["team"], kind="github").first()
-            if default_integration:
-                validated_data["github_integration"] = default_integration
 
         title = validated_data.get("title", "").strip()
         if not title and validated_data.get("description"):
@@ -95,12 +149,56 @@ class TaskSerializer(serializers.ModelSerializer):
         elif title:
             validated_data.setdefault("title_manually_set", True)
 
-        return super().create(validated_data)
+        task = super().create(validated_data)
+
+        # If no repositories were provided, try to set a default GitHub integration
+        if not repositories_data:
+            default_integration = Integration.objects.filter(team=self.context["team"], kind="github").first()
+            if default_integration:
+                task.github_integration = default_integration
+                task.save(update_fields=["github_integration"])
+        else:
+            self._sync_repositories(task, repositories_data)
+
+        return task
 
     def update(self, instance, validated_data):
+        repositories_data = validated_data.pop("task_repositories", None)
+
         if "title" in validated_data and "title_manually_set" not in validated_data:
             validated_data["title_manually_set"] = True
-        return super().update(instance, validated_data)
+
+        instance = super().update(instance, validated_data)
+
+        if repositories_data is not None:
+            self._sync_repositories(instance, repositories_data)
+
+        return instance
+
+    def _sync_repositories(self, task: Task, repositories_data: list[dict]) -> None:
+        """Replace all TaskRepository rows for a task and sync the legacy fields."""
+        task.task_repositories.all().delete()
+
+        default_integration = None
+        for repo_data in repositories_data:
+            gh_int = repo_data.get("github_integration")
+            if gh_int is None and default_integration is None:
+                default_integration = Integration.objects.filter(team=task.team, kind="github").first()
+            TaskRepository.objects.create(
+                task=task,
+                repository=repo_data["repository"],
+                github_integration=gh_int or default_integration,
+            )
+
+        # Sync legacy fields from the first repository
+        first = task.task_repositories.first()
+        if first:
+            task.repository = first.repository
+            task.github_integration = first.github_integration
+        else:
+            task.repository = None
+            task.github_integration = None
+        task.save(update_fields=["repository", "github_integration"])
 
 
 class AgentDefinitionSerializer(serializers.Serializer):

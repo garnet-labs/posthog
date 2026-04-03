@@ -163,7 +163,7 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if stage:
             qs = qs.filter(runs__stage=stage)
 
-        # Filter by repository or organization using the repository field
+        # Filter by repository or organization, checking both legacy and new fields
         organization = params.get("organization")
         repository = params.get("repository")
         created_by = params.get("created_by")
@@ -171,13 +171,21 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if repository:
             repo_str = repository.strip().lower()
             if "/" in repo_str:
-                qs = qs.filter(repository__iexact=repo_str)
+                qs = qs.filter(
+                    models.Q(repository__iexact=repo_str) | models.Q(task_repositories__repository__iexact=repo_str)
+                ).distinct()
             else:
-                qs = qs.filter(repository__iendswith=f"/{repo_str}")
+                qs = qs.filter(
+                    models.Q(repository__iendswith=f"/{repo_str}")
+                    | models.Q(task_repositories__repository__iendswith=f"/{repo_str}")
+                ).distinct()
 
         if organization:
             org_str = organization.strip().lower()
-            qs = qs.filter(repository__istartswith=f"{org_str}/")
+            qs = qs.filter(
+                models.Q(repository__istartswith=f"{org_str}/")
+                | models.Q(task_repositories__repository__istartswith=f"{org_str}/")
+            ).distinct()
 
         if created_by:
             qs = qs.filter(created_by_id=created_by)
@@ -190,8 +198,8 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             else:
                 qs = qs.filter(internal=False)
 
-        # Prefetch runs to avoid N+1 queries when fetching latest_run
-        qs = qs.prefetch_related("runs")
+        # Prefetch runs and repositories to avoid N+1 queries
+        qs = qs.prefetch_related("runs", "task_repositories")
 
         return qs
 

@@ -282,6 +282,35 @@ class Task(DeletedMetaFields, models.Model):
         return task
 
 
+class TaskRepository(models.Model):
+    """Junction model supporting multiple repositories per task."""
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="task_repositories")
+    repository = models.CharField(max_length=400)  # Format: "org/repo"
+    github_integration = models.ForeignKey(
+        "posthog.Integration",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={"kind": "github"},
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "posthog_task_repository"
+
+    def __str__(self):
+        return f"{self.task_id}: {self.repository}"
+
+    def save(self, *args, **kwargs):
+        if self.repository:
+            parts = self.repository.split("/")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                raise ValidationError({"repository": "Format for repository is organization/repo"})
+            self.repository = self.repository.lower()
+        super().save(*args, **kwargs)
+
+
 class TaskRun(models.Model):
     class Status(models.TextChoices):
         NOT_STARTED = "not_started", "Not Started"

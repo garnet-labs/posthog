@@ -2390,3 +2390,218 @@ class TestSandboxEnvironmentAPI(BaseTaskAPITest):
 
         task_run = TaskRun.objects.filter(task=task).latest("created_at")
         self.assertNotIn("sandbox_environment_id", task_run.state)
+
+
+class TestTaskMultiRepoAPI(BaseTaskAPITest):
+    def test_create_task_with_repositories_array(self):
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Multi-repo task",
+                "description": "Work across repos",
+                "origin_product": "user_created",
+                "repositories": [
+                    {"repository": "posthog/posthog-js"},
+                    {"repository": "posthog/posthog.com"},
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        data = response.json()
+        self.assertEqual(len(data["repositories"]), 2)
+        repo_names = [r["repository"] for r in data["repositories"]]
+        self.assertIn("posthog/posthog-js", repo_names)
+        self.assertIn("posthog/posthog.com", repo_names)
+
+        # Legacy field returns the first repository
+        self.assertEqual(data["repository"], "posthog/posthog-js")
+
+        # DB check
+        task = Task.objects.get(id=data["id"])
+        self.assertEqual(task.task_repositories.count(), 2)
+        self.assertEqual(task.repository, "posthog/posthog-js")
+
+    def test_create_task_with_legacy_repository_string(self):
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Legacy task",
+                "description": "Single repo",
+                "origin_product": "user_created",
+                "repository": "posthog/posthog",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        data = response.json()
+        self.assertEqual(data["repository"], "posthog/posthog")
+        self.assertEqual(len(data["repositories"]), 1)
+        self.assertEqual(data["repositories"][0]["repository"], "posthog/posthog")
+
+    def test_create_task_without_repository(self):
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "No repo task",
+                "description": "No repository",
+                "origin_product": "user_created",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        data = response.json()
+        self.assertIsNone(data["repository"])
+        self.assertEqual(len(data["repositories"]), 0)
+
+    def test_update_task_replaces_repositories(self):
+        # Create task with one repo
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Update me",
+                "description": "Will change repos",
+                "origin_product": "user_created",
+                "repositories": [{"repository": "posthog/posthog"}],
+            },
+            format="json",
+        )
+        task_id = response.json()["id"]
+
+        # Update with different repos
+        response = self.client.patch(
+            f"/api/projects/@current/tasks/{task_id}/",
+            {
+                "repositories": [
+                    {"repository": "posthog/posthog-js"},
+                    {"repository": "posthog/posthog.com"},
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        self.assertEqual(len(data["repositories"]), 2)
+        self.assertEqual(data["repository"], "posthog/posthog-js")
+
+        # Old repo should be gone
+        task = Task.objects.get(id=task_id)
+        self.assertEqual(task.task_repositories.count(), 2)
+        repo_names = list(task.task_repositories.values_list("repository", flat=True))
+        self.assertNotIn("posthog/posthog", repo_names)
+
+    def test_update_task_clear_repositories(self):
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Clear repos",
+                "description": "Will clear repos",
+                "origin_product": "user_created",
+                "repositories": [{"repository": "posthog/posthog"}],
+            },
+            format="json",
+        )
+        task_id = response.json()["id"]
+
+        response = self.client.patch(
+            f"/api/projects/@current/tasks/{task_id}/",
+            {"repositories": []},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        self.assertEqual(len(data["repositories"]), 0)
+        self.assertIsNone(data["repository"])
+
+    def test_retrieve_task_returns_both_formats(self):
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Retrieve me",
+                "description": "Check both formats",
+                "origin_product": "user_created",
+                "repositories": [
+                    {"repository": "posthog/posthog-js"},
+                    {"repository": "posthog/posthog.com"},
+                ],
+            },
+            format="json",
+        )
+        task_id = response.json()["id"]
+
+        response = self.client.get(f"/api/projects/@current/tasks/{task_id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+        self.assertIn("repository", data)
+        self.assertIn("repositories", data)
+        self.assertEqual(data["repository"], "posthog/posthog-js")
+        self.assertEqual(len(data["repositories"]), 2)
+
+    def test_list_tasks_filter_by_repository_finds_multi_repo_task(self):
+        self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Multi-repo",
+                "description": "Has multiple repos",
+                "origin_product": "user_created",
+                "repositories": [
+                    {"repository": "posthog/posthog-js"},
+                    {"repository": "posthog/posthog.com"},
+                ],
+            },
+            format="json",
+        )
+
+        # Should find by second repo
+        response = self.client.get("/api/projects/@current/tasks/?repository=posthog/posthog.com")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.json()["results"]), 1)
+        self.assertEqual(response.json()["results"][0]["title"], "Multi-repo")
+
+    def test_create_task_with_repositories_and_github_integration(self):
+        integration = Integration.objects.create(team=self.team, kind="github")
+
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "With integration",
+                "description": "Has integration",
+                "origin_product": "user_created",
+                "repositories": [
+                    {"repository": "posthog/posthog-js", "github_integration": integration.id},
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        data = response.json()
+        self.assertEqual(data["repositories"][0]["github_integration"], integration.id)
+        self.assertEqual(data["github_integration"], integration.id)
+
+    def test_create_task_legacy_with_github_integration(self):
+        integration = Integration.objects.create(team=self.team, kind="github")
+
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Legacy with integration",
+                "description": "Has integration",
+                "origin_product": "user_created",
+                "repository": "posthog/posthog",
+                "github_integration": integration.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        data = response.json()
+        self.assertEqual(len(data["repositories"]), 1)
+        self.assertEqual(data["repositories"][0]["repository"], "posthog/posthog")
+        self.assertEqual(data["repositories"][0]["github_integration"], integration.id)
