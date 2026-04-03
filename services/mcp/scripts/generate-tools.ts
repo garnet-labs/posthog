@@ -419,15 +419,18 @@ function composeToolSchema(config: ToolConfig, resolved: ResolvedOperation, spec
     }
 
     // rename_params: swap original field names for MCP-safe aliases in the schema.
-    // The handler maps back to the original name when building the request body.
+    // The handler maps back to the original name when building the request body/query.
     const renamedFields: Record<string, string> = {}
     if (renameMap.size > 0) {
-        // We need the Body import to reference .shape['original'] for the alias type
         const bodyImport = `${pascal}Body`
+        const queryImport = `${pascal}QueryParams`
+        const queryParamNameSet = new Set(queryParamNames)
         for (const [original, alias] of renameMap) {
             renamedFields[alias] = original
+            // Determine whether the original field lives in query params or body
+            const sourceImport = queryParamNameSet.has(original) ? queryImport : bodyImport
             schemaExpr += `\n    .omit({ '${original}': true })`
-            schemaExpr += `\n    .extend({ ${alias}: ${bodyImport}.shape['${original}'] })`
+            schemaExpr += `\n    .extend({ ${alias}: ${sourceImport}.shape['${original}'] })`
         }
     }
 
@@ -578,8 +581,17 @@ function generateToolCode(
         handlerBody += `            body,\n`
     }
     if (hasQuery) {
+        // Build reverse map: original → alias for renamed query params
+        const originalToAlias = new Map<string, string>()
+        for (const [alias, original] of Object.entries(composition.renamedFields)) {
+            originalToAlias.set(original, alias)
+        }
         const queryAssignments = composition.queryParamNames
-            .map((qn) => `                ${qn}: params.${qn},`)
+            .map((qn) => {
+                const alias = originalToAlias.get(qn)
+                // Use alias for params access, original name as the query key
+                return alias ? `                '${qn}': params.${alias},` : `                ${qn}: params.${qn},`
+            })
             .join('\n')
         handlerBody += `            query: {\n${queryAssignments}\n            },\n`
     }

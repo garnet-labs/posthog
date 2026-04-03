@@ -9,8 +9,6 @@ import {
     AlertsPartialUpdateBody,
     AlertsPartialUpdateParams,
     AlertsRetrieveParams,
-    AlertsRetrieveQueryParams,
-    AlertsSimulateCreateBody,
 } from '@/generated/alerts/api'
 import { withPostHogUrl, type WithPostHogUrl } from '@/tools/tool-utils'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
@@ -34,7 +32,7 @@ const alertsList = (): ToolBase<typeof AlertsListSchema, WithPostHogUrl<Schemas.
     },
 })
 
-const AlertGetSchema = AlertsRetrieveParams.omit({ project_id: true }).extend(AlertsRetrieveQueryParams.shape)
+const AlertGetSchema = AlertsRetrieveParams.omit({ project_id: true })
 
 const alertGet = (): ToolBase<typeof AlertGetSchema, Schemas.Alert> => ({
     name: 'alert-get',
@@ -44,11 +42,6 @@ const alertGet = (): ToolBase<typeof AlertGetSchema, Schemas.Alert> => ({
         const result = await context.api.request<Schemas.Alert>({
             method: 'GET',
             path: `/api/projects/${projectId}/alerts/${params.id}/`,
-            query: {
-                checks_date_from: params.checks_date_from,
-                checks_date_to: params.checks_date_to,
-                checks_limit: params.checks_limit,
-            },
         })
         return result
     },
@@ -82,9 +75,6 @@ const alertCreate = (): ToolBase<typeof AlertCreateSchema, Schemas.Alert> => ({
         }
         if (params.config !== undefined) {
             body['config'] = params.config
-        }
-        if (params.detector_config !== undefined) {
-            body['detector_config'] = params.detector_config
         }
         if (params.calculation_interval !== undefined) {
             body['calculation_interval'] = params.calculation_interval
@@ -133,9 +123,6 @@ const alertUpdate = (): ToolBase<typeof AlertUpdateSchema, Schemas.Alert> => ({
         if (params.config !== undefined) {
             body['config'] = params.config
         }
-        if (params.detector_config !== undefined) {
-            body['detector_config'] = params.detector_config
-        }
         if (params.calculation_interval !== undefined) {
             body['calculation_interval'] = params.calculation_interval
         }
@@ -169,40 +156,10 @@ const alertDelete = (): ToolBase<typeof AlertDeleteSchema, unknown> => ({
     },
 })
 
-const AlertSimulateSchema = AlertsSimulateCreateBody
-
-const alertSimulate = (): ToolBase<typeof AlertSimulateSchema, Schemas.AlertSimulateResponse> => ({
-    name: 'alert-simulate',
-    schema: AlertSimulateSchema,
-    handler: async (context: Context, params: z.infer<typeof AlertSimulateSchema>) => {
-        const projectId = await context.stateManager.getProjectId()
-        const body: Record<string, unknown> = {}
-        if (params.insight !== undefined) {
-            body['insight'] = params.insight
-        }
-        if (params.detector_config !== undefined) {
-            body['detector_config'] = params.detector_config
-        }
-        if (params.series_index !== undefined) {
-            body['series_index'] = params.series_index
-        }
-        if (params.date_from !== undefined) {
-            body['date_from'] = params.date_from
-        }
-        const result = await context.api.request<Schemas.AlertSimulateResponse>({
-            method: 'POST',
-            path: `/api/projects/${projectId}/alerts/simulate/`,
-            body,
-        })
-        return result
-    },
-})
-
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'alerts-list': alertsList,
     'alert-get': alertGet,
     'alert-create': alertCreate,
     'alert-update': alertUpdate,
     'alert-delete': alertDelete,
-    'alert-simulate': alertSimulate,
 }

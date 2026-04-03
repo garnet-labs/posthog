@@ -54,18 +54,11 @@ export const notebooksCreateBodyVersionMin = -2147483648
 export const notebooksCreateBodyVersionMax = 2147483647
 
 export const NotebooksCreateBody = /* @__PURE__ */ zod.object({
-    title: zod.string().max(notebooksCreateBodyTitleMax).nullish().describe('Title of the notebook.'),
-    content: zod.unknown().nullish().describe('Notebook content as a ProseMirror JSON document structure.'),
-    text_content: zod.string().nullish().describe('Plain text representation of the notebook content for search.'),
-    version: zod
-        .number()
-        .min(notebooksCreateBodyVersionMin)
-        .max(notebooksCreateBodyVersionMax)
-        .optional()
-        .describe(
-            'Version number for optimistic concurrency control. Must match the current version when updating content.'
-        ),
-    deleted: zod.boolean().optional().describe('Whether the notebook has been soft-deleted.'),
+    title: zod.string().max(notebooksCreateBodyTitleMax).nullish(),
+    content: zod.unknown().nullish(),
+    text_content: zod.string().nullish(),
+    version: zod.number().min(notebooksCreateBodyVersionMin).max(notebooksCreateBodyVersionMax).optional(),
+    deleted: zod.boolean().optional(),
 })
 
 /**
@@ -98,18 +91,15 @@ export const notebooksPartialUpdateBodyVersionMin = -2147483648
 export const notebooksPartialUpdateBodyVersionMax = 2147483647
 
 export const NotebooksPartialUpdateBody = /* @__PURE__ */ zod.object({
-    title: zod.string().max(notebooksPartialUpdateBodyTitleMax).nullish().describe('Title of the notebook.'),
-    content: zod.unknown().nullish().describe('Notebook content as a ProseMirror JSON document structure.'),
-    text_content: zod.string().nullish().describe('Plain text representation of the notebook content for search.'),
+    title: zod.string().max(notebooksPartialUpdateBodyTitleMax).nullish(),
+    content: zod.unknown().nullish(),
+    text_content: zod.string().nullish(),
     version: zod
         .number()
         .min(notebooksPartialUpdateBodyVersionMin)
         .max(notebooksPartialUpdateBodyVersionMax)
-        .optional()
-        .describe(
-            'Version number for optimistic concurrency control. Must match the current version when updating content.'
-        ),
-    deleted: zod.boolean().optional().describe('Whether the notebook has been soft-deleted.'),
+        .optional(),
+    deleted: zod.boolean().optional(),
 })
 
 /**
