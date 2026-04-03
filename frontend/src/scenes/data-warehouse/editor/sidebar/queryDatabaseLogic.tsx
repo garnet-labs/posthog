@@ -1337,7 +1337,10 @@ export const queryDatabaseLogic = kea<queryDatabaseLogicType>([
             }
 
             const nextFolderId = getFolderIdFromDropTarget(values.displayedTreeData, dropTargetId)
-            const currentFolderId = activeItem.record?.folderId ?? null
+            const currentFolderId =
+                activeItem.record?.type === 'view' && activeItem.record.isSavedQuery
+                    ? (activeItem.record.view.folder_id ?? null)
+                    : (activeItem.record?.folderId ?? null)
 
             if (nextFolderId === undefined || currentFolderId === nextFolderId) {
                 return
