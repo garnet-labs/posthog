@@ -70,7 +70,7 @@ def _deactivate_version_materialization(version: EndpointVersion) -> None:
     Deactivate materialization for an endpoint version.
 
     This reverts the materialization (removes Temporal schedule, cleans up S3 tables)
-    and soft-deletes the saved_query.
+    while preserving the backing saved query for sidebar organization.
     """
     saved_query = version.saved_query
     if not saved_query:

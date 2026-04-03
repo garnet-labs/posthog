@@ -83,14 +83,16 @@ class TestDeactivateStaleMaterializationsTask(BaseTest):
             last_executed_at=now - timedelta(days=45),
             materialization_created_at=now - timedelta(days=45),
         )
+        saved_query_id = version.saved_query_id
 
         deactivate_stale_materializations()
 
         version.refresh_from_db()
-        assert version.saved_query is None
+        assert version.saved_query is not None
+        assert version.saved_query_id == saved_query_id
 
-        saved_query = DataWarehouseSavedQuery.objects.get(name__startswith="POSTHOG_DELETED_")
-        assert saved_query.deleted is True
+        saved_query = DataWarehouseSavedQuery.objects.get(id=saved_query_id)
+        assert saved_query.deleted is False
         assert saved_query.is_materialized is False
 
     @mock.patch("products.data_warehouse.backend.data_load.saved_query_service.delete_saved_query_schedule")
@@ -203,7 +205,7 @@ class TestDeactivateStaleMaterializationsTask(BaseTest):
         stale_version.refresh_from_db()
         active_version.refresh_from_db()
 
-        assert stale_version.saved_query is None  # Deactivated
+        assert stale_version.saved_query is not None  # Deactivated but preserved
         assert active_version.saved_query is not None  # Kept
 
     def test_no_endpoints_found(self):
@@ -227,7 +229,8 @@ class TestDeactivateStaleMaterializationsTask(BaseTest):
 
         # Should be deactivated because it's at or past the threshold
         version.refresh_from_db()
-        assert version.saved_query is None
+        assert version.saved_query is not None
+        assert version.saved_query.is_materialized is False
 
 
 class TestDeactivateEndpointMaterialization(BaseTest):
@@ -239,7 +242,7 @@ class TestDeactivateEndpointMaterialization(BaseTest):
         }
 
     @mock.patch("products.data_warehouse.backend.data_load.saved_query_service.delete_saved_query_schedule")
-    def test_deactivates_materialization_and_soft_deletes_saved_query(self, mock_delete_schedule):
+    def test_deactivates_materialization_and_preserves_saved_query(self, mock_delete_schedule):
         saved_query = DataWarehouseSavedQuery.objects.create(
             team=self.team,
             name="to_deactivate",
@@ -275,11 +278,11 @@ class TestDeactivateEndpointMaterialization(BaseTest):
         _deactivate_version_materialization(version)
 
         version.refresh_from_db()
-        assert version.saved_query is None
+        assert version.saved_query is not None
         assert version.is_materialized is False
 
         saved_query.refresh_from_db()
-        assert saved_query.deleted is True
+        assert saved_query.deleted is False
         assert saved_query.is_materialized is False
         assert saved_query.sync_frequency_interval is None
         assert saved_query.last_run_at is None
