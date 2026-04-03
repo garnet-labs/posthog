@@ -144,8 +144,10 @@ def copy_claude_auth(uid: int, gid: int) -> None:
             shutil.copy2(src, claude_dir / name)
 
     src = Path("/tmp/claude-auth.json")
-    if src.exists():
+    if src.is_file():
         shutil.copy2(src, SANDBOX_HOME / ".claude.json")
+    elif src.exists():
+        log("WARNING: /tmp/claude-auth.json is not a file (Docker created a directory mount) — skipping")
 
     run(["chown", "-R", f"{uid}:{gid}", str(SANDBOX_HOME)])
 
