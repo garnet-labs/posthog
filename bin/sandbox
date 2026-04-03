@@ -684,12 +684,55 @@ def init_cache_from_master() -> None:
 
     try:
         _copy_sandbox_backup_xml(init_worktree)
-        info("Building and starting containers...")
-        compose(init_project, init_port, init_worktree, "up", "-d", "--build", capture=True)
 
-        info("Waiting for master to boot...")
-        if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
-            fatal("Cache init failed. See logs above.")
+        # Build the app image and start only infra services (no app container).
+        # Previously this ran `compose up` which started the full app with
+        # mprocs/phrocs, installed node deps, rust crates, etc. — all unnecessary
+        # for building the database cache. Now we run migrations directly.
+        info("Building app image...")
+        compose(init_project, init_port, init_worktree, "build", "app", capture=True)
+        info("Starting infra services...")
+        compose(init_project, init_port, init_worktree, "up", "-d",
+                "db", "redis7", "clickhouse", "kafka", "zookeeper", "objectstorage", capture=True)
+
+        # Wait for infra to be healthy
+        info("Waiting for infra services...")
+        for svc in ["db", "clickhouse", "kafka", "redis7"]:
+            container = f"{init_project}-{svc}-1"
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                result = run(
+                    ["docker", "inspect", "--format", "{{.State.Health.Status}}", container],
+                    check=False, capture=True,
+                )
+                status = result.stdout.strip() if result.returncode == 0 else ""
+                if status == "healthy":
+                    info(f"  {svc}: healthy")
+                    break
+                time.sleep(2)
+            else:
+                dump_container_logs(container)
+                fatal(f"{svc} did not become healthy within 120s")
+
+        # Run migrations directly — no mprocs, no pnpm, no node deps.
+        compose_run = [
+            "docker", "compose", "--progress=quiet",
+            "-p", init_project,
+            "-f", str(COMPOSE_FILE), "-f", str(PROFILES_FILE),
+            "run", "--rm", "--no-deps", "--entrypoint", "",
+            "-e", "SKIP_SERVICE_VERSION_REQUIREMENTS=1",
+            "app",
+        ]
+        env = _compose_env(init_port, init_worktree)
+
+        info("Running Postgres migrations...")
+        run(compose_run + ["python", "manage.py", "migrate"], env_extra=env)
+
+        info("Running ClickHouse migrations...")
+        run(compose_run + ["python", "manage.py", "migrate_clickhouse"], env_extra=env)
+
+        info("Creating demo user and org...")
+        run(compose_run + ["python", "manage.py", "setup_dev", "--no-data"], env_extra=env)
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
