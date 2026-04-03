@@ -92,7 +92,7 @@ export SANDBOX_CLAUDE_JSON=$CLAUDE_JSON_FILE
 export SANDBOX_SSH_AUTHORIZED_KEYS=$UBUNTU_SSH_DIR/authorized_keys
 export SANDBOX_IDE_VOLUME=sandbox-intellij
 
-sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml up -d
+sudo -u ubuntu -E HOME=/home/ubuntu docker compose -f docker-compose.sandbox.yml up -d
 
 echo "==> Cloud sandbox boot complete at $(date)"
 echo "==> Tailscale hostname: $SANDBOX_HOSTNAME"
