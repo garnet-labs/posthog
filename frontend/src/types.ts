@@ -12,7 +12,7 @@ import { ChartDataset, ChartType, InteractionItem } from 'lib/Chart'
 import { AlertType } from 'lib/components/Alerts/types'
 import { CommonFilters, HeatmapFilters, HeatmapFixedPositionMode } from 'lib/components/heatmaps/types'
 import { HedgehogActorOptions } from 'lib/components/HedgehogMode/types'
-import { UrlTriggerConfig } from 'lib/components/IngestionControls/types'
+import { SessionRecordingTriggerGroupsConfig, UrlTriggerConfig } from 'lib/components/IngestionControls/types'
 import { JSONContent } from 'lib/components/RichContentEditor/types'
 import { DashboardCompatibleScenes } from 'lib/components/SceneDashboardChoice/sceneDashboardChoiceModalLogic'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
@@ -391,6 +391,7 @@ export interface NotificationSettings {
 
 export interface InAppNotification {
     id: string
+    team_id: number | null
     notification_type: string
     priority: string
     title: string
@@ -399,6 +400,8 @@ export interface InAppNotification {
     read_at: string | null
     resource_type: string | null
     source_url: string
+    source_type: string | null
+    source_id: string | null
     created_at: string
 }
 
@@ -680,6 +683,7 @@ export interface TeamType extends TeamBasicType {
     session_recording_url_blocklist_config?: UrlTriggerConfig[]
     session_recording_event_trigger_config?: string[]
     session_recording_trigger_match_type_config?: 'all' | 'any' | null
+    session_recording_trigger_groups?: SessionRecordingTriggerGroupsConfig | null
     surveys_opt_in?: boolean
     heatmaps_opt_in?: boolean
     conversations_enabled?: boolean
@@ -898,6 +902,7 @@ export enum PropertyOperator {
 export enum SavedInsightsTabs {
     Home = 'home',
     All = 'all',
+    Yours = 'yours',
     History = 'history',
     Alerts = 'alerts',
 }
@@ -970,6 +975,9 @@ export enum PropertyFilterType {
     Log = 'log',
     LogAttribute = 'log_attribute',
     LogResourceAttribute = 'log_resource_attribute',
+    Span = 'span',
+    SpanAttribute = 'span_attribute',
+    SpanResourceAttribute = 'span_resource_attribute',
     WorkflowVariable = 'workflow_variable',
     Empty = 'empty',
 }
@@ -1060,6 +1068,16 @@ export interface LogPropertyFilter extends BasePropertyFilter {
     operator: PropertyOperator
 }
 
+export type SpanPropertyFilterType =
+    | PropertyFilterType.Span
+    | PropertyFilterType.SpanAttribute
+    | PropertyFilterType.SpanResourceAttribute
+
+export interface SpanPropertyFilter extends BasePropertyFilter {
+    type: SpanPropertyFilterType
+    operator: PropertyOperator
+}
+
 export interface FeaturePropertyFilter extends BasePropertyFilter {
     type: PropertyFilterType.Feature
     operator: PropertyOperator
@@ -1105,6 +1123,7 @@ export type AnyPropertyFilter =
     | DataWarehousePersonPropertyFilter
     | ErrorTrackingIssueFilter
     | LogPropertyFilter
+    | SpanPropertyFilter
     | RevenueAnalyticsPropertyFilter
 
 /** Any filter type supported by `property_to_expr(scope="person", ...)`. */
@@ -2297,8 +2316,11 @@ export interface InsightModel extends Cacheable, WithAccessControl {
     _create_in_folder?: string | null
 }
 
-export interface QueryBasedInsightModel extends Omit<InsightModel, 'filters'> {
-    query: Node | null
+export interface QueryBasedInsightModel<R extends Node<Record<string, any>> = Node<Record<string, any>>> extends Omit<
+    InsightModel,
+    'filters'
+> {
+    query: R | null
 }
 
 export interface EndpointType extends WithAccessControl {
@@ -2369,6 +2391,10 @@ export interface DashboardTemplateListParams {
     scope?: DashboardTemplateScope
     // matches on template name, description, and tags
     search?: string
+    /** When set, sort by template name (not searching). Omit for server default order. Ignored when `search` is set. */
+    ordering?: 'template_name' | '-template_name'
+    /** When true, only curated featured templates. When false, only non-featured. */
+    is_featured?: boolean
 }
 
 export type DashboardTemplateScope = 'team' | 'global' | 'feature_flag'
@@ -3003,6 +3029,9 @@ export type InsightEditorFilterGroup = {
     title: string
     editorFilters: InsightEditorFilter[]
     defaultExpanded?: boolean
+    show?: boolean
+    /** Summary shown next to the title when the section is collapsed (e.g. "3 filters", "$browser, $os") */
+    collapsedSummary?: string | null
 }
 
 export interface SystemStatusSubrows {
@@ -4077,6 +4106,7 @@ export interface ScheduledChangeType {
     created_by: UserBasicType
     is_recurring: boolean
     recurrence_interval: RecurrenceInterval | null
+    cron_expression: string | null
     last_executed_at: string | null
     end_date: string | null
 }
@@ -4187,6 +4217,7 @@ export type HotKey =
     | 'd'
     | 'e'
     | 'f'
+    | 'g'
     | 'h'
     | 'i'
     | 'j'
@@ -4286,6 +4317,9 @@ export enum PropertyDefinitionType {
     Log = 'log',
     LogAttribute = 'log_attribute',
     LogResourceAttribute = 'log_resource_attribute',
+    Span = 'span',
+    SpanAttribute = 'span_attribute',
+    SpanResourceAttribute = 'span_resource_attribute',
     FlagValue = 'flag_value',
     WorkflowVariable = 'workflow_variable',
 }
@@ -4442,6 +4476,7 @@ export interface Experiment {
         timeseries?: boolean
     }
     exposure_preaggregation_enabled?: boolean
+    only_count_matured_users?: boolean
     _create_in_folder?: string | null
     conclusion?: ExperimentConclusion | null
     conclusion_comment?: string | null
@@ -4558,6 +4593,7 @@ export interface AppContext {
     /** Support flow aid: a staff-only list of users who may be impersonated to access this resource. */
     suggested_users_with_access?: UserBasicType[]
     livestream_host?: string
+    oauth_application?: OAuthApplicationPublicMetadata
 }
 
 export type StoredMetricMathOperations = 'max' | 'min' | 'sum'
@@ -5002,6 +5038,7 @@ export enum ExporterFormat {
     MP4 = 'video/mp4',
     GIF = 'image/gif',
     HCL = 'text/hcl',
+    MARKDOWN = 'text/markdown',
 }
 
 /** Exporting directly from the browser to a file */
@@ -5336,6 +5373,7 @@ export enum ActivityScope {
     ORGANIZATION = 'Organization',
     ORGANIZATION_MEMBERSHIP = 'OrganizationMembership',
     ORGANIZATION_INVITE = 'OrganizationInvite',
+    ORGANIZATION_DOMAIN = 'OrganizationDomain',
     ERROR_TRACKING_ISSUE = 'ErrorTrackingIssue',
     DATA_WAREHOUSE_SAVED_QUERY = 'DataWarehouseSavedQuery',
     USER_INTERVIEW = 'UserInterview',
@@ -5443,6 +5481,8 @@ export interface DataWarehouseSavedQuery {
     sync_frequency?: string
     status?: string
     managed_viewset_kind: DataWarehouseManagedViewsetKind | null
+    folder_id?: string | null
+    folder_name?: string | null
     latest_error: string | null
     latest_history_id?: string
     is_materialized?: boolean
@@ -5453,6 +5493,14 @@ export interface DataWarehouseSavedQuery {
     origin?: DataWarehouseSavedQueryOrigin
     is_test?: boolean
     expires_at?: string
+}
+
+export interface DataWarehouseSavedQueryFolder {
+    /** UUID */
+    id: string
+    name: string
+    created_at?: string
+    view_count?: number
 }
 
 export interface DataWarehouseSavedQueryDraft {
@@ -5585,6 +5633,7 @@ export interface DataModelingJob {
 export interface SimpleExternalDataSourceSchema {
     id: string
     name: string
+    label: string | null
     should_sync: boolean
     last_synced_at?: Dayjs
 }
@@ -5615,7 +5664,7 @@ export interface ExternalDataSourceSyncSchema {
     sync_time_of_day: string | null
     incremental_field: string | null
     incremental_field_type: string | null
-    sync_type: 'full_refresh' | 'incremental' | 'append' | null
+    sync_type: 'full_refresh' | 'incremental' | 'append' | 'webhook' | null
     incremental_fields: IncrementalField[]
     incremental_available: boolean
     append_available: boolean
@@ -5627,7 +5676,7 @@ export interface ExternalDataSourceSyncSchema {
 export interface ExternalDataSourceSchema extends SimpleExternalDataSourceSchema {
     table?: SimpleDataWarehouseTable
     incremental: boolean
-    sync_type: 'incremental' | 'full_refresh' | 'append' | null
+    sync_type: 'incremental' | 'full_refresh' | 'append' | 'webhook' | null
     sync_time_of_day: string | null
     status?: ExternalDataSchemaStatus
     latest_error: string | null
@@ -6195,6 +6244,10 @@ export type OnboardingProduct = {
     socialProof?: string
     userCentricDescription?: string
     capabilities?: string[]
+    /** Title + problem pairs shown in the post-onboarding modal. Falls back to capabilities if absent. */
+    valueProps?: { title: string; problem: string }[]
+    /** Hedgehog illustration for the post-onboarding modal. Falls back to SupermanHog if absent. */
+    hedgehog?: React.ComponentType<{ className?: string }>
 }
 
 export type CyclotronJobInputSchemaType = {
@@ -6287,6 +6340,7 @@ export interface HogFunctionMappingType {
     inputs_schema?: CyclotronJobInputSchemaType[]
     inputs?: Record<string, CyclotronInputType> | null
     filters?: CyclotronJobFiltersType | null
+    use_all_events_by_default?: boolean
 }
 export interface HogFunctionMappingTemplateType extends HogFunctionMappingType {
     name: string
@@ -6696,6 +6750,7 @@ export type OAuthApplicationPublicMetadata = {
     name: string
     client_id: string
     is_verified: boolean
+    logo_uri: string | null
 }
 export interface EmailSenderDomainStatus {
     status: 'pending' | 'success'

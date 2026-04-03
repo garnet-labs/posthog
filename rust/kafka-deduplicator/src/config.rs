@@ -300,19 +300,18 @@ pub struct Config {
     // Limits memory usage by bounding the number of in-flight HTTP connections
     // Critical during rebalance when many partitions are assigned simultaneously
     // Higher values speed up rebalance; streaming bounds memory per download to ~8KB
-    #[envconfig(default = "200")]
+    #[envconfig(default = "40")]
     pub max_concurrent_checkpoint_file_downloads: usize,
 
-    // Maximum concurrent S3 file uploads during checkpoint export (global LimitStore semaphore).
-    // Bounds total S3 API concurrency across all partition checkpoints.
-    #[envconfig(default = "200")]
+    // Maximum concurrent S3 file uploads during checkpoint export
+    // Controls the LimitStore semaphore that bounds concurrent S3 HTTP requests
+    #[envconfig(default = "40")]
     pub max_concurrent_checkpoint_file_uploads: usize,
 
-    // Maximum concurrent upload buffers per partition checkpoint.
-    // Each active upload holds ~18MB (8MB read buffer + ~10MB BufWriter).
-    // With max_concurrent_checkpoints=8, worst case memory is
-    // 8 × this value × 18MB, so 25 × 8 = 200 buffers ≈ 3.6GB.
-    #[envconfig(default = "25")]
+    // Maximum upload futures actively polled per partition checkpoint (files open with
+    // read buffers + BufWriters). Bounds memory independently from S3 HTTP concurrency.
+    // Each active buffer consumes ~18MB (8MB read buffer + ~10MB BufWriter).
+    #[envconfig(default = "40")]
     pub max_upload_buffers_per_partition: usize,
 
     // Delay in seconds between starting each partition's checkpoint within a cycle.
@@ -325,6 +324,7 @@ pub struct Config {
     // Use to isolate whether memory spikes come from the flush/compaction or the upload.
     #[envconfig(default = "false")]
     pub checkpoint_skip_export: bool,
+
 
     // Maximum time allowed for a complete checkpoint import for a single partition (seconds).
     // This includes listing checkpoints, downloading metadata, and downloading all files.

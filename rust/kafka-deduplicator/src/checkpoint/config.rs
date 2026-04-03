@@ -75,16 +75,14 @@ pub struct CheckpointConfig {
     /// This is critical during rebalance when many partitions are assigned simultaneously.
     pub max_concurrent_checkpoint_file_downloads: usize,
 
-    /// Maximum concurrent S3 file uploads during checkpoint export (global LimitStore semaphore).
-    /// Bounds total S3 API concurrency across all partition checkpoints.
+    /// Maximum concurrent S3 file uploads during checkpoint export.
+    /// Controls the LimitStore semaphore that bounds concurrent S3 HTTP requests.
     pub max_concurrent_checkpoint_file_uploads: usize,
 
-    /// Maximum concurrent upload buffers per partition checkpoint.
-    /// Controls how many files are actively being uploaded (and buffered in memory)
-    /// for a single partition's checkpoint. Each active upload holds ~18MB
-    /// (8MB read buffer + ~10MB BufWriter). This is the primary memory control
-    /// for uploads — with max_concurrent_checkpoints partitions uploading
-    /// simultaneously, worst case memory is partitions × this value × 18MB.
+    /// Maximum number of upload futures actively polled (files open with read buffers
+    /// and BufWriters) per partition checkpoint. Controls the `buffer_unordered` window
+    /// to bound memory independently from the S3 HTTP concurrency limit above.
+    /// Each active buffer consumes ~18MB (8MB read buffer + ~10MB BufWriter).
     pub max_upload_buffers_per_partition: usize,
 
     /// Maximum time allowed for a complete checkpoint import for a single partition.
@@ -131,9 +129,9 @@ impl Default for CheckpointConfig {
             s3_attempt_timeout: Duration::from_secs(20),
             s3_max_retries: 3,
             checkpoint_import_attempt_depth: 10,
-            max_concurrent_checkpoint_file_downloads: 1000,
-            max_concurrent_checkpoint_file_uploads: 1000,
-            max_upload_buffers_per_partition: 25,
+            max_concurrent_checkpoint_file_downloads: 40,
+            max_concurrent_checkpoint_file_uploads: 40,
+            max_upload_buffers_per_partition: 40,
             checkpoint_partition_import_timeout: Duration::from_secs(240),
             checkpoint_stagger_delay: Duration::ZERO,
             local_checkpoint_max_staleness: Duration::from_secs(
