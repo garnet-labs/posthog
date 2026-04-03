@@ -481,7 +481,7 @@ export const QueryDatabase = ({
                                     e.stopPropagation()
                                     const nextConnectionId =
                                         connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
-                                    newInternalTab(
+                                    router.actions.push(
                                         urls.sqlEditor({
                                             query: buildSelectAllQuery(item.name, null),
                                             connectionId: nextConnectionId,
