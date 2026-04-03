@@ -4,11 +4,6 @@
         "prompt_name": {
             "pattern": "^[^/]+$",
             "type": "string"
-        },
-        "version": {
-            "description": "Specific prompt version to fetch. If omitted, the latest version is returned.",
-            "minimum": 1,
-            "type": "number"
         }
     },
     "required": ["prompt_name"],
