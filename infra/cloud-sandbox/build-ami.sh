@@ -38,7 +38,7 @@ set -euo pipefail
 # --- Configuration ---
 REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE="${BUILD_INSTANCE_TYPE:-m6i.2xlarge}"
-VOLUME_SIZE=100
+VOLUME_SIZE=40
 KEY_NAME="${AWS_KEY_NAME:-}"
 BUILD_BRANCH="${BUILD_BRANCH:-}"
 SECURITY_GROUP="${SANDBOX_SECURITY_GROUP:-}"
@@ -133,6 +133,12 @@ sudo -u ubuntu sg docker -c "python3 bin/sandbox rebuild-cache"
 
 # --- Clean up for snapshotting ---
 echo "==> Cleaning up..."
+
+# Reset to master so any branch can be created as a worktree at boot.
+# DELETE BEFORE LANDING — only needed while BUILD_BRANCH is used for testing.
+cd /home/ubuntu/posthog
+sudo -u ubuntu git checkout master
+
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 rm -rf /tmp/*
