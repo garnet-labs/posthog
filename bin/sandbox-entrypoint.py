@@ -201,9 +201,16 @@ def root_phase() -> None:
         gitdir_line = gitfile.read_text().strip()
         worktree_name = gitdir_line.rsplit("/", 1)[-1]
         container_gitdir = f"/repo.git/worktrees/{worktree_name}"
+        patched_content = f"gitdir: {container_gitdir}\n"
         patched_gitfile = Path("/tmp/sandbox-gitfile")
-        patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
-        run(["mount", "--bind", str(patched_gitfile), str(gitfile)])
+        patched_gitfile.write_text(patched_content)
+        # Bind mount preserves the host file. On native Linux Docker the
+        # nested bind mount may fail, so fall back to writing directly
+        # (acceptable — the host worktree is temporary for cache init).
+        result = run_quiet(["mount", "--bind", str(patched_gitfile), str(gitfile)])
+        if result.returncode != 0:
+            log("bind mount for .git failed, writing patched gitfile directly")
+            gitfile.write_text(patched_content)
 
     export_environment(uid, gid)
     start_sshd(uid, gid)
