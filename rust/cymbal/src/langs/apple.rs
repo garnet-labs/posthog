@@ -808,6 +808,11 @@ mod test {
     fn get_inline_dsym_bytes() -> Vec<u8> {
         use posthog_symbol_data::write_symbol_data;
 
+        // This ZIP was built from test_binary_inline.c compiled with:
+        //   -fdebug-prefix-map=$(srcdir)=/cymbal_tests/apple
+        // so DWARF paths are stable across machines (always /cymbal_tests/apple/...).
+        // The ZIP includes __source/manifest.json and the source file content,
+        // enabling source-context tests without requiring the file to exist on disk.
         const DSYM_ZIP: &[u8] =
             include_bytes!("../../tests/static/apple/test_binary_inline.dSYM.zip");
         write_symbol_data(posthog_symbol_data::AppleDsym {
@@ -820,13 +825,16 @@ mod test {
     /// into multiple resolved frames: one per logical layer (inlined + physical).
     ///
     /// Source layout of `test_binary_inline.c`:
-    ///   inlined_leaf()    — always_inline, lines 4-8
+    ///   inlined_leaf()    — always_inline, lines 4-8 (`volatile int x = 99` at line 6)
     ///   inner_function()  — calls inlined_leaf (line 12); inlined_leaf is inlined here
     ///   outer_function()  — calls inner_function (line 17); both get inlined here
     ///
     /// Address 0x10000034c is inside the body of inlined_leaf as inlined into
     /// outer_function (via inner_function). Lookup of 0x34c-1=0x34b resolves to
     /// three logical frames: inlined_leaf → inner_function → outer_function.
+    ///
+    /// The test ZIP includes source files with DWARF paths remapped to the stable
+    /// prefix `/cymbal_tests/apple/`, so source context is verified end-to-end.
     #[sqlx::test(migrations = "./tests/test_migrations")]
     async fn test_apple_inlined_frame_expansion(db: sqlx::PgPool) {
         use chrono::Utc;
@@ -948,5 +956,29 @@ mod test {
         assert!(frames.iter().all(|f| f.source
             .as_ref()
             .is_some_and(|s| s.contains("test_binary_inline.c"))));
+
+        // Source context populated for every frame — the ZIP includes source
+        // files, so all three layers should have context lines.
+        for (i, frame) in frames.iter().enumerate() {
+            assert!(
+                frame.context.is_some(),
+                "frame[{i}] ({:?}) has no source context",
+                frame.resolved_name
+            );
+        }
+
+        // The innermost frame (inlined_leaf) should have the `volatile int x = 99` line.
+        let leaf_ctx = frames[2].context.as_ref().unwrap();
+        let all_lines: Vec<&str> = leaf_ctx
+            .before
+            .iter()
+            .chain(std::iter::once(&leaf_ctx.line))
+            .chain(leaf_ctx.after.iter())
+            .map(|l| l.line.as_str())
+            .collect();
+        assert!(
+            all_lines.iter().any(|l| l.contains("volatile int x = 99")),
+            "expected 'volatile int x = 99' in inlined_leaf context, got: {all_lines:?}"
+        );
     }
 }
