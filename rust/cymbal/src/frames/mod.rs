@@ -83,10 +83,24 @@ impl RawFrame {
             }
 
             RawFrame::Dart(frame) => (to_vec(Ok(frame.into())), "dart"),
-            RawFrame::Apple(frame) => (
-                frame.resolve(team_id, catalog, debug_images).await,
-                "apple",
-            ),
+            RawFrame::Apple(frame) => {
+                let resolved = frame.resolve(team_id, catalog, debug_images).await;
+                // For Apple inlined frames every logical layer shares the same
+                // physical address, so the generic `/part` suffix alone is not
+                // enough to give each layer a stable, unique identity in the DB.
+                // Instead we bake the inlined index into the hash_id itself
+                // (mirroring how Java's frame_id() encodes function+module+line),
+                // and always use part=0.  This lets context be stored and looked
+                // up independently per inlined layer.
+                let resolved = resolved.map(|mut fs| {
+                    fs.iter_mut().enumerate().for_each(|(idx, f)| {
+                        f.frame_id =
+                            RawFrameId::new(frame.inlined_frame_id(idx), team_id).to_full(0);
+                    });
+                    fs
+                });
+                (resolved, "apple")
+            }
             RawFrame::Php(frame) => (to_vec(Ok(frame.into())), "php"),
             RawFrame::Python(frame) => (to_vec(Ok(frame.into())), "python"),
             RawFrame::Ruby(frame) => (to_vec(Ok(frame.into())), "ruby"),
@@ -96,11 +110,15 @@ impl RawFrame {
             RawFrame::Java(frame) => (frame.resolve(team_id, catalog).await, "java"),
         };
 
-        // The raw id of the frame is set after it's resolved
+        // The raw id of the frame is set after it's resolved.
+        // Apple frames pre-assign their own frame_id (baking the inlined index
+        // into the hash) so we skip any frame whose id is already set.
         let res = res.map(|mut fs| {
-            fs.iter_mut()
-                .enumerate()
-                .for_each(|(index, f)| f.frame_id = self.frame_id(team_id, index));
+            fs.iter_mut().enumerate().for_each(|(index, f)| {
+                if f.frame_id == FrameId::placeholder() {
+                    f.frame_id = self.frame_id(team_id, index);
+                }
+            });
             fs
         });
 
