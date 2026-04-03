@@ -173,7 +173,12 @@ def bind_mount_node_modules(uid: int, gid: int) -> None:
         nm.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
         run(["chown", f"{uid}:{gid}", str(nm)])
-        run(["mount", "--bind", str(cache_dir), str(nm)])
+        # On native Linux Docker, nested bind mounts can fail.
+        # Fall back gracefully — pnpm will just write to the workspace directly.
+        result = run_quiet(["mount", "--bind", str(cache_dir), str(nm)])
+        if result.returncode != 0:
+            log(f"bind mount for {nm} failed, skipping")
+            continue
 
     run(["chown", "-R", f"{uid}:{gid}", str(cache_root)])
 
