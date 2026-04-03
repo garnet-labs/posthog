@@ -26,19 +26,21 @@ const frameworks = [
 export const Default: Story = {
     render: () => {
         return (
-            <Combobox items={frameworks}>
-                <ComboboxInput placeholder="Select a framework" />
-                <ComboboxContent>
-                    <ComboboxEmpty>No items found.</ComboboxEmpty>
-                    <ComboboxList>
-                        {(item) => (
-                            <ComboboxItem key={item} value={item}>
-                                {item}
-                            </ComboboxItem>
-                        )}
-                    </ComboboxList>
-                </ComboboxContent>
-            </Combobox>
+            <div className="max-w-xs">
+                <Combobox items={frameworks}>
+                    <ComboboxInput placeholder="Select a framework" />
+                    <ComboboxContent>
+                        <ComboboxEmpty>No items found.</ComboboxEmpty>
+                        <ComboboxList>
+                            {(item) => (
+                                <ComboboxItem key={item} value={item}>
+                                    {item}
+                                </ComboboxItem>
+                            )}
+                        </ComboboxList>
+                    </ComboboxContent>
+                </Combobox>
+            </div>
         )
     },
 } satisfies Story
@@ -48,35 +50,38 @@ export const Multiple: Story = {
     render: () => {
         const anchor = useComboboxAnchor()
         return (
-            <Combobox
-                multiple
-                autoHighlight
-                items={frameworks}
-                defaultValue={[frameworks[0]]}
-            >
-                <ComboboxChips ref={anchor} className="max-w-xs">
-                    <ComboboxValue>
-                        {(values) => (
-                            <React.Fragment>
-                                {values.map((value: string) => (
-                                    <ComboboxChip key={value}>{value}</ComboboxChip>
-                                ))}
-                                <ComboboxChipsInput />
-                            </React.Fragment>
-                        )}
-                    </ComboboxValue>
-                </ComboboxChips>
-                <ComboboxContent anchor={anchor}>
-                    <ComboboxEmpty>No items found.</ComboboxEmpty>
-                    <ComboboxList>
-                        {(item) => (
-                            <ComboboxItem key={item} value={item}>
-                                {item}
-                            </ComboboxItem>
-                        )}
-                    </ComboboxList>
-                </ComboboxContent>
-            </Combobox>
+            <div className="max-w-xs">
+
+                <Combobox
+                    multiple
+                    autoHighlight
+                    items={frameworks}
+                    defaultValue={[frameworks[0]]}
+                >
+                    <ComboboxChips ref={anchor} className="max-w-xs">
+                        <ComboboxValue>
+                            {(values) => (
+                                <React.Fragment>
+                                    {values.map((value: string) => (
+                                        <ComboboxChip key={value}>{value}</ComboboxChip>
+                                    ))}
+                                    <ComboboxChipsInput />
+                                </React.Fragment>
+                            )}
+                        </ComboboxValue>
+                    </ComboboxChips>
+                    <ComboboxContent anchor={anchor}>
+                        <ComboboxEmpty>No items found.</ComboboxEmpty>
+                        <ComboboxList>
+                            {(item) => (
+                                <ComboboxItem key={item} value={item}>
+                                    {item}
+                                </ComboboxItem>
+                            )}
+                        </ComboboxList>
+                    </ComboboxContent>
+                </Combobox>
+            </div>
         )
     },
 } satisfies Story
@@ -84,19 +89,21 @@ export const Multiple: Story = {
 export const Clearable: Story = {
     render: () => {
         return (
-            <Combobox items={frameworks} defaultValue={frameworks[0]}>
-                <ComboboxInput placeholder="Select a framework" showClear className="max-w-xs" />
-                <ComboboxContent>
-                    <ComboboxEmpty>No items found.</ComboboxEmpty>
-                    <ComboboxList>
-                        {(item) => (
-                            <ComboboxItem key={item} value={item}>
-                                {item}
-                            </ComboboxItem>
-                        )}
-                    </ComboboxList>
-                </ComboboxContent>
-            </Combobox>
+            <div className="max-w-xs">
+                <Combobox items={frameworks} defaultValue={frameworks[0]}>
+                    <ComboboxInput placeholder="Select a framework" showClear className="max-w-xs" />
+                    <ComboboxContent>
+                        <ComboboxEmpty>No items found.</ComboboxEmpty>
+                        <ComboboxList>
+                            {(item) => (
+                                <ComboboxItem key={item} value={item}>
+                                    {item}
+                                </ComboboxItem>
+                            )}
+                        </ComboboxList>
+                    </ComboboxContent>
+                </Combobox>
+            </div>
         )
     },
 } satisfies Story
@@ -140,27 +147,30 @@ export const GroupsAndSeparators: Story = {
         ] as const;
 
         return (
-            <Combobox items={timezones}>
-                <ComboboxInput placeholder="Select a timezone" className="max-w-xs" />
-                <ComboboxContent>
-                    <ComboboxEmpty>No timezones found.</ComboboxEmpty>
-                    <ComboboxList>
-                        {(group, index) => (
-                            <ComboboxGroup key={group.value} items={group.items}>
-                                <ComboboxLabel>{group.value}</ComboboxLabel>
-                                <ComboboxCollection>
-                                    {(item) => (
-                                        <ComboboxItem key={item} value={item}>
-                                            {item}
-                                        </ComboboxItem>
-                                    )}
-                                </ComboboxCollection>
-                                {index < timezones.length - 1 && <ComboboxSeparator />}
-                            </ComboboxGroup>
-                        )}
-                    </ComboboxList>
-                </ComboboxContent>
-            </Combobox>
+            <div className="max-w-xs">
+
+                <Combobox items={timezones}>
+                    <ComboboxInput placeholder="Select a timezone" className="max-w-xs" />
+                    <ComboboxContent>
+                        <ComboboxEmpty>No timezones found.</ComboboxEmpty>
+                        <ComboboxList>
+                            {(group, index) => (
+                                <ComboboxGroup key={group.value} items={group.items}>
+                                    <ComboboxLabel>{group.value}</ComboboxLabel>
+                                    <ComboboxCollection>
+                                        {(item) => (
+                                            <ComboboxItem key={item} value={item}>
+                                                {item}
+                                            </ComboboxItem>
+                                        )}
+                                    </ComboboxCollection>
+                                    {index < timezones.length - 1 && <ComboboxSeparator />}
+                                </ComboboxGroup>
+                            )}
+                        </ComboboxList>
+                    </ComboboxContent>
+                </Combobox>
+            </div>
         )
     },
 } satisfies Story
@@ -221,31 +231,34 @@ export const CustomItems: Story = {
         ]
 
         return (
-            <Combobox
-                items={countries.filter((country) => country.code !== "")}
-                itemToStringValue={(country: (typeof countries)[number]) => country.label}
-            >
-                <ComboboxInput placeholder="Search countries..." className="max-w-xs"/>
-                <ComboboxContent>
-                    <ComboboxEmpty>No countries found.</ComboboxEmpty>
-                    <ComboboxList>
-                        {(country) => (
-                            <ComboboxItem key={country.code} value={country}>
-                                <Item size="xs" className="p-0">
-                                    <ItemContent>
-                                        <ItemTitle className="whitespace-nowrap">
-                                            {country.label}
-                                        </ItemTitle>
-                                        <ItemDescription>
-                                            {country.continent} ({country.code})
-                                        </ItemDescription>
-                                    </ItemContent>
-                                </Item>
-                            </ComboboxItem>
-                        )}
-                    </ComboboxList>
-                </ComboboxContent>
-            </Combobox>
+            <div className="max-w-xs">
+
+                <Combobox
+                    items={countries.filter((country) => country.code !== "")}
+                    itemToStringValue={(country: (typeof countries)[number]) => country.label}
+                >
+                    <ComboboxInput placeholder="Search countries..." className="max-w-xs" />
+                    <ComboboxContent>
+                        <ComboboxEmpty>No countries found.</ComboboxEmpty>
+                        <ComboboxList>
+                            {(country) => (
+                                <ComboboxItem key={country.code} value={country}>
+                                    <Item size="xs" className="p-0">
+                                        <ItemContent>
+                                            <ItemTitle className="whitespace-nowrap">
+                                                {country.label}
+                                            </ItemTitle>
+                                            <ItemDescription>
+                                                {country.continent} ({country.code})
+                                            </ItemDescription>
+                                        </ItemContent>
+                                    </Item>
+                                </ComboboxItem>
+                            )}
+                        </ComboboxList>
+                    </ComboboxContent>
+                </Combobox>
+            </div>
         )
     },
 } satisfies Story
@@ -255,7 +268,7 @@ export const Invalid: Story = {
     render: () => {
         return (
             <Combobox items={frameworks}>
-                <ComboboxInput placeholder="Select a framework" aria-invalid="true" className="max-w-xs"/>
+                <ComboboxInput placeholder="Select a framework" aria-invalid="true" className="max-w-xs" />
                 <ComboboxContent>
                     <ComboboxEmpty>No items found.</ComboboxEmpty>
                     <ComboboxList>

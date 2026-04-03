@@ -169,3 +169,13 @@ export const Disabled = {
         </div>
     ),
 } satisfies Story
+
+
+export const Misc = {
+    render: () => (
+        <div className="max-w-sm">
+            <Button left className="w-full">Aligned left</Button>
+            <Button left className="w-full"><TrashIcon /> Aligned left</Button>
+        </div>
+    ),
+} satisfies Story

@@ -5,6 +5,7 @@ import * as React from 'react'
 import { Chip, ChipClose } from './chip'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './input-group'
 import { cn } from './lib/utils'
+import { Button } from './button'
 
 const ComboboxAnchorContext = React.createContext<React.RefObject<HTMLDivElement> | null>(null)
 
@@ -147,10 +148,10 @@ function ComboboxItem({ className, children, ...props }: ComboboxPrimitive.Item.
         <ComboboxPrimitive.Item
             data-slot="combobox-item"
             className={cn(
-                "relative flex min-h-8 w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground not-data-[variant=destructive]:data-highlighted:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
-                "[&>.item]:border-0",
+                "w-full font-normal not-data-[variant=destructive]:data-highlighted:**:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&>.item]:border-0",
                 className
             )}
+            render={<Button left />}
             {...props}
         >
             {children}

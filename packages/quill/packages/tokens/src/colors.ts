@@ -48,9 +48,14 @@ export const semanticColors: Record<string, ColorTuple> = {
     input: ['oklch(0.81 0 0 / 1)', 'oklch(0.46 0.02 279.18)', 'border-input'],
     ring: ['oklch(0.446 0.03 257)', 'oklch(0.709 0 0)', 'border-ring'],
 
+    // Hovering default button
     'fill-hover': ['color-mix(in oklch, var(--accent) 40%, transparent)', 'color-mix(in oklch, var(--accent) 40%, transparent)', 'bg-fill-hover'],
+    // Active default button
     'fill-active': ['var(--accent)', 'var(--accent)', 'bg-fill-active'],
-    'fill-selected': ['var(--muted)', 'var(--muted)', 'bg-fill-selected'],
+    // Expanded default button
+    'fill-expanded': ['var(--muted)', 'var(--muted)', 'bg-fill-expanded'],
+    // Selected default button (checked or selected)
+    'fill-selected': ['color-mix(in oklch, var(--fill-hover) 50%, transparent)', 'color-mix(in oklch, var(--accent) 50%, transparent)', 'bg-fill-hover'],
 } as const
 
 // ── Types ──────────────────────────────────────────────
