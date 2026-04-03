@@ -1,6 +1,14 @@
-import { getPreviewQueryUrl } from './SyncProgressStep'
+import { getPreviewQueryUrl, getSourceAccessMethod } from './SyncProgressStep'
 
 describe('SyncProgressStep', () => {
+    it('prefers the wizard access method before the source has loaded', () => {
+        expect(getSourceAccessMethod('direct', undefined)).toEqual('direct')
+    })
+
+    it('uses the loaded source access method when available', () => {
+        expect(getSourceAccessMethod('warehouse', 'direct')).toEqual('direct')
+    })
+
     it('includes the direct connection id in SQL editor preview URLs', () => {
         expect(getPreviewQueryUrl('orders', 'direct', 'source-123')).toContain('#c=source-123')
     })

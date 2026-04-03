@@ -9,6 +9,13 @@ import { buildTableQueryUrl } from 'scenes/data-warehouse/utils'
 import { SceneSection } from '~/layout/scenes/components/SceneSection'
 import { ExternalDataSourceSchema } from '~/types'
 
+export function getSourceAccessMethod(
+    wizardAccessMethod: 'warehouse' | 'direct',
+    sourceAccessMethod?: 'warehouse' | 'direct'
+): 'warehouse' | 'direct' {
+    return sourceAccessMethod ?? wizardAccessMethod
+}
+
 export function getPreviewQueryUrl(
     tableName: string,
     accessMethod: 'warehouse' | 'direct' | undefined,
@@ -18,12 +25,12 @@ export function getPreviewQueryUrl(
 }
 
 export const SyncProgressStep = (): JSX.Element => {
-    const { sourceId, isWrapped } = useValues(sourceWizardLogic)
+    const { sourceId, isWrapped, source: wizardSource } = useValues(sourceWizardLogic)
     const { cancelWizard } = useActions(sourceWizardLogic)
     const { dataWarehouseSources, dataWarehouseSourcesLoading } = useValues(dataWarehouseSettingsLogic)
     const source = dataWarehouseSources?.results.find((n) => n.id === sourceId)
     const schemas = source?.schemas ?? []
-    const sourceAccessMethod = source?.access_method
+    const sourceAccessMethod = getSourceAccessMethod(wizardSource.access_method, source?.access_method)
     const isDirectQuerySource = sourceAccessMethod === 'direct'
 
     const getSyncStatus = (schema: ExternalDataSourceSchema): { status: string; tagType: LemonTagType } => {
