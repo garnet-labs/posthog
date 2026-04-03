@@ -39,6 +39,12 @@ logger = structlog.get_logger(__name__)
 LogLevel = Literal["debug", "info", "warn", "error"]
 
 
+def resolve_schema(schema: BaseModel | dict) -> dict:
+    if isinstance(schema, BaseModel):
+        return schema.model_json_schema()
+    return schema
+
+
 class Task(DeletedMetaFields, models.Model):
     class OriginProduct(models.TextChoices):
         ERROR_TRACKING = "error_tracking", "Error Tracking"
@@ -231,7 +237,7 @@ class Task(DeletedMetaFields, models.Model):
         branch: str | None = None,
         sandbox_environment_id: str | None = None,
         internal: bool = False,
-        output_schema: BaseModel | None = None,
+        output_schema: BaseModel | dict | None = None,
     ) -> "Task":
         from products.tasks.backend.temporal.client import execute_task_processing_workflow
 
@@ -258,7 +264,7 @@ class Task(DeletedMetaFields, models.Model):
             github_integration=github_integration,
             repository=repository,
             internal=internal,
-            json_schema=output_schema.model_json_schema() if output_schema else None,
+            json_schema=resolve_schema(output_schema) if output_schema else None,
         )
 
         extra_state: dict[str, str] | None = None
