@@ -596,9 +596,6 @@ export const QueryDatabase = ({
                     item.record?.type === 'managed-view'
                 ) {
                     const table = item.record?.tableName
-                    const selectAllQuery = table
-                        ? `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
-                        : null
                     const editLabel = item.record.type === 'endpoint' ? 'Edit endpoint' : 'Edit view'
 
                     return (
