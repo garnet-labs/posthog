@@ -28,7 +28,7 @@ from products.error_tracking.backend.hogql_queries.error_tracking_query_runner_u
 class ErrorTrackingQueryV3Builder:
     """ClickHouse-only query builder using the denormalized fingerprint table.
 
-    Uses the HogQL virtual fields on events (issue_id_denormalized, issue_name,
+    Uses the HogQL virtual fields on events (issue_id_v2, issue_name,
     issue_status, etc.) which trigger a LazyJoin to the denormalized table.
     This avoids Postgres and the old overrides table entirely.
     """
@@ -82,8 +82,8 @@ class ErrorTrackingQueryV3Builder:
 
     def _select_expressions(self) -> list[ast.Expr]:
         exprs: list[ast.Expr] = [
-            # issue_id from the denormalized table (not the old overrides table)
-            ast.Alias(alias="id", expr=ast.Field(chain=["e", "issue_id_denormalized"])),
+            # issue_id from the denormalized fingerprint_issue_state table
+            ast.Alias(alias="id", expr=ast.Field(chain=["e", "issue_id_v2"])),
             # metadata from denormalized table via HogQL virtual fields
             ast.Alias(alias="status", expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_status"])])),
             ast.Alias(alias="name", expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_name"])])),
@@ -92,11 +92,11 @@ class ErrorTrackingQueryV3Builder:
             ),
             ast.Alias(
                 alias="assignee_user_id",
-                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_user_id"])]),
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_assigned_user_id"])]),
             ),
             ast.Alias(
                 alias="assignee_role_id",
-                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "assigned_role_id"])]),
+                expr=ast.Call(name="any", args=[ast.Field(chain=["e", "issue_assigned_role_id"])]),
             ),
             # timestamps
             ast.Alias(alias="last_seen", expr=ast.Call(name="max", args=[ast.Field(chain=["e", "timestamp"])])),
@@ -219,6 +219,7 @@ class ErrorTrackingQueryV3Builder:
                 left=ast.Field(chain=["e", "event"]),
                 right=ast.Constant(value="$exception"),
             ),
+            ast.Call(name="isNotNull", args=[ast.Field(chain=["e", "issue_id_v2"])]),
             ast.Placeholder(expr=ast.Field(chain=["filters"])),
         ]
 
@@ -244,7 +245,7 @@ class ErrorTrackingQueryV3Builder:
             exprs.append(
                 ast.CompareOperation(
                     op=ast.CompareOperationOp.Eq,
-                    left=ast.Field(chain=["e", "issue_id_denormalized"]),
+                    left=ast.Field(chain=["e", "issue_id_v2"]),
                     right=ast.Constant(value=self.query.issueId),
                 )
             )
@@ -321,7 +322,7 @@ class ErrorTrackingQueryV3Builder:
                 exprs.append(
                     ast.CompareOperation(
                         op=ast.CompareOperationOp.Eq,
-                        left=ast.Field(chain=["e", "assigned_user_id"]),
+                        left=ast.Field(chain=["e", "issue_assigned_user_id"]),
                         right=ast.Constant(value=self.query.assignee.id),
                     )
                 )
@@ -329,7 +330,7 @@ class ErrorTrackingQueryV3Builder:
                 exprs.append(
                     ast.CompareOperation(
                         op=ast.CompareOperationOp.Eq,
-                        left=ast.Field(chain=["e", "assigned_role_id"]),
+                        left=ast.Field(chain=["e", "issue_assigned_role_id"]),
                         right=ast.Constant(value=str(self.query.assignee.id)),
                     )
                 )
