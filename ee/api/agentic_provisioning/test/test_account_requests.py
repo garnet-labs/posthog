@@ -109,6 +109,18 @@ class TestAccountRequests(StripeProvisioningTestBase):
         assert res.status_code == 400
         assert res.json()["error"]["code"] == "team_resolution_failed"
 
+    def test_existing_user_with_non_numeric_team_id_returns_400(self):
+        User.objects.create_and_join(
+            organization=self.organization, email="existing@example.com", password="testpass", first_name="Existing"
+        )
+        payload = self._account_request_payload(
+            email="existing@example.com",
+            configuration={"team_id": "abc"},
+        )
+        res = self._post_signed("/api/agentic/provisioning/account_requests", data=payload)
+        assert res.status_code == 400
+        assert res.json()["error"]["code"] == "invalid_request"
+
     def test_existing_user_with_inaccessible_team_id_returns_400(self):
         User.objects.create_and_join(
             organization=self.organization, email="existing@example.com", password="testpass", first_name="Existing"

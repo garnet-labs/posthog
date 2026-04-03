@@ -243,7 +243,14 @@ def account_requests(request: Request) -> Response:
         try:
             requested_team_id = int(requested_team_id)
         except (ValueError, TypeError):
-            requested_team_id = None
+            return Response(
+                {
+                    "id": request_id,
+                    "type": "error",
+                    "error": {"code": "invalid_request", "message": "configuration.team_id must be an integer"},
+                },
+                status=400,
+            )
 
     existing_user = User.objects.filter(email=email).first()
 
@@ -323,9 +330,6 @@ def _resolve_team_for_existing_user(user: User, requested_team_id: int | None = 
         return non_demo_teams[0]
 
     organization = memberships[0].organization
-    if not non_demo_teams:
-        return Team.objects.create_with_data(initiating_user=user, organization=organization)
-
     return Team.objects.create_with_data(initiating_user=user, organization=organization)
 
 
