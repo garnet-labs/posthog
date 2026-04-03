@@ -84,7 +84,7 @@ impl RawFrame {
 
             RawFrame::Dart(frame) => (to_vec(Ok(frame.into())), "dart"),
             RawFrame::Apple(frame) => (
-                to_vec(frame.resolve(team_id, catalog, debug_images).await),
+                frame.resolve(team_id, catalog, debug_images).await,
                 "apple",
             ),
             RawFrame::Php(frame) => (to_vec(Ok(frame.into())), "php"),
