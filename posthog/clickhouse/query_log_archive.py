@@ -12,6 +12,8 @@ SHARDED_QUERY_LOG_ARCHIVE_MV = "sharded_query_log_archive_mv"
 DIST_QUERY_LOG_ARCHIVE_MV = "dist_query_log_archive_mv"
 SHARDED_QUERY_LOG_ARCHIVE_WRITABLE_TABLE = "writable_sharded_query_log_archive"
 
+OPS_QUERY_LOG_ARCHIVE_MV = "ops_query_log_archive_mv"
+
 
 def QUERY_LOG_ARCHIVE_TABLE_ENGINE_NEW():
     return MergeTreeEngine("query_log_archive_new", replication_scheme=ReplicationScheme.REPLICATED)
@@ -487,3 +489,26 @@ def QUERY_LOG_ARCHIVE_ADD_MODIFIERS_COLUMN_SQL(table=QUERY_LOG_ARCHIVE_DATA_TABL
 
 def QUERY_LOG_ARCHIVE_UPDATE_MV_SQL(mv_name=QUERY_LOG_ARCHIVE_MV):
     return f"""ALTER TABLE {mv_name} MODIFY QUERY {MV_SELECT_SQL}"""
+
+
+# OPS cluster query_log_archive — satellite clusters write here
+def OPS_QUERY_LOG_ARCHIVE_TABLE_SQL():
+    return QUERY_LOG_ARCHIVE_NEW_TABLE_SQL(
+        table_name=QUERY_LOG_ARCHIVE_DATA_TABLE,
+        engine=MergeTreeEngine(QUERY_LOG_ARCHIVE_DATA_TABLE, replication_scheme=ReplicationScheme.REPLICATED),
+    )
+
+
+def OPS_QUERY_LOG_ARCHIVE_DISTRIBUTED_TABLE_SQL():
+    return QUERY_LOG_ARCHIVE_NEW_TABLE_SQL(
+        table_name=QUERY_LOG_ARCHIVE_DATA_TABLE,
+        engine=Distributed(data_table=QUERY_LOG_ARCHIVE_DATA_TABLE, cluster="ops"),
+        include_table_clauses=False,
+    )
+
+
+def OPS_QUERY_LOG_ARCHIVE_MV_SQL():
+    return QUERY_LOG_ARCHIVE_NEW_MV_SQL(
+        view_name=OPS_QUERY_LOG_ARCHIVE_MV,
+        dest_table=QUERY_LOG_ARCHIVE_DATA_TABLE,
+    )
