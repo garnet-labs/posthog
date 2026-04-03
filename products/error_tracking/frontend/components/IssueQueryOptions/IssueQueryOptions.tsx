@@ -3,21 +3,18 @@ import { useActions, useValues } from 'kea'
 import { IconRefresh } from '@posthog/icons'
 import { LemonButton, LemonMenu, LemonSelect, LemonSwitch, Spinner } from '@posthog/lemon-ui'
 
-import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
-
 import { issuesDataNodeLogic } from '../../logics/issuesDataNodeLogic'
 import { ORDER_BY_OPTIONS, issueQueryOptionsLogic } from './issueQueryOptionsLogic'
 
 export const IssueQueryOptions = (): JSX.Element => {
-    const { orderBy, orderDirection, useQueryV3 } = useValues(issueQueryOptionsLogic)
+    const { orderBy, orderDirection, useQueryV3, showQueryV3Switch } = useValues(issueQueryOptionsLogic)
     const { setOrderBy, setOrderDirection, setUseQueryV3 } = useActions(issueQueryOptionsLogic)
-    const hasQueryV3Flag = useFeatureFlag('ERROR_TRACKING_QUERY_V3')
 
     return (
         <span className="flex items-center justify-between gap-2 self-end">
             <Reload />
             <div className="flex items-center gap-2 self-end">
-                {hasQueryV3Flag && (
+                {showQueryV3Switch && (
                     <LemonSwitch
                         checked={useQueryV3}
                         onChange={setUseQueryV3}
