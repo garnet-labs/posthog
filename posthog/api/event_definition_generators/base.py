@@ -1,7 +1,7 @@
 import hashlib
 from abc import ABC, abstractmethod
 
-from django.db.models import Q, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 
 import orjson
 
@@ -97,12 +97,22 @@ class EventDefinitionGenerator(ABC):
             "$screen",  # Manually captured in mobile apps (iOS, Android, React Native, Flutter)
         ]
 
-        # Fetch event definitions: either non-system events or explicitly included system events
+        # Only include custom events that are verified or have a schema defined.
+        # This prevents spam events and events with personal information from
+        # being included in generated code committed to the repository.
+        has_schema = Exists(EventSchema.objects.filter(event_definition=OuterRef("pk")))
+
         event_definitions = (
             EventDefinition.objects.filter(team__project_id=project_id)
             .filter(
-                Q(name__in=included_system_events)  # Include whitelisted system events
-                | ~Q(name__startswith="$")  # Include all non-system events
+                Q(name__in=included_system_events)  # Always include whitelisted system events
+                | (
+                    ~Q(name__startswith="$")  # Custom (non-system) events must be...
+                    & (
+                        Q(enterpriseeventdefinition__verified=True)  # ...verified by a user
+                        | has_schema  # ...or have a schema defined
+                    )
+                )
             )
             .order_by("name")
         )
