@@ -11,7 +11,7 @@ import { ORDER_BY_OPTIONS, issueQueryOptionsLogic } from './issueQueryOptionsLog
 export const IssueQueryOptions = (): JSX.Element => {
     const { orderBy, orderDirection, useQueryV3 } = useValues(issueQueryOptionsLogic)
     const { setOrderBy, setOrderDirection, setUseQueryV3 } = useActions(issueQueryOptionsLogic)
-    const hasQueryV3Flag = useFeatureFlag('ERROR_TRACKING_FORCE_QUERY_V3')
+    const hasQueryV3Flag = useFeatureFlag('ERROR_TRACKING_QUERY_V3')
 
     return (
         <span className="flex items-center justify-between gap-2 self-end">
