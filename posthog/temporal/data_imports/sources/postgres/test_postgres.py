@@ -1,13 +1,13 @@
 from datetime import UTC, date, datetime
 
 import pytest
-import pyarrow as pa
-import structlog
 from unittest import mock
 from unittest.mock import patch
 
 from django.db import connection as django_connection
 
+import pyarrow as pa
+import structlog
 from psycopg import sql
 
 from posthog.temporal.data_imports.sources.postgres.postgres import (
@@ -23,10 +23,10 @@ from posthog.temporal.data_imports.sources.postgres.postgres import (
     _has_duplicate_primary_keys,
     _is_read_replica,
     _normalize_function_names,
+    filter_postgres_incremental_fields,
     get_foreign_keys,
     get_postgres_row_count,
     get_schemas,
-    filter_postgres_incremental_fields,
 )
 from posthog.temporal.data_imports.sources.postgres.source import PostgresSource
 
