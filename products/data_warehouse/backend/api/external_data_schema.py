@@ -237,7 +237,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         if source.is_direct_postgres:
             # We use "should_sync" to determine if the table should be exposed or hidden.
             if should_sync is True and instance.should_sync is False:
-                source_schema, source_table_name = get_direct_postgres_location(
+                source_catalog, source_schema, source_table_name = get_direct_postgres_location(
                     schema_name=instance.name,
                     schema_metadata=instance.schema_metadata,
                     default_schema=(source.job_inputs or {}).get("schema"),
@@ -247,6 +247,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
                     schema_name=instance.name,
                     source=source,
                     columns=postgres_schema_metadata_to_dwh_columns(instance.schema_metadata),
+                    source_catalog=source_catalog,
                     source_schema=source_schema,
                     source_table_name=source_table_name,
                 )

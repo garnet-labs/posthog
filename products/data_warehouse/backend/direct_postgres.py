@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from products.data_warehouse.backend.models.table import DataWarehouseTable
 
 DIRECT_POSTGRES_URL_PATTERN = "direct://postgres"
+DIRECT_POSTGRES_CATALOG_OPTION = "direct_postgres_catalog"
 DIRECT_POSTGRES_SCHEMA_OPTION = "direct_postgres_schema"
 DIRECT_POSTGRES_TABLE_OPTION = "direct_postgres_table"
 
@@ -55,6 +56,7 @@ def postgres_schema_metadata_to_dwh_columns(schema_metadata: dict[str, Any] | No
 def postgres_schema_metadata(
     columns: list[tuple[str, str, bool]],
     foreign_keys: list[tuple[str, str, str]] | None = None,
+    source_catalog: str | None = None,
     source_schema: str | None = None,
     source_table_name: str | None = None,
 ) -> dict[str, Any]:
@@ -67,6 +69,7 @@ def postgres_schema_metadata(
             {"column": column_name, "target_table": target_table, "target_column": target_column}
             for column_name, target_table, target_column in (foreign_keys or [])
         ],
+        "source_catalog": source_catalog,
         "source_schema": source_schema,
         "source_table_name": source_table_name,
     }
@@ -77,26 +80,32 @@ def get_direct_postgres_location(
     schema_name: str,
     schema_metadata: dict[str, Any] | None = None,
     default_schema: str | None = None,
-) -> tuple[str, str]:
+) -> tuple[str | None, str, str]:
+    source_catalog = schema_metadata.get("source_catalog") if isinstance(schema_metadata, dict) else None
     source_schema = schema_metadata.get("source_schema") if isinstance(schema_metadata, dict) else None
     source_table_name = schema_metadata.get("source_table_name") if isinstance(schema_metadata, dict) else None
     normalized_default_schema = _normalize_default_schema(default_schema)
 
     if isinstance(source_schema, str) and isinstance(source_table_name, str):
-        return source_schema, source_table_name
+        return source_catalog if isinstance(source_catalog, str) else None, source_schema, source_table_name
 
     if normalized_default_schema is None and "." in schema_name:
         inferred_schema, inferred_table_name = schema_name.split(".", 1)
-        return inferred_schema, inferred_table_name
+        return None, inferred_schema, inferred_table_name
 
-    return normalized_default_schema or "public", schema_name
+    return None, normalized_default_schema or "public", schema_name
 
 
-def get_direct_postgres_table_options(*, source_schema: str, source_table_name: str) -> dict[str, str]:
-    return {
+def get_direct_postgres_table_options(
+    *, source_catalog: str | None = None, source_schema: str, source_table_name: str
+) -> dict[str, str]:
+    options = {
         DIRECT_POSTGRES_SCHEMA_OPTION: source_schema,
         DIRECT_POSTGRES_TABLE_OPTION: source_table_name,
     }
+    if source_catalog:
+        options[DIRECT_POSTGRES_CATALOG_OPTION] = source_catalog
+    return options
 
 
 def upsert_direct_postgres_table(
@@ -105,6 +114,7 @@ def upsert_direct_postgres_table(
     schema_name: str,
     source: ExternalDataSource,
     columns: DirectPostgresColumns,
+    source_catalog: str | None = None,
     source_schema: str,
     source_table_name: str,
 ) -> DataWarehouseTable:
@@ -112,7 +122,11 @@ def upsert_direct_postgres_table(
 
     options = {
         **(existing_table.options if existing_table is not None and isinstance(existing_table.options, dict) else {}),
-        **get_direct_postgres_table_options(source_schema=source_schema, source_table_name=source_table_name),
+        **get_direct_postgres_table_options(
+            source_catalog=source_catalog,
+            source_schema=source_schema,
+            source_table_name=source_table_name,
+        ),
     }
 
     if existing_table is None:
@@ -172,9 +186,10 @@ def reconcile_direct_postgres_schemas(
         if schema_model is None:
             continue
 
-        resolved_source_schema, resolved_source_table_name = get_direct_postgres_location(
+        resolved_source_catalog, resolved_source_schema, resolved_source_table_name = get_direct_postgres_location(
             schema_name=source_schema.name,
             schema_metadata={
+                "source_catalog": source_schema.source_catalog,
                 "source_schema": source_schema.source_schema,
                 "source_table_name": source_schema.source_table_name,
             },
@@ -183,6 +198,7 @@ def reconcile_direct_postgres_schemas(
         schema_metadata = postgres_schema_metadata(
             source_schema.columns,
             source_schema.foreign_keys,
+            source_catalog=resolved_source_catalog,
             source_schema=resolved_source_schema,
             source_table_name=resolved_source_table_name,
         )
@@ -198,6 +214,7 @@ def reconcile_direct_postgres_schemas(
             schema_name=source_schema.name,
             source=source,
             columns=postgres_columns_to_dwh_columns(source_schema.columns),
+            source_catalog=resolved_source_catalog,
             source_schema=resolved_source_schema,
             source_table_name=resolved_source_table_name,
         )

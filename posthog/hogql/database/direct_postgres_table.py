@@ -5,6 +5,7 @@ from posthog.hogql.escape_sql import escape_hogql_identifier, escape_postgres_id
 
 class DirectPostgresTable(FunctionCallTable):
     requires_args: bool = False
+    postgres_catalog: str | None = None
     postgres_schema: str
     postgres_table_name: str
     external_data_source_id: str
@@ -14,9 +15,12 @@ class DirectPostgresTable(FunctionCallTable):
         return escape_hogql_identifier(self.name)
 
     def to_printed_postgres(self, context) -> str:
-        return (
-            f"{escape_postgres_identifier(self.postgres_schema)}.{escape_postgres_identifier(self.postgres_table_name)}"
-        )
+        parts = []
+        if self.postgres_catalog:
+            parts.append(escape_postgres_identifier(self.postgres_catalog))
+        parts.append(escape_postgres_identifier(self.postgres_schema))
+        parts.append(escape_postgres_identifier(self.postgres_table_name))
+        return ".".join(parts)
 
     def to_printed_clickhouse(self, context) -> str:
         raise QueryError("Direct Postgres tables cannot be printed into ClickHouse SQL")

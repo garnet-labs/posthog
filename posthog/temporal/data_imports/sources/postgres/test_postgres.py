@@ -100,6 +100,7 @@ class TestPostgresSchemaDiscovery:
     def _mock_connection(self, *fetchall_results: list[tuple[object, ...]]):
         cursor = mock.MagicMock()
         cursor.fetchall.side_effect = list(fetchall_results)
+        cursor.fetchone.return_value = ("PostgreSQL 15.0",)
 
         cursor_context = mock.MagicMock()
         cursor_context.__enter__.return_value = cursor
@@ -132,8 +133,11 @@ class TestPostgresSchemaDiscovery:
             )
 
         cursor = connection.cursor.return_value.__enter__.return_value
-        first_query = cursor.execute.call_args_list[0].args[0]
-        second_query = cursor.execute.call_args_list[1].args[0]
+        executed_queries = [
+            call.args[0] for call in cursor.execute.call_args_list if "SELECT version()" not in str(call.args[0])
+        ]
+        first_query = executed_queries[0]
+        second_query = executed_queries[1]
 
         assert "NOT IN" in first_query
         assert "ALL(" not in first_query
@@ -165,14 +169,44 @@ class TestPostgresSchemaDiscovery:
             )
 
         cursor = connection.cursor.return_value.__enter__.return_value
-        first_query = cursor.execute.call_args_list[0].args[0]
-        second_query = cursor.execute.call_args_list[1].args[0]
+        executed_queries = [
+            call.args[0] for call in cursor.execute.call_args_list if "SELECT version()" not in str(call.args[0])
+        ]
+        first_query = executed_queries[0]
+        second_query = executed_queries[1]
 
         assert "NOT IN" in first_query
         assert "ALL(" not in first_query
         assert " IN (" in second_query
         assert "ANY(" not in second_query
         assert foreign_keys == {"analytics.events": [("user_id", "public.users", "id")]}
+
+    def test_get_schemas_tracks_duckdb_catalog_for_discovered_tables(self):
+        connection = self._mock_connection(
+            [("public", "ducklake_view"), ("system", "query_log")],
+            [("__ducklake_metadata_ducklake", "public", "ducklake_view"), ("ducklake", "system", "query_log")],
+            [
+                ("public", "ducklake_view", "id", "integer", "NO", 1),
+                ("system", "query_log", "query_id", "varchar", "NO", 1),
+            ],
+        )
+        connection.cursor.return_value.__enter__.return_value.fetchone.return_value = ("DuckDB 1.4 (Duckgres)",)
+
+        with mock.patch(
+            "posthog.temporal.data_imports.sources.postgres.postgres._connect_to_postgres",
+            return_value=connection,
+        ):
+            schemas = get_schemas(
+                host="localhost",
+                port=5432,
+                database="postgres",
+                user="postgres",
+                password="postgres",
+                schema="",
+            )
+
+        assert schemas["public.ducklake_view"].source_catalog == "__ducklake_metadata_ducklake"
+        assert schemas["system.query_log"].source_catalog == "ducklake"
 
     def test_get_postgres_row_count_skips_blank_schema_browse(self):
         with mock.patch(

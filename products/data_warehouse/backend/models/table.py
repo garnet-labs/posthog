@@ -34,7 +34,11 @@ from posthog.settings import TEST
 from posthog.sync import database_sync_to_async
 from posthog.temporal.data_imports.pipelines.pipeline.consts import PARTITION_KEY
 
-from products.data_warehouse.backend.direct_postgres import DIRECT_POSTGRES_SCHEMA_OPTION, DIRECT_POSTGRES_TABLE_OPTION
+from products.data_warehouse.backend.direct_postgres import (
+    DIRECT_POSTGRES_CATALOG_OPTION,
+    DIRECT_POSTGRES_SCHEMA_OPTION,
+    DIRECT_POSTGRES_TABLE_OPTION,
+)
 from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
 from products.data_warehouse.backend.models.util import (
     CLICKHOUSE_HOGQL_MAPPING,
@@ -464,6 +468,11 @@ class DataWarehouseTable(CreatedMetaFields, UpdatedMetaFields, UUIDTModel, Delet
             fields[column] = self._get_hogql_field_for_column(column, type, clickhouse_type, is_nullable)
 
         if self.external_data_source and self.external_data_source.is_direct_postgres:
+            postgres_catalog = (
+                self.options.get(DIRECT_POSTGRES_CATALOG_OPTION)
+                if isinstance(self.options.get(DIRECT_POSTGRES_CATALOG_OPTION), str)
+                else None
+            )
             postgres_schema = (
                 self.options.get(DIRECT_POSTGRES_SCHEMA_OPTION)
                 if isinstance(self.options.get(DIRECT_POSTGRES_SCHEMA_OPTION), str)
@@ -477,6 +486,7 @@ class DataWarehouseTable(CreatedMetaFields, UpdatedMetaFields, UUIDTModel, Delet
             return DirectPostgresTable(
                 name=self.name,
                 fields=fields,
+                postgres_catalog=postgres_catalog,
                 postgres_schema=postgres_schema,
                 postgres_table_name=postgres_table_name,
                 external_data_source_id=str(self.external_data_source_id),

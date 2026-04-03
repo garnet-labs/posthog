@@ -50,9 +50,17 @@ class SSLRequiredError(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class PostgresDiscoveredSchema:
+    source_catalog: str | None
     source_schema: str
     source_table_name: str
     columns: list[tuple[str, str, bool]]
+
+
+def _is_duckdb_connection(cursor: psycopg.Cursor) -> bool:
+    cursor.execute("SELECT version()")
+    row = cursor.fetchone()
+    version = str(row[0]) if row and row[0] is not None else ""
+    return "duckdb" in version.lower() or "duckgres" in version.lower()
 
 
 def _get_sslmode(require_ssl: bool) -> str:
@@ -154,7 +162,7 @@ def _build_named_value_placeholders(prefix: str, values: list[str]) -> tuple[str
 
 def _get_discovered_tables(
     cursor: psycopg.Cursor, schema: str | None, names: list[str] | None = None
-) -> tuple[dict[str, tuple[str, str]], bool]:
+) -> tuple[dict[str, tuple[str | None, str, str]], bool]:
     selected_schema = _normalize_selected_schema(schema)
     qualify_with_schema = selected_schema is None
 
@@ -195,8 +203,28 @@ def _get_discovered_tables(
         )
 
     discovered_rows = cursor.fetchall()
+    is_duckdb = _is_duckdb_connection(cursor)
+    catalogs_by_table: dict[tuple[str, str], str | None] = dict.fromkeys(discovered_rows)
+
+    if is_duckdb and discovered_rows:
+        source_schemas = sorted({schema_name for schema_name, _table_name in discovered_rows})
+        schema_placeholders, schema_params = _build_named_value_placeholders("schema", source_schemas)
+        cursor.execute(
+            f"""
+            SELECT table_catalog, table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_schema IN ({schema_placeholders})
+            """,
+            schema_params,
+        )
+        for table_catalog, table_schema, table_name in cursor.fetchall():
+            pair = (table_schema, table_name)
+            if pair in catalogs_by_table and catalogs_by_table[pair] is None:
+                catalogs_by_table[pair] = table_catalog
+
     all_tables = {
         _get_display_table_name(schema_name, table_name, qualify_with_schema=qualify_with_schema): (
+            catalogs_by_table[(schema_name, table_name)],
             schema_name,
             table_name,
         )
@@ -290,7 +318,9 @@ def get_schemas(
             if not discovered_tables:
                 return {}
 
-            source_schemas = sorted({schema_name for schema_name, _table_name in discovered_tables.values()})
+            source_schemas = sorted(
+                {schema_name for _table_catalog, schema_name, _table_name in discovered_tables.values()}
+            )
             table_lookup = {source: display_name for display_name, source in discovered_tables.items()}
             discovered_pairs = set(discovered_tables.values())
             schema_placeholders, schema_params = _build_named_value_placeholders("schema", source_schemas)
@@ -331,7 +361,14 @@ def get_schemas(
 
             columns_by_table: dict[str, list[tuple[str, str, bool]]] = collections.defaultdict(list)
             for table_schema, table_name, column_name, data_type, is_nullable, _ordinal_position in result:
-                pair = (table_schema, table_name)
+                pair = next(
+                    (
+                        discovered_pair
+                        for discovered_pair in discovered_pairs
+                        if discovered_pair[1] == table_schema and discovered_pair[2] == table_name
+                    ),
+                    None,
+                )
                 if pair not in discovered_pairs:
                     continue
 
@@ -340,11 +377,12 @@ def get_schemas(
 
         return {
             display_name: PostgresDiscoveredSchema(
+                source_catalog=source_catalog,
                 source_schema=schema_name,
                 source_table_name=table_name,
                 columns=columns_by_table.get(display_name, []),
             )
-            for display_name, (schema_name, table_name) in discovered_tables.items()
+            for display_name, (source_catalog, schema_name, table_name) in discovered_tables.items()
         }
     finally:
         connection.close()
@@ -377,7 +415,9 @@ def get_foreign_keys(
             if not discovered_tables:
                 return {}
 
-            source_schemas = sorted({schema_name for schema_name, _table_name in discovered_tables.values()})
+            source_schemas = sorted(
+                {schema_name for _table_catalog, schema_name, _table_name in discovered_tables.values()}
+            )
             table_lookup = {source: display_name for display_name, source in discovered_tables.items()}
             discovered_pairs = set(discovered_tables.values())
             schema_placeholders, schema_params = _build_named_value_placeholders("schema", source_schemas)
@@ -416,7 +456,14 @@ def get_foreign_keys(
                 target_table_name,
                 target_column_name,
             ) in result:
-                pair = (source_schema_name, table_name)
+                pair = next(
+                    (
+                        discovered_pair
+                        for discovered_pair in discovered_pairs
+                        if discovered_pair[1] == source_schema_name and discovered_pair[2] == table_name
+                    ),
+                    None,
+                )
                 if pair not in discovered_pairs:
                     continue
 

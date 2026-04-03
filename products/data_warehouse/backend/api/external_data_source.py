@@ -752,9 +752,10 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             source_schema = next(
                 (source_schema for source_schema in source_schemas if source_schema.name == schema_name), None
             )
-            resolved_source_schema, resolved_source_table_name = get_direct_postgres_location(
+            resolved_source_catalog, resolved_source_schema, resolved_source_table_name = get_direct_postgres_location(
                 schema_name=schema_name,
                 schema_metadata={
+                    "source_catalog": source_schema.source_catalog if source_schema else None,
                     "source_schema": source_schema.source_schema if source_schema else None,
                     "source_table_name": source_schema.source_table_name if source_schema else None,
                 },
@@ -764,6 +765,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 postgres_schema_metadata(
                     source_schema.columns if source_schema else [],
                     source_schema.foreign_keys if source_schema else [],
+                    source_catalog=resolved_source_catalog,
                     source_schema=resolved_source_schema,
                     source_table_name=resolved_source_table_name,
                 )
@@ -797,6 +799,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                     schema_name=schema_name,
                     source=new_source_model,
                     columns=postgres_columns_to_dwh_columns(source_schema.columns if source_schema else []),
+                    source_catalog=resolved_source_catalog,
                     source_schema=resolved_source_schema,
                     source_table_name=resolved_source_table_name,
                 )
