@@ -168,6 +168,106 @@ describe('SessionManager', () => {
         })
     })
 
+    describe('getTraceId', () => {
+        it('should return existing trace id if it exists', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue({ uuid: 'existing-uuid', traceId: 'existing-trace-id' })
+
+            const result = await sessionManager.getTraceId(sessionId)
+
+            expect(result).toBe('existing-trace-id')
+            expect(mockCache.get).toHaveBeenCalledWith('session:test-session-123')
+            expect(mockCache.set).not.toHaveBeenCalled()
+        })
+
+        it('should create and return new trace id if none exists', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue({ uuid: 'existing-uuid' })
+
+            const result = await sessionManager.getTraceId(sessionId)
+
+            expect(result).toBe('test-uuid-12345')
+            expect(mockCache.set).toHaveBeenCalledWith('session:test-session-123', {
+                uuid: 'existing-uuid',
+                traceId: 'test-uuid-12345',
+            })
+        })
+
+        it('should create both uuid and trace id if session does not exist', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue(null)
+
+            const result = await sessionManager.getTraceId(sessionId)
+
+            expect(result).toBe('test-uuid-12345')
+            expect(mockCache.set).toHaveBeenCalledWith('session:test-session-123', {
+                uuid: 'test-uuid-12345',
+                traceId: 'test-uuid-12345',
+            })
+        })
+    })
+
+    describe('isTraceEmitted', () => {
+        it('should return true if trace has been emitted', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue({ uuid: 'uuid', traceEmitted: true })
+
+            const result = await sessionManager.isTraceEmitted(sessionId)
+
+            expect(result).toBe(true)
+        })
+
+        it('should return false if trace has not been emitted', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue({ uuid: 'uuid' })
+
+            const result = await sessionManager.isTraceEmitted(sessionId)
+
+            expect(result).toBe(false)
+        })
+
+        it('should return false if session does not exist', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue(null)
+
+            const result = await sessionManager.isTraceEmitted(sessionId)
+
+            expect(result).toBe(false)
+        })
+    })
+
+    describe('markTraceEmitted', () => {
+        it('should set traceEmitted to true on existing session', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue({ uuid: 'uuid', traceId: 'trace-id' })
+
+            await sessionManager.markTraceEmitted(sessionId)
+
+            expect(mockCache.set).toHaveBeenCalledWith('session:test-session-123', {
+                uuid: 'uuid',
+                traceId: 'trace-id',
+                traceEmitted: true,
+            })
+        })
+
+        it('should not set traceEmitted if session does not exist', async () => {
+            const sessionId = 'test-session-123'
+
+            ;(mockCache.get as any).mockResolvedValue(null)
+
+            await sessionManager.markTraceEmitted(sessionId)
+
+            expect(mockCache.set).not.toHaveBeenCalled()
+        })
+    })
+
     describe('integration scenarios', () => {
         it('should handle multiple sequential operations', async () => {
             const sessionId = 'test-session'

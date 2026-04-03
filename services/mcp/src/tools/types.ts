@@ -11,6 +11,8 @@ export type CloudRegion = 'us' | 'eu'
 
 export type SessionState = {
     uuid: string
+    traceId?: string
+    traceEmitted?: boolean
 }
 
 export type State = {

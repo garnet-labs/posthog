@@ -222,6 +222,9 @@ export class MCP extends McpAgent<Env> {
                     ...(this.requestProperties.sessionId
                         ? {
                               $session_id: await this.sessionManager.getSessionUuid(this.requestProperties.sessionId),
+                              $ai_session_id: await this.sessionManager.getSessionUuid(
+                                  this.requestProperties.sessionId
+                              ),
                           }
                         : {}),
                     ...(clientName ? { mcp_oauth_client_name: clientName } : {}),
@@ -242,7 +245,8 @@ export class MCP extends McpAgent<Env> {
         handler: (params: z.infer<TSchema>) => Promise<any>
     ): void {
         const wrappedHandler = async (params: z.infer<TSchema>): Promise<any> => {
-            const traceId = generateId()
+            const sessionId = this.requestProperties.sessionId
+            const traceId = sessionId ? await this.sessionManager.getTraceId(sessionId) : generateId()
             const spanId = generateId()
             const spanName = `mcp/${tool.name}`
             const startTime = performance.now()
@@ -258,13 +262,19 @@ export class MCP extends McpAgent<Env> {
                 const latency = (performance.now() - startTime) / 1000
                 const errorOutput = `Invalid input: ${validation.error.message}`
                 const outputState = { error: errorOutput }
-                await this.trackEvent(AnalyticsEvent.AI_TRACE, {
-                    $ai_trace_id: traceId,
-                    $ai_span_name: spanName,
-                    $ai_latency: latency,
-                    $ai_is_error: true,
-                    ai_product: 'mcp',
-                })
+                const shouldEmitTrace = !sessionId || !(await this.sessionManager.isTraceEmitted(sessionId))
+                if (shouldEmitTrace) {
+                    await this.trackEvent(AnalyticsEvent.AI_TRACE, {
+                        $ai_trace_id: traceId,
+                        $ai_span_name: sessionId ? 'mcp/session' : spanName,
+                        $ai_latency: latency,
+                        $ai_is_error: true,
+                        ai_product: 'mcp',
+                    })
+                    if (sessionId) {
+                        await this.sessionManager.markTraceEmitted(sessionId)
+                    }
+                }
                 await this.trackEvent(AnalyticsEvent.AI_SPAN, {
                     $ai_trace_id: traceId,
                     $ai_span_id: spanId,
@@ -299,12 +309,18 @@ export class MCP extends McpAgent<Env> {
                 await this.trackEvent(AnalyticsEvent.MCP_TOOL_RESPONSE, {
                     tool: tool.name,
                 })
-                await this.trackEvent(AnalyticsEvent.AI_TRACE, {
-                    $ai_trace_id: traceId,
-                    $ai_span_name: spanName,
-                    $ai_latency: latency,
-                    ai_product: 'mcp',
-                })
+                const shouldEmitTrace = !sessionId || !(await this.sessionManager.isTraceEmitted(sessionId))
+                if (shouldEmitTrace) {
+                    await this.trackEvent(AnalyticsEvent.AI_TRACE, {
+                        $ai_trace_id: traceId,
+                        $ai_span_name: sessionId ? 'mcp/session' : spanName,
+                        $ai_latency: latency,
+                        ai_product: 'mcp',
+                    })
+                    if (sessionId) {
+                        await this.sessionManager.markTraceEmitted(sessionId)
+                    }
+                }
                 await this.trackEvent(AnalyticsEvent.AI_SPAN, {
                     $ai_trace_id: traceId,
                     $ai_span_id: spanId,
@@ -352,13 +368,19 @@ export class MCP extends McpAgent<Env> {
                 const latency = (performance.now() - startTime) / 1000
                 const errorMessage = error instanceof Error ? error.message : String(error)
                 const outputState = { error: errorMessage }
-                await this.trackEvent(AnalyticsEvent.AI_TRACE, {
-                    $ai_trace_id: traceId,
-                    $ai_span_name: spanName,
-                    $ai_latency: latency,
-                    $ai_is_error: true,
-                    ai_product: 'mcp',
-                })
+                const shouldEmitTrace = !sessionId || !(await this.sessionManager.isTraceEmitted(sessionId))
+                if (shouldEmitTrace) {
+                    await this.trackEvent(AnalyticsEvent.AI_TRACE, {
+                        $ai_trace_id: traceId,
+                        $ai_span_name: sessionId ? 'mcp/session' : spanName,
+                        $ai_latency: latency,
+                        $ai_is_error: true,
+                        ai_product: 'mcp',
+                    })
+                    if (sessionId) {
+                        await this.sessionManager.markTraceEmitted(sessionId)
+                    }
+                }
                 await this.trackEvent(AnalyticsEvent.AI_SPAN, {
                     $ai_trace_id: traceId,
                     $ai_span_id: spanId,

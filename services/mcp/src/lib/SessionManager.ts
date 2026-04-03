@@ -42,6 +42,34 @@ export class SessionManager {
         await this.cache.delete(key)
     }
 
+    async getTraceId(sessionId: string): Promise<string> {
+        const key = this._getKey(sessionId)
+        const existingSession = await this.cache.get(key)
+
+        if (existingSession?.traceId) {
+            return existingSession.traceId
+        }
+
+        const traceId = uuidv7()
+        await this.cache.set(key, { ...existingSession, uuid: existingSession?.uuid ?? uuidv7(), traceId })
+
+        return traceId
+    }
+
+    async isTraceEmitted(sessionId: string): Promise<boolean> {
+        const key = this._getKey(sessionId)
+        const session = await this.cache.get(key)
+        return !!session?.traceEmitted
+    }
+
+    async markTraceEmitted(sessionId: string): Promise<void> {
+        const key = this._getKey(sessionId)
+        const session = await this.cache.get(key)
+        if (session) {
+            await this.cache.set(key, { ...session, traceEmitted: true })
+        }
+    }
+
     async clearAllSessions(): Promise<void> {
         await this.cache.clear()
     }
