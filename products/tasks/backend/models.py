@@ -53,6 +53,9 @@ class Task(DeletedMetaFields, models.Model):
         SLACK = "slack", "Slack"
         SUPPORT_QUEUE = "support_queue", "Support Queue"
         SESSION_SUMMARIES = "session_summaries", "Session Summaries"
+        # Unlike the others (which indicate direct creation from that product, e.g. a "fix this error" button),
+        # signal report tasks originate indirectly via signals from other products.
+        SIGNAL_REPORT = "signal_report", "Signal Report"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
@@ -77,6 +80,15 @@ class Task(DeletedMetaFields, models.Model):
         max_length=255, null=True, blank=True
     )  # Format is organization/repo, for example posthog/posthog-js
 
+    signal_report = models.ForeignKey(
+        "signals.SignalReport",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="task",
+        db_index=False,
+    )
+
     json_schema = models.JSONField(
         default=None,
         null=True,
@@ -95,6 +107,9 @@ class Task(DeletedMetaFields, models.Model):
     class Meta:
         db_table = "posthog_task"
         managed = True
+        indexes = [
+            models.Index(fields=["signal_report"], name="posthog_task_signal_report_idx"),
+        ]
 
     def __str__(self):
         return self.title
@@ -235,6 +250,7 @@ class Task(DeletedMetaFields, models.Model):
         start_workflow: bool = True,
         posthog_mcp_scopes: PosthogMcpScopes = "full",
         branch: str | None = None,
+        signal_report_id: str | None = None,
         sandbox_environment_id: str | None = None,
         internal: bool = False,
         output_schema: BaseModel | dict | None = None,
@@ -265,6 +281,7 @@ class Task(DeletedMetaFields, models.Model):
             repository=repository,
             internal=internal,
             json_schema=resolve_schema(output_schema) if output_schema else None,
+            **({"signal_report_id": signal_report_id} if signal_report_id else {}),
         )
 
         extra_state: dict[str, str] | None = None
