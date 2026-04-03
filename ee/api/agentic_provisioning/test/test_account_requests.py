@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from rest_framework.response import Response
 
-from posthog.models.organization import Organization, OrganizationMembership
+from posthog.models.organization import Organization
 from posthog.models.team.team import Team
 from posthog.models.user import User
 
