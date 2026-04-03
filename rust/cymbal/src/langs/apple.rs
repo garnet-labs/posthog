@@ -130,7 +130,9 @@ impl RawAppleFrame {
             }
             Err(ResolveError::ResolutionError(FrameError::MissingChunkIdData(chunk_id))) => {
                 tracing::debug!("[apple-debug] resolve() MissingChunkIdData: {}", chunk_id);
-                Ok(vec![self.handle_resolution_error(AppleError::MissingDsym(chunk_id))])
+                Ok(vec![self.handle_resolution_error(AppleError::MissingDsym(
+                    chunk_id,
+                ))])
             }
             Err(ResolveError::ResolutionError(e)) => {
                 unreachable!("Should not have received error {:?}", e)
@@ -180,7 +182,8 @@ impl RawAppleFrame {
         let lookup_addr = relative_addr.saturating_sub(1);
         tracing::debug!(
             "[apple-debug] resolve_impl: relative_addr=0x{:x}, lookup_addr=0x{:x}",
-            relative_addr, lookup_addr
+            relative_addr,
+            lookup_addr
         );
 
         tracing::debug!(
@@ -930,7 +933,12 @@ mod test {
             .unwrap();
 
         // Three logical frames from one physical address
-        assert_eq!(frames.len(), 3, "expected 3 frames (inlined expansion), got: {:#?}", frames);
+        assert_eq!(
+            frames.len(),
+            3,
+            "expected 3 frames (inlined expansion), got: {:#?}",
+            frames
+        );
 
         // All must be resolved
         assert!(frames.iter().all(|f| f.resolved));
@@ -941,7 +949,8 @@ mod test {
         assert_eq!(frames[2].resolved_name, Some("inlined_leaf".to_string()));
 
         // Source file populated
-        assert!(frames.iter().all(|f| f.source
+        assert!(frames.iter().all(|f| f
+            .source
             .as_ref()
             .is_some_and(|s| s.contains("test_binary_inline.c"))));
 
