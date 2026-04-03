@@ -43,6 +43,15 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Result<&'a str, Error> 
 }
 
 impl Context {
+    /// Per-request metric faceting labels. Called once per publish_batch, not per event.
+    pub fn metric_tags(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("path", self.path.clone()),
+            ("token_prefix", self.api_token.chars().take(10).collect()),
+            ("attempt", self.attempt.to_string()),
+        ]
+    }
+
     pub fn clock_skew(&self) -> chrono::Duration {
         self.client_timestamp
             .signed_duration_since(self.server_received_at)

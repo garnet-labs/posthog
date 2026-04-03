@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::str::FromStr;
 use std::{net::SocketAddr, num::NonZeroU32};
 
 use common_continuous_profiling::ContinuousProfilingConfig;
@@ -249,6 +251,19 @@ pub struct Config {
 
     #[envconfig(nested = true)]
     pub continuous_profiling: ContinuousProfilingConfig,
+
+    /// Comma-separated list of active v1 Kafka clusters (e.g. "msk" or
+    /// "msk,warpstream"). Parsed by `load_v1_kafka_clusters()` after
+    /// `Config::init_from_env()` — each name triggers a prefix-stripped
+    /// load of `V1KafkaClusterConfig` from env vars. Empty string means
+    /// the v1 Kafka sink is disabled.
+    #[envconfig(default = "")]
+    pub capture_v1_kafka_clusters: String,
+
+    /// Max time (ms) to wait for all delivery acks after enqueue (v1 sink).
+    /// Shared across all clusters — not per-cluster.
+    #[envconfig(default = "15000")]
+    pub capture_v1_kafka_produce_timeout_ms: u64,
 }
 
 #[derive(Envconfig, Clone)]
@@ -310,4 +325,151 @@ pub struct KafkaConfig {
     pub kafka_producer_sticky_partitioning_linger_ms: u32, // sticky.partitioning.linger.ms
     #[envconfig(default = "false")] // librdkafka default
     pub kafka_producer_enable_idempotence: bool, // enable.idempotence
+}
+
+// ---------------------------------------------------------------------------
+// v1 multi-cluster Kafka config
+//
+// Each v1 capture deploy can write to one or more Kafka clusters (e.g. MSK
+// and WarpStream). Which clusters are active is controlled by a single CSV
+// env var:
+//
+//   CAPTURE_V1_KAFKA_CLUSTERS=msk            # single cluster
+//   CAPTURE_V1_KAFKA_CLUSTERS=msk,warpstream # dual-write / migration
+//
+// Per-cluster settings use a naming convention: the cluster name becomes an
+// env var prefix. For the "msk" cluster every field in V1KafkaClusterConfig
+// is read from CAPTURE_V1_KAFKA_MSK_<FIELD>, e.g.:
+//
+//   CAPTURE_V1_KAFKA_MSK_HOSTS=broker1:9092,broker2:9092
+//   CAPTURE_V1_KAFKA_MSK_TLS=true
+//   CAPTURE_V1_KAFKA_MSK_TOPIC_MAIN=events_plugin_ingestion
+//   ...
+//
+// The config is NOT nested into the main Config struct — it is loaded
+// separately via load_v1_kafka_clusters() after Config::init_from_env(),
+// using envconfig's init_from_hashmap with dynamic prefix stripping.
+//
+// Clusters not listed in CAPTURE_V1_KAFKA_CLUSTERS are ignored even if
+// their env vars are present, making cutover a one-line CSV change.
+// ---------------------------------------------------------------------------
+
+/// Identity of a v1 Kafka cluster. Adding a third cluster requires a new
+/// variant here plus its `as_str()`, `env_prefix()`, and `FromStr` arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClusterName {
+    Msk,
+    Warpstream,
+}
+
+impl ClusterName {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Msk => "msk",
+            Self::Warpstream => "warpstream",
+        }
+    }
+
+    pub fn env_prefix(&self) -> &'static str {
+        match self {
+            Self::Msk => "CAPTURE_V1_KAFKA_MSK_",
+            Self::Warpstream => "CAPTURE_V1_KAFKA_WARPSTREAM_",
+        }
+    }
+}
+
+impl FromStr for ClusterName {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "msk" => Ok(Self::Msk),
+            "warpstream" => Ok(Self::Warpstream),
+            other => Err(format!("unknown cluster: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for ClusterName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Single config struct for any v1 Kafka cluster. Loaded N times with different
+/// env var prefixes via `init_from_hashmap` (e.g. `CAPTURE_V1_KAFKA_MSK_*`,
+/// `CAPTURE_V1_KAFKA_WARPSTREAM_*`). Every listed cluster is a complete,
+/// independent setup — connection, producer tuning, and all topics.
+///
+/// Field names map directly to the env var suffix after the prefix is stripped.
+/// For example, for the MSK cluster, `hosts` is read from
+/// `CAPTURE_V1_KAFKA_MSK_HOSTS`, `topic_main` from
+/// `CAPTURE_V1_KAFKA_MSK_TOPIC_MAIN`, etc.
+#[derive(Envconfig, Clone, Debug)]
+pub struct V1KafkaClusterConfig {
+    // -- Connection --
+    /// Comma-separated broker list (e.g. "broker1:9092,broker2:9092").
+    pub hosts: String,
+    #[envconfig(default = "false")]
+    pub tls: bool,
+    #[envconfig(default = "")]
+    pub client_id: String,
+
+    // -- Producer tuning (maps to librdkafka settings) --
+    #[envconfig(default = "20")]
+    pub linger_ms: u32,
+    /// In-memory producer queue size in MiB (converted to KB for rdkafka).
+    #[envconfig(default = "400")]
+    pub queue_mib: u32,
+    /// Time before we stop retrying producing a message (ms).
+    #[envconfig(default = "20000")]
+    pub message_timeout_ms: u32,
+    #[envconfig(default = "1000000")]
+    pub message_max_bytes: u32,
+    /// none, gzip, snappy, lz4, zstd
+    #[envconfig(default = "none")]
+    pub compression_codec: String,
+    #[envconfig(default = "all")]
+    pub acks: String,
+    #[envconfig(default = "false")]
+    pub enable_idempotence: bool,
+    #[envconfig(default = "10000")]
+    pub batch_num_messages: u32,
+    #[envconfig(default = "1000000")]
+    pub batch_size: u32,
+
+    // -- Topics (all required — envconfig errors if any are missing) --
+    pub topic_main: String,
+    pub topic_historical: String,
+    pub topic_overflow: String,
+    pub topic_dlq: String,
+}
+
+/// Load a V1KafkaClusterConfig by stripping the cluster's env var prefix
+/// and feeding the remainder into envconfig's `init_from_hashmap`.
+fn load_cluster_config(cluster: ClusterName) -> Result<V1KafkaClusterConfig, envconfig::Error> {
+    let prefix = cluster.env_prefix();
+    let map: HashMap<String, String> = std::env::vars()
+        .filter_map(|(k, v)| k.strip_prefix(prefix).map(|rest| (rest.to_string(), v)))
+        .collect();
+    V1KafkaClusterConfig::init_from_hashmap(&map)
+}
+
+/// Parse `CAPTURE_V1_KAFKA_CLUSTERS` CSV and load each cluster's config.
+pub fn load_v1_kafka_clusters(
+    clusters_csv: &str,
+) -> anyhow::Result<HashMap<ClusterName, V1KafkaClusterConfig>> {
+    let names: Vec<ClusterName> = clusters_csv
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.parse::<ClusterName>())
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("bad CAPTURE_V1_KAFKA_CLUSTERS: {e}"))?;
+
+    let mut clusters = HashMap::new();
+    for name in names {
+        let config = load_cluster_config(name)
+            .map_err(|e| anyhow::anyhow!("cluster {}: {e}", name.as_str()))?;
+        clusters.insert(name, config);
+    }
+    Ok(clusters)
 }

@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+
+use crate::config::{CaptureMode, ClusterName, V1KafkaClusterConfig};
 
 /// Kafka topic routing for a processed event.
 /// `Drop` means the event should not be produced at all.
@@ -16,39 +19,40 @@ pub enum Destination {
     Drop,
 }
 
-/// Full configuration for the v1 sink.
-#[derive(Clone, Debug)]
-pub struct SinkConfig {
-    // Topic routing
-    pub main_topic: String,
-    pub historical_topic: String,
-    pub overflow_topic: String,
-    pub dlq_topic: String,
-
-    // Kafka client tuning (passed through to rdkafka ClientConfig)
-    pub kafka_hosts: String,
-    pub kafka_tls: bool,
-    pub kafka_compression_codec: String,
-    pub producer_linger_ms: u32,
-    pub producer_queue_mib: u32,
-    pub producer_queue_messages: u32,
-
-    /// Max time to wait for all delivery acks after enqueue.
-    pub produce_timeout: Duration,
-    // Placeholder for future fallback sink config (S3, etc.)
-    // pub fallback: Option<FallbackConfig>,
-}
-
-impl SinkConfig {
-    pub fn resolve_topic<'a>(&'a self, destination: &'a Destination) -> Option<&'a str> {
-        match destination {
-            Destination::AnalyticsMain => Some(&self.main_topic),
-            Destination::AnalyticsHistorical => Some(&self.historical_topic),
-            Destination::Overflow => Some(&self.overflow_topic),
-            Destination::Dlq => Some(&self.dlq_topic),
+impl V1KafkaClusterConfig {
+    /// Resolve which topic to use for the given destination on this cluster.
+    pub fn topic_for<'a>(&'a self, dest: &'a Destination) -> Option<&'a str> {
+        match dest {
+            Destination::AnalyticsMain => Some(&self.topic_main),
+            Destination::AnalyticsHistorical => Some(&self.topic_historical),
+            Destination::Overflow => Some(&self.topic_overflow),
+            Destination::Dlq => Some(&self.topic_dlq),
             Destination::Custom(t) => Some(t.as_str()),
             Destination::Drop => None,
         }
+    }
+}
+
+/// Full configuration for the v1 sink. Each cluster is a complete, independent
+/// Kafka setup. The caller (handler/router) decides which cluster(s) to write to.
+#[derive(Clone, Debug)]
+pub struct SinkConfig {
+    pub clusters: HashMap<ClusterName, V1KafkaClusterConfig>,
+    pub produce_timeout: Duration,
+    pub capture_mode: CaptureMode,
+}
+
+impl SinkConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.clusters.is_empty(), "no v1 kafka clusters configured");
+        for (&name, cfg) in &self.clusters {
+            anyhow::ensure!(
+                !cfg.hosts.is_empty(),
+                "cluster {} has empty hosts",
+                name.as_str()
+            );
+        }
+        Ok(())
     }
 }
 
@@ -80,16 +84,9 @@ pub trait SinkResult: Send + Sync {
 pub struct KafkaResult {
     uuid_key: String,
     outcome: Outcome,
-    /// Raw rdkafka error for Kafka-specific introspection. Currently always None
-    /// because we go through the v0 `KafkaProducer` trait which maps errors to
-    /// `CaptureError`. Will be populated once we have a v1-specific producer.
     kafka_error: Option<KafkaError>,
-    /// Pre-formatted cause string built at construction time from whatever error
-    /// source is available (rdkafka error codes, serialization failures, timeouts).
     cause: Option<String>,
-    /// Batch-level: single `Utc::now()` at the start of publish/publish_batch.
     enqueued_at: DateTime<Utc>,
-    /// Per-event: `Utc::now()` when the ack resolved or timeout/error was recorded.
     completed_at: DateTime<Utc>,
 }
 
@@ -112,12 +109,10 @@ impl KafkaResult {
         }
     }
 
-    /// Raw rdkafka error for Kafka-specific introspection.
     pub fn kafka_error(&self) -> Option<&KafkaError> {
         self.kafka_error.as_ref()
     }
 
-    /// The `RDKafkaErrorCode` if the error originated from rdkafka.
     pub fn error_code(&self) -> Option<RDKafkaErrorCode> {
         self.kafka_error
             .as_ref()
