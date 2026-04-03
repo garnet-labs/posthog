@@ -756,6 +756,37 @@ describe('sqlEditorLogic', () => {
             performQuerySpy.mockRestore()
         })
 
+        it('resets stale database connection state when reopening the editor without a connection in the url', async () => {
+            const performQuerySpy = jest
+                .spyOn(queryRunner, 'performQuery')
+                .mockResolvedValue({ tables: {}, joins: [] } as never)
+
+            featureFlagLogic.actions.setFeatureFlags([FEATURE_FLAGS.DWH_POSTGRES_DIRECT_QUERY], {
+                [FEATURE_FLAGS.DWH_POSTGRES_DIRECT_QUERY]: true,
+            })
+
+            databaseLogic.actions.setConnection('conn-123')
+            await databaseLogic.asyncActions.loadDatabase()
+            performQuerySpy.mockClear()
+            window.history.replaceState({}, '', urls.sqlEditor())
+
+            logic = sqlEditorLogic({
+                tabId: TAB_ID,
+                monaco: createMockMonaco(),
+                editor: createMockEditor(),
+            })
+            logic.mount()
+
+            await new Promise((resolve) => setTimeout(resolve, 0))
+
+            expect(logic.values.selectedConnectionId).toBeUndefined()
+            expect(databaseLogic.values.connectionId).toBeNull()
+            expect(performQuerySpy).toHaveBeenCalledTimes(1)
+            expect(performQuerySpy.mock.calls[0][0]).toMatchObject({ connectionId: undefined })
+
+            performQuerySpy.mockRestore()
+        })
+
         it('passes sendRawQuery when running a direct query', async () => {
             const performQuerySpy = jest
                 .spyOn(queryRunner, 'performQuery')

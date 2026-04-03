@@ -32,7 +32,7 @@ import { OutputTab } from 'scenes/data-warehouse/editor/outputPaneLogic'
 import { buildQueryForColumnClick } from 'scenes/data-warehouse/editor/sql-utils'
 import { sqlEditorLogic } from 'scenes/data-warehouse/editor/sqlEditorLogic'
 import { dataWarehouseSettingsLogic } from 'scenes/data-warehouse/settings/dataWarehouseSettingsLogic'
-import { buildTableQueryUrl } from 'scenes/data-warehouse/utils'
+import { buildSelectAllQuery } from 'scenes/data-warehouse/utils'
 import { urls } from 'scenes/urls'
 
 import { SearchHighlightMultiple } from '~/layout/navigation-3000/components/SearchHighlight'
@@ -481,7 +481,12 @@ export const QueryDatabase = ({
                                     e.stopPropagation()
                                     const nextConnectionId =
                                         connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
-                                    newInternalTab(buildTableQueryUrl(item.name, nextConnectionId, null))
+                                    newInternalTab(
+                                        urls.sqlEditor({
+                                            query: buildSelectAllQuery(item.name, null),
+                                            connectionId: nextConnectionId,
+                                        })
+                                    )
                                 }}
                             >
                                 <ButtonPrimitive menuItem>Query</ButtonPrimitive>

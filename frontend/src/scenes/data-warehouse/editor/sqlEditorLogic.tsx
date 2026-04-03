@@ -257,7 +257,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             externalDataSourcesLogic,
             ['dataWarehouseSources'],
             databaseTableListLogic,
-            ['database', 'databaseLoading'],
+            ['database', 'databaseLoading', 'connectionId as databaseConnectionId'],
             outputPaneLogic({ tabId: props.tabId }),
             ['activeTab as outputActiveTab'],
         ],
@@ -1814,6 +1814,9 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             }
 
             const outputTabFromUrl = parseOutputTab(searchParams.output_tab ?? hashParams.output_tab)
+            const expectedDatabaseConnectionId = values.selectedConnectionId ?? null
+            const shouldSyncDatabaseConnection =
+                values.databaseConnectionId !== expectedDatabaseConnectionId || !values.database
 
             if (
                 !searchParams.open_query &&
@@ -1830,6 +1833,10 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 !hashParams.output_tab &&
                 values.queryInput !== null
             ) {
+                if (shouldSyncDatabaseConnection && !values.databaseLoading) {
+                    actions.setConnection(expectedDatabaseConnectionId)
+                    actions.loadDatabase()
+                }
                 return
             }
 
@@ -2062,8 +2069,8 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 }
             }
 
-            if (!values.database && !values.databaseLoading && connectionIdFromHash === undefined) {
-                actions.setConnection(values.selectedConnectionId ?? null)
+            if (connectionIdFromHash === undefined && shouldSyncDatabaseConnection && !values.databaseLoading) {
+                actions.setConnection(expectedDatabaseConnectionId)
                 actions.loadDatabase()
             }
         },
@@ -2071,9 +2078,17 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
     afterMount(({ actions, props, values, cache }) => {
         cache.lastSelectedConnectionId = values.selectedConnectionId
 
+        const expectedDatabaseConnectionId = values.selectedConnectionId ?? null
+        const shouldSyncDatabaseConnection =
+            values.databaseConnectionId !== expectedDatabaseConnectionId || !values.database
+        const hasExplicitEditorUrlState =
+            window.location.search.length > 0 ||
+            window.location.hash.length > 0 ||
+            window.location.pathname !== urls.sqlEditor()
+
         if (
-            isEmbeddedSQLEditorMode(props.mode ?? SQLEditorMode.FullScene) &&
-            !values.database &&
+            (isEmbeddedSQLEditorMode(props.mode ?? SQLEditorMode.FullScene) || !hasExplicitEditorUrlState) &&
+            shouldSyncDatabaseConnection &&
             !values.databaseLoading
         ) {
             actions.setConnection(values.selectedConnectionId ?? null)
