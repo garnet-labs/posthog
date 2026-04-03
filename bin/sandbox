@@ -1539,7 +1539,11 @@ def _cloud_gather_auth() -> tuple[str, str, str, str]:
 
     claude_json_file = Path.home() / ".claude.json"
     if claude_json_file.exists():
-        claude_json = claude_json_file.read_text().strip()
+        # Only include auth-relevant fields — the full file can exceed
+        # the 16KB AWS user-data limit (projects history is ~10KB alone).
+        CLAUDE_JSON_KEEP = {"oauthAccount", "userID", "hasCompletedOnboarding"}
+        full = json.loads(claude_json_file.read_text())
+        claude_json = json.dumps({k: v for k, v in full.items() if k in CLAUDE_JSON_KEEP})
 
     return ssh_keys_str, claude_credentials, claude_settings, claude_json
 
