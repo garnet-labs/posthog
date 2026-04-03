@@ -87,9 +87,12 @@ else
     mkdir -p /mnt/nvme
     mount "$NVME_DEV" /mnt/nvme
 
-    # Copy existing Docker data (images, volumes, build cache from AMI) to NVMe
+    # Move Docker data from EBS to NVMe using tar (much faster than cp -a
+    # for the ~200k small files in overlay2 — reads sequentially instead of
+    # doing per-file metadata lookups that saturate EBS IOPS).
     systemctl stop docker
-    cp -a /var/lib/docker /mnt/nvme/docker
+    mkdir -p /mnt/nvme/docker
+    tar -C /var/lib/docker -cf - . | tar -C /mnt/nvme/docker -xf -
     rm -rf /var/lib/docker
     ln -s /mnt/nvme/docker /var/lib/docker
     systemctl start docker
