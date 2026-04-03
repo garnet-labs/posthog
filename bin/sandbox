@@ -1617,7 +1617,7 @@ def cmd_cloud_create(branch: str) -> None:
         "--image-id",
         config["ami_id"],
         "--instance-type",
-        "m6i.2xlarge",
+        "m6id.2xlarge",
         "--subnet-id",
         config["subnet_id"],
         "--security-group-ids",

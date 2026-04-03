@@ -65,6 +65,37 @@ fi
 
 chown -R ubuntu:ubuntu "$CLAUDE_AUTH_DIR"
 
+# --- Move Docker to NVMe for I/O performance ---
+echo "==> Setting up NVMe instance store..."
+
+# Auto-detect the NVMe instance store device (not the root EBS).
+ROOT_DEV=$(lsblk -no PKNAME $(findmnt -n -o SOURCE /) | head -1)
+NVME_DEV=""
+for dev in /dev/nvme*n1; do
+    name=$(basename "$dev")
+    if [ "$name" != "$ROOT_DEV" ] && [ -b "$dev" ]; then
+        NVME_DEV="$dev"
+        break
+    fi
+done
+
+if [ -z "$NVME_DEV" ]; then
+    echo "==> WARNING: No NVMe instance store found, staying on EBS"
+else
+    echo "==> Found NVMe instance store: $NVME_DEV"
+    mkfs.ext4 -L nvme-docker "$NVME_DEV"
+    mkdir -p /mnt/nvme
+    mount "$NVME_DEV" /mnt/nvme
+
+    # Copy existing Docker data (images, volumes, build cache from AMI) to NVMe
+    systemctl stop docker
+    cp -a /var/lib/docker /mnt/nvme/docker
+    rm -rf /var/lib/docker
+    ln -s /mnt/nvme/docker /var/lib/docker
+    systemctl start docker
+    echo "==> Docker data moved to NVMe ($NVME_DEV)"
+fi
+
 # --- Pre-populate sandbox config to skip interactive prompts ---
 echo "==> Pre-populating sandbox config..."
 SANDBOX_CONFIG_DIR="/home/ubuntu/.posthog-sandboxes"
