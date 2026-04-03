@@ -181,7 +181,7 @@ def provisioning_services(request: Request) -> Response:
     if error := verify_api_version(request):
         return error
 
-    return Response({"data": _get_services(), "next_cursor": ""})
+    return Response({"data": _get_services()})
 
 
 # ---------------------------------------------------------------------------
