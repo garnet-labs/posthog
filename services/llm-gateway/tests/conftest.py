@@ -9,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 from llm_gateway.auth.models import AuthenticatedUser
 from llm_gateway.main import http_exception_handler
-from llm_gateway.services.plan_resolver import PlanInfo
 from llm_gateway.rate_limiting.cost_throttles import (
     ProductCostThrottle,
     UserCostBurstThrottle,
@@ -17,6 +16,7 @@ from llm_gateway.rate_limiting.cost_throttles import (
 )
 from llm_gateway.rate_limiting.runner import ThrottleRunner
 from llm_gateway.rate_limiting.throttles import Throttle
+from llm_gateway.services.plan_resolver import PlanInfo
 
 
 def create_test_app(

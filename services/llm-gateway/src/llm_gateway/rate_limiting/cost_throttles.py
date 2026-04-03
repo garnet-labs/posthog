@@ -6,13 +6,18 @@ from typing import TYPE_CHECKING
 import structlog
 from redis.asyncio import Redis
 
-from llm_gateway.config import DEFAULT_USER_COST_LIMIT, FREE_PLAN_EXPIRED_COST_LIMIT, FREE_PLAN_TRIAL_COST_LIMIT, get_settings
+from llm_gateway.config import (
+    DEFAULT_USER_COST_LIMIT,
+    FREE_PLAN_EXPIRED_COST_LIMIT,
+    FREE_PLAN_TRIAL_COST_LIMIT,
+    get_settings,
+)
 
 if TYPE_CHECKING:
     from llm_gateway.config import UserCostLimit
 from llm_gateway.rate_limiting.redis_limiter import CostRateLimiter
-from llm_gateway.services.plan_resolver import get_billing_period_number, is_pro_plan
 from llm_gateway.rate_limiting.throttles import Throttle, ThrottleContext, ThrottleResult, get_team_multiplier
+from llm_gateway.services.plan_resolver import get_billing_period_number, is_pro_plan
 
 logger = structlog.get_logger(__name__)
 

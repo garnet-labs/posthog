@@ -3,7 +3,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from llm_gateway.services.plan_resolver import PlanInfo, PlanResolver, _is_in_trial, get_billing_period_number, is_pro_plan
+from llm_gateway.services.plan_resolver import (
+    PlanResolver,
+    _is_in_trial,
+    get_billing_period_number,
+    is_pro_plan,
+)
 
 
 class TestIsProPlan:
