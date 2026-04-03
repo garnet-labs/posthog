@@ -184,6 +184,19 @@ export const OriginProductEnumApi = {
     SignalReport: 'signal_report',
 } as const
 
+export interface TaskRepositoryApi {
+    /**
+     * Repository in org/repo format (e.g. posthog/posthog-js)
+     * @maxLength 400
+     */
+    repository: string
+    /**
+     * GitHub integration ID
+     * @nullable
+     */
+    github_integration?: number | null
+}
+
 export interface PatchedTaskApi {
     readonly id?: string
     /** @nullable */
@@ -195,15 +208,17 @@ export interface PatchedTaskApi {
     description?: string
     origin_product?: OriginProductEnumApi
     /**
-     * @maxLength 255
+     * First repository (deprecated, use repositories instead)
      * @nullable
      */
-    repository?: string | null
+    readonly repository?: string | null
     /**
-     * GitHub integration for this task
+     * First repository's GitHub integration (deprecated, use repositories instead)
      * @nullable
      */
-    github_integration?: number | null
+    readonly github_integration?: number | null
+    /** Repositories associated with this task */
+    repositories?: TaskRepositoryApi[]
     /** @nullable */
     signal_report?: string | null
     /** JSON schema for the task. This is used to validate the output of the task. */
