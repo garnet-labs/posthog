@@ -22,11 +22,18 @@ export const buildTableQueryUrl = (
     tableName: string,
     connectionId?: string | null,
     limitOffsetClause: string | null = 'LIMIT 100'
-): string =>
-    urls.sqlEditor({
-        query: buildSelectAllQuery(tableName, limitOffsetClause),
-        connectionId: connectionId ?? undefined,
-    })
+): string => {
+    const hashParams = new URLSearchParams()
+    hashParams.set('q', buildSelectAllQuery(tableName, limitOffsetClause))
+
+    if (connectionId) {
+        hashParams.set('c', connectionId)
+    }
+
+    const hashString = hashParams.toString()
+
+    return `${urls.sqlEditor()}${hashString ? `#${hashString}` : ''}`
+}
 
 export const defaultQuery = (table: string, columns: DatabaseSchemaField[]): DataVisualizationNode => {
     return {

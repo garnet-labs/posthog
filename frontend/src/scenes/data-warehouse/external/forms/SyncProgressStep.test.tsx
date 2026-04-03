@@ -10,13 +10,21 @@ describe('SyncProgressStep', () => {
     })
 
     it('includes the direct connection id in SQL editor preview URLs', () => {
-        expect(getPreviewQueryUrl('orders', 'direct', 'source-123')).toContain('#c=source-123')
+        const previewUrl = new URL(getPreviewQueryUrl('orders', 'direct', 'source-123'), 'https://app.posthog.com')
+
+        expect(new URLSearchParams(previewUrl.hash.slice(1)).get('c')).toEqual('source-123')
+    })
+
+    it('stores the preview query in the URL hash', () => {
+        const previewUrl = new URL(getPreviewQueryUrl('orders', 'direct', 'source-123'), 'https://app.posthog.com')
+
+        expect(previewUrl.hash).toContain('q=SELECT+*+FROM+orders+LIMIT+100')
     })
 
     it('quotes dotted table names as a single HogQL identifier', () => {
         const previewUrl = new URL(getPreviewQueryUrl('demo.orders', 'direct', 'source-123'), 'https://app.posthog.com')
 
-        expect(previewUrl.searchParams.get('open_query')).toEqual('SELECT * FROM demo.orders LIMIT 100')
+        expect(new URLSearchParams(previewUrl.hash.slice(1)).get('q')).toEqual('SELECT * FROM demo.orders LIMIT 100')
     })
 
     it('does not include a connection id for warehouse preview URLs', () => {
