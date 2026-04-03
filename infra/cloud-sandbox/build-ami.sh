@@ -134,6 +134,11 @@ sudo -u ubuntu sg docker -c "python3 bin/sandbox rebuild-cache"
 # --- Clean up for snapshotting ---
 echo "==> Cleaning up..."
 
+# Detach HEAD so no branch is "checked out" — bin/sandbox create can
+# then create a worktree for any branch, including the one used to build.
+cd /home/ubuntu/posthog
+sudo -u ubuntu git checkout --detach
+
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 rm -rf /tmp/*
