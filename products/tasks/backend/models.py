@@ -299,7 +299,7 @@ class Task(DeletedMetaFields, models.Model):
         return task
 
 
-class TaskRepository(models.Model):
+class TaskRepository(UUIDModel):
     """Junction model supporting multiple repositories per task."""
 
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="task_repositories")
