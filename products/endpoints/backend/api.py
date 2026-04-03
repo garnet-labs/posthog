@@ -335,7 +335,7 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
 
     def _build_materialization_info(self, version: EndpointVersion) -> dict:
         """Build materialization status dict for a version."""
-        if version.saved_query:
+        if version.saved_query and version.saved_query.is_materialized:
             return {
                 "status": version.saved_query.status or "Unknown",
                 "can_materialize": True,
@@ -1157,6 +1157,24 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         """
         version = version or endpoint.get_version()
         if version:
+            if version.saved_query:
+                try:
+                    delete_node_from_dag(version.saved_query)
+                except Exception as e:
+                    logger.exception(
+                        "Failed to remove endpoint node from DAG",
+                        endpoint_name=endpoint.name,
+                        saved_query_id=version.saved_query.id if version.saved_query else None,
+                    )
+                    capture_exception(
+                        e,
+                        {
+                            "product": Product.ENDPOINTS,
+                            "team_id": self.team_id,
+                            "endpoint_name": endpoint.name,
+                            "saved_query_id": version.saved_query.id if version.saved_query else None,
+                        },
+                    )
             version.disable_materialization()
         clear_endpoint_materialization_cache(self.team_id, endpoint.name)
 

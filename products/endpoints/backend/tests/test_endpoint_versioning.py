@@ -444,8 +444,8 @@ class TestEndpointVersioning(ClickhouseTestMixin, APIBaseTest):
         )
         version = endpoint.get_version()
 
-        # Ensure no saved query on version
-        self.assertIsNone(version.saved_query)
+        # Non-materialized versions may still have a backing saved query for sidebar organization
+        self.assertFalse(version.is_materialized)
 
         # Update query
         new_query = {"kind": "HogQLQuery", "query": "SELECT 2"}
@@ -459,10 +459,10 @@ class TestEndpointVersioning(ClickhouseTestMixin, APIBaseTest):
 
         endpoint.refresh_from_db()
 
-        # Verify version was incremented but no saved query was created on new version
+        # Verify version was incremented without transferring materialization state
         self.assertEqual(2, endpoint.current_version)
         new_version = endpoint.get_version()
-        self.assertIsNone(new_version.saved_query)
+        self.assertFalse(new_version.is_materialized)
 
     def test_version_activate_deactivate(self):
         """Version can be activated and deactivated via update endpoint with version param."""
@@ -690,7 +690,7 @@ class TestEndpointVersioning(ClickhouseTestMixin, APIBaseTest):
 
         # v2 should still NOT be materialized
         self.assertFalse(v2.is_materialized)
-        self.assertIsNone(v2.saved_query)
+        self.assertIsNotNone(v2.saved_query)
 
     def test_update_with_version_param_disables_materialization_on_specific_version(self):
         """Update with ?version=N should disable materialization on that specific version."""
@@ -753,11 +753,12 @@ class TestEndpointVersioning(ClickhouseTestMixin, APIBaseTest):
 
         # v1 should no longer be materialized
         self.assertFalse(v1.is_materialized)
-        self.assertIsNone(v1.saved_query)
+        self.assertIsNotNone(v1.saved_query)
 
-        # Saved query should be soft-deleted
+        # Saved query should remain linked but no longer be materialized
         saved_query.refresh_from_db()
-        self.assertTrue(saved_query.deleted)
+        self.assertFalse(saved_query.deleted)
+        self.assertFalse(saved_query.is_materialized)
 
     def test_update_with_version_param_updates_description_on_specific_version(self):
         """Update with ?version=N should update description on that specific version."""
