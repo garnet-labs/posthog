@@ -250,9 +250,7 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                         render: function RenderName(_, schema) {
                             const nameContent =
                                 isDirectQuerySource && schema.table ? (
-                                    <Link to={getPreviewUrl(schema.table.name)}>
-                                        {schema.label ?? schema.name}
-                                    </Link>
+                                    <Link to={getPreviewUrl(schema.table.name)}>{schema.label ?? schema.name}</Link>
                                 ) : (
                                     <span>{schema.label ?? schema.name}</span>
                                 )
