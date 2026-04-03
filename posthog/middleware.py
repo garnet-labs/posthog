@@ -2,6 +2,7 @@ import re
 import json
 import time
 import uuid
+import posixpath
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timedelta
@@ -744,13 +745,21 @@ class OAuthCoopMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
+    @staticmethod
+    def _matches_oauth_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
+        for prefix in prefixes:
+            if path.startswith(prefix) or path.rstrip("/") + "/" == prefix:
+                return True
+        return False
+
     def __call__(self, request):
         response = self.get_response(request)
-        if any(request.path.startswith(prefix) for prefix in self.OAUTH_PATH_PREFIXES):
+        if self._matches_oauth_prefix(request.path, self.OAUTH_PATH_PREFIXES):
             response["Cross-Origin-Opener-Policy"] = "unsafe-none"
         elif request.path == "/login" or request.path == "/login/":
             next_url = request.GET.get("next", "")
-            if any(next_url.startswith(prefix) for prefix in self.OAUTH_PATH_PREFIXES):
+            normalized = posixpath.normpath(next_url) if next_url.startswith("/") else next_url
+            if self._matches_oauth_prefix(normalized, self.OAUTH_PATH_PREFIXES):
                 response["Cross-Origin-Opener-Policy"] = "unsafe-none"
         return response
 
@@ -941,8 +950,10 @@ IMPERSONATION_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 # These should be paths that are safe or necessary for the impersonated session to function.
 # Supports both prefix strings and compiled regex patterns.
 READ_ONLY_IMPERSONATION_ALLOWLISTED_PATHS: list[str | re.Pattern] = [
-    # These endpoints use POST but are read-only
-    re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/query/?$"),
+    # These endpoints use POST but are read-only:
+    # /query/[A-Z][A-Za-z]* matches query-kind segments, while the schema-upgrade POST action
+    # /query/upgrade/ needs an explicit "|upgrade" branch as that starts with a lowercase letter
+    re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/query(?:/[A-Za-z]+)?/?$"),
     re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/insights/viewed/?$"),
     re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/metalytics/?$"),
     re.compile(r"^/api/(environments|projects)/([0-9]+|@current)/endpoints/[^/]+/run/?$"),

@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 
+import pytest
 from freezegun import freeze_time
 from posthog.test.base import APIBaseTest, FuzzyInt, override_settings
 from unittest.mock import patch
@@ -779,6 +780,20 @@ class TestImpersonationReadOnlyMiddleware(APIBaseTest):
         # Should not be blocked by impersonation middleware (might get other errors)
         assert response.status_code != 403 or response.json().get("code") != "impersonation_read_only"
 
+    def test_read_only_impersonation_allows_query_kind_endpoint(self):
+        """POST to /query/<kind>/ must be allowlisted (same as /query/), not blocked as non-idempotent."""
+        self.login_as_other_user_read_only()
+
+        assert self.client.get("/api/users/@me").json()["email"] == "other-user@posthog.com"
+
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/query/HogQLQuery/",
+            data={"query": {"kind": "HogQLQuery", "query": "select 1"}},
+            content_type="application/json",
+        )
+
+        assert response.status_code != 403 or response.json().get("code") != "impersonation_read_only"
+
     def test_regular_impersonation_allows_write(self):
         """Verify regular (non-read-only) impersonation can still write."""
         dashboard = Dashboard.objects.create(team=self.team, name="Test Dashboard")
@@ -1390,3 +1405,45 @@ class TestSocialAuthExceptionMiddleware(APIBaseTest):
         self.assertIsNotNone(response)
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertEqual(response.url, "/login?error_code=oauth_cancelled")
+
+
+@pytest.mark.parametrize(
+    "path,query_string,expected_coop",
+    [
+        ("/connect/vercel/link", "", "unsafe-none"),
+        ("/oauth/callback", "", "unsafe-none"),
+        ("/login", "next=/connect/vercel/link", "unsafe-none"),
+        ("/login", "next=/connect/vercel/link?session=abc", "unsafe-none"),
+        ("/login", "", "same-origin"),
+        ("/login", "next=/dashboard", "same-origin"),
+        ("/login", "next=/connect/vercel/../../admin", "same-origin"),
+        ("/some/other/path", "", "same-origin"),
+    ],
+    ids=[
+        "direct-oauth-vercel",
+        "direct-oauth-callback",
+        "login-next-oauth",
+        "login-next-oauth-with-params",
+        "login-no-next",
+        "login-next-non-oauth",
+        "login-next-path-traversal",
+        "unrelated-path",
+    ],
+)
+def test_oauth_coop_middleware(path, query_string, expected_coop):
+    from django.http import HttpResponse
+    from django.test import RequestFactory
+
+    from posthog.middleware import OAuthCoopMiddleware
+
+    factory = RequestFactory()
+    request = factory.get(path + ("?" + query_string if query_string else ""))
+
+    def get_response(req):
+        resp = HttpResponse("ok")
+        resp["Cross-Origin-Opener-Policy"] = "same-origin"
+        return resp
+
+    middleware = OAuthCoopMiddleware(get_response)
+    response = middleware(request)
+    assert response["Cross-Origin-Opener-Policy"] == expected_coop

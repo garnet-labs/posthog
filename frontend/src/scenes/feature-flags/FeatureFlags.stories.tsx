@@ -49,7 +49,7 @@ const meta: Meta = {
                 },
             },
             post: {
-                '/api/environments/:team_id/query': {},
+                '/api/environments/:team_id/query/:kind': {},
                 // flag targeting has loaders, make sure they don't keep loading
                 '/api/projects/:team_id/feature_flags/user_blast_radius/': () => [
                     200,
@@ -61,7 +61,7 @@ const meta: Meta = {
 }
 export default meta
 
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<{}>
 export const FeatureFlagsList: Story = {}
 
 export const NewFeatureFlag: Story = {
