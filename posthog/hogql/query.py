@@ -499,8 +499,6 @@ class HogQLQueryExecutor:
 
         postgres_source, source_config = validate_direct_postgres_source_config(source, self.team)
         source_schema = source_config.schema
-        if not source_schema:
-            raise ExposedHogQLError("Invalid direct Postgres connection schema.")
         require_ssl = source.created_at >= SSL_REQUIRED_AFTER_DATE
         settings = self._effective_direct_postgres_settings()
         statement_timeout_ms = (
@@ -536,13 +534,14 @@ class HogQLQueryExecutor:
                         connection_kwargs["sslmode"] = "require"
 
                     with psycopg.connect(**connection_kwargs) as connection:
-                        connection.execute(
-                            direct_postgres_session_setup_sql(
-                                source_schema,
-                                source.connection_metadata,
-                                host,
+                        if source_schema:
+                            connection.execute(
+                                direct_postgres_session_setup_sql(
+                                    source_schema,
+                                    source.connection_metadata,
+                                    host,
+                                )
                             )
-                        )
                         connection.adapters.register_loader("date", LenientDirectPostgresDateLoader)
                         with connection.cursor() as cursor:
                             cursor.execute(self.direct_postgres_sql, self.direct_postgres_values or None)
