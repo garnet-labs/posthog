@@ -242,9 +242,15 @@ class EventDefinitionViewSet(
         verified_param = self.request.GET.get("verified")
         if verified_param is not None and EE_AVAILABLE:
             if verified_param.lower() == "true":
-                search_query = search_query + " AND verified = true"
+                # Core PostHog events (starting with $) are inherently treated as verified
+                search_query = (
+                    search_query + " AND (verified = true OR posthog_eventdefinition.name LIKE %(is_posthog_event)s)"
+                )
             else:
-                search_query = search_query + " AND (verified IS NULL OR verified = false)"
+                search_query = (
+                    search_query
+                    + " AND (verified IS NULL OR verified = false) AND posthog_eventdefinition.name NOT LIKE %(is_posthog_event)s"
+                )
 
         excluded_properties = self.request.GET.get("excluded_properties")
 

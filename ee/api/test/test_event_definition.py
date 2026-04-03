@@ -176,8 +176,9 @@ class TestEventDefinitionEnterpriseAPI(APIBaseTest):
 
     @parameterized.expand(
         [
-            ("verified_only", "true", ["entered_free_trial", "watched_movie"]),
-            ("unverified_only", "false", ["$pageview", "purchase"]),
+            # Core PostHog events (starting with $) are inherently treated as verified
+            ("verified_only", "true", ["$pageview", "entered_free_trial", "watched_movie"]),
+            ("unverified_only", "false", ["purchase"]),
             ("all_when_not_specified", None, ["$pageview", "entered_free_trial", "purchase", "watched_movie"]),
         ]
     )
