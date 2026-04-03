@@ -1463,7 +1463,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             }
         },
     })),
-    subscriptions(({ actions, values }) => ({
+    subscriptions(({ actions, values, cache }) => ({
         showLegacyFilters: (showLegacyFilters: boolean) => {
             if (showLegacyFilters) {
                 if (typeof values.sourceQuery.source.filters !== 'object') {
