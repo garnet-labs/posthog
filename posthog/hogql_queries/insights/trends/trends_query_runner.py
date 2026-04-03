@@ -769,9 +769,9 @@ class TrendsQueryRunner(AnalyticsQueryRunner[TrendsQueryResponse]):
         if isinstance(series, EventsNode):
             return series.event
         if isinstance(series, ActionsNode):
-            # TODO: Can we load the Action in more efficiently?
-            action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
-            return action.name
+            from posthog.hogql_queries.action_utils import get_action_name
+
+            return get_action_name(int(series.id), self.team)
 
         if isinstance(series, DataWarehouseNode):
             return series.table_name

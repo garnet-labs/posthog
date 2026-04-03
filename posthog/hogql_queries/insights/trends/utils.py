@@ -80,7 +80,9 @@ def group_node_to_expr(group: GroupNode, team: Team) -> ast.Expr | None:
             group_filters.append(node_expr)
         elif isinstance(node, ActionsNode):
             try:
-                action = Action.objects.get(pk=int(node.id), team__project_id=team.project_id)
+                from posthog.hogql_queries.action_utils import get_action
+
+                action = get_action(int(node.id), team)
                 node_expr = action_to_expr(action)
                 if node.properties is not None and node.properties != []:
                     node_expr = ast.And(exprs=[node_expr, property_to_expr(node.properties, team)])

@@ -360,9 +360,11 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
             )
         elif isinstance(series, ActionsNode):
             try:
-                action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
+                from posthog.hogql_queries.action_utils import get_action
+
+                action = get_action(int(series.id), self.team)
                 filters.append(action_to_expr(action))
-            except Action.DoesNotExist:
+            except Exception:
                 # If an action doesn't exist, we want to return no events
                 filters.append(parse_expr("1 = 2"))
 
@@ -414,9 +416,9 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
             return series.table_name
 
         if isinstance(series, ActionsNode):
-            # TODO: Can we load the Action in more efficiently?
-            action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
-            return action.name
+            from posthog.hogql_queries.action_utils import get_action_name
+
+            return get_action_name(int(series.id), self.team)
 
     def intervals_num(self):
         delta = self.query_date_range.date_to() - self.query_date_range.date_from()

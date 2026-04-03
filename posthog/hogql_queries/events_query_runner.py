@@ -27,7 +27,7 @@ from posthog.api.person import PERSON_DEFAULT_DISPLAY_NAME_PROPERTIES
 from posthog.hogql_queries.insights.insight_actors_query_runner import InsightActorsQueryRunner
 from posthog.hogql_queries.insights.paginators import HogQLHasMorePaginator
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner, get_query_runner
-from posthog.models import Action, Person
+from posthog.models import Person
 from posthog.models.action.action import ActionStepJSON
 from posthog.models.element import chain_to_elements
 from posthog.models.person.person import get_distinct_ids_for_subquery
@@ -201,10 +201,9 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                             )
                 if self.query.actionId:
                     with self.timings.measure("action_id"):
-                        try:
-                            action = Action.objects.get(pk=self.query.actionId, team__project_id=self.team.project_id)
-                        except Action.DoesNotExist:
-                            raise Exception("Action does not exist")
+                        from posthog.hogql_queries.action_utils import get_action
+
+                        action = get_action(int(self.query.actionId), self.team)
                         if not action.steps:
                             raise Exception("Action does not have any match groups")
                         where_exprs.append(action_to_expr(action))

@@ -13,7 +13,7 @@ from posthog.hogql.property import action_to_expr, has_aggregation, map_virtual_
 from posthog.api.person import PERSON_DEFAULT_DISPLAY_NAME_PROPERTIES
 from posthog.hogql_queries.insights.paginators import HogQLHasMorePaginator
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
-from posthog.models import Action, Person
+from posthog.models import Person
 from posthog.models.person.person import get_distinct_ids_for_subquery
 from posthog.models.person.util import get_person_by_pk_or_uuid
 from posthog.utils import relative_date_parse
@@ -328,12 +328,9 @@ class SessionsQueryRunner(AnalyticsQueryRunner[SessionsQueryResponse]):
                                 )
                             )
                         elif self.query.actionId:
-                            try:
-                                action = Action.objects.get(
-                                    pk=self.query.actionId, team__project_id=self.team.project_id
-                                )
-                            except Action.DoesNotExist:
-                                raise Exception("Action does not exist")
+                            from posthog.hogql_queries.action_utils import get_action
+
+                            action = get_action(int(self.query.actionId), self.team)
                             if not action.steps:
                                 raise Exception("Action does not have any match groups")
                             event_where_exprs.append(action_to_expr(action))

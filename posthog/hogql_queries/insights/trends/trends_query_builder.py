@@ -30,7 +30,6 @@ from posthog.hogql_queries.insights.trends.breakdown import (
 from posthog.hogql_queries.insights.trends.display import TrendsDisplay
 from posthog.hogql_queries.insights.trends.utils import group_node_to_expr, is_groups_math
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
-from posthog.models.action.action import Action
 from posthog.models.filters.mixins.utils import cached_property
 from posthog.models.team.team import Team
 
@@ -911,9 +910,11 @@ class TrendsQueryBuilder(DataWarehouseInsightQueryMixin):
 
     def _get_action_expr(self, series: ActionsNode) -> ast.Expr | None:
         try:
-            action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(series.id), self.team)
             return action_to_expr(action)
-        except Action.DoesNotExist:
+        except Exception:
             # If an action doesn't exist, we want to return no events
             return parse_expr("1 = 2")
 

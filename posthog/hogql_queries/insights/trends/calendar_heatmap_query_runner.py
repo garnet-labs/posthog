@@ -39,7 +39,6 @@ from posthog.hogql_queries.insights.trends.series_with_extras import SeriesWithE
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.models import Team
-from posthog.models.action.action import Action
 from posthog.models.filters.mixins.utils import cached_property
 
 from products.event_definitions.backend.models.property_definition import PropertyDefinition
@@ -283,7 +282,9 @@ class CalendarHeatmapQueryRunner(AnalyticsQueryRunner[CalendarHeatmapResponse]):
     @cached_property
     def conversion_goal_expr(self) -> Optional[ast.Expr]:
         if self.query.series[0].kind == "ActionsNode":
-            action = Action.objects.get(pk=self.query.series[0].id, team__project_id=self.team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(self.query.series[0].id), self.team)
             return action_to_expr(action)
         elif isinstance(self.query.conversionGoal, CustomEventConversionGoal):
             return ast.CompareOperation(
@@ -295,7 +296,9 @@ class CalendarHeatmapQueryRunner(AnalyticsQueryRunner[CalendarHeatmapResponse]):
 
         # Support for web analytics
         if isinstance(self.query.conversionGoal, ActionConversionGoal):
-            action = Action.objects.get(pk=self.query.conversionGoal.actionId, team__project_id=self.team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(self.query.conversionGoal.actionId), self.team)
             return action_to_expr(action)
         else:
             return None
@@ -329,9 +332,9 @@ class CalendarHeatmapQueryRunner(AnalyticsQueryRunner[CalendarHeatmapResponse]):
         if isinstance(series, EventsNode):
             return series.event
         if isinstance(series, ActionsNode):
-            # TODO: Can we load the Action in more efficiently?
-            action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
-            return action.name
+            from posthog.hogql_queries.action_utils import get_action_name
+
+            return get_action_name(int(series.id), self.team)
 
         if isinstance(series, DataWarehouseNode):
             return series.table_name

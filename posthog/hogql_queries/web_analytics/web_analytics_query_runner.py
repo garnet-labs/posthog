@@ -46,7 +46,7 @@ from posthog.hogql_queries.web_analytics.metrics import (
     WEB_ANALYTICS_QUERY_ERRORS,
 )
 from posthog.hogql_queries.web_analytics.traffic_type import get_traffic_category_expr, get_traffic_type_expr
-from posthog.models import Action, User
+from posthog.models import User
 from posthog.models.filters.mixins.utils import cached_property
 from posthog.rbac.user_access_control import UserAccessControl
 from posthog.utils import generate_cache_key, get_safe_cache
@@ -239,7 +239,9 @@ class WebAnalyticsQueryRunner(AnalyticsQueryRunner[WAR], ABC):
     @cached_property
     def conversion_goal_expr(self) -> Optional[ast.Expr]:
         if isinstance(self.query.conversionGoal, ActionConversionGoal):
-            action = Action.objects.get(pk=self.query.conversionGoal.actionId, team__project_id=self.team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(self.query.conversionGoal.actionId), self.team)
             return action_to_expr(action)
         elif isinstance(self.query.conversionGoal, CustomEventConversionGoal):
             return ast.CompareOperation(

@@ -40,7 +40,6 @@ from posthog.hogql_queries.insights.trends.breakdown import BREAKDOWN_OTHER_STRI
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRangeWithIntervals
 from posthog.models import Team
-from posthog.models.action.action import Action
 from posthog.models.filters.mixins.utils import cached_property
 from posthog.queries.breakdown_props import ALL_USERS_COHORT_ID
 from posthog.queries.util import correct_result_for_sampling
@@ -335,7 +334,9 @@ class RetentionQueryRunner(AnalyticsQueryRunner[RetentionQueryResponse]):
 
     def get_events_for_entity(self, entity: RetentionEntity) -> list[str | None]:
         if entity.type == EntityType.ACTIONS and entity.id:
-            action = Action.objects.get(pk=int(entity.id), team__project_id=self.team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(entity.id), self.team)
             return action.get_step_events()
         return [entity.id] if isinstance(entity.id, str) else [None]
 

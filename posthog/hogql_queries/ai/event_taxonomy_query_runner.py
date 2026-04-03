@@ -17,7 +17,6 @@ from posthog.hogql.query import execute_hogql_query
 from posthog.clickhouse.query_tagging import Product, tags_context
 from posthog.hogql_queries.ai.utils import TaxonomyCacheMixin
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
-from posthog.models import Action
 
 
 class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTaxonomyQueryResponse]):
@@ -162,7 +161,9 @@ class EventTaxonomyQueryRunner(TaxonomyCacheMixin, AnalyticsQueryRunner[EventTax
                 )
             )
         elif self.query.actionId:
-            action = Action.objects.get(pk=self.query.actionId, team__project_id=self.team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(self.query.actionId), self.team)
             filter_expr.append(action_to_expr(action))
         else:
             raise ValueError("Either event or action ID must be provided.")

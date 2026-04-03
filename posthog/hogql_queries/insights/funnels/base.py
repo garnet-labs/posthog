@@ -282,8 +282,9 @@ class FunnelBase(ABC):
             name = ", ".join(events)
             action_id = name
         else:
-            action = Action.objects.get(pk=step.id, team__project_id=self.context.team.project_id)
-            name = action.name
+            from posthog.hogql_queries.action_utils import get_action_name
+
+            name = get_action_name(int(step.id), self.context.team)
             action_id = step.id
 
         return {

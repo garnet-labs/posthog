@@ -28,7 +28,6 @@ from posthog.caching.insights_api import BASE_MINIMUM_INSIGHT_REFRESH_INTERVAL, 
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange, compare_interval_length
 from posthog.hogql_queries.utils.timestamp_utils import format_label_date, get_earliest_timestamp_from_series
-from posthog.models import Action
 from posthog.models.filters.mixins.utils import cached_property
 
 
@@ -209,11 +208,13 @@ class LifecycleQueryRunner(AnalyticsQueryRunner[LifecycleQueryResponse]):
             action_object = {}
             label = "{} - {}".format("", val[2])
             if isinstance(series, ActionsNode):
-                action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
-                label = "{} - {}".format(action.name, val[2])
+                from posthog.hogql_queries.action_utils import get_action_name
+
+                action_name = get_action_name(int(series.id), self.team)
+                label = "{} - {}".format(action_name, val[2])
                 action_object = {
-                    "id": str(action.pk),
-                    "name": action.name,
+                    "id": str(series.id),
+                    "name": action_name,
                     "type": "actions",
                     "order": 0,
                     "math": "total",
@@ -349,10 +350,9 @@ class LifecycleQueryRunner(AnalyticsQueryRunner[LifecycleQueryResponse]):
         with self.timings.measure("series_filters"):
             for series in self.query.series or []:
                 if isinstance(series, ActionsNode):
-                    try:
-                        action = Action.objects.get(pk=int(series.id), team__project_id=self.team.project_id)
-                    except Action.DoesNotExist:
-                        raise ValidationError(f"Action ID {series.id} does not exist!")
+                    from posthog.hogql_queries.action_utils import get_action
+
+                    action = get_action(int(series.id), self.team)
                     event_filters.append(action_to_expr(action))
                 elif isinstance(series, EventsNode):
                     if series.event is not None:

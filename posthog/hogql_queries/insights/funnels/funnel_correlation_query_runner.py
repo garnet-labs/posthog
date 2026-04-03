@@ -36,7 +36,6 @@ from posthog.hogql_queries.insights.funnels.utils import funnel_window_interval_
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.models import Team
-from posthog.models.action.action import Action
 from posthog.models.element.element import chain_to_elements
 from posthog.models.event.util import ElementSerializer
 from posthog.models.property.util import get_property_string_expr
@@ -879,7 +878,9 @@ class FunnelCorrelationQueryRunner(AnalyticsQueryRunner[FunnelCorrelationRespons
         events: set[str] = set()
         for entity in self.funnels_query.series:
             if isinstance(entity, ActionsNode):
-                action = Action.objects.get(pk=int(entity.id), team__project_id=self.context.team.project_id)
+                from posthog.hogql_queries.action_utils import get_action
+
+                action = get_action(int(entity.id), self.context.team)
                 events.update([x for x in action.get_step_events() if x])
             elif isinstance(entity, EventsNode):
                 if entity.event is not None:

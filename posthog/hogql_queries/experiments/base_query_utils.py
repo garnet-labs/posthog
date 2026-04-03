@@ -31,7 +31,6 @@ from posthog.hogql_queries.experiments.hogql_aggregation_utils import (
 )
 from posthog.hogql_queries.insights.trends.aggregation_operations import ALLOWED_SESSION_MATH_PROPERTIES
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
-from posthog.models.action.action import Action
 from posthog.models.team.team import Team
 
 from products.experiments.backend.models.experiment import Experiment
@@ -165,9 +164,11 @@ def event_or_action_to_filter(
 
     if isinstance(entity_node, ActionsNode):
         try:
-            action = Action.objects.get(pk=int(entity_node.id), team__project_id=team.project_id)
+            from posthog.hogql_queries.action_utils import get_action
+
+            action = get_action(int(entity_node.id), team)
             event_filter = action_to_expr(action)
-        except Action.DoesNotExist:
+        except Exception:
             # If an action doesn't exist, we want to return no events
             event_filter = ast.Constant(value=False)
     else:
