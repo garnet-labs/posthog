@@ -308,12 +308,6 @@ pub struct Config {
     #[envconfig(default = "40")]
     pub max_concurrent_checkpoint_file_uploads: usize,
 
-    // Maximum upload futures actively polled per partition checkpoint (files open with
-    // read buffers + BufWriters). Bounds memory independently from S3 HTTP concurrency.
-    // Each active buffer consumes ~18MB (8MB read buffer + ~10MB BufWriter).
-    #[envconfig(default = "40")]
-    pub max_upload_buffers_per_partition: usize,
-
     // Delay in seconds between starting each partition's checkpoint within a cycle.
     // Spreads out RocksDB flushes to avoid compaction storms that cause memory spikes.
     // 0 = auto-calculate (checkpoint_interval / partition_count).
@@ -324,7 +318,6 @@ pub struct Config {
     // Use to isolate whether memory spikes come from the flush/compaction or the upload.
     #[envconfig(default = "false")]
     pub checkpoint_skip_export: bool,
-
 
     // Maximum time allowed for a complete checkpoint import for a single partition (seconds).
     // This includes listing checkpoints, downloading metadata, and downloading all files.

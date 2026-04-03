@@ -5046,6 +5046,7 @@ dependencies = [
  "aws-sdk-s3",
  "axum 0.7.9",
  "bincode",
+ "bytes",
  "bytesize",
  "chrono",
  "common-alloc",

@@ -1,14 +1,12 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use futures::stream;
-use futures::StreamExt;
-use object_store::buffered::BufWriter;
+use bytes::Bytes;
 use object_store::path::Path as ObjectPath;
-use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
+use object_store::{ObjectStore, ObjectStoreExt, PutPayload, WriteMultipart};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -18,46 +16,12 @@ use super::s3_client::create_s3_client;
 use super::uploader::CheckpointUploader;
 use crate::metrics_const::CHECKPOINT_FILE_UPLOADS_COUNTER;
 
-/// Chunk size for streaming file reads during upload.
-/// Balances memory usage and cancellation responsiveness.
-const UPLOAD_CHUNK_SIZE: usize = 8 * 1024 * 1024; // 8MB
+/// Part size for S3 multipart uploads. Each part is read from disk and uploaded
+/// as an individual PUT request. S3 requires a minimum of 5MB per part.
+const MULTIPART_PART_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
-/// Result of attempting to read the next chunk from a file with cancellation support
-enum ChunkResult {
-    Data(usize), // Number of bytes read
-    EndOfStream,
-    Cancelled,
-    Error(std::io::Error),
-}
-
-/// Read next chunk from file with cancellation support.
-/// Uses `tokio::select!` with `biased;` to ensure cancellation is checked promptly,
-/// even if the read is slow or stalled.
-async fn read_chunk_cancellable(
-    file: &mut File,
-    buf: &mut [u8],
-    cancel_token: Option<&CancellationToken>,
-) -> ChunkResult {
-    match cancel_token {
-        Some(token) => {
-            tokio::select! {
-                biased;
-
-                _ = token.cancelled() => ChunkResult::Cancelled,
-
-                result = file.read(buf) => match result {
-                    Ok(0) => ChunkResult::EndOfStream,
-                    Ok(n) => ChunkResult::Data(n),
-                    Err(e) => ChunkResult::Error(e),
-                }
-            }
-        }
-        None => match file.read(buf).await {
-            Ok(0) => ChunkResult::EndOfStream,
-            Ok(n) => ChunkResult::Data(n),
-            Err(e) => ChunkResult::Error(e),
-        },
-    }
+fn is_cancelled(cancel_token: Option<&CancellationToken>) -> bool {
+    cancel_token.is_some_and(CancellationToken::is_cancelled)
 }
 
 /// Hint the kernel to evict page cache pages for a file after it has been fully read.
@@ -83,6 +47,10 @@ fn advise_dontneed(file: &File, path: &Path) {
 
 /// S3Uploader using `object_store` crate with `LimitStore` for bounded concurrency.
 /// The LimitStore wraps the S3 client with a semaphore that limits concurrent requests.
+///
+/// Files are uploaded sequentially to minimize memory: only one file's buffers exist
+/// at a time per partition. Part-level concurrency within each file (via `put_part`)
+/// provides S3 throughput without the memory overhead of many open files.
 #[derive(Debug)]
 pub struct S3Uploader {
     store: Arc<dyn ObjectStore>,
@@ -95,34 +63,34 @@ impl S3Uploader {
             create_s3_client(&config, config.max_concurrent_checkpoint_file_uploads).await?;
 
         info!(
-            "S3 uploader initialized for bucket '{}' with max {} concurrent uploads",
-            config.s3_bucket, config.max_concurrent_checkpoint_file_uploads
+            "S3 uploader initialized for bucket '{}' with max {} concurrent S3 requests",
+            config.s3_bucket, config.max_concurrent_checkpoint_file_uploads,
         );
 
-        // Coerce to trait object for use with BufWriter
         let store: Arc<dyn ObjectStore> = store;
         Ok(Self { store, config })
     }
 
-    /// Upload a file with cancellation support.
-    /// On cancellation or error, calls abort() to clean up multipart upload parts.
+    /// Upload a single file using multipart upload.
+    ///
+    /// Uses `put_multipart` + `WriteMultipart` directly instead of `BufWriter` to avoid
+    /// double-buffering: file data is read into a buffer, converted to `Bytes` (zero-copy),
+    /// and submitted as a multipart part. The LimitStore semaphore on the underlying store
+    /// governs how many S3 requests are in-flight across all uploads.
     async fn upload_file_cancellable(
         &self,
         local_path: &Path,
         s3_key: &str,
         cancel_token: Option<&CancellationToken>,
     ) -> Result<()> {
-        // Pre-start cancellation check
-        if let Some(token) = cancel_token {
-            if token.is_cancelled() {
-                metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "cancelled")
-                    .increment(1);
-                warn!("Upload cancelled before starting: {s3_key}");
-                return Err(UploadCancelledError {
-                    reason: format!("before starting: {s3_key}"),
-                }
-                .into());
+        if is_cancelled(cancel_token) {
+            metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "cancelled")
+                .increment(1);
+            warn!("Upload cancelled before starting: {s3_key}");
+            return Err(UploadCancelledError {
+                reason: format!("before starting: {s3_key}"),
             }
+            .into());
         }
 
         let path = ObjectPath::from(s3_key);
@@ -137,56 +105,53 @@ impl S3Uploader {
             .with_context(|| format!("Failed to get metadata for file: {local_path:?}"))?
             .len();
 
-        // BufWriter implements AsyncWrite and handles multipart upload internally.
-        // It buffers data and automatically uses multipart upload for large files.
-        let mut upload = BufWriter::new(Arc::clone(&self.store), path.clone());
+        let upload = self
+            .store
+            .put_multipart(&path)
+            .await
+            .with_context(|| format!("Failed to initiate multipart upload: {s3_key}"))?;
 
-        let mut buf = vec![0u8; UPLOAD_CHUNK_SIZE];
+        let mut write = WriteMultipart::new_with_chunk_size(upload, MULTIPART_PART_SIZE);
 
         loop {
-            let chunk_result = read_chunk_cancellable(&mut file, &mut buf, cancel_token).await;
+            if is_cancelled(cancel_token) {
+                let _ = write.abort().await;
+                metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "cancelled")
+                    .increment(1);
+                warn!("Upload of {s3_key} cancelled mid-stream");
+                return Err(UploadCancelledError {
+                    reason: format!("mid-stream: {s3_key}"),
+                }
+                .into());
+            }
 
-            match chunk_result {
-                ChunkResult::Data(n) => {
-                    if let Err(e) = upload.write_all(&buf[..n]).await {
-                        let _ = upload.abort().await;
-                        metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "error")
-                            .increment(1);
-                        return Err(anyhow::Error::new(e))
-                            .with_context(|| format!("Failed to write chunk to S3: {s3_key}"));
-                    }
-                }
-                ChunkResult::EndOfStream => break,
-                ChunkResult::Cancelled => {
-                    let _ = upload.abort().await;
-                    metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "cancelled")
-                        .increment(1);
-                    warn!("Upload of {s3_key} cancelled mid-stream");
-                    return Err(UploadCancelledError {
-                        reason: format!("mid-stream: {s3_key}"),
-                    }
-                    .into());
-                }
-                ChunkResult::Error(e) => {
-                    let _ = upload.abort().await;
+            // Read up to MULTIPART_PART_SIZE from file. Each read allocates a fresh buffer
+            // that is moved (zero-copy) into the multipart part via Bytes::from(Vec).
+            let mut buf = vec![0u8; MULTIPART_PART_SIZE];
+            let n = match file.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = write.abort().await;
                     metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "error")
                         .increment(1);
-                    return Err(anyhow::Error::new(e)).with_context(|| {
-                        format!("Failed to read chunk from file: {local_path:?}")
-                    });
+                    return Err(anyhow::Error::new(e))
+                        .with_context(|| format!("Failed to read file: {local_path:?}"));
                 }
-            }
+            };
+            buf.truncate(n);
+
+            // Bytes::from(Vec<u8>) takes ownership without copying.
+            // WriteMultipart::put accumulates chunks and submits a part when chunk_size is reached.
+            write.put(Bytes::from(buf));
         }
 
-        // Hint the kernel to evict page cache pages for this file. Checkpoint SST files
-        // are read once for upload and never accessed again, but the kernel keeps them
-        // cached, inflating container_memory_working_set_bytes and triggering OOM kills.
         advise_dontneed(&file, local_path);
 
-        // Finalize the upload (triggers CompleteMultipartUpload API call for large files)
-        upload
-            .shutdown()
+        write
+            .finish()
             .await
+            .map_err(|e| anyhow::anyhow!(e))
             .with_context(|| format!("Failed to complete upload for: {s3_key}"))?;
 
         metrics::counter!(CHECKPOINT_FILE_UPLOADS_COUNTER, "status" => "success").increment(1);
@@ -217,88 +182,46 @@ impl CheckpointUploader for S3Uploader {
         plan: &super::CheckpointPlan,
         cancel_token: Option<&CancellationToken>,
     ) -> Result<Vec<String>> {
-        // Pre-start check
-        if let Some(token) = cancel_token {
-            if token.is_cancelled() {
-                warn!("Upload cancelled before starting batch");
-                return Err(UploadCancelledError {
-                    reason: "before starting batch".to_string(),
-                }
-                .into());
+        if is_cancelled(cancel_token) {
+            warn!("Upload cancelled before starting batch");
+            return Err(UploadCancelledError {
+                reason: "before starting batch".to_string(),
             }
+            .into());
         }
 
         info!(
-            "Starting upload with plan: {} files to upload, {} files referenced from parents",
+            "Starting upload: {} files to upload, {} reused from parents",
             plan.files_to_upload.len(),
             plan.info.metadata.files.len() - plan.files_to_upload.len()
         );
 
-        // Create child token for sibling cancellation - allows cancelling siblings
-        // without cancelling parent (so caller can continue with other work)
-        let upload_token = cancel_token
-            .map(|parent| parent.child_token())
-            .unwrap_or_default();
-
-        // buffer_unordered(N) only polls N futures concurrently, so only N files
-        // are open with read buffers and BufWriters allocated at any time.
-        // Futures outside the window aren't started, bounding memory to
-        // N * ~18MB (8MB read buffer + ~10MB BufWriter) instead of all files at once.
-        //
-        // Pre-collect owned (src, dest) pairs to avoid lifetime issues with
-        // buffer_unordered's lazy stream requiring closures general over all lifetimes.
-        let upload_tasks: Vec<_> = plan
-            .files_to_upload
-            .iter()
-            .map(|f| (f.local_path.clone(), plan.info.get_file_key(&f.filename)))
-            .collect();
-
-        let mut stream = stream::iter(upload_tasks)
-            .map(|(src, dest)| {
-                let token = upload_token.clone();
-                async move {
-                    self.upload_file_cancellable(&src, &dest, Some(&token))
-                        .await?;
-                    Ok::<String, anyhow::Error>(dest)
-                }
-            })
-            .buffer_unordered(self.config.max_upload_buffers_per_partition);
-
         let mut uploaded_keys = Vec::with_capacity(plan.files_to_upload.len());
-        let mut first_error: Option<anyhow::Error> = None;
 
-        // Process completions, cancel siblings on first error
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(key) => uploaded_keys.push(key),
-                Err(e) => {
-                    first_error = Some(e);
-                    // Cancel siblings - they'll exit on next chunk read
-                    upload_token.cancel();
-                    break;
-                }
-            }
-        }
-
-        // Drain remaining active futures - they'll exit quickly due to cancellation.
-        // Futures not yet started (outside the buffer window) will see cancellation
-        // immediately when polled and exit without allocating resources.
-        while stream.next().await.is_some() {}
-
-        // Return early on error - DO NOT upload metadata
-        if let Some(e) = first_error {
-            return Err(e);
-        }
-
-        // Check cancellation before uploading metadata (final gate)
-        if let Some(token) = cancel_token {
-            if token.is_cancelled() {
-                warn!("Upload cancelled before metadata upload");
+        // Upload files sequentially to minimize memory. Only one file's read buffers
+        // and in-flight multipart parts exist at a time. The LimitStore semaphore on the
+        // underlying store governs S3 concurrency across all concurrent partition uploads.
+        for file_info in &plan.files_to_upload {
+            if is_cancelled(cancel_token) {
+                warn!("Upload cancelled between files");
                 return Err(UploadCancelledError {
-                    reason: "before metadata upload".to_string(),
+                    reason: "between files".to_string(),
                 }
                 .into());
             }
+
+            let dest = plan.info.get_file_key(&file_info.filename);
+            self.upload_file_cancellable(&file_info.local_path, &dest, cancel_token)
+                .await?;
+            uploaded_keys.push(dest);
+        }
+
+        if is_cancelled(cancel_token) {
+            warn!("Upload cancelled before metadata upload");
+            return Err(UploadCancelledError {
+                reason: "before metadata upload".to_string(),
+            }
+            .into());
         }
 
         // ALL files succeeded - now safe to upload metadata
@@ -309,7 +232,7 @@ impl CheckpointUploader for S3Uploader {
             .with_context(|| format!("Failed to upload metadata to S3 key: {metadata_key}"))?;
 
         info!(
-            "Uploaded {} files and metadata file to s3://{}/{}",
+            "Uploaded {} files and metadata to s3://{}/{}",
             plan.files_to_upload.len(),
             self.config.s3_bucket,
             plan.info.get_remote_attempt_path(),
@@ -328,89 +251,23 @@ impl CheckpointUploader for S3Uploader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use tokio::io::AsyncWriteExt;
 
-    #[tokio::test]
-    async fn test_read_chunk_cancellable_returns_data_without_token() {
-        let tmp_dir = TempDir::new().unwrap();
-        let file_path = tmp_dir.path().join("test_file.txt");
-
-        // Create a test file with some content
-        let mut file = tokio::fs::File::create(&file_path).await.unwrap();
-        file.write_all(b"hello world").await.unwrap();
-        file.flush().await.unwrap();
-        drop(file);
-
-        // Read without cancellation token
-        let mut file = tokio::fs::File::open(&file_path).await.unwrap();
-        let mut buf = vec![0u8; 1024];
-
-        let result = read_chunk_cancellable(&mut file, &mut buf, None).await;
-        match result {
-            ChunkResult::Data(n) => {
-                assert_eq!(n, 11);
-                assert_eq!(&buf[..n], b"hello world");
-            }
-            _ => panic!("Expected Data result"),
-        }
-
-        // Next read should return EndOfStream
-        let result = read_chunk_cancellable(&mut file, &mut buf, None).await;
-        assert!(matches!(result, ChunkResult::EndOfStream));
+    #[test]
+    fn test_is_cancelled_none_token() {
+        assert!(!is_cancelled(None));
     }
 
-    #[tokio::test]
-    async fn test_read_chunk_cancellable_returns_cancelled_when_pre_cancelled() {
-        let tmp_dir = TempDir::new().unwrap();
-        let file_path = tmp_dir.path().join("test_file.txt");
+    #[test]
+    fn test_is_cancelled_active_token() {
+        let token = CancellationToken::new();
+        assert!(!is_cancelled(Some(&token)));
+    }
 
-        // Create a test file
-        let mut file = tokio::fs::File::create(&file_path).await.unwrap();
-        file.write_all(b"hello world").await.unwrap();
-        file.flush().await.unwrap();
-        drop(file);
-
-        // Create a pre-cancelled token
+    #[test]
+    fn test_is_cancelled_cancelled_token() {
         let token = CancellationToken::new();
         token.cancel();
-
-        // Read with pre-cancelled token should return Cancelled
-        let mut file = tokio::fs::File::open(&file_path).await.unwrap();
-        let mut buf = vec![0u8; 1024];
-
-        let result = read_chunk_cancellable(&mut file, &mut buf, Some(&token)).await;
-        assert!(
-            matches!(result, ChunkResult::Cancelled),
-            "Expected Cancelled result"
-        );
+        assert!(is_cancelled(Some(&token)));
     }
 
-    #[tokio::test]
-    async fn test_read_chunk_cancellable_returns_data_with_active_token() {
-        let tmp_dir = TempDir::new().unwrap();
-        let file_path = tmp_dir.path().join("test_file.txt");
-
-        // Create a test file
-        let mut file = tokio::fs::File::create(&file_path).await.unwrap();
-        file.write_all(b"hello world").await.unwrap();
-        file.flush().await.unwrap();
-        drop(file);
-
-        // Create an active (not cancelled) token
-        let token = CancellationToken::new();
-
-        // Read with active token should return Data
-        let mut file = tokio::fs::File::open(&file_path).await.unwrap();
-        let mut buf = vec![0u8; 1024];
-
-        let result = read_chunk_cancellable(&mut file, &mut buf, Some(&token)).await;
-        match result {
-            ChunkResult::Data(n) => {
-                assert_eq!(n, 11);
-                assert_eq!(&buf[..n], b"hello world");
-            }
-            _ => panic!("Expected Data result"),
-        }
-    }
 }
