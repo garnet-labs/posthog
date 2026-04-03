@@ -40,6 +40,7 @@ const PRODUCTS_DIR = path.resolve(REPO_ROOT, 'products')
 const GENERATED_DIR = path.resolve(MCP_ROOT, 'src/tools/generated')
 const DEFINITIONS_JSON_PATH = path.resolve(MCP_ROOT, 'schema/generated-tool-definitions.json')
 const ALL_DEFINITIONS_JSON_PATH = path.resolve(MCP_ROOT, 'schema/tool-definitions-all.json')
+const CLI_MANIFEST_PATH = path.resolve(MCP_ROOT, 'schema/cli-manifest.json')
 const TOOL_DEFINITIONS_V1_PATH = path.resolve(MCP_ROOT, 'schema/tool-definitions.json')
 const TOOL_DEFINITIONS_V2_PATH = path.resolve(MCP_ROOT, 'schema/tool-definitions-v2.json')
 const OPENAPI_PATH = path.resolve(REPO_ROOT, 'frontend/tmp/openapi.json')
@@ -1025,6 +1026,75 @@ function generateDefinitionsJson(
 }
 
 // ------------------------------------------------------------------
+// CLI manifest generation — runtime-interpreted tool registry for `ph`
+// ------------------------------------------------------------------
+
+interface CliToolManifest {
+    method: string
+    path: string
+    title: string
+    description: string
+    category: string
+    feature: string
+    scopes: string[]
+    annotations: {
+        readOnly: boolean
+        destructive: boolean
+        idempotent: boolean
+    }
+    params: {
+        path: string[]
+        query: string[]
+        body: string[]
+    }
+    soft_delete?: string | boolean | undefined
+}
+
+function generateCliManifest(
+    categories: {
+        config: CategoryConfig
+        enabledTools: [string, EnabledToolConfig, ResolvedOperation][]
+        enabledWrappers: [string, EnabledQueryWrapperToolConfig][]
+        yamlDir: string
+    }[],
+    spec: OpenApiSpec
+): Record<string, CliToolManifest> {
+    const manifest: Record<string, CliToolManifest> = {}
+
+    for (const { config: category, enabledTools, yamlDir } of categories) {
+        for (const [name, toolConfig, resolved] of enabledTools) {
+            const composition = composeToolSchema(toolConfig, resolved, spec)
+            const opDescription = resolved.operation.description?.trim() || resolved.operation.summary?.trim() || ''
+
+            const isSoftDelete = toolConfig.soft_delete !== undefined && toolConfig.soft_delete !== false
+            const httpMethod = isSoftDelete ? 'PATCH' : resolved.method
+
+            manifest[name] = {
+                method: httpMethod,
+                path: resolved.path,
+                title: toolConfig.title || resolved.operation.summary || name,
+                description: resolveDescription(toolConfig, yamlDir, opDescription),
+                category: category.category,
+                feature: category.feature,
+                scopes: toolConfig.scopes,
+                annotations: {
+                    readOnly: toolConfig.annotations.readOnly,
+                    destructive: toolConfig.annotations.destructive,
+                    idempotent: toolConfig.annotations.idempotent,
+                },
+                params: {
+                    path: composition.pathParamNames,
+                    query: composition.queryParamNames,
+                    body: composition.bodyFieldNames,
+                },
+                ...(isSoftDelete ? { soft_delete: toolConfig.soft_delete } : {}),
+            }
+        }
+    }
+    return manifest
+}
+
+// ------------------------------------------------------------------
 // Query wrapper generation — tools backed by schema.json definitions
 // ------------------------------------------------------------------
 
@@ -1299,6 +1369,10 @@ ${spreads}
     const definitions = { ...generateDefinitionsJson(allCategories), ...queryWrapperDefinitions }
     fs.writeFileSync(DEFINITIONS_JSON_PATH, JSON.stringify(definitions, null, 4) + '\n')
 
+    // CLI manifest — enriched tool registry with HTTP details for the `ph` CLI
+    const cliManifest = generateCliManifest(allCategories, spec)
+    fs.writeFileSync(CLI_MANIFEST_PATH, JSON.stringify(cliManifest, null, 4) + '\n')
+
     // Combined tool definitions for external consumers (docs site)
     const v1Definitions = JSON.parse(fs.readFileSync(TOOL_DEFINITIONS_V1_PATH, 'utf-8'))
     const v2Definitions = JSON.parse(fs.readFileSync(TOOL_DEFINITIONS_V2_PATH, 'utf-8'))
@@ -1319,10 +1393,14 @@ ${spreads}
         path.join(GENERATED_DIR, 'index.ts'),
     ]
     spawnSync(path.join(REPO_ROOT, 'bin/hogli'), ['format:js', ...generatedTsFiles], { stdio: 'pipe', cwd: REPO_ROOT })
-    spawnSync(path.join(REPO_ROOT, 'bin/hogli'), ['format:yaml', DEFINITIONS_JSON_PATH, ALL_DEFINITIONS_JSON_PATH], {
-        stdio: 'pipe',
-        cwd: REPO_ROOT,
-    })
+    spawnSync(
+        path.join(REPO_ROOT, 'bin/hogli'),
+        ['format:yaml', DEFINITIONS_JSON_PATH, ALL_DEFINITIONS_JSON_PATH, CLI_MANIFEST_PATH],
+        {
+            stdio: 'pipe',
+            cwd: REPO_ROOT,
+        }
+    )
 }
 
 // Export for testing
@@ -1330,6 +1408,7 @@ export {
     composeToolSchema,
     extractPathParams,
     generateCategoryFile,
+    generateCliManifest,
     generateCustomSchemaToolCode,
     generateQueryWrapperFile,
     generateToolCode,

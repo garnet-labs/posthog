@@ -1,0 +1,2159 @@
+{
+    "actions-get-all": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/actions/",
+        "title": "Get all actions",
+        "description": "Get all actions in the project. Actions are reusable event definitions that can combine multiple trigger conditions (page views, clicks, form submissions) into a single trackable event for use in insights and funnels. Supports pagination with limit and offset parameters. Note: Search/filtering by name is not supported on this endpoint.",
+        "category": "Actions",
+        "feature": "actions",
+        "scopes": ["action:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "action-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/actions/",
+        "title": "Create action",
+        "description": "Create a new action in the project. Actions define reusable event triggers based on page views, clicks, form submissions, or custom events. Each action can have multiple steps (OR conditions). Use actions to create composite events for insights and funnels. Example: Create a 'Sign Up Click' action with steps matching button clicks on the signup page.",
+        "category": "Actions",
+        "feature": "actions",
+        "scopes": ["action:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["name", "description", "tags", "post_to_slack", "slack_message_format", "steps", "pinned_at"]
+        }
+    },
+    "action-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/actions/{id}/",
+        "title": "Get action",
+        "description": "Get a specific action by ID. Returns the action configuration including all steps and their trigger conditions.",
+        "category": "Actions",
+        "feature": "actions",
+        "scopes": ["action:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "action-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/actions/{id}/",
+        "title": "Update action",
+        "description": "Update an existing action by ID. Can update name, description, steps, tags, and Slack notification settings.",
+        "category": "Actions",
+        "feature": "actions",
+        "scopes": ["action:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["name", "description", "tags", "post_to_slack", "slack_message_format", "steps", "pinned_at"]
+        }
+    },
+    "action-delete": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/actions/{id}/",
+        "title": "Delete action",
+        "description": "Delete an action by ID (soft delete - marks as deleted). The action will no longer appear in lists but historical data is preserved.",
+        "category": "Actions",
+        "feature": "actions",
+        "scopes": ["action:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "activity-logs-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/activity_log/",
+        "title": "List activity logs",
+        "description": "List recent activity logs for the project. Shows who changed what and when — includes feature flag updates, insight creations, dashboard modifications, experiment launches, and other project changes. Use scope parameter to filter by resource type (e.g. \"FeatureFlag\", \"Insight\", \"Dashboard\", \"Experiment\", \"Survey\", \"Cohort\"). Use item_id to filter changes for a specific resource. Returns results ordered by most recent first. Each result includes: user (who performed the action with first_name and email), activity (e.g. \"created\", \"updated\", \"deleted\"), scope (entity type like \"FeatureFlag\"), item_id (ID of the affected resource), detail (structured JSON with name, short_id, and a changes array where each change has type, action, field, before, and after values), and created_at timestamp.",
+        "category": "Activity logs",
+        "feature": "activity_logs",
+        "scopes": ["activity_log:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["item_id", "page", "page_size", "scope", "scopes", "user"],
+            "body": []
+        }
+    },
+    "alerts-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/alerts/",
+        "title": "List alerts",
+        "description": "List all insight alerts in the project. Returns alerts with their current state, threshold or detector configuration, timing information, and firing check history. Supports filtering by insight ID via query parameter. Alerts can use either threshold-based conditions (absolute_value, relative_increase, relative_decrease) or anomaly detection via detector_config (zscore, mad, iqr, isolation_forest, knn, etc.).",
+        "category": "Alerts",
+        "feature": "alerts",
+        "scopes": ["alert:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "alert-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/alerts/{id}/",
+        "title": "Get alert",
+        "description": "Get a specific alert by ID. Returns the full alert configuration including check results, threshold settings, detector_config (for anomaly detection alerts), and subscribed users. Check results include anomaly_scores, triggered_points, and triggered_dates for detector-based alerts. By default returns the last 5 checks. Use checks_date_from and checks_date_to (e.g. '-24h', '-7d') to get checks within a time window, and checks_limit to control the maximum returned (default 5, max 500). When date filters are provided without checks_limit, up to 500 checks are returned. Check history is retained for 14 days.",
+        "category": "Alerts",
+        "feature": "alerts",
+        "scopes": ["alert:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": ["checks_date_from", "checks_date_to", "checks_limit"],
+            "body": []
+        }
+    },
+    "alert-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/alerts/",
+        "title": "Create alert",
+        "description": "Create a new alert on an insight. Alerts can use either threshold-based conditions or anomaly detection. For threshold alerts: set condition (absolute_value, relative_increase, relative_decrease) and threshold configuration with bounds. For anomaly detection: set detector_config with a detector type (zscore, mad, iqr, threshold, copod, ecod, hbos, isolation_forest, knn, lof, ocsvm, pca) and parameters like threshold (sensitivity 0-1, default 0.9) and window size. Ensemble detectors combine 2+ sub-detectors with AND/OR logic. Requires an insight ID and at least one subscribed user.",
+        "category": "Alerts",
+        "feature": "alerts",
+        "scopes": ["alert:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": [
+                "insight",
+                "name",
+                "subscribed_users",
+                "threshold",
+                "condition",
+                "enabled",
+                "config",
+                "detector_config",
+                "calculation_interval",
+                "snoozed_until",
+                "skip_weekend"
+            ]
+        }
+    },
+    "alert-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/alerts/{id}/",
+        "title": "Update alert",
+        "description": "Update an existing alert by ID. Can update name, threshold, condition, config, detector_config, subscribed users, enabled state, calculation interval, and weekend skipping. Set detector_config to switch to anomaly detection, or set it to null to switch back to threshold mode. To snooze an alert, set snoozed_until to a relative date string (e.g. '2h', '1d'). To unsnooze, set snoozed_until to null.",
+        "category": "Alerts",
+        "feature": "alerts",
+        "scopes": ["alert:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": [
+                "insight",
+                "name",
+                "subscribed_users",
+                "threshold",
+                "condition",
+                "enabled",
+                "config",
+                "detector_config",
+                "calculation_interval",
+                "snoozed_until",
+                "skip_weekend"
+            ]
+        }
+    },
+    "alert-delete": {
+        "method": "DELETE",
+        "path": "/api/projects/{project_id}/alerts/{id}/",
+        "title": "Delete alert",
+        "description": "Delete an alert by ID. This permanently removes the alert and all its check history. Subscribed users will no longer receive notifications.",
+        "category": "Alerts",
+        "feature": "alerts",
+        "scopes": ["alert:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "alert-simulate": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/alerts/simulate/",
+        "title": "Simulate detector on insight",
+        "description": "Run an anomaly detector on an insight's historical data without creating any alert or check records. Use this to preview how a detector configuration would perform before saving it as an alert. Requires an insight ID and a detector_config object with a type (zscore, mad, iqr, copod, ecod, hbos, isolation_forest, knn, lof, ocsvm, pca, or ensemble). Optionally specify date_from (e.g. '-48h', '-30d') to control how far back to simulate, and series_index to pick which series to analyze. Returns data values, anomaly scores per point, triggered indices and dates, and for ensemble detectors, per-sub-detector score breakdowns.",
+        "category": "Alerts",
+        "feature": "alerts",
+        "scopes": ["alert:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["insight", "detector_config", "series_index", "date_from"]
+        }
+    },
+    "annotations-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/annotations/",
+        "title": "List annotations",
+        "description": "List annotations in the current project, newest first. Use this to review existing deployment markers and analysis notes before adding new annotations.",
+        "category": "Annotations",
+        "feature": "annotations",
+        "scopes": ["annotation:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset", "search"],
+            "body": []
+        }
+    },
+    "annotation-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/annotations/",
+        "title": "Create annotation",
+        "description": "Create an annotation to mark an important change (for example, a deployment) on charts and trends. Provide a note in `content`, when it happened in `date_marker` (ISO 8601), and whether it is scoped to the current `project` or the whole `organization`.",
+        "category": "Annotations",
+        "feature": "annotations",
+        "scopes": ["annotation:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["content", "date_marker", "scope"]
+        }
+    },
+    "annotation-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/annotations/{id}/",
+        "title": "Retrieve annotation",
+        "description": "Retrieve a single annotation by ID from the current project. Use this when you already know the annotation ID and want complete details.",
+        "category": "Annotations",
+        "feature": "annotations",
+        "scopes": ["annotation:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "annotations-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/annotations/{id}/",
+        "title": "Update annotation",
+        "description": "Update an existing annotation by ID. You can change its text (`content`), when it happened (`date_marker`, ISO 8601), or its visibility scope (`project` or `organization`). Only the fields you provide are updated.",
+        "category": "Annotations",
+        "feature": "annotations",
+        "scopes": ["annotation:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["content", "date_marker", "scope"]
+        }
+    },
+    "annotation-delete": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/annotations/{id}/",
+        "title": "Delete annotation",
+        "description": "Soft-delete an annotation by ID. This hides the annotation from normal lists while preserving historical records.",
+        "category": "Annotations",
+        "feature": "annotations",
+        "scopes": ["annotation:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "cdp-function-templates-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/hog_function_templates/",
+        "title": "List function templates",
+        "description": "List available function templates. Templates are pre-built function configurations for common integrations (Slack, webhooks, email, etc.) and transformations (GeoIP, etc.). Filter by type (destination, site_destination, site_app, transformation, etc.) via the 'type' query parameter. Results are sorted by popularity (number of active functions using each template).",
+        "category": "Function templates",
+        "feature": "hog_function_templates",
+        "scopes": ["hog_function:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset", "template_id", "type", "types"],
+            "body": []
+        }
+    },
+    "cdp-function-templates-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/hog_function_templates/{template_id}/",
+        "title": "Get function template",
+        "description": "Get a specific function template by its template ID (e.g. 'template-slack', 'template-geoip'). Returns the full template including source code, inputs schema, default filters, and mapping templates. Use this to understand what inputs a template requires before creating a function from it.",
+        "category": "Function templates",
+        "feature": "hog_function_templates",
+        "scopes": ["hog_function:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["template_id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "cdp-functions-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/hog_functions/",
+        "title": "List functions",
+        "description": "List all functions (destinations, transformations, site apps, and source webhooks) in the project. Returns each function's name, type, enabled status, execution order, and template info. Filter by type (destination, site_destination, internal_destination, source_webhook, warehouse_source_webhook, site_app, transformation) and enabled status via query parameters.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["created_at", "created_by", "enabled", "id", "limit", "offset", "search", "type", "updated_at"],
+            "body": []
+        }
+    },
+    "cdp-functions-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/hog_functions/",
+        "title": "Create function",
+        "description": "Create a new function. Requires 'type' (destination, site_destination, internal_destination, source_webhook, warehouse_source_webhook, site_app, or transformation) and either 'hog' source code or a 'template_id' to derive code from a template. Provide 'inputs_schema' to define configurable parameters and 'inputs' with their values. Use 'filters' to control which events trigger the function. Transformations run during ingestion and have an 'execution_order' field.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": [
+                "type",
+                "name",
+                "description",
+                "enabled",
+                "hog",
+                "inputs_schema",
+                "inputs",
+                "filters",
+                "masking",
+                "mappings",
+                "icon_url",
+                "template_id",
+                "execution_order"
+            ]
+        }
+    },
+    "cdp-functions-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/hog_functions/{id}/",
+        "title": "Get function",
+        "description": "Get a specific function by ID. Returns the full configuration including source code, inputs schema, input values (secrets are masked), filters, mappings, masking config, and runtime status.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "cdp-functions-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/hog_functions/{id}/",
+        "title": "Update function",
+        "description": "Partially update a function. Can enable/disable the function, change its name, description, source code, inputs, filters, mappings, or masking config. The 'type' field cannot be changed after creation. To delete a function, use the cdp-functions-delete tool instead.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": [
+                "type",
+                "name",
+                "description",
+                "enabled",
+                "hog",
+                "inputs_schema",
+                "inputs",
+                "filters",
+                "masking",
+                "mappings",
+                "icon_url",
+                "template_id",
+                "execution_order"
+            ]
+        }
+    },
+    "cdp-functions-delete": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/hog_functions/{id}/",
+        "title": "Delete function",
+        "description": "Delete a function by ID (soft delete). The function will no longer appear in lists or process events, but historical data is preserved.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "cdp-functions-invocations-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/hog_functions/{id}/invocations/",
+        "title": "Test-invoke function",
+        "description": "Test-invoke a function with a mock event payload. Sends the function configuration and test data to the plugin server for execution and returns logs and status. Use 'mock_async_functions: true' (default) to simulate external calls like fetch() without making real HTTP requests.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["configuration", "globals", "clickhouse_event", "mock_async_functions", "invocation_id"]
+        }
+    },
+    "cdp-functions-rearrange-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/hog_functions/rearrange/",
+        "title": "Reorder transformation execution",
+        "description": "Update the execution order of transformation functions. Send an 'orders' object mapping function UUIDs to their new execution_order integer values. Only applies to functions with type=transformation. Returns the updated list of transformations.",
+        "category": "Functions",
+        "feature": "hog_functions",
+        "scopes": ["hog_function:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["orders"]
+        }
+    },
+    "cohorts-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/cohorts/",
+        "title": "List all cohorts",
+        "description": "List all cohorts in the project. Returns both static cohorts (manually defined user lists) and dynamic cohorts (automatically updated based on property filters).",
+        "category": "Cohorts",
+        "feature": "cohorts",
+        "scopes": ["cohort:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "cohorts-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/cohorts/",
+        "title": "Create cohort",
+        "description": "Create a new cohort. For dynamic cohorts, provide 'filters' with AND/OR groups of property conditions (person properties, behavioral filters, or cohort references). For static cohorts, set 'is_static: true' then use the 'cohorts-add-persons-to-static-cohort-partial-update' tool to add person UUIDs.",
+        "category": "Cohorts",
+        "feature": "cohorts",
+        "scopes": ["cohort:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["name", "description", "filters", "query", "is_static", "cohort_type"]
+        }
+    },
+    "cohorts-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/cohorts/{id}/",
+        "title": "Get cohort",
+        "description": "Get a specific cohort by ID. Returns the cohort name, description, filters (for dynamic cohorts), count of matching users, and calculation status.",
+        "category": "Cohorts",
+        "feature": "cohorts",
+        "scopes": ["cohort:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "cohorts-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/cohorts/{id}/",
+        "title": "Update cohort",
+        "description": "Update an existing cohort's name, description, or filters. Changing filters on a dynamic cohort triggers recalculation. To soft-delete a cohort, set 'deleted: true'.",
+        "category": "Cohorts",
+        "feature": "cohorts",
+        "scopes": ["cohort:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["name", "description", "deleted", "filters", "query", "is_static", "cohort_type"]
+        }
+    },
+    "cohorts-add-persons-to-static-cohort-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/cohorts/{id}/add_persons_to_static_cohort/",
+        "title": "Add persons to static cohort",
+        "description": "Add persons to a static cohort by their UUIDs. Only works for static cohorts (is_static: true).",
+        "category": "Cohorts",
+        "feature": "cohorts",
+        "scopes": ["cohort:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["person_ids"]
+        }
+    },
+    "cohorts-rm-person-from-static-cohort-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/cohorts/{id}/remove_person_from_static_cohort/",
+        "title": "Remove person from static cohort",
+        "description": "Remove a person from a static cohort by their UUID. Only works for static cohorts (is_static: true). The person must exist in the project. Idempotent: removing a person who exists but is not a member of the cohort succeeds silently.",
+        "category": "Cohorts",
+        "feature": "cohorts",
+        "scopes": ["cohort:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["person_id"]
+        }
+    },
+    "dashboards-get-all": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/dashboards/",
+        "title": "Get all dashboards",
+        "description": "Get all dashboards in the project with optional filtering by pinned status or search term. Returns name, description, pinned status, tags, and creation metadata.",
+        "category": "Dashboards",
+        "feature": "dashboards",
+        "scopes": ["dashboard:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "dashboard-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/dashboards/",
+        "title": "Create dashboard",
+        "description": "Create a new dashboard. Provide a name and optional description, tags, and pinned status. Can also create from a template or duplicate an existing dashboard.",
+        "category": "Dashboards",
+        "feature": "dashboards",
+        "scopes": ["dashboard:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": [
+                "name",
+                "description",
+                "pinned",
+                "breakdown_colors",
+                "data_color_theme_id",
+                "tags",
+                "restriction_level",
+                "quick_filter_ids",
+                "use_template",
+                "use_dashboard",
+                "delete_insights"
+            ]
+        }
+    },
+    "dashboard-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/dashboards/{id}/",
+        "title": "Get dashboard",
+        "description": "Get a specific dashboard by ID. Returns the full dashboard including all tiles with their insights and layout information.",
+        "category": "Dashboards",
+        "feature": "dashboards",
+        "scopes": ["dashboard:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "dashboard-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/dashboards/{id}/",
+        "title": "Update dashboard",
+        "description": "Update an existing dashboard by ID. Can update name, description, pinned status, tags, filters, and restriction level.",
+        "category": "Dashboards",
+        "feature": "dashboards",
+        "scopes": ["dashboard:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": [
+                "name",
+                "description",
+                "pinned",
+                "breakdown_colors",
+                "data_color_theme_id",
+                "tags",
+                "restriction_level",
+                "quick_filter_ids",
+                "use_template",
+                "use_dashboard",
+                "delete_insights"
+            ]
+        }
+    },
+    "dashboard-delete": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/dashboards/{id}/",
+        "title": "Delete dashboard",
+        "description": "Delete a dashboard by ID. The dashboard will be soft-deleted and no longer appear in lists.",
+        "category": "Dashboards",
+        "feature": "dashboards",
+        "scopes": ["dashboard:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "dashboard-reorder-tiles": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/dashboards/{id}/reorder_tiles/",
+        "title": "Reorder dashboard tiles",
+        "description": "Reorder tiles on a dashboard by providing an array of tile IDs in the desired display order. Computes a 2-column grid layout (6 columns wide, 5 rows tall per tile). First, use dashboard-get to see current tile IDs.",
+        "category": "Dashboards",
+        "feature": "dashboards",
+        "scopes": ["dashboard:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["tile_order"]
+        }
+    },
+    "view-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/",
+        "title": "List saved queries",
+        "description": "List all data warehouse saved queries (views) in the project. Returns each view's name, materialization status, sync frequency, column schema, latest error, and last run timestamp. Use this to discover available views before querying them in HogQL.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["page", "search"],
+            "body": []
+        }
+    },
+    "view-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/",
+        "title": "Create saved query",
+        "description": "Create a new data warehouse saved query (view). If a view with the same name already exists, it will be updated instead (upsert behavior). The query must be valid HogQL. After creation, the view can be referenced by name in other HogQL queries.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["name", "query", "is_test"]
+        }
+    },
+    "view-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/",
+        "title": "Get saved query",
+        "description": "Get a specific data warehouse saved query (view) by ID. Returns the full view definition including the HogQL query, column schema, materialization status, sync frequency, and run history metadata.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "view-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/",
+        "title": "Update saved query",
+        "description": "Update an existing data warehouse saved query (view). Can change the name, HogQL query, or sync frequency. Changing the query triggers column re-inference and sets the status to 'modified'. Use sync_frequency to control materialization schedule: '24hour', '12hour', '6hour', '1hour', '30min', or 'never'. IMPORTANT: when updating the query field, you must first retrieve the view to get its latest_history_id, then pass that value as edited_history_id for conflict detection.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["name", "query", "edited_history_id", "is_test"]
+        }
+    },
+    "view-delete": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/",
+        "title": "Delete saved query",
+        "description": "Delete a data warehouse saved query (view) by ID. This is a soft delete — the view is marked as deleted and will no longer appear in lists or be queryable in HogQL. Any materialization schedule is also removed. Cannot delete views that have downstream dependencies or views from managed viewsets.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "view-materialize": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/materialize/",
+        "title": "Materialize saved query",
+        "description": "Enable materialization for a saved query. This creates a physical table from the view's query and sets up a 24-hour sync schedule to keep it refreshed. Materialized views are faster to query but use storage. Use 'view-unmaterialize' to undo. Rate limited.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["deleted", "name", "query", "edited_history_id", "soft_update", "is_test"]
+        }
+    },
+    "view-unmaterialize": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/revert_materialization/",
+        "title": "Revert materialization",
+        "description": "Undo materialization for a saved query. Deletes the materialized table and removes the sync schedule, reverting the view back to a virtual query that runs on each access. The view definition itself is preserved. Rate limited.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["deleted", "name", "query", "edited_history_id", "soft_update", "is_test"]
+        }
+    },
+    "view-run": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/run/",
+        "title": "Run saved query",
+        "description": "Trigger a manual materialization run for a saved query. This immediately refreshes the materialized table with the latest data. The view must already be materialized. Use 'view-run-history' to check run status.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["deleted", "name", "query", "edited_history_id", "soft_update", "is_test"]
+        }
+    },
+    "view-run-history": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/warehouse_saved_queries/{id}/run_history/",
+        "title": "Get run history",
+        "description": "Get the 5 most recent materialization run statuses for a saved query. Each entry includes the run status and timestamp. Use this to monitor whether materialization is running successfully.",
+        "category": "Data warehouse",
+        "feature": "data_warehouse",
+        "scopes": ["warehouse_view:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "early-access-feature-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/early_access_feature/",
+        "title": "List early access features",
+        "description": "List early access features in the current project. Returns name, stage, description, linked feature flag, and creation date for each feature.",
+        "category": "Early access features",
+        "feature": "early_access_features",
+        "scopes": ["early_access_feature:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "early-access-feature-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/early_access_feature/",
+        "title": "Create early access feature",
+        "description": "Create a new early access feature. A feature flag is automatically created unless feature_flag_id is provided. Stage determines whether opted-in users get the feature enabled.",
+        "category": "Early access features",
+        "feature": "early_access_features",
+        "scopes": ["early_access_feature:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["name", "description", "stage", "documentation_url", "payload", "feature_flag_id"]
+        }
+    },
+    "early-access-feature-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/early_access_feature/{id}/",
+        "title": "Get early access feature",
+        "description": "Get a single early access feature by ID. Returns full details including the linked feature flag configuration.",
+        "category": "Early access features",
+        "feature": "early_access_features",
+        "scopes": ["early_access_feature:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "early-access-feature-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/early_access_feature/{id}/",
+        "title": "Update early access feature",
+        "description": "Update an early access feature by ID. Changing the stage automatically updates the linked feature flag's enrollment conditions.",
+        "category": "Early access features",
+        "feature": "early_access_features",
+        "scopes": ["early_access_feature:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["name", "description", "stage", "documentation_url"]
+        }
+    },
+    "early-access-feature-destroy": {
+        "method": "DELETE",
+        "path": "/api/projects/{project_id}/early_access_feature/{id}/",
+        "title": "Delete early access feature",
+        "description": "Delete an early access feature by ID. Clears enrollment conditions from the linked feature flag but does not delete the flag itself.",
+        "category": "Early access features",
+        "feature": "early_access_features",
+        "scopes": ["early_access_feature:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "error-tracking-issues-list": {
+        "method": "GET",
+        "path": "/api/environments/{project_id}/error_tracking/issues/",
+        "title": "List error tracking issues",
+        "description": "List all error tracking issues in the project. Returns issues with status, volume, first/last seen timestamps, and assignee info.",
+        "category": "Error tracking",
+        "feature": "error_tracking",
+        "scopes": ["error_tracking:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "error-tracking-issues-retrieve": {
+        "method": "GET",
+        "path": "/api/environments/{project_id}/error_tracking/issues/{id}/",
+        "title": "Get error tracking issue",
+        "description": "Get a specific error tracking issue by ID. Returns full issue details including status, description, volume, and metadata.",
+        "category": "Error tracking",
+        "feature": "error_tracking",
+        "scopes": ["error_tracking:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "error-tracking-issues-partial-update": {
+        "method": "PATCH",
+        "path": "/api/environments/{project_id}/error_tracking/issues/{id}/",
+        "title": "Update error tracking issue",
+        "description": "Update an error tracking issue. Can change status (active, resolved, suppressed), assign to a user, or update description.",
+        "category": "Error tracking",
+        "feature": "error_tracking",
+        "scopes": ["error_tracking:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["status", "name", "description", "first_seen", "assignee", "external_issues"]
+        }
+    },
+    "feature-flag-get-all": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/feature_flags/",
+        "title": "Get all feature flags",
+        "description": "Get feature flags in the current project. Supports list filters including search by feature flag key or name (case-insensitive), then use the returned ID for get/update/delete tools.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [
+                "active",
+                "created_by_id",
+                "evaluation_runtime",
+                "excluded_properties",
+                "has_evaluation_contexts",
+                "limit",
+                "offset",
+                "search",
+                "tags",
+                "type"
+            ],
+            "body": []
+        }
+    },
+    "feature-flag-get-definition": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/feature_flags/{id}/",
+        "title": "Get feature flag definition",
+        "description": "Get a feature flag by ID.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "create-feature-flag": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/feature_flags/",
+        "title": "Create feature flag",
+        "description": "Create a feature flag in the current project.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["key", "name", "filters", "active", "tags", "evaluation_contexts"]
+        }
+    },
+    "update-feature-flag": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/feature_flags/{id}/",
+        "title": "Update feature flag",
+        "description": "Update a feature flag by ID in the current project.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["key", "name", "filters", "active", "tags", "evaluation_contexts"]
+        }
+    },
+    "delete-feature-flag": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/feature_flags/{id}/",
+        "title": "Delete feature flag",
+        "description": "Soft-delete a feature flag by ID in the current project.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "feature-flags-activity-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/feature_flags/{id}/activity/",
+        "title": "Get feature flag activity log",
+        "description": "Get the audit trail for a specific feature flag by ID. Returns a paginated list of changes including who made changes, what was changed, and when. Use limit and page query params for pagination.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["activity_log:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": ["limit", "page"],
+            "body": []
+        }
+    },
+    "feature-flags-dependent-flags-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/feature_flags/{id}/dependent_flags/",
+        "title": "Get dependent feature flags",
+        "description": "Get other active feature flags that depend on this flag. Use this to understand flag dependency chains before making changes to a flag's rollout conditions or disabling it.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "feature-flags-status-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/feature_flags/{id}/status/",
+        "title": "Get feature flag status",
+        "description": "Check the health and evaluation status of a feature flag by ID. Returns a status (active, stale, deleted, or unknown) and a human-readable reason explaining the status.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "feature-flags-evaluation-reasons-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/feature_flags/evaluation_reasons/",
+        "title": "Get feature flag evaluation reasons",
+        "description": "Debug why feature flags evaluate a certain way for a given user. Provide a distinct_id and optionally groups to see each flag's evaluated value and the reason for that evaluation (e.g. condition_match, no_condition_match, disabled).",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["distinct_id", "groups"],
+            "body": []
+        }
+    },
+    "feature-flags-user-blast-radius-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/feature_flags/user_blast_radius/",
+        "title": "Get user blast radius",
+        "description": "Assess the impact of a feature flag release condition before applying it. Provide a condition object and optionally a group_type_index to see how many users would be affected relative to the total user count.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["condition", "group_type_index"]
+        }
+    },
+    "feature-flags-copy-flags-create": {
+        "method": "POST",
+        "path": "/api/organizations/{organization_id}/feature_flags/copy_flags/",
+        "title": "Copy feature flag across projects",
+        "description": "Copy a feature flag from one project to other projects within the same organization. Provide the flag key, source project ID, and a list of target project IDs. Optionally copy scheduled changes with copy_schedule. Returns lists of successful and failed copies.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["feature_flag_key", "from_project", "target_project_ids", "copy_schedule"]
+        }
+    },
+    "scheduled-changes-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/scheduled_changes/",
+        "title": "List scheduled changes for feature flags",
+        "description": "List scheduled changes in the current project. Filter by model_name=FeatureFlag and record_id to see schedules for a specific flag. Returns pending, executed, and failed schedules with their payloads and timing. Use this to check what changes are queued for a feature flag before modifying it.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "scheduled-changes-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/scheduled_changes/{id}/",
+        "title": "Get a scheduled change",
+        "description": "Get a single scheduled change by ID. Returns the full details including the payload, schedule timing, execution status, and any failure reason.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "scheduled-changes-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/scheduled_changes/",
+        "title": "Create a scheduled change",
+        "description": "Schedule a future change to a feature flag. Supported operations: 'update_status' (enable/disable), 'add_release_condition', and 'update_variants'. Provide the flag ID as record_id, model_name as \"FeatureFlag\", a payload with the operation and value, and a scheduled_at datetime.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": [
+                "record_id",
+                "model_name",
+                "payload",
+                "scheduled_at",
+                "is_recurring",
+                "recurrence_interval",
+                "end_date"
+            ]
+        }
+    },
+    "scheduled-changes-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/scheduled_changes/{id}/",
+        "title": "Update a scheduled change",
+        "description": "Update a pending scheduled change by ID. You can modify the payload, scheduled_at time, or recurrence settings. Cannot change the target record (record_id) or model type (model_name).",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": [
+                "record_id",
+                "model_name",
+                "payload",
+                "scheduled_at",
+                "is_recurring",
+                "recurrence_interval",
+                "end_date"
+            ]
+        }
+    },
+    "scheduled-changes-delete": {
+        "method": "DELETE",
+        "path": "/api/projects/{project_id}/scheduled_changes/{id}/",
+        "title": "Delete a scheduled change",
+        "description": "Delete a scheduled change by ID. This permanently removes the scheduled change and it will not be executed.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "scopes": ["feature_flag:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "llm-analytics-clustering-jobs-list": {
+        "method": "GET",
+        "path": "/api/environments/{project_id}/llm_analytics/clustering_jobs/",
+        "title": "List clustering jobs",
+        "description": "List all clustering job configurations for the current team (max 5 per team). Each job defines an analysis level (trace or generation) and event filters that scope which traces are included in clustering runs. Cluster results are stored as $ai_trace_clusters and $ai_generation_clusters events — use docs-search or execute-sql to query them.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "scopes": ["llm_analytics:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["limit", "offset"],
+            "body": []
+        }
+    },
+    "llm-analytics-sentiment-create": {
+        "method": "POST",
+        "path": "/api/environments/{project_id}/llm_analytics/sentiment/",
+        "title": "Analyze sentiment",
+        "description": "Classify sentiment of LLM trace or generation user messages as positive, neutral, or negative. Pass a list of trace or generation IDs and an analysis_level (\"trace\" or \"generation\"). Returns per-ID sentiment labels with confidence scores and per-message breakdowns. Results are cached — use force_refresh to recompute. Rate-limited.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "scopes": ["llm_analytics:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["ids", "analysis_level", "force_refresh", "date_from", "date_to"]
+        }
+    },
+    "llm-analytics-summarization-create": {
+        "method": "POST",
+        "path": "/api/environments/{project_id}/llm_analytics/summarization/",
+        "title": "Summarize trace or generation",
+        "description": "Generate an AI-powered summary of an LLM trace or generation. Pass a trace_id or generation_id with a date_from — the backend fetches the data and returns a structured summary with title, flow diagram, summary bullets, and interesting notes. Results are cached. Use mode \"minimal\" (default) for 3-5 points or \"detailed\" for 5-10 points. Rate-limited.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "scopes": ["llm_analytics:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["summarize_type", "mode", "data", "force_refresh", "model"]
+        }
+    },
+    "llm-analytics-clustering-jobs-retrieve": {
+        "method": "GET",
+        "path": "/api/environments/{project_id}/llm_analytics/clustering_jobs/{id}/",
+        "title": "Get clustering job",
+        "description": "Retrieve a specific clustering job configuration by ID. Returns the job name, analysis level (trace or generation), event filters, enabled status, and timestamps.",
+        "category": "LLM analytics",
+        "feature": "llm_analytics",
+        "scopes": ["llm_analytics:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "notebooks-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/notebooks/",
+        "title": "List notebooks",
+        "description": "List all notebooks in the project. Supports filtering by search term, created_by, last_modified_by, date_from, date_to, and contains. Returns title, short_id, and creation/modification metadata.",
+        "category": "Notebooks",
+        "feature": "notebooks",
+        "scopes": ["notebook:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["contains", "created_by", "date_from", "date_to", "limit", "offset", "user"],
+            "body": []
+        }
+    },
+    "notebooks-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/notebooks/",
+        "title": "Create notebook",
+        "description": "Create a new notebook. Provide a title and content. Content is a JSON object representing the notebook's rich text document structure (ProseMirror-based). Returns the created notebook with its short_id.",
+        "category": "Notebooks",
+        "feature": "notebooks",
+        "scopes": ["notebook:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["title", "content", "text_content", "version", "deleted"]
+        }
+    },
+    "notebooks-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/notebooks/{short_id}/",
+        "title": "Get notebook",
+        "description": "Get a specific notebook by its short_id. Returns the full notebook including title, content, version, and creation/modification metadata.",
+        "category": "Notebooks",
+        "feature": "notebooks",
+        "scopes": ["notebook:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["short_id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "notebooks-partial-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/notebooks/{short_id}/",
+        "title": "Update notebook",
+        "description": "Update an existing notebook by short_id. Can update title, content, and deleted status. IMPORTANT: when updating the content field, you must provide the current version number for optimistic concurrency control. Retrieve the notebook first to get the latest version.",
+        "category": "Notebooks",
+        "feature": "notebooks",
+        "scopes": ["notebook:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["short_id"],
+            "query": [],
+            "body": ["title", "content", "text_content", "version", "deleted"]
+        }
+    },
+    "notebooks-destroy": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/notebooks/{short_id}/",
+        "title": "Delete notebook",
+        "description": "Delete a notebook by short_id. The notebook will be soft-deleted and no longer appear in lists.",
+        "category": "Notebooks",
+        "feature": "notebooks",
+        "scopes": ["notebook:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["short_id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": true
+    },
+    "persons-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/persons/",
+        "title": "List persons",
+        "description": "List persons in the current project. Supports search by email (full text) or distinct ID (exact match), and filtering by email or distinct_id query parameters. Returns paginated results with person properties and distinct IDs.",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["distinct_id", "email", "limit", "offset", "search"],
+            "body": []
+        }
+    },
+    "persons-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/persons/{id}/",
+        "title": "Get person",
+        "description": "Retrieve a single person by numeric ID or UUID. Returns the person's properties, distinct IDs, and metadata.",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "persons-property-delete": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/persons/{id}/delete_property/",
+        "title": "Delete person property",
+        "description": "Remove a single property from a person by key. The property is deleted asynchronously via the event pipeline ($unset).",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["unset"]
+        }
+    },
+    "persons-property-set": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/persons/{id}/update_property/",
+        "title": "Set person property",
+        "description": "Set a single property on a person. The property is updated asynchronously via the event pipeline ($set). Returns 202 Accepted.",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": ["key", "value"]
+        }
+    },
+    "persons-bulk-delete": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/persons/bulk_delete/",
+        "title": "Bulk delete persons",
+        "description": "Delete up to 1000 persons by PostHog person UUIDs or distinct IDs. Optionally delete associated events and recordings. Pass either `ids` (person UUIDs) or `distinct_ids`. Returns 202 Accepted. This operation is irreversible.",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["ids", "distinct_ids", "delete_events", "delete_recordings", "keep_person"]
+        }
+    },
+    "persons-cohorts-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/persons/cohorts/",
+        "title": "Get person cohorts",
+        "description": "Get all cohorts that a specific person belongs to. Requires the person_id query parameter.",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:read", "cohort:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["person_id"],
+            "body": []
+        }
+    },
+    "persons-values-retrieve": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/persons/values/",
+        "title": "Get person property values",
+        "description": "Get distinct values for a person property key. Useful for discovering what values exist for properties like 'plan', 'role', or 'company'. Provide the property key and optionally a search value to filter results.",
+        "category": "Persons",
+        "feature": "persons",
+        "scopes": ["person:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["key", "value"],
+            "body": []
+        }
+    },
+    "prompt-list": {
+        "method": "GET",
+        "path": "/api/environments/{project_id}/llm_prompts/",
+        "title": "List prompts",
+        "description": "List all LLM prompts stored for the current team. Optionally filter by name. Returns paginated prompt summaries.",
+        "category": "Prompts",
+        "feature": "prompts",
+        "scopes": ["llm_prompt:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["search"],
+            "body": []
+        }
+    },
+    "prompt-get": {
+        "method": "GET",
+        "path": "/api/environments/{project_id}/llm_prompts/name/{prompt_name}/",
+        "title": "Get prompt",
+        "description": "Get a specific LLM prompt by name, including its full content. Uses the cached endpoint for fast retrieval.",
+        "category": "Prompts",
+        "feature": "prompts",
+        "scopes": ["llm_prompt:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["prompt_name"],
+            "query": ["version"],
+            "body": []
+        }
+    },
+    "prompt-create": {
+        "method": "POST",
+        "path": "/api/environments/{project_id}/llm_prompts/",
+        "title": "Create prompt",
+        "description": "Create a new LLM prompt for the current team. Requires a unique name and prompt content (string or JSON object).",
+        "category": "Prompts",
+        "feature": "prompts",
+        "scopes": ["llm_prompt:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["name", "prompt"]
+        }
+    },
+    "prompt-update": {
+        "method": "PATCH",
+        "path": "/api/environments/{project_id}/llm_prompts/name/{prompt_name}/",
+        "title": "Update prompt",
+        "description": "Publish a new version of an existing LLM prompt by name. Name is immutable after creation.",
+        "category": "Prompts",
+        "feature": "prompts",
+        "scopes": ["llm_prompt:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["prompt_name"],
+            "query": [],
+            "body": ["prompt", "base_version"]
+        }
+    },
+    "prompt-duplicate": {
+        "method": "POST",
+        "path": "/api/environments/{project_id}/llm_prompts/name/{prompt_name}/duplicate/",
+        "title": "Duplicate prompt",
+        "description": "Duplicate an existing LLM prompt under a new name. Copies the latest version's content to create a new prompt at version 1. Useful for forking a prompt or as a way to rename since names are immutable after creation.",
+        "category": "Prompts",
+        "feature": "prompts",
+        "scopes": ["llm_prompt:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["prompt_name"],
+            "query": [],
+            "body": ["new_name"]
+        }
+    },
+    "proxy-list": {
+        "method": "GET",
+        "path": "/api/organizations/{organization_id}/proxy_records/",
+        "title": "List reverse proxies",
+        "description": "List all managed reverse proxies configured for the current organization. Returns each proxy's domain, CNAME target, provisioning status, and the maximum number of proxies allowed by the current plan. Use this to check whether a reverse proxy is set up before recommending one.",
+        "category": "Reverse proxy",
+        "feature": "reverse_proxy",
+        "scopes": ["organization:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": []
+        }
+    },
+    "proxy-get": {
+        "method": "GET",
+        "path": "/api/organizations/{organization_id}/proxy_records/{id}/",
+        "title": "Get reverse proxy details",
+        "description": "Get full details of a specific reverse proxy by ID. Returns the domain, CNAME target (the DNS record value the user needs to configure), current provisioning status, and any error or warning messages. Use this to debug why a proxy isn't working or to check DNS verification status.",
+        "category": "Reverse proxy",
+        "feature": "reverse_proxy",
+        "scopes": ["organization:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "proxy-create": {
+        "method": "POST",
+        "path": "/api/organizations/{organization_id}/proxy_records/",
+        "title": "Create reverse proxy",
+        "description": "Create a new managed reverse proxy for a custom domain. Provide the domain (e.g. 'e.example.com') that will proxy requests to PostHog. The response includes the CNAME target — the user must add a CNAME DNS record pointing their domain to this target. Once DNS propagates, the proxy is automatically verified and an SSL certificate is issued. The proxy starts in 'waiting' status until DNS is verified.",
+        "category": "Reverse proxy",
+        "feature": "reverse_proxy",
+        "scopes": ["organization:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": ["domain"]
+        }
+    },
+    "proxy-retry": {
+        "method": "POST",
+        "path": "/api/organizations/{organization_id}/proxy_records/{id}/retry/",
+        "title": "Retry reverse proxy provisioning",
+        "description": "Retry provisioning a reverse proxy that has failed. Only works for proxies in 'erroring' or 'timed_out' status. Resets the proxy to 'waiting' and restarts the DNS verification and certificate provisioning workflow.",
+        "category": "Reverse proxy",
+        "feature": "reverse_proxy",
+        "scopes": ["organization:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "proxy-delete": {
+        "method": "DELETE",
+        "path": "/api/organizations/{organization_id}/proxy_records/{id}/",
+        "title": "Delete reverse proxy",
+        "description": "Delete a managed reverse proxy. For proxies still being set up (waiting, erroring, timed_out), the record is removed immediately. For active proxies, a cleanup workflow is started to remove the provisioned infrastructure.",
+        "category": "Reverse proxy",
+        "feature": "reverse_proxy",
+        "scopes": ["organization:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "surveys-get-all": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/surveys/",
+        "title": "Get all surveys in the project with optional filtering.",
+        "description": "Get all surveys in the project with optional filtering. Can filter by search term or use pagination.",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["archived", "limit", "offset", "search"],
+            "body": []
+        }
+    },
+    "survey-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/surveys/{id}/",
+        "title": "Get a specific survey by ID.",
+        "description": "Get a specific survey by ID. Returns the survey configuration including questions, targeting, and scheduling details.",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    },
+    "survey-create": {
+        "method": "POST",
+        "path": "/api/projects/{project_id}/surveys/",
+        "title": "Creates a new survey in the project.",
+        "description": "Creates a new survey in the project. Surveys can be popover or API-based and support various question types including open-ended, multiple choice, rating, and link questions. Once created, you should ask the user if they want to add the survey to their application code.",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": false
+        },
+        "params": {
+            "path": [],
+            "query": [],
+            "body": [
+                "name",
+                "description",
+                "type",
+                "linked_flag_id",
+                "targeting_flag_filters",
+                "questions",
+                "appearance",
+                "start_date",
+                "responses_limit",
+                "iteration_count",
+                "iteration_frequency_days",
+                "enable_partial_responses"
+            ]
+        }
+    },
+    "survey-update": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/surveys/{id}/",
+        "title": "Update an existing survey by ID.",
+        "description": "Update an existing survey by ID. Can update name, description, questions, scheduling, and other survey properties.",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": [
+                "name",
+                "description",
+                "type",
+                "schedule",
+                "linked_flag_id",
+                "targeting_flag_id",
+                "targeting_flag_filters",
+                "remove_targeting_flag",
+                "questions",
+                "conditions",
+                "appearance",
+                "start_date",
+                "end_date",
+                "archived",
+                "responses_limit",
+                "iteration_count",
+                "iteration_frequency_days",
+                "enable_partial_responses"
+            ]
+        }
+    },
+    "survey-delete": {
+        "method": "PATCH",
+        "path": "/api/projects/{project_id}/surveys/{id}/",
+        "title": "Delete a survey by ID.",
+        "description": "Delete a survey by ID (soft delete - marks as archived).",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:write"],
+        "annotations": {
+            "readOnly": false,
+            "destructive": true,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        },
+        "soft_delete": "archived"
+    },
+    "survey-stats": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/surveys/{id}/stats/",
+        "title": "Get response statistics for a specific survey.",
+        "description": "Get response statistics for a specific survey. Includes detailed event counts (shown, dismissed, sent), unique respondents, conversion rates, and timing data. Supports optional date filtering.",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": ["date_from", "date_to"],
+            "body": []
+        }
+    },
+    "surveys-global-stats": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/surveys/stats/",
+        "title": "Get aggregated response statistics across all surveys.",
+        "description": "Get aggregated response statistics across all surveys in the project. Includes event counts (shown, dismissed, sent), unique respondents, conversion rates, and timing data. Supports optional date filtering.",
+        "category": "Surveys",
+        "feature": "surveys",
+        "scopes": ["survey:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["date_from", "date_to"],
+            "body": []
+        }
+    },
+    "workflows-list": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/hog_flows/",
+        "title": "List workflows",
+        "description": "List all workflows in the project. Returns workflows with their name, description, status (draft/active/archived), version, trigger configuration, and timestamps.",
+        "category": "Workflows",
+        "feature": "workflows",
+        "scopes": ["hog_flow:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": [],
+            "query": ["created_at", "created_by", "id", "limit", "offset", "updated_at"],
+            "body": []
+        }
+    },
+    "workflows-get": {
+        "method": "GET",
+        "path": "/api/projects/{project_id}/hog_flows/{id}/",
+        "title": "Get workflow",
+        "description": "Get a specific workflow by ID. Returns the full workflow definition including trigger, edges, actions, exit condition, and variables.",
+        "category": "Workflows",
+        "feature": "workflows",
+        "scopes": ["hog_flow:read"],
+        "annotations": {
+            "readOnly": true,
+            "destructive": false,
+            "idempotent": true
+        },
+        "params": {
+            "path": ["id"],
+            "query": [],
+            "body": []
+        }
+    }
+}
