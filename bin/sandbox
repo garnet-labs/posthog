@@ -420,20 +420,24 @@ def _ensure_jetbrains() -> None:
     config = _load_config()
 
     if "jetbrains" not in config:
-        while True:
-            answer = input("Do you use JetBrains for development? (P)yCharm / (I)ntelliJ / (N)o: ").strip().lower()
-            if answer in ("p", "pycharm"):
-                config["jetbrains"] = "pycharm"
-                break
-            elif answer in ("i", "intellij"):
-                config["jetbrains"] = "intellij"
-                break
-            elif answer in ("n", "no"):
-                config["jetbrains"] = None
-                break
-            else:
-                print("Please enter P, I, or N.")
-        _save_config(config)
+        if not sys.stdin.isatty():
+            config["jetbrains"] = None
+            _save_config(config)
+        else:
+            while True:
+                answer = input("Do you use JetBrains for development? (P)yCharm / (I)ntelliJ / (N)o: ").strip().lower()
+                if answer in ("p", "pycharm"):
+                    config["jetbrains"] = "pycharm"
+                    break
+                elif answer in ("i", "intellij"):
+                    config["jetbrains"] = "intellij"
+                    break
+                elif answer in ("n", "no"):
+                    config["jetbrains"] = None
+                    break
+                else:
+                    print("Please enter P, I, or N.")
+            _save_config(config)
 
     if not config.get("jetbrains"):
         return
@@ -813,7 +817,13 @@ def _prompt_migration_choice(stale_info: str) -> str:
     """Ask the user what to do about stale migrations.
 
     Auto-selects 'c' after 10 seconds if no input is given.
+    In non-interactive mode, returns 'c' immediately.
     """
+    if not sys.stdin.isatty():
+        warn("The cache has newer migrations than your branch (auto-selecting: use cache):")
+        print(stale_info)
+        return "c"
+
     import select
 
     warn("The cache has newer migrations than your branch:")
@@ -947,7 +957,7 @@ def _restore_and_start(
 # ---------------------------------------------------------------------------
 
 
-def cmd_create(branch: str, base_branch: str = "master") -> None:
+def cmd_create(branch: str, base_branch: str = "master", no_attach: bool = False) -> None:
     registry = Registry()
     slug = slugify(branch)
     project = project_name(slug)
@@ -1002,9 +1012,12 @@ def cmd_create(branch: str, base_branch: str = "master") -> None:
         info(f"Docker profiles: {', '.join(profiles)}")
     _restore_and_start(project, port, worktree_path, use_cache, profiles=profiles)
 
-    container = f"{project}-app-1"
-    health_url = f"http://localhost:{port}/_health"
-    _attach_with_health_poll(container, health_url)
+    if no_attach:
+        success(f"Sandbox '{project}' started on port {port} (not attaching)")
+    else:
+        container = f"{project}-app-1"
+        health_url = f"http://localhost:{port}/_health"
+        _attach_with_health_poll(container, health_url)
 
 
 def cmd_start(branch: str) -> None:
@@ -1456,15 +1469,17 @@ def _cloud_render_user_data(
 
     template = CLOUD_INIT_TEMPLATE.read_text()
 
+    # Base64-encode values that may contain quotes or special chars
+    # to avoid breaking the bash script. Cloud-init decodes them.
     replacements = {
         "__SANDBOX_BRANCH__": branch,
         "__SANDBOX_OWNER__": owner,
         "__SANDBOX_HOSTNAME__": hostname,
         "__TAILSCALE_AUTH_KEY__": tailscale_key,
         "__SSH_AUTHORIZED_KEYS__": ssh_keys,
-        "__CLAUDE_CREDENTIALS__": claude_credentials,
-        "__CLAUDE_SETTINGS__": claude_settings,
-        "__CLAUDE_JSON__": claude_json,
+        "__CLAUDE_CREDENTIALS_B64__": base64.b64encode(claude_credentials.encode()).decode() if claude_credentials else "",
+        "__CLAUDE_SETTINGS_B64__": base64.b64encode(claude_settings.encode()).decode() if claude_settings else "",
+        "__CLAUDE_JSON_B64__": base64.b64encode(claude_json.encode()).decode() if claude_json else "",
     }
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)
@@ -1696,7 +1711,7 @@ def cmd_cloud_shell(branch: str) -> None:
     if not hostname:
         fatal("No Tailscale hostname found for this sandbox")
 
-    # SSH to the host, then attach to the container's tmux session.
+    # SSH to the host, then use bin/sandbox shell (same as local).
     # UserKnownHostsFile=/dev/null avoids polluting known_hosts — Tailscale
     # handles host identity, and the host key changes on every EC2 instance.
     os.execvp(
@@ -1708,7 +1723,7 @@ def cmd_cloud_shell(branch: str) -> None:
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             f"ubuntu@{hostname}",
-            "docker exec -it -u 1000:1000 sandbox-cloud-app-1 tmux -L sandbox attach-session -t posthog",
+            f"cd /home/ubuntu/posthog && python3 bin/sandbox shell {branch}",
         ],
     )
 
@@ -1722,7 +1737,7 @@ def cmd_cloud_open(branch: str) -> None:
         fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
 
     hostname = _cloud_get_tag(instance, "sandbox:hostname")
-    url = f"http://{hostname}:8000"
+    url = f"http://{hostname}:{PORT_BASE}"
     info(f"Opening {url}...")
     webbrowser.open(url)
 
@@ -1737,6 +1752,9 @@ def cmd_cloud_logs(branch: str) -> None:
     if not hostname:
         fatal("No Tailscale hostname found for this sandbox")
 
+    slug = slugify(branch)
+    container = f"sandbox-{slug}-app-1"
+
     # Show the boot log (one-shot), then follow the app container logs.
     # We use `docker logs` directly rather than `docker compose logs` because
     # the compose file requires env vars that aren't set in the SSH session.
@@ -1748,8 +1766,8 @@ def cmd_cloud_logs(branch: str) -> None:
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             f"ubuntu@{hostname}",
-            "echo '=== Boot log ===' && cat /var/log/sandbox-boot.log 2>/dev/null; "
-            "echo '\\n=== App container logs ===' && docker logs -f sandbox-cloud-app-1",
+            f"echo '=== Boot log ===' && cat /var/log/sandbox-boot.log 2>/dev/null; "
+            f"echo '\\n=== App container logs ===' && docker logs -f {container}",
         ],
     )
 
@@ -1836,6 +1854,11 @@ examples:
         default="product_analytics",
         help="Comma-separated hogli intents (default: product_analytics)",
     )
+    p.add_argument(
+        "--no-attach",
+        action="store_true",
+        help="Don't attach to mprocs after creation (for CI/cloud use)",
+    )
 
     for name, help_text in [
         ("start", "Start a stopped sandbox"),
@@ -1908,7 +1931,7 @@ def main() -> None:
             os.environ["SANDBOX_INTENTS"] = args.intents
 
         dispatch = {
-            "create": lambda: cmd_create(args.branch, args.base_branch),
+            "create": lambda: cmd_create(args.branch, args.base_branch, no_attach=args.no_attach),
             "start": lambda: cmd_start(args.branch),
             "stop": lambda: cmd_stop(args.branch),
             "destroy": lambda: cmd_destroy(args.branch, clean=args.clean),

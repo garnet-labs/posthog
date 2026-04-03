@@ -131,16 +131,12 @@ build_status "building-cache"
 apt-get install -y -qq python3-yaml
 sudo -u ubuntu sg docker -c "python3 bin/sandbox rebuild-cache"
 
-# Tag the app image so cloud-init's compose project can find it.
-# rebuild-cache builds under "sandbox-cache-init" project, but cloud-init
-# uses "sandbox-cloud" — Docker Compose names images as {project}-{service}.
-sudo -u ubuntu sg docker -c "docker tag sandbox-cache-init-app sandbox-cloud-app"
-
 # --- Clean up for snapshotting ---
 echo "==> Cleaning up..."
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 rm -rf /tmp/*
+rm -f /home/ubuntu/.docker/config.json
 cloud-init clean --logs
 
 build_status "complete"
