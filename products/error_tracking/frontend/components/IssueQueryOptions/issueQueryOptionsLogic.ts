@@ -89,6 +89,10 @@ export const issueQueryOptionsLogic = kea<issueQueryOptionsLogicType>([
     }),
 
     selectors({
+        showQueryV3Switch: [
+            (s) => [s.featureFlags],
+            (featureFlags): boolean => !!featureFlags[FEATURE_FLAGS.ERROR_TRACKING_QUERY_V3],
+        ],
         forceQueryV3: [
             (s) => [s.featureFlags],
             (featureFlags): boolean => !!featureFlags[FEATURE_FLAGS.ERROR_TRACKING_FORCE_QUERY_V3],
