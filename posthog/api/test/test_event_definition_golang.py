@@ -498,16 +498,16 @@ class TestGolangGeneratorAPI(APIBaseTest):
         # Verify telemetry was called
         self._test_telemetry_called(mock_report)
 
-    def test_golang_endpoint_excludes_non_whitelisted_system_events(self):
-        # $autocapture should be excluded
-        # $pageview is whitelisted and should be included
-        EventDefinition.objects.create(team=self.team, project=self.project, name="$autocapture")
+    def test_golang_endpoint_excludes_non_core_system_events(self):
+        # $money is not a core PostHog event so it should be excluded
+        # $pageview is a core event and should be included
+        EventDefinition.objects.create(team=self.team, project=self.project, name="$money")
         EventDefinition.objects.create(team=self.team, project=self.project, name="$pageview")
 
         response = self.client.get(f"/api/projects/{self.project.id}/event_definitions/golang")
 
         code = response.json()["content"]
-        self.assertNotIn("Autocapture", code)
+        self.assertNotIn("Money", code)
         self.assertIn("Pageview", code)
 
     @patch("posthog.api.event_definition_generators.base.report_user_action")
