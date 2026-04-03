@@ -114,6 +114,10 @@ services:
         # Required for mount --bind (bind-mounting node_modules onto a volume)
         cap_add:
             - SYS_ADMIN
+        # Docker's default AppArmor profile blocks mount --bind over files
+        # inside bind mounts, even with SYS_ADMIN. Disable it.
+        security_opt:
+            - apparmor:unconfined
         # VSCode reads this label when attaching to configure extensions and settings
         labels:
             devcontainer.metadata: >-
