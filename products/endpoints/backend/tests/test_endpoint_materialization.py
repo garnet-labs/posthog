@@ -211,8 +211,8 @@ class TestEndpointMaterialization(ClickhouseTestMixin, APIBaseTest):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("at least 30 minutes", str(response.json()))
 
-    def test_disable_materialization_removes_saved_query(self):
-        """Test that disabling materialization removes the SavedQuery."""
+    def test_disable_materialization_preserves_saved_query(self):
+        """Test that disabling materialization preserves the SavedQuery for sidebar organization."""
         # Create and materialize an endpoint
         endpoint = create_endpoint_with_version(
             name="test_disable_materialization",
@@ -247,13 +247,15 @@ class TestEndpointMaterialization(ClickhouseTestMixin, APIBaseTest):
         response_data = response.json()
         self.assertFalse(response_data["is_materialized"])
 
-        # Verify saved_query is removed from version
+        # Verify saved_query remains linked to the version
         version.refresh_from_db()
-        self.assertIsNone(version.saved_query)
+        self.assertIsNotNone(version.saved_query)
+        self.assertEqual(version.saved_query_id, saved_query_id)
 
-        # Verify SavedQuery is soft-deleted
+        # Verify SavedQuery is preserved but no longer materialized
         saved_query = DataWarehouseSavedQuery.objects.get(id=saved_query_id)
-        self.assertTrue(saved_query.deleted)
+        self.assertFalse(saved_query.deleted)
+        self.assertFalse(saved_query.is_materialized)
 
     def test_cannot_materialize_query_with_invalid_variables(self):
         """Test that queries with invalid variable metadata cannot be materialized."""

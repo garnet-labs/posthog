@@ -4,7 +4,7 @@ import builtins
 import dataclasses
 from collections.abc import Iterator
 from datetime import timedelta
-from typing import Optional, Union, cast
+from typing import Any, Optional, Union, cast
 
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -356,6 +356,84 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
             "reason": reason if not can_mat else None,
         }
 
+    def _serialize_endpoint_saved_query_columns(self, version: EndpointVersion) -> dict[str, dict[str, str | bool]]:
+        type_mapping = {
+            "string": ("StringDatabaseField", "String"),
+            "integer": ("IntegerDatabaseField", "Int64"),
+            "float": ("FloatDatabaseField", "Float64"),
+            "decimal": ("DecimalDatabaseField", "Decimal"),
+            "boolean": ("BooleanDatabaseField", "Bool"),
+            "datetime": ("DateTimeDatabaseField", "DateTime64"),
+            "date": ("DateDatabaseField", "Date"),
+            "array": ("StringArrayDatabaseField", "Array(String)"),
+            "json": ("StringJSONDatabaseField", "JSON"),
+            "unknown": ("UnknownDatabaseField", "String"),
+        }
+
+        return {
+            column["name"]: {
+                "hogql": type_mapping.get(column["type"], ("UnknownDatabaseField", "String"))[0],
+                "clickhouse": type_mapping.get(column["type"], ("UnknownDatabaseField", "String"))[1],
+                "valid": True,
+            }
+            for column in version.get_columns()
+        }
+
+    def _get_saved_query_payload_for_version(self, version: EndpointVersion) -> dict[str, Any]:
+        hogql_query = convert_insight_query_to_hogql(version.query, self.team)
+        return {
+            "query": hogql_query,
+            "columns": self._serialize_endpoint_saved_query_columns(version),
+        }
+
+    def _ensure_endpoint_saved_query(
+        self, endpoint: Endpoint, version: EndpointVersion, folder_id: uuid.UUID | None = None
+    ) -> DataWarehouseSavedQuery:
+        saved_query_name = f"{endpoint.name}_v{version.version}"
+        saved_query = (
+            version.saved_query
+            or DataWarehouseSavedQuery.objects.filter(name=saved_query_name, team=self.team, deleted=False).first()
+        )
+
+        payload = self._get_saved_query_payload_for_version(version)
+
+        if saved_query is None:
+            saved_query = DataWarehouseSavedQuery(
+                name=saved_query_name,
+                team=self.team,
+                origin=DataWarehouseSavedQuery.Origin.ENDPOINT,
+            )
+            saved_query.query = payload["query"]
+            saved_query.columns = payload["columns"]
+            if folder_id is not None:
+                saved_query.folder_id = folder_id
+            saved_query.save()
+        else:
+            update_fields: list[str] = []
+            if saved_query.name != saved_query_name:
+                saved_query.name = saved_query_name
+                update_fields.append("name")
+            if saved_query.origin != DataWarehouseSavedQuery.Origin.ENDPOINT:
+                saved_query.origin = DataWarehouseSavedQuery.Origin.ENDPOINT
+                update_fields.append("origin")
+            if folder_id is not None and saved_query.folder_id != folder_id:
+                saved_query.folder_id = folder_id
+                update_fields.append("folder")
+            if saved_query.query != payload["query"]:
+                saved_query.query = payload["query"]
+                update_fields.append("query")
+            if saved_query.columns != payload["columns"]:
+                saved_query.columns = payload["columns"]
+                update_fields.append("columns")
+            if update_fields:
+                saved_query.save(update_fields=update_fields)
+
+        if version.saved_query_id != saved_query.id:
+            version.saved_query = saved_query
+            version.save(update_fields=["saved_query"])
+
+        return saved_query
+
     def _serialize(
         self,
         obj: Endpoint | EndpointVersion,
@@ -371,6 +449,9 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         else:
             endpoint = obj
             version = endpoint.get_version()
+
+        if version.saved_query is None and not endpoint.deleted:
+            version.saved_query = self._ensure_endpoint_saved_query(endpoint, version)
 
         url = None
         ui_url = None
@@ -400,6 +481,10 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
             "materialization": self._build_materialization_info(version),
             "bucket_overrides": version.bucket_overrides,
             "columns": version.get_columns() if version else [],
+            "saved_query_id": str(version.saved_query_id) if version.saved_query_id else None,
+            "folder_id": str(version.saved_query.folder_id)
+            if version.saved_query and version.saved_query.folder_id
+            else None,
         }
 
         if isinstance(obj, EndpointVersion):
@@ -1072,24 +1157,6 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         """
         version = version or endpoint.get_version()
         if version:
-            if version.saved_query:
-                try:
-                    delete_node_from_dag(version.saved_query)
-                except Exception as e:
-                    logger.exception(
-                        "Failed to remove endpoint node from DAG",
-                        endpoint_name=endpoint.name,
-                        saved_query_id=version.saved_query.id if version and version.saved_query else None,
-                    )
-                    capture_exception(
-                        e,
-                        {
-                            "product": Product.ENDPOINTS,
-                            "team_id": self.team_id,
-                            "endpoint_name": endpoint.name,
-                            "saved_query_id": version.saved_query.id if version and version.saved_query else None,
-                        },
-                    )
             version.disable_materialization()
         clear_endpoint_materialization_cache(self.team_id, endpoint.name)
 

@@ -181,13 +181,10 @@ class EndpointVersion(models.Model):
         return self.columns
 
     def disable_materialization(self) -> None:
-        """Disable materialization: revert and soft-delete the saved query, clear version fields."""
+        """Disable materialization but preserve the endpoint's saved query metadata."""
         if not self.saved_query:
             return
         self.saved_query.revert_materialization()
-        self.saved_query.soft_delete()
-        self.saved_query = None
-        self.save(update_fields=["saved_query"])
 
     @property
     def is_materialized(self) -> bool:
@@ -390,6 +387,10 @@ class Endpoint(CreatedMetaFields, UpdatedMetaFields, DeletedMetaFields, UUIDTMod
     def soft_delete(self) -> None:
         for version in self.versions.filter(saved_query__isnull=False):
             version.disable_materialization()
+            if version.saved_query:
+                version.saved_query.soft_delete()
+                version.saved_query = None
+                version.save(update_fields=["saved_query"])
 
         self.deleted = True
         self.deleted_at = timezone.now()

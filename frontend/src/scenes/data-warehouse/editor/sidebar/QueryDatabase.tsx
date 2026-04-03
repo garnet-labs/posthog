@@ -155,7 +155,7 @@ export const QueryDatabase = (): JSX.Element => {
             case 'managed-view':
                 return 'managed view'
             case 'endpoint':
-                return 'materialized endpoint'
+                return item.record?.isMaterialized ? 'materialized endpoint' : 'endpoint'
             case 'view':
             case 'view-table':
                 return item.record.view?.is_materialized ? 'materialized view' : 'view'
@@ -184,11 +184,8 @@ export const QueryDatabase = (): JSX.Element => {
     }
 
     const getEndpointUrl = (item: TreeDataItem): string => {
-        const endpointName = item.record?.table?.name ?? item.name
-        const versionMatch = endpointName.match(/^(.+)_v(\d+)$/)
-
-        if (versionMatch) {
-            return urls.endpoint(versionMatch[1], parseInt(versionMatch[2], 10))
+        if (item.record?.endpoint?.current_version) {
+            return urls.endpoint(item.name, item.record.endpoint.current_version)
         }
 
         return urls.endpoint(item.name)
@@ -539,41 +536,47 @@ export const QueryDatabase = (): JSX.Element => {
                         item.record?.type === 'endpoint'
                             ? getEndpointUrl(item)
                             : urls.sqlEditor({ view_id: item.record?.view.id })
-                    const table = item.record?.tableName || item.name
-                    const selectAllQuery = `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
+                    const table = item.record?.tableName
+                    const selectAllQuery = table
+                        ? `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
+                        : null
                     const nextConnectionId =
                         connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
 
                     return (
                         <DropdownMenuGroup>
-                            <DropdownMenuItem
-                                asChild
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    if (isEmbeddedMode) {
-                                        setActiveTab(OutputTab.Results)
-                                        setSourceQuery({
-                                            ...sourceQuery,
-                                            source: {
-                                                ...sourceQuery.source,
-                                                connectionId: nextConnectionId,
-                                            },
-                                        })
-                                        setQueryInput(selectAllQuery)
-                                        return
-                                    }
+                            {table &&
+                            selectAllQuery &&
+                            (item.record.type !== 'endpoint' || item.record.isMaterialized) ? (
+                                <DropdownMenuItem
+                                    asChild
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (isEmbeddedMode) {
+                                            setActiveTab(OutputTab.Results)
+                                            setSourceQuery({
+                                                ...sourceQuery,
+                                                source: {
+                                                    ...sourceQuery.source,
+                                                    connectionId: nextConnectionId,
+                                                },
+                                            })
+                                            setQueryInput(selectAllQuery)
+                                            return
+                                        }
 
-                                    router.actions.push(
-                                        urls.sqlEditor({
-                                            query: selectAllQuery,
-                                            outputTab: OutputTab.Results,
-                                            connectionId: nextConnectionId,
-                                        })
-                                    )
-                                }}
-                            >
-                                <ButtonPrimitive menuItem>Select all</ButtonPrimitive>
-                            </DropdownMenuItem>
+                                        router.actions.push(
+                                            urls.sqlEditor({
+                                                query: selectAllQuery,
+                                                outputTab: OutputTab.Results,
+                                                connectionId: nextConnectionId,
+                                            })
+                                        )
+                                    }}
+                                >
+                                    <ButtonPrimitive menuItem>Select all</ButtonPrimitive>
+                                </DropdownMenuItem>
+                            ) : null}
                             {!isEmbeddedMode && item.record.type !== 'endpoint' ? (
                                 <DropdownMenuItem
                                     asChild
@@ -598,7 +601,7 @@ export const QueryDatabase = (): JSX.Element => {
                                 asChild
                                 onClick={(e) => {
                                     e.stopPropagation()
-                                    void copyToClipboard(table)
+                                    void copyToClipboard(table || item.name)
                                 }}
                             >
                                 <ButtonPrimitive menuItem>Copy name</ButtonPrimitive>

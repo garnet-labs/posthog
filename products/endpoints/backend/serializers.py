@@ -173,6 +173,14 @@ class EndpointResponseSerializer(serializers.Serializer):
         many=True,
         help_text="Column names and types from the query's SELECT clause.",
     )
+    saved_query_id = serializers.UUIDField(
+        allow_null=True,
+        help_text="Backing saved query ID used for organizing this endpoint in the SQL editor sidebar.",
+    )
+    folder_id = serializers.UUIDField(
+        allow_null=True,
+        help_text="Folder used to organize this endpoint in the SQL editor sidebar.",
+    )
 
 
 class EndpointVersionResponseSerializer(EndpointResponseSerializer):
