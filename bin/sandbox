@@ -45,6 +45,7 @@ PROFILES_FILE = REPO_ROOT / "docker-compose.profiles.yml"
 WORKTREE_CMD = REPO_ROOT / "bin" / "posthog-worktree"
 
 REGISTRY_DIR = Path.home() / ".posthog-sandboxes"
+REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
 REGISTRY_FILE = REGISTRY_DIR / "registry.json"
 CONFIG_FILE = REGISTRY_DIR / "config.json"
 CLOUD_CONFIG_FILE = REGISTRY_DIR / "cloud-config.json"
