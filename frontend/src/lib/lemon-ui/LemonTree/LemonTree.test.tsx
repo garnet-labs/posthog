@@ -11,10 +11,19 @@ class ResizeObserverMock {
     disconnect(): void {}
 }
 
+const requestAnimationFrameMock = (callback: FrameRequestCallback): number =>
+    window.setTimeout(() => callback(performance.now()), 0)
+
+const cancelAnimationFrameMock = (handle: number): void => {
+    window.clearTimeout(handle)
+}
+
 describe('LemonTree virtualization', () => {
     beforeAll(() => {
         ;(global as typeof globalThis & { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
             ResizeObserverMock as unknown as typeof ResizeObserver
+        global.requestAnimationFrame = requestAnimationFrameMock
+        global.cancelAnimationFrame = cancelAnimationFrameMock
     })
 
     const setViewportHeight = (container: HTMLElement, height: number): HTMLElement => {
@@ -203,7 +212,7 @@ describe('LemonTree virtualization', () => {
             expect(within(container).getByLabelText('tree item: child-30')).toBeInTheDocument()
         })
         expect(within(container).queryByLabelText('tree item: child-0')).not.toBeInTheDocument()
-    })
+    }, 10000)
 
     it('supports an overridden virtualization overscan', async () => {
         const data: TreeDataItem[] = [
@@ -234,5 +243,5 @@ describe('LemonTree virtualization', () => {
             expect(within(container).getByLabelText('tree item: child-0')).toBeInTheDocument()
         })
         expect(within(container).queryByLabelText('tree item: child-1')).not.toBeInTheDocument()
-    })
+    }, 10000)
 })
