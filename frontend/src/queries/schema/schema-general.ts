@@ -137,6 +137,7 @@ export enum NodeKind {
     WebPageURLSearchQuery = 'WebPageURLSearchQuery',
     WebTrendsQuery = 'WebTrendsQuery',
     WebAnalyticsExternalSummaryQuery = 'WebAnalyticsExternalSummaryQuery',
+    WebNotableChangesQuery = 'WebNotableChangesQuery',
 
     // Revenue analytics queries
     RevenueAnalyticsGrossRevenueQuery = 'RevenueAnalyticsGrossRevenueQuery',
@@ -217,6 +218,7 @@ export type AnyDataNode =
     | WebPageURLSearchQuery
     | WebTrendsQuery
     | WebAnalyticsExternalSummaryQuery
+    | WebNotableChangesQuery
     | SessionAttributionExplorerQuery
     | RevenueExampleEventsQuery
     | RevenueExampleDataWarehouseTablesQuery
@@ -285,6 +287,7 @@ export type QuerySchema =
     | WebVitalsPathBreakdownQuery
     | WebPageURLSearchQuery
     | WebAnalyticsExternalSummaryQuery
+    | WebNotableChangesQuery
 
     // Revenue analytics
     | RevenueAnalyticsGrossRevenueQuery
@@ -844,6 +847,20 @@ export interface EventsQueryPersonColumn {
     distinct_id: string
 }
 
+/** An action step definition for matching events without a saved action */
+export interface EventsQueryActionStep {
+    event?: string | null
+    properties?: AnyPropertyFilter[]
+    selector?: string | null
+    tag_name?: string | null
+    text?: string | null
+    text_matching?: 'contains' | 'exact' | 'regex' | null
+    href?: string | null
+    href_matching?: 'contains' | 'exact' | 'regex' | null
+    url?: string | null
+    url_matching?: 'contains' | 'exact' | 'regex' | null
+}
+
 export interface EventsQuery extends DataNode<EventsQueryResponse> {
     kind: NodeKind.EventsQuery
     /** source for querying events for insights */
@@ -874,6 +891,8 @@ export interface EventsQuery extends DataNode<EventsQueryResponse> {
      * Show events matching a given action
      */
     actionId?: integer
+    /** Show events matching action steps directly, used when no actionId is provided (e.g. previewing unsaved actions). Ignored if actionId is set. */
+    actionSteps?: EventsQueryActionStep[]
     /** Show events for a given person */
     personId?: string
     /** Only fetch events that happened before this timestamp */
@@ -4748,6 +4767,29 @@ export interface WebTrendsQueryResponse extends AnalyticsQueryResponseBase {
 }
 
 export type CachedWebTrendsQueryResponse = CachedQueryResponse<WebTrendsQueryResponse>
+
+export interface WebNotableChangesQuery extends WebAnalyticsQueryBase<WebNotableChangesQueryResponse> {
+    kind: NodeKind.WebNotableChangesQuery
+    limit?: integer
+}
+
+export interface WebNotableChangeItem {
+    dimension_type: string
+    dimension_value: string
+    metric: string
+    current_value: number
+    previous_value: number
+    percent_change: number
+    impact_score: number
+}
+
+export interface WebNotableChangesQueryResponse extends AnalyticsQueryResponseBase {
+    results: WebNotableChangeItem[]
+    samplingRate?: SamplingRate
+    usedPreAggregatedTables?: boolean
+}
+
+export type CachedWebNotableChangesQueryResponse = CachedQueryResponse<WebNotableChangesQueryResponse>
 
 export type MarketingAnalyticsOrderBy = [string, 'ASC' | 'DESC']
 
