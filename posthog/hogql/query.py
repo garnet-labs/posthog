@@ -498,6 +498,9 @@ class HogQLQueryExecutor:
             raise ExposedHogQLError("Connection not found or has been deleted") from e
 
         postgres_source, source_config = validate_direct_postgres_source_config(source, self.team)
+        source_schema = source_config.schema
+        if not source_schema:
+            raise ExposedHogQLError("Invalid direct Postgres connection schema.")
         require_ssl = source.created_at >= SSL_REQUIRED_AFTER_DATE
         settings = self._effective_direct_postgres_settings()
         statement_timeout_ms = (
@@ -535,7 +538,7 @@ class HogQLQueryExecutor:
                     with psycopg.connect(**connection_kwargs) as connection:
                         connection.execute(
                             direct_postgres_session_setup_sql(
-                                source_config.schema,
+                                source_schema,
                                 source.connection_metadata,
                                 host,
                             )
