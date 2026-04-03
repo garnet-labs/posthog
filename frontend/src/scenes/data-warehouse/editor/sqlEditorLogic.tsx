@@ -854,6 +854,10 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             actions.setFinishedLoading(false)
         },
         setQueryInput: async ({ queryInput }, breakpoint) => {
+            const tablesAndColumns = await parseQueryTablesAndColumns(queryInput)
+            actions.setSelectedQueryTablesAndColumns(tablesAndColumns)
+            cache.updateActiveQueryDecoration?.()
+
             // Keep suggestion payload active - let user make edits and then decide to approve/reject
             // if editing a view, track latest history id changes are based on
             if (values.activeTab?.view && values.activeTab?.view.query?.query) {
@@ -1459,11 +1463,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
             }
         },
     })),
-    subscriptions(({ actions, values, cache }) => ({
-        queryInput: async (queryInput: string | null) => {
-            const result = await parseQueryTablesAndColumns(queryInput)
-            actions.setSelectedQueryTablesAndColumns(result)
-        },
+    subscriptions(({ actions, values }) => ({
         showLegacyFilters: (showLegacyFilters: boolean) => {
             if (showLegacyFilters) {
                 if (typeof values.sourceQuery.source.filters !== 'object') {
