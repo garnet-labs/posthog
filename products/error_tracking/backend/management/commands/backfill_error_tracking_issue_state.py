@@ -39,7 +39,6 @@ from products.error_tracking.backend.models import ErrorTrackingIssueFingerprint
 logger = structlog.get_logger(__name__)
 
 DEFAULT_BATCH_SIZE = 5000
-FLUSH_EVERY = 10000
 
 
 class Command(BaseCommand):
@@ -106,7 +105,7 @@ class Command(BaseCommand):
             produced += 1
             since_last_flush += 1
 
-            if since_last_flush >= FLUSH_EVERY:
+            if since_last_flush >= batch_size:
                 producer.flush()
                 since_last_flush = 0
                 elapsed = time.monotonic() - start_time
