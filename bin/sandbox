@@ -1623,7 +1623,7 @@ def cmd_cloud_create(branch: str) -> None:
         "--security-group-ids",
         config["security_group_id"],
         "--block-device-mappings",
-        "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}",
+        "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,Iops=10000,Encrypted=true,DeleteOnTermination=true}",
         "--metadata-options",
         "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2",
         "--user-data",
