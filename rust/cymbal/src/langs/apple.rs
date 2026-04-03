@@ -217,9 +217,9 @@ impl RawAppleFrame {
                 let mut frame = self.build_resolved_frame(info, debug_image);
 
                 // Attach source context to every inlined layer independently.
-                // Each layer has its own line number and its own stable raw_id
-                // (the inlined index is baked into the hash via inlined_frame_id),
-                // so there is no risk of clobbering another layer's context.
+                // Each layer has its own line number, and each gets a unique
+                // FrameId via the /part suffix, so there is no risk of
+                // clobbering another layer's context.
                 if let Some(full_path) = &info.full_path {
                     if let Some(source_text) = symbols.get_source(full_path) {
                         // symcache line numbers are 1-based (0 = unknown)
@@ -404,15 +404,6 @@ impl RawAppleFrame {
     }
 
     pub fn frame_id(&self) -> String {
-        self.inlined_frame_id(0)
-    }
-
-    /// Like `frame_id`, but includes `inlined_index` in the hash so that each
-    /// logical layer of an inlined call chain gets a stable, unique identity.
-    /// This mirrors how Java's `frame_id()` already encodes function+module+line
-    /// — every expanded frame carries its own distinct raw_id rather than sharing
-    /// a base hash differentiated only by the `/part` suffix.
-    pub fn inlined_frame_id(&self, inlined_index: usize) -> String {
         let mut hasher = Sha512::new();
 
         if let Some(instruction_addr) = &self.instruction_addr {
@@ -430,8 +421,6 @@ impl RawAppleFrame {
         if let Some(image_uuid) = &self.image_uuid {
             hasher.update(image_uuid.as_bytes());
         }
-
-        hasher.update(inlined_index.to_be_bytes());
 
         format!("{:x}", hasher.finalize())
     }

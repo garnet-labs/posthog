@@ -85,17 +85,13 @@ impl RawFrame {
             RawFrame::Dart(frame) => (to_vec(Ok(frame.into())), "dart"),
             RawFrame::Apple(frame) => {
                 let resolved = frame.resolve(team_id, catalog, debug_images).await;
-                // For Apple inlined frames every logical layer shares the same
-                // physical address, so the generic `/part` suffix alone is not
-                // enough to give each layer a stable, unique identity in the DB.
-                // Instead we bake the inlined index into the hash_id itself
-                // (mirroring how Java's frame_id() encodes function+module+line),
-                // and always use part=0.  This lets context be stored and looked
-                // up independently per inlined layer.
+                // Apple inlined frames share the same physical address and therefore
+                // the same hash_id. Each logical layer gets its own unique identity
+                // via the /part suffix (inlined index), exactly as Java does.
                 let resolved = resolved.map(|mut fs| {
                     fs.iter_mut().enumerate().for_each(|(idx, f)| {
                         f.frame_id =
-                            RawFrameId::new(frame.inlined_frame_id(idx), team_id).to_full(0);
+                            RawFrameId::new(frame.frame_id(), team_id).to_full(idx as i32);
                     });
                     fs
                 });
