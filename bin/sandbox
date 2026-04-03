@@ -1350,15 +1350,19 @@ def _ensure_cloud_config() -> dict:
 
 
 def _cloud_hostname(owner: str, branch: str) -> str:
-    """Generate a Tailscale hostname for a cloud sandbox."""
+    """Generate a unique Tailscale hostname for a cloud sandbox.
+
+    Includes a random suffix so recreating a sandbox for the same branch
+    doesn't collide with stale Tailscale nodes from previous instances.
+    """
+    import secrets
+
     slug = slugify(branch)
-    hostname = f"sandbox-{owner}-{slug}"
+    suffix = secrets.token_hex(3)  # 6 hex chars
+    hostname = f"sandbox-{owner}-{slug}-{suffix}"
     # Tailscale hostnames max 63 chars
     if len(hostname) > 63:
-        import hashlib
-
-        h = hashlib.sha256(hostname.encode()).hexdigest()[:6]
-        hostname = hostname[:56] + "-" + h
+        hostname = hostname[:63]
     return hostname
 
 
