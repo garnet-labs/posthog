@@ -1116,6 +1116,7 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             if (source) {
                 actions.selectConnector(source)
                 actions.updateSource({ access_method: accessMethod })
+                actions.setSourceConnectionDetailsValue('access_method', accessMethod)
                 actions.handleRedirect(source.name)
                 actions.setStep(2)
                 // Restore form values saved before an OAuth redirect
