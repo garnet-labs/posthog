@@ -1252,6 +1252,7 @@ def cmd_logs(branch: str) -> None:
 
 
 def cmd_rebuild_cache() -> None:
+    _ensure_cache_volumes()
     info("Clearing database cache...")
     clear_volume(DB_CACHE_VOLUME)
     docker_volume_run(DB_CACHE_VOLUME, "chmod 777 /data")

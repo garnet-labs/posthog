@@ -119,74 +119,17 @@ if [ -n "__BUILD_BRANCH__" ] && [ "__BUILD_BRANCH__" != "__" ]; then
     sudo -u ubuntu git checkout "__BUILD_BRANCH__"
 fi
 
-# --- Export compose env vars ---
-export COMPOSE_PROJECT_NAME=sandbox-cloud
-export SANDBOX_PORT=8000
-export SANDBOX_VITE_PORT=8234
-export SANDBOX_SSH_PORT=2222
-export SANDBOX_CODE=/home/ubuntu/posthog
-export SANDBOX_GIT_DIR=/home/ubuntu/posthog/.git
-export SANDBOX_UID=1000
-export SANDBOX_GID=1000
-export SANDBOX_MODE=cloud
-# Use empty dirs/files instead of /dev/null — Docker needs real bind mount sources
-mkdir -p /tmp/empty-claude-auth
-touch /tmp/empty-claude-json /tmp/empty-ssh-keys
-export SANDBOX_CLAUDE_AUTH=/tmp/empty-claude-auth
-export SANDBOX_CLAUDE_JSON=/tmp/empty-claude-json
-export SANDBOX_SSH_AUTHORIZED_KEYS=/tmp/empty-ssh-keys
-export SANDBOX_IDE_VOLUME=sandbox-intellij
-
-# --- Build sandbox Docker image + pull compose images ---
 # --- Docker Hub auth (avoids rate limiting) ---
 if [ -n "__DOCKERHUB_USER__" ] && [ "__DOCKERHUB_USER__" != "__" ]; then
     echo "==> Logging into Docker Hub..."
-    echo "__DOCKERHUB_TOKEN__" | sudo -u ubuntu docker login -u "__DOCKERHUB_USER__" --password-stdin
+    sudo -u ubuntu sg docker -c "echo __DOCKERHUB_TOKEN__ | docker login -u __DOCKERHUB_USER__ --password-stdin"
 fi
 
-echo "==> Building sandbox image..."
-build_status "building-image"
-sudo -u ubuntu docker build -f Dockerfile.sandbox -t posthog-sandbox:latest .
-
-echo "==> Pulling compose images..."
-build_status "pulling-images"
-sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml pull --ignore-buildable
-
-# --- Create shared Docker volumes ---
-echo "==> Creating Docker volumes..."
-sudo -u ubuntu bash -c '
-for vol in sandbox-uv-cache sandbox-pnpm-store sandbox-db-cache sandbox-cargo-target sandbox-intellij; do
-    docker volume create "$vol"
-done
-for vol in sandbox-db-cache sandbox-cargo-target sandbox-intellij; do
-    docker run --rm -v "$vol:/data" alpine chmod 777 /data
-done
-'
-
-# --- Boot the stack and run migrations ---
-echo "==> Booting stack for initial migration..."
-build_status "migrating"
-cd /home/ubuntu/posthog
-sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml up -d
-
-echo "==> Waiting for stack to be healthy..."
-for i in $(seq 1 300); do
-    if curl -sf http://localhost:8000/_health > /dev/null 2>&1; then
-        echo "Stack is healthy!"
-        break
-    fi
-    if [ "$i" -eq 300 ]; then
-        echo "ERROR: Stack did not become healthy in time"
-        sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml logs app --tail=50
-        build_status "failed"
-        exit 1
-    fi
-    sleep 2
-done
-
-# Graceful stop — ClickHouse and Kafka don't like hard kills
-echo "==> Stopping stack..."
-sudo -u ubuntu -E docker compose -f docker-compose.sandbox.yml stop
+# --- Build database cache (same command as local) ---
+echo "==> Building database cache..."
+build_status "building-cache"
+apt-get install -y -qq python3-yaml
+sudo -u ubuntu sg docker -c "python3 bin/sandbox rebuild-cache"
 
 # --- Clean up for snapshotting ---
 echo "==> Cleaning up..."
