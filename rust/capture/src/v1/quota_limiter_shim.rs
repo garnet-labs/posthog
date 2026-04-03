@@ -208,7 +208,7 @@ mod tests {
                 pyroscope_sample_rate: 100,
             },
             capture_v1_kafka_clusters: String::new(),
-            capture_v1_kafka_produce_timeout_ms: 15000,
+            capture_v1_kafka_produce_timeout_ms: 25000,
         }
     }
 

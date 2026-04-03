@@ -262,7 +262,7 @@ pub struct Config {
 
     /// Max time (ms) to wait for all delivery acks after enqueue (v1 sink).
     /// Shared across all clusters — not per-cluster.
-    #[envconfig(default = "15000")]
+    #[envconfig(default = "25000")]
     pub capture_v1_kafka_produce_timeout_ms: u64,
 }
 

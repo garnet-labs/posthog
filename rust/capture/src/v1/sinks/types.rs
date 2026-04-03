@@ -54,6 +54,15 @@ impl SinkConfig {
                 "cluster {} has empty hosts",
                 name.as_str()
             );
+            let msg_timeout = Duration::from_millis(cfg.message_timeout_ms as u64);
+            anyhow::ensure!(
+                self.produce_timeout >= msg_timeout,
+                "cluster {}: produce_timeout ({:?}) must be >= message_timeout_ms ({:?}) \
+                 to avoid ghost deliveries after application-level timeout",
+                name.as_str(),
+                self.produce_timeout,
+                msg_timeout,
+            );
         }
         Ok(())
     }
