@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use common_types::error_tracking::FrameId;
+use common_types::error_tracking::{FrameId, RawFrameId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use symbolic::common::Name;
@@ -215,6 +215,7 @@ impl RawAppleFrame {
             .enumerate()
             .map(|(i, info)| {
                 let mut frame = self.build_resolved_frame(info, debug_image);
+                frame.frame_id = RawFrameId::new(self.frame_id(), team_id).to_full(i as i32);
 
                 // Attach source context to every inlined layer independently.
                 // Each layer has its own line number, and each gets a unique

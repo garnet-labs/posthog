@@ -84,18 +84,7 @@ impl RawFrame {
 
             RawFrame::Dart(frame) => (to_vec(Ok(frame.into())), "dart"),
             RawFrame::Apple(frame) => {
-                let resolved = frame.resolve(team_id, catalog, debug_images).await;
-                // Apple inlined frames share the same physical address and therefore
-                // the same hash_id. Each logical layer gets its own unique identity
-                // via the /part suffix (inlined index), exactly as Java does.
-                let resolved = resolved.map(|mut fs| {
-                    fs.iter_mut().enumerate().for_each(|(idx, f)| {
-                        f.frame_id =
-                            RawFrameId::new(frame.frame_id(), team_id).to_full(idx as i32);
-                    });
-                    fs
-                });
-                (resolved, "apple")
+                (frame.resolve(team_id, catalog, debug_images).await, "apple")
             }
             RawFrame::Php(frame) => (to_vec(Ok(frame.into())), "php"),
             RawFrame::Python(frame) => (to_vec(Ok(frame.into())), "python"),
