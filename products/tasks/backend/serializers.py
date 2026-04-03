@@ -78,6 +78,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "repository",
             "github_integration",
             "repositories",
+            "signal_report",
             "json_schema",
             "internal",
             "latest_run",
@@ -133,6 +134,11 @@ class TaskSerializer(serializers.ModelSerializer):
                 data["repositories"] = [entry]
 
         return super().to_internal_value(data)
+
+    def validate_signal_report(self, value):
+        if value and value.team_id != self.context["team"].id:
+            raise serializers.ValidationError("Signal report must belong to the same team")
+        return value
 
     def create(self, validated_data):
         repositories_data = validated_data.pop("task_repositories", [])

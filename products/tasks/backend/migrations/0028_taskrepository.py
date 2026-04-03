@@ -27,7 +27,7 @@ def forwards_func(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("posthog", "0901_add_object_property_type"),
-        ("tasks", "0025_task_internal"),
+        ("tasks", "0027_task_signal_report_idx"),
     ]
 
     operations = [
