@@ -4,13 +4,14 @@ from urllib.parse import urlencode
 
 import pytest
 from posthog.test.base import APIBaseTest
-from posthog.api.oauth.test_dcr import generate_rsa_key
 
 from django.conf import settings
 from django.core.cache import cache
 from django.test import override_settings
 
 from rest_framework.test import APIClient
+
+from posthog.api.oauth.test_dcr import generate_rsa_key
 
 from ee.api.agentic_provisioning.signature import compute_signature
 from ee.api.agentic_provisioning.views import AUTH_CODE_CACHE_PREFIX
