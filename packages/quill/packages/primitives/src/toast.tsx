@@ -99,7 +99,7 @@ const ToastCard = React.forwardRef<HTMLDivElement, ToastCardProps>(
                     </div>
                 )}
                 {onDismiss && (
-                    <Button variant="ghost" size="icon-sm" className={cn("absolute top-2 right-2", !toastTitle && toastDescription && "top-1.5")} onClick={onDismiss}>
+                    <Button size="icon-sm" className={cn("absolute top-2 right-2", !toastTitle && toastDescription && "top-1.5")} onClick={onDismiss}>
                         <XIcon className="size-3.5" />
                     </Button>
                 )}
