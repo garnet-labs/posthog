@@ -165,71 +165,94 @@ def _get_discovered_tables(
 ) -> tuple[dict[str, tuple[str | None, str, str]], bool]:
     selected_schema = _normalize_selected_schema(schema)
     qualify_with_schema = selected_schema is None
-
-    if selected_schema is not None:
-        cursor.execute(
-            """
-            SELECT schemaname AS schema_name, tablename AS table_name
-            FROM pg_tables
-            WHERE schemaname = %(schema)s
-            UNION ALL
-            SELECT schemaname AS schema_name, matviewname AS table_name
-            FROM pg_matviews
-            WHERE schemaname = %(schema)s
-            ORDER BY schema_name, table_name
-            """,
-            {"schema": selected_schema},
-        )
-    else:
-        system_schema_placeholders, system_schema_params = _build_named_value_placeholders(
-            "system_schema", SYSTEM_POSTGRES_SCHEMAS
-        )
-        cursor.execute(
-            f"""
-            SELECT schemaname AS schema_name, tablename AS table_name
-            FROM pg_tables
-            WHERE schemaname NOT IN ({system_schema_placeholders})
-              AND schemaname NOT LIKE 'pg_temp_%%'
-              AND schemaname NOT LIKE 'pg_toast_temp_%%'
-            UNION ALL
-            SELECT schemaname AS schema_name, matviewname AS table_name
-            FROM pg_matviews
-            WHERE schemaname NOT IN ({system_schema_placeholders})
-              AND schemaname NOT LIKE 'pg_temp_%%'
-              AND schemaname NOT LIKE 'pg_toast_temp_%%'
-            ORDER BY schema_name, table_name
-            """,
-            system_schema_params,
-        )
-
-    discovered_rows = cursor.fetchall()
     is_duckdb = _is_duckdb_connection(cursor)
-    catalogs_by_table: dict[tuple[str, str], str | None] = dict.fromkeys(discovered_rows)
 
-    if is_duckdb and discovered_rows:
-        source_schemas = sorted({schema_name for schema_name, _table_name in discovered_rows})
-        schema_placeholders, schema_params = _build_named_value_placeholders("schema", source_schemas)
-        cursor.execute(
-            f"""
-            SELECT table_catalog, table_schema, table_name
-            FROM information_schema.tables
-            WHERE table_schema IN ({schema_placeholders})
-            """,
-            schema_params,
-        )
-        for table_catalog, table_schema, table_name in cursor.fetchall():
-            pair = (table_schema, table_name)
-            if pair in catalogs_by_table and catalogs_by_table[pair] is None:
-                catalogs_by_table[pair] = table_catalog
+    if is_duckdb:
+        cursor.execute("SELECT current_database()")
+        row = cursor.fetchone()
+        current_database = str(row[0]) if row and row[0] is not None else None
 
-    all_tables = {
-        _get_display_table_name(schema_name, table_name, qualify_with_schema=qualify_with_schema): (
-            catalogs_by_table[(schema_name, table_name)],
-            schema_name,
-            table_name,
-        )
-        for schema_name, table_name in discovered_rows
-    }
+        if selected_schema is not None:
+            cursor.execute(
+                """
+                SELECT table_catalog, table_schema, table_name
+                FROM information_schema.tables
+                WHERE table_catalog = %(current_database)s
+                  AND table_schema = %(schema)s
+                ORDER BY table_schema, table_name
+                """,
+                {"current_database": current_database, "schema": selected_schema},
+            )
+        else:
+            system_schema_placeholders, system_schema_params = _build_named_value_placeholders(
+                "system_schema", SYSTEM_POSTGRES_SCHEMAS
+            )
+            cursor.execute(
+                f"""
+                SELECT table_catalog, table_schema, table_name
+                FROM information_schema.tables
+                WHERE table_catalog = %(current_database)s
+                  AND table_schema NOT IN ({system_schema_placeholders})
+                ORDER BY table_schema, table_name
+                """,
+                {"current_database": current_database, **system_schema_params},
+            )
+
+        discovered_rows = cursor.fetchall()
+        all_tables = {
+            _get_display_table_name(schema_name, table_name, qualify_with_schema=qualify_with_schema): (
+                table_catalog,
+                schema_name,
+                table_name,
+            )
+            for table_catalog, schema_name, table_name in discovered_rows
+        }
+    else:
+        if selected_schema is not None:
+            cursor.execute(
+                """
+                SELECT schemaname AS schema_name, tablename AS table_name
+                FROM pg_tables
+                WHERE schemaname = %(schema)s
+                UNION ALL
+                SELECT schemaname AS schema_name, matviewname AS table_name
+                FROM pg_matviews
+                WHERE schemaname = %(schema)s
+                ORDER BY schema_name, table_name
+                """,
+                {"schema": selected_schema},
+            )
+        else:
+            system_schema_placeholders, system_schema_params = _build_named_value_placeholders(
+                "system_schema", SYSTEM_POSTGRES_SCHEMAS
+            )
+            cursor.execute(
+                f"""
+                SELECT schemaname AS schema_name, tablename AS table_name
+                FROM pg_tables
+                WHERE schemaname NOT IN ({system_schema_placeholders})
+                  AND schemaname NOT LIKE 'pg_temp_%%'
+                  AND schemaname NOT LIKE 'pg_toast_temp_%%'
+                UNION ALL
+                SELECT schemaname AS schema_name, matviewname AS table_name
+                FROM pg_matviews
+                WHERE schemaname NOT IN ({system_schema_placeholders})
+                  AND schemaname NOT LIKE 'pg_temp_%%'
+                  AND schemaname NOT LIKE 'pg_toast_temp_%%'
+                ORDER BY schema_name, table_name
+                """,
+                system_schema_params,
+            )
+
+        discovered_rows = cursor.fetchall()
+        all_tables = {
+            _get_display_table_name(schema_name, table_name, qualify_with_schema=qualify_with_schema): (
+                None,
+                schema_name,
+                table_name,
+            )
+            for schema_name, table_name in discovered_rows
+        }
 
     if names is None:
         return all_tables, qualify_with_schema

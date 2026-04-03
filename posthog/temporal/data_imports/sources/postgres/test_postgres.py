@@ -181,16 +181,17 @@ class TestPostgresSchemaDiscovery:
         assert "ANY(" not in second_query
         assert foreign_keys == {"analytics.events": [("user_id", "public.users", "id")]}
 
-    def test_get_schemas_tracks_duckdb_catalog_for_discovered_tables(self):
+    def test_get_schemas_for_duckdb_uses_current_catalog_only(self):
         connection = self._mock_connection(
-            [("public", "ducklake_view"), ("system", "query_log")],
-            [("__ducklake_metadata_ducklake", "public", "ducklake_view"), ("ducklake", "system", "query_log")],
+            [("ducklake", "system", "query_log")],
             [
-                ("public", "ducklake_view", "id", "integer", "NO", 1),
                 ("system", "query_log", "query_id", "varchar", "NO", 1),
             ],
         )
-        connection.cursor.return_value.__enter__.return_value.fetchone.return_value = ("DuckDB 1.4 (Duckgres)",)
+        connection.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
+            ("DuckDB 1.4 (Duckgres)",),
+            ("ducklake",),
+        ]
 
         with mock.patch(
             "posthog.temporal.data_imports.sources.postgres.postgres._connect_to_postgres",
@@ -205,8 +206,14 @@ class TestPostgresSchemaDiscovery:
                 schema="",
             )
 
-        assert schemas["public.ducklake_view"].source_catalog == "__ducklake_metadata_ducklake"
+        cursor = connection.cursor.return_value.__enter__.return_value
+        information_schema_query = str(cursor.execute.call_args_list[1].args[0])
+        information_schema_params = cursor.execute.call_args_list[1].args[1]
+
+        assert "table_catalog = %(current_database)s" in information_schema_query
+        assert information_schema_params["current_database"] == "ducklake"
         assert schemas["system.query_log"].source_catalog == "ducklake"
+        assert "public.ducklake_view" not in schemas
 
     def test_get_postgres_row_count_skips_blank_schema_browse(self):
         with mock.patch(
