@@ -287,8 +287,10 @@ AMI_ID=$(aws ec2 create-image \
     --query 'ImageId' \
     --output text)
 
-echo "==> Waiting for AMI to be available..."
-aws ec2 wait image-available --region "$REGION" --image-ids "$AMI_ID"
+echo "==> Waiting for AMI to be available (100GB snapshot, may take 15-20 min)..."
+# Default waiter: 40 attempts × 15s = 10 min, which isn't enough for a 100GB EBS snapshot.
+# Bump to 80 attempts (~20 min).
+AWS_MAX_ATTEMPTS=80 aws ec2 wait image-available --region "$REGION" --image-ids "$AMI_ID"
 
 echo ""
 echo "=== AMI Build Complete ==="
