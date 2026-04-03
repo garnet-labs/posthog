@@ -83,64 +83,68 @@ pub async fn warm_cache(
 
     let mut handles = Vec::with_capacity(total);
 
+    // Spawn all tasks immediately — the semaphore is acquired inside each task
+    // so the spawn loop doesn't block. This ensures the timeout below covers
+    // the full warming duration, not just the result-collection phase.
     for record in records {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let sem = semaphore.clone();
         let s3 = s3_client.clone();
         let bucket = bucket.to_string();
         let cache = ss_cache.clone();
         let parsers = parsers.clone();
 
         handles.push(tokio::spawn(async move {
-            let _permit = permit;
+            let _permit = sem.acquire_owned().await.unwrap();
             let result =
                 warm_single_entry(&s3, &bucket, &cache, &parsers, &record, byte_budget).await;
             (record.set_ref, result)
         }));
     }
 
-    let timeout = tokio::time::Duration::from_secs(config.cache_warming_timeout_seconds);
     let mut loaded: u64 = 0;
     let mut failed: u64 = 0;
     let mut skipped: u64 = 0;
     let mut bytes_loaded: u64 = 0;
 
-    let results = match tokio::time::timeout(timeout, async {
-        let mut results = Vec::with_capacity(handles.len());
-        for handle in handles {
-            results.push(handle.await);
-        }
-        results
-    })
-    .await
-    {
-        Ok(results) => results,
-        Err(_) => {
-            warn!(
-                timeout_seconds = config.cache_warming_timeout_seconds,
-                loaded, failed, skipped, "Cache warming timed out, proceeding with partial warm"
-            );
-            return Ok(());
-        }
-    };
+    // Collect results one at a time under a shared deadline. If we exceed the
+    // timeout, abort remaining tasks so they don't compete with real traffic
+    // after the pod is marked ready.
+    let deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.cache_warming_timeout_seconds);
+    let mut timed_out = false;
 
-    for result in results {
-        match result {
-            Ok((_, Ok(Some(bytes)))) => {
+    for handle in handles.iter_mut() {
+        match tokio::time::timeout_at(deadline, handle).await {
+            Ok(Ok((_, Ok(Some(bytes))))) => {
                 loaded += 1;
                 bytes_loaded += bytes as u64;
             }
-            Ok((_, Ok(None))) => {
+            Ok(Ok((_, Ok(None)))) => {
                 skipped += 1;
             }
-            Ok((ref_name, Err(e))) => {
+            Ok(Ok((ref_name, Err(e)))) => {
                 warn!(set_ref = %ref_name, error = %e, "Failed to warm symbol set");
                 failed += 1;
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!(error = %e, "Warming task panicked");
                 failed += 1;
             }
+            Err(_) => {
+                timed_out = true;
+                break;
+            }
         }
+    }
+
+    if timed_out {
+        for handle in &handles {
+            handle.abort();
+        }
+        warn!(
+            timeout_seconds = config.cache_warming_timeout_seconds,
+            loaded, failed, skipped, "Cache warming timed out, aborting remaining tasks"
+        );
     }
 
     let elapsed = start.elapsed();
