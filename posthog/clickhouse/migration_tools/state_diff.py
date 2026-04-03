@@ -13,6 +13,21 @@ from posthog.clickhouse.migration_tools.schema_introspect import TableSchema
 
 logger = logging.getLogger("migrations")
 
+
+def _normalize_type(t: str) -> str:
+    """Normalize a CH column type for comparison.
+
+    CH system.columns strips timezone from DateTime64 types:
+    'DateTime64(6, 'UTC')' in YAML → 'DateTime64(6)' in system.columns.
+    Also strips trailing whitespace and normalizes case for Nullable/LowCardinality wrappers.
+    """
+    import re
+
+    # Strip timezone from DateTime64(N, 'TZ') → DateTime64(N)
+    t = re.sub(r"DateTime64\((\d+),\s*'[^']+'\)", r"DateTime64(\1)", t)
+    return t.strip()
+
+
 # Sentinel value used in schema YAML to indicate the value should come from Django settings
 _FROM_SETTINGS_SENTINEL = "__from_settings__"
 
@@ -93,8 +108,14 @@ def _generate_create_sql(
             f"SETTINGS\n{settings_block}"
         )
 
-    # MergeTree family
-    engine_call = f"{table.engine}()"
+    # MergeTree family — Replicated engines need explicit ZK path + replica.
+    # Path uses database.table to be unique per table. The {shard} and {replica} macros
+    # are resolved by CH from the server config at CREATE time.
+    if "replicated" in table.engine.lower():
+        zk_path = f"/clickhouse/tables/{{shard}}/{database}.{table.name}"
+        engine_call = f"{table.engine}('{zk_path}', '{{replica}}')"
+    else:
+        engine_call = f"{table.engine}()"
     partition = f"\nPARTITION BY {table.partition_by}" if table.partition_by else ""
     order_by = f"\nORDER BY ({', '.join(table.order_by)})" if table.order_by else ""
 
@@ -215,7 +236,11 @@ def _collect_changes(
         desired_cols = {c.name: c for c in desired_table.columns}
         current_cols = {c.name: c for c in current_table.columns}
 
-        if desired_table.engine.lower() in ("kafka", "dictionary") and desired_cols != current_cols:
+        desired_col_types = {n: _normalize_type(c.type) for n, c in desired_cols.items()}
+        current_col_types = {n: _normalize_type(c.type) for n, c in current_cols.items()}
+        if desired_table.engine.lower() in ("kafka", "dictionary") and (
+            set(desired_cols.keys()) != set(current_cols.keys()) or desired_col_types != current_col_types
+        ):
             drops.append(
                 StateDiff(
                     action="drop",
@@ -279,7 +304,7 @@ def _collect_changes(
         for col_name in sorted(set(desired_cols.keys()) & set(current_cols.keys())):
             desired_col = desired_cols[col_name]
             current_col = current_cols[col_name]
-            if desired_col.type != current_col.type:
+            if _normalize_type(desired_col.type) != _normalize_type(current_col.type):
                 alters.append(
                     StateDiff(
                         action="alter_modify_column",
