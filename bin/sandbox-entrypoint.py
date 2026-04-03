@@ -144,7 +144,7 @@ def copy_claude_auth(uid: int, gid: int) -> None:
             shutil.copy2(src, claude_dir / name)
 
     src = Path("/tmp/claude-auth.json")
-    if src.is_file():
+    if src.exists():
         shutil.copy2(src, SANDBOX_HOME / ".claude.json")
 
     run(["chown", "-R", f"{uid}:{gid}", str(SANDBOX_HOME)])
