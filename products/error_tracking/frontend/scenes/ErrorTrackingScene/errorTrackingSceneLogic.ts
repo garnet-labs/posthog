@@ -46,7 +46,7 @@ export const errorTrackingSceneLogic = kea<errorTrackingSceneLogicType>([
             issueFiltersLogic({ logicKey: ERROR_TRACKING_SCENE_LOGIC_KEY }),
             ['dateRange', 'filterTestAccounts', 'filterGroup', 'mergedFilterGroup', 'searchQuery'],
             issueQueryOptionsLogic({ logicKey: ERROR_TRACKING_SCENE_LOGIC_KEY }),
-            ['assignee', 'orderBy', 'orderDirection', 'status', 'useQueryV3'],
+            ['assignee', 'orderBy', 'orderDirection', 'status', 'useQueryV3', 'forceQueryV3'],
             settingsLogic({
                 logicKey: ERROR_TRACKING_LOGIC_KEY,
                 sectionId: 'environment-error-tracking',
@@ -91,6 +91,7 @@ export const errorTrackingSceneLogic = kea<errorTrackingSceneLogicType>([
                 s.searchQuery,
                 s.orderDirection,
                 s.useQueryV3,
+                s.forceQueryV3,
             ],
             (
                 orderBy,
@@ -101,7 +102,8 @@ export const errorTrackingSceneLogic = kea<errorTrackingSceneLogicType>([
                 mergedFilterGroup,
                 searchQuery,
                 orderDirection,
-                useQueryV3
+                useQueryV3,
+                forceQueryV3
             ): DataTableNode => {
                 return errorTrackingQuery({
                     orderBy,
@@ -114,7 +116,7 @@ export const errorTrackingSceneLogic = kea<errorTrackingSceneLogicType>([
                     searchQuery,
                     columns: ['error', 'volume', 'occurrences', 'sessions', 'users'],
                     orderDirection,
-                    useQueryV3,
+                    useQueryV3: forceQueryV3 && useQueryV3,
                 })
             },
         ],
