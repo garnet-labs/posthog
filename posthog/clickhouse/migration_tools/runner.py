@@ -131,6 +131,8 @@ def _run_migration_ops(migration_module_path: str, ops_attr: str) -> None:
         elif hasattr(op, "fn"):
             client = cluster.any_host(lambda c: c).result()
             op.fn(client)
+        else:
+            logger.warning("Skipping migration operation with no 'sql' or 'fn' attribute: %s", type(op).__name__)
 
 
 def run_migration_up(migration_name: str) -> None:

@@ -35,8 +35,6 @@ def _resolve_setting(key: str) -> str:
 
 @dataclass
 class StateDiff:
-    # "create", "alter_add_column", "alter_drop_column",
-    # "alter_modify_column", "drop", "recreate_mv", "recreate"
     action: str
     table: str
     detail: str
@@ -159,7 +157,7 @@ def _collect_changes(
     database: str,
     cluster: str,
 ) -> tuple[list[StateDiff], list[StateDiff], list[StateDiff]]:
-    """Returns (extra_drops, alters, recreates) for tables that exist in both desired and current."""
+    """Handles tables present in both desired and current: engine mismatches, MV SELECT changes, column diffs."""
     drops: list[StateDiff] = []
     alters: list[StateDiff] = []
     recreates: list[StateDiff] = []
@@ -316,19 +314,20 @@ def diff_state(
 ) -> list[StateDiff]:
     """Returns diffs sorted in dependency order: drops, alters, creates, recreates."""
     db = database or desired.database
-    cl = cluster or desired.cluster
+    cluster_name = cluster or desired.cluster
 
     desired_names = set(desired.tables.keys())
     current_names = set(current.keys())
 
     drops = _collect_drops(desired_names, current, db)
-    creates = _collect_creates(desired, current_names, db, cl)
-    change_drops, alters, recreates = _collect_changes(desired, current, db, cl)
+    creates = _collect_creates(desired, current_names, db, cluster_name)
+    change_drops, alters, recreates = _collect_changes(desired, current, db, cluster_name)
     drops.extend(change_drops)
 
-    # Sort: higher tier drops first (MVs before distributed before local)
+    max_tier = 3  # MaterializedView/Dictionary — highest tier drops first
+
     def _drop_sort_key(d: StateDiff) -> tuple[int, str]:
-        tier = 3 - engine_tier(current.get(d.table, TableSchema(name=d.table, engine="")).engine)
+        tier = max_tier - engine_tier(current.get(d.table, TableSchema(name=d.table, engine="")).engine)
         return (tier, d.table)
 
     sort_key = _tier_sort_key(desired)

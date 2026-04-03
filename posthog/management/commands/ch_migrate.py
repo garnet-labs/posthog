@@ -132,7 +132,6 @@ class Command(BaseCommand):
     def _compute_diffs(
         self, database: str, schema_dir: Any, cluster_filter: str | None = None
     ) -> tuple[list, str | None]:
-        """Connects to the correct ClickHouse host per logical cluster declared in YAML."""
         from collections import defaultdict
 
         from posthog.clickhouse.migration_tools.desired_state import parse_desired_state_dir
@@ -543,26 +542,29 @@ def _execute_step_with_retry(
     from posthog.clickhouse.migration_tools.runner import execute_migration_step
     from posthog.clickhouse.migration_tools.tracking import StepRecord
 
+    def _record(success: bool) -> None:
+        record_step_fn(
+            client=client,
+            record=StepRecord(
+                migration_number=0,
+                migration_name=step.comment or "reconcile",
+                step_index=step_index,
+                host=hostname,
+                node_role="*",
+                direction="up",
+                checksum=checksum,
+                success=success,
+            ),
+            database=database,
+        )
+
     print(f"  Step {step_index}: {step.comment}...", end=" ", flush=True)
 
     for attempt in range(max_retries):
         try:
             execute_migration_step(cluster, step, rendered_sql)
             print("OK")
-            record_step_fn(
-                client=client,
-                record=StepRecord(
-                    migration_number=0,
-                    migration_name=step.comment or "reconcile",
-                    step_index=step_index,
-                    host=hostname,
-                    node_role="*",
-                    direction="up",
-                    checksum=checksum,
-                    success=True,
-                ),
-                database=database,
-            )
+            _record(success=True)
             return True
         except Exception as exc:
             if attempt < max_retries - 1:
@@ -571,21 +573,8 @@ def _execute_step_with_retry(
                 time.sleep(wait)
             else:
                 print(f"FAILED after {max_retries} attempts: {exc}")
-                record_step_fn(
-                    client=client,
-                    record=StepRecord(
-                        migration_number=0,
-                        migration_name=step.comment or "reconcile",
-                        step_index=step_index,
-                        host=hostname,
-                        node_role="*",
-                        direction="up",
-                        checksum=checksum,
-                        success=False,
-                    ),
-                    database=database,
-                )
+                _record(success=False)
                 print("\nApply halted. Review the error and retry.")
                 return False
 
-    return False  # unreachable, but satisfies type checker
+    return False

@@ -157,10 +157,12 @@ def generate_rollback_steps(diffs: list[StateDiff]) -> list[tuple[ManifestStep, 
 
 
 def _extract_column_name_from_add(sql: str) -> str | None:
-    parts = sql.upper().split("ADD COLUMN")
-    if len(parts) < 2:
+    upper = sql.upper()
+    marker = "ADD COLUMN"
+    idx = upper.find(marker)
+    if idx == -1:
         return None
-    remainder = sql[sql.upper().index("ADD COLUMN") + len("ADD COLUMN") :].strip()
+    remainder = sql[idx + len(marker) :].strip()
     if remainder.upper().startswith("IF NOT EXISTS "):
         remainder = remainder[len("IF NOT EXISTS ") :].strip()
     return remainder.split()[0] if remainder.split() else None
