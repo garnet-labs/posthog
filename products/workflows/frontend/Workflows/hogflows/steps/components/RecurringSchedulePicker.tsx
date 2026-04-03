@@ -226,7 +226,11 @@ function SchedulePreview({ state, summary, previewOccurrences, timezone }: Sched
                         {timezone ? ` in ${timezone}` : ''}
                     </div>
                     <div className="space-y-1.5">
-                        <OccurrencesList occurrences={previewOccurrences} isFinite={state.endType !== 'never'} />
+                        <OccurrencesList
+                            occurrences={previewOccurrences}
+                            isFinite={state.endType !== 'never'}
+                            timezone={timezone}
+                        />
                     </div>
                 </div>
             )}

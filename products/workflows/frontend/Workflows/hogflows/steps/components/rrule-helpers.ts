@@ -216,6 +216,20 @@ export function computePreviewOccurrences(
     }
 }
 
+/**
+ * Convert a "fake UTC" date (where UTC values represent local time in the schedule
+ * timezone, as produced by computePreviewOccurrences/rrule) to a real timestamp.
+ *
+ * RRule expands dates using UTC values that actually represent local times in the
+ * schedule timezone. This function reinterprets those values as real moments in time.
+ * For example, a fake-UTC date of 2026-04-03T19:25:00Z representing 19:25 Europe/Riga
+ * becomes 2026-04-03T16:25:00Z (the actual UTC moment).
+ */
+export function fakeUtcToReal(date: Date, timezone?: string): dayjs.Dayjs {
+    const utcStr = dayjs(date).utc().format('YYYY-MM-DD HH:mm:ss')
+    return timezone ? dayjs.tz(utcStr, timezone) : dayjs(utcStr)
+}
+
 export function buildSummary(state: ScheduleState, startsAt: string | null): string {
     const freqLabel = state.frequency === 'daily' ? 'day' : state.frequency.replace('ly', '')
     const intervalStr = state.interval > 1 ? `${state.interval} ${freqLabel}s` : freqLabel

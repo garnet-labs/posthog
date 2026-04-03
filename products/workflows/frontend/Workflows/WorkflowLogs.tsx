@@ -1,7 +1,16 @@
 import { useValues } from 'kea'
+import { type ReactNode, useMemo, useState } from 'react'
 
 import { IconClock } from '@posthog/icons'
-import { LemonCollapse, LemonDivider, ProfilePicture, Spinner, Tooltip } from '@posthog/lemon-ui'
+import {
+    LemonButton,
+    LemonCollapse,
+    LemonDivider,
+    LemonTable,
+    ProfilePicture,
+    Spinner,
+    Tooltip,
+} from '@posthog/lemon-ui'
 
 import { ListHog, SleepingHog } from 'lib/components/hedgehogs'
 import PropertyFiltersDisplay from 'lib/components/PropertyFilters/components/PropertyFiltersDisplay'
@@ -10,6 +19,12 @@ import { dayjs } from 'lib/dayjs'
 import { LogsViewer } from 'scenes/hog-functions/logs/LogsViewer'
 
 import { batchWorkflowJobsLogic } from './batchWorkflowJobsLogic'
+import {
+    computePreviewOccurrences,
+    fakeUtcToReal,
+    isOneTimeSchedule,
+    parseRRuleToState,
+} from './hogflows/steps/components/rrule-helpers'
 import { HogFlowBatchJob } from './hogflows/types'
 import { renderWorkflowLogMessage } from './logs/log-utils'
 import { WorkflowLogicProps, workflowLogic } from './workflowLogic'
@@ -97,8 +112,94 @@ function BatchRunInfo({ job }: { job: HogFlowBatchJob }): JSX.Element {
     )
 }
 
+const COMPACT_VISIBLE = 2
+
+interface UpcomingOccurrence {
+    date: Date
+    real: dayjs.Dayjs
+    displayDate: string
+    displayTime: string
+}
+
+function UpcomingOccurrences(): JSX.Element | null {
+    const { currentSchedule } = useValues(workflowLogic)
+    const [expanded, setExpanded] = useState(false)
+
+    const timezone = currentSchedule?.timezone
+
+    const occurrences = useMemo(() => {
+        if (!currentSchedule?.rrule || isOneTimeSchedule(currentSchedule.rrule)) {
+            return []
+        }
+        const parsed = parseRRuleToState(currentSchedule.rrule)
+        return computePreviewOccurrences(parsed, currentSchedule.starts_at, currentSchedule.timezone)
+    }, [currentSchedule])
+
+    const tzSuffix = timezone && timezone !== dayjs.tz.guess() ? ` ${timezone}` : ''
+
+    const futureOccurrences: UpcomingOccurrence[] = occurrences
+        .map((date) => {
+            const d = dayjs(date).utc()
+            return {
+                date,
+                real: fakeUtcToReal(date, timezone),
+                displayDate: d.format('ddd, MMM D YYYY'),
+                displayTime: d.format('h:mm A') + tzSuffix,
+            }
+        })
+        .filter((o) => o.real.isAfter(dayjs()))
+
+    if (futureOccurrences.length === 0) {
+        return null
+    }
+
+    const hasMore = futureOccurrences.length > COMPACT_VISIBLE
+    const visible = expanded ? futureOccurrences : futureOccurrences.slice(0, COMPACT_VISIBLE)
+
+    return (
+        <div>
+            <SectionHeading>Upcoming</SectionHeading>
+            <LemonTable
+                dataSource={visible}
+                columns={[
+                    {
+                        title: 'Date',
+                        render: (_, row) => row.displayDate,
+                    },
+                    {
+                        title: 'Time',
+                        render: (_, row) => row.displayTime,
+                    },
+                    {
+                        title: '',
+                        align: 'right' as const,
+                        render: (_, row) => <span className="text-muted whitespace-nowrap">{row.real.fromNow()}</span>,
+                    },
+                ]}
+                rowKey={(row) => row.date.toISOString()}
+                size="small"
+                footer={
+                    hasMore ? (
+                        <LemonButton fullWidth center onClick={() => setExpanded(!expanded)}>
+                            {expanded
+                                ? 'Show less'
+                                : `Show ${futureOccurrences.length - COMPACT_VISIBLE} more upcoming`}
+                        </LemonButton>
+                    ) : undefined
+                }
+            />
+        </div>
+    )
+}
+
+function SectionHeading({ children }: { children: ReactNode }): JSX.Element {
+    return <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">{children}</h3>
+}
+
 function WorkflowBatchRunLogs(props: WorkflowLogicProps): JSX.Element {
     const { futureJobs, pastJobs, batchWorkflowJobsLoading } = useValues(batchWorkflowJobsLogic(props))
+    const { currentSchedule } = useValues(workflowLogic)
+    const hasSchedule = !!currentSchedule?.rrule && !isOneTimeSchedule(currentSchedule.rrule)
 
     if (batchWorkflowJobsLoading) {
         return (
@@ -110,12 +211,15 @@ function WorkflowBatchRunLogs(props: WorkflowLogicProps): JSX.Element {
 
     if (!futureJobs.length && !pastJobs.length) {
         return (
-            <div className="flex flex-col bg-surface-primary rounded px-4 py-8 items-center text-center mx-auto">
-                <ListHog width="100" height="100" className="mb-4" />
-                <h2 className="text-xl leading-tight">No batch workflow jobs have been run yet</h2>
-                <p className="text-sm text-balance text-tertiary">
-                    Once a batch workflow job is triggered, execution logs will appear here.
-                </p>
+            <div className="flex flex-col gap-4">
+                <UpcomingOccurrences />
+                <div className="flex flex-col bg-surface-primary rounded px-4 py-8 items-center text-center mx-auto">
+                    <ListHog width="100" height="100" className="mb-4" />
+                    <h2 className="text-xl leading-tight">No batch workflow jobs have been run yet</h2>
+                    <p className="text-sm text-balance text-tertiary">
+                        Once a batch workflow job is triggered, execution logs will appear here.
+                    </p>
+                </div>
             </div>
         )
     }
@@ -129,10 +233,18 @@ function WorkflowBatchRunLogs(props: WorkflowLogicProps): JSX.Element {
             }))}
         />
     ) : (
-        <div className="border rounded bg-surface-primary p-2 text-muted">No past jobs.</div>
+        <div className="border rounded bg-surface-primary p-2 text-muted">No past invocations yet.</div>
     )
 
-    return <div className="flex flex-col gap-2">{pastJobsSection}</div>
+    return (
+        <div className="flex flex-col gap-4">
+            <UpcomingOccurrences />
+            <div>
+                {hasSchedule && <SectionHeading>Past invocations</SectionHeading>}
+                {pastJobsSection}
+            </div>
+        </div>
+    )
 }
 
 export function WorkflowLogs({ id }: WorkflowLogsProps): JSX.Element {

@@ -2,12 +2,21 @@ import { LemonTag } from '@posthog/lemon-ui'
 
 import { dayjs } from 'lib/dayjs'
 
+import { fakeUtcToReal } from './rrule-helpers'
+
 const VISIBLE_HEAD = 4
 const VISIBLE_TAIL = 1
 
-export function OccurrencesList({ occurrences, isFinite }: { occurrences: Date[]; isFinite: boolean }): JSX.Element {
-    const now = new Date()
-    const futureOccurrences = occurrences.filter((date) => date > now)
+export function OccurrencesList({
+    occurrences,
+    isFinite,
+    timezone,
+}: {
+    occurrences: Date[]
+    isFinite: boolean
+    timezone?: string
+}): JSX.Element {
+    const futureOccurrences = occurrences.filter((date) => fakeUtcToReal(date, timezone).isAfter(dayjs()))
     const total = futureOccurrences.length
     const needsCollapse = isFinite && total > VISIBLE_HEAD + VISIBLE_TAIL + 1
     const lastIndex = total - 1
