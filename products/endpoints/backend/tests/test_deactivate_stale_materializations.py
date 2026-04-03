@@ -84,6 +84,7 @@ class TestDeactivateStaleMaterializationsTask(BaseTest):
             materialization_created_at=now - timedelta(days=45),
         )
         saved_query_id = version.saved_query_id
+        assert saved_query_id is not None
 
         deactivate_stale_materializations()
 
