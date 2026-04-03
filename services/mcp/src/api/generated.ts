@@ -12781,6 +12781,16 @@ export namespace Schemas {
       bucket_overrides: EndpointResponseBucketOverrides;
       /** Column names and types from the query's SELECT clause. */
       columns: EndpointColumn[];
+      /**
+       * Backing saved query ID used for organizing this endpoint in the SQL editor sidebar.
+       * @nullable
+       */
+      saved_query_id: string | null;
+      /**
+       * Folder used to organize this endpoint in the SQL editor sidebar.
+       * @nullable
+       */
+      folder_id: string | null;
     }
 
     /**
@@ -12911,6 +12921,16 @@ export namespace Schemas {
       bucket_overrides: EndpointVersionResponseBucketOverrides;
       /** Column names and types from the query's SELECT clause. */
       columns: EndpointColumn[];
+      /**
+       * Backing saved query ID used for organizing this endpoint in the SQL editor sidebar.
+       * @nullable
+       */
+      saved_query_id: string | null;
+      /**
+       * Folder used to organize this endpoint in the SQL editor sidebar.
+       * @nullable
+       */
+      folder_id: string | null;
       /** Version number. */
       version: number;
       /** Version unique identifier (UUID). */

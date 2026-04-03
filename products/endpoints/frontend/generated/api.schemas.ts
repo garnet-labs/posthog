@@ -174,6 +174,16 @@ export interface EndpointResponseApi {
     bucket_overrides: EndpointResponseApiBucketOverrides
     /** Column names and types from the query's SELECT clause. */
     columns: EndpointColumnApi[]
+    /**
+     * Backing saved query ID used for organizing this endpoint in the SQL editor sidebar.
+     * @nullable
+     */
+    saved_query_id: string | null
+    /**
+     * Folder used to organize this endpoint in the SQL editor sidebar.
+     * @nullable
+     */
+    folder_id: string | null
 }
 
 export interface PaginatedEndpointResponseListApi {
@@ -320,6 +330,16 @@ export interface EndpointVersionResponseApi {
     bucket_overrides: EndpointVersionResponseApiBucketOverrides
     /** Column names and types from the query's SELECT clause. */
     columns: EndpointColumnApi[]
+    /**
+     * Backing saved query ID used for organizing this endpoint in the SQL editor sidebar.
+     * @nullable
+     */
+    saved_query_id: string | null
+    /**
+     * Folder used to organize this endpoint in the SQL editor sidebar.
+     * @nullable
+     */
+    folder_id: string | null
     /** Version number. */
     version: number
     /** Version unique identifier (UUID). */
