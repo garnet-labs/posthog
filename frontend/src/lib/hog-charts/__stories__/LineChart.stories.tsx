@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from '@storybook/react'
 import { LineChart, type LineChartProps } from '../charts/LineChart'
 import type { ChartTheme, GoalLine, LineChartConfig, Series } from '../core/types'
 
-// Static theme so stories don't depend on DOM CSS variables
 const theme: ChartTheme = {
     colors: ['#1d4aff', '#cd0f74', '#43827e', '#621da6', '#f04f58', '#e09b2b'],
     backgroundColor: '#ffffff',
@@ -17,8 +16,6 @@ const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 function makeSeries(key: string, data: number[], overrides?: Partial<Series>): Series {
     return { key, label: key, data, color: '', ...overrides }
 }
-
-// ── Meta ──
 
 const meta: Meta<LineChartProps> = {
     title: 'Charts/LineChart',
@@ -35,8 +32,6 @@ const meta: Meta<LineChartProps> = {
 export default meta
 
 type Story = StoryObj<LineChartProps>
-
-// ── Basic ──
 
 export const SingleSeries: Story = {
     args: {
@@ -55,8 +50,6 @@ export const MultipleSeries: Story = {
         ],
     },
 }
-
-// ── Line styles ──
 
 export const DashedLine: Story = {
     args: {
@@ -77,8 +70,6 @@ export const WithDataPoints: Story = {
     },
 }
 
-// ── Area fill ──
-
 export const AreaFill: Story = {
     args: {
         labels: dayLabels,
@@ -96,8 +87,6 @@ export const StackedAreas: Story = {
         ],
     },
 }
-
-// ── Grid and overlays ──
 
 export const WithGrid: Story = {
     args: {
@@ -132,8 +121,6 @@ export const WithCrosshair: Story = {
     },
 }
 
-// ── Scale modes ──
-
 export const LogScale: Story = {
     args: {
         labels: dayLabels,
@@ -153,8 +140,6 @@ export const PercentStack: Story = {
         config: { percentStackView: true, showGrid: true } satisfies LineChartConfig,
     },
 }
-
-// ── Edge cases ──
 
 export const GapsInData: Story = {
     args: {
@@ -216,8 +201,6 @@ export const HiddenSeries: Story = {
         config: { showGrid: true } satisfies LineChartConfig,
     },
 }
-
-// ── Axis formatting ──
 
 export const HiddenAxes: Story = {
     args: {

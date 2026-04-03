@@ -50,11 +50,8 @@ describe('hog-charts interaction', () => {
         })
 
         it('returns the index of the closest label when mouseX is between two points', () => {
-            // positions: a=100, b=200, c=300
             const xScale = (label: string): number | undefined => ({ a: 100, b: 200, c: 300 })[label]
-            // mouseX at 140 — closer to a (100) than b (200)
             expect(findNearestIndex(140, ['a', 'b', 'c'], xScale)).toBe(0)
-            // mouseX at 160 — closer to b (200) than a (100)
             expect(findNearestIndex(160, ['a', 'b', 'c'], xScale)).toBe(1)
         })
 

@@ -110,8 +110,7 @@ describe('hog-charts scales', () => {
         it('returns a log scale', () => {
             const series = [makeSeries({ key: 's1', data: [1, 10, 100] })]
             const scale = createYScale(series, dimensions, { scaleType: 'log' })
-            // log scale has base property
-            expect((scale as any).base).toBeTruthy()
+            expect('base' in scale).toBe(true)
         })
 
         it('clamps minimum to 1e-10 to avoid log(0)', () => {
@@ -176,7 +175,6 @@ describe('hog-charts scales', () => {
             const s2 = makeSeries({ key: 's2', data: [70, 30] })
             const result = computePercentStackData([s1, s2], ['a', 'b'])
             const s2Values = result.get('s2')!
-            // the top of the last stack layer should equal 1.0 at each point
             for (const v of s2Values) {
                 expect(v).toBeCloseTo(1, 5)
             }

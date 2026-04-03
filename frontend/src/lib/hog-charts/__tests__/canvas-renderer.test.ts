@@ -58,7 +58,6 @@ describe('hog-charts canvas-renderer', () => {
             const series = makeSeries({ key: 's1', data: [10, 50, 90] })
             const drawCtx = makeDrawContextWithGaps(ctx, labels, new Set([50]))
             drawLine(drawCtx, series)
-            // 'a' starts the path (moveTo), 'b' is skipped (Infinity), 'c' continues (lineTo)
             expect(ctx.moveTo).toHaveBeenCalledTimes(1)
             expect(ctx.lineTo).toHaveBeenCalledTimes(1)
         })
