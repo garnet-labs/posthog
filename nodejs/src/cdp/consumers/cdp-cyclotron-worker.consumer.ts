@@ -147,7 +147,12 @@ export class CdpCyclotronWorker<
     }
 
     protected async queueInvocationResults(invocations: CyclotronJobInvocationResult[]) {
-        await this.cyclotronJobQueue.queueInvocationResults(invocations)
+        // Collect any new invocations that need to be created as side effects (e.g., email queue routing)
+        const newInvocations = invocations.flatMap((r) => r.newInvocations ?? [])
+        await Promise.all([
+            this.cyclotronJobQueue.queueInvocationResults(invocations),
+            newInvocations.length > 0 ? this.cyclotronJobQueue.queueInvocations(newInvocations) : Promise.resolve(),
+        ])
     }
 
     public async start() {

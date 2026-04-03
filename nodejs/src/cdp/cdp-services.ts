@@ -42,6 +42,7 @@ export interface CdpCoreServices {
     nativeDestinationExecutorService: NativeDestinationExecutorService
     segmentDestinationExecutorService: SegmentDestinationExecutorService
     recipientTokensService: RecipientTokensService
+    emailService: EmailService
 }
 
 export type CdpCoreServicesConfig = Pick<
@@ -210,5 +211,6 @@ export function createCdpCoreServices(
         nativeDestinationExecutorService,
         segmentDestinationExecutorService,
         recipientTokensService,
+        emailService,
     }
 }

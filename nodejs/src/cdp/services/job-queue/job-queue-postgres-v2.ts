@@ -1,4 +1,5 @@
 import { chunk } from 'lodash'
+import { DateTime } from 'luxon'
 import { Gauge } from 'prom-client'
 
 import { parseJSON } from '~/utils/json-parse'
@@ -154,7 +155,9 @@ export class CyclotronJobQueuePostgresV2 {
                     await job.ack()
                 } else {
                     const stateBuffer = serializeState(result.invocation)
-                    await job.retry({ state: stateBuffer })
+                    const scheduledAt = result.invocation.queueScheduledAt
+                    const delayMs = scheduledAt ? Math.max(0, scheduledAt.toMillis() - DateTime.now().toMillis()) : 0
+                    await job.retry({ state: stateBuffer, delayMs })
                 }
             })
         )
