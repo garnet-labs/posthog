@@ -48,10 +48,10 @@ export function EditorFilterGroupTile({
                     <div className={clsx('flex items-baseline gap-2 font-semibold', headerExtra && 'flex-1')}>
                         <span>{title}</span>
                         {!isRowExpanded && collapsedSummary && (
-                            <span className="text-xs font-normal text-secondary flex-shrink">{collapsedSummary}</span>
+                            <span className="text-xs font-normal text-secondary shrink">{collapsedSummary}</span>
                         )}
                         {headerExtra && (
-                            <div className="ml-auto self-center flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <div className="ml-auto self-center shrink-0" onClick={(e) => e.stopPropagation()}>
                                 {headerExtra}
                             </div>
                         )}
