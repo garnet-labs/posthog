@@ -47,7 +47,6 @@ impl Context {
     pub fn metric_tags(&self) -> Vec<(&'static str, String)> {
         vec![
             ("path", self.path.clone()),
-            ("token_prefix", self.api_token.chars().take(10).collect()),
             ("attempt", self.attempt.to_string()),
         ]
     }

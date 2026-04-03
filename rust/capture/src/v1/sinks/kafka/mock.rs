@@ -54,8 +54,16 @@ impl MockProducer {
         self
     }
 
-    pub fn records(&self) -> Vec<ProduceRecord> {
-        self.records.lock().unwrap().clone()
+    pub fn record_count(&self) -> usize {
+        self.records.lock().unwrap().len()
+    }
+
+    pub fn with_records<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&[ProduceRecord]) -> R,
+    {
+        let guard = self.records.lock().unwrap();
+        f(&guard)
     }
 
     pub fn clear(&self) {

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use chrono::{DateTime, Utc};
 use rdkafka::error::RDKafkaErrorCode;
 
 use crate::config::{CaptureMode, ClusterName, V1KafkaClusterConfig};
-use crate::v1::sinks::kafka::producer::error_code_tag;
+use crate::v1::sinks::kafka::producer::ProduceError;
 
 /// Kafka topic routing for a processed event.
 /// `Drop` means the event should not be produced at all.
@@ -58,14 +59,58 @@ impl SinkConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// error_code_tag
+// ---------------------------------------------------------------------------
+
+/// Stable, low-cardinality snake_case tag for an RDKafkaErrorCode.
+/// Usable anywhere -- producer, sink, handler, logging.
+pub fn error_code_tag(code: RDKafkaErrorCode) -> &'static str {
+    match code {
+        RDKafkaErrorCode::QueueFull => "queue_full",
+        RDKafkaErrorCode::MessageSizeTooLarge => "message_size_too_large",
+        RDKafkaErrorCode::MessageTimedOut => "message_timed_out",
+        RDKafkaErrorCode::UnknownTopicOrPartition => "unknown_topic_or_partition",
+        RDKafkaErrorCode::TopicAuthorizationFailed => "topic_authorization_failed",
+        RDKafkaErrorCode::ClusterAuthorizationFailed => "cluster_authorization_failed",
+        RDKafkaErrorCode::InvalidMessage => "invalid_message",
+        RDKafkaErrorCode::InvalidMessageSize => "invalid_message_size",
+        RDKafkaErrorCode::NotLeaderForPartition => "not_leader_for_partition",
+        RDKafkaErrorCode::RequestTimedOut => "request_timed_out",
+        _ => "rdkafka_other",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Outcome
+// ---------------------------------------------------------------------------
+
 /// What happened when a publish attempt resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
+    /// Pre-resolution default for metrics emitted before outcome is known.
+    InFlight,
     Success,
     Timeout,
     RetriableError,
     FatalError,
 }
+
+impl Outcome {
+    pub fn as_tag(&self) -> &'static str {
+        match self {
+            Self::InFlight => "in_flight",
+            Self::Success => "success",
+            Self::Timeout => "timeout",
+            Self::RetriableError => "retriable_error",
+            Self::FatalError => "fatal_error",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SinkResult
+// ---------------------------------------------------------------------------
 
 /// Backend-agnostic trait for introspecting per-event publish results.
 pub trait SinkResult: Send + Sync {
@@ -74,56 +119,113 @@ pub trait SinkResult: Send + Sync {
 
     fn outcome(&self) -> Outcome;
 
-    /// Human-readable error description, rich with internal details for logging.
-    /// None on success.
-    fn cause(&self) -> Option<&str>;
+    /// Stable, low-cardinality tag for metrics. None on success.
+    fn cause(&self) -> Option<&'static str>;
 
-    /// Time between batch enqueue start and this event's ack completion.
-    fn elapsed(&self) -> chrono::Duration;
+    /// Rich human-readable error detail for logging. None on success.
+    fn detail(&self) -> Option<Cow<'_, str>>;
+
+    /// Time between batch enqueue and this event's ack completion.
+    /// None if the event never entered the ack path (immediate error).
+    fn elapsed(&self) -> Option<chrono::Duration>;
 }
 
-/// Kafka-specific implementation of [`SinkResult`].
+// ---------------------------------------------------------------------------
+// KafkaSinkError
+// ---------------------------------------------------------------------------
+
+/// Full-fidelity error enum capturing every failure mode in the Kafka sink.
+/// `SinkResult` trait methods derive their output from this.
+#[derive(Debug)]
+pub enum KafkaSinkError {
+    ClusterNotConfigured,
+    ClusterUnavailable,
+    SerializationFailed(String),
+    Produce(ProduceError),
+    Timeout,
+    TaskPanicked,
+}
+
+impl KafkaSinkError {
+    pub fn outcome(&self) -> Outcome {
+        match self {
+            Self::ClusterNotConfigured => Outcome::FatalError,
+            Self::ClusterUnavailable => Outcome::RetriableError,
+            Self::SerializationFailed(_) => Outcome::FatalError,
+            Self::Produce(e) => {
+                if e.is_retriable() {
+                    Outcome::RetriableError
+                } else {
+                    Outcome::FatalError
+                }
+            }
+            Self::Timeout => Outcome::Timeout,
+            Self::TaskPanicked => Outcome::RetriableError,
+        }
+    }
+
+    pub fn as_tag(&self) -> &'static str {
+        match self {
+            Self::ClusterNotConfigured => "cluster_not_configured",
+            Self::ClusterUnavailable => "cluster_unavailable",
+            Self::SerializationFailed(_) => "serialization_failed",
+            Self::Produce(e) => e.as_tag(),
+            Self::Timeout => "timeout",
+            Self::TaskPanicked => "task_panicked",
+        }
+    }
+
+    pub fn detail(&self) -> Cow<'_, str> {
+        match self {
+            Self::ClusterNotConfigured => Cow::Borrowed("cluster not configured"),
+            Self::ClusterUnavailable => Cow::Borrowed("cluster unavailable"),
+            Self::SerializationFailed(m) => Cow::Owned(format!("serialization failed: {m}")),
+            Self::Produce(e) => Cow::Owned(format!("{e}")),
+            Self::Timeout => Cow::Borrowed("produce timeout"),
+            Self::TaskPanicked => Cow::Borrowed("task panicked during delivery"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KafkaResult
+// ---------------------------------------------------------------------------
+
+/// Kafka-specific implementation of [`SinkResult`]. Outcome is derived from
+/// the error -- no explicit outcome field.
 pub struct KafkaResult {
     uuid_key: String,
-    outcome: Outcome,
-    error_code: Option<RDKafkaErrorCode>,
-    /// Static cause string for non-Kafka errors (timeout, health gate, etc.)
-    cause_override: Option<&'static str>,
+    error: Option<KafkaSinkError>,
     enqueued_at: DateTime<Utc>,
-    completed_at: DateTime<Utc>,
+    completed_at: Option<DateTime<Utc>>,
 }
 
 impl KafkaResult {
     pub(crate) fn ok(uuid_key: String, enqueued_at: DateTime<Utc>) -> Self {
         Self {
             uuid_key,
-            outcome: Outcome::Success,
-            error_code: None,
-            cause_override: None,
+            error: None,
             enqueued_at,
-            completed_at: Utc::now(),
+            completed_at: None,
         }
     }
 
-    pub(crate) fn err(
-        uuid_key: String,
-        outcome: Outcome,
-        error_code: Option<RDKafkaErrorCode>,
-        cause_override: Option<&'static str>,
-        enqueued_at: DateTime<Utc>,
-    ) -> Self {
+    pub(crate) fn err(uuid_key: String, error: KafkaSinkError, enqueued_at: DateTime<Utc>) -> Self {
         Self {
             uuid_key,
-            outcome,
-            error_code,
-            cause_override,
+            error: Some(error),
             enqueued_at,
-            completed_at: Utc::now(),
+            completed_at: None,
         }
     }
 
-    pub fn error_code(&self) -> Option<RDKafkaErrorCode> {
-        self.error_code
+    pub(crate) fn with_completed_at(mut self, t: DateTime<Utc>) -> Self {
+        self.completed_at = Some(t);
+        self
+    }
+
+    pub fn error(&self) -> Option<&KafkaSinkError> {
+        self.error.as_ref()
     }
 }
 
@@ -133,18 +235,65 @@ impl SinkResult for KafkaResult {
     }
 
     fn outcome(&self) -> Outcome {
-        self.outcome
-    }
-
-    fn cause(&self) -> Option<&str> {
-        if let Some(o) = self.cause_override {
-            return Some(o);
+        match &self.error {
+            None => Outcome::Success,
+            Some(e) => e.outcome(),
         }
-        self.error_code.map(error_code_tag)
     }
 
-    fn elapsed(&self) -> chrono::Duration {
-        self.completed_at.signed_duration_since(self.enqueued_at)
+    fn cause(&self) -> Option<&'static str> {
+        self.error.as_ref().map(|e| e.as_tag())
+    }
+
+    fn detail(&self) -> Option<Cow<'_, str>> {
+        self.error.as_ref().map(|e| e.detail())
+    }
+
+    fn elapsed(&self) -> Option<chrono::Duration> {
+        self.completed_at
+            .map(|t| t.signed_duration_since(self.enqueued_at))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SinkOutput
+// ---------------------------------------------------------------------------
+
+/// Concrete enum wrapping backend-specific results. Avoids per-event Box
+/// allocation while keeping `Sink` object-safe for `dyn Sink` composition.
+pub enum SinkOutput {
+    Kafka(KafkaResult),
+}
+
+impl SinkResult for SinkOutput {
+    fn key(&self) -> &str {
+        match self {
+            Self::Kafka(r) => r.key(),
+        }
+    }
+
+    fn outcome(&self) -> Outcome {
+        match self {
+            Self::Kafka(r) => r.outcome(),
+        }
+    }
+
+    fn cause(&self) -> Option<&'static str> {
+        match self {
+            Self::Kafka(r) => r.cause(),
+        }
+    }
+
+    fn detail(&self) -> Option<Cow<'_, str>> {
+        match self {
+            Self::Kafka(r) => r.detail(),
+        }
+    }
+
+    fn elapsed(&self) -> Option<chrono::Duration> {
+        match self {
+            Self::Kafka(r) => r.elapsed(),
+        }
     }
 }
 
@@ -163,7 +312,7 @@ pub struct BatchSummary {
 }
 
 impl BatchSummary {
-    pub fn from_results(results: &[Box<dyn SinkResult>]) -> Self {
+    pub fn from_results(results: &[SinkOutput]) -> Self {
         let mut succeeded = 0usize;
         let mut failed = 0usize;
         let mut timed_out = 0usize;
@@ -184,6 +333,7 @@ impl BatchSummary {
                         *errors.entry(tag.to_string()).or_default() += 1;
                     }
                 }
+                Outcome::InFlight => {}
             }
         }
 

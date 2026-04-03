@@ -10,10 +10,9 @@ use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::ClientConfig;
 use tracing::{info, warn};
 
-use common_types::CapturedEventHeaders;
-
 use crate::config::{ClusterName, V1KafkaClusterConfig};
 use crate::v1::sinks::kafka::context::{KafkaContext, ProducerHealth};
+use crate::v1::sinks::types::error_code_tag;
 
 // ---------------------------------------------------------------------------
 // ProduceError
@@ -60,34 +59,16 @@ impl ProduceError {
     }
 }
 
-/// Stable, low-cardinality snake_case tag for an RDKafkaErrorCode.
-/// Usable anywhere — producer, sink, handler, logging.
-pub fn error_code_tag(code: RDKafkaErrorCode) -> &'static str {
-    match code {
-        RDKafkaErrorCode::QueueFull => "queue_full",
-        RDKafkaErrorCode::MessageSizeTooLarge => "message_size_too_large",
-        RDKafkaErrorCode::MessageTimedOut => "message_timed_out",
-        RDKafkaErrorCode::UnknownTopicOrPartition => "unknown_topic_or_partition",
-        RDKafkaErrorCode::TopicAuthorizationFailed => "topic_authorization_failed",
-        RDKafkaErrorCode::ClusterAuthorizationFailed => "cluster_authorization_failed",
-        RDKafkaErrorCode::InvalidMessage => "invalid_message",
-        RDKafkaErrorCode::InvalidMessageSize => "invalid_message_size",
-        RDKafkaErrorCode::NotLeaderForPartition => "not_leader_for_partition",
-        RDKafkaErrorCode::RequestTimedOut => "request_timed_out",
-        _ => "rdkafka_other",
-    }
-}
-
 // ---------------------------------------------------------------------------
 // ProduceRecord
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProduceRecord {
     pub topic: String,
     pub key: Option<String>,
     pub payload: String,
-    pub headers: CapturedEventHeaders,
+    pub headers: OwnedHeaders,
 }
 
 // ---------------------------------------------------------------------------
@@ -196,14 +177,13 @@ impl super::KafkaProducerTrait for KafkaProducer {
     type Ack = SendHandle;
 
     fn send(&self, record: ProduceRecord) -> Result<SendHandle, ProduceError> {
-        let headers: OwnedHeaders = record.headers.into();
         match self.inner.send_result(FutureRecord {
             topic: &record.topic,
             payload: Some(&record.payload),
             partition: None,
             key: record.key.as_deref(),
             timestamp: None,
-            headers: Some(headers),
+            headers: Some(record.headers),
         }) {
             Ok(future) => Ok(SendHandle { inner: future }),
             Err((e, _)) => Err(produce_error_from_kafka(e)),
