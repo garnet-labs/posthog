@@ -7,7 +7,6 @@
         },
         "evaluationId": {
             "description": "The UUID of the evaluation to run.",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "type": "string"
         },
         "event": {
@@ -16,7 +15,6 @@
         },
         "target_event_id": {
             "description": "The UUID of the $ai_generation event to evaluate.",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "type": "string"
         },
         "timestamp": {

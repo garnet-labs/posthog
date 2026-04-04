@@ -1,10 +1,9 @@
 import { z } from 'zod'
 
-import { posthogUuid } from '@/lib/utils'
 import type { Context, ToolBase } from '@/tools/types'
 
 const schema = z.object({
-    evaluationId: posthogUuid().describe('The UUID of the evaluation to retrieve.'),
+    evaluationId: z.string().describe('The UUID of the evaluation to retrieve.'),
 })
 
 type Params = z.infer<typeof schema>

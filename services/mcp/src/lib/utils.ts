@@ -1,15 +1,4 @@
 import crypto from 'node:crypto'
-import { z } from 'zod'
-
-/**
- * PostHog uses UUIDv7-style identifiers where the version nibble can be `0`,
- * which Zod's built-in `.uuid()` rejects (it requires version 1-8 per RFC 9562).
- * This schema accepts any 8-4-4-4-12 hex string so it works with PostHog UUIDs.
- */
-export const posthogUuid = () =>
-    z
-        .string()
-        .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, 'Invalid UUID')
 
 export function hash(data: string): string {
     // Use PBKDF2 with sufficient computational effort for security
