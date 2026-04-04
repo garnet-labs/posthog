@@ -7,58 +7,60 @@ use metrics::{counter, histogram};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info_span, warn};
 
-use crate::config::ClusterName;
+use crate::config::CaptureMode;
 use crate::v1::context::Context;
 use crate::v1::sinks::event::{build_headers, Event};
 use crate::v1::sinks::kafka::producer::ProduceRecord;
 use crate::v1::sinks::kafka::KafkaProducerTrait;
-use crate::v1::sinks::types::{
-    BatchSummary, KafkaResult, KafkaSinkError, Outcome, SinkConfig, SinkOutput,
-};
+use crate::v1::sinks::types::{BatchSummary, KafkaResult, KafkaSinkError, Outcome, SinkOutput};
+use crate::v1::sinks::{SinkName, Sinks};
 
 /// Backend-agnostic publishing interface.
 #[async_trait]
 pub trait Sink: Send + Sync {
-    /// Publish a single event to a specific cluster. Returns None if the
+    /// Publish a single event to a specific sink. Returns None if the
     /// event was filtered (should_publish false / Destination::Drop).
     async fn publish(
         &self,
-        cluster: ClusterName,
+        sink: SinkName,
         ctx: &Context,
         event: &(dyn Event + Send + Sync),
     ) -> Option<SinkOutput>;
 
-    /// Publish a batch of events to a specific cluster. Returns one SinkOutput
+    /// Publish a batch of events to a specific sink. Returns one SinkOutput
     /// per published event -- skipped events produce no result.
     async fn publish_batch(
         &self,
-        cluster: ClusterName,
+        sink: SinkName,
         ctx: &Context,
         events: &[&(dyn Event + Send + Sync)],
     ) -> Vec<SinkOutput>;
 
-    /// Which clusters are available for writing.
-    fn clusters(&self) -> Vec<ClusterName>;
+    /// Which sinks are available for writing.
+    fn sinks(&self) -> Vec<SinkName>;
 
     /// Flush the underlying producer(s) for graceful shutdown.
     fn flush(&self) -> Result<(), String>;
 }
 
 pub struct KafkaSink<P: KafkaProducerTrait> {
-    producers: HashMap<ClusterName, Arc<P>>,
-    config: SinkConfig,
+    producers: HashMap<SinkName, Arc<P>>,
+    config: Sinks,
+    capture_mode: CaptureMode,
     handle: lifecycle::Handle,
 }
 
 impl<P: KafkaProducerTrait> KafkaSink<P> {
     pub fn new(
-        producers: HashMap<ClusterName, Arc<P>>,
-        config: SinkConfig,
+        producers: HashMap<SinkName, Arc<P>>,
+        config: Sinks,
+        capture_mode: CaptureMode,
         handle: lifecycle::Handle,
     ) -> Self {
         Self {
             producers,
             config,
+            capture_mode,
             handle,
         }
     }
@@ -66,13 +68,13 @@ impl<P: KafkaProducerTrait> KafkaSink<P> {
 
 fn publish_labels(
     ctx: &Context,
-    cluster: &str,
+    sink: &str,
     mode: &str,
     outcome: &str,
 ) -> [(&'static str, String); 5] {
     [
         ("mode", mode.to_string()),
-        ("cluster", cluster.to_string()),
+        ("cluster", sink.to_string()), // metric label key kept for dashboard compat
         ("outcome", outcome.to_string()),
         ("path", ctx.path.clone()),
         ("attempt", ctx.attempt.to_string()),
@@ -83,26 +85,26 @@ fn publish_labels(
 impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
     async fn publish(
         &self,
-        cluster: ClusterName,
+        sink: SinkName,
         ctx: &Context,
         event: &(dyn Event + Send + Sync),
     ) -> Option<SinkOutput> {
-        let results = self.publish_batch(cluster, ctx, &[event]).await;
+        let results = self.publish_batch(sink, ctx, &[event]).await;
         results.into_iter().next()
     }
 
     async fn publish_batch(
         &self,
-        cluster: ClusterName,
+        sink: SinkName,
         ctx: &Context,
         events: &[&(dyn Event + Send + Sync)],
     ) -> Vec<SinkOutput> {
-        let cluster_str = cluster.as_str();
-        let mode = self.config.capture_mode.as_tag();
+        let sink_str = sink.as_str();
+        let mode = self.capture_mode.as_tag();
 
         let span = info_span!(
             "v1_publish_batch",
-            cluster = cluster_str,
+            sink = sink_str,
             mode = mode,
             token = %ctx.api_token,
             path = %ctx.path,
@@ -112,14 +114,14 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         );
         let _guard = span.enter();
 
-        let cluster_cfg = match self.config.clusters.get(&cluster) {
+        let sink_cfg = match self.config.configs.get(&sink) {
             Some(c) => c,
             None => {
                 let enqueued_at = Utc::now();
                 let publishable: Vec<_> = events.iter().filter(|e| e.should_publish()).collect();
                 counter!(
                     "capture_v1_kafka_publish_total",
-                    &publish_labels(ctx, cluster_str, mode, Outcome::FatalError.as_tag())[..]
+                    &publish_labels(ctx, sink_str, mode, Outcome::FatalError.as_tag())[..]
                 )
                 .increment(publishable.len() as u64);
                 return publishable
@@ -127,22 +129,22 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                     .map(|e| {
                         SinkOutput::Kafka(KafkaResult::err(
                             e.uuid_key().to_string(),
-                            KafkaSinkError::ClusterNotConfigured,
+                            KafkaSinkError::SinkNotConfigured,
                             enqueued_at,
                         ))
                     })
                     .collect();
             }
         };
-        let producer = &self.producers[&cluster];
+        let producer = &self.producers[&sink];
 
-        // Per-cluster health gate
+        // Per-sink health gate
         if !producer.health().is_ready() {
             let enqueued_at = Utc::now();
             let publishable: Vec<_> = events.iter().filter(|e| e.should_publish()).collect();
             counter!(
                 "capture_v1_kafka_publish_total",
-                &publish_labels(ctx, cluster_str, mode, Outcome::RetriableError.as_tag())[..]
+                &publish_labels(ctx, sink_str, mode, Outcome::RetriableError.as_tag())[..]
             )
             .increment(publishable.len() as u64);
             return publishable
@@ -150,7 +152,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 .map(|e| {
                     SinkOutput::Kafka(KafkaResult::err(
                         e.uuid_key().to_string(),
-                        KafkaSinkError::ClusterUnavailable,
+                        KafkaSinkError::SinkUnavailable,
                         enqueued_at,
                     ))
                 })
@@ -170,7 +172,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
 
             let uuid_key = event.uuid_key().to_string();
 
-            let topic = match cluster_cfg.topic_for(event.destination()) {
+            let topic = match sink_cfg.kafka.topic_for(event.destination()) {
                 Some(t) => t.to_string(),
                 None => continue,
             };
@@ -180,7 +182,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 Err(e) => {
                     counter!(
                         "capture_v1_kafka_publish_total",
-                        &publish_labels(ctx, cluster_str, mode, Outcome::FatalError.as_tag())[..]
+                        &publish_labels(ctx, sink_str, mode, Outcome::FatalError.as_tag())[..]
                     )
                     .increment(1);
                     results.push(SinkOutput::Kafka(KafkaResult::err(
@@ -222,7 +224,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                     let outcome = sink_err.outcome();
                     counter!(
                         "capture_v1_kafka_publish_total",
-                        &publish_labels(ctx, cluster_str, mode, outcome.as_tag())[..]
+                        &publish_labels(ctx, sink_str, mode, outcome.as_tag())[..]
                     )
                     .increment(1);
                     results.push(SinkOutput::Kafka(KafkaResult::err(
@@ -234,8 +236,8 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             }
         }
 
-        // Phase 2: drain JoinSet with a single deadline for all acks
-        let deadline = tokio::time::Instant::now() + self.config.produce_timeout;
+        // Phase 2: drain JoinSet with per-sink deadline
+        let deadline = tokio::time::Instant::now() + sink_cfg.produce_timeout;
         let mut timed_out = false;
 
         while !pending_keys.is_empty() {
@@ -246,20 +248,15 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                         Ok(()) => {
                             counter!(
                                 "capture_v1_kafka_publish_total",
-                                &publish_labels(ctx, cluster_str, mode, Outcome::Success.as_tag())
-                                    [..]
+                                &publish_labels(ctx, sink_str, mode, Outcome::Success.as_tag())[..]
                             )
                             .increment(1);
                             let elapsed = completed_at.signed_duration_since(enqueued_at);
                             if let Ok(secs) = elapsed.to_std() {
                                 histogram!(
                                     "capture_v1_kafka_ack_duration_seconds",
-                                    &publish_labels(
-                                        ctx,
-                                        cluster_str,
-                                        mode,
-                                        Outcome::Success.as_tag()
-                                    )[..]
+                                    &publish_labels(ctx, sink_str, mode, Outcome::Success.as_tag())
+                                        [..]
                                 )
                                 .record(secs.as_secs_f64());
                             }
@@ -273,7 +270,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                             let outcome = sink_err.outcome();
                             counter!(
                                 "capture_v1_kafka_publish_total",
-                                &publish_labels(ctx, cluster_str, mode, outcome.as_tag())[..]
+                                &publish_labels(ctx, sink_str, mode, outcome.as_tag())[..]
                             )
                             .increment(1);
                             results.push(SinkOutput::Kafka(
@@ -305,7 +302,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             let sample_outcome = sink_err_fn().outcome();
             counter!(
                 "capture_v1_kafka_publish_total",
-                &publish_labels(ctx, cluster_str, mode, sample_outcome.as_tag())[..]
+                &publish_labels(ctx, sink_str, mode, sample_outcome.as_tag())[..]
             )
             .increment(pending_keys.len() as u64);
             for uuid_key in pending_keys {
@@ -326,7 +323,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         for (tag, count) in &summary.errors {
             counter!(
                 "capture_v1_kafka_produce_errors_total",
-                "cluster" => cluster_str.to_string(),
+                "cluster" => sink_str.to_string(),
                 "mode" => mode.to_string(),
                 "error" => tag.clone()
             )
@@ -337,14 +334,20 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         results
     }
 
-    fn clusters(&self) -> Vec<ClusterName> {
+    fn sinks(&self) -> Vec<SinkName> {
         self.producers.keys().copied().collect()
     }
 
     fn flush(&self) -> Result<(), String> {
         for (name, producer) in &self.producers {
+            let timeout = self
+                .config
+                .configs
+                .get(name)
+                .map(|c| c.produce_timeout)
+                .unwrap_or(std::time::Duration::from_secs(25));
             producer
-                .flush(self.config.produce_timeout)
+                .flush(timeout)
                 .map_err(|e| format!("flush {} failed: {e}", name.as_str()))?;
         }
         Ok(())

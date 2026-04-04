@@ -10,9 +10,10 @@ use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::ClientConfig;
 use tracing::{info, warn};
 
-use crate::config::{ClusterName, V1KafkaClusterConfig};
+use crate::v1::sinks::kafka::config::Config as KafkaConfig;
 use crate::v1::sinks::kafka::context::{KafkaContext, ProducerHealth};
 use crate::v1::sinks::types::error_code_tag;
+use crate::v1::sinks::SinkName;
 
 // ---------------------------------------------------------------------------
 // ProduceError
@@ -99,18 +100,18 @@ impl Future for SendHandle {
 pub struct KafkaProducer {
     inner: FutureProducer<KafkaContext>,
     health: Arc<ProducerHealth>,
-    cluster: ClusterName,
+    sink: SinkName,
 }
 
 impl KafkaProducer {
     pub fn new(
-        cluster: ClusterName,
-        config: &V1KafkaClusterConfig,
+        sink: SinkName,
+        config: &KafkaConfig,
         handle: lifecycle::Handle,
         capture_mode: &'static str,
     ) -> anyhow::Result<Self> {
         let health = Arc::new(ProducerHealth::new());
-        let ctx = KafkaContext::new(handle, health.clone(), cluster, capture_mode);
+        let ctx = KafkaContext::new(handle, health.clone(), sink, capture_mode);
 
         let mut client_config = ClientConfig::new();
         client_config
@@ -155,12 +156,12 @@ impl KafkaProducer {
         {
             Ok(_) => {
                 health.set_ready(true);
-                info!("v1 kafka producer [{}] connected", cluster.as_str());
+                info!("v1 kafka producer [{}] connected", sink.as_str());
             }
             Err(e) => {
                 warn!(
                     "v1 kafka producer [{}]: initial metadata fetch failed: {e}",
-                    cluster.as_str()
+                    sink.as_str()
                 );
             }
         }
@@ -168,7 +169,7 @@ impl KafkaProducer {
         Ok(Self {
             inner: producer,
             health,
-            cluster,
+            sink,
         })
     }
 }
@@ -198,8 +199,8 @@ impl super::KafkaProducerTrait for KafkaProducer {
         &self.health
     }
 
-    fn cluster_name(&self) -> ClusterName {
-        self.cluster
+    fn sink_name(&self) -> SinkName {
+        self.sink
     }
 }
 

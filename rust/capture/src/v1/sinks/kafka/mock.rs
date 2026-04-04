@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use rdkafka::error::KafkaError;
 
-use crate::config::ClusterName;
 use crate::v1::sinks::kafka::context::ProducerHealth;
 use crate::v1::sinks::kafka::producer::{ProduceError, ProduceRecord};
+use crate::v1::sinks::SinkName;
 
 /// Mock Kafka producer for testing. Captures sent records and supports
 /// configurable error injection and ack delays.
 pub struct MockProducer {
-    cluster: ClusterName,
+    sink: SinkName,
     records: Arc<Mutex<Vec<ProduceRecord>>>,
     send_error: Option<fn() -> ProduceError>,
     ack_error: Option<fn() -> ProduceError>,
@@ -21,11 +21,11 @@ pub struct MockProducer {
 }
 
 impl MockProducer {
-    pub fn new(cluster: ClusterName) -> Self {
+    pub fn new(sink: SinkName) -> Self {
         let health = Arc::new(ProducerHealth::new());
         health.set_ready(true);
         Self {
-            cluster,
+            sink,
             records: Arc::new(Mutex::new(Vec::new())),
             send_error: None,
             ack_error: None,
@@ -100,7 +100,7 @@ impl super::KafkaProducerTrait for MockProducer {
         &self.health
     }
 
-    fn cluster_name(&self) -> ClusterName {
-        self.cluster
+    fn sink_name(&self) -> SinkName {
+        self.sink
     }
 }

@@ -1,12 +1,10 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use rdkafka::error::RDKafkaErrorCode;
 
-use crate::config::{CaptureMode, ClusterName, V1KafkaClusterConfig};
 use crate::v1::sinks::kafka::producer::ProduceError;
 
 /// Kafka topic routing for a processed event.
@@ -20,52 +18,6 @@ pub enum Destination {
     Dlq,
     Custom(String),
     Drop,
-}
-
-impl V1KafkaClusterConfig {
-    /// Resolve which topic to use for the given destination on this cluster.
-    pub fn topic_for<'a>(&'a self, dest: &'a Destination) -> Option<&'a str> {
-        match dest {
-            Destination::AnalyticsMain => Some(&self.topic_main),
-            Destination::AnalyticsHistorical => Some(&self.topic_historical),
-            Destination::Overflow => Some(&self.topic_overflow),
-            Destination::Dlq => Some(&self.topic_dlq),
-            Destination::Custom(t) => Some(t.as_str()),
-            Destination::Drop => None,
-        }
-    }
-}
-
-/// Full configuration for the v1 sink. Each cluster is a complete, independent
-/// Kafka setup. The caller (handler/router) decides which cluster(s) to write to.
-#[derive(Clone, Debug)]
-pub struct SinkConfig {
-    pub clusters: HashMap<ClusterName, V1KafkaClusterConfig>,
-    pub produce_timeout: Duration,
-    pub capture_mode: CaptureMode,
-}
-
-impl SinkConfig {
-    pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.clusters.is_empty(), "no v1 kafka clusters configured");
-        for (&name, cfg) in &self.clusters {
-            anyhow::ensure!(
-                !cfg.hosts.is_empty(),
-                "cluster {} has empty hosts",
-                name.as_str()
-            );
-            let msg_timeout = Duration::from_millis(cfg.message_timeout_ms as u64);
-            anyhow::ensure!(
-                self.produce_timeout >= msg_timeout,
-                "cluster {}: produce_timeout ({:?}) must be >= message_timeout_ms ({:?}) \
-                 to avoid ghost deliveries after application-level timeout",
-                name.as_str(),
-                self.produce_timeout,
-                msg_timeout,
-            );
-        }
-        Ok(())
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -147,8 +99,8 @@ pub trait SinkResult: Send + Sync {
 /// `SinkResult` trait methods derive their output from this.
 #[derive(Debug)]
 pub enum KafkaSinkError {
-    ClusterNotConfigured,
-    ClusterUnavailable,
+    SinkNotConfigured,
+    SinkUnavailable,
     SerializationFailed(String),
     Produce(ProduceError),
     Timeout,
@@ -158,8 +110,8 @@ pub enum KafkaSinkError {
 impl KafkaSinkError {
     pub fn outcome(&self) -> Outcome {
         match self {
-            Self::ClusterNotConfigured => Outcome::FatalError,
-            Self::ClusterUnavailable => Outcome::RetriableError,
+            Self::SinkNotConfigured => Outcome::FatalError,
+            Self::SinkUnavailable => Outcome::RetriableError,
             Self::SerializationFailed(_) => Outcome::FatalError,
             Self::Produce(e) => {
                 if e.is_retriable() {
@@ -175,8 +127,8 @@ impl KafkaSinkError {
 
     pub fn as_tag(&self) -> &'static str {
         match self {
-            Self::ClusterNotConfigured => "cluster_not_configured",
-            Self::ClusterUnavailable => "cluster_unavailable",
+            Self::SinkNotConfigured => "sink_not_configured",
+            Self::SinkUnavailable => "sink_unavailable",
             Self::SerializationFailed(_) => "serialization_failed",
             Self::Produce(e) => e.as_tag(),
             Self::Timeout => "timeout",
@@ -186,8 +138,8 @@ impl KafkaSinkError {
 
     pub fn detail(&self) -> Cow<'_, str> {
         match self {
-            Self::ClusterNotConfigured => Cow::Borrowed("cluster not configured"),
-            Self::ClusterUnavailable => Cow::Borrowed("cluster unavailable"),
+            Self::SinkNotConfigured => Cow::Borrowed("sink not configured"),
+            Self::SinkUnavailable => Cow::Borrowed("sink unavailable"),
             Self::SerializationFailed(m) => Cow::Owned(format!("serialization failed: {m}")),
             Self::Produce(e) => Cow::Owned(format!("{e}")),
             Self::Timeout => Cow::Borrowed("produce timeout"),

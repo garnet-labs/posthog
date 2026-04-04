@@ -1,3 +1,4 @@
+pub mod config;
 pub mod context;
 pub mod mock;
 pub mod producer;
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use rdkafka::error::KafkaError;
 
-use crate::config::ClusterName;
+use crate::v1::sinks::SinkName;
 use context::ProducerHealth;
 use producer::{ProduceError, ProduceRecord};
 
@@ -20,5 +21,5 @@ pub trait KafkaProducerTrait: Send + Sync {
     fn send(&self, record: ProduceRecord) -> Result<Self::Ack, ProduceError>;
     fn flush(&self, timeout: Duration) -> Result<(), KafkaError>;
     fn health(&self) -> &Arc<ProducerHealth>;
-    fn cluster_name(&self) -> ClusterName;
+    fn sink_name(&self) -> SinkName;
 }
