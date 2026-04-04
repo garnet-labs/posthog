@@ -158,7 +158,14 @@ export function Chart({
                 <div
                     ref={wrapperRef}
                     className={className}
-                    style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, cursor: cursorStyle }}
+                    style={{
+                        position: 'relative',
+                        width: '100%',
+                        height: '100%',
+                        flex: 1,
+                        minHeight: 0,
+                        cursor: cursorStyle,
+                    }}
                     onMouseMove={handlers.onMouseMove}
                     onMouseLeave={handlers.onMouseLeave}
                     onClick={handlers.onClick}
