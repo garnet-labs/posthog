@@ -23,6 +23,7 @@ import { sanitizeHeaderValue } from '@/lib/utils'
 import { registerPrompts } from '@/prompts'
 import { registerResources } from '@/resources'
 import { registerUiAppResources } from '@/resources/ui-apps'
+import INSTRUCTIONS_TEMPLATE_TOOL_SEARCH from '@/templates/instructions-tool-search.md'
 import INSTRUCTIONS_TEMPLATE_V1 from '@/templates/instructions-v1.md'
 import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
 import type { CloudRegion, Context, State, Tool } from '@/tools/types'
@@ -44,6 +45,7 @@ export type RequestProperties = {
     projectId?: string
     clientUserAgent?: string
     readOnly?: boolean
+    mode?: 'tool_search'
     transport?: 'streamable-http' | 'sse'
 }
 
@@ -417,7 +419,15 @@ export class MCP extends McpAgent<Env> {
     }
 
     async init(): Promise<void> {
-        const { features, tools, version: clientVersion, organizationId, projectId, readOnly } = this.requestProperties
+        const {
+            features,
+            tools,
+            version: clientVersion,
+            organizationId,
+            projectId,
+            readOnly,
+            mode,
+        } = this.requestProperties
 
         // Pre-seed cache, fetch group types, and evaluate feature flag in parallel
         const groupTypesPromise = projectId ? this.getOrFetchGroupTypes(projectId) : Promise.resolve(undefined)
@@ -433,10 +443,6 @@ export class MCP extends McpAgent<Env> {
         const groupTypes = await groupTypesPromise
         const flagVersion = await flagPromise
         const version = flagVersion ?? clientVersion ?? 1
-        const instructions = version === 2 ? buildInstructions(groupTypes) : INSTRUCTIONS_TEMPLATE_V1
-
-        this.server = new McpServer({ name: 'PostHog', version: '1.0.0' }, { instructions })
-
         // When project ID is provided, both switch tools are removed (project implies org).
         // When only organization ID is provided, only switch-organization is removed.
         const excludeTools: string[] = []
@@ -447,6 +453,35 @@ export class MCP extends McpAgent<Env> {
         }
 
         const context = await this.getContext()
+
+        // In tool_search mode, register only 3 meta-tools (search, schema, call)
+        // instead of all ~155 tools. This reduces token usage for LLM clients.
+        // The original version-specific instructions are preserved with the
+        // tool_search preamble prepended.
+        if (mode === 'tool_search') {
+            const baseInstructions = version === 2 ? buildInstructions(groupTypes) : INSTRUCTIONS_TEMPLATE_V1
+            const instructions = INSTRUCTIONS_TEMPLATE_TOOL_SEARCH.trim() + '\n\n' + baseInstructions
+            this.server = new McpServer({ name: 'PostHog', version: '1.0.0' }, { instructions })
+
+            await registerPrompts(this.server)
+            await registerResources(this.server, context)
+            await registerUiAppResources(this.server, context)
+
+            const aiConsentGiven = await context.stateManager.getAiConsentGiven()
+            const { registerToolSearchMode } = await import('@/tools/toolSearchMode')
+            await registerToolSearchMode(this.server, context, {
+                features,
+                tools,
+                version,
+                excludeTools,
+                readOnly,
+                aiConsentGiven: aiConsentGiven ?? undefined,
+            })
+            return
+        }
+
+        const instructions = version === 2 ? buildInstructions(groupTypes) : INSTRUCTIONS_TEMPLATE_V1
+        this.server = new McpServer({ name: 'PostHog', version: '1.0.0' }, { instructions })
 
         // Register prompts and resources
         await registerPrompts(this.server)
