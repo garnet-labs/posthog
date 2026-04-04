@@ -389,6 +389,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
     actions(() => ({
         setItemExpanded: (index: number, expanded: boolean) => ({ index, expanded }),
         setSyncScrollPaused: (paused: boolean) => ({ paused }),
+        setLogsHasMore: (hasMore: boolean) => ({ hasMore }),
     })),
     reducers(() => ({
         expandedItems: [
@@ -408,6 +409,12 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
             {
                 setSyncScrollPaused: (_, { paused }) => paused,
                 setItemExpanded: () => true,
+            },
+        ],
+        logsHasMore: [
+            false,
+            {
+                setLogsHasMore: (_, { hasMore }) => hasMore,
             },
         ],
     })),
@@ -496,7 +503,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                                                     key: 'session_id',
                                                     value: sessionId,
                                                     operator: PropertyOperator.Exact,
-                                                    type: PropertyFilterType.LogEntry,
+                                                    type: PropertyFilterType.LogAttribute,
                                                 },
                                             ],
                                         },
@@ -507,6 +514,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                                 limit: 1000,
                             },
                         })
+                        actions.setLogsHasMore(response.hasMore)
                         return response.results
                     } catch (error) {
                         console.error('Failed to load backend logs for session replay', error)
@@ -1445,13 +1453,12 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     actions.registerWindowId(windowId)
                 }
             }
-            // Load backend logs when session events data is loaded (indicates session data is ready)
-            actions.loadLogs()
         },
     })),
     events(({ actions }) => ({
         afterMount: () => {
             actions.loadMatchingEvents()
+            actions.loadLogs()
         },
     })),
     propsChanged(({ actions, props }, oldProps) => {

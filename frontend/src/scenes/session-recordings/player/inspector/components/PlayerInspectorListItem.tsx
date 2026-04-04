@@ -219,10 +219,12 @@ function RowItemDetail({
     item,
     finalTimestamp,
     groupedItems,
+    sessionId,
 }: {
     item: InspectorListItem
     finalTimestamp: Dayjs | null
     groupedItems?: InspectorListItem[]
+    sessionId?: string
 }): JSX.Element | null {
     return (
         <div>
@@ -243,7 +245,11 @@ function RowItemDetail({
             ) : item.type === 'comment' ? (
                 <ItemAnyCommentDetail item={item} />
             ) : item.type === 'logs' ? (
-                <ItemLogDetail item={item} groupedItems={groupedItems as InspectorListItemLog[] | undefined} />
+                <ItemLogDetail
+                    item={item}
+                    groupedItems={groupedItems as InspectorListItemLog[] | undefined}
+                    sessionId={sessionId}
+                />
             ) : null}
         </div>
     )
@@ -373,7 +379,12 @@ const ListItemDetail = memo(function ListItemDetail({
             )}
         >
             <div className="text-xs">
-                <RowItemDetail item={item} finalTimestamp={end} groupedItems={groupedItems} />
+                <RowItemDetail
+                    item={item}
+                    finalTimestamp={end}
+                    groupedItems={groupedItems}
+                    sessionId={logicProps.sessionRecordingId}
+                />
                 <LemonDivider dashed />
 
                 <div
