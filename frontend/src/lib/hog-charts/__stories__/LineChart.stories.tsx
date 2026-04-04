@@ -21,7 +21,7 @@ const meta: Meta<LineChartProps> = {
     title: 'Charts/LineChart',
     component: LineChart,
     render: (args) => (
-        <div style={{ width: '100%', height: 300 }}>
+        <div style={{ width: '100%', height: 300, display: 'flex', flexDirection: 'column' }}>
             <LineChart {...args} />
         </div>
     ),
@@ -181,7 +181,7 @@ export const LargeDataset: Story = {
         series: [
             makeSeries(
                 'Trend',
-                Array.from({ length: 90 }, (_, i) => Math.sin(i / 5) * 50 + 100 + Math.random() * 20)
+                Array.from({ length: 90 }, (_, i) => Math.sin(i / 5) * 50 + 100 + ((i * 7 + 3) % 20))
             ),
         ],
         config: {
