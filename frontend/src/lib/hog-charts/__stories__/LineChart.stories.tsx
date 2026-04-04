@@ -21,7 +21,7 @@ const meta: Meta<LineChartProps> = {
     title: 'Charts/LineChart',
     component: LineChart,
     render: (args) => (
-        <div style={{ width: '100%', height: 300, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: 720, height: 300, display: 'flex', flexDirection: 'column' }}>
             <LineChart {...args} />
         </div>
     ),
