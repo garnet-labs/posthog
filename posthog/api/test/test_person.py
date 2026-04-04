@@ -495,7 +495,7 @@ class TestPerson(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         self.assertEqual(data["persons_deleted"], 2)
         self.assertTrue(data["events_queued_for_deletion"])
         self.assertFalse(data["recordings_queued_for_deletion"])
-        self.assertEqual(data["errors"], [])
+        self.assertEqual(data["deletion_errors"], [])
         self.assertEqual(Person.objects.filter(team=self.team).count(), 0)
 
         response = self.client.delete(f"/api/person/{person.uuid}/")
@@ -539,7 +539,7 @@ class TestPerson(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         self.assertEqual(data["persons_deleted"], 2)
         self.assertFalse(data["events_queued_for_deletion"])
         self.assertFalse(data["recordings_queued_for_deletion"])
-        self.assertEqual(data["errors"], [])
+        self.assertEqual(data["deletion_errors"], [])
         self.assertEqual(Person.objects.filter(team=self.team).count(), 0)
 
         response = self.client.delete(f"/api/person/{person.uuid}/")
@@ -579,7 +579,7 @@ class TestPerson(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         self.assertEqual(data["persons_found"], 1)
         self.assertEqual(data["persons_deleted"], 0)
         self.assertTrue(data["events_queued_for_deletion"])
-        self.assertEqual(data["errors"], [])
+        self.assertEqual(data["deletion_errors"], [])
         # Person should still exist
         self.assertEqual(Person.objects.filter(team=self.team, uuid=person.uuid).count(), 1)
         # But async deletion for events should be scheduled
@@ -609,7 +609,7 @@ class TestPerson(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         self.assertEqual(data["persons_deleted"], 1)
         self.assertFalse(data["events_queued_for_deletion"])
         self.assertTrue(data["recordings_queued_for_deletion"])
-        self.assertEqual(data["errors"], [])
+        self.assertEqual(data["deletion_errors"], [])
 
     def test_bulk_delete_validation_too_many_ids(self):
         """Test that bulk_delete rejects more than 1000 IDs"""
@@ -648,7 +648,7 @@ class TestPerson(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         self.assertEqual(data["persons_found"], 0)
         self.assertEqual(data["persons_deleted"], 0)
         self.assertFalse(data["events_queued_for_deletion"])
-        self.assertEqual(data["errors"], [])
+        self.assertEqual(data["deletion_errors"], [])
         self.assertEqual(AsyncDeletion.objects.filter(team_id=self.team.id).count(), 0)
 
     @freeze_time("2021-08-25T22:09:14.252Z")
@@ -773,9 +773,9 @@ class TestPerson(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
         data = response.json()
         self.assertEqual(data["persons_found"], 2)
         self.assertEqual(data["persons_deleted"], 1)
-        self.assertEqual(len(data["errors"]), 1)
-        self.assertEqual(data["errors"][0]["person_uuid"], str(person1.uuid))
-        self.assertNotIn("detail", data["errors"][0])
+        self.assertEqual(len(data["deletion_errors"]), 1)
+        self.assertEqual(data["deletion_errors"][0]["person_uuid"], str(person1.uuid))
+        self.assertNotIn("detail", data["deletion_errors"][0])
 
     def test_deletion_status_rejects_invalid_status(self):
         """Test that deletion_status returns 400 for invalid status filter"""

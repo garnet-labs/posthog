@@ -26378,15 +26378,19 @@ export namespace Schemas {
       keep_person?: boolean;
     }
 
+    export type PersonBulkDeleteResponseDeletionErrorsItem = {[key: string]: unknown};
+
     export interface PersonBulkDeleteResponse {
       /** Number of persons matched by the provided IDs or distinct IDs. */
       persons_found: number;
       /** Number of person records deleted from the database. 0 if keep_person was true. */
       persons_deleted: number;
-      /** Whether event deletion was queued for the matched persons. */
+      /** Whether event deletion was requested for the matched persons. If a deletion was already queued for a person, it will not be duplicated. */
       events_queued_for_deletion: boolean;
-      /** Whether recording deletion was queued for the matched persons. */
+      /** Whether recording deletion was requested for the matched persons. If a deletion was already queued for a person, it will not be duplicated. */
       recordings_queued_for_deletion: boolean;
+      /** Persons that could not be deleted. Each entry contains 'person_uuid'. Contact support if this persists. */
+      deletion_errors?: PersonBulkDeleteResponseDeletionErrorsItem[];
     }
 
     export interface PersonDeletePropertyRequest {

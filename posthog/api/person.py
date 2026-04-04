@@ -224,7 +224,7 @@ class PersonBulkDeleteResponseSerializer(serializers.Serializer):
         help_text="Whether recording deletion was requested for the matched persons. "
         "If a deletion was already queued for a person, it will not be duplicated."
     )
-    errors = serializers.ListField(
+    deletion_errors = serializers.ListField(
         child=serializers.DictField(),
         required=False,
         help_text="Persons that could not be deleted. Each entry contains 'person_uuid'. Contact support if this persists.",
@@ -664,7 +664,7 @@ class PersonViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             "persons_deleted": persons_deleted,
             "events_queued_for_deletion": delete_events and len(persons) > 0,
             "recordings_queued_for_deletion": delete_recordings and len(persons) > 0,
-            "errors": errors,
+            "deletion_errors": errors,
         }
 
     @extend_schema(
