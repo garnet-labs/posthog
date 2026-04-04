@@ -15,15 +15,6 @@ const ExecSchema = z.object({
 
 type ExecSchema = typeof ExecSchema
 
-const USAGE_HEADER = `All PostHog interactions go through this single tool using CLI-style commands:
-
-- \`tools\` — list all available tool names
-- \`info <tool_name>\` — show a tool's name, description, and input JSON schema
-- \`call <tool_name> <json_input>\` — invoke a tool with a JSON object as input
-
-Workflow: run \`tools\` to discover what's available, \`info <name>\` to understand a tool's parameters, then \`call <name> {"key": "value"}\` to execute it.
-
-`
 
 function parseCommand(input: string): { verb: string; rest: string } {
     const trimmed = input.trim()
@@ -48,7 +39,7 @@ export function createExecTool(
     context: Context,
     instructions: string
 ): Tool<ExecSchema> {
-    const description = USAGE_HEADER + instructions
+    const description = instructions
 
     return {
         name: 'posthog',

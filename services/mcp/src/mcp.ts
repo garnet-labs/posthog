@@ -441,11 +441,8 @@ export class MCP extends McpAgent<Env> {
         const useSingleExec = await singleExecPromise
         const version = flagVersion ?? clientVersion ?? 1
         const v2Instructions = buildInstructions(groupTypes)
-        const instructions = useSingleExec
-            ? INSTRUCTIONS_TEMPLATE_V3
-            : version === 2
-              ? v2Instructions
-              : INSTRUCTIONS_TEMPLATE_V1
+        const v3Instructions = buildInstructionsV2(INSTRUCTIONS_TEMPLATE_V3, guidelines, groupTypes)
+        const instructions = useSingleExec ? '' : version === 2 ? v2Instructions : INSTRUCTIONS_TEMPLATE_V1
 
         this.server = new McpServer({ name: 'PostHog', version: '1.0.0' }, { instructions })
 
@@ -485,7 +482,7 @@ export class MCP extends McpAgent<Env> {
         // In single-exec mode, register one "posthog" tool that wraps all tools
         // behind a CLI-like interface. Otherwise, register each tool individually.
         if (useSingleExec) {
-            const execTool = createExecTool(allTools, context, v2Instructions)
+            const execTool = createExecTool(allTools, context, v3Instructions)
             const typedExecTool = execTool as Tool<z.ZodObject>
             this.registerTool(typedExecTool, async (params) => typedExecTool.handler(context, params))
         } else {
