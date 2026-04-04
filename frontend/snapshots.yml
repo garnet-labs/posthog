@@ -4,6 +4,82 @@ config:
     team: '2'
     repo: 3d760a0a-0763-477d-89ee-f1e4e92cdd78
 snapshots:
+    charts-linechart--all-zeros--dark:
+        hash: v1.k794b7964.27f5525161cd67d6f3ac9b9d88cf47e40b530eca1a9c99543c3fb71eaeb844df.7olmfDmdqq6mijrSyVfm3tbqwJEH5HOM55xpzbX61vI
+    charts-linechart--all-zeros--light:
+        hash: v1.k794b7964.7a981e9f4e063141c4a809d4f3304214ea0462d7873109d4c8bbfaf85d406d05.euU08x459bFVA6wY-Du5_zXwC_u3_afTGlhNpr_CAus
+    charts-linechart--area-fill--dark:
+        hash: v1.k794b7964.2da17f5e5fdcb6de86183132f3a8d97e9e9c9bb3e85ccb285eeecf10c54e81d5.7k9b315YXDHzWMH3wQy00HqVGAh7Ebfq9sc6lPqhDpc
+    charts-linechart--area-fill--light:
+        hash: v1.k794b7964.ec0caa958d8bb7031f184a1cd50c3da4186597a2afefa2265aadddaa0ac55a62.3wj6R_yk056Tt21Na18xkwzB0McDY16e7BgFNAoyw6Y
+    charts-linechart--custom-formatters--dark:
+        hash: v1.k794b7964.653867df3863eebea7954d3aeb8b31cc4e8d475a6963d60e4f664eaf11b61941.c8iUuP8R7ukefUFIo5G9DBn1WwyKe2yF7bInjjTEF5w
+    charts-linechart--custom-formatters--light:
+        hash: v1.k794b7964.41e1d71d575c2337e10a7c8d50bd0e53e2c016f47e9a07137ccbf74055e8e176.6VtwwWYoO1SyjBr3Ip9UpIYNHXidrfrFo9qI_tNvpnI
+    charts-linechart--dashed-line--dark:
+        hash: v1.k794b7964.23099e7e0aaaed7539eef0a018c97a172399437be032c2b5fdea4fbfe535d26d.XE-DhmXbyXmdIYfX0XrQKceWfZ2Qvm9xSgEi7e6VroM
+    charts-linechart--dashed-line--light:
+        hash: v1.k794b7964.c90e862e8f9db802cc93f453e231a1f4c59c5655e7cc9bc71f62333265536173.1xVGhi8XuRbKJQgKIoh84Obzlm5WY34FE8OUPmVisJ4
+    charts-linechart--gaps-in-data--dark:
+        hash: v1.k794b7964.47f3a179b4619a693c8a2b20aab89b82f11f1d60fab4cc58922b75f9750c728c.22CADsW-EcoaKksr2g2WvmQC_R42txwrIU7z2WqQNOk
+    charts-linechart--gaps-in-data--light:
+        hash: v1.k794b7964.115d55e45ca25a1b2aa2a60813baf69a73a42ffc979128da561561756278cf3d.QgWkaDiYPkZb7KhxBk5zcHNlywSKOYRtOZ3P3GYwWJg
+    charts-linechart--hidden-axes--dark:
+        hash: v1.k794b7964.338984923b44330339ed8c399a3cab9e3632ee64addf01ce2580d6f36da86721.aw-pNmxHZdJdPUCSvQXfUBL5AoaO4G8916jDORGI9ls
+    charts-linechart--hidden-axes--light:
+        hash: v1.k794b7964.7990c53ab8ab50648d8f4a3817d6587acc9385e6a632ade9af4bdba88aa98bbb.tv6On6v_OntHnxNyuv3OKR1GrgK1gLCRtiLvUJo3DeY
+    charts-linechart--hidden-series--dark:
+        hash: v1.k794b7964.d29288e6514a355c7df8c786d88446963950d1a2fdb960b778aad24562461749.tPWWrCz5oQTuRy3hEN1x5ySAeCTEIiy1RRAy3hvrF2E
+    charts-linechart--hidden-series--light:
+        hash: v1.k794b7964.8db648d614c7665c769a595198932778658bedc98e8ba1d5148aa1a2cecffc48.DkEiyBnAxVigCR-8G3Tpr2CnQagm5zPBTz4wLXIzL3Y
+    charts-linechart--large-dataset--dark:
+        hash: v1.k794b7964.91de8a57b2e465fa87653820676062dc4338ee782bdc9a4d468d75af0ae165df.bWJjlm_qIgKwzDCWAoWEYKASPYcPYqhx66ZPY02yPb8
+    charts-linechart--large-dataset--light:
+        hash: v1.k794b7964.da79c5911e8ae2ebd3a84fd61882a63ca9fe0f3e0bbce952df46bb7fef3fe4b0.Q1h_FzrgCN2gVEAdSAefpe1WmsQhzccPXA3Gmx0ly9o
+    charts-linechart--log-scale--dark:
+        hash: v1.k794b7964.7db9b4252699b25b667d6b55b8cba150c58145f191804aa2cedd21008acab8dd.Uz--8PeQwuyinv-NsCTq1fkN-Ss5lOEFiLW2ttpnDn0
+    charts-linechart--log-scale--light:
+        hash: v1.k794b7964.42ccc1229cb0a8c7e8e75888e9604104bce2ff7ddd806372c338c7ead7a6c132.2W92RW9DxnMQ8JfFFviLWsKI0EoImKuqMQiWtVRgvYU
+    charts-linechart--multiple-series--dark:
+        hash: v1.k794b7964.488536e6ec6d3f746cd2b102eb0b9c44836b10d6f24da37199eb676fae77368c.NKQ1ooRNaSS296Gd1YkMktj78fFeFNyVANK5yQJ2Deo
+    charts-linechart--multiple-series--light:
+        hash: v1.k794b7964.827c6c7801cc5ed17cf6c4b6a8ea47e69558539ebf98a3f27510d4b1c13ddf93.TklriAIhxVYUaJ5jz5mQY8N1SnfPs-jpp1PCJa96faM
+    charts-linechart--negative-values--dark:
+        hash: v1.k794b7964.d0a410ea7d3bd1060fcd9452bb808337ec9f26f01fa7c90c3678052ed1b1967c.XhcxGbBsMPxmsR3ix2_-ekHJ7I3lb4ToWwZSpcM_H8k
+    charts-linechart--negative-values--light:
+        hash: v1.k794b7964.f2c0cc0c53fe17593666c6176ee2c6c282cafb491c6f76203db1017b41b73564.n0ck92OjvJrvzyp5dNORMLZ7_-13rqrr-hzGzPE-nLM
+    charts-linechart--percent-stack--dark:
+        hash: v1.k794b7964.c7dbc91d0a9fe030ff77c75da95b5a15d7aa3946ba56f7ee9ccd644c0356b709.SkBWribjwe3jcPAkrauDCfOJ2Tpo1-mFet1a-yuDOLw
+    charts-linechart--percent-stack--light:
+        hash: v1.k794b7964.d067c0523d8c2cc3f12deaa57cf1331e5b2dd71ea5540a6313a0ea9127af8fd9.BRXBhvtoxo6wB3uRXd49cS_aaS4Z614SR4ZYlf2Vlfs
+    charts-linechart--single-data-point--dark:
+        hash: v1.k794b7964.0f8f523fc98ed1736a0c3579a43c5b5df250e86412f2495775177875d41a507f.QTjhTfMTeuzjFmDs8Q3kfp3eLb_Aun9oH7dvv3LTWFw
+    charts-linechart--single-data-point--light:
+        hash: v1.k794b7964.a25370dbca3c32c5fe408be0c65c4c8481d7edad3b0aff0cb729f8e6b88db9fd.M1J52rIytI_1bk35cijPSZbCYAC6lRpIPl10iBkYQaM
+    charts-linechart--single-series--dark:
+        hash: v1.k794b7964.111d31cbb1ab9f6ea5357146dea5bede32c2c65bcc7f37bf81b292e24c835355.L2zqwf607vi-rz1fbdB6NPR94_KKwP_P-ugit5vHQPM
+    charts-linechart--single-series--light:
+        hash: v1.k794b7964.9378a50a57b4af037b978e66343765a7dfff76ff35a2dcf3f92df4a6712dcc65.Dp7oTGUqgRFI07vaznhdniJP4KlZFLnoTLQ44c5knCI
+    charts-linechart--stacked-areas--dark:
+        hash: v1.k794b7964.7bc37ede690ab992a471c31d771ecfead5419b458cb05eb0f2241c7f755db337.9ymlbHOQoGYkxLuR4qN76fOT0wI6e7N4I6v-7sM8HHg
+    charts-linechart--stacked-areas--light:
+        hash: v1.k794b7964.6811464f1bfa6b42717cbb35233d1768532403a31706a26547528f762dc8864d.Cbduqhq_kdmUpu9R2lcLLi2wpJrdHplIPD6GWJJ9pMw
+    charts-linechart--with-crosshair--dark:
+        hash: v1.k794b7964.1f69df506e4f823c73c35454a23852c5ba56be47006ffe13157f0dd61930f149.YqRdt0yyrFCsnJuE8Q_fhGVqmoUHfEcDVaoToTmoMdk
+    charts-linechart--with-crosshair--light:
+        hash: v1.k794b7964.bbbf5509a3490a5d9e76bcb990547677ee3195421d99da6ec0d322ddeb2d9b3a.CA7_PhqoT2oXY6Y6XlhchuGYcvOkZi3KVRitZKWioYU
+    charts-linechart--with-data-points--dark:
+        hash: v1.k794b7964.290aebcf4581f85d350f89ae30fe535982910c9da3cf0d55ccfc69ec563a0d7e.LdDXRXgFcd0ZPAyQ2L6brC0tkqBjyi4g227T2VQAWOc
+    charts-linechart--with-data-points--light:
+        hash: v1.k794b7964.3e0464eb6eb888ce4289a76c5a2662e34bde90c7bbeb919f7c92396fcbb5805a.dScDWwNUTsiBalSIToAG8YnceSi4yVgiG0e0f_l9ngw
+    charts-linechart--with-goal-lines--dark:
+        hash: v1.k794b7964.0892835d7377dd575091641c8569d781c29fa63242fb38054e3ccbcfcbcc3705.JTsZblJjYzzfYIRrV2zThbS8bhwMlpTwRq8-okTKuIM
+    charts-linechart--with-goal-lines--light:
+        hash: v1.k794b7964.631515305b3b7b4bf5fbf5aa6a3482371ab217ce09b773b644cfe74cd804afcc.RGuly9LOw-zCBBwUHFXZMkHqBhH8yS0ArsI2ATOwgKg
+    charts-linechart--with-grid--dark:
+        hash: v1.k794b7964.d29288e6514a355c7df8c786d88446963950d1a2fdb960b778aad24562461749.iCWNA_IziAY7wsWBJoY_LC88UercU7wL3da6QPKgzGY
+    charts-linechart--with-grid--light:
+        hash: v1.k794b7964.8db648d614c7665c769a595198932778658bedc98e8ba1d5148aa1a2cecffc48.UuKI-NIiB4-qpGs2YzPePBich37SQ0CH3d-tkxknFTI
     components-activitylog--data-management-activity--dark:
         hash: v1.k794b7964.f49e99304c77e24633cdf0b1520b2e794e432e4ade7159f48d9500294dfafc9d.ewQ2Diu0YLmZcTQkOYFyB2ZNX0JDXctVouOX9Yc_HDc
     components-activitylog--data-management-activity--light:
