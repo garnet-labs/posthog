@@ -1,9 +1,10 @@
 import { z } from 'zod'
 
+import { posthogUuid } from '@/lib/utils'
 import type { Context, ToolBase } from '@/tools/types'
 
 const schema = z.object({
-    evaluationId: z.string().uuid().describe('The UUID of the evaluation to delete.'),
+    evaluationId: posthogUuid().describe('The UUID of the evaluation to delete.'),
 })
 
 type Params = z.infer<typeof schema>

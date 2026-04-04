@@ -1,9 +1,10 @@
 import { z } from 'zod'
 
+import { posthogUuid } from '@/lib/utils'
 import type { Context, ToolBase } from '@/tools/types'
 
 const schema = z.object({
-    evaluationId: z.string().uuid().describe('The UUID of the evaluation to update.'),
+    evaluationId: posthogUuid().describe('The UUID of the evaluation to update.'),
     name: z.string().max(400).optional().describe('Updated name.'),
     description: z.string().optional().describe('Updated description.'),
     enabled: z.boolean().optional().describe('Enable or disable the evaluation.'),
