@@ -471,6 +471,7 @@ export class MCP extends McpAgent<Env> {
       ? this.getOrFetchGroupTypes(projectId)
       : Promise.resolve(undefined);
     const flagPromise = this.resolveVersionFlag();
+    const singleExecPromise = this.resolveSingleExecFlag();
     if (organizationId) {
       await this.cache.set("orgId", organizationId);
     }
@@ -478,9 +479,10 @@ export class MCP extends McpAgent<Env> {
       await this.cache.set("projectId", projectId);
     }
 
-    // Resolve group types and feature flag (started above in parallel with cache seeding)
+    // Resolve group types and feature flags (started above in parallel with cache seeding)
     const groupTypes = await groupTypesPromise;
     const flagVersion = await flagPromise;
+    const useSingleExec = await singleExecPromise;
     const version = flagVersion ?? clientVersion ?? 1;
     const instructions =
       version === 2 ? buildInstructions(groupTypes) : INSTRUCTIONS_TEMPLATE_V1;
@@ -523,9 +525,9 @@ export class MCP extends McpAgent<Env> {
       this._api.config.oauthClientName = oauthClientName;
     }
 
-    // In single-exec mode (version >= 3), register one "posthog" tool that wraps all tools
+    // In single-exec mode, register one "posthog" tool that wraps all tools
     // behind a CLI-like interface. Otherwise, register each tool individually.
-    if (version >= 3) {
+    if (useSingleExec) {
       const execTool = createExecTool(allTools, context);
       const typedExecTool = execTool as Tool<z.ZodObject>;
       this.registerTool(typedExecTool, async (params) =>
@@ -553,6 +555,19 @@ export class MCP extends McpAgent<Env> {
         : undefined;
     } catch {
       return undefined;
+    }
+  }
+
+  private async resolveSingleExecFlag(): Promise<boolean> {
+    try {
+      const distinctId = await this.getDistinctId();
+      return !!(await isFeatureFlagEnabled(
+        "mcp-single-exec-tool",
+        distinctId,
+        !!CUSTOM_API_BASE_URL,
+      ));
+    } catch {
+      return false;
     }
   }
 
