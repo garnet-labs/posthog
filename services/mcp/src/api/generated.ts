@@ -6616,6 +6616,14 @@ export namespace Schemas {
       Relative: 'relative',
     } as const;
 
+    export type HeatmapSortOrder = typeof HeatmapSortOrder[keyof typeof HeatmapSortOrder];
+
+
+    export const HeatmapSortOrder = {
+      Asc: 'asc',
+      Desc: 'desc',
+    } as const;
+
     export interface HeatmapSettings {
       /** @nullable */
       gradient?: HeatmapGradientStop[] | null;
@@ -6626,6 +6634,9 @@ export namespace Schemas {
       nullLabel?: string | null;
       /** @nullable */
       nullValue?: string | null;
+      /** @nullable */
+      sortColumn?: string | null;
+      sortOrder?: HeatmapSortOrder | null;
       /** @nullable */
       valueColumn?: string | null;
       /** @nullable */
@@ -9244,6 +9255,7 @@ export namespace Schemas {
       WorkflowVariables: 'workflow_variables',
       SuggestedFilters: 'suggested_filters',
       RecentFilters: 'recent_filters',
+      PinnedFilters: 'pinned_filters',
       Empty: 'empty',
     } as const;
 
@@ -30471,10 +30483,10 @@ export namespace Schemas {
     }
 
     export interface UserBlastRadiusResponse {
-      /** Number of users matching the condition */
-      users_affected: number;
-      /** Total number of users in the project */
-      total_users: number;
+      /** Number of entities matching the condition (users or groups depending on group_type_index) */
+      affected: number;
+      /** Total number of entities of this type in the project */
+      total: number;
     }
 
     export interface ViewLinkValidation {
