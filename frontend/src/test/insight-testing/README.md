@@ -119,3 +119,53 @@ queries to the right data based on event name and breakdown property.
 | `$pageview`                        | `[45, 82, 134, 210, 95]` over Mon–Fri                |
 | `Napped`                           | `[1, 3, 5, 8, 2]` over Mon–Fri                       |
 | `Napped` + breakdown by `hedgehog` | 5 series (Spike, Bramble, Thistle, Conker, Prickles) |
+
+## Hog-charts renderer
+
+The harness captures charts from both the legacy Chart.js renderer and the
+new hog-charts renderer (`lib/hog-charts`). `chart.renderer` is either
+`'chartjs'` or `'hog-charts'`; assertions against series names, data, labels,
+and axes work identically across both.
+
+Because `scenes/trends/Trends.tsx` still routes trends visualizations through
+`ActionsLineGraph` (Chart.js), test files that want to exercise the hog-charts
+path must add a per-file module mock that swaps `ActionsLineGraph` for
+`TrendsLineChartD3`:
+
+```tsx
+jest.mock('scenes/trends/viz/ActionsLineGraph', () => {
+  const { TrendsLineChartD3 } = require('./TrendsLineChartD3')
+  return { ActionsLineGraph: (props) => <TrendsLineChartD3 {...props} /> }
+})
+```
+
+With the mock in place, `renderInsightPage` routes through the real hog-charts
+bridge. The underlying `LineChart` component is itself swapped for a capture
+shim via `jest.config.ts` → `hog-charts-mock.tsx`, so no canvas code runs.
+
+### Tooltip testing
+
+Hog-charts tooltips are tested by imperatively driving the hover index:
+
+```tsx
+const chart = await waitForChart()
+chart.hover(2) // move hover to index 2
+const tooltip = await waitForTooltip(chart)
+expect(within(tooltip).getByText('134')).toBeInTheDocument()
+
+chart.pin() // pin the tooltip to show the close button
+chart.unpin() // unpin
+```
+
+`chart.hover`, `chart.pin`, `chart.unpin` are only available on hog-charts
+entries and throw on Chart.js entries. The fabricated `TooltipContext` passed
+to the bridge render prop is minimal: real position math, `ResizeObserver`,
+and `findNearestIndex` are intentionally bypassed — those concerns are
+covered by `lib/hog-charts/core/hooks/useChartInteraction.test.ts` and
+Playwright end-to-end tests.
+
+**What this harness validates:** the TrendsTooltip bridge mapping, series
+formatting, pin/unpin UI, and end-to-end kea data flow into the bridge.
+
+**What it does not validate:** mouse-coordinate-to-index resolution, canvas
+drawing, or scroll-to-dismiss pinned tooltip behavior.
