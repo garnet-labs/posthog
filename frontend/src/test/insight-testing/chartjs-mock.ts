@@ -1,3 +1,12 @@
+import {
+    type NormalizedAxis,
+    type NormalizedChart,
+    type NormalizedDataset,
+    getAllCapturedCharts,
+    pushCapturedChart,
+    resetAllCapturedCharts,
+} from './captured-charts'
+
 export interface ChartDataset {
     label?: string
     data?: number[]
@@ -25,28 +34,70 @@ export interface ChartConfig {
     options?: { scales?: Record<string, ChartScaleConfig>; [key: string]: unknown }
 }
 
-interface CapturedChart {
-    config: ChartConfig
-    canvas: HTMLCanvasElement
-}
-
-let capturedCharts: CapturedChart[] = []
-
 export function resetCapturedCharts(): void {
-    capturedCharts = []
+    resetAllCapturedCharts()
     MockChart._instances = []
 }
 
-/** Returns all captured chart snapshots. The latest entry is always a live
- *  snapshot of the most recent MockChart instance so that callers see
- *  post-update data without needing a new Chart constructor call. */
-export function getCapturedChartConfigs(): CapturedChart[] {
-    return capturedCharts
+/** @deprecated — use `getAllCapturedCharts` from `captured-charts`. Kept as a thin
+ *  compat shim that filters to Chart.js entries and exposes the legacy `{config, canvas}`
+ *  shape. Only the `config` field is actually populated (canvas is unused by callers). */
+export function getCapturedChartConfigs(): { config: ChartConfig; canvas: HTMLCanvasElement | null }[] {
+    return getAllCapturedCharts()
+        .filter((c) => c.renderer === 'chartjs')
+        .map((c) => ({ config: c.raw as ChartConfig, canvas: null }))
 }
 
 const defaults: Record<string, unknown> = {
     animation: false,
     plugins: { legend: { labels: { generateLabels: () => [] } } },
+}
+
+function toNormalizedDataset(ds: ChartDataset): NormalizedDataset {
+    return {
+        label: ds.label ?? '',
+        data: ds.data ?? [],
+        hidden: ds.hidden ?? false,
+        borderColor: ds.borderColor ?? '',
+        backgroundColor: ds.backgroundColor ?? '',
+        compare: ds.compare ?? false,
+        compareLabel: ds.compare_label ?? '',
+    }
+}
+
+function toNormalizedAxis(scale: ChartScaleConfig | undefined): NormalizedAxis {
+    return {
+        display: scale?.display ?? true,
+        type: scale?.type ?? 'linear',
+        stacked: scale?.stacked ?? false,
+        position: scale?.position ?? 'left',
+        tickLabel: (value) => {
+            const cb = scale?.ticks?.callback
+            return typeof cb === 'function' ? String(cb(value, 0, [])) : String(value)
+        },
+    }
+}
+
+function toNormalizedChart(config: ChartConfig): NormalizedChart {
+    const axes: Record<string, NormalizedAxis> = {}
+    const scales = config.options?.scales ?? {}
+    for (const [key, scale] of Object.entries(scales)) {
+        axes[key] = toNormalizedAxis(scale)
+    }
+    if (!axes.x) {
+        axes.x = toNormalizedAxis(undefined)
+    }
+    if (!axes.y) {
+        axes.y = toNormalizedAxis(undefined)
+    }
+    return {
+        renderer: 'chartjs',
+        type: config.type ?? '',
+        labels: config.data?.labels ?? [],
+        datasets: (config.data?.datasets ?? []).map(toNormalizedDataset),
+        axes,
+        raw: config,
+    }
 }
 
 class MockChart {
@@ -61,7 +112,7 @@ class MockChart {
         this.config = config
         this.data = config.data
         MockChart._instances.push(this)
-        capturedCharts.push({ config, canvas })
+        pushCapturedChart(toNormalizedChart(config))
 
         const container = canvas.parentElement
         if (container) {

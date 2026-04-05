@@ -1,5 +1,10 @@
-import type { ChartConfig, ChartDataset, ChartScaleConfig } from './chartjs-mock'
-import { getCapturedChartConfigs } from './chartjs-mock'
+import {
+    type NormalizedAxis,
+    type NormalizedChart,
+    type NormalizedDataset,
+    getAllCapturedCharts,
+} from './captured-charts'
+import type { ChartConfig } from './chartjs-mock'
 
 interface Series {
     label: string
@@ -10,12 +15,13 @@ interface Series {
     compareLabel: string
     borderColor: string
     backgroundColor: string
+    meta?: Record<string, unknown>
 }
 
-function makeSeries(ds: ChartDataset): Series {
-    const data = ds.data ?? []
+function makeSeries(ds: NormalizedDataset): Series {
+    const data = ds.data
     return {
-        label: ds.label ?? '',
+        label: ds.label,
         data,
         at(index: number): number {
             if (index < 0 || index >= data.length) {
@@ -23,11 +29,12 @@ function makeSeries(ds: ChartDataset): Series {
             }
             return data[index]
         },
-        hidden: ds.hidden ?? false,
-        compare: ds.compare ?? false,
-        compareLabel: ds.compare_label ?? '',
-        borderColor: ds.borderColor ?? '',
-        backgroundColor: ds.backgroundColor ?? '',
+        hidden: ds.hidden,
+        compare: ds.compare,
+        compareLabel: ds.compareLabel,
+        borderColor: ds.borderColor,
+        backgroundColor: ds.backgroundColor,
+        meta: ds.meta,
     }
 }
 
@@ -45,20 +52,26 @@ interface Axes {
     y: Axis
 }
 
-function makeAxis(scaleConfig: ChartScaleConfig | undefined): Axis {
-    return {
-        display: scaleConfig?.display ?? true,
-        type: scaleConfig?.type ?? 'linear',
-        stacked: scaleConfig?.stacked ?? false,
-        position: scaleConfig?.position ?? 'left',
-        tickLabel: (value: number | string) => {
-            const cb = scaleConfig?.ticks?.callback
-            return typeof cb === 'function' ? String(cb(value, 0, [])) : String(value)
-        },
+function makeAxes(axes: Record<string, NormalizedAxis>): Axes {
+    const fallback: NormalizedAxis = {
+        display: true,
+        type: 'linear',
+        stacked: false,
+        position: 'left',
+        tickLabel: (v) => String(v),
     }
+    return new Proxy({ x: axes.x ?? fallback, y: axes.y ?? fallback } as Axes, {
+        get(target, prop) {
+            if (typeof prop === 'string' && !(prop in target)) {
+                return axes[prop] ?? fallback
+            }
+            return target[prop as keyof typeof target]
+        },
+    }) as Axes
 }
 
 export interface Chart {
+    renderer: 'chartjs' | 'hog-charts'
     series(nameOrIndex: string | number): Series
     seriesCount: number
     seriesNames: string[]
@@ -67,11 +80,21 @@ export interface Chart {
     label(index: number): string
     type: string
     axes: Axes
+    raw: unknown
+    /** Chart.js config — only populated for Chart.js charts. Use `raw` for renderer-agnostic access. */
     config: ChartConfig
+    /** hog-charts only: move the hover index, triggering a tooltip re-render. */
+    hover(index: number): void
+    /** hog-charts only: pin the current tooltip. */
+    pin(): void
+    /** hog-charts only: unpin. */
+    unpin(): void
+    /** hog-charts only: DOM host containing the currently rendered tooltip. */
+    tooltipHost(): HTMLElement | null
 }
 
-function resolveChartConfig(index: number): ChartConfig {
-    const charts = getCapturedChartConfigs()
+function resolveChart(index: number): NormalizedChart {
+    const charts = getAllCapturedCharts()
     if (charts.length === 0) {
         throw new Error('No charts captured')
     }
@@ -79,7 +102,7 @@ function resolveChartConfig(index: number): ChartConfig {
     if (resolved < 0 || resolved >= charts.length) {
         throw new Error(`No chart at index ${resolved} (${charts.length} captured)`)
     }
-    return charts[resolved].config
+    return charts[resolved]
 }
 
 function quotedSeriesNames(allSeries: Series[]): string[] {
@@ -127,35 +150,30 @@ function labelAtIndex(labels: string[], index: number): string {
     return labels[index]
 }
 
-/** Lazily creates axis accessors — x and y are pre-built, others are created on first access. */
-function makeAxes(scales: Record<string, ChartScaleConfig | undefined>): Axes {
-    return new Proxy(
-        { x: makeAxis(scales.x), y: makeAxis(scales.y) },
-        {
-            get(target, prop) {
-                if (typeof prop === 'string' && !(prop in target)) {
-                    return makeAxis(scales[prop])
-                }
-                return target[prop as keyof typeof target]
-            },
-        }
-    ) as Axes
+function notSupported(field: string, renderer: string): never {
+    throw new Error(`${field} is only supported on hog-charts entries (got renderer: ${renderer})`)
 }
 
 export function getChart(index = -1): Chart {
-    const config = resolveChartConfig(index)
-    const allSeries = (config.data?.datasets ?? []).map(makeSeries)
-    const chartLabels = config.data?.labels ?? []
+    const normalized = resolveChart(index)
+    const allSeries = normalized.datasets.map(makeSeries)
+    const chartLabels = normalized.labels
 
     return {
+        renderer: normalized.renderer,
         series: (nameOrIndex) => findSeries(allSeries, nameOrIndex),
         seriesCount: allSeries.length,
         seriesNames: allSeries.map((s) => s.label),
-        value: (s, pointIndexOrLabel) => findSeries(allSeries, s).at(resolvePointIndex(chartLabels, pointIndexOrLabel)),
+        value: (s, p) => findSeries(allSeries, s).at(resolvePointIndex(chartLabels, p)),
         labels: chartLabels,
         label: (i) => labelAtIndex(chartLabels, i),
-        type: config.type ?? '',
-        axes: makeAxes(config.options?.scales ?? {}),
-        config,
+        type: normalized.type,
+        axes: makeAxes(normalized.axes),
+        raw: normalized.raw,
+        config: normalized.renderer === 'chartjs' ? (normalized.raw as ChartConfig) : ({} as ChartConfig),
+        hover: (i) => (normalized.hover ? normalized.hover(i) : notSupported('hover()', normalized.renderer)),
+        pin: () => (normalized.pin ? normalized.pin() : notSupported('pin()', normalized.renderer)),
+        unpin: () => (normalized.unpin ? normalized.unpin() : notSupported('unpin()', normalized.renderer)),
+        tooltipHost: () => (normalized.getTooltipHost ? normalized.getTooltipHost() : null),
     }
 }
