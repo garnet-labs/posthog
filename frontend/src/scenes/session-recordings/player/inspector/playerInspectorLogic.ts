@@ -391,7 +391,6 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
         setSyncScrollPaused: (paused: boolean) => ({ paused }),
         setLogsHasMore: (hasMore: boolean) => ({ hasMore }),
         setLogsNextCursor: (cursor: string | undefined) => ({ cursor }),
-        loadMoreLogs: true,
     })),
     reducers(() => ({
         expandedItems: [
@@ -423,13 +422,6 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
             undefined as string | undefined,
             {
                 setLogsNextCursor: (_, { cursor }) => cursor,
-            },
-        ],
-        logsLoadingMore: [
-            false,
-            {
-                loadMoreLogs: () => true,
-                loadLogsSuccess: () => false,
             },
         ],
     })),
@@ -535,6 +527,49 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                     } catch (error) {
                         console.error('Failed to load backend logs for session replay', error)
                         return []
+                    }
+                },
+                loadMoreLogs: async () => {
+                    const cursor = values.logsNextCursor
+                    if (!cursor || !values.start || !values.end) {
+                        return values.logs
+                    }
+
+                    try {
+                        const response = await api.logs.query({
+                            query: {
+                                dateRange: {
+                                    date_from: values.start.toISOString(),
+                                    date_to: values.end.toISOString(),
+                                },
+                                filterGroup: {
+                                    type: FilterLogicalOperator.And,
+                                    values: [
+                                        {
+                                            type: FilterLogicalOperator.And,
+                                            values: [
+                                                {
+                                                    key: 'session_id',
+                                                    value: props.sessionRecordingId,
+                                                    operator: PropertyOperator.Exact,
+                                                    type: PropertyFilterType.LogAttribute,
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                },
+                                severityLevels: [],
+                                serviceNames: [],
+                                limit: 1000,
+                                after: cursor,
+                            },
+                        })
+                        actions.setLogsHasMore(response.hasMore)
+                        actions.setLogsNextCursor(response.nextCursor)
+                        return [...values.logs, ...response.results]
+                    } catch (error) {
+                        console.error('Failed to load more backend logs for session replay', error)
+                        return values.logs
                     }
                 },
             },
@@ -1447,7 +1482,7 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
             (allItemsByItemType): boolean => allItemsByItemType['events']?.length > 0,
         ],
     })),
-    listeners(({ values, actions, props }) => ({
+    listeners(({ values, actions }) => ({
         setItemExpanded: ({ index, expanded }) => {
             if (expanded) {
                 const group = values.displayGroups[index]
@@ -1468,50 +1503,6 @@ export const playerInspectorLogic = kea<playerInspectorLogicType>([
                 if (windowId && !(windowId in values.uuidToIndex)) {
                     actions.registerWindowId(windowId)
                 }
-            }
-        },
-        loadMoreLogs: async () => {
-            const cursor = values.logsNextCursor
-            if (!cursor || !values.start || !values.end) {
-                return
-            }
-
-            try {
-                const sessionId = props.sessionRecordingId
-                const response = await api.logs.query({
-                    query: {
-                        dateRange: {
-                            date_from: values.start.toISOString(),
-                            date_to: values.end.toISOString(),
-                        },
-                        filterGroup: {
-                            type: FilterLogicalOperator.And,
-                            values: [
-                                {
-                                    type: FilterLogicalOperator.And,
-                                    values: [
-                                        {
-                                            key: 'session_id',
-                                            value: sessionId,
-                                            operator: PropertyOperator.Exact,
-                                            type: PropertyFilterType.LogAttribute,
-                                        },
-                                    ],
-                                },
-                            ],
-                        },
-                        severityLevels: [],
-                        serviceNames: [],
-                        limit: 1000,
-                        after: cursor,
-                    },
-                })
-                actions.setLogsHasMore(response.hasMore)
-                actions.setLogsNextCursor(response.nextCursor)
-                actions.loadLogsSuccess([...values.logs, ...response.results])
-            } catch (error) {
-                console.error('Failed to load more backend logs for session replay', error)
-                actions.loadLogsSuccess(values.logs)
             }
         },
     })),
