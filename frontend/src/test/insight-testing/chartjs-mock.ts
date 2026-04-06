@@ -18,6 +18,7 @@ export interface ChartDataset {
     borderColor?: string
     backgroundColor?: string
     yAxisID?: string
+    [key: string]: unknown
 }
 
 export interface ChartScaleConfig {
@@ -31,7 +32,11 @@ export interface ChartScaleConfig {
 export interface ChartConfig {
     type?: string
     data?: { labels?: string[]; datasets?: ChartDataset[] }
-    options?: { scales?: Record<string, ChartScaleConfig>; [key: string]: unknown }
+    options?: {
+        scales?: Record<string, ChartScaleConfig>
+        plugins?: { tooltip?: { external?: (ctx: { chart: unknown; tooltip: unknown }) => void } }
+        [key: string]: unknown
+    }
 }
 
 export function resetCapturedCharts(): void {
@@ -78,7 +83,7 @@ function toNormalizedAxis(scale: ChartScaleConfig | undefined): NormalizedAxis {
     }
 }
 
-function toNormalizedChart(config: ChartConfig): NormalizedChart {
+function toNormalizedChart(config: ChartConfig, mock: MockChart): NormalizedChart {
     const axes: Record<string, NormalizedAxis> = {}
     const scales = config.options?.scales ?? {}
     for (const [key, scale] of Object.entries(scales)) {
@@ -97,6 +102,10 @@ function toNormalizedChart(config: ChartConfig): NormalizedChart {
         datasets: (config.data?.datasets ?? []).map(toNormalizedDataset),
         axes,
         raw: config,
+        hover: (index) => mock.triggerTooltip(index),
+        pin: () => {},
+        unpin: () => {},
+        getTooltipHost: () => mock.getTooltipHost(),
     }
 }
 
@@ -106,18 +115,58 @@ class MockChart {
     config: ChartConfig
     canvas: HTMLCanvasElement
     data: ChartConfig['data']
+    private externalHandler: ((ctx: { chart: unknown; tooltip: unknown }) => void) | undefined
+    options: ChartConfig['options']
+    tooltip: { body?: unknown[] }
 
     constructor(canvas: HTMLCanvasElement, config: ChartConfig) {
         this.canvas = canvas
         this.config = config
         this.data = config.data
+        this.options = config.options
+        this.tooltip = {}
+        this.externalHandler = config.options?.plugins?.tooltip?.external
         MockChart._instances.push(this)
-        pushCapturedChart(toNormalizedChart(config))
+        pushCapturedChart(toNormalizedChart(config, this))
 
         const container = canvas.parentElement
         if (container) {
             renderChartDOM(container, config)
         }
+    }
+
+    /** Call the real external tooltip handler from LineGraph with fabricated data.
+     *  This triggers real InsightTooltip rendering into the tooltip wrapper div
+     *  that useInsightTooltip creates during component mount. */
+    triggerTooltip(index: number): void {
+        if (!this.externalHandler) {
+            return
+        }
+        const datasets = this.config.data?.datasets ?? []
+        const tooltipModel = {
+            opacity: index >= 0 ? 1 : 0,
+            dataPoints:
+                index >= 0
+                    ? datasets
+                          .filter((ds) => !ds.hidden)
+                          .map((ds, dsIdx) => ({
+                              dataIndex: index,
+                              datasetIndex: dsIdx,
+                              dataset: ds,
+                          }))
+                    : [],
+            body: index >= 0 ? [['data']] : [],
+            yAlign: 'no-transform',
+            caretX: 100,
+            caretY: 100,
+        }
+        this.tooltip = { body: tooltipModel.body }
+        this.externalHandler({ chart: this, tooltip: tooltipModel })
+    }
+
+    /** Find the tooltip wrapper div that useInsightTooltip appended to the body. */
+    getTooltipHost(): HTMLElement | null {
+        return document.querySelector('[data-attr="insight-tooltip-wrapper"]')
     }
 
     static getChart(_canvas: HTMLCanvasElement): MockChart | undefined {
@@ -138,6 +187,10 @@ class MockChart {
     getElementsAtEventForMode(): unknown[] {
         return []
     }
+    isZoomingOrPanning(): boolean {
+        return false
+    }
+    setActiveElements(): void {}
 }
 
 function buildLabelsDOM(labels: string[]): HTMLDivElement {

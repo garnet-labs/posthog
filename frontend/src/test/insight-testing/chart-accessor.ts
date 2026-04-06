@@ -83,13 +83,13 @@ export interface Chart {
     raw: unknown
     /** Chart.js config — only populated for Chart.js charts. Use `raw` for renderer-agnostic access. */
     config: ChartConfig
-    /** hog-charts only: move the hover index, triggering a tooltip re-render. */
+    /** Move the hover index, triggering a tooltip re-render at the given data index. */
     hover(index: number): void
-    /** hog-charts only: pin the current tooltip. */
+    /** Pin the current tooltip so it stays visible and becomes interactive. */
     pin(): void
-    /** hog-charts only: unpin. */
+    /** Unpin the tooltip. */
     unpin(): void
-    /** hog-charts only: DOM host containing the currently rendered tooltip. */
+    /** DOM host containing the currently rendered tooltip. */
     tooltipHost(): HTMLElement | null
 }
 
@@ -150,10 +150,6 @@ function labelAtIndex(labels: string[], index: number): string {
     return labels[index]
 }
 
-function notSupported(field: string, renderer: string): never {
-    throw new Error(`${field} is only supported on hog-charts entries (got renderer: ${renderer})`)
-}
-
 export function getChart(index = -1): Chart {
     const normalized = resolveChart(index)
     const allSeries = normalized.datasets.map(makeSeries)
@@ -171,12 +167,9 @@ export function getChart(index = -1): Chart {
         axes: makeAxes(normalized.axes),
         raw: normalized.raw,
         config: normalized.renderer === 'chartjs' ? (normalized.raw as ChartConfig) : ({} as ChartConfig),
-        hover: (i) => (normalized.hover ? normalized.hover(i) : notSupported('hover()', normalized.renderer)),
-        pin: () => (normalized.pin ? normalized.pin() : notSupported('pin()', normalized.renderer)),
-        unpin: () => (normalized.unpin ? normalized.unpin() : notSupported('unpin()', normalized.renderer)),
-        tooltipHost: () =>
-            normalized.getTooltipHost
-                ? normalized.getTooltipHost()
-                : notSupported('tooltipHost()', normalized.renderer),
+        hover: (i) => normalized.hover(i),
+        pin: () => normalized.pin(),
+        unpin: () => normalized.unpin(),
+        tooltipHost: () => normalized.getTooltipHost(),
     }
 }

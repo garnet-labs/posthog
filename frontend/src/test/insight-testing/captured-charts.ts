@@ -15,7 +15,6 @@ export interface NormalizedDataset {
     backgroundColor: string
     compare: boolean
     compareLabel: string
-    /** hog-charts Series.meta, undefined on chartjs */
     meta?: Record<string, unknown>
 }
 
@@ -35,14 +34,14 @@ export interface NormalizedChart {
     axes: Record<string, NormalizedAxis>
     /** Escape hatch — original config (Chart.js) or props (hog-charts). */
     raw: unknown
-    /** hog-charts only: drive hover state from tests. Throws on chartjs entries. */
-    hover?: (index: number) => void
-    /** hog-charts only: pin the fabricated tooltip context. */
-    pin?: () => void
-    /** hog-charts only: unpin. */
-    unpin?: () => void
-    /** hog-charts only: the DOM host where the tooltip render prop is rendered. */
-    getTooltipHost?: () => HTMLElement | null
+    /** Drive hover state from tests. Triggers tooltip rendering at the given data index. */
+    hover: (index: number) => void
+    /** Pin the tooltip so it stays visible and becomes interactive. */
+    pin: () => void
+    /** Unpin the tooltip. */
+    unpin: () => void
+    /** Returns the DOM element hosting the tooltip content. */
+    getTooltipHost: () => HTMLElement | null
 }
 
 let captured: NormalizedChart[] = []
