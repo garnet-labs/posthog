@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import random
 from dataclasses import asdict
 from datetime import UTC, datetime, time, timedelta
@@ -37,6 +39,8 @@ from posthog.temporal.common.schedule import (
 from posthog.temporal.utils import ExternalDataWorkflowInputs
 
 if TYPE_CHECKING:
+    from posthog.models import Team
+
     from products.data_warehouse.backend.models import ExternalDataSource
     from products.data_warehouse.backend.models.external_data_schema import ExternalDataSchema
 
@@ -48,7 +52,7 @@ def _jitter_timedelta(max_jitter: timedelta, rng: random.Random) -> tuple[int, i
     return (int(jitter_seconds // 3600), int((jitter_seconds % 3600) // 60))
 
 
-def get_sync_schedule(external_data_schema: "ExternalDataSchema", should_sync: bool = True):
+def get_sync_schedule(external_data_schema: ExternalDataSchema, should_sync: bool = True):
     inputs = ExternalDataWorkflowInputs(
         team_id=external_data_schema.team_id,
         external_data_schema_id=external_data_schema.id,
@@ -141,8 +145,8 @@ def to_temporal_schedule(
 
 
 def sync_external_data_job_workflow(
-    external_data_schema: "ExternalDataSchema", create: bool = False, should_sync: bool = True
-) -> "ExternalDataSchema":
+    external_data_schema: ExternalDataSchema, create: bool = False, should_sync: bool = True
+) -> ExternalDataSchema:
     temporal = sync_connect()
 
     schedule = get_sync_schedule(external_data_schema, should_sync=should_sync)
@@ -156,8 +160,8 @@ def sync_external_data_job_workflow(
 
 
 async def a_sync_external_data_job_workflow(
-    external_data_schema: "ExternalDataSchema", create: bool = False, should_sync: bool = True
-) -> "ExternalDataSchema":
+    external_data_schema: ExternalDataSchema, create: bool = False, should_sync: bool = True
+) -> ExternalDataSchema:
     temporal = await async_connect()
 
     schedule = get_sync_schedule(external_data_schema, should_sync=should_sync)
@@ -170,17 +174,17 @@ async def a_sync_external_data_job_workflow(
     return external_data_schema
 
 
-def trigger_external_data_source_workflow(external_data_source: "ExternalDataSource"):
+def trigger_external_data_source_workflow(external_data_source: ExternalDataSource):
     temporal = sync_connect()
     trigger_schedule(temporal, schedule_id=str(external_data_source.id))
 
 
-def trigger_external_data_workflow(external_data_schema: "ExternalDataSchema"):
+def trigger_external_data_workflow(external_data_schema: ExternalDataSchema):
     temporal = sync_connect()
     trigger_schedule(temporal, schedule_id=str(external_data_schema.id))
 
 
-async def a_trigger_external_data_workflow(external_data_schema: "ExternalDataSchema"):
+async def a_trigger_external_data_workflow(external_data_schema: ExternalDataSchema):
     temporal = await async_connect()
     await a_trigger_schedule(temporal, schedule_id=str(external_data_schema.id))
 
@@ -216,7 +220,7 @@ def delete_external_data_schedule(schedule_id: str):
         raise
 
 
-async def a_delete_external_data_schedule(external_data_source: "ExternalDataSource"):
+async def a_delete_external_data_schedule(external_data_source: ExternalDataSource):
     temporal = await async_connect()
     try:
         await a_delete_schedule(temporal, schedule_id=str(external_data_source.id))
@@ -248,6 +252,18 @@ def is_any_external_data_schema_paused(team_id: int) -> bool:
     )
 
 
+def is_cdc_enabled_for_team(team: Team) -> bool:
+    """Check if the CDC feature flag is enabled for a team."""
+    import posthoganalytics
+
+    return posthoganalytics.feature_enabled(
+        "dwh-postgres-cdc",
+        str(team.uuid),
+        groups={"organization": str(team.organization_id)},
+        group_properties={"organization": {"id": str(team.organization_id)}},
+    )
+
+
 # ---------------------------------------------------------------------------
 # CDC extraction scheduling (source-level)
 # ---------------------------------------------------------------------------
@@ -258,7 +274,7 @@ def _get_cdc_extraction_schedule_id(source_id: str) -> str:
 
 
 def get_cdc_extraction_schedule(
-    source: "ExternalDataSource",
+    source: ExternalDataSource,
     min_interval: timedelta,
 ) -> Schedule:
     """Build a Temporal Schedule for the CDC extraction workflow.
@@ -299,7 +315,7 @@ def get_cdc_extraction_schedule(
     )
 
 
-def sync_cdc_extraction_schedule(source: "ExternalDataSource", create: bool = False) -> None:
+def sync_cdc_extraction_schedule(source: ExternalDataSource, create: bool = False) -> None:
     """Create or update the CDC extraction Temporal schedule for a source.
 
     Calculates the interval from the most frequent CDC schema. If no CDC

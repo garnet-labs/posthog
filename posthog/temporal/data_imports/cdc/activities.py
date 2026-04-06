@@ -20,6 +20,7 @@ import pyarrow as pa
 import structlog
 from temporalio import activity
 
+from posthog.temporal.data_imports.cdc.adapters import get_cdc_adapter
 from posthog.temporal.data_imports.cdc.batcher import (
     ChangeEventBatcher,
     build_scd2_table,
@@ -29,7 +30,6 @@ from posthog.temporal.data_imports.cdc.batcher import (
 from posthog.temporal.data_imports.pipelines.pipeline_v3.kafka.common import SyncTypeLiteral
 from posthog.temporal.data_imports.pipelines.pipeline_v3.kafka.producer import KafkaBatchProducer
 from posthog.temporal.data_imports.pipelines.pipeline_v3.s3.writer import S3BatchWriter
-from posthog.temporal.data_imports.sources.postgres.cdc.stream_reader import PgCDCConnectionParams, PgCDCStreamReader
 
 from products.data_warehouse.backend.models import ExternalDataJob, ExternalDataSchema, ExternalDataSource
 
@@ -58,21 +58,6 @@ class ValidateCDCPrerequisitesInput:
     schema: str
     slot_name: str | None
     publication_name: str | None
-
-
-def _get_pg_connection_params(source: ExternalDataSource) -> PgCDCConnectionParams:
-    """Extract PgCDCConnectionParams from source job_inputs."""
-    inputs = source.job_inputs or {}
-    return PgCDCConnectionParams(
-        host=inputs.get("host", ""),
-        port=int(inputs.get("port", 5432)),
-        database=inputs.get("database", ""),
-        user=inputs.get("user", ""),
-        password=inputs.get("password", ""),
-        sslmode=inputs.get("sslmode", "prefer"),
-        slot_name=inputs.get("cdc_slot_name", ""),
-        publication_name=inputs.get("cdc_publication_name", ""),
-    )
 
 
 def _get_cdc_schemas(source: ExternalDataSource) -> list[ExternalDataSchema]:
@@ -183,8 +168,8 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
     cdc_table_names = {s.name for s in cdc_schemas}
     schema_by_name: dict[str, ExternalDataSchema] = {s.name: s for s in cdc_schemas}
 
-    params = _get_pg_connection_params(source)
-    reader = PgCDCStreamReader(params)
+    adapter = get_cdc_adapter(source)
+    reader = adapter.create_reader(source)
 
     created_jobs: list[ExternalDataJob] = []
 
@@ -607,35 +592,19 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
 @activity.defn
 def validate_cdc_prerequisites_activity(inputs: ValidateCDCPrerequisitesInput) -> list[str]:
     """Validate CDC prerequisites for a source. Returns list of error messages."""
-    import psycopg
-
-    from posthog.temporal.data_imports.sources.postgres.cdc.prerequisite_validator import validate_cdc_prerequisites
-
     close_old_connections()
 
     source = ExternalDataSource.objects.get(pk=inputs.source_id)
-    job_inputs = source.job_inputs or {}
+    adapter = get_cdc_adapter(source)
 
-    conn = psycopg.connect(
-        host=job_inputs.get("host", ""),
-        port=int(job_inputs.get("port", 5432)),
-        dbname=job_inputs.get("database", ""),
-        user=job_inputs.get("user", ""),
-        password=job_inputs.get("password", ""),
-        connect_timeout=15,
+    return adapter.validate_prerequisites(
+        source=source,
+        management_mode=inputs.management_mode,  # type: ignore[arg-type]
+        tables=inputs.tables,
+        schema=inputs.schema,
+        slot_name=inputs.slot_name,
+        publication_name=inputs.publication_name,
     )
-
-    try:
-        return validate_cdc_prerequisites(
-            conn=conn,
-            management_mode=inputs.management_mode,  # type: ignore[arg-type]
-            tables=inputs.tables,
-            schema=inputs.schema,
-            slot_name=inputs.slot_name,
-            publication_name=inputs.publication_name,
-        )
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -656,18 +625,11 @@ def cleanup_orphan_slots_activity() -> None:
        - Critical threshold (PostHog-managed, safety net on): drop slot, mark error
        - Self-managed: never drop, only warn
     """
-    from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import (
-        cdc_pg_connection,
-        drop_slot_and_publication,
-        get_slot_lag_bytes,
-    )
-
     close_old_connections()
 
     log = logger.bind()
     log.info("cleanup_orphan_slots_started")
 
-    # Find all sources with CDC enabled
     cdc_sources = list(
         ExternalDataSource.objects.filter(
             job_inputs__contains={"cdc_enabled": True},
@@ -683,6 +645,11 @@ def cleanup_orphan_slots_activity() -> None:
         if not slot_name or not pub_name:
             continue
 
+        try:
+            adapter = get_cdc_adapter(source)
+        except ValueError:
+            continue
+
         source_log = log.bind(
             source_id=str(source.id),
             team_id=source.team_id,
@@ -694,8 +661,8 @@ def cleanup_orphan_slots_activity() -> None:
         if source.deleted and management_mode == "posthog":
             source_log.info("cleaning_up_deleted_source_slot")
             try:
-                with cdc_pg_connection(source, connect_timeout=10) as conn:
-                    drop_slot_and_publication(conn, slot_name, pub_name)
+                with adapter.management_connection(source, connect_timeout=10) as conn:
+                    adapter.drop_resources(conn, slot_name, pub_name)
             except Exception:
                 source_log.exception("failed_to_cleanup_deleted_source_slot")
             continue
@@ -705,8 +672,8 @@ def cleanup_orphan_slots_activity() -> None:
             continue
 
         try:
-            with cdc_pg_connection(source, connect_timeout=10) as conn:
-                lag_bytes = get_slot_lag_bytes(conn, slot_name)
+            with adapter.management_connection(source, connect_timeout=10) as conn:
+                lag_bytes = adapter.get_lag_bytes(conn, slot_name)
         except Exception:
             source_log.exception("failed_to_check_slot_lag")
             continue
@@ -730,8 +697,8 @@ def cleanup_orphan_slots_activity() -> None:
             if management_mode == "posthog" and auto_drop:
                 source_log.warning("auto_dropping_slot_critical_lag")
                 try:
-                    with cdc_pg_connection(source, connect_timeout=10) as conn:
-                        drop_slot_and_publication(conn, slot_name, pub_name)
+                    with adapter.management_connection(source, connect_timeout=10) as conn:
+                        adapter.drop_resources(conn, slot_name, pub_name)
 
                     source.status = ExternalDataSource.Status.ERROR
                     source.save(update_fields=["status", "updated_at"])

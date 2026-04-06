@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import uuid
 import dataclasses
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from posthog.models import Team
+from typing import Any
 
 from django.db import transaction
 from django.db.models import Prefetch, Q
@@ -57,6 +54,7 @@ from products.data_warehouse.backend.data_load.service import (
     cancel_external_data_workflow,
     delete_external_data_schedule,
     is_any_external_data_schema_paused,
+    is_cdc_enabled_for_team,
     sync_external_data_job_workflow,
     trigger_external_data_source_workflow,
 )
@@ -84,18 +82,6 @@ from products.data_warehouse.backend.models.util import postgres_columns_to_dwh_
 from products.data_warehouse.backend.types import DataWarehouseManagedViewSetKind, ExternalDataSourceType
 
 logger = structlog.get_logger(__name__)
-
-
-def is_cdc_enabled_for_team(team: Team) -> bool:
-    """Check if the CDC feature flag is enabled for a team."""
-    import posthoganalytics
-
-    return posthoganalytics.feature_enabled(
-        "dwh-postgres-cdc",
-        str(team.uuid),
-        groups={"organization": str(team.organization_id)},
-        group_properties={"organization": {"id": str(team.organization_id)}},
-    )
 
 
 def get_sensitive_field_names(fields: list[FieldType]) -> set[str]:

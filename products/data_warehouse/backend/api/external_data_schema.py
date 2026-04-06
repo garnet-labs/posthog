@@ -20,11 +20,11 @@ from posthog.models.signals import model_activity_signal, mutable_receiver
 from posthog.temporal.data_imports.sources import SourceRegistry
 from posthog.temporal.data_imports.sources.common.base import WebhookSource
 
-from products.data_warehouse.backend.api.external_data_source import is_cdc_enabled_for_team
 from products.data_warehouse.backend.data_load.service import (
     cancel_external_data_workflow,
     external_data_workflow_exists,
     is_any_external_data_schema_paused,
+    is_cdc_enabled_for_team,
     pause_external_data_schedule,
     sync_cdc_extraction_schedule,
     sync_external_data_job_workflow,

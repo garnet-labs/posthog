@@ -4,12 +4,7 @@ from datetime import UTC, datetime
 import pytest
 from unittest.mock import MagicMock, patch
 
-from posthog.temporal.data_imports.cdc.activities import (
-    CDCExtractInput,
-    _flush_deferred_runs,
-    _get_pg_connection_params,
-    cdc_extract_activity,
-)
+from posthog.temporal.data_imports.cdc.activities import CDCExtractInput, _flush_deferred_runs, cdc_extract_activity
 from posthog.temporal.data_imports.cdc.types import ChangeEvent
 
 
@@ -32,6 +27,7 @@ def _make_source(source_id=None, job_inputs=None):
     source = MagicMock()
     source.id = source_id or uuid.uuid4()
     source.team_id = 1
+    source.source_type = "Postgres"
     source.job_inputs = (
         job_inputs
         if job_inputs is not None
@@ -70,7 +66,7 @@ _CDC_ACTIVITY_PATCHES = [
     "posthog.temporal.data_imports.cdc.activities.ExternalDataJob",
     "posthog.temporal.data_imports.cdc.activities.ExternalDataSource",
     "posthog.temporal.data_imports.cdc.activities._get_cdc_schemas",
-    "posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader",
+    "posthog.temporal.data_imports.cdc.activities.get_cdc_adapter",
     "posthog.temporal.data_imports.cdc.activities.S3BatchWriter",
     "posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer",
     "posthog.temporal.data_imports.cdc.activities.activity",
@@ -81,7 +77,7 @@ def _setup_mocks(
     mock_activity,
     MockProducer,
     MockS3Writer,
-    MockReader,
+    mock_get_adapter,
     mock_get_schemas,
     MockSourceModel,
     MockJob,
@@ -97,9 +93,10 @@ def _setup_mocks(
     mock_reader = MagicMock()
     mock_reader.read_changes.return_value = iter(events)
     mock_reader.truncated_tables = []
-    mock_reader._decoder = MagicMock()
-    mock_reader._decoder.get_key_columns.return_value = []
-    MockReader.return_value = mock_reader
+    mock_reader.get_decoder_key_columns.return_value = []
+    mock_adapter = MagicMock()
+    mock_adapter.create_reader.return_value = mock_reader
+    mock_get_adapter.return_value = mock_adapter
 
     mock_s3 = MagicMock()
     mock_batch_result = MagicMock()
@@ -130,27 +127,47 @@ def _setup_mocks(
     return mock_reader, mock_s3, mock_producer, mock_job
 
 
-class TestGetPgConnectionParams:
-    def test_extracts_params_from_job_inputs(self):
+class TestGetCDCAdapter:
+    def test_returns_postgres_adapter(self):
+        from posthog.temporal.data_imports.cdc.adapters import get_cdc_adapter
+        from posthog.temporal.data_imports.sources.postgres.cdc.adapter import PostgresCDCAdapter
+
         source = _make_source()
-        params = _get_pg_connection_params(source)
+        adapter = get_cdc_adapter(source)
+        assert isinstance(adapter, PostgresCDCAdapter)
 
-        assert params.host == "localhost"
-        assert params.port == 5432
-        assert params.database == "testdb"
-        assert params.user == "test"
-        assert params.password == "test"
-        assert params.slot_name == "posthog_slot"
-        assert params.publication_name == "posthog_pub"
+    def test_raises_for_unsupported_source(self):
+        from posthog.temporal.data_imports.cdc.adapters import get_cdc_adapter
 
-    def test_defaults_when_missing(self):
+        source = _make_source()
+        source.source_type = "UnsupportedDB"
+        with pytest.raises(ValueError, match="CDC is not supported"):
+            get_cdc_adapter(source)
+
+    def test_create_reader_extracts_params(self):
+        from posthog.temporal.data_imports.sources.postgres.cdc.adapter import PostgresCDCAdapter
+
+        adapter = PostgresCDCAdapter()
+        source = _make_source()
+        reader = adapter.create_reader(source)
+
+        assert reader._params.host == "localhost"
+        assert reader._params.port == 5432
+        assert reader._params.database == "testdb"
+        assert reader._params.slot_name == "posthog_slot"
+        assert reader._params.publication_name == "posthog_pub"
+
+    def test_create_reader_defaults_when_missing(self):
+        from posthog.temporal.data_imports.sources.postgres.cdc.adapter import PostgresCDCAdapter
+
+        adapter = PostgresCDCAdapter()
         source = _make_source(job_inputs={})
-        params = _get_pg_connection_params(source)
+        reader = adapter.create_reader(source)
 
-        assert params.host == ""
-        assert params.port == 5432
-        assert params.sslmode == "prefer"
-        assert params.slot_name == ""
+        assert reader._params.host == ""
+        assert reader._params.port == 5432
+        assert reader._params.sslmode == "prefer"
+        assert reader._params.slot_name == ""
 
 
 class TestFlushDeferredRuns:
@@ -244,7 +261,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -255,7 +272,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -271,7 +288,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -294,7 +311,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -305,7 +322,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -320,7 +337,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -341,7 +358,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -352,7 +369,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -368,7 +385,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -395,7 +412,7 @@ class TestCDCExtractActivity:
         assert any("status" in call.kwargs.get("update_fields", []) for call in mock_job.save.call_args_list)
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -404,7 +421,7 @@ class TestCDCExtractActivity:
         mock_close_conns,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         mock_activity,
     ):
         source = _make_source()
@@ -416,7 +433,9 @@ class TestCDCExtractActivity:
         mock_reader = MagicMock()
         mock_reader.read_changes.return_value = iter([])
         mock_reader.truncated_tables = []
-        MockReader.return_value = mock_reader
+        mock_adapter = MagicMock()
+        mock_adapter.create_reader.return_value = mock_reader
+        mock_get_adapter.return_value = mock_adapter
 
         inputs = CDCExtractInput(team_id=1, source_id=source.id)
         cdc_extract_activity(inputs)
@@ -432,7 +451,7 @@ class TestCDCExtractActivity:
         assert schema.last_synced_at is not None
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -441,7 +460,7 @@ class TestCDCExtractActivity:
         mock_close_conns,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         mock_activity,
     ):
         source = _make_source()
@@ -451,12 +470,12 @@ class TestCDCExtractActivity:
         inputs = CDCExtractInput(team_id=1, source_id=source.id)
         cdc_extract_activity(inputs)
 
-        MockReader.assert_not_called()
+        mock_get_adapter.assert_not_called()
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -467,7 +486,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -483,7 +502,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -503,7 +522,7 @@ class TestCDCExtractActivity:
         assert pa_table.num_rows == 1
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -512,7 +531,7 @@ class TestCDCExtractActivity:
         mock_close_conns,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         mock_activity,
     ):
         source = _make_source()
@@ -524,7 +543,9 @@ class TestCDCExtractActivity:
         mock_reader = MagicMock()
         mock_reader.read_changes.side_effect = RuntimeError("connection lost")
         mock_reader.truncated_tables = []
-        MockReader.return_value = mock_reader
+        mock_adapter = MagicMock()
+        mock_adapter.create_reader.return_value = mock_reader
+        mock_get_adapter.return_value = mock_adapter
 
         inputs = CDCExtractInput(team_id=1, source_id=source.id)
 
@@ -536,7 +557,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -547,7 +568,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -560,7 +581,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -588,7 +609,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -599,7 +620,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -615,7 +636,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -633,7 +654,7 @@ class TestCDCExtractActivity:
 
     @patch("posthog.temporal.data_imports.cdc.activities.unpause_external_data_schedule", create=True)
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -642,13 +663,10 @@ class TestCDCExtractActivity:
         mock_close_conns,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         mock_activity,
         mock_unpause,
     ):
-        """A TRUNCATE with no other DML in the slot must not silently early-exit.
-        The schema must transition to snapshot mode and the slot must be advanced
-        past the truncate so it does not replay on the next run."""
         source = _make_source()
         MockSourceModel.objects.get.return_value = source
 
@@ -659,9 +677,10 @@ class TestCDCExtractActivity:
         mock_reader.read_changes.return_value = iter([])  # no DML events
         mock_reader.truncated_tables = ["users"]
         mock_reader.last_commit_end_lsn = "0/500"
-        mock_reader._decoder = MagicMock()
-        mock_reader._decoder.get_key_columns.return_value = []
-        MockReader.return_value = mock_reader
+        mock_reader.get_decoder_key_columns.return_value = []
+        mock_adapter = MagicMock()
+        mock_adapter.create_reader.return_value = mock_reader
+        mock_get_adapter.return_value = mock_adapter
 
         mock_activity.heartbeat = MagicMock()
         mock_activity.info.return_value = MagicMock(workflow_id="wf-1", workflow_run_id="run-1")
@@ -677,7 +696,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -688,7 +707,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -702,7 +721,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -726,7 +745,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -737,7 +756,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -755,7 +774,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -781,7 +800,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -792,7 +811,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -809,7 +828,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -829,7 +848,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -840,7 +859,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -855,7 +874,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -896,7 +915,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -907,7 +926,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -922,7 +941,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -952,7 +971,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -963,7 +982,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -985,7 +1004,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
@@ -1014,7 +1033,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
-    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
     @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
@@ -1025,7 +1044,7 @@ class TestCDCExtractActivity:
         MockJob,
         MockSourceModel,
         mock_get_schemas,
-        MockReader,
+        mock_get_adapter,
         MockS3Writer,
         MockProducer,
         mock_activity,
@@ -1043,7 +1062,7 @@ class TestCDCExtractActivity:
             mock_activity,
             MockProducer,
             MockS3Writer,
-            MockReader,
+            mock_get_adapter,
             mock_get_schemas,
             MockSourceModel,
             MockJob,
