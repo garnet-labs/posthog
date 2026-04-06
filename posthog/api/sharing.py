@@ -45,8 +45,17 @@ from posthog.views import preflight_check
 
 from products.dashboards.backend.api.dashboard import DashboardSerializer
 from products.dashboards.backend.models.dashboard import Dashboard
+from products.notebooks.backend.models import Notebook
 
 logger = structlog.get_logger(__name__)
+
+
+class NotebookPublicShareSerializer(serializers.ModelSerializer):
+    """Serialized notebook for anonymous public (read-only) pages."""
+
+    class Meta:
+        model = Notebook
+        fields = ["short_id", "title", "content", "version", "text_content"]
 
 
 def shared_url_as_png(url: str = "") -> str:
@@ -77,6 +86,11 @@ def _log_share_password_attempt(
         item_id = str(resource.insight.id)
         resource_type = "insight"
         resource_name = resource.insight.name
+    elif resource.notebook:
+        scope = "Notebook"
+        item_id = str(resource.notebook.short_id)
+        resource_type = "notebook"
+        resource_name = resource.notebook.title or "Untitled"
     else:
         return
 
@@ -153,6 +167,11 @@ def check_can_edit_sharing_configuration(
         access_level = user_access_control.get_user_access_level(sharing.insight)
         if not access_level or not access_level_satisfied_for_resource("insight", access_level, "editor"):
             raise PermissionDenied("You don't have edit permissions for this insight.")
+
+    if sharing.notebook:
+        access_level = user_access_control.get_user_access_level(sharing.notebook)
+        if not access_level or not access_level_satisfied_for_resource("notebook", access_level, "editor"):
+            raise PermissionDenied("You don't have edit permissions for this notebook.")
 
     return True
 
@@ -278,7 +297,7 @@ class SharingConfigurationViewSet(TeamAndOrgViewSetMixin, mixins.ListModelMixin,
         "delete_password",
     ]
     pagination_class = None
-    queryset = SharingConfiguration.objects.select_related("dashboard", "insight", "recording")
+    queryset = SharingConfiguration.objects.select_related("dashboard", "insight", "recording", "notebook")
     serializer_class = SharingConfigurationSerializer
 
     def get_serializer_context(
@@ -289,9 +308,10 @@ class SharingConfigurationViewSet(TeamAndOrgViewSetMixin, mixins.ListModelMixin,
         dashboard_id = context.get("dashboard_id")
         insight_id = context.get("insight_id")
         recording_id = context.get("recording_id")
+        notebook_short_id = context.get("short_id")
 
-        if not dashboard_id and not insight_id and not recording_id:
-            raise ValidationError("Either a dashboard, insight or recording must be specified")
+        if not dashboard_id and not insight_id and not recording_id and not notebook_short_id:
+            raise ValidationError("Either a dashboard, insight, recording, or notebook must be specified")
 
         if dashboard_id:
             try:
@@ -306,6 +326,13 @@ class SharingConfigurationViewSet(TeamAndOrgViewSetMixin, mixins.ListModelMixin,
         if recording_id:
             # NOTE: Recordings are a special case as we don't want to query CH just for this.
             context["recording"] = SessionRecording.get_or_build(recording_id, team=self.team)
+        if notebook_short_id:
+            try:
+                context["notebook"] = Notebook.objects.get(
+                    short_id=notebook_short_id, team__project_id=self.team.project_id
+                )
+            except Notebook.DoesNotExist:
+                raise NotFound("Notebook not found.")
 
         context["insight_variables"] = InsightVariable.objects.filter(team=self.team)
 
@@ -319,11 +346,13 @@ class SharingConfigurationViewSet(TeamAndOrgViewSetMixin, mixins.ListModelMixin,
         dashboard = context.get("dashboard")
         insight = context.get("insight")
         recording = context.get("recording")
+        notebook = context.get("notebook")
 
         config_kwargs = {
             "team_id": self.team_id,
             "insight": insight,
             "dashboard": dashboard,
+            "notebook": notebook,
             "recording": recording,
             "expires_at": None,
         }
@@ -396,7 +425,32 @@ class SharingConfigurationViewSet(TeamAndOrgViewSetMixin, mixins.ListModelMixin,
                 ),
             )
 
-        if not context.get("recording") and serializer.data.get("enabled"):
+        if context.get("notebook"):
+            nb = instance.notebook
+            name = nb.title or "Untitled"
+            log_activity(
+                organization_id=None,
+                team_id=self.team_id,
+                user=cast(User, self.request.user),
+                was_impersonated=is_impersonated_session(self.request),
+                item_id=nb.short_id,
+                scope="Notebook",
+                activity="sharing " + ("enabled" if serializer.data.get("enabled") else "disabled"),
+                detail=Detail(
+                    name=str(name) if name else None,
+                    changes=[
+                        Change(
+                            type="Notebook",
+                            action="changed",
+                            field="sharing",
+                            after=serializer.data.get("enabled"),
+                        )
+                    ],
+                    short_id=str(nb.short_id),
+                ),
+            )
+
+        if not context.get("recording") and not context.get("notebook") and serializer.data.get("enabled"):
             export_asset_for_opengraph(instance)
 
         return response.Response(serializer.data)
@@ -429,6 +483,23 @@ class SharingConfigurationViewSet(TeamAndOrgViewSetMixin, mixins.ListModelMixin,
                 detail=Detail(
                     name=str(name) if name else None,
                     short_id=str(new_instance.insight.short_id),
+                ),
+            )
+
+        if context.get("notebook"):
+            nb = new_instance.notebook
+            name = nb.title or "Untitled"
+            log_activity(
+                organization_id=None,
+                team_id=self.team_id,
+                user=cast(User, self.request.user),
+                was_impersonated=is_impersonated_session(self.request),
+                item_id=nb.short_id,
+                scope="Notebook",
+                activity="access token refreshed",
+                detail=Detail(
+                    name=str(name) if name else None,
+                    short_id=str(nb.short_id),
                 ),
             )
 
@@ -554,7 +625,7 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
         if access_token:
             try:
                 sharing_configuration = (
-                    SharingConfiguration.objects.select_related("dashboard", "insight", "recording")
+                    SharingConfiguration.objects.select_related("dashboard", "insight", "recording", "notebook")
                     .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now()))
                     .get(access_token=access_token)
                 )
@@ -858,6 +929,11 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
 
             except Exception:
                 raise NotFound("No heatmap found")
+        elif isinstance(resource, SharingConfiguration) and resource.notebook and not resource.notebook.deleted:
+            asset_title = resource.notebook.title or "Untitled"
+            asset_description = ""
+            notebook_data = NotebookPublicShareSerializer(resource.notebook).data
+            exported_data.update({"notebook": notebook_data})
         elif isinstance(resource, SharingConfiguration) and resource.recording:
             asset_title = "Session Recording"
             recording_data = SessionRecordingSerializer(resource.recording, context=context).data

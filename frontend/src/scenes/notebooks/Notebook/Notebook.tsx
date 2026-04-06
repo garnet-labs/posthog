@@ -34,12 +34,13 @@ export type NotebookProps = NotebookLogicProps & {
 export function Notebook({
     shortId,
     mode,
+    sharedNotebook,
     editable = true,
     initialAutofocus = 'start',
     initialContent,
     className,
 }: NotebookProps): JSX.Element {
-    const logicProps: NotebookLogicProps = { shortId, mode }
+    const logicProps: NotebookLogicProps = { shortId, mode, sharedNotebook }
     const logic = notebookLogic(logicProps)
     const { notebook, notebookLoading, editor, conflictWarningVisible, isEditable, isTemplate, notebookMissing } =
         useValues(logic)

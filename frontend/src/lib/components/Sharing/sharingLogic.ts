@@ -1,6 +1,7 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
+import posthog from 'posthog-js'
 
 import api from 'lib/api'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
@@ -19,6 +20,7 @@ export interface SharingLogicProps {
     dashboardId?: number
     insightShortId?: InsightShortId
     recordingId?: string
+    notebookShortId?: string
     additionalParams?: Record<string, any>
 }
 
@@ -43,12 +45,13 @@ const defaultSharingSettings = {
 
 const propsToApiParams = async (
     props: SharingLogicProps
-): Promise<{ dashboardId?: number; insightId?: number; recordingId?: string }> => {
+): Promise<{ dashboardId?: number; insightId?: number; recordingId?: string; notebookShortId?: string }> => {
     const insightId = props.insightShortId ? await getInsightId(props.insightShortId) : undefined
     return {
         dashboardId: props.dashboardId,
         insightId,
         recordingId: props.recordingId,
+        notebookShortId: props.notebookShortId,
     }
 }
 
@@ -56,8 +59,8 @@ export const sharingLogic = kea<sharingLogicType>([
     path(['lib', 'components', 'Sharing', 'sharingLogic']),
     props({} as SharingLogicProps),
     key(
-        ({ insightShortId, dashboardId, recordingId }) =>
-            `sharing-${insightShortId || dashboardId || recordingId || ''}`
+        ({ insightShortId, dashboardId, recordingId, notebookShortId }) =>
+            `sharing-${insightShortId || dashboardId || recordingId || notebookShortId || ''}`
     ),
     connect(() => [preflightLogic, userLogic, dashboardsModel, organizationLogic]),
 
@@ -95,6 +98,9 @@ export const sharingLogic = kea<sharingLogicType>([
         setIsEnabled: (enabled) => {
             if (props.dashboardId) {
                 eventUsageLogic.actions.reportDashboardShareToggled(enabled)
+            }
+            if (props.notebookShortId) {
+                posthog.capture('notebook public sharing toggled', { enabled, short_id: props.notebookShortId })
             }
         },
         setIsEnabledSuccess: () => {

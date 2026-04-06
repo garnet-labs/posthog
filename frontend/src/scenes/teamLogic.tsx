@@ -358,6 +358,11 @@ export const teamLogic = kea<teamLogicType>([
         loadCurrentTeamSuccess: ({ currentTeam }) => {
             if (currentTeam) {
                 ApiConfig.setCurrentTeamId(currentTeam.id)
+                // Shared / exporter pages only preload `current_team` (TeamPublicSerializer), not `current_project`.
+                // ApiRequest still routes under `/api/projects/{project_id}/…` via ApiConfig.getCurrentProjectId().
+                if (currentTeam.project_id != null) {
+                    ApiConfig.setCurrentProjectId(currentTeam.project_id)
+                }
             }
 
             // Detect managed viewsets to mark them as completed in the product setup

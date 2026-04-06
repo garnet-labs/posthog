@@ -1,17 +1,24 @@
 import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
-import { useState } from 'react'
 
-import { IconCopy } from '@posthog/icons'
-import { LemonBanner, LemonButton, LemonDivider, LemonModal } from '@posthog/lemon-ui'
+import { IconCopy, IconLock } from '@posthog/icons'
+import { LemonBanner, LemonButton, LemonDivider, LemonModal, LemonSkeleton, LemonSwitch } from '@posthog/lemon-ui'
 
+import { AccessControlAction } from 'lib/components/AccessControlAction'
+import { SharePasswordsTable } from 'lib/components/Sharing/SharePasswordsTable'
+import { sharingLogic } from 'lib/components/Sharing/sharingLogic'
 import { SHARING_MODAL_WIDTH } from 'lib/components/Sharing/SharingModal'
+import { upgradeModalLogic } from 'lib/components/UpgradeModal/upgradeModalLogic'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { Tooltip } from 'lib/lemon-ui/Tooltip'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { base64Encode } from 'lib/utils'
+import { accessLevelSatisfied } from 'lib/utils/accessControlUtils'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
 import { urls } from 'scenes/urls'
 
 import { AccessControlPopoutCTA } from '~/layout/navigation-3000/sidepanel/panels/access_control/AccessControlPopoutCTA'
-import { AccessControlResourceType } from '~/types'
+import { AccessControlLevel, AccessControlResourceType, AvailableFeature } from '~/types'
 
 import { notebookLogic } from './notebookLogic'
 
@@ -20,17 +27,30 @@ export type NotebookShareModalProps = {
 }
 
 export function NotebookShareModal({ shortId }: NotebookShareModalProps): JSX.Element {
-    const { content, isLocalOnly, isShareModalOpen } = useValues(notebookLogic({ shortId }))
-    const { closeShareModal } = useActions(notebookLogic({ shortId }))
+    const nbLogic = notebookLogic({ shortId })
+    const { content, isLocalOnly, isShareModalOpen, notebook } = useValues(nbLogic)
+    const { closeShareModal } = useActions(nbLogic)
+    const userAccessLevel = notebook?.user_access_level
 
     const notebookUrl = urls.absolute(urls.currentProject(urls.notebook(shortId)))
     const canvasUrl = urls.absolute(urls.canvas()) + `#🦔=${base64Encode(JSON.stringify(content))}`
 
-    const [interestTracked, setInterestTracked] = useState(false)
+    const sharingProps = { notebookShortId: shortId }
+    const {
+        sharingConfiguration,
+        sharingConfigurationLoading,
+        shareLink,
+        sharingAllowed,
+        advancedPermissionsAvailable,
+    } = useValues(sharingLogic(sharingProps))
+    const { setIsEnabled, setPasswordRequired } = useActions(sharingLogic(sharingProps))
+    const { guardAvailableFeature } = useValues(upgradeModalLogic)
+    const { featureFlags } = useValues(featureFlagLogic)
+    const passwordProtectedSharesEnabled = !!featureFlags[FEATURE_FLAGS.PASSWORD_PROTECTED_SHARES]
 
-    const trackInterest = (): void => {
-        posthog.capture('pressed interested in notebook sharing', { url: notebookUrl })
-    }
+    const hasEditAccess = userAccessLevel
+        ? accessLevelSatisfied(AccessControlResourceType.Notebook, userAccessLevel, AccessControlLevel.Editor)
+        : true
 
     return (
         <LemonModal
@@ -52,7 +72,7 @@ export function NotebookShareModal({ shortId }: NotebookShareModalProps): JSX.El
                     }}
                 />
                 <LemonDivider />
-                <h3>Internal Link</h3>
+                <h3>Internal link</h3>
                 {!isLocalOnly ? (
                     <>
                         <p>
@@ -79,7 +99,7 @@ export function NotebookShareModal({ shortId }: NotebookShareModalProps): JSX.El
                     </LemonBanner>
                 )}
 
-                <h3>Template Link</h3>
+                <h3>Template link</h3>
                 <p>
                     The link below will open a Canvas with the contents of this Notebook, allowing the receiver to view
                     it, edit it or create their own Notebook without affecting this one.
@@ -98,22 +118,108 @@ export function NotebookShareModal({ shortId }: NotebookShareModalProps): JSX.El
 
                 <LemonDivider className="my-4" />
 
-                <h3>External Sharing</h3>
+                <h3>Public link</h3>
+                {!isLocalOnly ? (
+                    <>
+                        {!sharingConfiguration && sharingConfigurationLoading ? (
+                            <LemonSkeleton.Row repeat={3} />
+                        ) : !sharingConfiguration ? (
+                            <p>Something went wrong...</p>
+                        ) : (
+                            <>
+                                {!sharingAllowed ? (
+                                    <LemonBanner type="warning">
+                                        Public sharing is disabled for this organization.
+                                    </LemonBanner>
+                                ) : (
+                                    <AccessControlAction
+                                        resourceType={AccessControlResourceType.Notebook}
+                                        minAccessLevel={AccessControlLevel.Editor}
+                                        userAccessLevel={userAccessLevel}
+                                    >
+                                        <LemonSwitch
+                                            id="notebook-sharing-switch"
+                                            label="Share notebook publicly (read-only)"
+                                            checked={sharingConfiguration.enabled}
+                                            data-attr="notebook-sharing-switch"
+                                            onChange={(active) => setIsEnabled(active)}
+                                            bordered
+                                            fullWidth
+                                            loading={sharingConfigurationLoading}
+                                        />
+                                    </AccessControlAction>
+                                )}
 
-                <LemonBanner
-                    type="warning"
-                    action={{
-                        children: !interestTracked ? 'I would like this!' : 'Thanks!',
-                        onClick: () => {
-                            if (!interestTracked) {
-                                trackInterest()
-                                setInterestTracked(true)
-                            }
-                        },
-                    }}
-                >
-                    We don’t currently support sharing notebooks externally, but it’s on our roadmap!
-                </LemonBanner>
+                                {sharingAllowed && sharingConfiguration.enabled && sharingConfiguration.access_token ? (
+                                    <div className="deprecated-space-y-2 mt-2">
+                                        {passwordProtectedSharesEnabled && hasEditAccess && (
+                                            <div className="LemonSwitch LemonSwitch--medium LemonSwitch--bordered LemonSwitch--full-width flex-col py-1.5">
+                                                <LemonSwitch
+                                                    className="px-0"
+                                                    fullWidth
+                                                    label={
+                                                        <div className="flex items-center">
+                                                            Password protect
+                                                            {!advancedPermissionsAvailable && (
+                                                                <Tooltip title="This is a premium feature, click to learn more.">
+                                                                    <IconLock className="ml-1.5 text-muted text-lg" />
+                                                                </Tooltip>
+                                                            )}
+                                                        </div>
+                                                    }
+                                                    onChange={(passwordRequired: boolean) => {
+                                                        if (passwordRequired) {
+                                                            guardAvailableFeature(
+                                                                AvailableFeature.ADVANCED_PERMISSIONS,
+                                                                () => setPasswordRequired(passwordRequired)
+                                                            )
+                                                        } else {
+                                                            setPasswordRequired(passwordRequired)
+                                                        }
+                                                    }}
+                                                    checked={sharingConfiguration.password_required}
+                                                />
+                                                {sharingConfiguration.password_required && (
+                                                    <div className="mt-1 w-full">
+                                                        <SharePasswordsTable notebookShortId={shortId} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        <LemonButton
+                                            data-attr="notebook-sharing-link-button"
+                                            type="primary"
+                                            onClick={() => {
+                                                void copyToClipboard(shareLink, shareLink).catch((e) =>
+                                                    posthog.captureException(
+                                                        new Error(
+                                                            'unexpected notebook sharing clipboard error: ' + e.message
+                                                        )
+                                                    )
+                                                )
+                                            }}
+                                            icon={<IconCopy />}
+                                            fullWidth
+                                            center
+                                            truncate
+                                            title={shareLink}
+                                        >
+                                            {shareLink}
+                                        </LemonButton>
+                                        <p className="text-muted text-sm">
+                                            Anyone with the link can view this notebook. Embedded queries use this
+                                            project&apos;s data within the same permissions as other shared resources.
+                                        </p>
+                                    </div>
+                                ) : null}
+                            </>
+                        )}
+                    </>
+                ) : (
+                    <LemonBanner type="info">
+                        <p>Public links are not available for notebooks that are only visible to you.</p>
+                    </LemonBanner>
+                )}
             </div>
         </LemonModal>
     )

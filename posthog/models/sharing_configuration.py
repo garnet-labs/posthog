@@ -26,6 +26,7 @@ class SharingConfiguration(models.Model):
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
     dashboard = models.ForeignKey("dashboards.Dashboard", on_delete=models.CASCADE, null=True)
     insight = models.ForeignKey("posthog.Insight", on_delete=models.CASCADE, null=True)
+    notebook = models.ForeignKey("notebooks.Notebook", on_delete=models.CASCADE, null=True, blank=True)
     recording = models.ForeignKey(
         "SessionRecording",
         related_name="sharing_configurations",
@@ -61,6 +62,7 @@ class SharingConfiguration(models.Model):
             team=self.team,
             dashboard=self.dashboard,
             insight=self.insight,
+            notebook=self.notebook,
             recording=self.recording,
             enabled=self.enabled,
             settings=self.settings,
@@ -118,7 +120,7 @@ class SharingConfiguration(models.Model):
         if obj._meta.object_name == "Insight" and self.dashboard:
             return cast(Insight, obj).id in self.get_connected_insight_ids()
 
-        for comparison in [self.insight, self.dashboard, self.recording]:
+        for comparison in [self.insight, self.dashboard, self.notebook, self.recording]:
             if comparison and comparison == obj:
                 return True
 

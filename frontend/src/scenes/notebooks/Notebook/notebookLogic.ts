@@ -73,13 +73,15 @@ import { notebookSettingsLogic } from './notebookSettingsLogic'
 const SYNC_DELAY = 1000
 const NOTEBOOK_REFRESH_MS = window.location.origin === 'http://localhost:8000' ? 5000 : 30000
 
-export type NotebookLogicMode = 'notebook' | 'canvas'
+export type NotebookLogicMode = 'notebook' | 'canvas' | 'shared'
 
 export type NotebookLogicProps = {
     shortId: string
     mode?: NotebookLogicMode
     target?: NotebookTarget
     canvasFiltersOverride?: AnyPropertyFilter[]
+    /** Server-provided snapshot for anonymous shared (read-only) views */
+    sharedNotebook?: Pick<NotebookType, 'short_id' | 'title' | 'content' | 'version' | 'text_content'>
 }
 
 async function runWhenEditorIsReady(waitForEditor: () => boolean, fn: () => any): Promise<any | null> {
@@ -100,7 +102,7 @@ async function runWhenEditorIsReady(waitForEditor: () => boolean, fn: () => any)
 export const notebookLogic = kea<notebookLogicType>([
     props({} as NotebookLogicProps),
     path((key) => ['scenes', 'notebooks', 'Notebook', 'notebookLogic', key]),
-    key(({ shortId, mode }) => `${shortId}-${mode}`),
+    key(({ shortId, mode }) => `${shortId}-${mode ?? 'notebook'}`),
 
     connect((props: NotebookLogicProps) => ({
         values: [
@@ -300,6 +302,22 @@ export const notebookLogic = kea<notebookLogicType>([
                 loadNotebook: async () => {
                     let response: NotebookType | null = null
 
+                    if (values.mode === 'shared' && props.sharedNotebook) {
+                        const shared = await migrate({
+                            ...props.sharedNotebook,
+                            id: props.sharedNotebook.short_id,
+                            created_at: '',
+                            created_by: null,
+                            last_modified_at: undefined,
+                            last_modified_by: null,
+                            user_access_level: AccessControlLevel.Member,
+                        } as NotebookType)
+                        if (shared.content && (!values.notebook || values.notebook.version !== shared.version)) {
+                            values.editor?.setContent(shared.content)
+                        }
+                        return shared
+                    }
+
                     if (values.mode !== 'notebook') {
                         return null
                     }
@@ -462,12 +480,17 @@ export const notebookLogic = kea<notebookLogicType>([
         isLocalOnly: [
             (s) => [(_, props) => props, s.isTemplate],
             (props, isTemplate): boolean => {
-                return props.shortId === 'scratchpad' || props.mode === 'canvas' || isTemplate
+                return (
+                    props.shortId === 'scratchpad' || props.mode === 'canvas' || props.mode === 'shared' || isTemplate
+                )
             },
         ],
         notebookMissing: [
             (s) => [s.notebook, s.notebookLoading, s.mode],
             (notebook, notebookLoading, mode): boolean => {
+                if (mode === 'shared') {
+                    return !notebook && !notebookLoading
+                }
                 return (['notebook', 'template'].includes(mode) && !notebook && !notebookLoading) ?? false
             },
         ],
@@ -602,6 +625,7 @@ export const notebookLogic = kea<notebookLogicType>([
         isEditable: [
             (s) => [s.shouldBeEditable, s.previewContent, s.notebook, s.mode],
             (shouldBeEditable, previewContent, notebook, mode) =>
+                mode !== 'shared' &&
                 shouldBeEditable &&
                 (mode === 'canvas' ||
                     (!previewContent &&
@@ -637,7 +661,7 @@ export const notebookLogic = kea<notebookLogicType>([
             },
         ],
     }),
-    listeners(({ values, actions, cache }) => ({
+    listeners(({ values, actions, cache, props }) => ({
         insertAfterLastNode: async ({ content }) => {
             await runWhenEditorIsReady(
                 () => !!values.editor && (values.isLocalOnly || !!values.notebook),
@@ -808,7 +832,9 @@ export const notebookLogic = kea<notebookLogicType>([
         saveNotebookSuccess: actions.scheduleNotebookRefresh,
         loadNotebookSuccess: () => {
             actions.scheduleNotebookRefresh()
-            actions.maybeLoadComments()
+            if (props.mode !== 'shared') {
+                actions.maybeLoadComments()
+            }
         },
 
         exportJSON: () => {

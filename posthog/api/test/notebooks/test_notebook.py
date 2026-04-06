@@ -369,3 +369,24 @@ class TestNotebooks(APIBaseTest, QueryMatchingTest):
             format="json",
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_notebook_sharing_list_and_enable(self) -> None:
+        notebook = self.client.post(
+            f"/api/projects/{self.team.id}/notebooks",
+            {"title": "Public nb"},
+            format="json",
+        ).json()
+        short_id = notebook["short_id"]
+
+        response = self.client.get(f"/api/projects/{self.team.id}/notebooks/{short_id}/sharing")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["enabled"] is False
+
+        response = self.client.patch(
+            f"/api/projects/{self.team.id}/notebooks/{short_id}/sharing",
+            {"enabled": True},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["enabled"] is True
+        assert response.json()["access_token"]
