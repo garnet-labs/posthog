@@ -164,6 +164,21 @@
             "readOnlyHint": false
         }
     },
+    "alert-simulate": {
+        "description": "Run an anomaly detector on an insight's historical data without creating any alert or check records. Use this to preview how a detector configuration would perform before saving it as an alert. Requires an insight ID and a detector_config object with a type (zscore, mad, iqr, copod, ecod, hbos, isolation_forest, knn, lof, ocsvm, pca, or ensemble). Optionally specify date_from (e.g. '-48h', '-30d') to control how far back to simulate, and series_index to pick which series to analyze. Returns data values, anomaly scores per point, triggered indices and dates, and for ensemble detectors, per-sub-detector score breakdowns.",
+        "category": "Alerts",
+        "feature": "alerts",
+        "summary": "Simulate detector on insight",
+        "title": "Simulate detector on insight",
+        "required_scopes": ["alert:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
     "annotations-list": {
         "description": "List annotations in the current project, newest first. Use this to review existing deployment markers and analysis notes before adding new annotations.",
         "category": "Annotations",
@@ -1034,6 +1049,21 @@
             "readOnlyHint": true
         }
     },
+    "feature-flags-dependent-flags-retrieve": {
+        "description": "Get other active feature flags that depend on this flag. Use this to understand flag dependency chains before making changes to a flag's rollout conditions or disabling it.",
+        "category": "Feature flags",
+        "feature": "flags",
+        "summary": "Get dependent feature flags",
+        "title": "Get dependent feature flags",
+        "required_scopes": ["feature_flag:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
     "feature-flags-status-retrieve": {
         "description": "Check the health and evaluation status of a feature flag by ID. Returns a status (active, stale, deleted, or unknown) and a human-readable reason explaining the status.",
         "category": "Feature flags",
@@ -1735,6 +1765,21 @@
         "annotations": {
             "destructiveHint": false,
             "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "prompt-duplicate": {
+        "description": "Duplicate an existing LLM prompt under a new name. Copies the latest version's content to create a new prompt at version 1. Useful for forking a prompt or as a way to rename since names are immutable after creation.",
+        "category": "Prompts",
+        "feature": "prompts",
+        "summary": "Duplicate prompt",
+        "title": "Duplicate prompt",
+        "required_scopes": ["llm_prompt:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
             "openWorldHint": true,
             "readOnlyHint": false
         }

@@ -134,7 +134,7 @@ class ActivityLogQueryParamsSerializer(serializers.Serializer):
     )
 
 
-@extend_schema(tags=["activity_logs"])
+@extend_schema(tags=["activity_logs", "platform_features"])
 class ActivityLogViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet, mixins.ListModelMixin):
     scope_object = "activity_log"
     queryset = ActivityLog.objects.all()
@@ -238,6 +238,7 @@ class ActivityLogFlatExportSerializer(serializers.ModelSerializer):
         return json.dumps(obj.detail) if obj.detail else ""
 
 
+@extend_schema(tags=["platform_features"])
 class AdvancedActivityLogsViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet, mixins.ListModelMixin):
     serializer_class = ActivityLogSerializer
     pagination_class = ActivityLogPagination

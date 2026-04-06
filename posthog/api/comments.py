@@ -148,7 +148,7 @@ class CommentPagination(pagination.CursorPagination):
     page_size = 100
 
 
-@extend_schema(tags=["core"])
+@extend_schema(tags=["core", "platform_features"])
 class CommentViewSet(TeamAndOrgViewSetMixin, ForbidDestroyModel, viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
