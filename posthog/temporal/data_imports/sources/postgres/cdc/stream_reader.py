@@ -54,11 +54,14 @@ class PgCDCStreamReader:
             password=self._params.password,
         )
 
-    def read_changes(self, from_position: str | None = None) -> Iterator[ChangeEvent]:
+    def read_changes(self) -> Iterator[ChangeEvent]:
         """Read all pending WAL changes from the replication slot.
 
         Uses peek (non-consuming) so the slot position is not advanced.
         Call confirm_position() after successful processing.
+
+        Uses a named server-side cursor to stream rows in chunks rather than
+        buffering the entire WAL backlog in client memory.
         """
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -74,12 +77,12 @@ class PgCDCStreamReader:
             pub_name=sql.Literal(self._params.publication_name),
         )
 
-        with self._conn.cursor() as cur:
+        with self._conn.cursor(name="cdc_stream") as cur:
+            cur.itersize = 1000
             cur.execute(query)
 
             for row in cur:
                 lsn_str: str = row[0]
-                # xid: int = row[1]  # not needed
                 data: bytes = row[2]
 
                 events = self._decoder.decode_message(data, lsn_str)
