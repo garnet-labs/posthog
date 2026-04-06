@@ -20,6 +20,7 @@ from posthog.models.signals import model_activity_signal, mutable_receiver
 from posthog.temporal.data_imports.sources import SourceRegistry
 from posthog.temporal.data_imports.sources.common.base import WebhookSource
 
+from products.data_warehouse.backend.api.external_data_source import is_cdc_enabled_for_team
 from products.data_warehouse.backend.data_load.service import (
     cancel_external_data_workflow,
     external_data_workflow_exists,
@@ -153,6 +154,13 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             and sync_type != ExternalDataSchema.SyncType.CDC
         ):
             raise ValidationError("Invalid sync type")
+
+        if sync_type == ExternalDataSchema.SyncType.CDC:
+            from posthog.models import Team
+
+            team = Team.objects.get(id=self.context["team_id"])
+            if not is_cdc_enabled_for_team(team):
+                raise ValidationError("CDC is not enabled for this team")
 
         # Only update sync_type if it was explicitly provided in the request
         if "sync_type" in data:
@@ -435,6 +443,9 @@ class ExternalDataSchemaViewset(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         context["database"] = Database.create_for(team_id=self.team_id)
         return context
 
+    def _is_cdc_enabled(self) -> bool:
+        return is_cdc_enabled_for_team(self.team)
+
     def safely_get_queryset(self, queryset):
         return queryset.exclude(deleted=True).prefetch_related("created_by").order_by(self.ordering)
 
@@ -596,7 +607,7 @@ class ExternalDataSchemaViewset(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             "incremental_fields": schema.incremental_fields,
             "incremental_available": schema.supports_incremental,
             "append_available": schema.supports_append,
-            "cdc_available": schema.supports_cdc,
+            "cdc_available": schema.supports_cdc if self._is_cdc_enabled() else None,
             "full_refresh_available": True,
             "supports_webhooks": schema.supports_webhooks,
         }

@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 import uuid
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from posthog.models import Team
 
 from django.db import transaction
 from django.db.models import Prefetch, Q
@@ -79,6 +84,18 @@ from products.data_warehouse.backend.models.util import postgres_columns_to_dwh_
 from products.data_warehouse.backend.types import DataWarehouseManagedViewSetKind, ExternalDataSourceType
 
 logger = structlog.get_logger(__name__)
+
+
+def is_cdc_enabled_for_team(team: Team) -> bool:
+    """Check if the CDC feature flag is enabled for a team."""
+    import posthoganalytics
+
+    return posthoganalytics.feature_enabled(
+        "dwh-postgres-cdc",
+        str(team.uuid),
+        groups={"organization": str(team.organization_id)},
+        group_properties={"organization": {"id": str(team.organization_id)}},
+    )
 
 
 def get_sensitive_field_names(fields: list[FieldType]) -> set[str]:
@@ -695,7 +712,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
         )
 
         # CDC: create slot + publication for PostHog-managed sources
-        cdc_enabled = payload.get("cdc_enabled", False)
+        cdc_enabled = payload.get("cdc_enabled", False) and self._is_cdc_enabled()
         if cdc_enabled and source_type_model == ExternalDataSourceType.POSTGRES:
             cdc_result = self._setup_cdc_slot(source, source_config, new_source_model, payload)
             if cdc_result is not None:
@@ -1000,6 +1017,9 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 error=str(e),
             )
 
+    def _is_cdc_enabled(self) -> bool:
+        return is_cdc_enabled_for_team(self.team)
+
     def prefix_required(self, source_type: str) -> bool:
         source_type_exists = (
             ExternalDataSource.objects.exclude(deleted=True)
@@ -1239,7 +1259,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 "incremental_fields": schema.incremental_fields,
                 "incremental_available": schema.supports_incremental,
                 "append_available": schema.supports_append,
-                "cdc_available": schema.supports_cdc,
+                "cdc_available": schema.supports_cdc if self._is_cdc_enabled() else None,
                 "incremental_field": schema.incremental_fields[0]["field"]
                 if len(schema.incremental_fields) > 0 and len(schema.incremental_fields[0]["field"]) > 0
                 else None,
