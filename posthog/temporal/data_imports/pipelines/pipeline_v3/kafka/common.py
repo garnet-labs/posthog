@@ -53,8 +53,8 @@ class ExportSignalMessage:
     partition_mode: Optional[PartitionMode] = None
     is_first_ever_sync: bool = False
     cumulative_row_count: int = 0
-    cdc_write_mode: Optional[Literal["incremental_merge", "scd2_append"]] = None
-    cdc_table_mode: Optional[Literal["consolidated", "cdc_only", "both"]] = None
+    cdc_write_mode: Optional[str] = None
+    cdc_table_mode: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

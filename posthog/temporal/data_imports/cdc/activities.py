@@ -457,28 +457,28 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
             if decoder_pks and decoder_pks != stored_pks:
                 log.warning("pk_columns_changed", table=table_name, old=stored_pks, new=decoder_pks)
                 pk_columns_by_table[table_name] = decoder_pks
-                schema = schema_by_name.get(table_name)
-                if schema is not None:
-                    schema.sync_type_config["primary_key_columns"] = decoder_pks
-                    schema.save(update_fields=["sync_type_config", "updated_at"])
+                pk_schema = schema_by_name.get(table_name)
+                if pk_schema is not None:
+                    pk_schema.sync_type_config["primary_key_columns"] = decoder_pks
+                    pk_schema.save(update_fields=["sync_type_config", "updated_at"])
 
         truncated_tables = list(reader.truncated_tables)
         reader.clear_truncated_tables()
         for table_name in truncated_tables:
-            schema = schema_by_name.get(table_name)
-            if schema is not None:
-                log.warning("truncate_detected", table=table_name, schema_id=str(schema.id))
-                schema.sync_type_config["cdc_mode"] = "snapshot"
-                schema.sync_type_config.pop("cdc_last_log_position", None)
-                schema.initial_sync_complete = False
-                schema.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
+            trunc_schema = schema_by_name.get(table_name)
+            if trunc_schema is not None:
+                log.warning("truncate_detected", table=table_name, schema_id=str(trunc_schema.id))
+                trunc_schema.sync_type_config["cdc_mode"] = "snapshot"
+                trunc_schema.sync_type_config.pop("cdc_last_log_position", None)
+                trunc_schema.initial_sync_complete = False
+                trunc_schema.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
                 try:
                     from products.data_warehouse.backend.data_load.service import unpause_external_data_schedule
 
-                    unpause_external_data_schedule(str(schema.id))
-                    log.info("unpaused_schema_schedule_for_resnapshot", schema_id=str(schema.id))
+                    unpause_external_data_schedule(str(trunc_schema.id))
+                    log.info("unpaused_schema_schedule_for_resnapshot", schema_id=str(trunc_schema.id))
                 except Exception:
-                    log.warning("failed_to_unpause_schema_schedule", schema_id=str(schema.id))
+                    log.warning("failed_to_unpause_schema_schedule", schema_id=str(trunc_schema.id))
 
         if event_count == 0:
             if truncated_tables:

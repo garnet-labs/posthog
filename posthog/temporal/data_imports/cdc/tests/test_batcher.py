@@ -176,13 +176,13 @@ class TestChangeEventBatcher:
         batcher = ChangeEventBatcher(max_events=3)
         batcher.add(_make_event(columns={"id": 1}))
         batcher.add(_make_event(columns={"id": 2}))
-        assert batcher.should_flush is False
+        assert not batcher.should_flush
 
         batcher.add(_make_event(columns={"id": 3}))
-        assert batcher.should_flush is True
+        assert batcher.should_flush
 
         batcher.flush()
-        assert batcher.should_flush is False
+        assert not batcher.should_flush
 
     def test_should_flush_byte_threshold(self):
         batcher = ChangeEventBatcher(max_bytes=500)
