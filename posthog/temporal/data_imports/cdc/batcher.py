@@ -121,6 +121,10 @@ def enrich_delete_rows(
     2. The corresponding row in `existing_rows` (e.g. the current DeltaLake state
        passed in from the load processor for cross-batch enrichment).
 
+    Note: This function materializes columns to Python lists via to_pylist().
+    The processor pre-filters `existing_rows` to only the PKs present in DELETE
+    events before calling this, so the materialization is bounded by the batch size.
+
     Metadata columns (op, timestamp, deleted flags, valid_from/to) are always
     kept from the DELETE event itself and are never overwritten.
     """
@@ -325,11 +329,16 @@ def _events_to_table(events: list[ChangeEvent]) -> pa.Table:
         deleted_flags.append(is_delete)
         deleted_at.append(ts_us if is_delete else None)
 
-    # Build PyArrow arrays for source columns
+    # Build PyArrow arrays for source columns.
+    # If type inference fails (e.g. mixed int/str from a schema change mid-WAL),
+    # fall back to storing the column as strings.
     arrays: list[pa.Array] = []
     fields: list[pa.Field] = []
     for col_name in column_names:
-        arr = pa.array(source_data[col_name])
+        try:
+            arr = pa.array(source_data[col_name])
+        except (pa.ArrowInvalid, pa.ArrowTypeError):
+            arr = pa.array([str(v) if v is not None else None for v in source_data[col_name]], type=pa.string())
         arrays.append(arr)
         fields.append(pa.field(col_name, arr.type))
 

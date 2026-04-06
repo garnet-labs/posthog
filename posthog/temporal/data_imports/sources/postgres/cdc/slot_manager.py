@@ -3,11 +3,49 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import psycopg
 from psycopg import sql
 
+if TYPE_CHECKING:
+    from products.data_warehouse.backend.models import ExternalDataSource
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def cdc_pg_connection(source: ExternalDataSource, connect_timeout: int = 15) -> Iterator[psycopg.Connection]:
+    """Open a psycopg connection to the source database, respecting SSH tunnels.
+
+    This is the single place to create CDC management connections. All callers
+    (slot creation, publication management, cleanup, WAL lag checks) should use
+    this rather than constructing connections manually from job_inputs.
+    """
+    from posthog.temporal.data_imports.sources import SourceRegistry
+
+    from products.data_warehouse.backend.types import ExternalDataSourceType
+
+    job_inputs = source.job_inputs or {}
+    source_type = ExternalDataSourceType(source.source_type)
+    source_impl = SourceRegistry.get_source(source_type)
+    config = source_impl.parse_config(job_inputs)
+
+    with source_impl.with_ssh_tunnel(config) as (host, port):
+        conn = psycopg.connect(
+            host=host,
+            port=port,
+            dbname=config.database,
+            user=config.user,
+            password=config.password,
+            connect_timeout=connect_timeout,
+        )
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 
 def create_slot_and_publication(
@@ -101,16 +139,21 @@ def add_table_to_publication(
     schema: str,
     table: str,
 ) -> None:
-    """Add a table to an existing publication."""
+    """Add a table to an existing publication. No-op if already a member."""
     with conn.cursor() as cur:
-        cur.execute(
-            sql.SQL("ALTER PUBLICATION {} ADD TABLE {}.{}").format(
-                sql.Identifier(pub_name),
-                sql.Identifier(schema),
-                sql.Identifier(table),
+        try:
+            cur.execute(
+                sql.SQL("ALTER PUBLICATION {} ADD TABLE {}.{}").format(
+                    sql.Identifier(pub_name),
+                    sql.Identifier(schema),
+                    sql.Identifier(table),
+                )
             )
-        )
-        conn.commit()
+            conn.commit()
+        except psycopg.errors.DuplicateObject:
+            conn.rollback()
+            logger.info("Table %s.%s is already in publication '%s', skipping", schema, table, pub_name)
+            return
 
     logger.info("Added table %s.%s to publication '%s'", schema, table, pub_name)
 
@@ -121,16 +164,21 @@ def remove_table_from_publication(
     schema: str,
     table: str,
 ) -> None:
-    """Remove a table from an existing publication."""
+    """Remove a table from an existing publication. No-op if not a member."""
     with conn.cursor() as cur:
-        cur.execute(
-            sql.SQL("ALTER PUBLICATION {} DROP TABLE {}.{}").format(
-                sql.Identifier(pub_name),
-                sql.Identifier(schema),
-                sql.Identifier(table),
+        try:
+            cur.execute(
+                sql.SQL("ALTER PUBLICATION {} DROP TABLE {}.{}").format(
+                    sql.Identifier(pub_name),
+                    sql.Identifier(schema),
+                    sql.Identifier(table),
+                )
             )
-        )
-        conn.commit()
+            conn.commit()
+        except psycopg.errors.UndefinedTable:
+            conn.rollback()
+            logger.info("Table %s.%s is not in publication '%s', skipping", schema, table, pub_name)
+            return
 
     logger.info("Removed table %s.%s from publication '%s'", schema, table, pub_name)
 

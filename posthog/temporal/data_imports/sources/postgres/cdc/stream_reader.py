@@ -122,6 +122,10 @@ class PgCDCStreamReader:
     def clear_truncated_tables(self) -> None:
         self._decoder.clear_truncated_tables()
 
+    def get_decoder_key_columns(self, table_name: str) -> list[str]:
+        """Return PK columns discovered by the decoder from Relation messages during read_changes()."""
+        return self._decoder.get_key_columns(table_name)
+
     @property
     def last_commit_end_lsn(self) -> str | None:
         """End LSN of the most recently committed transaction.

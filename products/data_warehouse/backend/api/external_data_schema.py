@@ -135,7 +135,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
     def get_sync_time_of_day(self, schema: ExternalDataSchema):
         return schema.sync_time_of_day
 
-    @extend_schema_field(serializers.CharField())
+    @extend_schema_field(serializers.ChoiceField(choices=["consolidated", "cdc_only", "both"]))
     def get_cdc_table_mode(self, schema: ExternalDataSchema) -> str:
         return schema.cdc_table_mode
 
@@ -403,36 +403,18 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         action: str,
     ) -> None:
         """Best-effort add/remove a table from the CDC publication."""
-        import psycopg
-
         from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import (
             add_table_to_publication,
+            cdc_pg_connection,
             remove_table_from_publication,
         )
 
-        job_inputs = source.job_inputs or {}
-
         try:
-            source_type = ExternalDataSourceType(source.source_type)
-            source_impl = SourceRegistry.get_source(source_type)
-            config = source_impl.parse_config(job_inputs)
-
-            with source_impl.with_ssh_tunnel(config) as (host, port):
-                conn = psycopg.connect(
-                    host=host,
-                    port=port,
-                    dbname=config.database,
-                    user=config.user,
-                    password=config.password,
-                    connect_timeout=15,
-                )
-                try:
-                    if action == "add":
-                        add_table_to_publication(conn, pub_name, db_schema, table_name)
-                    else:
-                        remove_table_from_publication(conn, pub_name, db_schema, table_name)
-                finally:
-                    conn.close()
+            with cdc_pg_connection(source) as conn:
+                if action == "add":
+                    add_table_to_publication(conn, pub_name, db_schema, table_name)
+                else:
+                    remove_table_from_publication(conn, pub_name, db_schema, table_name)
         except Exception as e:
             logger.exception(
                 "Failed to alter CDC publication",

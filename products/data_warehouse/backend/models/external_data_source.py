@@ -136,22 +136,13 @@ class ExternalDataSource(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
 
         # Drop slot and publication on the source database
         try:
-            import psycopg
-
-            from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import drop_slot_and_publication
-
-            conn = psycopg.connect(
-                host=job_inputs.get("host", ""),
-                port=int(job_inputs.get("port", 5432)),
-                dbname=job_inputs.get("database", ""),
-                user=job_inputs.get("user", ""),
-                password=job_inputs.get("password", ""),
-                connect_timeout=10,
+            from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import (
+                cdc_pg_connection,
+                drop_slot_and_publication,
             )
-            try:
+
+            with cdc_pg_connection(self, connect_timeout=10) as conn:
                 drop_slot_and_publication(conn, slot_name, pub_name)
-            finally:
-                conn.close()
         except Exception:
             logger.exception(
                 "Failed to drop CDC slot/publication on source DB (best-effort)",
