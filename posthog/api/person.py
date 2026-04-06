@@ -155,35 +155,46 @@ def get_person_name_helper(
     return str(person_pk)
 
 
-class PersonsWebThrottleMixin:
+class PersonsWebThrottleBase(UserOrEmailRateThrottle):
     rate_limit_setting: str
+    _cached_limits: dict[str, str] | None = None
+    _cache_loaded: bool = False
+
+    def _get_team_limits(self) -> dict[str, str]:
+        """Get team limits with startup caching - only loads once from disk"""
+        if not self._cache_loaded:
+            try:
+                limits_str = get_instance_setting(self.rate_limit_setting) or "{}"
+                self._cached_limits = json.loads(limits_str)
+            except Exception:
+                logger.exception(
+                    "Error parsing team-specific rate limits (setting=%s)",
+                    self.rate_limit_setting,
+                )
+                self._cached_limits = {}
+            finally:
+                self._cache_loaded = True
+
+        return self._cached_limits or {}
 
     def allow_request(self, request, view):
         team_id = getattr(view, "team_id", None)
         if team_id:
-            try:
-                limits_str = get_instance_setting(self.rate_limit_setting) or "{}"
-                limits = json.loads(limits_str)
-                custom_rate = limits.get(str(team_id))
-                if custom_rate:
-                    self.rate = custom_rate
-                    self.num_requests, self.duration = self.parse_rate(self.rate)
-            except Exception:
-                logger.exception(
-                    "Error getting team-specific rate limit for team %s (setting=%s)",
-                    team_id,
-                    self.rate_limit_setting,
-                )
+            limits = self._get_team_limits()
+            custom_rate = limits.get(str(team_id))
+            if custom_rate:
+                self.rate = custom_rate
+                self.num_requests, self.duration = self.parse_rate(self.rate)
         return super().allow_request(request, view)
 
 
-class PersonsWebBurstThrottle(PersonsWebThrottleMixin, UserOrEmailRateThrottle):
+class PersonsWebBurstThrottle(PersonsWebThrottleBase):
     scope = "persons_burst"
     rate = "180/minute"
     rate_limit_setting = "PERSONS_BURST_RATE_LIMITS"
 
 
-class PersonsWebSustainedThrottle(PersonsWebThrottleMixin, UserOrEmailRateThrottle):
+class PersonsWebSustainedThrottle(PersonsWebThrottleBase):
     scope = "persons_sustained"
     rate = "1200/hour"
     rate_limit_setting = "PERSONS_SUSTAINED_RATE_LIMITS"
