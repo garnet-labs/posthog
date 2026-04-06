@@ -4,6 +4,9 @@ pub mod mock;
 pub mod producer;
 pub mod types;
 
+#[cfg(test)]
+mod sink_tests;
+
 use std::future::Future;
 use std::time::Duration;
 

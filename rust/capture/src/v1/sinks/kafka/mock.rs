@@ -16,6 +16,7 @@ pub struct MockProducer {
     send_error: Option<fn() -> ProduceError>,
     ack_error: Option<fn() -> ProduceError>,
     ack_delay: Option<Duration>,
+    ready_override: Option<bool>,
     handle: lifecycle::Handle,
 }
 
@@ -27,6 +28,7 @@ impl MockProducer {
             send_error: None,
             ack_error: None,
             ack_delay: None,
+            ready_override: None,
             handle,
         }
     }
@@ -43,6 +45,11 @@ impl MockProducer {
 
     pub fn with_ack_delay(mut self, d: Duration) -> Self {
         self.ack_delay = Some(d);
+        self
+    }
+
+    pub fn with_not_ready(mut self) -> Self {
+        self.ready_override = Some(false);
         self
     }
 
@@ -89,7 +96,8 @@ impl super::KafkaProducerTrait for MockProducer {
     }
 
     fn is_ready(&self) -> bool {
-        self.handle.is_healthy()
+        self.ready_override
+            .unwrap_or_else(|| self.handle.is_healthy())
     }
 
     fn sink_name(&self) -> SinkName {
