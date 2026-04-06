@@ -8,7 +8,6 @@ import { groupsModel } from '~/models/groupsModel'
 import { InsightVizNode, NodeKind, TrendsQuery } from '~/queries/schema/schema-general'
 
 import { initKeaTests } from '../init'
-import { resetAllCapturedCharts } from './captured-charts'
 import { resetCapturedCharts } from './chartjs-mock'
 import { setupInsightMocks, type SetupMocksOptions } from './mocks'
 
@@ -25,7 +24,6 @@ export function buildTrendsQuery(overrides?: Partial<TrendsQuery>): TrendsQuery 
 
 /** Sets up Kea context, mounts common logics, and configures insight API mocks. */
 function setupTestEnvironment(mocks?: SetupMocksOptions, featureFlags?: Record<string, string | boolean>): void {
-    resetAllCapturedCharts()
     resetCapturedCharts()
 
     initKeaTests()

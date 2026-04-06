@@ -174,6 +174,9 @@ export function getChart(index = -1): Chart {
         hover: (i) => (normalized.hover ? normalized.hover(i) : notSupported('hover()', normalized.renderer)),
         pin: () => (normalized.pin ? normalized.pin() : notSupported('pin()', normalized.renderer)),
         unpin: () => (normalized.unpin ? normalized.unpin() : notSupported('unpin()', normalized.renderer)),
-        tooltipHost: () => (normalized.getTooltipHost ? normalized.getTooltipHost() : null),
+        tooltipHost: () =>
+            normalized.getTooltipHost
+                ? normalized.getTooltipHost()
+                : notSupported('tooltipHost()', normalized.renderer),
     }
 }
