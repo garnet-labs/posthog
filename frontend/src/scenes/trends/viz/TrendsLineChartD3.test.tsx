@@ -1,12 +1,13 @@
 import '@testing-library/jest-dom'
 
-import { cleanup } from '@testing-library/react'
+import { cleanup, screen, waitFor } from '@testing-library/react'
 
 import { FEATURE_FLAGS } from 'lib/constants'
 import { setupJsdom } from 'lib/hog-charts/test-helpers'
 
 import { NodeKind } from '~/queries/schema/schema-general'
 import { buildTrendsQuery, chart, renderInsight, trendsSeries } from '~/test/insight-testing'
+import { ChartDisplayType } from '~/types'
 
 let cleanupJsdom: () => void
 
@@ -32,7 +33,27 @@ describe('TrendsLineChartD3', () => {
             expect(tooltip.element.querySelector('.graph-series-glyph')).toBeInTheDocument()
         })
 
-        it('shows breakdown values across series', async () => {
+        it('shows each series with its own value for multiple series', async () => {
+            renderInsight({
+                query: buildTrendsQuery({
+                    series: [
+                        { kind: NodeKind.EventsNode, event: '$pageview', name: '$pageview' },
+                        { kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' },
+                    ],
+                }),
+                featureFlags: HOG_CHARTS_FLAG,
+            })
+
+            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
+
+            tooltip.row('Pageview').expectValue('134')
+            tooltip.row('Napped').expectValue('5')
+
+            const glyphs = tooltip.element.querySelectorAll('.graph-series-glyph')
+            expect(glyphs.length).toBe(2)
+        })
+
+        it('shows breakdown values in the inverted column layout', async () => {
             renderInsight({
                 query: buildTrendsQuery({
                     series: [{ kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' }],
@@ -44,6 +65,62 @@ describe('TrendsLineChartD3', () => {
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
             tooltip.row('Spike').expectValue('3')
+        })
+
+        it('shows current and previous period rows in compare mode', async () => {
+            renderInsight({
+                query: buildTrendsQuery({
+                    compareFilter: { compare: true },
+                }),
+                featureFlags: HOG_CHARTS_FLAG,
+            })
+
+            await waitFor(() => {
+                expect(screen.getByRole('img', { name: /chart with 2 data series/i })).toBeInTheDocument()
+            })
+
+            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
+
+            tooltip.row('Current').expectValue('134')
+            tooltip.row('Previous').expectValue('100')
+        })
+
+        it('formats values as percentages in percent stack view', async () => {
+            renderInsight({
+                query: buildTrendsQuery({
+                    series: [
+                        { kind: NodeKind.EventsNode, event: '$pageview', name: '$pageview' },
+                        { kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' },
+                    ],
+                    trendsFilter: {
+                        display: ChartDisplayType.ActionsAreaGraph,
+                        showPercentStackView: true,
+                    },
+                }),
+                featureFlags: HOG_CHARTS_FLAG,
+            })
+
+            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
+
+            const pageviewRow = tooltip.row('Pageview')
+            expect(pageviewRow.element.textContent).toMatch(/%/)
+        })
+
+        it('hides series glyph for formula insights', async () => {
+            renderInsight({
+                query: buildTrendsQuery({
+                    trendsFilter: { formula: 'A + B' },
+                    series: [
+                        { kind: NodeKind.EventsNode, event: '$pageview', name: '$pageview' },
+                        { kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' },
+                    ],
+                }),
+                featureFlags: HOG_CHARTS_FLAG,
+            })
+
+            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
+
+            expect(tooltip.element.querySelector('.graph-series-glyph')).not.toBeInTheDocument()
         })
 
         it('excludes zero-count series', async () => {

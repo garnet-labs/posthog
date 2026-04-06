@@ -79,6 +79,8 @@ export interface SeriesData {
     labels?: string[]
     days?: string[]
     breakdown_value?: string | number
+    compare?: boolean
+    compare_label?: string
 }
 
 export const trendsSeries = {
@@ -111,6 +113,17 @@ export const trendsSeries = {
         days,
         labels,
     },
+    pageviewsCompare: [
+        { label: '$pageview', data: [45, 82, 134, 210, 95], days, labels, compare: true, compare_label: 'current' },
+        {
+            label: '$pageview',
+            data: [30, 60, 100, 180, 70],
+            days: ['2024-06-03', '2024-06-04', '2024-06-05', '2024-06-06', '2024-06-07'],
+            labels,
+            compare: true,
+            compare_label: 'previous',
+        },
+    ],
 }
 
 // Maps (event name, optional breakdown) → canned series data.
@@ -133,6 +146,14 @@ const seriesByEvent: Record<string, EventSeriesConfig> = {
     },
     ZeroCounts: { default: trendsSeries.withZeroCounts[0], multi: trendsSeries.withZeroCounts },
     Minimal: { default: trendsSeries.minimal },
+}
+
+/** Resolver for compare queries — returns current + previous period series. */
+export function lookupCompareSeries(eventName: string): SeriesData[] | null {
+    if (eventName === '$pageview') {
+        return trendsSeries.pageviewsCompare
+    }
+    return null
 }
 
 const fallbackSeries: SeriesData = {
