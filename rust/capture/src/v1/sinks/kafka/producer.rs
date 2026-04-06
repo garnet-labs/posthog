@@ -3,11 +3,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use metrics::counter;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::ClientConfig;
-use tracing::{info, warn};
+use tracing::{error, info};
 
 use super::types::error_code_tag;
 use crate::v1::sinks::kafka::config::Config as KafkaConfig;
@@ -160,10 +161,17 @@ impl KafkaProducer {
                 info!("v1 kafka producer [{}] connected", sink.as_str());
             }
             Err(e) => {
-                warn!(
+                error!(
                     "v1 kafka producer [{}]: initial metadata fetch failed: {e}",
                     sink.as_str()
                 );
+                counter!(
+                    "capture_v1_kafka_client_errors_total",
+                    "cluster" => sink.as_str(),
+                    "mode" => capture_mode,
+                    "error" => "metadata_fetch_failed",
+                )
+                .increment(1);
             }
         }
 

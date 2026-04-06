@@ -24,6 +24,12 @@ pub fn error_code_tag(code: RDKafkaErrorCode) -> &'static str {
         RDKafkaErrorCode::InvalidMessageSize => "invalid_message_size",
         RDKafkaErrorCode::NotLeaderForPartition => "not_leader_for_partition",
         RDKafkaErrorCode::RequestTimedOut => "request_timed_out",
+        // Transport/infra codes surfaced by ClientContext::error() callback
+        RDKafkaErrorCode::BrokerTransportFailure => "broker_transport_failure",
+        RDKafkaErrorCode::AllBrokersDown => "all_brokers_down",
+        RDKafkaErrorCode::Resolve => "resolve",
+        RDKafkaErrorCode::Authentication => "authentication",
+        RDKafkaErrorCode::SaslAuthenticationFailed => "sasl_authentication_failed",
         _ => "rdkafka_other",
     }
 }

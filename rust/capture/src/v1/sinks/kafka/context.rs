@@ -1,5 +1,8 @@
 use metrics::{counter, gauge};
+use rdkafka::error::KafkaError;
+use tracing::error;
 
+use super::types::error_code_tag;
 use crate::v1::sinks::SinkName;
 
 // ---------------------------------------------------------------------------
@@ -19,6 +22,30 @@ impl KafkaContext {
 }
 
 impl rdkafka::ClientContext for KafkaContext {
+    fn error(&self, err: KafkaError, reason: &str) {
+        let sink = self.sink.as_str();
+        let mode = self.mode;
+        let tag = err
+            .rdkafka_error_code()
+            .map(error_code_tag)
+            .unwrap_or("unknown");
+        error!(
+            sink = sink,
+            mode = mode,
+            error = %err,
+            error_tag = tag,
+            reason = reason,
+            "rdkafka client error"
+        );
+        counter!(
+            "capture_v1_kafka_client_errors_total",
+            "cluster" => sink,
+            "mode" => mode,
+            "error" => tag,
+        )
+        .increment(1);
+    }
+
     fn stats(&self, stats: rdkafka::Statistics) {
         let sink = self.sink.as_str();
         let mode = self.mode;
@@ -26,6 +53,20 @@ impl rdkafka::ClientContext for KafkaContext {
         let brokers_up = stats.brokers.values().any(|b| b.state == "UP");
         if brokers_up {
             self.handle.report_healthy();
+        } else if !stats.brokers.is_empty() {
+            error!(
+                sink = sink,
+                mode = mode,
+                broker_count = stats.brokers.len(),
+                "all brokers DOWN for sink"
+            );
+            counter!(
+                "capture_v1_kafka_client_errors_total",
+                "cluster" => sink,
+                "mode" => mode,
+                "error" => "all_brokers_down",
+            )
+            .increment(1);
         }
 
         // metric label key "cluster" kept for dashboard backward compatibility

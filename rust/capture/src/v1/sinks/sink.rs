@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use metrics::{counter, histogram};
 use tokio::task::JoinSet;
-use tracing::{debug, error, info_span, warn};
+use tracing::{debug, error, info_span, Level};
 
 use crate::config::CaptureMode;
 use crate::v1::context::Context;
@@ -143,6 +143,12 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         let sink_cfg = match self.config.configs.get(&sink) {
             Some(c) => c,
             None => {
+                crate::ctx_log!(
+                    Level::ERROR,
+                    ctx,
+                    sink = sink_str,
+                    "sink not configured — rejecting batch"
+                );
                 return reject_publishable(
                     events,
                     || KafkaSinkError::SinkNotConfigured,
@@ -157,6 +163,12 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
 
         // Per-sink health gate
         if !producer.is_ready() {
+            crate::ctx_log!(
+                Level::ERROR,
+                ctx,
+                sink = sink_str,
+                "producer not ready — rejecting batch"
+            );
             return reject_publishable(
                 events,
                 || KafkaSinkError::SinkUnavailable,
@@ -359,8 +371,18 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         let summary = BatchSummary::from_results(&results);
         if summary.all_ok() {
             debug!(%summary, "batch published");
+        } else if summary.succeeded == 0 {
+            crate::ctx_log!(Level::ERROR, ctx,
+                sink = sink_str,
+                %summary,
+                errors = ?summary.errors,
+                "batch fully failed");
         } else {
-            warn!(%summary, "batch had errors");
+            crate::ctx_log!(Level::WARN, ctx,
+                sink = sink_str,
+                %summary,
+                errors = ?summary.errors,
+                "batch partially failed");
         }
         for (tag, count) in &summary.errors {
             counter!(
