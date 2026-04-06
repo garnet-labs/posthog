@@ -13,6 +13,7 @@ import type {
     NotebooksListParams,
     PaginatedNotebookMinimalListApi,
     PatchedNotebookApi,
+    SharingConfigurationApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -354,6 +355,79 @@ export const notebooksKernelStopCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(notebookApi),
+    })
+}
+
+export const getNotebooksSharingListUrl = (projectId: string, shortId: string) => {
+    return `/api/projects/${projectId}/notebooks/${shortId}/sharing/`
+}
+
+export const notebooksSharingList = async (
+    projectId: string,
+    shortId: string,
+    options?: RequestInit
+): Promise<SharingConfigurationApi[]> => {
+    return apiMutator<SharingConfigurationApi[]>(getNotebooksSharingListUrl(projectId, shortId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+/**
+ * Create a new password for the sharing configuration.
+ */
+export const getNotebooksSharingPasswordsCreateUrl = (projectId: string, shortId: string) => {
+    return `/api/projects/${projectId}/notebooks/${shortId}/sharing/passwords/`
+}
+
+export const notebooksSharingPasswordsCreate = async (
+    projectId: string,
+    shortId: string,
+    sharingConfigurationApi: NonReadonly<SharingConfigurationApi>,
+    options?: RequestInit
+): Promise<SharingConfigurationApi> => {
+    return apiMutator<SharingConfigurationApi>(getNotebooksSharingPasswordsCreateUrl(projectId, shortId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(sharingConfigurationApi),
+    })
+}
+
+/**
+ * Delete a password from the sharing configuration.
+ */
+export const getNotebooksSharingPasswordsDestroyUrl = (projectId: string, shortId: string, passwordId: string) => {
+    return `/api/projects/${projectId}/notebooks/${shortId}/sharing/passwords/${passwordId}/`
+}
+
+export const notebooksSharingPasswordsDestroy = async (
+    projectId: string,
+    shortId: string,
+    passwordId: string,
+    options?: RequestInit
+): Promise<void> => {
+    return apiMutator<void>(getNotebooksSharingPasswordsDestroyUrl(projectId, shortId, passwordId), {
+        ...options,
+        method: 'DELETE',
+    })
+}
+
+export const getNotebooksSharingRefreshCreateUrl = (projectId: string, shortId: string) => {
+    return `/api/projects/${projectId}/notebooks/${shortId}/sharing/refresh/`
+}
+
+export const notebooksSharingRefreshCreate = async (
+    projectId: string,
+    shortId: string,
+    sharingConfigurationApi: NonReadonly<SharingConfigurationApi>,
+    options?: RequestInit
+): Promise<SharingConfigurationApi> => {
+    return apiMutator<SharingConfigurationApi>(getNotebooksSharingRefreshCreateUrl(projectId, shortId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(sharingConfigurationApi),
     })
 }
 
