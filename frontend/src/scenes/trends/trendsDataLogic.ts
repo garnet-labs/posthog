@@ -2,16 +2,14 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 
 import { DataColorTheme, DataColorToken } from 'lib/colors'
 import { dayjs } from 'lib/dayjs'
+import { indexTrendResults } from 'lib/hog-charts/transforms/trends'
+import type { IndexedTrendResult } from 'lib/hog-charts/transforms/trends'
 import { isMultiSeriesFormula } from 'lib/utils'
 import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
 import { getColorFromToken } from 'scenes/dataThemeLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 import { keyForInsightLogicProps } from 'scenes/insights/sharedUtils'
 import {
-    BREAKDOWN_NULL_NUMERIC_LABEL,
-    BREAKDOWN_NULL_STRING_LABEL,
-    BREAKDOWN_OTHER_NUMERIC_LABEL,
-    BREAKDOWN_OTHER_STRING_LABEL,
     getTrendDatasetKey,
     getTrendResultCustomization,
     getTrendResultCustomizationColorToken,
@@ -36,14 +34,12 @@ import {
     HogQLMathType,
     InsightLogicProps,
     IntervalType,
-    LifecycleToggle,
     PropertyMathType,
     TrendAPIResponse,
     TrendResult,
 } from '~/types'
 
 import type { trendsDataLogicType } from './trendsDataLogicType'
-import { IndexedTrendResult } from './types'
 
 export const RESULT_CUSTOMIZATION_DEFAULT = ResultCustomizationBy.Value
 
@@ -193,74 +189,8 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
 
         indexedResults: [
             (s) => [s.results, s.display, s.lifecycleFilter],
-            (results, display, lifecycleFilter): IndexedTrendResult[] => {
-                const defaultLifecyclesOrder = ['new', 'resurrecting', 'returning', 'dormant']
-                let indexedResults = results.map((result, index) => ({ ...result, seriesIndex: index }))
-
-                // want the previous bars to show before current bars
-                if (display === ChartDisplayType.ActionsUnstackedBar && indexedResults.some((x) => x.compare)) {
-                    indexedResults.sort((a, b) => {
-                        if (a.compare_label === b.compare_label) {
-                            return 0
-                        }
-                        if (a.compare_label === 'previous') {
-                            return -1
-                        }
-                        if (b.compare_label === 'previous') {
-                            return 1
-                        }
-                        return 0
-                    })
-                } else if (
-                    display &&
-                    (display === ChartDisplayType.ActionsBarValue || display === ChartDisplayType.ActionsPie)
-                ) {
-                    indexedResults.sort((a, b) => {
-                        const aValue =
-                            a.breakdown_value === BREAKDOWN_OTHER_STRING_LABEL
-                                ? -BREAKDOWN_OTHER_NUMERIC_LABEL
-                                : a.breakdown_value === BREAKDOWN_NULL_STRING_LABEL
-                                  ? -BREAKDOWN_NULL_NUMERIC_LABEL
-                                  : a.aggregated_value
-                        const bValue =
-                            b.breakdown_value === BREAKDOWN_OTHER_STRING_LABEL
-                                ? -BREAKDOWN_OTHER_NUMERIC_LABEL
-                                : b.breakdown_value === BREAKDOWN_NULL_STRING_LABEL
-                                  ? -BREAKDOWN_NULL_NUMERIC_LABEL
-                                  : b.aggregated_value
-                        return bValue - aValue
-                    })
-                } else if (lifecycleFilter) {
-                    if (lifecycleFilter.toggledLifecycles) {
-                        indexedResults = indexedResults.filter((result) =>
-                            lifecycleFilter.toggledLifecycles!.includes(String(result.status) as LifecycleToggle)
-                        )
-                    }
-
-                    indexedResults = indexedResults.sort(
-                        (a, b) =>
-                            defaultLifecyclesOrder.indexOf(String(b.status)) -
-                            defaultLifecyclesOrder.indexOf(String(a.status))
-                    )
-                }
-
-                const colorIndexMap = new Map<string, number>()
-                indexedResults
-                    .slice()
-                    .sort((a, b) => (a.action?.order ?? 0) - (b.action?.order ?? 0))
-                    .forEach((item) => {
-                        const key = `${item.label}_${item.action?.order}_${item?.breakdown_value}`
-                        if (!colorIndexMap.has(key)) {
-                            colorIndexMap.set(key, colorIndexMap.size)
-                        }
-                    })
-
-                return indexedResults.map((item, index) => {
-                    const key = `${item.label}_${item.action?.order}_${item?.breakdown_value}`
-                    const colorIndex = colorIndexMap.get(key) ?? 0
-                    return { ...item, colorIndex, id: index }
-                })
-            },
+            (results, display, lifecycleFilter): IndexedTrendResult[] =>
+                indexTrendResults(results, display, lifecycleFilter),
         ],
 
         currentPeriodResult: [
