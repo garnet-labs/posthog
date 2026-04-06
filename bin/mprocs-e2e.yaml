@@ -6,7 +6,7 @@ procs:
             BASE_URL: 'http://localhost:8010'
 
     backend:
-        shell: 'uv sync --active && bin/wait-for-docker && ./bin/start-backend'
+        shell: 'uv sync --active && bin/wait-for-docker && bin/e2e-db-snapshot ensure && ./bin/start-backend'
         env:
             DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog_e2e_test'
             CLICKHOUSE_DATABASE: 'posthog_test'
@@ -18,7 +18,7 @@ procs:
             E2E_TESTING: '1'
 
     celery-worker:
-        shell: 'uv sync --active && bin/wait-for-docker && ./bin/start-celery worker'
+        shell: 'uv sync --active && bin/wait-for-docker && bin/e2e-db-snapshot ensure && ./bin/start-celery worker'
         env:
             DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog_e2e_test'
             CLICKHOUSE_DATABASE: 'posthog_test'

@@ -94,11 +94,24 @@ case "${1:-}" in
         echo "=== Restore complete ==="
         ;;
 
+    ensure)
+        # Non-destructive: set up the DB only if it doesn't exist yet.
+        # Called automatically by mprocs before backend/celery start.
+        if psql -d posthog_e2e_test -c "SELECT 1" > /dev/null 2>&1; then
+            echo "posthog_e2e_test already exists, skipping setup"
+            exit 0
+        fi
+
+        echo "posthog_e2e_test not found, setting up..."
+        exec "$0" restore
+        ;;
+
     *)
-        echo "Usage: $0 {create|restore}"
+        echo "Usage: $0 {create|restore|ensure}"
         echo ""
         echo "  create   Run all migrations + setup_dev, then snapshot the DB (slow, do once)"
         echo "  restore  Restore from snapshot + run ClickHouse migrations (fast, do often)"
+        echo "  ensure   Create the DB only if it doesn't exist yet (safe for auto-startup)"
         exit 1
         ;;
 esac

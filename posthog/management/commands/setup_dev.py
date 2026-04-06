@@ -22,6 +22,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         print("\n⚠️ setup_dev is deprecated. Use the more robust generate_demo_data command instead.\n")  # noqa T201
+
+        if User.objects.filter(email="test@posthog.com").exists():
+            self.stdout.write("Demo data already exists, skipping setup")
+            return
+
         with transaction.atomic():
             _, team, user = User.objects.bootstrap(
                 organization_name=ORGANIZATION_NAME,
