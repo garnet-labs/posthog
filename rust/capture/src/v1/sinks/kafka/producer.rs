@@ -215,8 +215,6 @@ fn is_fatal_kafka_error(code: RDKafkaErrorCode) -> bool {
         RDKafkaErrorCode::MessageSizeTooLarge
             | RDKafkaErrorCode::InvalidMessageSize
             | RDKafkaErrorCode::InvalidMessage
-            | RDKafkaErrorCode::TopicAuthorizationFailed
-            | RDKafkaErrorCode::ClusterAuthorizationFailed
     )
 }
 

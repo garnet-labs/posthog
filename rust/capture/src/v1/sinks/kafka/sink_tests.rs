@@ -1,15 +1,10 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::http::Method;
-use chrono::Utc;
 use rdkafka::error::RDKafkaErrorCode;
-use uuid::Uuid;
 
 use crate::config::CaptureMode;
-use crate::v1::analytics::query::Query;
 use crate::v1::context::Context;
 use crate::v1::sinks::event::Event;
 use crate::v1::sinks::kafka::mock::MockProducer;
@@ -88,27 +83,6 @@ impl Event for FakeEvent {
 // ---------------------------------------------------------------------------
 // TestHarness
 // ---------------------------------------------------------------------------
-
-fn test_context() -> Context {
-    Context {
-        api_token: "phc_test_token".into(),
-        user_agent: "test-agent/1.0".into(),
-        content_type: "application/json".into(),
-        content_encoding: None,
-        sdk_info: "posthog-rust/1.0.0".into(),
-        attempt: 1,
-        request_id: Uuid::new_v4(),
-        client_timestamp: Utc::now(),
-        client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-        query: Query::default(),
-        method: Method::POST,
-        path: "/i/v1/general/events".into(),
-        server_received_at: Utc::now(),
-        created_at: None,
-        capture_internal: false,
-        historical_migration: false,
-    }
-}
 
 fn test_kafka_config() -> super::config::Config {
     let env: HashMap<String, String> = [
@@ -227,7 +201,11 @@ impl HarnessBuilder {
         TestHarness {
             sink,
             producer,
-            ctx: test_context(),
+            ctx: {
+                let mut ctx = crate::v1::test_utils::test_context();
+                ctx.created_at = None;
+                ctx
+            },
             _manager: manager,
         }
     }
@@ -407,15 +385,16 @@ async fn ack_error_retriable_delivery_cancelled() {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Ack-time fatal kafka error (topic auth failed)
+// 9. Ack-time retriable kafka error (topic auth failed — infrastructure
+//    misconfiguration, may succeed on a different pod)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn ack_error_fatal_topic_auth() {
+async fn ack_error_retriable_topic_auth() {
     let h = TestHarness::builder()
         .ack_error(|| ProduceError::Kafka {
             code: RDKafkaErrorCode::TopicAuthorizationFailed,
-            retriable: false,
+            retriable: true,
         })
         .build();
     let event = FakeEvent::ok("evt-1");
@@ -424,7 +403,7 @@ async fn ack_error_fatal_topic_auth() {
     let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].outcome(), Outcome::FatalError);
+    assert_eq!(results[0].outcome(), Outcome::RetriableError);
     assert_eq!(results[0].cause(), Some("topic_authorization_failed"));
     assert!(results[0].elapsed().is_some());
     assert_eq!(h.producer.record_count(), 1);
