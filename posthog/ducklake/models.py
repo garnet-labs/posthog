@@ -25,8 +25,6 @@ class DuckLakeCatalog(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
         "posthog.Team",
         on_delete=models.CASCADE,
         related_name="ducklake_catalog",
-        null=True,
-        blank=True,
     )
     organization = models.OneToOneField(
         "posthog.Organization",
@@ -99,8 +97,6 @@ class DuckgresServer(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
         "posthog.Team",
         on_delete=models.CASCADE,
         related_name="duckgres_server",
-        null=True,
-        blank=True,
     )
     organization = models.OneToOneField(
         "posthog.Organization",
