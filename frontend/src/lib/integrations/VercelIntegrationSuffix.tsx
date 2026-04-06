@@ -21,7 +21,7 @@ export function VercelIntegrationSuffix({ integration }: { integration: Integrat
     const isConnectable = integration.config?.type === 'connectable'
     const envMapping: EnvMapping | undefined = integration.config?.environment_mapping
 
-    if (!isConnectable || !envMapping) {
+    if (!isConnectable) {
         if (!accountUrl) {
             return <></>
         }
@@ -38,7 +38,8 @@ export function VercelIntegrationSuffix({ integration }: { integration: Integrat
         )
     }
 
-    return <VercelEnvMappingEditor integration={integration} envMapping={envMapping} />
+    const effectiveMapping = envMapping || { production: null, preview: null, development: null }
+    return <VercelEnvMappingEditor integration={integration} envMapping={effectiveMapping} />
 }
 
 function VercelEnvMappingEditor({
@@ -97,20 +98,25 @@ function VercelEnvMappingEditor({
     }))
 
     return (
-        <div className="space-y-2 w-full mt-2">
-            <h4 className="font-semibold text-sm">Environment mapping</h4>
-            {(['production', 'preview', 'development'] as const).map((env) => (
-                <div key={env} className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-muted uppercase w-24">{env}</span>
-                    <LemonSelect
-                        size="small"
-                        fullWidth
-                        value={mapping[env]}
-                        onChange={(value) => handleChange(env, value)}
-                        options={teamOptions}
-                    />
-                </div>
-            ))}
+        <div className="basis-full border-t pt-3 mt-1 mx-2 mb-2 space-y-2">
+            <h4 className="font-semibold text-xs text-muted">Environment mapping</h4>
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-center max-w-sm">
+                {(['production', 'preview', 'development'] as const).map((env) => (
+                    <>
+                        <span key={`label-${env}`} className="text-xs font-medium text-muted uppercase">
+                            {env}
+                        </span>
+                        <LemonSelect
+                            key={env}
+                            size="small"
+                            fullWidth
+                            value={mapping[env]}
+                            onChange={(value) => handleChange(env, value)}
+                            options={teamOptions}
+                        />
+                    </>
+                ))}
+            </div>
             {error && <p className="text-danger text-xs">{error}</p>}
             {dirty && (
                 <LemonButton type="primary" size="small" loading={saving} onClick={handleSave}>
