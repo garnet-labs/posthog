@@ -8,13 +8,13 @@ const ExecSchema = z.object({
         .describe(
             'CLI-style command string. Supported commands:\n' +
                 '  tools                         — list available tool names\n' +
+                '  search <regex_pattern>         — search tools by JavaScript regex (matches name, title, description)\n' +
                 '  info <tool_name>              — show tool name, description, and input schema\n' +
                 '  call <tool_name> <json_input> — call a tool with JSON input'
         ),
 })
 
 type ExecSchema = typeof ExecSchema
-
 
 function parseCommand(input: string): { verb: string; rest: string } {
     const trimmed = input.trim()
@@ -42,8 +42,8 @@ export function createExecTool(
     const description = instructions
 
     return {
-        name: 'posthog',
-        title: 'PostHog',
+        name: 'exec',
+        title: 'Execute PostHog command',
         description,
         schema: ExecSchema,
         scopes: [],
@@ -59,6 +59,28 @@ export function createExecTool(
             switch (verb) {
                 case 'tools': {
                     return allTools.map((t) => t.name)
+                }
+
+                case 'search': {
+                    if (!rest) {
+                        throw new Error('Usage: search <regex_pattern>')
+                    }
+                    let regex: RegExp
+                    try {
+                        regex = new RegExp(rest, 'i')
+                    } catch {
+                        throw new Error(`Invalid regex pattern: "${rest}"`)
+                    }
+                    const matches = allTools
+                        .filter((t) => regex.test(t.name) || regex.test(t.title) || regex.test(t.description))
+                        .map((t) => ({ name: t.name, title: t.title, description: t.description }))
+                    if (matches.length === 0) {
+                        return {
+                            matches: [],
+                            hint: `No tools matched "${rest}". Run "tools" to see all available tool names.`,
+                        }
+                    }
+                    return matches
                 }
 
                 case 'info': {
@@ -97,7 +119,7 @@ export function createExecTool(
                 }
 
                 default:
-                    throw new Error(`Unknown command: "${verb}". Supported commands: tools, info, call`)
+                    throw new Error(`Unknown command: "${verb}". Supported commands: tools, search, info, call`)
             }
         },
     }
