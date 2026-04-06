@@ -105,6 +105,24 @@ class ChangeEventBatcher:
         return size
 
 
+def _safe_pa_array(values: list, target_type: pa.DataType) -> pa.Array:
+    """Build a pa.Array, falling back to type inference if the explicit cast fails.
+
+    Parquet/DeltaLake can store types (e.g. fixed-size binary for decimals) that
+    don't round-trip cleanly through Python objects. When enrichment fills values
+    from existing_rows.to_pylist() (which yields decimal.Decimal, bytes, etc.)
+    into a column whose Arrow type is the parquet storage type, pa.array() may
+    reject the Python objects. In that case we let PyArrow infer the type.
+    """
+    try:
+        return pa.array(values, type=target_type)
+    except (pa.ArrowTypeError, pa.ArrowInvalid):
+        arr = pa.array(values)
+        if arr.type == pa.null():
+            return arr.cast(pa.string())
+        return arr
+
+
 def enrich_delete_rows(
     table: pa.Table,
     pk_columns: list[str],
@@ -209,8 +227,9 @@ def enrich_delete_rows(
             # that pa.array() doesn't reject non-null values.
             if col_type == pa.null() and existing_rows is not None and col in existing_rows.column_names:
                 col_type = existing_rows.schema.field(col).type
-            new_columns[col] = pa.array(row_data[col], type=col_type)
-            new_fields.append(pa.field(col, col_type))
+            arr = _safe_pa_array(row_data[col], col_type)
+            new_columns[col] = arr
+            new_fields.append(pa.field(col, arr.type))
         else:
             new_columns[col] = table.column(col)
             new_fields.append(field)
@@ -219,7 +238,8 @@ def enrich_delete_rows(
 
     for col in extra_cols_from_existing:
         ex_type = existing_rows.schema.field(col).type  # type: ignore[union-attr]
-        result = result.append_column(pa.field(col, ex_type), pa.array(row_data[col], type=ex_type))
+        arr = _safe_pa_array(row_data[col], ex_type)
+        result = result.append_column(pa.field(col, arr.type), arr)
 
     return result
 
