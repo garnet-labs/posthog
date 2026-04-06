@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
+import { POSTHOG_META_KEY, type Context, type ToolBase, type ZodObjectAny } from '@/tools/types'
 
 interface QueryWrapperConfig<T extends ZodObjectAny> {
     name: string
@@ -14,47 +14,62 @@ interface QueryWrapperConfig<T extends ZodObjectAny> {
 }
 
 export function createQueryWrapper<T extends ZodObjectAny>(config: QueryWrapperConfig<T>): () => ToolBase<T> {
-    return () => ({
-        name: config.name,
-        schema: config.schema,
-        handler: async (context: Context, rawParams: z.infer<T>) => {
-            const projectId = await context.stateManager.getProjectId()
-            const params = config.schema.parse(rawParams)
-            const query: Record<string, unknown> = { ...params, kind: config.kind }
+    return () => {
+        const tool: ToolBase<T> = {
+            name: config.name,
+            schema: config.schema,
+            handler: async (context: Context, rawParams: z.infer<T>) => {
+                const projectId = await context.stateManager.getProjectId()
+                const params = config.schema.parse(rawParams)
+                const query: Record<string, unknown> = { ...params, kind: config.kind }
 
-            // Convert flat filterGroup arrays (from assistant schemas) into the nested
-            // PropertyGroupFilter structure the query API expects.
-            if (Array.isArray(query.filterGroup)) {
-                if (query.filterGroup.length > 0) {
-                    query.filterGroup = {
-                        type: 'AND',
-                        values: [{ type: 'AND', values: query.filterGroup }],
+                // Convert flat filterGroup arrays (from assistant schemas) into the nested
+                // PropertyGroupFilter structure the query API expects.
+                if (Array.isArray(query.filterGroup)) {
+                    if (query.filterGroup.length > 0) {
+                        query.filterGroup = {
+                            type: 'AND',
+                            values: [{ type: 'AND', values: query.filterGroup }],
+                        }
+                    } else {
+                        delete query.filterGroup
                     }
-                } else {
-                    delete query.filterGroup
                 }
-            }
-            const result = await context.api.request<{
-                results: unknown
-                columns?: unknown
-                formatted_results?: string
-            }>({
-                method: 'POST',
-                path: `/api/environments/${projectId}/query/`,
-                body: { query },
-            })
-            const baseUrl = context.api.getProjectBaseUrl(projectId)
-            const posthogUrl = config.urlPrefix
-                ? `${baseUrl}${config.urlPrefix}`
-                : `${baseUrl}/insights/new?q=${encodeURIComponent(JSON.stringify(query))}`
-            return {
-                results: result.formatted_results ?? result.results,
-                _posthogUrl: posthogUrl,
-            }
-        },
-        _meta: {
-            ...(config.uiResourceUri ? { ui: { resourceUri: config.uiResourceUri } } : {}),
-            ...(config.responseFormat ? { responseFormat: config.responseFormat } : {}),
-        },
-    })
+                const result = await context.api.request<{
+                    results: unknown
+                    columns?: unknown
+                    formatted_results?: string
+                }>({
+                    method: 'POST',
+                    path: `/api/environments/${projectId}/query/`,
+                    body: { query },
+                })
+                const baseUrl = context.api.getProjectBaseUrl(projectId)
+                const posthogUrl = config.urlPrefix
+                    ? `${baseUrl}${config.urlPrefix}`
+                    : `${baseUrl}/insights/new?q=${encodeURIComponent(JSON.stringify(query))}`
+
+                if (result.formatted_results) {
+                    tool._meta = {
+                        ...tool._meta,
+                        [POSTHOG_META_KEY]: {
+                            ...tool._meta?.[POSTHOG_META_KEY],
+                            formattedResults: result.formatted_results,
+                        },
+                    }
+                }
+
+                return {
+                    results: result.results,
+                    query,
+                    _posthogUrl: posthogUrl,
+                }
+            },
+            _meta: {
+                ...(config.uiResourceUri ? { ui: { resourceUri: config.uiResourceUri } } : {}),
+                ...(config.responseFormat ? { [POSTHOG_META_KEY]: { responseFormat: config.responseFormat } } : {}),
+            },
+        }
+        return tool
+    }
 }

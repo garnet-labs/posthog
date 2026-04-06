@@ -25,7 +25,7 @@ import { registerResources } from '@/resources'
 import { registerUiAppResources } from '@/resources/ui-apps'
 import INSTRUCTIONS_TEMPLATE_V1 from '@/templates/instructions-v1.md'
 import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
-import type { CloudRegion, Context, State, Tool } from '@/tools/types'
+import { POSTHOG_META_KEY, type CloudRegion, type Context, type State, type Tool } from '@/tools/types'
 import type { AnalyticsMetadata, WithAnalytics } from '@/ui-apps/types'
 
 function buildInstructions(groupTypes?: GroupType[]): string {
@@ -320,8 +320,13 @@ export class MCP extends McpAgent<Env> {
                 // structuredContent is not added to model context, only used by UI apps
                 const hasUiResource = tool._meta?.ui?.resourceUri
 
+                // Handlers may set formattedResults on the tool's _meta to provide
+                // pre-formatted LLM text (e.g. compact tables with computed metrics).
+                // When present, it's used as the text content instead of TOON-encoding
+                // the raw result.
+                const posthogMeta = tool._meta?.[POSTHOG_META_KEY] || {}
+
                 // If there's a UI resource, include analytics metadata for the UI app
-                // The structuredContent is typed as WithAnalytics<T> where T is the tool result
                 let structuredContent: WithAnalytics<typeof result> | typeof result = result
                 if (hasUiResource) {
                     const distinctId = await this.getDistinctId()
@@ -335,8 +340,8 @@ export class MCP extends McpAgent<Env> {
                     }
                 }
 
-                const useJson = tool._meta?.responseFormat === 'json'
-                const text = useJson ? JSON.stringify(result) : formatResponse(result)
+                const useJson = posthogMeta.responseFormat === 'json'
+                const text = posthogMeta.formattedResults ?? (useJson ? JSON.stringify(result) : formatResponse(result))
 
                 return {
                     content: [
@@ -345,7 +350,6 @@ export class MCP extends McpAgent<Env> {
                             text,
                         },
                     ],
-                    // Include raw result as structuredContent for UI apps to consume
                     ...(hasUiResource ? { structuredContent } : {}),
                 }
             } catch (error: any) {
