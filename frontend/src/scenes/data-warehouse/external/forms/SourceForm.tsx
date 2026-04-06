@@ -336,7 +336,9 @@ SELECT pg_create_logical_replication_slot('posthog_slot', 'pgoutput');`}
                                                     </pre>
                                                 </LemonBanner>
                                             </div>
-                                        ) : null
+                                        ) : (
+                                            <></>
+                                        )
                                     }
                                 </LemonField>
 
@@ -406,14 +408,18 @@ SELECT pg_create_logical_replication_slot('posthog_slot', 'pgoutput');`}
                                                                 </>
                                                             )}
                                                         </LemonField>
-                                                    ) : null
+                                                    ) : (
+                                                        <></>
+                                                    )
                                                 }
                                             </LemonField>
                                         </div>
                                     )}
                                 </div>
                             </>
-                        ) : null
+                        ) : (
+                            <></>
+                        )
                     }
                 </LemonField>
             </div>
