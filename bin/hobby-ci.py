@@ -375,6 +375,83 @@ runcmd:
             print(f"   Error: {result['stderr']}", flush=True)
         return False
 
+    def smoke_test_ingestion(self, timeout_seconds=180, poll_interval=10):
+        if not self.droplet:
+            return False, "No droplet configured"
+        if not self.ssh_private_key:
+            return False, "No SSH key configured"
+
+        # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
+        base_url = f"http://{self.droplet.ip_address}"  # HTTP: avoid DNS/TLS in CI
+
+        print("📝 Creating test user and fetching API keys via Django shell...", flush=True)
+        setup_script = (
+            "from posthog.models import User, Organization, Team, PersonalAPIKey;"
+            "from rest_framework_simplejwt.tokens import AccessToken;"
+            "org, _ = Organization.objects.get_or_create(name='Hobby CI Test');"
+            "user = User.objects.create_user("
+            "  email='ci@posthog.com', password='CiTest123', organization=org, first_name='Hobby CI'"
+            ");"
+            "team = Team.objects.filter(organization=org).first();"
+            "api_key = PersonalAPIKey.objects.create("
+            "  user=user, label='ci-smoke-test', team=team,"
+            ");"
+            "print(f'{team.api_token}|||{api_key.value}');"
+        )
+        result = self.run_ssh_command(
+            f'cd /hobby && sudo -E docker-compose -f docker-compose.yml exec -T web python manage.py shell -c "{setup_script}"',
+            timeout=60,
+        )
+        if result["exit_code"] != 0:
+            return False, f"User setup failed (exit {result['exit_code']}): {result['stderr'][:200]}"
+
+        output_line = [line for line in result["stdout"].strip().split("\n") if "|||" in line]
+        if not output_line:
+            return False, f"Could not parse API keys from output: {result['stdout'][:200]}"
+        project_api_token, personal_api_key = output_line[-1].split("|||")
+
+        event_name = "hobby_ci_smoke_test"
+        print(f"📤 Sending test event '{event_name}'...", flush=True)
+        capture_resp = requests.post(
+            f"{base_url}/capture/",  # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
+            json={
+                "api_key": project_api_token,
+                "event": event_name,
+                "properties": {"source": "hobby-ci"},
+                "distinct_id": "ci-test-user",
+            },
+            timeout=30,
+        )
+        if capture_resp.status_code != 200:
+            return False, f"Capture failed: HTTP {capture_resp.status_code} - {capture_resp.text[:200]}"
+
+        print(f"⏳ Polling for event (timeout {timeout_seconds}s)...", flush=True)
+        headers = {"Authorization": f"Bearer {personal_api_key}"}
+        deadline = time.time() + timeout_seconds
+        attempt = 0
+        while time.time() < deadline:
+            attempt += 1
+            try:
+                events_resp = requests.get(
+                    f"{base_url}/api/projects/@current/events/",  # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
+                    params={"event": event_name},
+                    headers=headers,
+                    timeout=10,
+                )
+                if events_resp.status_code == 200:
+                    results = events_resp.json().get("results", [])
+                    if len(results) > 0:
+                        print(f"✅ Event found after {attempt} poll(s)", flush=True)
+                        return True, "Event ingested successfully"
+                    print(f"   Poll {attempt}: no events yet", flush=True)
+                else:
+                    print(f"   Poll {attempt}: HTTP {events_resp.status_code}", flush=True)
+            except Exception as e:
+                print(f"   Poll {attempt}: {type(e).__name__}", flush=True)
+            time.sleep(poll_interval)
+
+        return False, f"Event did not appear within {timeout_seconds}s ({attempt} polls)"
+
     @staticmethod
     def find_existing_droplet_for_pr(token, pr_number):
         """Find an existing droplet for a PR by tag"""
@@ -683,9 +760,18 @@ runcmd:
                 print(f"  Health check passed but cloud-init not yet complete", flush=True)
             elif cloud_init_finished:
                 # Cloud-init done but health check not passing - check if containers are healthy
-                all_healthy, _, _ = self.check_container_health()
+                all_healthy, unhealthy, _ = self.check_container_health()
                 if not all_healthy:
                     containers_healthy_since = None  # Reset if containers unhealthy
+                elif http_502_count > 0 and http_502_count % 10 == 0:
+                    print(
+                        f"\n🔍 Containers healthy but web returning 502 ({http_502_count} times), fetching web logs...",
+                        flush=True,
+                    )
+                    web_logs = self.run_command_on_droplet("docker logs --tail=50 hobby-web-1 2>&1", timeout=15)
+                    if web_logs:
+                        for line in web_logs.strip().split("\n")[-20:]:
+                            print(f"  [web] {line}", flush=True)
 
             time.sleep(retry_interval)
             attempt += 1
@@ -1431,7 +1517,7 @@ def main():
         print("Fetching all docker-compose logs...", flush=True)
         try:
             result = ht.run_command_on_droplet(
-                "cd hobby && sudo -E docker-compose -f docker-compose.yml logs --tail=500 --no-log-prefix", timeout=60
+                "cd /hobby && sudo -E docker-compose -f docker-compose.yml logs --tail=500 --no-log-prefix", timeout=60
             )
             if result:
                 log_path = "/tmp/docker-compose-logs.txt"
@@ -1484,6 +1570,15 @@ def main():
 
         ht = HobbyTester(droplet_id=droplet_id)
         success = ht.generate_demo_data()
+        exit(0 if success else 1)
+
+    if command == "smoke-test-ingestion":
+        print("Running event ingestion smoke test", flush=True)
+        droplet_id = os.environ.get("HOBBY_DROPLET_ID")
+
+        ht = HobbyTester(droplet_id=droplet_id)
+        success, message = ht.smoke_test_ingestion()
+        print(f"{'✅' if success else '❌'} {message}", flush=True)
         exit(0 if success else 1)
 
     if command == "cleanup-stale":

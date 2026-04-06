@@ -416,6 +416,13 @@ jobs:
                   PR_NUMBER: ${{ github.event.pull_request.number }}
                   RUN_ID: ${{ github.run_id }}
                   RUN_ATTEMPT: ${{ github.run_attempt }}
+            - name: Smoke test event ingestion
+              if: env.TEST_EXIT_CODE == '0' && env.PREVIEW_MODE == 'false'
+              timeout-minutes: 5
+              run: uv run bin/hobby-ci.py smoke-test-ingestion
+              env:
+                  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_HOBBY_TOKEN }}
+                  DIGITALOCEAN_SSH_PRIVATE_KEY: ${{ secrets.DO_DEPLOY_SSH_PRIVATE_KEY }}
             - name: Generate demo data
               if: env.TEST_EXIT_CODE == '0' && env.PREVIEW_MODE == 'true' && env.HOBBY_DROPLET_NEW == 'true'
               timeout-minutes: 15
