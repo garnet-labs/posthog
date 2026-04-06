@@ -1,5 +1,6 @@
 import decimal
 from datetime import UTC, datetime
+from typing import Literal
 
 import pyarrow as pa
 from parameterized import parameterized
@@ -20,7 +21,7 @@ from posthog.temporal.data_imports.cdc.types import ChangeEvent
 
 
 def _make_event(
-    op: str = "I",
+    op: Literal["I", "U", "D"] = "I",
     table: str = "users",
     position: str = "0/100",
     columns: dict | None = None,

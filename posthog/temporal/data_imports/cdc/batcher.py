@@ -216,7 +216,7 @@ def enrich_delete_rows(
 
     # Rebuild table — replace/extend columns.  Extra columns are added after the
     # existing ones so the schema grows but doesn't change existing field positions.
-    new_columns: dict[str, pa.Array] = {}
+    new_columns: dict[str, pa.Array | pa.ChunkedArray] = {}
     new_fields: list[pa.Field] = []
     for field in table.schema:
         col = field.name

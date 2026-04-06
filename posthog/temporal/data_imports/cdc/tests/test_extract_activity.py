@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -9,7 +10,7 @@ from posthog.temporal.data_imports.cdc.types import ChangeEvent
 
 
 def _make_event(
-    op: str = "I",
+    op: Literal["I", "U", "D"] = "I",
     table: str = "users",
     position: str = "0/100",
     columns: dict | None = None,
@@ -146,10 +147,12 @@ class TestGetCDCAdapter:
 
     def test_create_reader_extracts_params(self):
         from posthog.temporal.data_imports.sources.postgres.cdc.adapter import PostgresCDCAdapter
+        from posthog.temporal.data_imports.sources.postgres.cdc.stream_reader import PgCDCStreamReader
 
         adapter = PostgresCDCAdapter()
         source = _make_source()
         reader = adapter.create_reader(source)
+        assert isinstance(reader, PgCDCStreamReader)
 
         assert reader._params.host == "localhost"
         assert reader._params.port == 5432
@@ -159,10 +162,12 @@ class TestGetCDCAdapter:
 
     def test_create_reader_defaults_when_missing(self):
         from posthog.temporal.data_imports.sources.postgres.cdc.adapter import PostgresCDCAdapter
+        from posthog.temporal.data_imports.sources.postgres.cdc.stream_reader import PgCDCStreamReader
 
         adapter = PostgresCDCAdapter()
         source = _make_source(job_inputs={})
         reader = adapter.create_reader(source)
+        assert isinstance(reader, PgCDCStreamReader)
 
         assert reader._params.host == ""
         assert reader._params.port == 5432

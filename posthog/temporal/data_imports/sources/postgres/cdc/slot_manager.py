@@ -24,14 +24,11 @@ def cdc_pg_connection(source: ExternalDataSource, connect_timeout: int = 15) -> 
     (slot creation, publication management, cleanup, WAL lag checks) should use
     this rather than constructing connections manually from job_inputs.
     """
-    from posthog.temporal.data_imports.sources import SourceRegistry
+    from posthog.temporal.data_imports.sources.postgres.source import PostgresSource, PostgresSourceConfig
 
-    from products.data_warehouse.backend.types import ExternalDataSourceType
-
+    source_impl = PostgresSource()
     job_inputs = source.job_inputs or {}
-    source_type = ExternalDataSourceType(source.source_type)
-    source_impl = SourceRegistry.get_source(source_type)
-    config = source_impl.parse_config(job_inputs)
+    config: PostgresSourceConfig = source_impl.parse_config(job_inputs)
 
     with source_impl.with_ssh_tunnel(config) as (host, port):
         conn = psycopg.connect(

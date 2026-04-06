@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from structlog.types import FilteringBoundLogger
 from temporalio import activity
@@ -37,8 +37,8 @@ class KafkaBatchProducer:
     # Partial data loading fields
     _is_first_ever_sync: bool
     # CDC write mode fields
-    _cdc_write_mode: str | None
-    _cdc_table_mode: str | None
+    _cdc_write_mode: Literal["incremental_merge", "scd2_append"] | None
+    _cdc_table_mode: Literal["consolidated", "cdc_only", "both"] | None
 
     def __init__(
         self,
@@ -58,8 +58,8 @@ class KafkaBatchProducer:
         partition_format: PartitionFormat | None = None,
         partition_mode: PartitionMode | None = None,
         is_first_ever_sync: bool = False,
-        cdc_write_mode: str | None = None,
-        cdc_table_mode: str | None = None,
+        cdc_write_mode: Literal["incremental_merge", "scd2_append"] | None = None,
+        cdc_table_mode: Literal["consolidated", "cdc_only", "both"] | None = None,
     ) -> None:
         self._team_id = team_id
         self._job_id = job_id
