@@ -146,7 +146,7 @@ Prefer query wrappers when the user's question maps to a supported insight type.
 `query-stickiness` | Engagement frequency (how many days users do X) | No breakdowns supported
 `query-paths` | User navigation flows and sequences | Specify includeEventTypes
 `query-lifecycle` | New, returning, resurrecting, dormant user composition | Single event only, no math aggregation
-`query-traces-list` | LLM/AI trace listing and inspection | For AI observability data
+`query-llm-traces-list` | LLM/AI trace listing and inspection | For AI observability data
 
 #### Choosing the right query tool
 
