@@ -5,13 +5,11 @@ pub mod producer;
 pub mod types;
 
 use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 
 use rdkafka::error::KafkaError;
 
 use crate::v1::sinks::SinkName;
-use context::ProducerHealth;
 use producer::{ProduceError, ProduceRecord};
 
 /// Trait abstracting a Kafka producer for testability.
@@ -21,6 +19,6 @@ pub trait KafkaProducerTrait: Send + Sync {
 
     fn send(&self, record: ProduceRecord) -> Result<Self::Ack, ProduceError>;
     fn flush(&self, timeout: Duration) -> Result<(), KafkaError>;
-    fn health(&self) -> &Arc<ProducerHealth>;
+    fn is_ready(&self) -> bool;
     fn sink_name(&self) -> SinkName;
 }

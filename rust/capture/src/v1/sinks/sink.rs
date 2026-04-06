@@ -140,7 +140,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         let producer = &self.producers[&sink];
 
         // Per-sink health gate
-        if !producer.health().is_ready() {
+        if !producer.is_ready() {
             let enqueued_at = Utc::now();
             let publishable: Vec<_> = events.iter().filter(|e| e.should_publish()).collect();
             counter!(

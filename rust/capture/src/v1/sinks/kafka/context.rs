@@ -1,39 +1,6 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
 use metrics::{counter, gauge};
 
 use crate::v1::sinks::SinkName;
-
-// ---------------------------------------------------------------------------
-// ProducerHealth
-// ---------------------------------------------------------------------------
-
-pub struct ProducerHealth {
-    any_broker_up: AtomicBool,
-}
-
-impl Default for ProducerHealth {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ProducerHealth {
-    pub fn new() -> Self {
-        Self {
-            any_broker_up: AtomicBool::new(false),
-        }
-    }
-
-    pub fn is_ready(&self) -> bool {
-        self.any_broker_up.load(Ordering::Relaxed)
-    }
-
-    pub fn set_ready(&self, ready: bool) {
-        self.any_broker_up.store(ready, Ordering::Relaxed);
-    }
-}
 
 // ---------------------------------------------------------------------------
 // KafkaContext
@@ -41,24 +8,13 @@ impl ProducerHealth {
 
 pub(crate) struct KafkaContext {
     handle: lifecycle::Handle,
-    health: Arc<ProducerHealth>,
     sink: SinkName,
     mode: &'static str,
 }
 
 impl KafkaContext {
-    pub fn new(
-        handle: lifecycle::Handle,
-        health: Arc<ProducerHealth>,
-        sink: SinkName,
-        mode: &'static str,
-    ) -> Self {
-        Self {
-            handle,
-            health,
-            sink,
-            mode,
-        }
+    pub fn new(handle: lifecycle::Handle, sink: SinkName, mode: &'static str) -> Self {
+        Self { handle, sink, mode }
     }
 }
 
@@ -68,7 +24,6 @@ impl rdkafka::ClientContext for KafkaContext {
         let mode = self.mode;
 
         let brokers_up = stats.brokers.values().any(|b| b.state == "UP");
-        self.health.set_ready(brokers_up);
         if brokers_up {
             self.handle.report_healthy();
         }

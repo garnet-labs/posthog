@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use rdkafka::error::KafkaError;
 
-use crate::v1::sinks::kafka::context::ProducerHealth;
 use crate::v1::sinks::kafka::producer::{ProduceError, ProduceRecord};
 use crate::v1::sinks::SinkName;
 
@@ -17,20 +16,18 @@ pub struct MockProducer {
     send_error: Option<fn() -> ProduceError>,
     ack_error: Option<fn() -> ProduceError>,
     ack_delay: Option<Duration>,
-    health: Arc<ProducerHealth>,
+    handle: lifecycle::Handle,
 }
 
 impl MockProducer {
-    pub fn new(sink: SinkName) -> Self {
-        let health = Arc::new(ProducerHealth::new());
-        health.set_ready(true);
+    pub fn new(sink: SinkName, handle: lifecycle::Handle) -> Self {
         Self {
             sink,
             records: Arc::new(Mutex::new(Vec::new())),
             send_error: None,
             ack_error: None,
             ack_delay: None,
-            health,
+            handle,
         }
     }
 
@@ -46,11 +43,6 @@ impl MockProducer {
 
     pub fn with_ack_delay(mut self, d: Duration) -> Self {
         self.ack_delay = Some(d);
-        self
-    }
-
-    pub fn with_health_ready(self, ready: bool) -> Self {
-        self.health.set_ready(ready);
         self
     }
 
@@ -96,8 +88,8 @@ impl super::KafkaProducerTrait for MockProducer {
         Ok(())
     }
 
-    fn health(&self) -> &Arc<ProducerHealth> {
-        &self.health
+    fn is_ready(&self) -> bool {
+        self.handle.is_healthy()
     }
 
     fn sink_name(&self) -> SinkName {

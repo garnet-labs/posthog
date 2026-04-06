@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -12,7 +11,7 @@ use tracing::{info, warn};
 
 use super::types::error_code_tag;
 use crate::v1::sinks::kafka::config::Config as KafkaConfig;
-use crate::v1::sinks::kafka::context::{KafkaContext, ProducerHealth};
+use crate::v1::sinks::kafka::context::KafkaContext;
 use crate::v1::sinks::SinkName;
 
 // ---------------------------------------------------------------------------
@@ -99,7 +98,7 @@ impl Future for SendHandle {
 
 pub struct KafkaProducer {
     inner: FutureProducer<KafkaContext>,
-    health: Arc<ProducerHealth>,
+    handle: lifecycle::Handle,
     sink: SinkName,
 }
 
@@ -110,8 +109,7 @@ impl KafkaProducer {
         handle: lifecycle::Handle,
         capture_mode: &'static str,
     ) -> anyhow::Result<Self> {
-        let health = Arc::new(ProducerHealth::new());
-        let ctx = KafkaContext::new(handle, health.clone(), sink, capture_mode);
+        let ctx = KafkaContext::new(handle.clone(), sink, capture_mode);
 
         let mut client_config = ClientConfig::new();
         client_config
@@ -158,7 +156,7 @@ impl KafkaProducer {
             .fetch_metadata(None, Duration::from_secs(10))
         {
             Ok(_) => {
-                health.set_ready(true);
+                handle.report_healthy();
                 info!("v1 kafka producer [{}] connected", sink.as_str());
             }
             Err(e) => {
@@ -171,7 +169,7 @@ impl KafkaProducer {
 
         Ok(Self {
             inner: producer,
-            health,
+            handle,
             sink,
         })
     }
@@ -198,8 +196,8 @@ impl super::KafkaProducerTrait for KafkaProducer {
         self.inner.flush(rdkafka::util::Timeout::After(timeout))
     }
 
-    fn health(&self) -> &Arc<ProducerHealth> {
-        &self.health
+    fn is_ready(&self) -> bool {
+        self.handle.is_healthy()
     }
 
     fn sink_name(&self) -> SinkName {
