@@ -4,6 +4,9 @@
  * Resolves path params ({project_id}, {id}, etc.), separates query vs body
  * params, and makes the HTTP request. Also provides a dry-run mode that
  * previews the request without executing.
+ *
+ * Query wrapper tools (those with `query_kind`) POST to the query endpoint
+ * with the payload wrapped in `{ query: { kind, ...params } }`.
  */
 
 import type { CliConfig } from './config.js'
@@ -16,7 +19,47 @@ interface ResolvedRequest {
     body?: Record<string, unknown>
 }
 
+function makeHeaders(config: CliConfig): Record<string, string> {
+    return {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'X-PostHog-Client': 'cli-agent',
+    }
+}
+
+function buildQueryWrapperRequest(
+    tool: CliToolManifest,
+    params: Record<string, unknown>,
+    config: CliConfig
+): ResolvedRequest {
+    const resolvedPath = tool.path.replace('{project_id}', config.projectId)
+    const url = `${config.host}${resolvedPath}`
+
+    // Build the query payload: inject `kind`, handle filterGroup transform
+    const query: Record<string, unknown> = { ...params, kind: tool.query_kind }
+
+    // Convert flat filterGroup arrays into the nested PropertyGroupFilter
+    // structure the query API expects (same transform as MCP's query-wrapper-factory).
+    if (Array.isArray(query['filterGroup'])) {
+        const filters = query['filterGroup'] as unknown[]
+        if (filters.length > 0) {
+            query['filterGroup'] = {
+                type: 'AND',
+                values: [{ type: 'AND', values: filters }],
+            }
+        } else {
+            delete query['filterGroup']
+        }
+    }
+
+    return { method: 'POST', url, headers: makeHeaders(config), body: { query } }
+}
+
 function buildRequest(tool: CliToolManifest, params: Record<string, unknown>, config: CliConfig): ResolvedRequest {
+    if (tool.query_kind) {
+        return buildQueryWrapperRequest(tool, params, config)
+    }
+
     // Resolve path template — replace {project_id} with config, others from params
     let resolvedPath = tool.path.replace('{project_id}', config.projectId)
 
@@ -69,14 +112,7 @@ function buildRequest(tool: CliToolManifest, params: Record<string, unknown>, co
     }
 
     const url = `${config.host}${resolvedPath}${qs}`
-
-    const headers: Record<string, string> = {
-        Authorization: `Bearer ${config.apiKey}`,
-        'Content-Type': 'application/json',
-        'X-PostHog-Client': 'cli-agent',
-    }
-
-    return { method: tool.method, url, headers, body }
+    return { method: tool.method, url, headers: makeHeaders(config), body }
 }
 
 export function dryRun(

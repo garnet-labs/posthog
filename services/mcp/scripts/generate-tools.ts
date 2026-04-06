@@ -1029,6 +1029,17 @@ function generateDefinitionsJson(
 // CLI manifest generation — runtime-interpreted tool registry for `ph`
 // ------------------------------------------------------------------
 
+interface CliParamSchema {
+    name: string
+    type: string
+    required: boolean
+    description?: string
+}
+
+interface CliTypeDefinition {
+    properties: CliParamSchema[]
+}
+
 interface CliToolManifest {
     method: string
     path: string
@@ -1048,6 +1059,107 @@ interface CliToolManifest {
         body: string[]
     }
     soft_delete?: string | boolean | undefined
+    /** Present for query wrapper tools — the `kind` value injected into the query payload. */
+    query_kind?: string | undefined
+    /** Resolved property schemas for query wrapper tools — enables progressive schema exploration. */
+    query_schema?: CliParamSchema[] | undefined
+    /** Pre-resolved nested type definitions referenced by query_schema params. */
+    types?: Record<string, CliTypeDefinition> | undefined
+}
+
+function resolveJsonSchemaType(
+    prop: Record<string, unknown>,
+    definitions: Record<string, Record<string, unknown>>
+): string {
+    if (prop['$ref']) {
+        const refName = (prop['$ref'] as string).split('/').pop()!
+        return refName
+    }
+    if (prop['const']) {
+        return `"${prop['const']}"`
+    }
+    if (prop['enum']) {
+        return (prop['enum'] as string[]).join(' | ')
+    }
+    if (prop['type'] === 'array' && prop['items']) {
+        const items = prop['items'] as Record<string, unknown>
+        return `${resolveJsonSchemaType(items, definitions)}[]`
+    }
+    if (prop['anyOf']) {
+        return (prop['anyOf'] as Record<string, unknown>[])
+            .map((a) => resolveJsonSchemaType(a, definitions))
+            .join(' | ')
+    }
+    if (prop['allOf']) {
+        return (prop['allOf'] as Record<string, unknown>[])
+            .map((a) => resolveJsonSchemaType(a, definitions))
+            .join(' & ')
+    }
+    if (prop['type']) {
+        const t = prop['type']
+        return Array.isArray(t) ? t.join(' | ') : (t as string)
+    }
+    return 'unknown'
+}
+
+function resolveQuerySchemaParams(
+    querySchema: JsonSchemaRoot,
+    schemaRef: string,
+    excludeProps: string[]
+): CliParamSchema[] {
+    const schema = querySchema.definitions[schemaRef]
+    if (!schema?.properties) {
+        return []
+    }
+    const required = new Set((schema.required as string[] | undefined) ?? [])
+    const excludeSet = new Set([...excludeProps, 'kind', 'response'])
+
+    return Object.entries(schema.properties as Record<string, Record<string, unknown>>)
+        .filter(([name]) => !excludeSet.has(name))
+        .map(([name, prop]) => ({
+            name,
+            type: resolveJsonSchemaType(prop, querySchema.definitions as Record<string, Record<string, unknown>>),
+            required: required.has(name),
+            ...(prop['description'] ? { description: (prop['description'] as string).slice(0, 200) } : {}),
+        }))
+}
+
+function resolveReferencedTypes(
+    querySchema: JsonSchemaRoot,
+    params: CliParamSchema[]
+): Record<string, CliTypeDefinition> | undefined {
+    const types: Record<string, CliTypeDefinition> = {}
+    const primitives = new Set(['string', 'number', 'boolean', 'integer', 'null', 'unknown', 'object'])
+
+    // Extract type names referenced by params
+    const referencedNames = new Set<string>()
+    for (const p of params) {
+        for (const segment of p.type.split('|').map((s) => s.trim().replace('[]', ''))) {
+            if (segment && !primitives.has(segment) && !segment.startsWith('"')) {
+                referencedNames.add(segment)
+            }
+        }
+    }
+
+    // Resolve each referenced type one level deep
+    for (const typeName of referencedNames) {
+        const def = querySchema.definitions[typeName]
+        if (!def?.properties) {
+            continue
+        }
+        const required = new Set((def.required as string[] | undefined) ?? [])
+        const props: CliParamSchema[] = Object.entries(def.properties as Record<string, Record<string, unknown>>).map(
+            ([name, prop]) => ({
+                name,
+                type: resolveJsonSchemaType(prop, querySchema.definitions as Record<string, Record<string, unknown>>),
+                required: required.has(name),
+                ...(prop['description'] ? { description: (prop['description'] as string).slice(0, 200) } : {}),
+            })
+        )
+        types[typeName] = { properties: props }
+    }
+
+    return Object.keys(types).length > 0 ? types : undefined
 }
 
 function generateCliManifest(
@@ -1057,11 +1169,12 @@ function generateCliManifest(
         enabledWrappers: [string, EnabledQueryWrapperToolConfig][]
         yamlDir: string
     }[],
-    spec: OpenApiSpec
+    spec: OpenApiSpec,
+    querySchema: JsonSchemaRoot
 ): Record<string, CliToolManifest> {
     const manifest: Record<string, CliToolManifest> = {}
 
-    for (const { config: category, enabledTools, yamlDir } of categories) {
+    for (const { config: category, enabledTools, enabledWrappers, yamlDir } of categories) {
         for (const [name, toolConfig, resolved] of enabledTools) {
             const composition = composeToolSchema(toolConfig, resolved, spec)
             const opDescription = resolved.operation.description?.trim() || resolved.operation.summary?.trim() || ''
@@ -1088,6 +1201,32 @@ function generateCliManifest(
                     body: composition.bodyFieldNames,
                 },
                 ...(isSoftDelete ? { soft_delete: toolConfig.soft_delete } : {}),
+            }
+        }
+
+        // Query wrappers — typed tools that POST to /api/environments/{project_id}/query/
+        for (const [name, wrapperConfig] of enabledWrappers) {
+            const kind = extractKindFromSchemaRef(querySchema, wrapperConfig.schema_ref)
+            const excludeProps = wrapperConfig.exclude_properties ?? []
+            const querySchemaParams = resolveQuerySchemaParams(querySchema, wrapperConfig.schema_ref, excludeProps)
+
+            manifest[name] = {
+                method: 'POST',
+                path: '/api/environments/{project_id}/query/',
+                title: wrapperConfig.title || name,
+                description: resolveDescription(wrapperConfig, yamlDir, ''),
+                category: category.category,
+                feature: category.feature,
+                scopes: wrapperConfig.scopes,
+                annotations: {
+                    readOnly: wrapperConfig.annotations.readOnly,
+                    destructive: wrapperConfig.annotations.destructive,
+                    idempotent: wrapperConfig.annotations.idempotent,
+                },
+                params: { path: [], query: [], body: [] },
+                query_kind: kind,
+                query_schema: querySchemaParams,
+                types: resolveReferencedTypes(querySchema, querySchemaParams),
             }
         }
     }
@@ -1279,6 +1418,12 @@ function main(): void {
 
     // Accumulate query wrapper definitions separately
     const queryWrapperDefinitions: Record<string, unknown> = {}
+    // Standalone query wrappers (from query-wrappers.yaml) — collected for CLI manifest
+    const standaloneQueryWrappers: {
+        config: QueryWrappersConfig
+        enabledWrappers: [string, EnabledQueryWrapperToolConfig][]
+        yamlDir: string
+    }[] = []
     let querySchema: JsonSchemaRoot | undefined
 
     for (const def of definitionSources) {
@@ -1312,6 +1457,11 @@ function main(): void {
                     queryWrapperDefinitions,
                     generateQueryWrapperDefinitionsJson(config, enabledWrappers, path.dirname(def.filePath))
                 )
+                standaloneQueryWrappers.push({
+                    config,
+                    enabledWrappers,
+                    yamlDir: path.dirname(def.filePath),
+                })
                 process.stdout.write(`Generated ${enabledWrappers.length} query wrapper(s) from ${label}\n`)
             }
             continue
@@ -1370,7 +1520,36 @@ ${spreads}
     fs.writeFileSync(DEFINITIONS_JSON_PATH, JSON.stringify(definitions, null, 4) + '\n')
 
     // CLI manifest — enriched tool registry with HTTP details for the `ph` CLI
-    const cliManifest = generateCliManifest(allCategories, spec)
+    if (!querySchema) {
+        querySchema = loadQuerySchema()
+    }
+    const cliManifest = generateCliManifest(allCategories, spec, querySchema)
+    // Merge standalone query wrappers (from query-wrappers.yaml) into CLI manifest
+    for (const { config, enabledWrappers, yamlDir } of standaloneQueryWrappers) {
+        for (const [name, wrapperConfig] of enabledWrappers) {
+            const kind = extractKindFromSchemaRef(querySchema, wrapperConfig.schema_ref)
+            const excludeProps = wrapperConfig.exclude_properties ?? []
+            const querySchemaParams = resolveQuerySchemaParams(querySchema, wrapperConfig.schema_ref, excludeProps)
+            cliManifest[name] = {
+                method: 'POST',
+                path: '/api/environments/{project_id}/query/',
+                title: wrapperConfig.title || name,
+                description: resolveDescription(wrapperConfig, yamlDir, ''),
+                category: config.category,
+                feature: config.feature,
+                scopes: wrapperConfig.scopes,
+                annotations: {
+                    readOnly: wrapperConfig.annotations.readOnly,
+                    destructive: wrapperConfig.annotations.destructive,
+                    idempotent: wrapperConfig.annotations.idempotent,
+                },
+                params: { path: [], query: [], body: [] },
+                query_kind: kind,
+                query_schema: querySchemaParams,
+                types: resolveReferencedTypes(querySchema, querySchemaParams),
+            }
+        }
+    }
     fs.writeFileSync(CLI_MANIFEST_PATH, JSON.stringify(cliManifest, null, 4) + '\n')
 
     // Combined tool definitions for external consumers (docs site)

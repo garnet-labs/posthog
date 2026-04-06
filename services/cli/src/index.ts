@@ -6,12 +6,6 @@
  * method + path + param locations. Accepts raw JSON payloads via --json,
  * avoiding flag-per-param explosion. Designed for coding agents (Claude Code,
  * Cursor, etc.) that interact via bash.
- *
- * Usage:
- *   ph list                                      # discover tools
- *   ph schema feature-flag-get-all                # inspect input params
- *   ph feature-flag-get-all --json '{"search":"beta"}'
- *   ph feature-flag-get-all --json '{"search":"beta"}' --dry-run
  */
 
 import { Command } from 'commander'
@@ -19,10 +13,16 @@ import { Command } from 'commander'
 import { resolveConfig, type CliConfig } from './config.js'
 import { execute, dryRun } from './executor.js'
 import { loadManifest, type CliToolManifest } from './manifest.js'
+import { briefSchema, fullSchema } from './schema-explorer.js'
+
+const AGENT_HINT = `
+Workflow: ph list → ph schema <tool> → ph <tool> --json '{...}'
+Use --dry-run before mutations. Pipe to jq for filtering.
+Query tools (query-trends, query-funnel, ...) auto-inject the query kind.`.trim()
 
 function createProgram(manifest: Record<string, CliToolManifest>, config: CliConfig): Command {
     const program = new Command()
-    program.name('ph').description('Agent-first CLI for the PostHog API').version('0.1.0')
+    program.name('ph').description(`Agent-first CLI for the PostHog API\n\n${AGENT_HINT}`).version('0.1.0')
 
     // --- ph list ---
     program
@@ -71,14 +71,17 @@ function createProgram(manifest: Record<string, CliToolManifest>, config: CliCon
                     process.stdout.write(`  ${name.padEnd(40)} ${t.title} (${flags})\n`)
                 }
             }
-            process.stdout.write('\n')
+            process.stdout.write(
+                `\n${filtered.length} tools. Use "ph schema <tool>" for params, "ph <tool> --json '{...}'" to execute.\n`
+            )
         })
 
     // --- ph schema <tool> ---
     program
         .command('schema <tool>')
-        .description('Show input schema for a tool (params, method, path)')
-        .action((toolName: string) => {
+        .description('Show input schema for a tool (brief by default, --full for description)')
+        .option('--full', 'Include full description with examples')
+        .action((toolName: string, opts: { full?: boolean }) => {
             const tool = manifest[toolName]
             if (!tool) {
                 process.stderr.write(`Unknown tool: ${toolName}\n`)
@@ -86,19 +89,11 @@ function createProgram(manifest: Record<string, CliToolManifest>, config: CliCon
                 process.exitCode = 1
                 return
             }
-            const schema = {
-                name: toolName,
-                title: tool.title,
-                description: tool.description,
-                method: tool.method,
-                path: tool.path,
-                category: tool.category,
-                scopes: tool.scopes,
-                annotations: tool.annotations,
-                params: tool.params,
-                ...(tool.soft_delete ? { soft_delete: tool.soft_delete } : {}),
-            }
+            const schema = opts.full ? fullSchema(toolName, tool) : briefSchema(toolName, tool)
             process.stdout.write(JSON.stringify(schema, null, 2) + '\n')
+            if (!opts.full && tool.description.length > 200) {
+                process.stderr.write(`Hint: use --full for complete description (${tool.description.length} chars).\n`)
+            }
         })
 
     // --- ph <tool> --json '{...}' [--dry-run] ---

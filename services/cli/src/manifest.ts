@@ -9,6 +9,13 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+export interface CliParamSchema {
+    name: string
+    type: string
+    required: boolean
+    description?: string
+}
+
 export interface CliToolManifest {
     method: string
     path: string
@@ -28,6 +35,12 @@ export interface CliToolManifest {
         body: string[]
     }
     soft_delete?: string | boolean
+    /** Present for query wrapper tools — the `kind` value injected into the query payload. */
+    query_kind?: string
+    /** Resolved property schemas for query wrapper tools. */
+    query_schema?: CliParamSchema[]
+    /** Pre-resolved nested type definitions referenced by query_schema params. */
+    types?: Record<string, { properties: CliParamSchema[] }>
 }
 
 const MANIFEST_LOCATIONS = [
