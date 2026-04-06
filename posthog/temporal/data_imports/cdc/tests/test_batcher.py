@@ -2,6 +2,7 @@ import decimal
 from datetime import UTC, datetime
 
 import pyarrow as pa
+from parameterized import parameterized
 
 from posthog.temporal.data_imports.cdc.batcher import (
     CDC_OP_COLUMN,
@@ -218,49 +219,62 @@ class TestDeduplicateTable:
             batcher.add(ev)
         return batcher.flush()["users"]
 
-    def test_single_event_unchanged(self):
-        table = self._make_raw_table([_make_event(op="I", columns={"id": 1})])
-        result = deduplicate_table(table, ["id"])
-        assert result.num_rows == 1
-
-    def test_two_updates_same_pk_keeps_last(self):
+    @parameterized.expand(
+        [
+            (
+                "single_event_unchanged",
+                [("I", {"id": 1})],
+                ["id"],
+                1,
+                None,
+            ),
+            (
+                "two_updates_same_pk_keeps_last",
+                [("U", {"id": 1, "name": "Alice"}), ("U", {"id": 1, "name": "Bob"})],
+                ["id"],
+                1,
+                {"name": "Bob"},
+            ),
+            (
+                "different_pks_both_kept",
+                [("I", {"id": 1, "name": "Alice"}), ("I", {"id": 2, "name": "Bob"})],
+                ["id"],
+                2,
+                None,
+            ),
+            (
+                "insert_then_delete_keeps_delete",
+                [("I", {"id": 1, "name": "Alice"}), ("D", {"id": 1})],
+                ["id"],
+                1,
+                {"_ph_cdc_op": "D"},
+            ),
+            (
+                "empty_pk_returns_unchanged",
+                [("I", {"id": 1}), ("I", {"id": 2})],
+                [],
+                2,
+                None,
+            ),
+            (
+                "missing_pk_col_returns_unchanged",
+                [("I", {"id": 1}), ("I", {"id": 2})],
+                ["nonexistent_col"],
+                2,
+                None,
+            ),
+        ],
+    )
+    def test_deduplicate(self, _name, ops_and_cols, pk_columns, expected_rows, expected_values):
         events = [
-            _make_event(op="U", columns={"id": 1, "name": "Alice"}, position="0/100"),
-            _make_event(op="U", columns={"id": 1, "name": "Bob"}, position="0/200"),
+            _make_event(op=op, columns=cols, position=f"0/{i}00") for i, (op, cols) in enumerate(ops_and_cols, start=1)
         ]
         table = self._make_raw_table(events)
-        result = deduplicate_table(table, ["id"])
-        assert result.num_rows == 1
-        assert result.column("name")[0].as_py() == "Bob"
-
-    def test_different_pks_both_kept(self):
-        events = [
-            _make_event(op="I", columns={"id": 1, "name": "Alice"}),
-            _make_event(op="I", columns={"id": 2, "name": "Bob"}),
-        ]
-        table = self._make_raw_table(events)
-        result = deduplicate_table(table, ["id"])
-        assert result.num_rows == 2
-
-    def test_insert_then_delete_keeps_delete(self):
-        events = [
-            _make_event(op="I", columns={"id": 1, "name": "Alice"}, position="0/100"),
-            _make_event(op="D", columns={"id": 1}, position="0/200"),
-        ]
-        table = self._make_raw_table(events)
-        result = deduplicate_table(table, ["id"])
-        assert result.num_rows == 1
-        assert result.column(CDC_OP_COLUMN)[0].as_py() == "D"
-
-    def test_empty_pk_columns_returns_unchanged(self):
-        table = self._make_raw_table([_make_event(), _make_event()])
-        result = deduplicate_table(table, [])
-        assert result.num_rows == 2
-
-    def test_pk_column_not_in_table_returns_unchanged(self):
-        table = self._make_raw_table([_make_event(), _make_event()])
-        result = deduplicate_table(table, ["nonexistent_col"])
-        assert result.num_rows == 2
+        result = deduplicate_table(table, pk_columns)
+        assert result.num_rows == expected_rows
+        if expected_values:
+            for col, val in expected_values.items():
+                assert result.column(col)[0].as_py() == val
 
     def test_preserves_row_order(self):
         events = [
@@ -269,7 +283,6 @@ class TestDeduplicateTable:
         ]
         table = self._make_raw_table(events)
         result = deduplicate_table(table, ["id"])
-        # Both PKs distinct, order should be preserved
         assert result.column("id").to_pylist() == [2, 1]
 
 
@@ -280,81 +293,65 @@ class TestBuildScd2Table:
             batcher.add(ev)
         return batcher.flush()["users"]
 
-    def test_single_event_valid_to_is_null(self):
-        ts = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        table = self._make_raw_table([_make_event(op="I", columns={"id": 1}, timestamp=ts)])
-        result = build_scd2_table(table, ["id"])
-        assert SCD2_VALID_FROM_COLUMN in result.column_names
-        assert SCD2_VALID_TO_COLUMN in result.column_names
-        assert result.column(SCD2_VALID_FROM_COLUMN)[0].as_py() == ts
-        assert result.column(SCD2_VALID_TO_COLUMN)[0].as_py() is None
+    _TS1 = datetime(2026, 1, 1, tzinfo=UTC)
+    _TS2 = datetime(2026, 1, 2, tzinfo=UTC)
+    _TS3 = datetime(2026, 1, 3, tzinfo=UTC)
 
-    def test_two_events_same_pk_valid_to_chain(self):
-        ts1 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        ts2 = datetime(2026, 1, 2, 12, 0, 0, tzinfo=UTC)
+    @parameterized.expand(
+        [
+            (
+                "single_event_valid_to_null",
+                [("I", {"id": 1}, _TS1)],
+                ["id"],
+                [None],
+                [_TS1],
+            ),
+            (
+                "two_events_same_pk_chain",
+                [("I", {"id": 1}, _TS1), ("U", {"id": 1}, _TS2)],
+                ["id"],
+                [_TS2, None],
+                [_TS1, _TS2],
+            ),
+            (
+                "three_events_same_pk",
+                [("I", {"id": 1}, _TS1), ("U", {"id": 1}, _TS2), ("U", {"id": 1}, _TS3)],
+                ["id"],
+                [_TS2, _TS3, None],
+                [_TS1, _TS2, _TS3],
+            ),
+            (
+                "delete_is_last_valid_state",
+                [("I", {"id": 1}, _TS1), ("D", {"id": 1}, _TS2)],
+                ["id"],
+                [_TS2, None],
+                [_TS1, _TS2],
+            ),
+            (
+                "different_pks_independent",
+                [("I", {"id": 1}, _TS1), ("I", {"id": 2}, _TS2)],
+                ["id"],
+                [None, None],
+                [_TS1, _TS2],
+            ),
+            (
+                "empty_pk_all_null_valid_to",
+                [("I", {"id": 1}, _TS1), ("U", {"id": 1}, _TS1)],
+                [],
+                [None, None],
+                [_TS1, _TS1],
+            ),
+        ],
+    )
+    def test_scd2(self, _name, ops_cols_ts, pk_columns, expected_valid_to, expected_valid_from):
         events = [
-            _make_event(op="I", columns={"id": 1, "name": "Alice"}, position="0/100", timestamp=ts1),
-            _make_event(op="U", columns={"id": 1, "name": "Bob"}, position="0/200", timestamp=ts2),
+            _make_event(op=op, columns=cols, position=f"0/{i}00", timestamp=ts)
+            for i, (op, cols, ts) in enumerate(ops_cols_ts, start=1)
         ]
         table = self._make_raw_table(events)
-        result = build_scd2_table(table, ["id"])
-        assert result.num_rows == 2
-        # First event: valid_to = ts2
-        assert result.column(SCD2_VALID_FROM_COLUMN)[0].as_py() == ts1
-        assert result.column(SCD2_VALID_TO_COLUMN)[0].as_py() == ts2
-        # Last event: valid_to = null
-        assert result.column(SCD2_VALID_FROM_COLUMN)[1].as_py() == ts2
-        assert result.column(SCD2_VALID_TO_COLUMN)[1].as_py() is None
-
-    def test_three_events_same_pk(self):
-        ts1 = datetime(2026, 1, 1, tzinfo=UTC)
-        ts2 = datetime(2026, 1, 2, tzinfo=UTC)
-        ts3 = datetime(2026, 1, 3, tzinfo=UTC)
-        events = [
-            _make_event(op="I", columns={"id": 1}, position="0/100", timestamp=ts1),
-            _make_event(op="U", columns={"id": 1}, position="0/200", timestamp=ts2),
-            _make_event(op="U", columns={"id": 1}, position="0/300", timestamp=ts3),
-        ]
-        table = self._make_raw_table(events)
-        result = build_scd2_table(table, ["id"])
-        valid_to = result.column(SCD2_VALID_TO_COLUMN).to_pylist()
-        assert valid_to == [ts2, ts3, None]
-
-    def test_delete_is_last_valid_state(self):
-        ts1 = datetime(2026, 1, 1, tzinfo=UTC)
-        ts2 = datetime(2026, 1, 2, tzinfo=UTC)
-        events = [
-            _make_event(op="I", columns={"id": 1}, position="0/100", timestamp=ts1),
-            _make_event(op="D", columns={"id": 1}, position="0/200", timestamp=ts2),
-        ]
-        table = self._make_raw_table(events)
-        result = build_scd2_table(table, ["id"])
-        # DELETE row is the last event → valid_to IS NULL (current state)
-        assert result.column(SCD2_VALID_TO_COLUMN)[1].as_py() is None
-
-    def test_different_pks_independent_chains(self):
-        ts1 = datetime(2026, 1, 1, tzinfo=UTC)
-        ts2 = datetime(2026, 1, 2, tzinfo=UTC)
-        events = [
-            _make_event(op="I", columns={"id": 1, "name": "Alice"}, position="0/100", timestamp=ts1),
-            _make_event(op="I", columns={"id": 2, "name": "Bob"}, position="0/200", timestamp=ts2),
-        ]
-        table = self._make_raw_table(events)
-        result = build_scd2_table(table, ["id"])
-        # Each PK is independent — both should have valid_to = null
-        assert result.column(SCD2_VALID_TO_COLUMN)[0].as_py() is None
-        assert result.column(SCD2_VALID_TO_COLUMN)[1].as_py() is None
-
-    def test_empty_pk_columns_all_null_valid_to(self):
-        ts = datetime(2026, 1, 1, tzinfo=UTC)
-        events = [
-            _make_event(op="I", columns={"id": 1}, timestamp=ts),
-            _make_event(op="U", columns={"id": 1}, timestamp=ts),
-        ]
-        table = self._make_raw_table(events)
-        result = build_scd2_table(table, [])
-        # Can't determine groups without PKs, all rows get valid_to = null
-        assert result.column(SCD2_VALID_TO_COLUMN).to_pylist() == [None, None]
+        result = build_scd2_table(table, pk_columns)
+        assert result.column(SCD2_VALID_TO_COLUMN).to_pylist() == expected_valid_to
+        assert result.column(SCD2_VALID_FROM_COLUMN).to_pylist() == expected_valid_from
 
     def test_valid_from_equals_cdc_timestamp(self):
         ts = datetime(2026, 3, 15, 10, 30, 0, tzinfo=UTC)
