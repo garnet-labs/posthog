@@ -155,46 +155,38 @@ def get_person_name_helper(
     return str(person_pk)
 
 
-class PersonsWebBurstThrottle(UserOrEmailRateThrottle):
+class PersonsWebThrottleMixin:
+    rate_limit_setting: str
+
+    def allow_request(self, request, view):
+        team_id = getattr(view, "team_id", None)
+        if team_id:
+            try:
+                limits_str = get_instance_setting(self.rate_limit_setting) or "{}"
+                limits = json.loads(limits_str)
+                custom_rate = limits.get(str(team_id))
+                if custom_rate:
+                    self.rate = custom_rate
+                    self.num_requests, self.duration = self.parse_rate(self.rate)
+            except Exception:
+                logger.exception(
+                    "Error getting team-specific rate limit for team %s (setting=%s)",
+                    team_id,
+                    self.rate_limit_setting,
+                )
+        return super().allow_request(request, view)
+
+
+class PersonsWebBurstThrottle(PersonsWebThrottleMixin, UserOrEmailRateThrottle):
     scope = "persons_burst"
     rate = "180/minute"
-
-    def allow_request(self, request, view):
-        # Get team_id from view if available
-        team_id = getattr(view, "team_id", None)
-        if team_id:
-            try:
-                persons_burst_rate_limits_str = get_instance_setting("PERSONS_BURST_RATE_LIMITS") or "{}"
-                persons_burst_rate_limits = json.loads(persons_burst_rate_limits_str)
-                custom_rate = persons_burst_rate_limits.get(str(team_id))
-                if custom_rate:
-                    self.rate = custom_rate
-                    self.num_requests, self.duration = self.parse_rate(self.rate)
-            except Exception:
-                logger.exception(f"Error getting team-specific burst rate limit for team {team_id}")
-
-        return super().allow_request(request, view)
+    rate_limit_setting = "PERSONS_BURST_RATE_LIMITS"
 
 
-class PersonsWebSustainedThrottle(UserOrEmailRateThrottle):
+class PersonsWebSustainedThrottle(PersonsWebThrottleMixin, UserOrEmailRateThrottle):
     scope = "persons_sustained"
     rate = "1200/hour"
-
-    def allow_request(self, request, view):
-        # Get team_id from view if available
-        team_id = getattr(view, "team_id", None)
-        if team_id:
-            try:
-                persons_sustained_rate_limits_str = get_instance_setting("PERSONS_SUSTAINED_RATE_LIMITS") or "{}"
-                persons_sustained_rate_limits = json.loads(persons_sustained_rate_limits_str)
-                custom_rate = persons_sustained_rate_limits.get(str(team_id))
-                if custom_rate:
-                    self.rate = custom_rate
-                    self.num_requests, self.duration = self.parse_rate(self.rate)
-            except Exception:
-                logger.exception(f"Error getting team-specific sustained rate limit for team {team_id}")
-
-        return super().allow_request(request, view)
+    rate_limit_setting = "PERSONS_SUSTAINED_RATE_LIMITS"
 
 
 class PersonsDeleteBurstThrottle(PersonalApiKeyRateThrottle):
