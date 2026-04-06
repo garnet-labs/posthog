@@ -6,7 +6,7 @@ import { FEATURE_FLAGS } from 'lib/constants'
 import { setupJsdom } from 'lib/hog-charts/test-helpers'
 
 import { NodeKind } from '~/queries/schema/schema-general'
-import { buildTrendsQuery, chart, renderInsight, trendsSeries } from '~/test/insight-testing'
+import { buildTrendsQuery, chart, renderInsight } from '~/test/insight-testing'
 import { ChartDisplayType } from '~/types'
 
 let cleanupJsdom: () => void
@@ -27,7 +27,7 @@ describe('TrendsLineChartD3', () => {
         it('shows the series value and glyph for a single series', async () => {
             renderInsight({ query: buildTrendsQuery(), featureFlags: HOG_CHARTS_FLAG })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             tooltip.row('Pageview').expectValue('134')
             expect(tooltip.element.querySelector('.graph-series-glyph')).toBeInTheDocument()
@@ -44,7 +44,7 @@ describe('TrendsLineChartD3', () => {
                 featureFlags: HOG_CHARTS_FLAG,
             })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             tooltip.row('Pageview').expectValue('134')
             tooltip.row('Napped').expectValue('5')
@@ -62,7 +62,7 @@ describe('TrendsLineChartD3', () => {
                 featureFlags: HOG_CHARTS_FLAG,
             })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             tooltip.row('Spike').expectValue('3')
         })
@@ -79,7 +79,7 @@ describe('TrendsLineChartD3', () => {
                 expect(screen.getByRole('img', { name: /chart with 2 data series/i })).toBeInTheDocument()
             })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             tooltip.row('Current').expectValue('134')
             tooltip.row('Previous').expectValue('100')
@@ -100,7 +100,7 @@ describe('TrendsLineChartD3', () => {
                 featureFlags: HOG_CHARTS_FLAG,
             })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             const pageviewRow = tooltip.row('Pageview')
             expect(pageviewRow.element.textContent).toMatch(/%/)
@@ -118,7 +118,7 @@ describe('TrendsLineChartD3', () => {
                 featureFlags: HOG_CHARTS_FLAG,
             })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             expect(tooltip.element.querySelector('.graph-series-glyph')).not.toBeInTheDocument()
         })
@@ -131,7 +131,7 @@ describe('TrendsLineChartD3', () => {
                 featureFlags: HOG_CHARTS_FLAG,
             })
 
-            const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels.length)
+            const tooltip = await chart.hoverTooltip(2)
 
             tooltip.row('ActiveSeries').expectValue('3')
             tooltip.expectNoRow('EmptySeries')
@@ -145,7 +145,7 @@ describe('TrendsLineChartD3', () => {
                 featureFlags: HOG_CHARTS_FLAG,
             })
 
-            const tooltip = await chart.hoverTooltip(0, trendsSeries.minimal.labels.length)
+            const tooltip = await chart.hoverTooltip(0)
 
             tooltip.row('Minimal').expectValue('1')
         })

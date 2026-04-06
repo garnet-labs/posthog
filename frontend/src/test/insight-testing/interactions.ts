@@ -8,6 +8,7 @@ import { TrendsQuery } from '~/queries/schema/schema-general'
 import { InsightLogicProps } from '~/types'
 
 import { INSIGHT_TEST_ID } from './render-insight'
+import { trendsSeries } from './test-data'
 import { type TooltipAccessor, createTooltipAccessor } from './tooltip-helpers'
 
 const DEBOUNCE_TIMEOUT = 3000
@@ -104,7 +105,7 @@ export function getQuerySource(): TrendsQuery {
 }
 
 export const chart = {
-    async hoverTooltip(index: number, totalLabels: number): Promise<TooltipAccessor> {
+    async hoverTooltip(index: number, totalLabels = trendsSeries.pageviews.labels.length): Promise<TooltipAccessor> {
         const canvas = await screen.findByRole('img', { name: /chart with/i })
         const wrapper = canvas.parentElement!
 
