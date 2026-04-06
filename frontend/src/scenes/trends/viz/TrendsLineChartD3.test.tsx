@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom'
 
-import { cleanup, within } from '@testing-library/react'
+import { cleanup } from '@testing-library/react'
 
 import { FEATURE_FLAGS } from 'lib/constants'
 
@@ -44,7 +44,7 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
-            expect(within(tooltip).getByText('134')).toBeInTheDocument()
+            chart.expectRow(tooltip, 'Pageview', '134')
             expect(tooltip.querySelector('.graph-series-glyph')).toBeInTheDocument()
         })
 
@@ -59,8 +59,7 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
-            expect(within(tooltip).getByText('Spike')).toBeInTheDocument()
-            expect(within(tooltip).getByText('Thistle')).toBeInTheDocument()
+            chart.expectRow(tooltip, 'Spike', '3')
         })
 
         it('excludes zero-count series', async () => {
@@ -73,8 +72,8 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
-            expect(within(tooltip).getByText('3')).toBeInTheDocument()
-            expect(tooltip.textContent).not.toContain('EmptySeries')
+            chart.expectRow(tooltip, 'ActiveSeries', '3')
+            chart.expectNoRow(tooltip, 'EmptySeries')
         })
 
         it('renders correctly when series has no action metadata', async () => {
@@ -87,7 +86,7 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(0, trendsSeries.minimal.labels!.length)
 
-            expect(within(tooltip).getByText('1')).toBeInTheDocument()
+            chart.expectRow(tooltip, 'Minimal', '1')
         })
     })
 })

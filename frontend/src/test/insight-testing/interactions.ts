@@ -102,6 +102,19 @@ export function getQuerySource(): TrendsQuery {
     return getLogic().values.querySource as TrendsQuery
 }
 
+function findTooltipRow(tooltip: HTMLElement, label: string): HTMLElement {
+    const rows = tooltip.querySelectorAll('tr')
+    for (const row of rows) {
+        if (row.textContent?.includes(label)) {
+            return row as HTMLElement
+        }
+    }
+    const available = Array.from(rows)
+        .map((r) => r.textContent?.trim())
+        .filter(Boolean)
+    throw new Error(`No tooltip row containing "${label}". Rows: ${available.map((r) => `"${r}"`).join(', ')}`)
+}
+
 export const chart = {
     async hoverTooltip(index: number, totalLabels: number): Promise<HTMLElement> {
         const canvas = await screen.findByRole('img', { name: /chart with/i })
@@ -122,5 +135,21 @@ export const chart = {
             tooltip = el as HTMLElement
         })
         return tooltip
+    },
+
+    expectRow(tooltip: HTMLElement, label: string, value: string): void {
+        const row = findTooltipRow(tooltip, label)
+        const countsCell = row.querySelector('.datum-counts-column')
+        if (!countsCell) {
+            throw new Error(`Row "${label}" has no counts cell`)
+        }
+        expect(countsCell.textContent).toContain(value)
+    },
+
+    expectNoRow(tooltip: HTMLElement, label: string): void {
+        const rows = tooltip.querySelectorAll('tr')
+        for (const row of rows) {
+            expect(row.textContent).not.toContain(label)
+        }
     },
 }
