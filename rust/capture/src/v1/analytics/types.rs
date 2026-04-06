@@ -475,4 +475,124 @@ mod tests {
         let garbage = b"this is not json at all {{{";
         assert!(serde_json::from_slice::<Batch>(garbage).is_err());
     }
+
+    // --- SinkEvent impl for WrappedEvent ---
+
+    use crate::v1::sinks::event::Event as SinkEventTrait;
+    use crate::v1::sinks::Destination;
+    use crate::v1::test_utils;
+    use common_types::HasEventName;
+
+    fn ok_wrapped(event_name: &str, distinct_id: &str) -> WrappedEvent {
+        test_utils::wrapped_event(event_name, distinct_id)
+    }
+
+    #[test]
+    fn uuid_key_returns_event_uuid() {
+        let ev = ok_wrapped("$pageview", "user-1");
+        assert_eq!(ev.uuid_key(), ev.event.uuid);
+    }
+
+    #[test]
+    fn should_publish_ok_and_non_drop() {
+        let ev = ok_wrapped("$pageview", "user-1");
+        assert!(ev.should_publish());
+    }
+
+    #[test]
+    fn should_publish_false_when_dropped() {
+        let mut ev = ok_wrapped("$pageview", "user-1");
+        ev.result = EventResult::Drop;
+        assert!(!ev.should_publish());
+    }
+
+    #[test]
+    fn should_publish_false_when_destination_drop() {
+        let mut ev = ok_wrapped("$pageview", "user-1");
+        ev.destination = Destination::Drop;
+        assert!(!ev.should_publish());
+    }
+
+    #[test]
+    fn should_publish_false_when_limited() {
+        let mut ev = ok_wrapped("$pageview", "user-1");
+        ev.result = EventResult::Limited;
+        assert!(!ev.should_publish());
+    }
+
+    #[test]
+    fn headers_empty_when_no_skip_person() {
+        let ev = ok_wrapped("$pageview", "user-1");
+        assert!(ev.headers().is_empty());
+    }
+
+    #[test]
+    fn headers_include_skip_person_processing() {
+        let mut ev = ok_wrapped("$pageview", "user-1");
+        ev.skip_person_processing = true;
+        let h = ev.headers();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0], ("skip_person_processing".into(), "true".into()));
+    }
+
+    #[test]
+    fn partition_key_normal_mode() {
+        let ctx = test_utils::test_context();
+        let ev = ok_wrapped("$pageview", "user-42");
+        let key = ev.partition_key(&ctx);
+        assert_eq!(key, format!("{}:user-42", ctx.api_token));
+    }
+
+    #[test]
+    fn partition_key_cookieless_mode() {
+        let ctx = test_utils::test_context();
+        let mut ev = ok_wrapped("$pageview", "user-42");
+        ev.event.options.cookieless_mode = Some(true);
+        let key = ev.partition_key(&ctx);
+        assert_eq!(key, format!("{}:{}", ctx.api_token, ctx.client_ip));
+    }
+
+    #[test]
+    fn partition_key_cookieless_capture_internal() {
+        let mut ctx = test_utils::test_context();
+        ctx.capture_internal = true;
+        let mut ev = ok_wrapped("$pageview", "user-42");
+        ev.event.options.cookieless_mode = Some(true);
+        let key = ev.partition_key(&ctx);
+        assert_eq!(key, format!("{}:127.0.0.1", ctx.api_token));
+    }
+
+    #[test]
+    fn destination_returns_event_destination() {
+        let mut ev = ok_wrapped("$pageview", "user-1");
+        ev.destination = Destination::Overflow;
+        assert_eq!(*ev.destination(), Destination::Overflow);
+    }
+
+    // --- HasEventName impl for WrappedEvent ---
+
+    #[test]
+    fn event_name_returns_event_field() {
+        let ev = ok_wrapped("$pageview", "user-1");
+        assert_eq!(ev.event_name(), "$pageview");
+    }
+
+    #[test]
+    fn has_property_product_tour_id_some() {
+        let mut ev = ok_wrapped("survey sent", "user-1");
+        ev.event.options.product_tour_id = Some("tour-123".into());
+        assert!(ev.has_property("product_tour_id"));
+    }
+
+    #[test]
+    fn has_property_product_tour_id_none() {
+        let ev = ok_wrapped("survey sent", "user-1");
+        assert!(!ev.has_property("product_tour_id"));
+    }
+
+    #[test]
+    fn has_property_unknown_key() {
+        let ev = ok_wrapped("$pageview", "user-1");
+        assert!(!ev.has_property("unknown_key"));
+    }
 }

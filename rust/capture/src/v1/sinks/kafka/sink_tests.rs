@@ -607,3 +607,75 @@ async fn destination_dlq_routes_to_correct_topic() {
         assert_eq!(records[0].topic, "events_dlq");
     });
 }
+
+// ---------------------------------------------------------------------------
+// Destination::Custom topic routing
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn destination_custom_routes_to_custom_topic() {
+    let h = TestHarness::new();
+    let event = FakeEvent::ok("evt-1").with_destination(Destination::Custom("my_topic".into()));
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].outcome(), Outcome::Success);
+    h.producer.with_records(|records| {
+        assert_eq!(records[0].topic, "my_topic");
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Sink::publish() single-event convenience method
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn publish_single_event_success() {
+    let h = TestHarness::new();
+    let event = FakeEvent::ok("evt-1");
+
+    let result = h.sink.publish(SinkName::Msk, &h.ctx, &event).await;
+
+    assert!(result.is_some());
+    let r = result.unwrap();
+    assert_eq!(r.key(), "evt-1");
+    assert_eq!(r.outcome(), Outcome::Success);
+}
+
+#[tokio::test]
+async fn publish_single_non_publishable_returns_none() {
+    let h = TestHarness::new();
+    let event = FakeEvent::ok("evt-1").with_publish(false);
+
+    let result = h.sink.publish(SinkName::Msk, &h.ctx, &event).await;
+
+    assert!(result.is_none());
+    assert_eq!(h.producer.record_count(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// BatchSummary with timeout results
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn batch_summary_with_timeouts() {
+    let h = TestHarness::builder()
+        .ack_delay(Duration::from_secs(60))
+        .produce_timeout(Duration::from_millis(50))
+        .build();
+    let e1 = FakeEvent::ok("evt-1");
+    let e2 = FakeEvent::ok("evt-2");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let summary = BatchSummary::from_results(&results);
+
+    assert_eq!(summary.total, 2);
+    assert_eq!(summary.succeeded, 0);
+    assert_eq!(summary.timed_out, 2);
+    assert_eq!(summary.failed, 0);
+    assert!(!summary.all_ok());
+    assert_eq!(summary.errors.get("timeout").copied(), Some(2));
+}
