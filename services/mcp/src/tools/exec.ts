@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { formatResponse } from '@/lib/response'
+
 import type { Context, Tool, ZodObjectAny } from './types'
 
 const ExecSchema = z.object({
@@ -58,7 +60,7 @@ export function createExecTool(
 
             switch (verb) {
                 case 'tools': {
-                    return allTools.map((t) => t.name)
+                    return JSON.stringify(allTools.map((t) => t.name))
                 }
 
                 case 'search': {
@@ -73,14 +75,14 @@ export function createExecTool(
                     }
                     const matches = allTools
                         .filter((t) => regex.test(t.name) || regex.test(t.title) || regex.test(t.description))
-                        .map((t) => ({ name: t.name, title: t.title, description: t.description }))
+                        .map((t) => t.name)
                     if (matches.length === 0) {
-                        return {
+                        return JSON.stringify({
                             matches: [],
                             hint: `No tools matched "${rest}". Run "tools" to see all available tool names.`,
-                        }
+                        })
                     }
-                    return matches
+                    return JSON.stringify(matches)
                 }
 
                 case 'info': {
@@ -88,13 +90,13 @@ export function createExecTool(
                         throw new Error('Usage: info <tool_name>')
                     }
                     const tool = findTool(allTools, rest)
-                    return {
+                    return JSON.stringify({
                         name: tool.name,
                         title: tool.title,
                         description: tool.description,
                         annotations: tool.annotations,
                         inputSchema: z.toJSONSchema(tool.schema),
-                    }
+                    })
                 }
 
                 case 'call': {
@@ -115,7 +117,9 @@ export function createExecTool(
                         }
                     }
 
-                    return tool.handler(context, input)
+                    const result = await tool.handler(context, input)
+                    const useJson = tool._meta?.responseFormat === 'json'
+                    return useJson ? JSON.stringify(result) : formatResponse(result)
                 }
 
                 default:

@@ -23,9 +23,10 @@ These are BLOCKING REQUIREMENTS — like how you must read a file before editing
 
 ```text
 # STEP 1: REQUIRED — Discover available tools
-posthog:exec({ "command": "tools" })
-# OR search for tools by JavaScript regex (matches name, title, description)
+# Preferred: search with a focused regex (matches name, title, description)
 posthog:exec({ "command": "search <regex_pattern>" })
+# Fallback: list all tools (only if you don't know what domain to search)
+posthog:exec({ "command": "tools" })
 
 # STEP 2: REQUIRED — Check schema BEFORE any call
 posthog:exec({ "command": "info <tool_name>" })
@@ -40,18 +41,18 @@ posthog:exec({ "command": "call <tool_name> <json_input>" })
 
 <example>
 User: How many weekly active users do we have?
-Assistant: I need to discover the right tools first.
-[Runs posthog:exec({ "command": "tools" })]
-Assistant: I see there's a `read-data-schema` tool. Let me check its schema.
-[Runs posthog:exec({ "command": "info read-data-schema" })]
+Assistant: I need to find the right query tool and data schema tool.
+[Runs posthog:exec({ "command": "search query-trends" }) and posthog:exec({ "command": "search read-data" }) in parallel]
+Assistant: Let me check the schemas for both tools.
+[Runs posthog:exec({ "command": "info query-trends" }) and posthog:exec({ "command": "info read-data-schema" }) in parallel]
 Assistant: Now let me check what events are available.
 [Runs posthog:exec({ "command": "call read-data-schema {\"kind\": \"events\"}" })]
 </example>
 
 <example>
 User: Create a dashboard for our key revenue metrics
-Assistant: I'll need multiple tools for this. Let me discover and check schemas first.
-[Runs posthog:exec({ "command": "tools" })]
+Assistant: I'll need dashboard and query tools. Let me search for them.
+[Runs posthog:exec({ "command": "search dashboard" }) and posthog:exec({ "command": "search execute-sql" }) in parallel]
 Assistant: Let me check the schemas for the tools I'll need.
 [Runs posthog:exec({ "command": "info dashboard-create" }) and posthog:exec({ "command": "info execute-sql" }) in parallel]
 Assistant: Now I have both schemas. Let me start by searching for existing revenue insights.
@@ -60,8 +61,8 @@ Assistant: Now I have both schemas. Let me start by searching for existing reven
 
 <example>
 User: Find events related to onboarding
-Assistant: Let me find the right tool first.
-[Runs posthog:exec({ "command": "tools" }). Sees read-data-schema in the list.]
+Assistant: Let me find the data schema tool.
+[Runs posthog:exec({ "command": "search read-data" })]
 [Runs posthog:exec({ "command": "info read-data-schema" })]
 Assistant: Now I can search for onboarding events.
 [Runs posthog:exec({ "command": "call read-data-schema {\"kind\": \"events\", \"search\": \"onboarding\"}" })]
@@ -122,6 +123,27 @@ If you get errors due to permissions being denied, check that you have the corre
 If you cannot answer the user's PostHog related request or question using other available tools in this MCP, use the 'docs-search' tool to provide information from the documentation to guide user how they can do it themselves - when doing so provide condensed instructions with links to sources.
 
 ### Tool search
+
+**Always prefer `search` over `tools`** — `tools` returns every tool and wastes tokens. Use `search <regex>` with a short, targeted pattern to find what you need.
+
+Write focused patterns that match 1-5 tools. The regex matches against tool name, title, and description.
+
+**Good patterns** (specific, narrow):
+
+- `search feature-flag` — tools for feature flags
+- `search dashboard` — dashboard CRUD tools
+- `search query-` — all insight query wrappers
+- `search experiment` — experiment tools
+- `search survey` — survey tools
+
+**Bad patterns** (too broad, match dozens of tools):
+
+- `search data` — matches almost everything
+- `search get|list|create` — matches action verbs across all domains
+- `search pageview_trends` — search is too focused
+- `search pageview|email@address.com` — unrelated to tools
+
+Only fall back to `tools` if you have no idea which domain to search, or if `search` returns no results.
 
 PostHog tools have lowercase kebab-case naming. Tools are organized by category:
 
