@@ -194,6 +194,74 @@ def _get_rows_to_sync(
         return 0
 
 
+def get_primary_keys_for_schemas(
+    config: SnowflakeSourceConfig,
+    table_names: list[str],
+) -> dict[str, list[str] | None]:
+    """Detect primary keys for all tables by iterating SHOW PRIMARY KEYS."""
+    result: dict[str, list[str] | None] = dict.fromkeys(table_names)
+
+    try:
+        auth_connect_args: dict[str, str | None] = {}
+        file_name: str | None = None
+
+        if config.auth_type.selection == "keypair" and config.auth_type.private_key is not None:
+            with tempfile.NamedTemporaryFile(delete=False) as tf:
+                tf.write(config.auth_type.private_key.encode("utf-8"))
+                file_name = tf.name
+
+            auth_connect_args = {
+                "user": config.auth_type.user,
+                "private_key_file": file_name,
+                "private_key_file_pwd": config.auth_type.passphrase
+                if config.auth_type.passphrase and len(config.auth_type.passphrase) > 0
+                else None,
+            }
+        else:
+            auth_connect_args = {
+                "password": config.auth_type.password,
+                "user": config.auth_type.user,
+            }
+
+        with snowflake.connector.connect(
+            account=config.account_id,
+            warehouse=config.warehouse,
+            database=config.database,
+            schema=config.schema,
+            role=config.role,
+            **auth_connect_args,
+        ) as connection:
+            with connection.cursor() as cursor:
+                if cursor is None:
+                    raise Exception("Can't create cursor to Snowflake")
+
+                for tbl in table_names:
+                    try:
+                        cursor.execute(
+                            "SHOW PRIMARY KEYS IN IDENTIFIER(%s)",
+                            (f"{config.database}.{config.schema}.{tbl}",),
+                        )
+
+                        column_index = next(
+                            (i for i, row in enumerate(cursor.description) if row.name == "column_name"), -1
+                        )
+                        if column_index == -1:
+                            continue
+
+                        keys = [row[column_index] for row in cursor]
+                        if keys:
+                            result[tbl] = keys
+                    except Exception:
+                        continue
+
+        if file_name is not None:
+            os.unlink(file_name)
+    except Exception:
+        pass
+
+    return result
+
+
 def _get_primary_keys(cursor: SnowflakeCursor, database: str, schema: str, table_name: str) -> list[str] | None:
     cursor.execute("SHOW PRIMARY KEYS IN IDENTIFIER(%s)", (f"{database}.{schema}.{table_name}",))
 

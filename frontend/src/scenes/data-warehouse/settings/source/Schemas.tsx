@@ -375,6 +375,30 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                         },
                     },
                     {
+                        title: 'Primary key',
+                        key: 'primary_key',
+                        isHidden: isDirectQuerySource || !schemas.some((s) => s.sync_type === 'incremental'),
+                        render: function RenderPrimaryKey(_, schema) {
+                            if (schema.sync_type !== 'incremental') {
+                                return null
+                            }
+
+                            if (schema.primary_key_columns && schema.primary_key_columns.length > 0) {
+                                return (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                        {schema.primary_key_columns.map((col) => (
+                                            <LemonTag key={col} type="default">
+                                                {col}
+                                            </LemonTag>
+                                        ))}
+                                    </div>
+                                )
+                            }
+
+                            return <span className="text-xs text-muted-foreground">Auto-detect</span>
+                        },
+                    },
+                    {
                         title: isDirectQuerySource ? 'Queryable' : 'Enabled',
                         key: 'should_sync',
                         sorter: (a, b) => Number(a.should_sync) - Number(b.should_sync),
@@ -684,12 +708,17 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         append_available: schemaIncrementalFields.append_available,
                         incremental_fields: schemaIncrementalFields.incremental_fields,
                         supports_webhooks: schemaIncrementalFields?.supports_webhooks ?? false,
+                        primary_key_columns: currentSyncMethodModalSchema.primary_key_columns ?? null,
+                        available_columns: [],
                     }}
+                    availableColumns={schemaIncrementalFields.available_columns ?? []}
+                    detectedPrimaryKeys={schemaIncrementalFields.detected_primary_keys ?? null}
+                    primaryKeyLocked={!!currentSyncMethodModalSchema.table}
                     onClose={() => {
                         resetSchemaIncrementalFields()
                         closeSyncMethodModal()
                     }}
-                    onSave={(syncType, incrementalField, incrementalFieldType) => {
+                    onSave={(syncType, incrementalField, incrementalFieldType, primaryKeyColumns) => {
                         updateSchema({
                             ...currentSyncMethodModalSchema,
                             should_sync: true,
@@ -697,6 +726,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                             incremental_field: syncType === 'full_refresh' ? null : incrementalField,
                             incremental_field_type: syncType === 'full_refresh' ? null : incrementalFieldType,
                             sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
+                            primary_key_columns: syncType === 'incremental' ? (primaryKeyColumns ?? null) : null,
                         })
                     }}
                 />

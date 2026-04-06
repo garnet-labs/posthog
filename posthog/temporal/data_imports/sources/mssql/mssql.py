@@ -121,6 +121,60 @@ def _build_query(
     }
 
 
+def get_primary_keys_for_schemas(
+    host: str,
+    user: str,
+    password: str,
+    database: str,
+    schema: str,
+    port: int,
+    table_names: list[str],
+) -> dict[str, list[str] | None]:
+    """Detect primary keys for all tables in a single query."""
+    import pymssql
+
+    result: dict[str, list[str] | None] = dict.fromkeys(table_names)
+
+    try:
+        connection = pymssql.connect(
+            server=host,
+            port=str(port),
+            database=database,
+            user=user,
+            password=password,
+            login_timeout=5,
+        )
+
+        with connection.cursor(as_dict=False) as cursor:
+            cursor.execute(
+                """
+                SELECT tc.TABLE_NAME, kcu.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                WHERE tc.TABLE_SCHEMA = %(schema)s
+                AND tc.TABLE_NAME IN %(names)s
+                AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                """,
+                {"schema": schema, "names": tuple(table_names)},
+            )
+            rows = cursor.fetchall()
+
+            pks: dict[str, list[str]] = collections.defaultdict(list)
+            for table_name, column_name in rows:
+                pks[table_name].append(column_name)
+
+            for table_name, pk_cols in pks.items():
+                result[table_name] = pk_cols
+
+        connection.close()
+    except Exception:
+        pass
+
+    return result
+
+
 def _get_primary_keys(cursor: Cursor, schema: str, table_name: str) -> list[str] | None:
     query = """
         SELECT c.name AS column_name

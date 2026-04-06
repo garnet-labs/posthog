@@ -249,6 +249,53 @@ def get_schemas(
     return schema_list
 
 
+def get_primary_keys_for_schemas(
+    host: str,
+    database: str,
+    user: str,
+    password: str,
+    schema: str,
+    port: int,
+    table_names: list[str],
+    require_ssl: bool = False,
+) -> dict[str, list[str] | None]:
+    """Detect primary keys for all tables in a single query."""
+    result: dict[str, list[str] | None] = dict.fromkeys(table_names)
+
+    try:
+        connection = _connect_to_postgres(
+            host=host, port=port, database=database, user=user, password=password, require_ssl=require_ssl
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("""
+                    SELECT tc.table_name, kcu.column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                    WHERE tc.table_schema = {schema}
+                    AND tc.table_name = ANY({names})
+                    AND tc.constraint_type = 'PRIMARY KEY'
+                """).format(schema=sql.Literal(schema), names=sql.Literal(table_names))
+            )
+            rows = cursor.fetchall()
+
+            pks: dict[str, list[str]] = collections.defaultdict(list)
+            for table_name, column_name in rows:
+                pks[table_name].append(column_name)
+
+            for table_name, pk_cols in pks.items():
+                result[table_name] = pk_cols
+
+        connection.close()
+    except Exception:
+        pass
+
+    return result
+
+
 def get_foreign_keys(
     host: str,
     database: str,

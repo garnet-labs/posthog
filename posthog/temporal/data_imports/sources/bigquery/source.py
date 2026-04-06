@@ -17,6 +17,7 @@ from posthog.temporal.data_imports.sources.bigquery.bigquery import (
     delete_all_temp_destination_tables,
     delete_table,
     filter_incremental_fields as filter_bigquery_incremental_fields,
+    get_primary_keys_for_schemas as get_bigquery_primary_keys_for_schemas,
     get_schemas as get_bigquery_schemas,
     validate_credentials as validate_bigquery_credentials,
 )
@@ -53,6 +54,8 @@ class BigQuerySource(SimpleSource[BigQuerySourceConfig]):
             names=names,
         )
 
+        detected_pks = get_bigquery_primary_keys_for_schemas(config, bq_schemas)
+
         filtered_results = [
             (table_name, filter_bigquery_incremental_fields(columns)) for table_name, columns in bq_schemas.items()
         ]
@@ -72,6 +75,8 @@ class BigQuerySource(SimpleSource[BigQuerySourceConfig]):
                     }
                     for column_name, column_type, nullable in columns
                 ],
+                columns=bq_schemas[table_name],
+                detected_primary_keys=detected_pks.get(table_name),
             )
             for table_name, columns in filtered_results
             if not table_name.startswith(build_destination_table_prefix(None))

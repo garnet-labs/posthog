@@ -19,6 +19,7 @@ from posthog.temporal.data_imports.sources.common.schema import SourceSchema
 from posthog.temporal.data_imports.sources.generated_configs import MSSQLSourceConfig
 from posthog.temporal.data_imports.sources.mssql.mssql import (
     filter_mssql_incremental_fields,
+    get_primary_keys_for_schemas as get_mssql_primary_keys_for_schemas,
     get_schemas as get_mssql_schemas,
     mssql_source,
 )
@@ -114,6 +115,15 @@ class MSSQLSource(SimpleSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatab
                 schema=config.schema,
                 names=names,
             )
+            detected_pks = get_mssql_primary_keys_for_schemas(
+                host=host,
+                port=port,
+                user=config.user,
+                password=config.password,
+                database=config.database,
+                schema=config.schema,
+                table_names=list(db_schemas.keys()),
+            )
 
         for table_name, columns in db_schemas.items():
             incremental_field_tuples = filter_mssql_incremental_fields(columns)
@@ -134,6 +144,8 @@ class MSSQLSource(SimpleSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatab
                     supports_incremental=len(incremental_fields) > 0,
                     supports_append=len(incremental_fields) > 0,
                     incremental_fields=incremental_fields,
+                    columns=columns,
+                    detected_primary_keys=detected_pks.get(table_name),
                 )
             )
 

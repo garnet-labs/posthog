@@ -25,6 +25,7 @@ from posthog.temporal.data_imports.sources.postgres.postgres import (
     get_connection_metadata as get_postgres_connection_metadata,
     get_foreign_keys as get_postgres_foreign_keys,
     get_postgres_row_count,
+    get_primary_keys_for_schemas as get_postgres_primary_keys_for_schemas,
     get_schemas as get_postgres_schemas,
     postgres_source,
 )
@@ -172,6 +173,15 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                 schema=config.schema,
                 names=names,
             )
+            detected_pks = get_postgres_primary_keys_for_schemas(
+                host=host,
+                port=port,
+                user=config.user,
+                password=config.password,
+                database=config.database,
+                schema=config.schema,
+                table_names=list(db_schemas.keys()),
+            )
 
             if with_counts:
                 row_counts = get_postgres_row_count(
@@ -208,6 +218,7 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                     row_count=row_counts.get(table_name, None),
                     columns=columns,
                     foreign_keys=db_foreign_keys.get(table_name, []),
+                    detected_primary_keys=detected_pks.get(table_name),
                 )
             )
 

@@ -283,6 +283,64 @@ def _get_partition_settings(
         return None
 
 
+def get_primary_keys_for_schemas(
+    host: str,
+    user: str,
+    password: str,
+    database: str,
+    schema: str,
+    port: int,
+    table_names: list[str],
+    using_ssl: bool = True,
+) -> dict[str, list[str] | None]:
+    """Detect primary keys for all tables in a single query."""
+    result: dict[str, list[str] | None] = dict.fromkeys(table_names)
+
+    try:
+        ssl_ca: str | None = None
+        if using_ssl:
+            ssl_ca = "/etc/ssl/cert.pem" if settings.DEBUG else "/etc/ssl/certs/ca-certificates.crt"
+
+        connection = pymysql.connect(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password,
+            connect_timeout=10,
+            ssl_ca=ssl_ca,
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT tc.TABLE_NAME, kcu.COLUMN_NAME
+                FROM information_schema.TABLE_CONSTRAINTS tc
+                JOIN information_schema.KEY_COLUMN_USAGE kcu
+                ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                WHERE tc.TABLE_SCHEMA = %(schema)s
+                AND tc.TABLE_NAME IN %(names)s
+                AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                """,
+                {"schema": schema, "names": tuple(table_names)},
+            )
+            rows = cursor.fetchall()
+
+            pks: dict[str, list[str]] = collections.defaultdict(list)
+            for table_name, column_name in rows:
+                pks[table_name].append(column_name)
+
+            for table_name, pk_cols in pks.items():
+                result[table_name] = pk_cols
+
+        connection.close()
+    except Exception:
+        pass
+
+    return result
+
+
 def _get_primary_keys(cursor: Cursor, schema: str, table_name: str) -> list[str] | None:
     query = """
         SELECT COLUMN_NAME

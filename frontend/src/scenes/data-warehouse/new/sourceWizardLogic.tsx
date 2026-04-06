@@ -251,12 +251,14 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             schema: ExternalDataSourceSyncSchema,
             syncType: ExternalDataSourceSyncSchema['sync_type'],
             incrementalField: string | null,
-            incrementalFieldType: string | null
+            incrementalFieldType: string | null,
+            primaryKeyColumns: string[] | null
         ) => ({
             schema,
             syncType,
             incrementalField,
             incrementalFieldType,
+            primaryKeyColumns,
         }),
         clearSource: true,
         updateSource: (source: Partial<ExternalDataSourceCreatePayload>) => ({
@@ -344,13 +346,17 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                         should_sync: s.table === schema.table ? shouldSync : s.should_sync,
                     }))
                 },
-                updateSchemaSyncType: (state, { schema, syncType, incrementalField, incrementalFieldType }) => {
+                updateSchemaSyncType: (
+                    state,
+                    { schema, syncType, incrementalField, incrementalFieldType, primaryKeyColumns }
+                ) => {
                     return state.map((s) => ({
                         ...s,
                         sync_type: s.table === schema.table ? syncType : s.sync_type,
                         incremental_field: s.table === schema.table ? incrementalField : s.incremental_field,
                         incremental_field_type:
                             s.table === schema.table ? incrementalFieldType : s.incremental_field_type,
+                        primary_key_columns: s.table === schema.table ? primaryKeyColumns : s.primary_key_columns,
                     }))
                 },
             },
@@ -419,11 +425,15 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
             {
                 openSyncMethodModal: (_, { schema }) => schema,
                 cancelSyncMethodModal: () => null,
-                updateSchemaSyncType: (_, { schema, syncType, incrementalField, incrementalFieldType }) => ({
+                updateSchemaSyncType: (
+                    _,
+                    { schema, syncType, incrementalField, incrementalFieldType, primaryKeyColumns }
+                ) => ({
                     ...schema,
                     sync_type: syncType,
                     incremental_field: incrementalField,
                     incremental_field_type: incrementalFieldType,
+                    primary_key_columns: primaryKeyColumns,
                 }),
             },
         ],
@@ -721,6 +731,7 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                                 incremental_field: null,
                                 incremental_field_type: null,
                                 sync_time_of_day: null,
+                                primary_key_columns: null,
                             })),
                         },
                     })
@@ -819,6 +830,7 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                                         incremental_field: schema.incremental_field,
                                         incremental_field_type: schema.incremental_field_type,
                                         sync_time_of_day: schema.sync_time_of_day,
+                                        primary_key_columns: schema.primary_key_columns,
                                     })),
                                 },
                             })
@@ -1022,6 +1034,7 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                                 incremental_field: schema.incremental_field,
                                 incremental_field_type: schema.incremental_field_type,
                                 sync_time_of_day: schema.sync_time_of_day ?? null,
+                                primary_key_columns: schema.primary_key_columns,
                             })),
                         },
                     })
