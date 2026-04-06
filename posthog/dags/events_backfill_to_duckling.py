@@ -458,7 +458,7 @@ def _set_table_partitioning(
     table: str,
     partition_expr: str,
     context: AssetExecutionContext,
-    team_id: int,
+    team_id: int | None,
 ) -> bool:
     """Set partitioning on a DuckLake table.
 
@@ -1956,6 +1956,8 @@ def duckling_events_full_backfill_sensor(
             break
 
         team_id = catalog.team_id
+        if team_id is None:
+            continue
 
         # Determine start month - use cached value if resuming same team
         if team_id == resume_team_id and cached_earliest:
