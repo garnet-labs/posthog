@@ -192,9 +192,11 @@ class DeltaTableHelper:
 
             # Normalize keys and check the keys actually exist in the dataset
             py_table_column_names = data.column_names
-            normalized_primary_keys = [
-                normalize_column_name(x) for x in primary_keys if normalize_column_name(x) in py_table_column_names
-            ]
+            normalized_primary_keys: list[str] = []
+            for x in primary_keys:
+                n = normalize_column_name(x)
+                if n in py_table_column_names:
+                    normalized_primary_keys.append(n)
 
             predicate_ops = [f"source.{c} = target.{c}" for c in normalized_primary_keys]
             if use_partitioning:
@@ -346,9 +348,11 @@ class DeltaTableHelper:
         # Step 1: Close existing current rows for PKs in this batch
         if delta_table is not None and primary_keys and "valid_from" in data.column_names:
             py_column_names = data.column_names
-            normalized_pks = [
-                normalize_column_name(x) for x in primary_keys if normalize_column_name(x) in py_column_names
-            ]
+            normalized_pks: list[str] = []
+            for x in primary_keys:
+                n = normalize_column_name(x)
+                if n in py_column_names:
+                    normalized_pks.append(n)
 
             if normalized_pks:
                 # Use only the first row per PK to avoid ambiguous multi-match merge
