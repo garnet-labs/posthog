@@ -87,7 +87,7 @@ It runs four fast, read-only probes and prints a status summary:
 ```text
 hogli doctor
 
-  Disk usage ............... OK (22.6 KiB reclaimable)
+  Disk usage ............... OK (22.6 MiB reclaimable)
   Zombie processes ......... OK (0 orphaned)
   Docker ................... OK (daemon running)
   Migrations ............... WARNING (1 unapplied)
