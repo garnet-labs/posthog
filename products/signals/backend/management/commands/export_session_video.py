@@ -87,7 +87,6 @@ class Command(BaseCommand):
                 wait_for_css_selector=".replayer-wrapper",
                 recording_duration=duration,
                 playback_speed=playback_speed,
-                use_puppeteer=True,
                 recording_fps=recording_fps,
             ),
         )

@@ -1,6 +1,5 @@
 import os
 import abc
-import json
 import time
 import uuid
 import shutil
@@ -20,8 +19,6 @@ from playwright.sync_api import (
 )
 
 from posthog.schema import ReplayInactivityPeriod
-
-from posthog.exceptions_capture import capture_exception
 
 logger = structlog.get_logger(__name__)
 
@@ -52,7 +49,6 @@ class RecordReplayToFileOptions:
     screenshot_width: Optional[int] = None
     screenshot_height: Optional[int] = None
     playback_speed: int = 1
-    use_puppeteer: bool = False
     recording_fps: int | None = None
 
     def __post_init__(self) -> None:
@@ -85,128 +81,6 @@ class _ReplayVideoRecorder(abc.ABC):
     def record(self) -> RecordingResult:
         """Record a replay to a file."""
         raise NotImplementedError
-
-
-class PuppeteerRecorder(_ReplayVideoRecorder):
-    """Record a replay to a file using Puppeteer."""
-
-    # Path to Node.js scripts directory (relative to project root)
-    # TODO: Find a better way to do this
-    NODEJS_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "nodejs", "src", "scripts")
-    SCRIPT_NAME = "record-replay-session-to-video-puppeteer.js"
-
-    def record(self) -> RecordingResult:
-        # Load the script
-        script_path = os.path.join(self.NODEJS_SCRIPTS_DIR, self.SCRIPT_NAME)
-        if not os.path.exists(script_path):
-            msg = f"Puppeteer recorder script not found: {script_path}"
-            logger.exception(
-                msg,
-                options=asdict(self.opts),
-                signals_type="video_export",
-            )
-            raise FileNotFoundError(msg)
-        # Build input
-        options = {
-            "url_to_render": self.opts.url_to_render,
-            "output_path": self.output_path,
-            "wait_for_css_selector": self.opts.wait_for_css_selector,
-            "recording_duration": self.opts.recording_duration,
-            "playback_speed": self.opts.playback_speed,
-            "headless": os.getenv("EXPORTER_HEADLESS", "1") != "0",
-        }
-        if self.opts.screenshot_width is not None:
-            options["screenshot_width"] = self.opts.screenshot_width
-        if self.opts.screenshot_height is not None:
-            options["screenshot_height"] = self.opts.screenshot_height
-        if self.opts.recording_fps is not None:
-            options["recording_fps"] = self.opts.recording_fps
-        ffmpeg_path = shutil.which("ffmpeg")
-        if ffmpeg_path:
-            options["ffmpeg_path"] = ffmpeg_path
-        else:
-            msg = "ffmpeg not found in PATH"
-            logger.exception(msg, signals_type="video_export")
-            raise RuntimeError(msg)
-        headless = options["headless"]
-        options_json = json.dumps(options)
-        # Record the video
-        try:
-            result = subprocess.run(
-                ["node", script_path, options_json],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE if headless else None,
-                text=True,
-                check=False,  # Don't raise on non-zero exit, we'll check the JSON output
-                timeout=60 * 60 * 3,  # 3 hours timeout in case of script hanging, as it has own timeouts
-            )
-            # Parse JSON output from stdout
-            if not result.stdout.strip():
-                msg = "Puppeteer recorder produced no output when recording the session."
-                logger.exception(
-                    msg,
-                    exit_code=result.returncode,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    options=options,
-                    signals_type="video_export",
-                )
-                raise RuntimeError(msg)
-            try:
-                output = json.loads(result.stdout.strip())
-            except json.JSONDecodeError as e:
-                msg = (
-                    f"Failed to parse Puppeteer output, when recording the session: {e}. Output: {result.stdout[:500]}"
-                )
-                logger.exception(
-                    msg,
-                    exit_code=result.returncode,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    options=options,
-                    signals_type="video_export",
-                )
-                raise RuntimeError(msg) from e
-            if not output.get("success"):
-                msg = f"Puppeteer recorder failed, when recording the session: {output.get('error', 'Unknown error')}"
-                logger.exception(
-                    msg,
-                    exit_code=result.returncode,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    options=options,
-                    signals_type="video_export",
-                )
-                raise RuntimeError(msg)
-            # Parse inactivity periods
-            if not output.get("inactivity_periods"):
-                # Expect that all the recordings should have at least one period with active: True/False
-                msg = "Puppeteer recorder produced no inactivity periods when recording the session."
-                err = RuntimeError(msg)
-                logger.exception(msg, output=output, options=options, signals_type="video_export")
-                capture_exception(err, additional_properties={"options": options, "output": output})
-                raise err
-            inactivity_periods = [
-                ReplayInactivityPeriod.model_validate(period) for period in output["inactivity_periods"]
-            ]
-            # Parse segment timestamps
-            segment_start_timestamps = {}
-            if output.get("segment_start_timestamps"):
-                segment_start_timestamps = {float(k): float(v) for k, v in output["segment_start_timestamps"].items()}
-            # Return the result
-            return RecordingResult(
-                video_path=output["video_path"],
-                pre_roll=output["pre_roll"],
-                playback_speed=output["playback_speed"],
-                measured_width=output.get("measured_width"),
-                inactivity_periods=inactivity_periods,
-                segment_start_timestamps=segment_start_timestamps,
-                custom_fps=output.get("custom_fps"),
-            )
-        except Exception as e:
-            msg = f"Puppeteer recorder failed, when recording the session: {e}"
-            logger.exception(msg, error=str(e), options=options, signals_type="video_export")
-            raise RuntimeError(msg) from e
 
 
 class PlaywrightRecorder(_ReplayVideoRecorder):
@@ -720,35 +594,11 @@ def record_replay_to_file(
         temp_dir_ctx = tempfile.TemporaryDirectory(prefix="ph-video-export-", ignore_cleanup_errors=True)
         record_dir = temp_dir_ctx.name
         temp_output_path = os.path.join(record_dir, f"{uuid.uuid4()}{ext}")
-        # Choose recording method: Puppeteer or Playwright
-        use_puppeteer = opts.use_puppeteer
-        if use_puppeteer:
-            # ============ Node.js + Puppeteer recording ============
-            logger.debug("Using Node.js + Puppeteer recorder.", options=asdict(opts), signals_type="video_export")
-            result = PuppeteerRecorder(
-                output_path=temp_output_path,
-                record_dir=record_dir,
-                opts=opts,
-            ).record()
-            temp_output_path = result.video_path
-            # After setpts stretching, the fps filter sets the output frame rate.
-            # custom_fps / playback_speed gives the correct final FPS
-            # (e.g. 24 FPS recorded at 8x -> 3 FPS final, 60 FPS at 4x -> 15 FPS final)
-            if result.custom_fps and result.playback_speed > 1:
-                fps_to_render_at = result.custom_fps // result.playback_speed
-            else:
-                fps_to_render_at = result.custom_fps or 25
-        else:
-            # ============ Python + Playwright recording ============
-            logger.debug("Using Python + Playwright recorder.", options=asdict(opts), signals_type="video_export")
-            result = PlaywrightRecorder(
-                output_path=temp_output_path,
-                record_dir=record_dir,
-                opts=opts,
-            ).record()
-            # Use default rendering logic for Playwright, as we don't modify the FPS during recording
-            fps_to_render_at = None
-        # ============ Common post-processing (ffmpeg) ============
+        result = PlaywrightRecorder(
+            output_path=temp_output_path,
+            record_dir=record_dir,
+            opts=opts,
+        ).record()
         logger.debug(
             "Recording complete.",
             pre_roll=result.pre_roll,
@@ -765,7 +615,7 @@ def record_replay_to_file(
             recording_duration=opts.recording_duration,
             playback_speed=result.playback_speed,
             measured_width=result.measured_width,
-            fps_to_render_at=fps_to_render_at,
+            fps_to_render_at=None,
         )
         if ext == ".mp4":
             video_renderer._convert_to_mp4()

@@ -128,7 +128,6 @@ def _track_video_export_started(asset: ExportedAsset, build: dict[str, Any]) -> 
                 "playback_speed": build.get("playback_speed", 1),
                 "recording_fps": build.get("recording_fps"),
                 # Crucial to separate summaries from regular exports
-                "use_puppeteer": build.get("use_puppeteer", False),
             },
             groups=groups(asset.team.organization, asset.team),
         )
@@ -158,8 +157,6 @@ def _track_video_export_completed(asset: ExportedAsset, build: dict[str, Any], v
                 "playback_speed": build.get("playback_speed", 1),
                 "recording_fps": build.get("recording_fps"),
                 "file_size_bytes": file_size,
-                # Crucial to separate summaries from regular exports
-                "use_puppeteer": build.get("use_puppeteer", False),
             },
             groups=groups(asset.team.organization, asset.team),
         )
@@ -191,7 +188,6 @@ def record_and_persist_video_activity(build: dict[str, Any]) -> None:
                 screenshot_height=build.get("height"),
                 recording_duration=build["duration"],
                 playback_speed=build.get("playback_speed", 1),
-                use_puppeteer=build.get("use_puppeteer", False),
                 recording_fps=build.get("recording_fps"),
             ),
         )
@@ -199,12 +195,6 @@ def record_and_persist_video_activity(build: dict[str, Any]) -> None:
             if asset.export_context is None:
                 asset.export_context = {}
             asset.export_context["inactivity_periods"] = [x.model_dump() for x in inactivity_periods]
-            # Validate inactivity periods - ensure at least one valid period exists
-            valid_period_count = sum(
-                1 for i, period in enumerate(inactivity_periods) if _validate_period(period, i, len(inactivity_periods))
-            )
-            if valid_period_count == 0 and build.get("use_puppeteer", False):
-                raise ValueError("No valid inactivity periods detected in the recording")
             asset.save(update_fields=["export_context"])
         # Check file size first to prevent OOM
         file_size = os.path.getsize(tmp_path)
