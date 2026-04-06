@@ -7,7 +7,7 @@ import psycopg
 from psycopg import sql as psql
 from psycopg.conninfo import make_conninfo
 
-from posthog.ducklake.common import get_duckgres_config, sanitize_ducklake_identifier
+from posthog.ducklake.common import get_duckgres_config_for_org, is_dev_mode, sanitize_ducklake_identifier
 
 if TYPE_CHECKING:
     from posthog.schema import HogQLQuery
@@ -32,7 +32,13 @@ class DuckLakeTableResult:
 
 
 def _make_duckgres_conninfo(team_id: int) -> str:
-    config = get_duckgres_config(team_id)
+    from posthog.ducklake.common import _duckgres_dev_config, _get_org_id_for_team
+
+    if is_dev_mode():
+        config = _duckgres_dev_config()
+    else:
+        org_id = _get_org_id_for_team(team_id)
+        config = get_duckgres_config_for_org(org_id)
     return make_conninfo(
         host=config["DUCKGRES_HOST"],
         port=int(config["DUCKGRES_PORT"]),

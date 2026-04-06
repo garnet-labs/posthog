@@ -18,15 +18,8 @@ class TestExecuteDuckLakeQuery:
             execute_ducklake_query(1)
 
     @mock.patch("posthog.ducklake.client.psycopg")
-    @mock.patch("posthog.ducklake.client.get_duckgres_config")
-    def test_sql_path_executes_directly(self, mock_config, mock_psycopg):
-        mock_config.return_value = {
-            "DUCKGRES_HOST": "localhost",
-            "DUCKGRES_PORT": "5432",
-            "DUCKGRES_DATABASE": "ducklake",
-            "DUCKGRES_USERNAME": "posthog",
-            "DUCKGRES_PASSWORD": "posthog",
-        }
+    @mock.patch("posthog.ducklake.client.is_dev_mode", return_value=True)
+    def test_sql_path_executes_directly(self, _mock_dev_mode, mock_psycopg):
         mock_cursor = mock.MagicMock()
         mock_cursor.description = [
             mock.MagicMock(name="col1", type_code=25),
@@ -49,17 +42,10 @@ class TestExecuteDuckLakeQuery:
         assert result.hogql is None
 
     @mock.patch("posthog.ducklake.client.psycopg")
-    @mock.patch("posthog.ducklake.client.get_duckgres_config")
+    @mock.patch("posthog.ducklake.client.is_dev_mode", return_value=True)
     @mock.patch("posthog.ducklake.client.compile_hogql_to_ducklake_sql")
-    def test_query_path_compiles_and_executes(self, mock_compile, mock_config, mock_psycopg):
+    def test_query_path_compiles_and_executes(self, mock_compile, _mock_dev_mode, mock_psycopg):
         mock_compile.return_value = ("SELECT count(*) FROM events", "SELECT count() FROM events")
-        mock_config.return_value = {
-            "DUCKGRES_HOST": "localhost",
-            "DUCKGRES_PORT": "5432",
-            "DUCKGRES_DATABASE": "ducklake",
-            "DUCKGRES_USERNAME": "posthog",
-            "DUCKGRES_PASSWORD": "posthog",
-        }
         mock_cursor = mock.MagicMock()
         mock_cursor.description = [mock.MagicMock(name="cnt", type_code=20)]
         mock_cursor.description[0].name = "cnt"
@@ -79,15 +65,8 @@ class TestExecuteDuckLakeQuery:
         assert result.results == [[42]]
 
     @mock.patch("posthog.ducklake.client.psycopg")
-    @mock.patch("posthog.ducklake.client.get_duckgres_config")
-    def test_sets_search_path(self, mock_config, mock_psycopg):
-        mock_config.return_value = {
-            "DUCKGRES_HOST": "localhost",
-            "DUCKGRES_PORT": "5432",
-            "DUCKGRES_DATABASE": "ducklake",
-            "DUCKGRES_USERNAME": "posthog",
-            "DUCKGRES_PASSWORD": "posthog",
-        }
+    @mock.patch("posthog.ducklake.client.is_dev_mode", return_value=True)
+    def test_sets_search_path(self, _mock_dev_mode, mock_psycopg):
         mock_cursor = mock.MagicMock()
         mock_cursor.description = []
         mock_cursor.fetchall.return_value = []

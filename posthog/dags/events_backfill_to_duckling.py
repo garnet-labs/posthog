@@ -68,7 +68,7 @@ from posthog.dags.events_backfill_to_ducklake import (
     EXPECTED_DUCKLAKE_COLUMNS,
     MAX_RETRY_ATTEMPTS,
 )
-from posthog.ducklake.common import attach_catalog, escape, get_ducklake_catalog_for_team, get_team_config
+from posthog.ducklake.common import attach_catalog, escape, get_ducklake_catalog_for_team, get_org_config
 from posthog.ducklake.models import DuckLakeCatalog
 from posthog.ducklake.storage import configure_cross_account_connection
 
@@ -518,7 +518,7 @@ def ensure_events_table_exists(
     idempotent - calling SET PARTITIONED BY multiple times with the same keys succeeds.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
 
     conn = _connect_duckdb()
@@ -602,7 +602,7 @@ def ensure_persons_table_exists(
     idempotent - calling SET PARTITIONED BY multiple times with the same keys succeeds.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
 
     conn = _connect_duckdb()
@@ -682,7 +682,7 @@ def delete_events_table(
     Returns True if the table was deleted, False if it didn't exist.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
 
     conn = _connect_duckdb()
@@ -720,7 +720,7 @@ def delete_persons_table(
     Returns True if the table was deleted, False if it didn't exist.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
 
     conn = _connect_duckdb()
@@ -757,7 +757,7 @@ def validate_duckling_schema(
     be registered with DuckLake due to schema mismatches.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
 
     conn = _connect_duckdb()
@@ -806,7 +806,7 @@ def validate_duckling_persons_schema(
 ) -> None:
     """Validate that the duckling's persons table schema matches our export columns."""
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
 
     conn = _connect_duckdb()
@@ -896,7 +896,7 @@ def delete_events_partition_data(
     Returns the number of rows deleted.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
     date_str = partition_date.strftime("%Y-%m-%d")
 
@@ -988,7 +988,7 @@ def delete_persons_partition_data(
     Returns the number of rows deleted.
     """
     destination = catalog.to_cross_account_destination()
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
     alias = "ducklake"
     date_label = partition_date.strftime("%Y-%m-%d") if partition_date else "full"
 
@@ -1174,7 +1174,7 @@ def register_file_with_duckling(
 
     destination = catalog.to_cross_account_destination()
     alias = "ducklake"
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
 
     last_exception: Exception | None = None
     for attempt in range(MAX_RETRY_ATTEMPTS):
@@ -1395,7 +1395,7 @@ def register_persons_file_with_duckling(
 
     destination = catalog.to_cross_account_destination()
     alias = "ducklake"
-    catalog_config = get_team_config(catalog.team_id)
+    catalog_config = get_org_config(str(catalog.organization_id))
 
     last_exception: Exception | None = None
     for attempt in range(MAX_RETRY_ATTEMPTS):

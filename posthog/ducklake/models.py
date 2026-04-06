@@ -12,15 +12,16 @@ if TYPE_CHECKING:
 
 
 class DuckLakeCatalog(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
-    """Per-team DuckLake catalog configuration.
+    """Per-organization DuckLake catalog configuration.
 
-    Stores database connection details and bucket configuration for teams that need
-    isolated DuckLake catalogs (e.g., single-tenant Duckling customers).
+    Stores database connection details and bucket configuration for orgs that need
+    isolated DuckLake catalogs (e.g., managed warehouse customers).
 
-    For teams without a DuckLakeCatalog entry, the system falls back to
+    For orgs without a DuckLakeCatalog entry, the system falls back to
     environment variable configuration.
     """
 
+    # Deprecated: use organization instead. Kept nullable for backward compatibility.
     team = models.OneToOneField(
         "posthog.Team",
         on_delete=models.CASCADE,
@@ -86,13 +87,14 @@ class DuckLakeCatalog(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
 
 
 class DuckgresServer(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
-    """Per-team duckgres query server connection details.
+    """Per-organization duckgres query server connection details.
 
     Duckgres is a Postgres-protocol-compatible DuckDB server, separate from
-    the DuckLake catalog Postgres database. Each team that uses duckgres for
+    the DuckLake catalog Postgres database. Each org that uses duckgres for
     copy workflows needs its own connection entry.
     """
 
+    # Deprecated: use organization instead. Kept nullable for backward compatibility.
     team = models.OneToOneField(
         "posthog.Team",
         on_delete=models.CASCADE,

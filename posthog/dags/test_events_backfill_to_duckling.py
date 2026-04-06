@@ -571,7 +571,7 @@ class TestDeleteEventsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_retries_on_transaction_conflict(self, mock_config, mock_connect, mock_cross, mock_attach, mock_sleep):
         mock_config.return_value = {}
         mock_catalog = MagicMock()
@@ -597,7 +597,7 @@ class TestDeleteEventsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_raises_non_conflict_exception(self, mock_config, mock_connect, mock_cross, mock_attach, mock_sleep):
         mock_config.return_value = {}
         mock_catalog = MagicMock()
@@ -619,7 +619,7 @@ class TestDeleteEventsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_raises_after_max_retries(self, mock_config, mock_connect, mock_cross, mock_attach, mock_sleep):
         mock_config.return_value = {}
         mock_catalog = MagicMock()
@@ -640,7 +640,7 @@ class TestDeleteEventsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_returns_zero_on_catalog_exception(self, mock_config, mock_connect, mock_cross, mock_attach):
         mock_config.return_value = {}
         mock_catalog = MagicMock()
@@ -661,7 +661,7 @@ class TestDeletePersonsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_retries_on_transaction_conflict(self, mock_config, mock_connect, mock_cross, mock_attach, mock_sleep):
         mock_config.return_value = {}
         mock_catalog = MagicMock()
@@ -685,7 +685,7 @@ class TestDeletePersonsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_retries_on_full_export_conflict(self, mock_config, mock_connect, mock_cross, mock_attach, mock_sleep):
         mock_config.return_value = {}
         mock_catalog = MagicMock()
@@ -709,7 +709,7 @@ class TestDeletePersonsRetry:
     @patch("posthog.dags.events_backfill_to_duckling.attach_catalog")
     @patch("posthog.dags.events_backfill_to_duckling.configure_cross_account_connection")
     @patch("posthog.dags.events_backfill_to_duckling._connect_duckdb")
-    @patch("posthog.dags.events_backfill_to_duckling.get_team_config")
+    @patch("posthog.dags.events_backfill_to_duckling.get_org_config")
     def test_exponential_backoff(self, mock_config, mock_connect, mock_cross, mock_attach, mock_sleep):
         mock_config.return_value = {}
         mock_catalog = MagicMock()

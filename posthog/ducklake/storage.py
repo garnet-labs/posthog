@@ -26,9 +26,10 @@ from urllib.parse import urlparse
 import psycopg
 
 from posthog.ducklake.common import (
+    _get_org_id_for_team,
     escape as ducklake_escape,
     get_config,
-    get_team_config,
+    get_org_config,
 )
 
 if TYPE_CHECKING:
@@ -166,7 +167,7 @@ class DuckLakeStorageConfig:
             DuckLakeStorageConfig instance with appropriate credentials.
         """
         if team_id is not None:
-            config = get_team_config(team_id)
+            config = get_org_config(_get_org_id_for_team(team_id))
         else:
             config = get_config()
         settings = _get_django_settings()
@@ -439,7 +440,7 @@ def ensure_ducklake_bucket_exists(
 
     if config is None:
         if team_id is not None:
-            config = get_team_config(team_id)
+            config = get_org_config(_get_org_id_for_team(team_id))
         else:
             config = get_config()
 
