@@ -9,23 +9,35 @@ class Migration(migrations.Migration):
     operations = [
         # Backfill organization_id from team.organization_id for existing rows.
         # These are tiny tables (single-digit rows) so a simple UPDATE is safe.
+        # The NOT EXISTS guard prevents UniqueViolation if two teams in the same
+        # org both have a row — only the first one wins. In practice this shouldn't
+        # happen (one catalog/server per org is the invariant), but the guard makes
+        # the migration safe regardless.
         migrations.RunSQL(
             sql="""
-                UPDATE posthog_ducklakecatalog
+                UPDATE posthog_ducklakecatalog dlc
                 SET organization_id = t.organization_id
                 FROM posthog_team t
-                WHERE posthog_ducklakecatalog.team_id = t.id
-                  AND posthog_ducklakecatalog.organization_id IS NULL
+                WHERE dlc.team_id = t.id
+                  AND dlc.organization_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM posthog_ducklakecatalog other
+                      WHERE other.organization_id = t.organization_id
+                  )
             """,
             reverse_sql=migrations.RunSQL.noop,
         ),
         migrations.RunSQL(
             sql="""
-                UPDATE posthog_duckgresserver
+                UPDATE posthog_duckgresserver ds
                 SET organization_id = t.organization_id
                 FROM posthog_team t
-                WHERE posthog_duckgresserver.team_id = t.id
-                  AND posthog_duckgresserver.organization_id IS NULL
+                WHERE ds.team_id = t.id
+                  AND ds.organization_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM posthog_duckgresserver other
+                      WHERE other.organization_id = t.organization_id
+                  )
             """,
             reverse_sql=migrations.RunSQL.noop,
         ),
