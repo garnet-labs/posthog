@@ -32,7 +32,6 @@ func writeConfig(t *testing.T, cfg configFile) {
 }
 
 func boolPtr(b bool) *bool { return &b }
-func intPtr(i int) *int    { return &i }
 
 // enabledConfig returns a configFile with telemetry fully enabled.
 func enabledConfig() configFile {

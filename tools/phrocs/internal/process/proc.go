@@ -19,6 +19,7 @@ import (
 	gops "github.com/shirou/gopsutil/v4/process"
 
 	"github.com/posthog/posthog/phrocs/internal/config"
+	"github.com/posthog/posthog/phrocs/internal/telemetry"
 )
 
 const metricsSampleInterval = 1 * time.Second
@@ -288,6 +289,7 @@ func (p *Process) Snapshot() Snapshot {
 		snap.MemRSSMB = ptr(m.MemRSSMB)
 		snap.PeakMemRSSMB = ptr(m.PeakMemMB)
 		snap.CPUPercent = ptr(m.CPUPercent)
+		snap.PeakCPUPercent = ptr(m.PeakCPUPct)
 		snap.CPUTimeS = ptr(m.CPUTimeS)
 		snap.ThreadCount = ptr(m.Threads)
 		snap.ChildProcessCount = ptr(m.Children)
@@ -350,6 +352,9 @@ func (p *Process) sampleMetrics() {
 		p.metrics.PeakMemMB = rssMB
 	}
 	p.metrics.CPUPercent = cpuPct
+	if cpuPct > p.metrics.PeakCPUPct {
+		p.metrics.PeakCPUPct = cpuPct
+	}
 	p.metrics.CPUTimeS = cpuTime
 	p.metrics.Threads = threads
 	p.metrics.Children = len(all) - 1
@@ -582,6 +587,7 @@ func (p *Process) handleExit(cmd *exec.Cmd, exitErr error, send func(tea.Msg)) {
 	p.mu.Lock()
 	if p.cmd == cmd && p.status != StatusStopped {
 		p.status = st
+		p.trackProcessCompleted(st)
 		p.metrics = nil
 		code := cmd.ProcessState.ExitCode()
 		p.exitCode = &code
@@ -873,4 +879,21 @@ func (p *Process) Resize(cols, rows uint16) {
 	if ptmx != nil {
 		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 	}
+}
+
+// trackProcessCompleted sends telemetry with peak resource usage.
+// Must be called with p.mu held, before p.metrics is cleared.
+func (p *Process) trackProcessCompleted(st Status) {
+	stats := telemetry.ProcessStats{
+		Name:      p.Name,
+		Status:    st.String(),
+		ExitCode:  p.exitCode,
+		DurationS: time.Since(p.startedAt).Seconds(),
+	}
+	if m := p.metrics; m != nil {
+		stats.PeakMemMB = m.PeakMemMB
+		stats.PeakCPUPct = m.PeakCPUPct
+		stats.CPUTimeS = m.CPUTimeS
+	}
+	telemetry.TrackProcessCompleted(stats)
 }
