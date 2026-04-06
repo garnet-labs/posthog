@@ -9,7 +9,15 @@ from pathlib import Path
 
 import click
 
-from .paths import DB_ROUTING_YAML, DJANGO_SETTINGS, FRONTEND_PACKAGE_JSON, PRODUCTS_DIR, TACH_TOML, load_structure
+from .paths import (
+    DB_ROUTING_YAML,
+    DJANGO_SETTINGS,
+    FEATURE_FLAGS_CONSTANTS,
+    FRONTEND_PACKAGE_JSON,
+    PRODUCTS_DIR,
+    TACH_TOML,
+    load_structure,
+)
 
 
 def flatten_structure(files: dict, prefix: str = "", result: dict | None = None) -> dict[str, dict]:
@@ -29,7 +37,9 @@ def flatten_structure(files: dict, prefix: str = "", result: dict | None = None)
 
 def _render_template(template: str, product_name: str) -> str:
     pascal_name = "".join(word.capitalize() for word in product_name.split("_"))
-    return template.format(product=product_name, Product=pascal_name)
+    upper_name = product_name.upper()
+    hyphen_name = product_name.replace("_", "-")
+    return template.format(product=product_name, Product=pascal_name, PRODUCT=upper_name, product_hyphen=hyphen_name)
 
 
 def _register_in_file(
@@ -99,6 +109,53 @@ def _add_to_django_settings(product_name: str, *, dry_run: bool) -> None:
         return content[:insert_pos] + f'    "{app_config}",\n' + content[insert_pos:]
 
     _register_in_file(DJANGO_SETTINGS, "Django settings", app_config, write, dry_run=dry_run)
+
+
+def _add_to_feature_flags(product_name: str, *, dry_run: bool) -> None:
+    flag_key = product_name.upper()
+    flag_value = product_name.replace("_", "-")
+    entry = f"    {flag_key}: '{flag_value}', // owner: #team-CHANGEME\n"
+
+    def write(content: str) -> str | None:
+        lines = content.split("\n")
+
+        marker_idx = None
+        for i, line in enumerate(lines):
+            if "// PLEASE KEEP THIS ALPHABETICALLY ORDERED" in line:
+                marker_idx = i
+                break
+
+        if marker_idx is None:
+            click.echo(f"\n  Could not find FEATURE_FLAGS insertion point — add manually: {flag_key}")
+            return None
+
+        # Walk backward from marker to find the last section comment.
+        # constants.tsx has curated sub-sections (Eternal, Holidays, UX, etc.)
+        # before the general "Temporary feature flags" section — we only want
+        # to insert into that last section.
+        section_start = None
+        for i in range(marker_idx - 1, -1, -1):
+            stripped = lines[i].strip()
+            if stripped.startswith("//") and not stripped.startswith("// owner"):
+                section_start = i + 1
+                break
+
+        # Walk forward to find the alphabetical insertion point
+        insert_idx = marker_idx
+        if section_start is not None:
+            for i in range(section_start, marker_idx):
+                stripped = lines[i].strip()
+                if not stripped or stripped.startswith("//"):
+                    continue
+                existing_key = stripped.split(":")[0].strip().rstrip(",")
+                if existing_key > flag_key:
+                    insert_idx = i
+                    break
+
+        lines.insert(insert_idx, entry.rstrip("\n"))
+        return "\n".join(lines)
+
+    _register_in_file(FEATURE_FLAGS_CONSTANTS, "FEATURE_FLAGS constants", flag_key, write, dry_run=dry_run)
 
 
 def _get_existing_databases() -> list[str]:
@@ -190,6 +247,7 @@ def bootstrap_product(name: str, dry_run: bool, force: bool) -> None:
     _add_to_tach_toml(name, dry_run=dry_run)
     _add_to_frontend_package_json(name, dry_run=dry_run)
     _add_to_django_settings(name, dry_run=dry_run)
+    _add_to_feature_flags(name, dry_run=dry_run)
 
     if dry_run:
         _add_to_db_routing(name, name, dry_run=True)
@@ -218,3 +276,42 @@ def bootstrap_product(name: str, dry_run: bool, force: bool) -> None:
                 show_default=True,
             )
             _add_to_db_routing(name, db_name, dry_run=False)
+
+    if not dry_run:
+        click.echo("")
+        click.secho("  📦 Installing dependencies", bold=True)
+        import subprocess
+
+        click.echo("  Running pnpm install...")
+        result = subprocess.run(["pnpm", "install"], capture_output=True, text=True)
+        if result.returncode == 0:
+            click.secho("  ✓ pnpm install", fg="green")
+        else:
+            click.secho("  ✗ pnpm install failed — run it manually", fg="red")
+            output = (result.stderr or result.stdout or "").strip()
+            if output:
+                click.echo(f"    {output.splitlines()[-1]}")
+
+        click.echo("  Running pnpm build:products...")
+        result = subprocess.run(
+            ["pnpm", "--filter=@posthog/frontend", "build:products"], capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            click.secho("  ✓ build:products", fg="green")
+        else:
+            click.secho("  ✗ build:products failed — run it manually", fg="red")
+            output = (result.stderr or result.stdout or "").strip()
+            if output:
+                click.echo(f"    {output.splitlines()[-1]}")
+
+    flag_value = name.replace("_", "-")
+    click.echo("")
+    click.secho("  🚩 Feature flag", bold=True)
+    click.echo(f"  Your product is gated behind '{flag_value}' (category: Unreleased, tags: alpha).")
+    click.secho(
+        "  Enable the flag in PostHog to see it in the nav!",
+        fg="green",
+    )
+    click.echo("")
+    click.secho("  📋 Next steps", bold=True)
+    click.echo(f"  See TODO.md in products/{name}/ for the full setup checklist.")

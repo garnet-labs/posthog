@@ -18,6 +18,33 @@ root_files:
         required_lenient: true
         template: ''
 
+    TODO.md:
+        required: false
+        required_lenient: false
+        template: |
+            # {Product} — setup checklist
+
+            > Delete this file once all items are done.
+
+            ## Feature flag
+
+            - [ ] Update `// owner: #team-CHANGEME` on `{PRODUCT}` in `frontend/src/lib/constants.tsx`
+            - [ ] Enable the `{product_hyphen}` flag in PostHog to see the product in the nav
+
+            ## Manifest
+
+            - [ ] Replace placeholder icon (`default_icon_type`) in `manifest.tsx`
+            - [ ] Define CSS color variable (`--color-product-{product_hyphen}-light`) or update `iconColor`
+            - [ ] Add a `ProductKey` entry and fill in `intents: []`
+            - [ ] Wire up scenes and routes
+
+            ## Release lifecycle
+
+            Your product starts in **alpha** (category: Unreleased, tags: alpha).
+
+            See the full release guide for moving through alpha → beta → GA:
+            https://posthog.com/handbook/product/releasing-new-products-and-features
+
     manifest.tsx:
         required: true
         required_lenient: false
@@ -27,7 +54,9 @@ root_files:
              *
              * Defines scenes, routes, URLs, and navigation for this product.
              */
-            import {{ ProductManifest }} from '../../frontend/src/types'
+            import {{ FEATURE_FLAGS }} from 'lib/constants'
+
+            import {{ FileSystemIconColor, ProductManifest }} from '~/types'
 
             export const manifest: ProductManifest = {{
                 name: '{Product}',
@@ -43,7 +72,20 @@ root_files:
                 }},
                 fileSystemTypes: {{}},
                 treeItemsNew: [],
-                treeItemsProducts: [],
+                treeItemsProducts: [
+                    {{
+                        path: '{Product}',
+                        type: '{product}',
+                        intents: [], // Add your ProductKey after running schema:build
+                        category: 'Unreleased',
+                        iconType: 'default_icon_type',
+                        iconColor: ['var(--color-product-{product_hyphen}-light)'] as FileSystemIconColor,
+                        href: '/{product}',
+                        sceneKey: '{Product}',
+                        flag: FEATURE_FLAGS.{PRODUCT},
+                        tags: ['alpha'],
+                    }},
+                ],
             }}
 
     package.json:
@@ -51,7 +93,7 @@ root_files:
         required_lenient: true
         template: |
             {{
-                "name": "@posthog/products-{product}",
+                "name": "@posthog/products-{product_hyphen}",
                 "scripts": {{
                     "backend:test": "pytest -c ../../pytest.ini --rootdir ../.. backend/tests -v --tb=short",
                     "backend:contract-check": "echo 'Contract files unchanged'"
