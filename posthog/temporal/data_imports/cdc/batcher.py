@@ -332,6 +332,8 @@ def _events_to_table(events: list[ChangeEvent]) -> pa.Table:
     # Build PyArrow arrays for source columns.
     # If type inference fails (e.g. mixed int/str from a schema change mid-WAL),
     # fall back to storing the column as strings.
+    # Also upgrade pa.null() → pa.string() since DeltaLake rejects the Null type
+    # (happens when a DELETE-only batch has all-None values for non-PK columns).
     arrays: list[pa.Array] = []
     fields: list[pa.Field] = []
     for col_name in column_names:
@@ -339,6 +341,8 @@ def _events_to_table(events: list[ChangeEvent]) -> pa.Table:
             arr = pa.array(source_data[col_name])
         except (pa.ArrowInvalid, pa.ArrowTypeError):
             arr = pa.array([str(v) if v is not None else None for v in source_data[col_name]], type=pa.string())
+        if arr.type == pa.null():
+            arr = arr.cast(pa.string())
         arrays.append(arr)
         fields.append(pa.field(col_name, arr.type))
 
