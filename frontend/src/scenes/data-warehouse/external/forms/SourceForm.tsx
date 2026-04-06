@@ -243,180 +243,194 @@ export const sourceFieldToElement = (
 }
 
 function CDCConfigSection(): JSX.Element {
-    const [cdcEnabled, setCdcEnabled] = React.useState(false)
-    const [managementMode, setManagementMode] = React.useState<'posthog' | 'self_managed'>('posthog')
+    // showAdvanced is purely local UI toggle — not a form field
     const [showAdvanced, setShowAdvanced] = React.useState(false)
-    const [autoDropSlot, setAutoDropSlot] = React.useState(true)
 
     return (
         <Group name="payload">
-            <div className="deprecated-space-y-4 mt-4">
+            <div className="space-y-4 mt-4">
                 <LemonField name="cdc_enabled" label="Change data capture (CDC)">
-                    {({ onChange }) => (
+                    {({ value: cdcEnabled, onChange }) => (
                         <>
                             <p className="text-xs text-secondary mb-2">
                                 CDC captures inserts, updates, and deletes via PostgreSQL logical replication.
                             </p>
-                            <LemonSwitch
-                                checked={cdcEnabled}
-                                onChange={(checked) => {
-                                    setCdcEnabled(checked)
-                                    onChange(checked)
-                                }}
-                            />
+                            <LemonSwitch checked={!!cdcEnabled} onChange={onChange} />
                         </>
                     )}
                 </LemonField>
 
-                {cdcEnabled && (
-                    <>
-                        <LemonField name="cdc_management_mode" label="Slot management">
-                            {({ onChange }) => (
-                                <LemonRadio
-                                    value={managementMode}
-                                    onChange={(newValue) => {
-                                        const mode = newValue as 'posthog' | 'self_managed'
-                                        setManagementMode(mode)
-                                        onChange(mode)
-                                    }}
-                                    options={[
-                                        {
-                                            value: 'posthog',
-                                            label: (
-                                                <div>
-                                                    <div>PostHog-managed</div>
-                                                    <div className="text-xs text-secondary">
-                                                        PostHog creates and manages the replication slot and
-                                                        publication. Requires a database user with REPLICATION
-                                                        privileges.
-                                                    </div>
-                                                </div>
-                                            ),
-                                        },
-                                        {
-                                            value: 'self_managed',
-                                            label: (
-                                                <div>
-                                                    <div>Self-managed</div>
-                                                    <div className="text-xs text-secondary">
-                                                        You manage your own replication slot and publication. PostHog
-                                                        only needs SELECT access.
-                                                    </div>
-                                                </div>
-                                            ),
-                                        },
-                                    ]}
-                                />
-                            )}
-                        </LemonField>
-
-                        {managementMode === 'self_managed' && (
-                            <div className="deprecated-space-y-4">
-                                <LemonField name="cdc_slot_name" label="Replication slot name">
-                                    {({ value, onChange }) => (
-                                        <LemonInput
-                                            placeholder="posthog_slot"
-                                            value={value || ''}
+                <LemonField name="cdc_enabled">
+                    {({ value: cdcEnabled }) =>
+                        cdcEnabled ? (
+                            <>
+                                <LemonField name="cdc_management_mode" label="Slot management">
+                                    {({ value: managementMode, onChange }) => (
+                                        <LemonRadio
+                                            value={managementMode || 'posthog'}
                                             onChange={onChange}
+                                            options={[
+                                                {
+                                                    value: 'posthog',
+                                                    label: (
+                                                        <div>
+                                                            <div>PostHog-managed</div>
+                                                            <div className="text-xs text-secondary">
+                                                                PostHog creates and manages the replication slot and
+                                                                publication. Requires a database user with REPLICATION
+                                                                privileges.
+                                                            </div>
+                                                        </div>
+                                                    ),
+                                                },
+                                                {
+                                                    value: 'self_managed',
+                                                    label: (
+                                                        <div>
+                                                            <div>Self-managed</div>
+                                                            <div className="text-xs text-secondary">
+                                                                You manage your own replication slot and publication.
+                                                                PostHog only needs SELECT access.
+                                                            </div>
+                                                        </div>
+                                                    ),
+                                                },
+                                            ]}
                                         />
                                     )}
                                 </LemonField>
-                                <LemonField name="cdc_publication_name" label="Publication name">
-                                    {({ value, onChange }) => (
-                                        <LemonInput placeholder="posthog_pub" value={value || ''} onChange={onChange} />
-                                    )}
-                                </LemonField>
-                                <LemonBanner type="info">
-                                    <p className="font-semibold mb-1">Setup SQL</p>
-                                    <p className="text-xs mb-2">
-                                        Run these commands on your PostgreSQL database before connecting:
-                                    </p>
-                                    <pre className="text-xs bg-surface-primary p-2 rounded overflow-x-auto whitespace-pre-wrap">
-                                        {`CREATE PUBLICATION posthog_pub FOR TABLE public.your_table
+
+                                <LemonField name="cdc_management_mode">
+                                    {({ value: managementMode }) =>
+                                        managementMode === 'self_managed' ? (
+                                            <div className="space-y-4">
+                                                <LemonField name="cdc_slot_name" label="Replication slot name">
+                                                    {({ value, onChange }) => (
+                                                        <LemonInput
+                                                            placeholder="posthog_slot"
+                                                            value={value || ''}
+                                                            onChange={onChange}
+                                                        />
+                                                    )}
+                                                </LemonField>
+                                                <LemonField name="cdc_publication_name" label="Publication name">
+                                                    {({ value, onChange }) => (
+                                                        <LemonInput
+                                                            placeholder="posthog_pub"
+                                                            value={value || ''}
+                                                            onChange={onChange}
+                                                        />
+                                                    )}
+                                                </LemonField>
+                                                <LemonBanner type="info">
+                                                    <p className="font-semibold mb-1">Setup SQL</p>
+                                                    <p className="text-xs mb-2">
+                                                        Run these commands on your PostgreSQL database before
+                                                        connecting:
+                                                    </p>
+                                                    <pre className="text-xs bg-surface-primary p-2 rounded overflow-x-auto whitespace-pre-wrap">
+                                                        {`CREATE PUBLICATION posthog_pub FOR TABLE public.your_table
   WITH (publish_via_partition_root = true);
 
 SELECT pg_create_logical_replication_slot('posthog_slot', 'pgoutput');`}
-                                    </pre>
-                                </LemonBanner>
-                            </div>
-                        )}
+                                                    </pre>
+                                                </LemonBanner>
+                                            </div>
+                                        ) : null
+                                    }
+                                </LemonField>
 
-                        <div>
-                            <button
-                                type="button"
-                                className="text-xs text-secondary hover:text-default cursor-pointer"
-                                onClick={() => setShowAdvanced((v) => !v)}
-                            >
-                                {showAdvanced ? '▾' : '▸'} Advanced settings
-                            </button>
-
-                            {showAdvanced && (
-                                <div className="deprecated-space-y-4 mt-3 pl-3 border-l-2 border-border">
-                                    {managementMode === 'posthog' && (
-                                        <LemonField
-                                            name="cdc_auto_drop_slot"
-                                            label="Automatic slot protection"
-                                            info="When enabled, PostHog will automatically drop the replication slot if WAL lag exceeds the critical threshold, preventing disk exhaustion on your database."
-                                        >
-                                            {({ onChange }) => (
-                                                <LemonSwitch
-                                                    checked={autoDropSlot}
-                                                    onChange={(checked) => {
-                                                        setAutoDropSlot(checked)
-                                                        onChange(checked)
-                                                    }}
-                                                />
-                                            )}
-                                        </LemonField>
-                                    )}
-
-                                    {managementMode === 'posthog' && autoDropSlot && (
-                                        <>
-                                            <LemonField
-                                                name="cdc_lag_warning_threshold_mb"
-                                                label="WAL lag warning threshold (MB)"
-                                                info="PostHog will log a warning when replication slot lag exceeds this value."
-                                            >
-                                                {({ value, onChange }) => (
-                                                    <LemonInput
-                                                        type="number"
-                                                        value={value ?? 1024}
-                                                        onChange={onChange}
-                                                        min={1}
-                                                    />
-                                                )}
-                                            </LemonField>
-                                            <LemonField
-                                                name="cdc_lag_critical_threshold_mb"
-                                                label="WAL lag critical threshold (MB)"
-                                                info="PostHog will drop the replication slot when lag exceeds this value (requires automatic slot protection to be enabled)."
-                                            >
-                                                {({ value, onChange }) => (
-                                                    <LemonInput
-                                                        type="number"
-                                                        value={value ?? 10240}
-                                                        onChange={onChange}
-                                                        min={1}
-                                                    />
-                                                )}
-                                            </LemonField>
-                                        </>
-                                    )}
-
-                                    <LemonField
-                                        name="cdc_schema_disable_grace_period_hours"
-                                        label="Schema pause grace period (hours)"
-                                        info="How long a paused table can be re-enabled without requiring a full re-snapshot. After this window, re-enabling will trigger a new snapshot."
+                                <div>
+                                    <button
+                                        type="button"
+                                        className="text-xs text-secondary hover:text-default cursor-pointer"
+                                        onClick={() => setShowAdvanced((v) => !v)}
                                     >
-                                        {({ value, onChange }) => (
-                                            <LemonInput type="number" value={value ?? 12} onChange={onChange} min={0} />
-                                        )}
-                                    </LemonField>
+                                        {showAdvanced ? '▾' : '▸'} Advanced settings
+                                    </button>
+
+                                    {showAdvanced && (
+                                        <div className="space-y-4 mt-3 pl-3 border-l-2 border-border">
+                                            <LemonField name="cdc_management_mode">
+                                                {({ value: managementMode }) =>
+                                                    (managementMode || 'posthog') === 'posthog' ? (
+                                                        <LemonField
+                                                            name="cdc_auto_drop_slot"
+                                                            label="Automatic slot protection"
+                                                            info="When enabled, PostHog will automatically drop the replication slot if WAL lag exceeds the critical threshold, preventing disk exhaustion on your database."
+                                                        >
+                                                            {({ value: autoDropSlot, onChange }) => (
+                                                                <>
+                                                                    <LemonSwitch
+                                                                        checked={autoDropSlot ?? true}
+                                                                        onChange={onChange}
+                                                                    />
+                                                                    {(autoDropSlot ?? true) && (
+                                                                        <div className="space-y-4 mt-4">
+                                                                            <LemonField
+                                                                                name="cdc_lag_warning_threshold_mb"
+                                                                                label="WAL lag warning threshold (MB)"
+                                                                                info="PostHog will log a warning when replication slot lag exceeds this value."
+                                                                            >
+                                                                                {({
+                                                                                    value: warnVal,
+                                                                                    onChange: warnOnChange,
+                                                                                }) => (
+                                                                                    <LemonInput
+                                                                                        type="number"
+                                                                                        value={warnVal ?? 1024}
+                                                                                        onChange={warnOnChange}
+                                                                                        min={1}
+                                                                                    />
+                                                                                )}
+                                                                            </LemonField>
+                                                                            <LemonField
+                                                                                name="cdc_lag_critical_threshold_mb"
+                                                                                label="WAL lag critical threshold (MB)"
+                                                                                info="PostHog will drop the replication slot when lag exceeds this value (requires automatic slot protection to be enabled)."
+                                                                            >
+                                                                                {({
+                                                                                    value: critVal,
+                                                                                    onChange: critOnChange,
+                                                                                }) => (
+                                                                                    <LemonInput
+                                                                                        type="number"
+                                                                                        value={critVal ?? 10240}
+                                                                                        onChange={critOnChange}
+                                                                                        min={1}
+                                                                                    />
+                                                                                )}
+                                                                            </LemonField>
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            )}
+                                                        </LemonField>
+                                                    ) : null
+                                                }
+                                            </LemonField>
+
+                                            <LemonField
+                                                name="cdc_schema_disable_grace_period_hours"
+                                                label="Schema pause grace period (hours)"
+                                                info="How long a paused table can be re-enabled without requiring a full re-snapshot. After this window, re-enabling will trigger a new snapshot."
+                                            >
+                                                {({ value, onChange }) => (
+                                                    <LemonInput
+                                                        type="number"
+                                                        value={value ?? 12}
+                                                        onChange={onChange}
+                                                        min={0}
+                                                    />
+                                                )}
+                                            </LemonField>
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                    </>
-                )}
+                            </>
+                        ) : null
+                    }
+                </LemonField>
             </div>
         </Group>
     )
@@ -472,7 +486,7 @@ export function SourceFormComponent({
     }
 
     return (
-        <div className="deprecated-space-y-4">
+        <div className="space-y-4">
             {!isUpdateMode &&
                 sourceConfig.name === 'Postgres' &&
                 featureFlags[FEATURE_FLAGS.DWH_POSTGRES_DIRECT_QUERY] && (
