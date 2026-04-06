@@ -11,8 +11,9 @@ use crate::config::CaptureMode;
 use crate::v1::context::Context;
 use crate::v1::sinks::event::{build_headers, Event};
 use crate::v1::sinks::kafka::producer::ProduceRecord;
+use crate::v1::sinks::kafka::types::{KafkaResult, KafkaSinkError};
 use crate::v1::sinks::kafka::KafkaProducerTrait;
-use crate::v1::sinks::types::{BatchSummary, KafkaResult, KafkaSinkError, Outcome, SinkOutput};
+use crate::v1::sinks::types::{BatchSummary, Outcome, SinkOutput};
 use crate::v1::sinks::{SinkName, Sinks};
 
 /// Backend-agnostic publishing interface.
@@ -40,7 +41,7 @@ pub trait Sink: Send + Sync {
     fn sinks(&self) -> Vec<SinkName>;
 
     /// Flush the underlying producer(s) for graceful shutdown.
-    fn flush(&self) -> Result<(), String>;
+    fn flush(&self) -> anyhow::Result<()>;
 }
 
 pub struct KafkaSink<P: KafkaProducerTrait> {
@@ -281,7 +282,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                     }
                 }
                 Ok(Some(Err(join_err))) => {
-                    error!("join error during publish_batch: {join_err:#}");
+                    error!(error = %format!("{join_err:#}"), "join error during publish_batch");
                 }
                 Ok(None) => break,
                 Err(_) => {
@@ -305,12 +306,13 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 &publish_labels(ctx, sink_str, mode, sample_outcome.as_tag())[..]
             )
             .increment(pending_keys.len() as u64);
+            let gave_up_at = if timed_out { Some(Utc::now()) } else { None };
             for uuid_key in pending_keys {
-                results.push(SinkOutput::Kafka(KafkaResult::err(
-                    uuid_key,
-                    sink_err_fn(),
-                    enqueued_at,
-                )));
+                let mut result = KafkaResult::err(uuid_key, sink_err_fn(), enqueued_at);
+                if let Some(t) = gave_up_at {
+                    result = result.with_completed_at(t);
+                }
+                results.push(SinkOutput::Kafka(result));
             }
         }
 
@@ -338,17 +340,17 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         self.producers.keys().copied().collect()
     }
 
-    fn flush(&self) -> Result<(), String> {
+    fn flush(&self) -> anyhow::Result<()> {
         for (name, producer) in &self.producers {
             let timeout = self
                 .config
                 .configs
                 .get(name)
                 .map(|c| c.produce_timeout)
-                .unwrap_or(std::time::Duration::from_secs(25));
+                .unwrap_or(super::constants::DEFAULT_PRODUCE_TIMEOUT);
             producer
                 .flush(timeout)
-                .map_err(|e| format!("flush {} failed: {e}", name.as_str()))?;
+                .map_err(|e| anyhow::anyhow!("{}: flush error: {e:#}", name.as_str()))?;
         }
         Ok(())
     }

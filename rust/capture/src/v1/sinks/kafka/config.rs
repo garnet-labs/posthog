@@ -49,6 +49,10 @@ pub struct Config {
     pub metadata_max_age_ms: u32,
     #[envconfig(default = "60000")]
     pub socket_timeout_ms: u32,
+    /// How often librdkafka fires the stats callback (ms). Controls the
+    /// refresh cadence for broker health, queue depth, and RTT gauges.
+    #[envconfig(default = "10000")]
+    pub statistics_interval_ms: u32,
 
     // -- Topics (all required -- envconfig errors if any are missing) --
     pub topic_main: String,
@@ -109,6 +113,7 @@ mod tests {
         env.insert("METADATA_REFRESH_INTERVAL_MS".into(), "10000".into());
         env.insert("METADATA_MAX_AGE_MS".into(), "30000".into());
         env.insert("SOCKET_TIMEOUT_MS".into(), "30000".into());
+        env.insert("STATISTICS_INTERVAL_MS".into(), "5000".into());
 
         let cfg = Config::init_from_hashmap(&env).unwrap();
         assert_eq!(cfg.hosts, "localhost:9092");
@@ -126,6 +131,7 @@ mod tests {
         assert_eq!(cfg.metadata_refresh_interval_ms, 10000);
         assert_eq!(cfg.metadata_max_age_ms, 30000);
         assert_eq!(cfg.socket_timeout_ms, 30000);
+        assert_eq!(cfg.statistics_interval_ms, 5000);
         assert_eq!(cfg.topic_main, "events_main");
     }
 
@@ -147,6 +153,7 @@ mod tests {
         assert_eq!(cfg.metadata_refresh_interval_ms, 20000);
         assert_eq!(cfg.metadata_max_age_ms, 60000);
         assert_eq!(cfg.socket_timeout_ms, 60000);
+        assert_eq!(cfg.statistics_interval_ms, 10000);
     }
 
     #[test]

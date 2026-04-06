@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
 
+use crate::v1::context::Context;
+use crate::v1::sinks::event::Event as SinkEvent;
 use crate::v1::sinks::Destination;
 
 fn empty_raw_object() -> Box<RawValue> {
@@ -68,6 +70,47 @@ pub struct WrappedEvent {
     pub details: Option<&'static str>,
     pub destination: Destination,
     pub skip_person_processing: bool,
+}
+
+impl SinkEvent for WrappedEvent {
+    fn uuid_key(&self) -> &str {
+        &self.event.uuid
+    }
+
+    fn should_publish(&self) -> bool {
+        self.result == EventResult::Ok && self.destination != Destination::Drop
+    }
+
+    fn destination(&self) -> &Destination {
+        &self.destination
+    }
+
+    fn headers(&self) -> Vec<(String, String)> {
+        let mut h = Vec::new();
+        if self.skip_person_processing {
+            h.push(("skip_person_processing".into(), "true".into()));
+        }
+        h
+    }
+
+    fn partition_key(&self, ctx: &Context) -> String {
+        if self.event.options.cookieless_mode == Some(true) {
+            let ip = if ctx.capture_internal {
+                "127.0.0.1".to_string()
+            } else {
+                ctx.client_ip.to_string()
+            };
+            format!("{}:{}", ctx.api_token, ip)
+        } else {
+            format!("{}:{}", ctx.api_token, self.event.distinct_id)
+        }
+    }
+
+    fn serialize(&self, _ctx: &Context) -> Result<String, String> {
+        // TODO: builds IngestionEvent from self + Context, applies $-prefix
+        // remapping, IP redaction, property merging. Tackled separately.
+        unimplemented!("WrappedEvent::serialize")
+    }
 }
 
 /// Shim implementation of HasEventName for CaptureQuotaLimiter compatibility.

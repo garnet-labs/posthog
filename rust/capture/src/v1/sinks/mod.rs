@@ -1,3 +1,4 @@
+pub mod constants;
 pub mod event;
 pub mod kafka;
 pub mod sink;
@@ -10,8 +11,9 @@ use std::time::Duration;
 use envconfig::Envconfig;
 
 pub use event::Event;
+pub use kafka::types::{KafkaResult, KafkaSinkError};
 pub use sink::{KafkaSink, Sink};
-pub use types::{Destination, KafkaResult, KafkaSinkError, Outcome, SinkOutput, SinkResult};
+pub use types::{Destination, Outcome, SinkOutput, SinkResult};
 
 // ---------------------------------------------------------------------------
 // SinkName
@@ -171,7 +173,7 @@ fn load_sink_config(name: SinkName, env: &HashMap<String, String>) -> anyhow::Re
         .map(|v| v.parse::<u64>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("bad PRODUCE_TIMEOUT_MS: {e}"))?
-        .unwrap_or(25000);
+        .unwrap_or(constants::DEFAULT_PRODUCE_TIMEOUT.as_millis() as u64);
 
     Ok(Config {
         produce_timeout: Duration::from_millis(produce_timeout_ms),
@@ -194,7 +196,10 @@ mod tests {
     fn test_env_for(name: SinkName) -> HashMap<String, String> {
         let prefix = name.env_prefix();
         [
-            (format!("{prefix}PRODUCE_TIMEOUT_MS"), "25000".into()),
+            (
+                format!("{prefix}PRODUCE_TIMEOUT_MS"),
+                constants::DEFAULT_PRODUCE_TIMEOUT.as_millis().to_string(),
+            ),
             (format!("{prefix}KAFKA_HOSTS"), "localhost:9092".into()),
             (format!("{prefix}KAFKA_TOPIC_MAIN"), "events_main".into()),
             (
@@ -260,7 +265,7 @@ mod tests {
         let env = test_env_for(SinkName::Msk);
         let cfg = load_sink_config(SinkName::Msk, &env).unwrap();
         assert_eq!(cfg.kafka.hosts, "localhost:9092");
-        assert_eq!(cfg.produce_timeout, Duration::from_millis(25000));
+        assert_eq!(cfg.produce_timeout, constants::DEFAULT_PRODUCE_TIMEOUT);
     }
 
     #[test]
@@ -268,7 +273,7 @@ mod tests {
         let mut env = test_env_for(SinkName::Msk);
         env.remove("CAPTURE_V1_SINK_MSK_PRODUCE_TIMEOUT_MS");
         let cfg = load_sink_config(SinkName::Msk, &env).unwrap();
-        assert_eq!(cfg.produce_timeout, Duration::from_millis(25000));
+        assert_eq!(cfg.produce_timeout, constants::DEFAULT_PRODUCE_TIMEOUT);
     }
 
     #[test]
@@ -276,10 +281,10 @@ mod tests {
         let mut env = test_env_for(SinkName::Msk);
         env.insert(
             "CAPTURE_V1_SINK_MSK_PRODUCE_TIMEOUT_MS".into(),
-            "30000".into(),
+            "45000".into(),
         );
         let cfg = load_sink_config(SinkName::Msk, &env).unwrap();
-        assert_eq!(cfg.produce_timeout, Duration::from_millis(30000));
+        assert_eq!(cfg.produce_timeout, Duration::from_millis(45000));
     }
 
     #[test]

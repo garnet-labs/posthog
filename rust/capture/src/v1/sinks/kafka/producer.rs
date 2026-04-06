@@ -10,9 +10,9 @@ use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::ClientConfig;
 use tracing::{info, warn};
 
+use super::types::error_code_tag;
 use crate::v1::sinks::kafka::config::Config as KafkaConfig;
 use crate::v1::sinks::kafka::context::{KafkaContext, ProducerHealth};
-use crate::v1::sinks::types::error_code_tag;
 use crate::v1::sinks::SinkName;
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,10 @@ impl KafkaProducer {
         let mut client_config = ClientConfig::new();
         client_config
             .set("bootstrap.servers", &config.hosts)
-            .set("statistics.interval.ms", "10000")
+            .set(
+                "statistics.interval.ms",
+                config.statistics_interval_ms.to_string(),
+            )
             .set("linger.ms", config.linger_ms.to_string())
             .set("message.timeout.ms", config.message_timeout_ms.to_string())
             .set("message.max.bytes", config.message_max_bytes.to_string())

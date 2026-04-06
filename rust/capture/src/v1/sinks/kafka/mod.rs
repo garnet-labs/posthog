@@ -2,6 +2,7 @@ pub mod config;
 pub mod context;
 pub mod mock;
 pub mod producer;
+pub mod types;
 
 use std::future::Future;
 use std::sync::Arc;
