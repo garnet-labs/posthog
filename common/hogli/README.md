@@ -74,6 +74,43 @@ man hogli
 
 Every subcommand is self-documented. You can append `--help` to any command for detailed options, for example `hogli test:python --help`.
 
+### Health checks
+
+Run `hogli doctor` for a quick overview of your dev environment health:
+
+```bash
+hogli doctor
+```
+
+It runs four fast, read-only probes and prints a status summary:
+
+```text
+hogli doctor
+
+  Disk usage ............... OK (22.6 KiB reclaimable)
+  Zombie processes ......... OK (0 orphaned)
+  Docker ................... OK (daemon running)
+  Migrations ............... WARNING (1 unapplied)
+                              run `hogli migrations:sync`
+
+  1 warning(s) found.
+```
+
+For targeted cleanup, use the individual commands directly:
+
+- `hogli doctor:disk` - Check for reclaimable disk space and optionally clean up
+- `hogli doctor:zombies` - Find and kill orphaned dev processes
+
+### Post-command hints
+
+After running a command, hogli occasionally shows a one-liner reminder to run maintenance tasks:
+
+```text
+  Hint: Run `hogli doctor:disk` to check for disk bloat
+```
+
+Hints are rate-limited to one per 24 hours, skipped in CI environments, and not shown after doctor/meta/telemetry commands. To disable hints entirely, set `HOGLI_NO_HINTS=1`.
+
 ### Design philosophy
 
 Hogli follows these principles:
@@ -241,7 +278,7 @@ lint:
 ```yaml
 docker:deprecated:
   bin_script: docker
-  description: '[DEPRECATED] Use `hogli start` instead'
+  description: "[DEPRECATED] Use `hogli start` instead"
   hidden: true # Still works, just not shown in --help
 ```
 
