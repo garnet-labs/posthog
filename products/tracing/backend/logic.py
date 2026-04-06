@@ -257,7 +257,7 @@ class TraceSpansQueryRunner(TraceSpansQueryRunnerMixin, AnalyticsQueryRunner[Tra
             parse_select(
                 """
             SELECT
-                trace_id
+                (timestamp, trace_id)
             FROM posthog.trace_spans
             WHERE {where} AND is_root_span = 1
             LIMIT {limit}
@@ -290,7 +290,7 @@ class TraceSpansQueryRunner(TraceSpansQueryRunnerMixin, AnalyticsQueryRunner[Tra
                 duration_nano,
                 is_root_span
             FROM posthog.trace_spans
-            WHERE {where} AND trace_id IN ({trace_id_query}) LIMIT {limit}
+            WHERE {where} AND (timestamp, trace_id) IN ({trace_id_query}) LIMIT {limit}
         """,
             placeholders={
                 "where": self.where(),
