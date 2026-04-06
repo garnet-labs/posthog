@@ -145,27 +145,24 @@ shim via `jest.config.ts` → `hog-charts-mock.tsx`, so no canvas code runs.
 
 ### Tooltip testing
 
-Hog-charts tooltips are tested by imperatively driving the hover index:
+Tooltips are tested by imperatively driving the hover index. Both renderers
+render `InsightTooltip` into the DOM — `waitForTooltip` finds it regardless
+of which renderer produced it:
 
 ```tsx
 const chart = await waitForChart()
 chart.hover(2) // move hover to index 2
-const tooltip = await waitForTooltip(chart)
+const tooltip = await waitForTooltip()
 expect(within(tooltip).getByText('134')).toBeInTheDocument()
-
-chart.pin() // pin the tooltip to show the close button
-chart.unpin() // unpin
 ```
 
-`chart.hover`, `chart.pin`, `chart.unpin` are only available on hog-charts
-entries and throw on Chart.js entries. The fabricated `TooltipContext` passed
-to the bridge render prop is minimal: real position math, `ResizeObserver`,
-and `findNearestIndex` are intentionally bypassed — those concerns are
-covered by `lib/hog-charts/core/hooks/useChartInteraction.test.ts` and
-Playwright end-to-end tests.
+For Chart.js, `hover(index)` calls the real external tooltip handler from
+`LineGraph.tsx` with a fabricated `TooltipModel`, so `InsightTooltip` renders
+with real data. For hog-charts, `hover(index)` sets the shim's hover state
+which triggers the tooltip render prop with a fabricated `TooltipContext`.
 
-**What this harness validates:** the TrendsTooltip bridge mapping, series
-formatting, pin/unpin UI, and end-to-end kea data flow into the bridge.
+**What this harness validates:** tooltip content, series formatting, and
+end-to-end kea data flow into the tooltip.
 
 **What it does not validate:** mouse-coordinate-to-index resolution, canvas
-drawing, or scroll-to-dismiss pinned tooltip behavior.
+drawing, tooltip positioning, or pinnable-tooltip interactions.

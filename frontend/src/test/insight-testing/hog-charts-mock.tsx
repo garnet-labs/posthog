@@ -91,9 +91,7 @@ function buildNormalizedFromProps(
 function CaptureShim(props: CaptureShimProps): React.ReactElement {
     const { kind, series, labels, config, tooltip, children } = props
 
-    const tooltipHostRef = useRef<HTMLDivElement | null>(null)
     const [hoverIndex, setHoverIndex] = useState<number>(-1)
-    const [isPinned, setIsPinned] = useState<boolean>(false)
 
     // Mutable normalized entry — the same reference is returned for every
     // accessor call, so late data updates (hover-driven tooltip rebuilds)
@@ -108,9 +106,6 @@ function CaptureShim(props: CaptureShimProps): React.ReactElement {
             axes: {} as NormalizedChart['axes'],
             raw: props,
             hover: (i: number) => setHoverIndex(i),
-            pin: () => setIsPinned(true),
-            unpin: () => setIsPinned(false),
-            getTooltipHost: () => tooltipHostRef.current,
         }
         entryRef.current = entry
         pushCapturedChart(entry)
@@ -142,11 +137,11 @@ function CaptureShim(props: CaptureShimProps): React.ReactElement {
                 right: 800,
                 toJSON: () => ({}),
             } as DOMRect,
-            isPinned,
-            onUnpin: isPinned ? () => setIsPinned(false) : undefined,
+            isPinned: false,
+            onUnpin: undefined,
         }
         return tooltip(ctx)
-    }, [tooltip, hoverIndex, isPinned, labels, visibleSeries])
+    }, [tooltip, hoverIndex, labels, visibleSeries])
 
     return (
         <div data-attr="hog-charts-mock" data-renderer="hog-charts" data-kind={kind}>
@@ -173,9 +168,7 @@ function CaptureShim(props: CaptureShimProps): React.ReactElement {
                     ))}
                 </div>
             </div>
-            <div ref={tooltipHostRef} data-attr="hog-charts-tooltip-host">
-                {tooltipNode}
-            </div>
+            <div data-attr="hog-charts-tooltip-host">{tooltipNode}</div>
             {children}
         </div>
     )
