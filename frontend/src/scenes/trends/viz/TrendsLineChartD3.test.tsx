@@ -1,17 +1,3 @@
-/**
- * Integration tests for TrendsLineChartD3 with real hog-charts components.
- *
- * Only ResizeObserver and getBoundingClientRect are mocked — everything else
- * (d3 scales, interaction hooks, tooltip overlays) runs for real.
- */
-
-class MockResizeObserver {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-}
-global.ResizeObserver = MockResizeObserver
-
 import '@testing-library/jest-dom'
 
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
@@ -20,9 +6,14 @@ import { FEATURE_FLAGS } from 'lib/constants'
 import { DEFAULT_MARGINS } from 'lib/hog-charts/core/Chart'
 
 import { NodeKind } from '~/queries/schema/schema-general'
-import { buildTrendsQuery, renderInsightViz, trendsSeries } from '~/test/insight-testing'
+import { buildTrendsQuery, renderInsightPage, trendsSeries } from '~/test/insight-testing'
 
-import { TrendInsight } from '../Trends'
+class MockResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+}
+global.ResizeObserver = MockResizeObserver
 
 const MOCK_RECT: DOMRect = {
     x: 0,
@@ -56,7 +47,7 @@ function hoverAtIndex(wrapper: HTMLElement, index: number, totalLabels: number):
 
 describe('TrendsLineChartD3 integration', () => {
     it('renders the chart with overlay DOM', async () => {
-        renderInsightViz({ component: TrendInsight, featureFlags: HOG_CHARTS_FLAG })
+        renderInsightPage({ query: buildTrendsQuery(), featureFlags: HOG_CHARTS_FLAG })
 
         await waitFor(() => {
             expect(screen.getByRole('img', { name: /chart with 1 data series/i })).toBeInTheDocument()
@@ -64,7 +55,7 @@ describe('TrendsLineChartD3 integration', () => {
     })
 
     it('shows tooltip with series data on hover', async () => {
-        renderInsightViz({ component: TrendInsight, featureFlags: HOG_CHARTS_FLAG })
+        renderInsightPage({ query: buildTrendsQuery(), featureFlags: HOG_CHARTS_FLAG })
 
         const canvas = await screen.findByRole('img', { name: /chart with/i })
 
@@ -80,13 +71,12 @@ describe('TrendsLineChartD3 integration', () => {
     })
 
     it('renders multiple series when breakdown is applied', async () => {
-        renderInsightViz({
-            component: TrendInsight,
-            featureFlags: HOG_CHARTS_FLAG,
+        renderInsightPage({
             query: buildTrendsQuery({
                 series: [{ kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' }],
                 breakdownFilter: { breakdown: 'hedgehog', breakdown_type: 'event' },
             }),
+            featureFlags: HOG_CHARTS_FLAG,
         })
 
         await waitFor(() => {
@@ -95,8 +85,8 @@ describe('TrendsLineChartD3 integration', () => {
     })
 
     it('drops zero-count series from the chart', async () => {
-        renderInsightViz({
-            component: TrendInsight,
+        renderInsightPage({
+            query: buildTrendsQuery(),
             featureFlags: HOG_CHARTS_FLAG,
             mocks: {
                 mockResponses: [
@@ -133,8 +123,8 @@ describe('TrendsLineChartD3 integration', () => {
     })
 
     it('does not crash when series meta is missing', async () => {
-        renderInsightViz({
-            component: TrendInsight,
+        renderInsightPage({
+            query: buildTrendsQuery(),
             featureFlags: HOG_CHARTS_FLAG,
             mocks: {
                 mockResponses: [
