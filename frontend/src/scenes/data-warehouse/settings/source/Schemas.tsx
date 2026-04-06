@@ -396,7 +396,36 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                         }
                                         checked={schema.should_sync}
                                         onChange={(active) => {
-                                            updateSchema({ ...schema, should_sync: active })
+                                            if (!active && schema.sync_type === 'cdc') {
+                                                LemonDialog.open({
+                                                    title: 'Disable CDC table?',
+                                                    content: (
+                                                        <div className="text-sm text-secondary space-y-2">
+                                                            <p>
+                                                                Disabling{' '}
+                                                                <strong>{schema.table?.name ?? schema.name}</strong>{' '}
+                                                                will remove it from the replication publication. Changes
+                                                                made while disabled will be permanently lost.
+                                                            </p>
+                                                            <p>
+                                                                Re-enabling this table will require a{' '}
+                                                                <strong>full resync</strong> to ensure data consistency.
+                                                            </p>
+                                                        </div>
+                                                    ),
+                                                    primaryButton: {
+                                                        children: 'Disable',
+                                                        status: 'danger',
+                                                        onClick: () => updateSchema({ ...schema, should_sync: false }),
+                                                    },
+                                                    secondaryButton: {
+                                                        children: 'Cancel',
+                                                        type: 'tertiary',
+                                                    },
+                                                })
+                                            } else {
+                                                updateSchema({ ...schema, should_sync: active })
+                                            }
                                         }}
                                     />
                                 </SourceEditorAction>

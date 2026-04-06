@@ -373,26 +373,17 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         if newly_set_to_cdc or (should_sync is True and not instance.should_sync):
             self._alter_cdc_publication(source, pub_name, db_schema, instance.name, action="add")
 
-            # Check grace period on re-enable
+            # Always force a full re-snapshot on re-enable: while removed from the
+            # publication the replication slot kept advancing, so any changes made
+            # during that window are permanently lost regardless of how short it was.
             if should_sync is True and not newly_set_to_cdc:
-                disabled_at = instance.sync_type_config.get("cdc_disabled_at")
-                grace_hours = job_inputs.get("cdc_schema_disable_grace_period_hours", 12)
-                if disabled_at is not None:
-                    from datetime import UTC, datetime
-
-                    disabled_dt = datetime.fromisoformat(disabled_at)
-                    elapsed = datetime.now(tz=UTC) - disabled_dt
-                    if elapsed.total_seconds() > grace_hours * 3600:
-                        instance.sync_type_config["cdc_mode"] = "snapshot"
-                        instance.initial_sync_complete = False
-                        instance.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
-
-                instance.sync_type_config.pop("cdc_disabled_at", None)
+                instance.sync_type_config["cdc_mode"] = "snapshot"
+                instance.initial_sync_complete = False
+                instance.save(update_fields=["sync_type_config", "initial_sync_complete", "updated_at"])
 
         # Remove table from publication when toggling sync off
         elif should_sync is False and instance.should_sync:
             self._alter_cdc_publication(source, pub_name, db_schema, instance.name, action="remove")
-            instance.sync_type_config["cdc_disabled_at"] = dt.datetime.now(tz=dt.UTC).isoformat()
 
     def _alter_cdc_publication(
         self,

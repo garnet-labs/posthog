@@ -1246,7 +1246,6 @@ export const sourceWizardLogic = kea<sourceWizardLogicType>([
                             'cdc_auto_drop_slot',
                             'cdc_lag_warning_threshold_mb',
                             'cdc_lag_critical_threshold_mb',
-                            'cdc_schema_disable_grace_period_hours',
                         ]
                         for (const key of cdcKeys) {
                             if (payload['payload']?.[key] !== undefined) {

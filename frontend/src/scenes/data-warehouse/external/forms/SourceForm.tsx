@@ -409,21 +409,6 @@ SELECT pg_create_logical_replication_slot('posthog_slot', 'pgoutput');`}
                                                     ) : null
                                                 }
                                             </LemonField>
-
-                                            <LemonField
-                                                name="cdc_schema_disable_grace_period_hours"
-                                                label="Schema pause grace period (hours)"
-                                                info="How long a paused table can be re-enabled without requiring a full re-snapshot. After this window, re-enabling will trigger a new snapshot."
-                                            >
-                                                {({ value, onChange }) => (
-                                                    <LemonInput
-                                                        type="number"
-                                                        value={value ?? 12}
-                                                        onChange={onChange}
-                                                        min={0}
-                                                    />
-                                                )}
-                                            </LemonField>
                                         </div>
                                     )}
                                 </div>

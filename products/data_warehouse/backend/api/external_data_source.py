@@ -877,7 +877,6 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 "cdc_auto_drop_slot": payload.get("cdc_auto_drop_slot", True),
                 "cdc_lag_warning_threshold_mb": payload.get("cdc_lag_warning_threshold_mb", 1024),
                 "cdc_lag_critical_threshold_mb": payload.get("cdc_lag_critical_threshold_mb", 10240),
-                "cdc_schema_disable_grace_period_hours": payload.get("cdc_schema_disable_grace_period_hours", 12),
             }
         )
 
