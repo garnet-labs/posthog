@@ -860,3 +860,93 @@ class TestUserAPI(APIBaseTest):
 
         self.assertEqual(num_requests, 6)
         self.assertEqual(duration, 1200)  # 20 minutes * 60 seconds
+
+    def test_persons_web_burst_throttle_uses_default_rate_when_no_custom_limit(self):
+        from posthog.api.person import PersonsWebBurstThrottle
+
+        throttle = PersonsWebBurstThrottle()
+
+        # Mock view and request
+        mock_view = Mock()
+        mock_view.team_id = 123
+        mock_request = Mock()
+
+        with (
+            patch("posthog.api.person.get_instance_setting", return_value="{}"),
+            patch.object(throttle.__class__.__bases__[0], "allow_request", return_value=True),
+        ):
+            result = throttle.allow_request(mock_request, mock_view)
+            self.assertTrue(result)
+            # Rate should remain default
+            self.assertEqual(throttle.rate, "180/minute")
+
+    def test_persons_web_burst_throttle_uses_custom_rate_when_configured(self):
+        from posthog.api.person import PersonsWebBurstThrottle
+
+        throttle = PersonsWebBurstThrottle()
+
+        # Mock view and request
+        mock_view = Mock()
+        mock_view.team_id = 123
+        mock_request = Mock()
+
+        def mock_get_setting(setting_name):
+            if setting_name == "PERSONS_BURST_RATE_LIMITS":
+                return '{"123": "500/minute"}'
+            return "{}"
+
+        with (
+            patch("posthog.api.person.get_instance_setting", side_effect=mock_get_setting),
+            patch.object(throttle.__class__.__bases__[0], "allow_request", return_value=True),
+        ):
+            result = throttle.allow_request(mock_request, mock_view)
+            self.assertTrue(result)
+            # Should use custom rate
+            self.assertEqual(throttle.rate, "500/minute")
+            self.assertEqual(throttle.num_requests, 500)
+            self.assertEqual(throttle.duration, 60)  # 1 minute in seconds
+
+    def test_persons_web_sustained_throttle_uses_custom_rate_when_configured(self):
+        from posthog.api.person import PersonsWebSustainedThrottle
+
+        throttle = PersonsWebSustainedThrottle()
+
+        # Mock view and request
+        mock_view = Mock()
+        mock_view.team_id = 9291
+        mock_request = Mock()
+
+        def mock_get_setting(setting_name):
+            if setting_name == "PERSONS_SUSTAINED_RATE_LIMITS":
+                return '{"9291": "2000/hour"}'
+            return "{}"
+
+        with (
+            patch("posthog.api.person.get_instance_setting", side_effect=mock_get_setting),
+            patch.object(throttle.__class__.__bases__[0], "allow_request", return_value=True),
+        ):
+            result = throttle.allow_request(mock_request, mock_view)
+            self.assertTrue(result)
+            # Should use custom rate
+            self.assertEqual(throttle.rate, "2000/hour")
+            self.assertEqual(throttle.num_requests, 2000)
+            self.assertEqual(throttle.duration, 3600)  # 1 hour in seconds
+
+    def test_persons_web_throttle_handles_invalid_json_gracefully(self):
+        from posthog.api.person import PersonsWebBurstThrottle
+
+        throttle = PersonsWebBurstThrottle()
+
+        # Mock view and request
+        mock_view = Mock()
+        mock_view.team_id = 123
+        mock_request = Mock()
+
+        with (
+            patch("posthog.api.person.get_instance_setting", return_value="invalid-json"),
+            patch.object(throttle.__class__.__bases__[0], "allow_request", return_value=True),
+        ):
+            result = throttle.allow_request(mock_request, mock_view)
+            self.assertTrue(result)
+            # Should fall back to default rate
+            self.assertEqual(throttle.rate, "180/minute")

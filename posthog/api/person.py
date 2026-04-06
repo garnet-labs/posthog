@@ -1,3 +1,4 @@
+import json
 import uuid
 import asyncio
 import builtins
@@ -55,6 +56,7 @@ from posthog.models.filters.path_filter import PathFilter
 from posthog.models.filters.properties_timeline_filter import PropertiesTimelineFilter
 from posthog.models.filters.retention_filter import RetentionFilter
 from posthog.models.filters.stickiness_filter import StickinessFilter
+from posthog.models.instance_setting import get_instance_setting
 from posthog.models.person.deletion import reset_deleted_person_distinct_ids
 from posthog.models.person.missing_person import MissingPerson
 from posthog.models.person.person import PersonDistinctId
@@ -157,10 +159,42 @@ class PersonsWebBurstThrottle(UserOrEmailRateThrottle):
     scope = "persons_burst"
     rate = "180/minute"
 
+    def allow_request(self, request, view):
+        # Get team_id from view if available
+        team_id = getattr(view, "team_id", None)
+        if team_id:
+            try:
+                persons_burst_rate_limits_str = get_instance_setting("PERSONS_BURST_RATE_LIMITS") or "{}"
+                persons_burst_rate_limits = json.loads(persons_burst_rate_limits_str)
+                custom_rate = persons_burst_rate_limits.get(str(team_id))
+                if custom_rate:
+                    self.rate = custom_rate
+                    self.num_requests, self.duration = self.parse_rate(self.rate)
+            except Exception:
+                logger.exception(f"Error getting team-specific burst rate limit for team {team_id}")
+
+        return super().allow_request(request, view)
+
 
 class PersonsWebSustainedThrottle(UserOrEmailRateThrottle):
     scope = "persons_sustained"
     rate = "1200/hour"
+
+    def allow_request(self, request, view):
+        # Get team_id from view if available
+        team_id = getattr(view, "team_id", None)
+        if team_id:
+            try:
+                persons_sustained_rate_limits_str = get_instance_setting("PERSONS_SUSTAINED_RATE_LIMITS") or "{}"
+                persons_sustained_rate_limits = json.loads(persons_sustained_rate_limits_str)
+                custom_rate = persons_sustained_rate_limits.get(str(team_id))
+                if custom_rate:
+                    self.rate = custom_rate
+                    self.num_requests, self.duration = self.parse_rate(self.rate)
+            except Exception:
+                logger.exception(f"Error getting team-specific sustained rate limit for team {team_id}")
+
+        return super().allow_request(request, view)
 
 
 class PersonsDeleteBurstThrottle(PersonalApiKeyRateThrottle):

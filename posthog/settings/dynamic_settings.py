@@ -210,6 +210,16 @@ CONSTANCE_CONFIG = {
         "Whether teams are on an allow list to bypass rate limiting. Comma separated list of team-ids",
         str,
     ),
+    "PERSONS_BURST_RATE_LIMITS": (
+        get_from_env("PERSONS_BURST_RATE_LIMITS", "{}"),
+        "Per-team burst rate limits for persons API endpoint in JSON format. Example: {'2': '1000/minute'}",
+        str,
+    ),
+    "PERSONS_SUSTAINED_RATE_LIMITS": (
+        get_from_env("PERSONS_SUSTAINED_RATE_LIMITS", "{}"),
+        "Per-team sustained rate limits for persons API endpoint in JSON format. Example: {'2': '5000/hour'}",
+        str,
+    ),
     "REDIRECT_APP_TO_US": (
         get_from_env("REDIRECT_APP_TO_US", False, type_cast=str_to_bool),
         "Temporary option to redirect all app traffic from app.posthog.com to us.posthog.com.",
@@ -274,6 +284,8 @@ SETTINGS_ALLOWING_API_OVERRIDE = (
     "ALLOW_EXPERIMENTAL_ASYNC_MIGRATIONS",
     "RATE_LIMIT_ENABLED",
     "RATE_LIMITING_ALLOW_LIST_TEAMS",
+    "PERSONS_BURST_RATE_LIMITS",
+    "PERSONS_SUSTAINED_RATE_LIMITS",
     "CLICKHOUSE_KILL_SWITCH",
     "CLICKHOUSE_HEDGED_APP_QUERIES",
     "CLICKHOUSE_ENABLE_ANALYZER_TEAMS",
