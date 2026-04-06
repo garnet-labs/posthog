@@ -204,12 +204,16 @@ def test_copy_data_modeling_model_to_ducklake_activity_via_duckgres(monkeypatch)
         MagicMock(return_value=False),
     )
     monkeypatch.setattr(
-        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow.get_ducklake_catalog_by_team_org",
+        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow._get_org_id_for_team",
+        MagicMock(return_value="org-123"),
+    )
+    monkeypatch.setattr(
+        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow.get_ducklake_catalog_for_organization",
         MagicMock(return_value=_create_mock_catalog()),
     )
     mock_server = MagicMock()
     monkeypatch.setattr(
-        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow.get_duckgres_server_by_team_org",
+        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow.get_duckgres_server_for_organization",
         MagicMock(return_value=mock_server),
     )
     mock_stage = MagicMock()

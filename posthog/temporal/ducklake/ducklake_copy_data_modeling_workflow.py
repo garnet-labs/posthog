@@ -11,10 +11,12 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 
 from posthog.ducklake.common import (
+    _get_org_id_for_team,
     attach_catalog,
     get_config,
-    get_duckgres_server_by_team_org,
+    get_duckgres_server_for_organization,
     get_ducklake_catalog_by_team_org,
+    get_ducklake_catalog_for_organization,
     is_dev_mode,
     sanitize_ducklake_identifier,
 )
@@ -497,8 +499,9 @@ class DuckLakeCopyDataModelingWorkflow(PostHogWorkflow):
 
 def _copy_data_modeling_via_duckgres(inputs: DuckLakeCopyActivityInputs, logger) -> None:
     """Stage Delta files and create the DuckLake table via duckgres."""
-    catalog = get_ducklake_catalog_by_team_org(inputs.team_id)
-    server = get_duckgres_server_by_team_org(inputs.team_id)
+    org_id = _get_org_id_for_team(inputs.team_id)
+    catalog = get_ducklake_catalog_for_organization(org_id)
+    server = get_duckgres_server_for_organization(org_id)
     if catalog is None:
         raise ApplicationError(f"No DuckLakeCatalog configured for team {inputs.team_id}", non_retryable=True)
     if server is None:

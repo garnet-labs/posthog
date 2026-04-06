@@ -79,3 +79,30 @@ class TestExecuteDuckLakeQuery:
         execute_ducklake_query(1, sql="SELECT 1")
 
         mock_conn.execute.assert_called_once_with("SET search_path TO 'posthog'")
+
+    @mock.patch("posthog.ducklake.client.psycopg")
+    @mock.patch("posthog.ducklake.client.get_duckgres_config_for_org")
+    @mock.patch("posthog.ducklake.client.is_dev_mode", return_value=False)
+    def test_production_path_resolves_org(self, _mock_dev_mode, mock_config_for_org, mock_psycopg):
+        mock_config_for_org.return_value = {
+            "DUCKGRES_HOST": "prod.duckgres.com",
+            "DUCKGRES_PORT": "5432",
+            "DUCKGRES_DATABASE": "warehouse",
+            "DUCKGRES_USERNAME": "root",
+            "DUCKGRES_PASSWORD": "secret",
+        }
+        mock_cursor = mock.MagicMock()
+        mock_cursor.description = [mock.MagicMock(name="cnt", type_code=20)]
+        mock_cursor.description[0].name = "cnt"
+        mock_cursor.fetchall.return_value = [(1,)]
+        mock_conn = mock.MagicMock()
+        mock_conn.cursor.return_value.__enter__ = mock.Mock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = mock.Mock(return_value=False)
+        mock_psycopg.connect.return_value.__enter__ = mock.Mock(return_value=mock_conn)
+        mock_psycopg.connect.return_value.__exit__ = mock.Mock(return_value=False)
+
+        with mock.patch("posthog.ducklake.client._get_org_id_for_team", return_value="org-456"):
+            result = execute_ducklake_query(1, sql="SELECT 1")
+
+        mock_config_for_org.assert_called_once_with("org-456")
+        assert result.results == [[1]]
