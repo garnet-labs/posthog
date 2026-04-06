@@ -178,13 +178,14 @@ class PersonsWebThrottleBase(UserOrEmailRateThrottle):
         return self._cached_limits or {}
 
     def allow_request(self, request, view):
-        team_id = getattr(view, "team_id", None)
-        if team_id:
-            limits = self._get_team_limits()
-            custom_rate = limits.get(str(team_id))
-            if custom_rate:
-                self.rate = custom_rate
-                self.num_requests, self.duration = self.parse_rate(self.rate)
+        if not settings.TEST:
+            team_id = getattr(view, "team_id", None)
+            if team_id:
+                limits = self._get_team_limits()
+                custom_rate = limits.get(str(team_id))
+                if custom_rate:
+                    self.rate = custom_rate
+                    self.num_requests, self.duration = self.parse_rate(self.rate)
         return super().allow_request(request, view)
 
 
