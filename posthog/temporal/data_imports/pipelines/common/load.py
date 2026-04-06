@@ -120,8 +120,8 @@ async def _seed_cdc_companion_from_snapshot(
     'cdc_only' or 'both' mode.  Any existing companion table is reset first so that a
     full resync always starts the _cdc history fresh from the new snapshot.
 
-    For large tables this reads the entire snapshot into memory; this is acceptable
-    because it is a one-time operation per resync.
+    Reads the snapshot in batches via PyArrow dataset scanning to avoid loading the
+    entire table into memory.
     """
     import asyncio
 
@@ -142,9 +142,7 @@ async def _seed_cdc_companion_from_snapshot(
     if snapshot_dt is None:
         return
 
-    snapshot_table: pa.Table = await asyncio.to_thread(snapshot_dt.to_pyarrow_table)
-    if snapshot_table.num_rows == 0:
-        return
+    dataset = await asyncio.to_thread(snapshot_dt.to_pyarrow_dataset)
 
     # Strip any pre-existing CDC metadata columns from the snapshot (defensive).
     cdc_meta_cols = {
@@ -155,24 +153,7 @@ async def _seed_cdc_companion_from_snapshot(
         SCD2_VALID_FROM_COLUMN,
         SCD2_VALID_TO_COLUMN,
     }
-    snapshot_table = snapshot_table.select([c for c in snapshot_table.column_names if c not in cdc_meta_cols])
-
-    n = snapshot_table.num_rows
-    ts_type = pa.timestamp("us", tz="UTC")
-    # Use Unix epoch (0) for the seed timestamp so that any real WAL commit timestamp
-    # is guaranteed to be greater.  Without this, seeded rows end up with
-    # valid_from > valid_to when the first CDC event has a commit time that predates
-    # the snapshot ingestion time (e.g. changes captured during the initial snapshot load).
-    epoch_us = 0
-
-    snapshot_table = (
-        snapshot_table.append_column(pa.field(CDC_OP_COLUMN, pa.string()), pa.array(["I"] * n, type=pa.string()))
-        .append_column(pa.field(CDC_TIMESTAMP_COLUMN, ts_type), pa.array([epoch_us] * n, type=ts_type))
-        .append_column(pa.field(DELETED_COLUMN, pa.bool_()), pa.array([False] * n, type=pa.bool_()))
-        .append_column(pa.field(DELETED_AT_COLUMN, ts_type), pa.array([None] * n, type=ts_type))
-        .append_column(pa.field(SCD2_VALID_FROM_COLUMN, ts_type), pa.array([epoch_us] * n, type=ts_type))
-        .append_column(pa.field(SCD2_VALID_TO_COLUMN, ts_type), pa.array([None] * n, type=ts_type))
-    )
+    read_columns = [c for c in dataset.schema.names if c not in cdc_meta_cols]
 
     companion_resource_name = f"{schema.name}_cdc"
     companion_helper = DeltaTableHelper(
@@ -184,23 +165,68 @@ async def _seed_cdc_companion_from_snapshot(
     # Reset so a full resync always starts the companion fresh.
     await companion_helper.reset_table()
 
-    primary_keys: list[str] = schema.sync_type_config.get("primary_key_columns", [])
-    await companion_helper.write_scd2_to_deltalake(data=snapshot_table, primary_keys=primary_keys)
+    hogql_schema = HogQLSchema()
+    total_rows = 0
 
-    companion_dt = await companion_helper.get_delta_table()
-    if companion_dt is None:
+    SEED_BATCH_SIZE = 50_000
+    reader = await asyncio.to_thread(
+        lambda: dataset.scanner(columns=read_columns, batch_size=SEED_BATCH_SIZE).to_reader()
+    )
+
+    def _read_next_batch(r: pa.RecordBatchReader) -> pa.RecordBatch | None:
+        try:
+            return r.read_next_batch()
+        except StopIteration:
+            return None
+
+    # Use Unix epoch (0) for the seed timestamp so that any real WAL commit timestamp
+    # is guaranteed to be greater.  Without this, seeded rows end up with
+    # valid_from > valid_to when the first CDC event has a commit time that predates
+    # the snapshot ingestion time (e.g. changes captured during the initial snapshot load).
+    ts_type = pa.timestamp("us", tz="UTC")
+    epoch_us = 0
+
+    while True:
+        batch = await asyncio.to_thread(_read_next_batch, reader)
+        if batch is None:
+            break
+
+        batch_table = pa.Table.from_batches([batch])
+        if batch_table.num_rows == 0:
+            continue
+
+        n = batch_table.num_rows
+        batch_table = (
+            batch_table.append_column(pa.field(CDC_OP_COLUMN, pa.string()), pa.array(["I"] * n, type=pa.string()))
+            .append_column(pa.field(CDC_TIMESTAMP_COLUMN, ts_type), pa.array([epoch_us] * n, type=ts_type))
+            .append_column(pa.field(DELETED_COLUMN, pa.bool_()), pa.array([False] * n, type=pa.bool_()))
+            .append_column(pa.field(DELETED_AT_COLUMN, ts_type), pa.array([None] * n, type=ts_type))
+            .append_column(pa.field(SCD2_VALID_FROM_COLUMN, ts_type), pa.array([epoch_us] * n, type=ts_type))
+            .append_column(pa.field(SCD2_VALID_TO_COLUMN, ts_type), pa.array([None] * n, type=ts_type))
+        )
+
+        # Plain append — the companion table is freshly reset so there are no existing
+        # rows to close, making SCD2 merge unnecessary.
+        await companion_helper.write_to_deltalake(
+            data=batch_table,
+            write_type="append",
+            should_overwrite_table=False,
+            primary_keys=None,
+        )
+        hogql_schema.add_pyarrow_table(batch_table)
+        total_rows += n
+
+    if total_rows == 0:
         return
 
     file_uris = await companion_helper.get_file_uris()
-    hogql_schema = HogQLSchema()
-    hogql_schema.add_pyarrow_table(snapshot_table)
 
     await run_post_load_operations(
         job=job,
         schema=schema,
         source=source,
         delta_table_helper=companion_helper,
-        row_count=n,
+        row_count=total_rows,
         file_uris=file_uris,
         table_schema_dict=hogql_schema.to_hogql_types(),
         resource_name=companion_resource_name,
