@@ -104,7 +104,7 @@ class TestExecuteDuckLakeQuery:
         mock_psycopg.connect.return_value.__enter__ = mock.Mock(return_value=mock_conn)
         mock_psycopg.connect.return_value.__exit__ = mock.Mock(return_value=False)
 
-        with mock.patch("posthog.ducklake.client._get_org_id_for_team", return_value="org-456"):
+        with mock.patch("posthog.ducklake.common._get_org_id_for_team", return_value="org-456"):
             result = execute_ducklake_query(1, sql="SELECT 1")
 
         mock_config_for_org.assert_called_once_with("org-456")

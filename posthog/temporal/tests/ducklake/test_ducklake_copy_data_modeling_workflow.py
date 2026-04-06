@@ -742,7 +742,11 @@ def test_copy_data_modeling_model_to_ducklake_activity_raises_when_no_catalog(mo
         MagicMock(return_value=False),
     )
     monkeypatch.setattr(
-        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow.get_ducklake_catalog_by_team_org",
+        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow._get_org_id_for_team",
+        MagicMock(return_value="org-123"),
+    )
+    monkeypatch.setattr(
+        "posthog.temporal.ducklake.ducklake_copy_data_modeling_workflow.get_ducklake_catalog_for_organization",
         MagicMock(return_value=None),
     )
 
