@@ -33,6 +33,8 @@ from posthog.personhog_client.proto.generated.personhog.types.v1.group_pb2 impor
     GroupWithKey,
 )
 from posthog.personhog_client.proto.generated.personhog.types.v1.person_pb2 import (
+    DeletePersonsRequest,
+    DeletePersonsResponse,
     GetDistinctIdsForPersonRequest,
     GetDistinctIdsForPersonResponse,
     GetDistinctIdsForPersonsRequest,

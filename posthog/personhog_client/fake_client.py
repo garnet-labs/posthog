@@ -312,6 +312,25 @@ class FakePersonHogClient:
             results.append(group_pb2.GroupTypeMappingsByKey(key=pid, mappings=mappings))
         return group_pb2.GroupTypeMappingsBatchResponse(results=results)
 
+    # ── Person deletes ────────────────────────────────────────────────
+
+    def delete_persons(
+        self, request: person_pb2.DeletePersonsRequest, timeout: float | None = None
+    ) -> person_pb2.DeletePersonsResponse:
+        self.calls.append(_Call("delete_persons", request))
+        deleted_count = 0
+        for uuid in request.person_uuids:
+            person = self._persons_by_uuid.pop((request.team_id, uuid), None)
+            if person is None:
+                continue
+            deleted_count += 1
+            self._persons_by_id.pop((request.team_id, person.id), None)
+            # Remove distinct_id mappings
+            dids = self._distinct_ids.pop((request.team_id, person.id), [])
+            for did in dids:
+                self._persons_by_distinct_id.pop((request.team_id, did.distinct_id), None)
+        return person_pb2.DeletePersonsResponse(deleted_count=deleted_count)
+
     # ── Assertion helpers ────────────────────────────────────────────
 
     def assert_called(self, method: str, *, times: int | None = None) -> list[_Call]:

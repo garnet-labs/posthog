@@ -60,6 +60,7 @@ from posthog.models.person.missing_person import MissingPerson
 from posthog.models.person.person import PersonDistinctId
 from posthog.models.person.util import (
     delete_person,
+    delete_persons_from_postgres,
     get_person_by_pk_or_uuid,
     get_persons_by_distinct_ids,
     get_persons_by_uuids,
@@ -586,9 +587,9 @@ class PersonViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         persons = list(persons_queryset)
 
         if not keep_person:
+            # Send ClickHouse deletion events and log activity per person
             for person in persons:
                 delete_person(person=person)
-                self.perform_destroy(person)
                 log_activity(
                     organization_id=self.organization.id,
                     team_id=self.team_id,
@@ -599,6 +600,8 @@ class PersonViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                     activity="deleted",
                     detail=Detail(name=str(person.uuid)),
                 )
+            # Delete from Postgres via personhog RPC (or ORM fallback)
+            delete_persons_from_postgres(self.team_id, persons)
 
         if delete_events:
             self._queue_event_deletion(persons)
