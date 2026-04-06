@@ -152,6 +152,9 @@ If you need to set up without Flox, see the [manual development setup](./manual-
 
 These issues can occur regardless of whether you're using Flox or manual setup.
 
+**Quick health check**
+If your dev environment isn't behaving as expected, start with `hogli doctor`. It checks disk usage, zombie processes, Docker status, and pending migrations, then suggests specific commands to fix any issues.
+
 **Docker/OrbStack resource limits**
 If you see "Exit Code 137" or out-of-memory errors, your Docker container doesn't have enough resources. In OrbStack settings, allocate **at least 4 GB RAM** (8 GB recommended) and **at least 4 CPU cores** (400%).
 
