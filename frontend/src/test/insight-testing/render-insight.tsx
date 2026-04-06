@@ -85,7 +85,7 @@ export function renderInsightPage(props: RenderInsightPageProps = {}): ReturnTyp
 
 export interface RenderInsightVizProps {
     query?: TrendsQuery
-    component: React.ComponentType<Record<string, unknown>>
+    component: React.ComponentType
     mocks?: SetupMocksOptions
     featureFlags?: Record<string, string | boolean>
 }
@@ -106,7 +106,7 @@ function InsightVizWrapper({
     component: Component,
 }: {
     query: TrendsQuery
-    component: React.ComponentType<Record<string, unknown>>
+    component: React.ComponentType
 }): JSX.Element {
     const [vizQuery, setVizQuery] = useState<InsightVizNode>({
         kind: NodeKind.InsightVizNode,
@@ -128,7 +128,7 @@ function InsightVizWrapper({
     const insightProps: InsightLogicProps = {
         dashboardItemId: INSIGHT_TEST_ID,
         query: vizQuery,
-        setQuery: setVizQuery,
+        setQuery: setVizQuery as (node: InsightVizNode) => void,
     }
 
     const vizKey = insightVizDataNodeKey(insightProps)
