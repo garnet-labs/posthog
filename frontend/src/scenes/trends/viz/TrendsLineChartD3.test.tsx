@@ -3,39 +3,23 @@ import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 
 import { FEATURE_FLAGS } from 'lib/constants'
+import { setupJsdom } from 'lib/hog-charts/test-helpers'
 
 import { NodeKind } from '~/queries/schema/schema-general'
 import { buildTrendsQuery, chart, renderInsight, trendsSeries } from '~/test/insight-testing'
 
-class MockResizeObserver {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-}
-global.ResizeObserver = MockResizeObserver
-
-const MOCK_RECT: DOMRect = {
-    x: 0,
-    y: 0,
-    width: 800,
-    height: 400,
-    top: 0,
-    left: 0,
-    bottom: 400,
-    right: 800,
-    toJSON: () => ({}),
-}
-
-const HOG_CHARTS_FLAG = { [FEATURE_FLAGS.PRODUCT_ANALYTICS_HOG_CHARTS]: true }
+let cleanupJsdom: () => void
 
 beforeEach(() => {
-    jest.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(MOCK_RECT)
+    cleanupJsdom = setupJsdom()
 })
 
 afterEach(() => {
-    jest.restoreAllMocks()
+    cleanupJsdom()
     cleanup()
 })
+
+const HOG_CHARTS_FLAG = { [FEATURE_FLAGS.PRODUCT_ANALYTICS_HOG_CHARTS]: true }
 
 describe('TrendsLineChartD3', () => {
     describe('tooltips', () => {
@@ -44,8 +28,8 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
-            chart.expectRow(tooltip, 'Pageview', '134')
-            expect(tooltip.querySelector('.graph-series-glyph')).toBeInTheDocument()
+            tooltip.row('Pageview').expectValue('134')
+            expect(tooltip.element.querySelector('.graph-series-glyph')).toBeInTheDocument()
         })
 
         it('shows breakdown values across series', async () => {
@@ -59,7 +43,7 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
-            chart.expectRow(tooltip, 'Spike', '3')
+            tooltip.row('Spike').expectValue('3')
         })
 
         it('excludes zero-count series', async () => {
@@ -72,8 +56,8 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(2, trendsSeries.pageviews.labels!.length)
 
-            chart.expectRow(tooltip, 'ActiveSeries', '3')
-            chart.expectNoRow(tooltip, 'EmptySeries')
+            tooltip.row('ActiveSeries').expectValue('3')
+            tooltip.expectNoRow('EmptySeries')
         })
 
         it('renders correctly when series has no action metadata', async () => {
@@ -86,7 +70,7 @@ describe('TrendsLineChartD3', () => {
 
             const tooltip = await chart.hoverTooltip(0, trendsSeries.minimal.labels!.length)
 
-            chart.expectRow(tooltip, 'Minimal', '1')
+            tooltip.row('Minimal').expectValue('1')
         })
     })
 })

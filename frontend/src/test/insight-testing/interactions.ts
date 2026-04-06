@@ -1,13 +1,14 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-import { DEFAULT_MARGINS } from 'lib/hog-charts/core/Chart'
+import { hoverAtIndex } from 'lib/hog-charts/test-helpers'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
 import { TrendsQuery } from '~/queries/schema/schema-general'
 import { InsightLogicProps } from '~/types'
 
 import { INSIGHT_TEST_ID } from './render-insight'
+import { type TooltipAccessor, createTooltipAccessor } from './tooltip-helpers'
 
 const DEBOUNCE_TIMEOUT = 3000
 
@@ -102,31 +103,12 @@ export function getQuerySource(): TrendsQuery {
     return getLogic().values.querySource as TrendsQuery
 }
 
-function findTooltipRow(tooltip: HTMLElement, label: string): HTMLElement {
-    const rows = tooltip.querySelectorAll('tr')
-    for (const row of rows) {
-        if (row.textContent?.includes(label)) {
-            return row as HTMLElement
-        }
-    }
-    const available = Array.from(rows)
-        .map((r) => r.textContent?.trim())
-        .filter(Boolean)
-    throw new Error(`No tooltip row containing "${label}". Rows: ${available.map((r) => `"${r}"`).join(', ')}`)
-}
-
 export const chart = {
-    async hoverTooltip(index: number, totalLabels: number): Promise<HTMLElement> {
+    async hoverTooltip(index: number, totalLabels: number): Promise<TooltipAccessor> {
         const canvas = await screen.findByRole('img', { name: /chart with/i })
         const wrapper = canvas.parentElement!
-        const rect = wrapper.getBoundingClientRect()
-        const plotLeft = DEFAULT_MARGINS.left
-        const plotWidth = rect.width - DEFAULT_MARGINS.right - plotLeft
-        const step = plotWidth / (totalLabels - 1)
 
-        act(() => {
-            fireEvent.mouseMove(wrapper, { clientX: plotLeft + step * index, clientY: rect.height / 2 })
-        })
+        hoverAtIndex(wrapper, index, totalLabels)
 
         let tooltip!: HTMLElement
         await waitFor(() => {
@@ -134,22 +116,6 @@ export const chart = {
             expect(el).not.toBeNull()
             tooltip = el as HTMLElement
         })
-        return tooltip
-    },
-
-    expectRow(tooltip: HTMLElement, label: string, value: string): void {
-        const row = findTooltipRow(tooltip, label)
-        const countsCell = row.querySelector('.datum-counts-column')
-        if (!countsCell) {
-            throw new Error(`Row "${label}" has no counts cell`)
-        }
-        expect(countsCell.textContent).toContain(value)
-    },
-
-    expectNoRow(tooltip: HTMLElement, label: string): void {
-        const rows = tooltip.querySelectorAll('tr')
-        for (const row of rows) {
-            expect(row.textContent).not.toContain(label)
-        }
+        return createTooltipAccessor(tooltip)
     },
 }
