@@ -715,9 +715,51 @@ export const ActivityLogListScopesItem = {
     Ticket: 'Ticket',
 } as const
 
+export type AdvancedActivityLogsListParams = {
+    activities?: string[]
+    detail_filters?: unknown
+    end_date?: string
+    hogql_filter?: string
+    /**
+     * @nullable
+     */
+    is_system?: boolean | null
+    item_ids?: string[]
+    scopes?: string[]
+    search_text?: string
+    start_date?: string
+    users?: string[]
+    /**
+     * @nullable
+     */
+    was_impersonated?: boolean | null
+}
+
+export type AdvancedActivityLogsAvailableFiltersRetrieve200 = { [key: string]: unknown }
+
 export type CommentsListParams = {
     /**
      * The pagination cursor value.
      */
     cursor?: string
+    /**
+     * Filter by the ID of the resource being commented on.
+     * @minLength 1
+     */
+    item_id?: string
+    /**
+     * Filter by resource type (e.g. Dashboard, FeatureFlag, Insight, Replay).
+     * @minLength 1
+     */
+    scope?: string
+    /**
+     * Full-text search within comment content.
+     * @minLength 1
+     */
+    search?: string
+    /**
+     * Filter replies to a specific parent comment.
+     * @minLength 1
+     */
+    source_comment?: string
 }

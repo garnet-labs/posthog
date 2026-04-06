@@ -323,6 +323,7 @@ class AdvancedActivityLogsViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSe
 
         return super().get_serializer_class()
 
+    @extend_schema(parameters=[AdvancedActivityLogFiltersSerializer])
     def list(self, request, *args, **kwargs):
         filters_serializer = AdvancedActivityLogFiltersSerializer(data=request.query_params)
         filters_serializer.is_valid(raise_exception=True)
@@ -339,6 +340,7 @@ class AdvancedActivityLogsViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSe
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @extend_schema(responses={200: dict})
     @action(detail=False, methods=["GET"])
     def available_filters(self, request, **kwargs):
         queryset = self.get_queryset()

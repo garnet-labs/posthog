@@ -6,7 +6,7 @@
 #
 # Access controls and metalytics are out of scope for now.
 category: Platform Features
-feature: approvals
+feature: platform_features
 url_prefix: /
 
 tools:

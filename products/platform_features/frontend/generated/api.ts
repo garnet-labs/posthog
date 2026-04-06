@@ -11,6 +11,8 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
 import type {
     ActivityLogApi,
     ActivityLogListParams,
+    AdvancedActivityLogsAvailableFiltersRetrieve200,
+    AdvancedActivityLogsListParams,
     ApprovalPoliciesListParams,
     ApprovalPolicyApi,
     ChangeRequestApi,
@@ -570,15 +572,28 @@ export const activityLogList = async (
     })
 }
 
-export const getAdvancedActivityLogsListUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/advanced_activity_logs/`
+export const getAdvancedActivityLogsListUrl = (projectId: string, params?: AdvancedActivityLogsListParams) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : value.toString())
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/advanced_activity_logs/?${stringifiedParams}`
+        : `/api/projects/${projectId}/advanced_activity_logs/`
 }
 
 export const advancedActivityLogsList = async (
     projectId: string,
+    params?: AdvancedActivityLogsListParams,
     options?: RequestInit
 ): Promise<PaginatedActivityLogListApi> => {
-    return apiMutator<PaginatedActivityLogListApi>(getAdvancedActivityLogsListUrl(projectId), {
+    return apiMutator<PaginatedActivityLogListApi>(getAdvancedActivityLogsListUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -591,11 +606,14 @@ export const getAdvancedActivityLogsAvailableFiltersRetrieveUrl = (projectId: st
 export const advancedActivityLogsAvailableFiltersRetrieve = async (
     projectId: string,
     options?: RequestInit
-): Promise<ActivityLogApi> => {
-    return apiMutator<ActivityLogApi>(getAdvancedActivityLogsAvailableFiltersRetrieveUrl(projectId), {
-        ...options,
-        method: 'GET',
-    })
+): Promise<AdvancedActivityLogsAvailableFiltersRetrieve200> => {
+    return apiMutator<AdvancedActivityLogsAvailableFiltersRetrieve200>(
+        getAdvancedActivityLogsAvailableFiltersRetrieveUrl(projectId),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
 }
 
 export const getAdvancedActivityLogsExportCreateUrl = (projectId: string) => {

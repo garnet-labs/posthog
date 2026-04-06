@@ -259,6 +259,26 @@ export const AdvancedActivityLogsListParams = /* @__PURE__ */ zod.object({
         ),
 })
 
+export const advancedActivityLogsListQueryActivitiesDefault = []
+export const advancedActivityLogsListQueryDetailFiltersDefault = {}
+export const advancedActivityLogsListQueryItemIdsDefault = []
+export const advancedActivityLogsListQueryScopesDefault = []
+export const advancedActivityLogsListQueryUsersDefault = []
+
+export const AdvancedActivityLogsListQueryParams = /* @__PURE__ */ zod.object({
+    activities: zod.array(zod.string()).default(advancedActivityLogsListQueryActivitiesDefault),
+    detail_filters: zod.unknown().default(advancedActivityLogsListQueryDetailFiltersDefault),
+    end_date: zod.iso.datetime({}).optional(),
+    hogql_filter: zod.string().optional(),
+    is_system: zod.boolean().nullish(),
+    item_ids: zod.array(zod.string()).default(advancedActivityLogsListQueryItemIdsDefault),
+    scopes: zod.array(zod.string()).default(advancedActivityLogsListQueryScopesDefault),
+    search_text: zod.string().optional(),
+    start_date: zod.iso.datetime({}).optional(),
+    users: zod.array(zod.string()).default(advancedActivityLogsListQueryUsersDefault),
+    was_impersonated: zod.boolean().nullish(),
+})
+
 export const AdvancedActivityLogsAvailableFiltersRetrieveParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
@@ -277,6 +297,14 @@ export const CommentsListParams = /* @__PURE__ */ zod.object({
 
 export const CommentsListQueryParams = /* @__PURE__ */ zod.object({
     cursor: zod.string().optional().describe('The pagination cursor value.'),
+    item_id: zod.string().min(1).optional().describe('Filter by the ID of the resource being commented on.'),
+    scope: zod
+        .string()
+        .min(1)
+        .optional()
+        .describe('Filter by resource type (e.g. Dashboard, FeatureFlag, Insight, Replay).'),
+    search: zod.string().min(1).optional().describe('Full-text search within comment content.'),
+    source_comment: zod.string().min(1).optional().describe('Filter replies to a specific parent comment.'),
 })
 
 export const CommentsRetrieveParams = /* @__PURE__ */ zod.object({
