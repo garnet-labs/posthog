@@ -17,6 +17,7 @@ import '@testing-library/jest-dom'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 
 import { FEATURE_FLAGS } from 'lib/constants'
+import { DEFAULT_MARGINS } from 'lib/hog-charts/core/Chart'
 
 import { NodeKind } from '~/queries/schema/schema-general'
 import { buildTrendsQuery, renderInsightViz, trendsSeries } from '~/test/insight-testing'
@@ -47,8 +48,8 @@ afterEach(() => {
 })
 
 function hoverAtIndex(wrapper: HTMLElement, index: number, totalLabels: number): void {
-    const plotLeft = 48
-    const plotWidth = 800 - 16 - plotLeft
+    const plotLeft = DEFAULT_MARGINS.left
+    const plotWidth = MOCK_RECT.width - DEFAULT_MARGINS.right - plotLeft
     const step = plotWidth / (totalLabels - 1)
     fireEvent.mouseMove(wrapper, { clientX: plotLeft + step * index, clientY: 200 })
 }
