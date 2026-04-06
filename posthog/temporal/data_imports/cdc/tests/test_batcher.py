@@ -1,4 +1,7 @@
+import decimal
 from datetime import UTC, datetime
+
+import pyarrow as pa
 
 from posthog.temporal.data_imports.cdc.batcher import (
     CDC_OP_COLUMN,
@@ -166,6 +169,46 @@ class TestChangeEventBatcher:
         # Columns absent from the D event should be null, not missing
         assert table.column("name")[1].as_py() is None
         assert table.column("email")[1].as_py() is None
+
+    def test_should_flush_event_count_threshold(self):
+        batcher = ChangeEventBatcher(max_events=3)
+        batcher.add(_make_event(columns={"id": 1}))
+        batcher.add(_make_event(columns={"id": 2}))
+        assert batcher.should_flush is False
+
+        batcher.add(_make_event(columns={"id": 3}))
+        assert batcher.should_flush is True
+
+        batcher.flush()
+        assert batcher.should_flush is False
+
+    def test_should_flush_byte_threshold(self):
+        batcher = ChangeEventBatcher(max_bytes=500)
+        batcher.add(_make_event(columns={"id": 1, "data": "x"}))
+        assert batcher.should_flush is False
+
+        batcher.add(_make_event(columns={"id": 2, "data": "y" * 500}))
+        assert batcher.should_flush is True
+
+
+class TestEventsToTableEdgeCases:
+    def test_all_null_column_becomes_string_not_null_type(self):
+        batcher = ChangeEventBatcher()
+        batcher.add(_make_event(op="D", columns={"id": 1, "email": None}))
+        batcher.add(_make_event(op="D", columns={"id": 2, "email": None}))
+        tables = batcher.flush()
+
+        table = tables["users"]
+        assert table.column("email").type == pa.string()
+
+    def test_mixed_types_in_column_falls_back_to_string(self):
+        batcher = ChangeEventBatcher()
+        batcher.add(_make_event(op="I", columns={"id": 1, "val": 42}))
+        batcher.add(_make_event(op="I", columns={"id": 2, "val": "hello"}))
+        tables = batcher.flush()
+
+        table = tables["users"]
+        assert table.column("val").type == pa.string()
 
 
 class TestDeduplicateTable:
@@ -403,3 +446,25 @@ class TestEnrichDeleteRows:
         # id=1 DELETE should be enriched with Alice; id=2 INSERT untouched
         assert result.column("name")[2].as_py() == "Alice"
         assert result.column("name")[1].as_py() == "Bob"
+
+    def test_enrichment_with_decimal_values_from_existing(self):
+        table = self._make_raw_table([_make_event(op="D", columns={"id": 1, "amount": None})])
+        existing = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "amount": pa.array([decimal.Decimal("99.99")]),
+            }
+        )
+        result = enrich_delete_rows(table, ["id"], existing_rows=existing)
+        assert result.column("amount")[0].as_py() == decimal.Decimal("99.99")
+
+    def test_enrichment_type_mismatch_existing_vs_batch(self):
+        table = self._make_raw_table([_make_event(op="D", columns={"id": 1, "code": None})])
+        existing = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "code": pa.array(["ABC"], type=pa.string()),
+            }
+        )
+        result = enrich_delete_rows(table, ["id"], existing_rows=existing)
+        assert result.column("code")[0].as_py() == "ABC"

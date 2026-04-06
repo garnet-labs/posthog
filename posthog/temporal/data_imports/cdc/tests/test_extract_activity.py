@@ -825,3 +825,250 @@ class TestCDCExtractActivity:
 
         assert schema.sync_type_config.get("cdc_mode") == "snapshot"
         assert schema.sync_type_config.get("cdc_last_log_position") is None
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_both_mode_creates_two_trackers(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        schema.sync_type_config["cdc_table_mode"] = "both"
+        schema.cdc_table_mode = "both"
+        events = [_make_event(op="I", table="users", position="0/100", columns={"id": 1, "name": "Alice"})]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Two S3 writes: one for the consolidated table, one for the _cdc table
+        assert mock_s3.write_batch.call_count == 2
+
+        written_tables = [call[0][0] for call in mock_s3.write_batch.call_args_list]
+        consolidated_table = written_tables[0]
+        cdc_table = written_tables[1]
+
+        # Consolidated table: 1 row (deduplicated INSERT), no valid_from/valid_to
+        assert consolidated_table.num_rows == 1
+        assert "valid_from" not in consolidated_table.column_names
+        assert "valid_to" not in consolidated_table.column_names
+
+        # _cdc table: 1 row with SCD2 columns
+        assert cdc_table.num_rows == 1
+        assert "valid_from" in cdc_table.column_names
+        assert "valid_to" in cdc_table.column_names
+
+        # Two Kafka producers: one with incremental_merge, one with scd2_append
+        assert MockProducer.call_count == 2
+        write_modes = {call.kwargs["cdc_write_mode"] for call in MockProducer.call_args_list}
+        assert write_modes == {"incremental_merge", "scd2_append"}
+
+        resource_names = {call.kwargs["resource_name"] for call in MockProducer.call_args_list}
+        assert resource_names == {"users", "users_cdc"}
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_cdc_only_mode_creates_single_cdc_tracker(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        schema.sync_type_config["cdc_table_mode"] = "cdc_only"
+        schema.cdc_table_mode = "cdc_only"
+        events = [_make_event(op="I", table="users", position="0/100", columns={"id": 1, "name": "Alice"})]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Only one S3 write for the _cdc resource
+        mock_s3.write_batch.assert_called_once()
+        written_table = mock_s3.write_batch.call_args[0][0]
+        assert written_table.num_rows == 1
+        assert "valid_from" in written_table.column_names
+        assert "valid_to" in written_table.column_names
+
+        # Only one Kafka producer with scd2_append and _cdc resource name
+        assert MockProducer.call_count == 1
+        producer_kwargs = MockProducer.call_args.kwargs
+        assert producer_kwargs["resource_name"] == "users_cdc"
+        assert producer_kwargs["cdc_write_mode"] == "scd2_append"
+
+    @patch("posthog.temporal.data_imports.cdc.activities.ChangeEventBatcher")
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_micro_batch_flush_sends_kafka_immediately(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+        MockBatcher,
+    ):
+        from posthog.temporal.data_imports.cdc.batcher import ChangeEventBatcher as RealBatcher
+
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="streaming", source=source)
+        schema.sync_type_config["cdc_table_mode"] = "consolidated"
+        schema.cdc_table_mode = "consolidated"
+        events = [
+            _make_event(op="I", table="users", position="0/100", columns={"id": 1, "name": "Alice"}),
+            _make_event(op="I", table="users", position="0/200", columns={"id": 2, "name": "Bob"}),
+            _make_event(op="I", table="users", position="0/300", columns={"id": 3, "name": "Charlie"}),
+        ]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        # Use a real batcher with max_events=2 so after the 2nd event should_flush is True
+        MockBatcher.return_value = RealBatcher(max_events=2)
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # 2 events trigger a micro-batch flush (non-final), then 1 event triggers the final flush
+        # Each flush produces one S3 write and one Kafka send
+        assert mock_s3.write_batch.call_count == 2
+        assert mock_producer.send_batch_notification.call_count == 2
+
+        # Micro-batch (first call) is NOT the final batch; final flush IS
+        send_calls = mock_producer.send_batch_notification.call_args_list
+        assert send_calls[0].kwargs["is_final_batch"] is False
+        assert send_calls[1].kwargs["is_final_batch"] is True
+
+    @patch("posthog.temporal.data_imports.cdc.activities.activity")
+    @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
+    @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
+    @patch("posthog.temporal.data_imports.cdc.activities.PgCDCStreamReader")
+    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
+    @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
+    @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
+    def test_deferred_run_stored_per_batch_for_snapshot_schema(
+        self,
+        mock_close_conns,
+        MockJob,
+        MockSourceModel,
+        mock_get_schemas,
+        MockReader,
+        MockS3Writer,
+        MockProducer,
+        mock_activity,
+    ):
+        source = _make_source()
+        schema = _make_schema("users", cdc_mode="snapshot", source=source)
+        schema.sync_type_config["cdc_table_mode"] = "consolidated"
+        schema.cdc_table_mode = "consolidated"
+        events = [
+            _make_event(op="I", table="users", position="0/100", columns={"id": 1, "name": "Alice"}),
+            _make_event(op="I", table="users", position="0/200", columns={"id": 2, "name": "Bob"}),
+        ]
+
+        mock_reader, mock_s3, mock_producer, mock_job = _setup_mocks(
+            mock_activity,
+            MockProducer,
+            MockS3Writer,
+            MockReader,
+            mock_get_schemas,
+            MockSourceModel,
+            MockJob,
+            mock_close_conns,
+            source,
+            [schema],
+            events,
+        )
+
+        inputs = CDCExtractInput(team_id=1, source_id=source.id)
+        cdc_extract_activity(inputs)
+
+        # Snapshot mode defers Kafka — no producer should be created during extraction
+        MockProducer.assert_not_called()
+
+        # Exactly one deferred run entry (one tracker for the consolidated table)
+        deferred = schema.sync_type_config.get("cdc_deferred_runs", [])
+        assert len(deferred) == 1
+
+        entry = deferred[0]
+        assert entry["run_uuid"] is not None
+        assert len(entry["batch_results"]) == 1
+        batch = entry["batch_results"][0]
+        assert batch["s3_path"] == "s3://bucket/data/part-0000.parquet"
+        assert batch["row_count"] == len(events)
+
+        # Job should be marked COMPLETED by the activity (no Kafka consumer will do it)
+        assert any("status" in call.kwargs.get("update_fields", []) for call in mock_job.save.call_args_list)

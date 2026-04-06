@@ -268,7 +268,7 @@ async def register_cdc_companion_table(
     logger = LOGGER.bind(team_id=team_id)
 
     if row_count == 0:
-        await logger.awarn("Skipping `register_cdc_companion_table` due to `row_count` being 0")
+        await logger.awarning("Skipping `register_cdc_companion_table` due to `row_count` being 0")
         return
 
     @database_sync_to_async_pool
