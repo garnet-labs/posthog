@@ -315,6 +315,11 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
 
             Creates the entry on first call (keyed by run_uuid), appends to it on
             subsequent calls.  Saves immediately so progress survives process failures.
+
+            IMPORTANT: This mutates the in-memory schema.sync_type_config and saves
+            with update_fields=["sync_type_config"]. This is safe because
+            cdc_extract_activity is single-threaded and all sync_type_config writes
+            happen sequentially within this activity. Do not call from async contexts.
             """
             deferred = schema.sync_type_config.setdefault("cdc_deferred_runs", [])
 
@@ -437,6 +442,9 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
         for event in reader.read_changes():
             activity.heartbeat()
 
+            # The publication should be scoped to CDC-enabled tables only, so in
+            # practice this filter is a no-op. It's a safety net in case the
+            # publication includes extra tables (e.g. self-managed mode).
             if event.table_name not in cdc_table_names:
                 continue
 
@@ -459,7 +467,7 @@ def cdc_extract_activity(inputs: CDCExtractInput) -> None:
         # 2. Post-WAL: PK change detection, truncate handling
         # ------------------------------------------------------------------
         for table_name in all_table_names:
-            decoder_pks = reader._decoder.get_key_columns(table_name)
+            decoder_pks = reader.get_decoder_key_columns(table_name)
             stored_pks = pk_columns_by_table.get(table_name, [])
             if decoder_pks and decoder_pks != stored_pks:
                 log.warning("pk_columns_changed", table=table_name, old=stored_pks, new=decoder_pks)
@@ -648,9 +656,8 @@ def cleanup_orphan_slots_activity() -> None:
        - Critical threshold (PostHog-managed, safety net on): drop slot, mark error
        - Self-managed: never drop, only warn
     """
-    import psycopg
-
     from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import (
+        cdc_pg_connection,
         drop_slot_and_publication,
         get_slot_lag_bytes,
     )
@@ -687,18 +694,8 @@ def cleanup_orphan_slots_activity() -> None:
         if source.deleted and management_mode == "posthog":
             source_log.info("cleaning_up_deleted_source_slot")
             try:
-                conn = psycopg.connect(
-                    host=job_inputs.get("host", ""),
-                    port=int(job_inputs.get("port", 5432)),
-                    dbname=job_inputs.get("database", ""),
-                    user=job_inputs.get("user", ""),
-                    password=job_inputs.get("password", ""),
-                    connect_timeout=10,
-                )
-                try:
+                with cdc_pg_connection(source, connect_timeout=10) as conn:
                     drop_slot_and_publication(conn, slot_name, pub_name)
-                finally:
-                    conn.close()
             except Exception:
                 source_log.exception("failed_to_cleanup_deleted_source_slot")
             continue
@@ -708,18 +705,8 @@ def cleanup_orphan_slots_activity() -> None:
             continue
 
         try:
-            conn = psycopg.connect(
-                host=job_inputs.get("host", ""),
-                port=int(job_inputs.get("port", 5432)),
-                dbname=job_inputs.get("database", ""),
-                user=job_inputs.get("user", ""),
-                password=job_inputs.get("password", ""),
-                connect_timeout=10,
-            )
-            try:
+            with cdc_pg_connection(source, connect_timeout=10) as conn:
                 lag_bytes = get_slot_lag_bytes(conn, slot_name)
-            finally:
-                conn.close()
         except Exception:
             source_log.exception("failed_to_check_slot_lag")
             continue
@@ -743,18 +730,8 @@ def cleanup_orphan_slots_activity() -> None:
             if management_mode == "posthog" and auto_drop:
                 source_log.warning("auto_dropping_slot_critical_lag")
                 try:
-                    conn = psycopg.connect(
-                        host=job_inputs.get("host", ""),
-                        port=int(job_inputs.get("port", 5432)),
-                        dbname=job_inputs.get("database", ""),
-                        user=job_inputs.get("user", ""),
-                        password=job_inputs.get("password", ""),
-                        connect_timeout=10,
-                    )
-                    try:
+                    with cdc_pg_connection(source, connect_timeout=10) as conn:
                         drop_slot_and_publication(conn, slot_name, pub_name)
-                    finally:
-                        conn.close()
 
                     source.status = ExternalDataSource.Status.ERROR
                     source.save(update_fields=["status", "updated_at"])
