@@ -103,9 +103,6 @@ function toNormalizedChart(config: ChartConfig, mock: MockChart): NormalizedChar
         axes,
         raw: config,
         hover: (index) => mock.triggerTooltip(index),
-        pin: () => {},
-        unpin: () => {},
-        getTooltipHost: () => mock.getTooltipHost(),
     }
 }
 
@@ -162,11 +159,6 @@ class MockChart {
         }
         this.tooltip = { body: tooltipModel.body }
         this.externalHandler({ chart: this, tooltip: tooltipModel })
-    }
-
-    /** Find the tooltip wrapper div that useInsightTooltip appended to the body. */
-    getTooltipHost(): HTMLElement | null {
-        return document.querySelector('[data-attr="insight-tooltip-wrapper"]')
     }
 
     static getChart(_canvas: HTMLCanvasElement): MockChart | undefined {

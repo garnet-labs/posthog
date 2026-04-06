@@ -20,15 +20,29 @@ export async function waitForChart(): Promise<Chart> {
     return chart!
 }
 
-/** Wait for a hog-charts tooltip to render inside the tooltip host for the
- *  given chart. Returns the first child element (the rendered tooltip). */
-export async function waitForTooltip(chart: Chart): Promise<HTMLElement> {
+/** Known tooltip host selectors — one per renderer.
+ *  hog-charts renders into [data-attr="hog-charts-tooltip-host"],
+ *  Chart.js renders into [data-attr="insight-tooltip-wrapper"]. */
+const TOOLTIP_HOST_SELECTORS = ['[data-attr="hog-charts-tooltip-host"]', '[data-attr="insight-tooltip-wrapper"]']
+
+function findTooltipHost(): HTMLElement | null {
+    for (const selector of TOOLTIP_HOST_SELECTORS) {
+        const el = document.querySelector<HTMLElement>(selector)
+        if (el && el.children.length > 0) {
+            return el
+        }
+    }
+    return null
+}
+
+/** Wait for a tooltip to render. Works for both Chart.js and hog-charts.
+ *  Call `chart.hover(index)` first, then await this to get the tooltip element. */
+export async function waitForTooltip(): Promise<HTMLElement> {
     let found: HTMLElement | null = null
     await waitFor(
         () => {
-            const host = chart.tooltipHost()
+            const host = findTooltipHost()
             expect(host).not.toBeNull()
-            expect(host!.children.length).toBeGreaterThan(0)
             found = host!.firstElementChild as HTMLElement
         },
         { timeout: 2000 }

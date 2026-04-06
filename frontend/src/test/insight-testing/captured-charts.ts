@@ -36,12 +36,6 @@ export interface NormalizedChart {
     raw: unknown
     /** Drive hover state from tests. Triggers tooltip rendering at the given data index. */
     hover: (index: number) => void
-    /** Pin the tooltip so it stays visible and becomes interactive. */
-    pin: () => void
-    /** Unpin the tooltip. */
-    unpin: () => void
-    /** Returns the DOM element hosting the tooltip content. */
-    getTooltipHost: () => HTMLElement | null
 }
 
 let captured: NormalizedChart[] = []

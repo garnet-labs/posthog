@@ -85,12 +85,6 @@ export interface Chart {
     config: ChartConfig
     /** Move the hover index, triggering a tooltip re-render at the given data index. */
     hover(index: number): void
-    /** Pin the current tooltip so it stays visible and becomes interactive. */
-    pin(): void
-    /** Unpin the tooltip. */
-    unpin(): void
-    /** DOM host containing the currently rendered tooltip. */
-    tooltipHost(): HTMLElement | null
 }
 
 function resolveChart(index: number): NormalizedChart {
@@ -168,8 +162,5 @@ export function getChart(index = -1): Chart {
         raw: normalized.raw,
         config: normalized.renderer === 'chartjs' ? (normalized.raw as ChartConfig) : ({} as ChartConfig),
         hover: (i) => normalized.hover(i),
-        pin: () => normalized.pin(),
-        unpin: () => normalized.unpin(),
-        tooltipHost: () => normalized.getTooltipHost(),
     }
 }
