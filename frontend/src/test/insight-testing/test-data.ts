@@ -23,6 +23,22 @@ export const eventDefinitions: EventDefinition[] = [
         last_seen_at: friday,
         created_at: setupWeek,
     },
+    {
+        id: 'evt-003',
+        name: 'ZeroCounts',
+        description: 'Event with one empty and one active series',
+        tags: [],
+        last_seen_at: friday,
+        created_at: setupWeek,
+    },
+    {
+        id: 'evt-004',
+        name: 'Minimal',
+        description: 'Event with no action metadata',
+        tags: [],
+        last_seen_at: friday,
+        created_at: setupWeek,
+    },
 ]
 
 export const propertyDefinitions: PropertyDefinition[] = [
@@ -85,6 +101,16 @@ export const trendsSeries = {
         { label: 'Conker', data: [0, 0, 0, 0, 0], days, labels, breakdown_value: 'Conker' },
         { label: 'Prickles', data: [0, 0, 1, 1, 0], days, labels, breakdown_value: 'Prickles' },
     ],
+    withZeroCounts: [
+        { label: 'EmptySeries', data: [0, 0, 0, 0, 0], days, labels },
+        { label: 'ActiveSeries', data: [1, 2, 3, 2, 2], days, labels },
+    ],
+    minimal: {
+        label: 'Minimal',
+        data: [1, 1, 1, 1, 1],
+        days,
+        labels,
+    },
 }
 
 // Maps (event name, optional breakdown) → canned series data.
@@ -92,6 +118,8 @@ export const trendsSeries = {
 
 interface EventSeriesConfig {
     default: SeriesData
+    /** Return multiple series for this event even without a breakdown. */
+    multi?: SeriesData[]
     breakdowns?: Record<string, SeriesData[]>
 }
 
@@ -103,6 +131,8 @@ const seriesByEvent: Record<string, EventSeriesConfig> = {
             hedgehog: trendsSeries.napsByHedgehog,
         },
     },
+    ZeroCounts: { default: trendsSeries.withZeroCounts[0], multi: trendsSeries.withZeroCounts },
+    Minimal: { default: trendsSeries.minimal },
 }
 
 const fallbackSeries: SeriesData = {
@@ -119,6 +149,9 @@ export function lookupSeries(eventName: string, breakdownProperty?: string): Ser
     }
     if (breakdownProperty && config.breakdowns?.[breakdownProperty]) {
         return config.breakdowns[breakdownProperty]
+    }
+    if (config.multi) {
+        return config.multi
     }
     return [config.default]
 }

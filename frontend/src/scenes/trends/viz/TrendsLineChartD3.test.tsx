@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom'
 
-import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import { FEATURE_FLAGS } from 'lib/constants'
 import { DEFAULT_MARGINS } from 'lib/hog-charts/core/Chart'
@@ -45,32 +45,31 @@ function hoverAtIndex(wrapper: HTMLElement, index: number, totalLabels: number):
     fireEvent.mouseMove(wrapper, { clientX: plotLeft + step * index, clientY: 200 })
 }
 
-describe('TrendsLineChartD3 integration', () => {
-    it('renders the chart with overlay DOM', async () => {
+async function hoverAndGetTooltip(index: number, totalLabels: number): Promise<HTMLElement> {
+    const canvas = await screen.findByRole('img', { name: /chart with/i })
+    act(() => {
+        hoverAtIndex(canvas.parentElement!, index, totalLabels)
+    })
+    let tooltip!: HTMLElement
+    await waitFor(() => {
+        const el = document.querySelector('[data-hog-charts-tooltip]')
+        expect(el).not.toBeNull()
+        tooltip = el as HTMLElement
+    })
+    return tooltip
+}
+
+describe('TrendsLineChartD3', () => {
+    it('shows correct series value and label in tooltip on hover', async () => {
         renderInsightPage({ query: buildTrendsQuery(), featureFlags: HOG_CHARTS_FLAG })
 
-        await waitFor(() => {
-            expect(screen.getByRole('img', { name: /chart with 1 data series/i })).toBeInTheDocument()
-        })
+        const tooltip = await hoverAndGetTooltip(2, trendsSeries.pageviews.labels!.length)
+
+        expect(within(tooltip).getByText('134')).toBeInTheDocument()
+        expect(tooltip.querySelector('.graph-series-glyph')).toBeInTheDocument()
     })
 
-    it('shows tooltip with series data on hover', async () => {
-        renderInsightPage({ query: buildTrendsQuery(), featureFlags: HOG_CHARTS_FLAG })
-
-        const canvas = await screen.findByRole('img', { name: /chart with/i })
-
-        act(() => {
-            hoverAtIndex(canvas.parentElement!, 2, trendsSeries.pageviews.labels!.length)
-        })
-
-        await waitFor(() => {
-            const tooltip = document.querySelector('[data-hog-charts-tooltip]')
-            expect(tooltip).not.toBeNull()
-            expect(tooltip!.textContent).toContain('134')
-        })
-    })
-
-    it('renders multiple series when breakdown is applied', async () => {
+    it('shows breakdown values in tooltip when breakdown is applied', async () => {
         renderInsightPage({
             query: buildTrendsQuery({
                 series: [{ kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' }],
@@ -79,83 +78,36 @@ describe('TrendsLineChartD3 integration', () => {
             featureFlags: HOG_CHARTS_FLAG,
         })
 
-        await waitFor(() => {
-            expect(screen.getByRole('img', { name: /chart with 4 data series/i })).toBeInTheDocument()
-        })
+        const tooltip = await hoverAndGetTooltip(2, trendsSeries.pageviews.labels!.length)
+
+        expect(within(tooltip).getByText('Spike')).toBeInTheDocument()
+        expect(within(tooltip).getByText('Thistle')).toBeInTheDocument()
     })
 
-    it('drops zero-count series from the chart', async () => {
+    it('excludes zero-count series and shows only active series in tooltip', async () => {
         renderInsightPage({
-            query: buildTrendsQuery(),
+            query: buildTrendsQuery({
+                series: [{ kind: NodeKind.EventsNode, event: 'ZeroCounts', name: 'ZeroCounts' }],
+            }),
             featureFlags: HOG_CHARTS_FLAG,
-            mocks: {
-                mockResponses: [
-                    {
-                        match: (q) => q.kind === NodeKind.TrendsQuery,
-                        response: {
-                            results: [
-                                {
-                                    action: { id: 'a', type: 'events', name: 'A', order: 0 },
-                                    label: 'Empty',
-                                    count: 0,
-                                    data: [0, 0, 0, 0, 0],
-                                    days: ['2024-06-10', '2024-06-11', '2024-06-12', '2024-06-13', '2024-06-14'],
-                                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-                                },
-                                {
-                                    action: { id: 'b', type: 'events', name: 'B', order: 1 },
-                                    label: 'NonEmpty',
-                                    count: 10,
-                                    data: [1, 2, 3, 2, 2],
-                                    days: ['2024-06-10', '2024-06-11', '2024-06-12', '2024-06-13', '2024-06-14'],
-                                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-                                },
-                            ],
-                        },
-                    },
-                ],
-            },
         })
 
-        await waitFor(() => {
-            expect(screen.getByRole('img', { name: /chart with 1 data series/i })).toBeInTheDocument()
-        })
+        const tooltip = await hoverAndGetTooltip(2, trendsSeries.pageviews.labels!.length)
+
+        expect(within(tooltip).getByText('3')).toBeInTheDocument()
+        expect(tooltip.textContent).not.toContain('EmptySeries')
     })
 
-    it('does not crash when series meta is missing', async () => {
+    it('renders tooltip without crashing when series has no action metadata', async () => {
         renderInsightPage({
-            query: buildTrendsQuery(),
+            query: buildTrendsQuery({
+                series: [{ kind: NodeKind.EventsNode, event: 'Minimal', name: 'Minimal' }],
+            }),
             featureFlags: HOG_CHARTS_FLAG,
-            mocks: {
-                mockResponses: [
-                    {
-                        match: (q) => q.kind === NodeKind.TrendsQuery,
-                        response: {
-                            results: [
-                                {
-                                    label: 'Bare',
-                                    count: 5,
-                                    data: [1, 1, 1, 1, 1],
-                                    days: ['2024-06-10', '2024-06-11', '2024-06-12', '2024-06-13', '2024-06-14'],
-                                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-                                },
-                            ],
-                        },
-                    },
-                ],
-            },
         })
 
-        await waitFor(() => {
-            expect(screen.getByRole('img', { name: /chart with 1 data series/i })).toBeInTheDocument()
-        })
+        const tooltip = await hoverAndGetTooltip(0, trendsSeries.minimal.labels!.length)
 
-        act(() => {
-            hoverAtIndex(screen.getByRole('img', { name: /chart with/i }).parentElement!, 0, 5)
-        })
-
-        await waitFor(() => {
-            expect(document.querySelector('[data-hog-charts-tooltip]')).not.toBeNull()
-        })
+        expect(within(tooltip).getByText('1')).toBeInTheDocument()
     })
 })
