@@ -64,14 +64,18 @@ export function TrendsLineChartD3({ context }: TrendsLineChartD3Props): JSX.Elem
 
     const hasData = indexedResults && indexedResults[0]?.data && indexedResults.some((r) => r.count !== 0)
 
-    const chartConfig = buildTrendsConfig({
-        interval,
-        days: currentPeriodResult?.days ?? [],
-        timezone,
-        yAxisScaleType,
-        isPercentStackView,
-        goalLines,
-    })
+    const chartConfig = useMemo(
+        () =>
+            buildTrendsConfig({
+                interval,
+                days: currentPeriodResult?.days ?? [],
+                timezone,
+                yAxisScaleType,
+                isPercentStackView,
+                goalLines,
+            }),
+        [interval, currentPeriodResult?.days, timezone, yAxisScaleType, isPercentStackView, goalLines]
+    )
 
     const formatCompareLabel = context?.formatCompareLabel
     const renderTooltip = useCallback(

@@ -13,8 +13,11 @@ const BREAKDOWN_NULL_STRING_LABEL = '$$_posthog_breakdown_null_$$'
 const BREAKDOWN_NULL_NUMERIC_LABEL = 9007199254740990
 
 export interface IndexedTrendResult extends TrendResult {
+    /** Index after applying visualization-specific sorting and filtering. */
     id: number
+    /** Original index before re-sorting — used to get series color correctly. */
     seriesIndex: number
+    /** Color index shared between current/previous compare series with the same label. */
     colorIndex: number
 }
 
