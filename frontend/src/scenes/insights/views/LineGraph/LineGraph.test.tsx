@@ -5,7 +5,7 @@ import {
     buildTrendsQuery,
     type MockResponse,
     type QueryBody,
-    renderInsightPage,
+    renderInsight,
     waitForChart,
 } from '~/test/insight-testing'
 import { ChartDisplayType } from '~/types'
@@ -67,7 +67,7 @@ describe('LineGraph', () => {
         })
 
         it('renders the last data point with a dashed line when it falls on the current day', async () => {
-            renderInsightPage({
+            renderInsight({
                 query: buildTrendsQuery(),
             })
 
@@ -88,7 +88,7 @@ describe('LineGraph', () => {
             // Move "now" to the day after the data range
             jest.setSystemTime(new Date('2024-06-15T12:00:00Z'))
 
-            renderInsightPage({
+            renderInsight({
                 query: buildTrendsQuery(),
             })
 
@@ -101,7 +101,7 @@ describe('LineGraph', () => {
         })
 
         it('excludes incomplete day from trend line regression', async () => {
-            renderInsightPage({
+            renderInsight({
                 query: buildTrendsQuery({
                     trendsFilter: { showTrendLines: true },
                 }),
@@ -118,7 +118,7 @@ describe('LineGraph', () => {
         it('does not set trendoffset when all data is complete', async () => {
             jest.setSystemTime(new Date('2024-06-15T12:00:00Z'))
 
-            renderInsightPage({
+            renderInsight({
                 query: buildTrendsQuery({
                     trendsFilter: { showTrendLines: true },
                 }),
@@ -135,7 +135,7 @@ describe('LineGraph', () => {
 
     describe('Compare to previous', () => {
         it('uses current period dates on x-axis for unstacked bar chart with compare', async () => {
-            renderInsightPage({
+            renderInsight({
                 query: buildTrendsQuery({
                     trendsFilter: { display: ChartDisplayType.ActionsUnstackedBar },
                     compareFilter: { compare: true },

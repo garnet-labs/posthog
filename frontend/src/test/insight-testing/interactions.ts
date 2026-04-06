@@ -1,6 +1,7 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+import { DEFAULT_MARGINS } from 'lib/hog-charts/core/Chart'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
 import { TrendsQuery } from '~/queries/schema/schema-general'
@@ -99,4 +100,27 @@ export const compare = {
 
 export function getQuerySource(): TrendsQuery {
     return getLogic().values.querySource as TrendsQuery
+}
+
+export const chart = {
+    async hoverTooltip(index: number, totalLabels: number): Promise<HTMLElement> {
+        const canvas = await screen.findByRole('img', { name: /chart with/i })
+        const wrapper = canvas.parentElement!
+        const rect = wrapper.getBoundingClientRect()
+        const plotLeft = DEFAULT_MARGINS.left
+        const plotWidth = rect.width - DEFAULT_MARGINS.right - plotLeft
+        const step = plotWidth / (totalLabels - 1)
+
+        act(() => {
+            fireEvent.mouseMove(wrapper, { clientX: plotLeft + step * index, clientY: rect.height / 2 })
+        })
+
+        let tooltip!: HTMLElement
+        await waitFor(() => {
+            const el = document.querySelector('[data-hog-charts-tooltip]')
+            expect(el).not.toBeNull()
+            tooltip = el as HTMLElement
+        })
+        return tooltip
+    },
 }
