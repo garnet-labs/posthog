@@ -1792,8 +1792,9 @@ def duckling_events_daily_backfill_sensor(
     new_partitions: list[str] = []
     run_requests: list[RunRequest] = []
 
-    # Find all teams with duckling configurations
-    for catalog in DuckLakeCatalog.objects.all():
+    # Find all team-backed duckling configurations (org-only catalogs are not
+    # processable by per-project backfills)
+    for catalog in DuckLakeCatalog.objects.filter(team__isnull=False):
         partition_key = f"{catalog.team_id}_{yesterday}"
 
         if partition_key not in existing:
@@ -1926,10 +1927,11 @@ def duckling_events_full_backfill_sensor(
         except json.JSONDecodeError:
             cursor_data = {}
 
-    # Get list of teams to process
-    catalogs = list(DuckLakeCatalog.objects.all().order_by("team_id"))
+    # Get team-backed catalogs (org-only catalogs are not processable by
+    # per-project backfills)
+    catalogs = list(DuckLakeCatalog.objects.filter(team__isnull=False).order_by("team_id"))
     if not catalogs:
-        context.log.info("No DuckLakeCatalog entries found")
+        context.log.info("No team-backed DuckLakeCatalog entries found")
         return SensorResult(run_requests=[])
 
     # Find where to resume from
@@ -1956,11 +1958,6 @@ def duckling_events_full_backfill_sensor(
             break
 
         team_id = catalog.team_id
-        if team_id is None:
-            context.log.warning(
-                f"DuckLakeCatalog id={catalog.id} has no team_id — backfill requires a team-backed catalog, skipping"
-            )
-            continue
 
         # Determine start month - use cached value if resuming same team
         if team_id == resume_team_id and cached_earliest:
@@ -2076,7 +2073,7 @@ def duckling_persons_daily_backfill_sensor(
     new_partitions: list[str] = []
     run_requests: list[RunRequest] = []
 
-    for catalog in DuckLakeCatalog.objects.all():
+    for catalog in DuckLakeCatalog.objects.filter(team__isnull=False):
         partition_key = f"{catalog.team_id}_{yesterday}"
 
         if partition_key not in existing:
@@ -2166,10 +2163,11 @@ def duckling_persons_full_backfill_sensor(
         To restart from scratch, reset the cursor in Dagster UI:
         Sensors -> duckling_persons_full_backfill_sensor -> Reset cursor
     """
-    # Get list of teams to process
-    catalogs = list(DuckLakeCatalog.objects.all().order_by("team_id"))
+    # Get team-backed catalogs (org-only catalogs are not processable by
+    # per-project backfills)
+    catalogs = list(DuckLakeCatalog.objects.filter(team__isnull=False).order_by("team_id"))
     if not catalogs:
-        context.log.info("No DuckLakeCatalog entries found")
+        context.log.info("No team-backed DuckLakeCatalog entries found")
         return SensorResult(run_requests=[])
 
     # Check existing partitions
