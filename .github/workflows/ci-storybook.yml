@@ -586,7 +586,7 @@ jobs:
     handle-snapshots:
         name: Handle snapshot changes
         runs-on: ubuntu-latest
-        timeout-minutes: 5
+        timeout-minutes: 15
         needs: [visual-regression, changes]
         if: always() && needs.changes.outputs.frontend == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         permissions:
@@ -652,6 +652,7 @@ jobs:
               run: cd products/visual_review/cli && npm ci
 
             - name: Submit to Visual Review
+              timeout-minutes: 10
               continue-on-error: true
               env:
                   VR_TOKEN: ${{ secrets.VR_API_TOKEN }}
