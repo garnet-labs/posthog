@@ -18591,6 +18591,30 @@ export namespace Schemas {
       cohorts: LocalEvaluationResponseCohorts;
     }
 
+    export interface LogsAlertCheck {
+      readonly id: string;
+      readonly created_at: string;
+      /**
+       * @minimum 0
+       * @maximum 2147483647
+       * @nullable
+       */
+      result_count?: number | null;
+      threshold_breached: boolean;
+      /** @maxLength 20 */
+      state_before: string;
+      /** @maxLength 20 */
+      state_after: string;
+      /** @nullable */
+      error_message?: string | null;
+      /**
+       * @minimum 0
+       * @maximum 2147483647
+       * @nullable
+       */
+      query_duration_ms?: number | null;
+    }
+
     /**
      * * `above` - Above
     * `below` - Below
@@ -18620,6 +18644,13 @@ export namespace Schemas {
       Errored: 'errored',
       Snoozed: 'snoozed',
     } as const;
+
+    export interface LogsAlertSparklineBucket {
+      timestamp: string;
+      ok: number;
+      breached: number;
+      errored: number;
+    }
 
     export interface LogsAlertConfiguration {
       readonly id: string;
@@ -18675,6 +18706,7 @@ export namespace Schemas {
       readonly created_by: UserBasic;
       /** @nullable */
       readonly updated_at: string | null;
+      readonly sparkline: readonly LogsAlertSparklineBucket[];
     }
 
     export interface LogsAlertSimulateBucket {
@@ -20304,6 +20336,15 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: LiveDebuggerBreakpoint[];
+    }
+
+    export interface PaginatedLogsAlertCheckList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: LogsAlertCheck[];
     }
 
     export interface PaginatedLogsAlertConfigurationList {
@@ -24147,6 +24188,7 @@ export namespace Schemas {
       readonly created_by?: UserBasic;
       /** @nullable */
       readonly updated_at?: string | null;
+      readonly sparkline?: readonly LogsAlertSparklineBucket[];
     }
 
     /**
@@ -31956,6 +31998,30 @@ export namespace Schemas {
     offset?: number;
     };
 
+    export type EnvironmentsLogsAlertsChecksListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    /**
+     * Filter checks by outcome.
+     */
+    outcome?: EnvironmentsLogsAlertsChecksListOutcome;
+    };
+
+    export type EnvironmentsLogsAlertsChecksListOutcome = typeof EnvironmentsLogsAlertsChecksListOutcome[keyof typeof EnvironmentsLogsAlertsChecksListOutcome];
+
+
+    export const EnvironmentsLogsAlertsChecksListOutcome = {
+      Breached: 'breached',
+      Errored: 'errored',
+      Ok: 'ok',
+    } as const;
+
     export type EnvironmentsPersistedFolderListParams = {
     /**
      * Number of results to return per page.
@@ -35038,6 +35104,30 @@ export namespace Schemas {
      */
     offset?: number;
     };
+
+    export type LogsAlertsChecksListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    /**
+     * Filter checks by outcome.
+     */
+    outcome?: LogsAlertsChecksListOutcome;
+    };
+
+    export type LogsAlertsChecksListOutcome = typeof LogsAlertsChecksListOutcome[keyof typeof LogsAlertsChecksListOutcome];
+
+
+    export const LogsAlertsChecksListOutcome = {
+      Breached: 'breached',
+      Errored: 'errored',
+      Ok: 'ok',
+    } as const;
 
     export type ManagedMigrationsListParams = {
     /**
