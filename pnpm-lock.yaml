@@ -103,6 +103,7 @@ overrides:
   react-dom: 18.3.1
   sha.js: '>=2.4.12'
   typescript: 5.7.3
+  uWebSockets.js: https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/cfc9a40d8132a34881813cec3d5f8e3a185b3ce3
 
 patchedDependencies:
   chartjs-plugin-crosshair@2.0.0:
@@ -33521,7 +33522,7 @@ snapshots:
       '@storybook/theming': 7.6.20(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@storybook/types': 7.6.20
       dequal: 2.0.3
-      lodash: 4.17.23
+      lodash: 4.18.1
       memoizerific: 1.11.3
       store2: 2.14.4
       telejson: 7.2.0
