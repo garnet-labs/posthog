@@ -4602,30 +4602,6 @@ describe.each([{ PERSONS_PREFETCH_ENABLED: false }, { PERSONS_PREFETCH_ENABLED: 
             }
         )
         testWithTeamIngester(
-            'should drop $$heatmap events when team.heatmaps_opt_in=false',
-            { teamOverrides: { heatmaps_opt_in: false } },
-            async (ingester, hub, team) => {
-                const distinctId = new UUIDT().toString()
-                await ingester.handleKafkaBatch(
-                    createKafkaMessages([
-                        new EventBuilder(team, distinctId)
-                            .withEvent('$$heatmap')
-                            .withProperties({
-                                $heatmap_data: {
-                                    'http://localhost:3000/': [{ x: 100, y: 200, target_fixed: false, type: 'click' }],
-                                },
-                            })
-                            .build(),
-                    ])
-                )
-
-                await waitForKafkaMessages(hub)
-                const events = await fetchEvents(hub, team.id)
-                expect(events.length).toBe(0)
-            }
-        )
-
-        testWithTeamIngester(
             'should route $ai_generation events through AI subpipeline with full enrichment',
             {},
             async (ingester, hub, team) => {

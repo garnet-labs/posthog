@@ -237,7 +237,6 @@ export class IngestionGeneralServer implements NodeServer {
                     { topic: KAFKA_EVENTS_PLUGIN_INGESTION_HISTORICAL, group_id: 'clickhouse-ingestion-historical' },
                     { topic: KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW, group_id: 'clickhouse-ingestion-overflow' },
                     { topic: 'client_iwarnings_ingestion', group_id: 'client_iwarnings_ingestion' },
-                    { topic: 'heatmaps_ingestion', group_id: 'heatmaps_ingestion' },
                 ]
 
                 for (const consumerOption of consumersOptions) {

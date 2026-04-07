@@ -8,6 +8,7 @@ import {
     KAFKA_EVENTS_PLUGIN_INGESTION_DLQ,
     KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
     KAFKA_GROUPS,
+    KAFKA_HEATMAPS_INGESTION_DLQ,
     KAFKA_INGESTION_WARNINGS,
     KAFKA_LOG_ENTRIES,
     KAFKA_PERSON,
@@ -37,6 +38,16 @@ export function createTestMonitoringOutputs(kafkaProducer: KafkaProducerWrapper)
     return new IngestionOutputs({
         [APP_METRICS_OUTPUT]: [{ topic: KAFKA_APP_METRICS_2, producer: kafkaProducer, producerName: 'test' }],
         [LOG_ENTRIES_OUTPUT]: [{ topic: KAFKA_LOG_ENTRIES, producer: kafkaProducer, producerName: 'test' }],
+    })
+}
+
+export function createTestHeatmapsOutputs(kafkaProducer: KafkaProducerWrapper) {
+    return new IngestionOutputs({
+        [HEATMAPS_OUTPUT]: [{ topic: KAFKA_CLICKHOUSE_HEATMAP_EVENTS, producer: kafkaProducer, producerName: 'test' }],
+        [INGESTION_WARNINGS_OUTPUT]: [
+            { topic: KAFKA_INGESTION_WARNINGS, producer: kafkaProducer, producerName: 'test' },
+        ],
+        [DLQ_OUTPUT]: [{ topic: KAFKA_HEATMAPS_INGESTION_DLQ, producer: kafkaProducer, producerName: 'test' }],
     })
 }
 

@@ -15,6 +15,7 @@ import { InternalFetchService } from './common/services/internal-fetch'
 import type { IngestionConsumerConfig } from './ingestion/config'
 import type { CookielessManager } from './ingestion/cookieless/cookieless-manager'
 import type { ErrorTrackingConsumerConfig } from './ingestion/error-tracking/config'
+import type { HeatmapsConsumerConfig } from './ingestion/heatmaps/config'
 import { KafkaProducerWrapper } from './kafka/producer'
 import type { LogsIngestionConsumerConfig, TracesIngestionConsumerConfig } from './logs-ingestion/config'
 import type { SessionRecordingApiConfig, SessionRecordingConfig } from './session-recording/config'
@@ -118,6 +119,7 @@ export interface PluginsServerConfig
         LogsIngestionConsumerConfig,
         TracesIngestionConsumerConfig,
         ErrorTrackingConsumerConfig,
+        HeatmapsConsumerConfig,
         SessionRecordingConfig,
         SessionRecordingApiConfig {}
 

@@ -2,6 +2,7 @@ import { getDefaultCdpConfig } from '../cdp/config'
 import { getDefaultCommonConfig } from '../common/config'
 import { getDefaultIngestionConsumerConfig } from '../ingestion/config'
 import { getDefaultErrorTrackingConsumerConfig } from '../ingestion/error-tracking/config'
+import { getDefaultHeatmapsConsumerConfig } from '../ingestion/heatmaps/config'
 import {
     getDefaultLogsIngestionConsumerConfig,
     getDefaultTracesIngestionConsumerConfig,
@@ -23,6 +24,7 @@ export function getDefaultConfig(): PluginsServerConfig {
         ...getDefaultLogsIngestionConsumerConfig(),
         ...getDefaultTracesIngestionConsumerConfig(),
         ...getDefaultErrorTrackingConsumerConfig(),
+        ...getDefaultHeatmapsConsumerConfig(),
         ...getDefaultSessionRecordingConfig(),
         ...getDefaultSessionRecordingApiConfig(),
     }

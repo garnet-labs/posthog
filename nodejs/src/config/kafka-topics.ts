@@ -40,6 +40,10 @@ export const KAFKA_CLICKHOUSE_SESSION_REPLAY_EVENTS = `${prefix}clickhouse_sessi
 export const KAFKA_PERFORMANCE_EVENTS = `${prefix}clickhouse_performance_events${suffix}`
 // write heatmap events to ClickHouse
 export const KAFKA_CLICKHOUSE_HEATMAP_EVENTS = `${prefix}clickhouse_heatmap_events${suffix}`
+
+// Heatmaps ingestion topics
+export const KAFKA_HEATMAPS_INGESTION = `${prefix}heatmaps_ingestion${suffix}`
+export const KAFKA_HEATMAPS_INGESTION_DLQ = `${prefix}heatmaps_ingestion_dlq${suffix}`
 // write AI events to ClickHouse
 export const KAFKA_CLICKHOUSE_AI_EVENTS_JSON = `${prefix}clickhouse_ai_events_json${suffix}`
 

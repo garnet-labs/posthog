@@ -19,7 +19,6 @@ import {
     createClientIngestionWarningSubpipeline,
 } from './client-ingestion-warning-subpipeline'
 import { EventSubpipelineInput, createEventSubpipeline } from './event-subpipeline'
-import { HeatmapSubpipelineInput, createHeatmapSubpipeline } from './heatmap-subpipeline'
 import {
     AiEventOutput,
     AsyncOutput,
@@ -30,7 +29,6 @@ import {
 } from './outputs'
 
 export type PerDistinctIdPipelineInput = EventSubpipelineInput &
-    HeatmapSubpipelineInput &
     ClientIngestionWarningSubpipelineInput &
     AiEventSubpipelineInput
 
@@ -54,11 +52,10 @@ export interface PerDistinctIdPipelineContext {
     team: Team
 }
 
-type EventBranch = 'client_ingestion_warning' | 'heatmap' | 'ai' | 'event'
+type EventBranch = 'client_ingestion_warning' | 'ai' | 'event'
 
 const EVENT_BRANCH_MAP = new Map<string, EventBranch>([
     ['$$client_ingestion_warning', 'client_ingestion_warning'],
-    ['$$heatmap', 'heatmap'],
     ...[...AI_EVENT_TYPES].map((t): [string, EventBranch] => [t, 'ai']),
 ])
 
@@ -88,15 +85,6 @@ export function createPerDistinctIdPipeline<TInput extends PerDistinctIdPipeline
             e.branching(classifyEvent, (branches) =>
                 branches
                     .branch('client_ingestion_warning', (b) => createClientIngestionWarningSubpipeline(b))
-                    .branch('heatmap', (b) =>
-                        createHeatmapSubpipeline(b, {
-                            options,
-                            outputs,
-                            teamManager,
-                            groupTypeManager,
-                            groupStore,
-                        })
-                    )
                     .branch('ai', (b) =>
                         createAiEventSubpipeline(b, {
                             options,

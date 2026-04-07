@@ -12,10 +12,8 @@ import {
 import { EventOutput, HeatmapsOutput } from './outputs'
 import { TestingAiEventSubpipelineInput, createTestingAiEventSubpipeline } from './testing-ai-event-subpipeline'
 import { TestingEventSubpipelineInput, createTestingEventSubpipeline } from './testing-event-subpipeline'
-import { TestingHeatmapSubpipelineInput, createTestingHeatmapSubpipeline } from './testing-heatmap-subpipeline'
 
 export type TestingPerDistinctIdPipelineInput = TestingEventSubpipelineInput &
-    TestingHeatmapSubpipelineInput &
     ClientIngestionWarningSubpipelineInput &
     TestingAiEventSubpipelineInput
 
@@ -29,11 +27,10 @@ export interface TestingPerDistinctIdPipelineContext {
     team: Team
 }
 
-type EventBranch = 'client_ingestion_warning' | 'heatmap' | 'ai' | 'event'
+type EventBranch = 'client_ingestion_warning' | 'ai' | 'event'
 
 const EVENT_BRANCH_MAP = new Map<string, EventBranch>([
     ['$$client_ingestion_warning', 'client_ingestion_warning'],
-    ['$$heatmap', 'heatmap'],
     ...[...AI_EVENT_TYPES].map((t): [string, EventBranch] => [t, 'ai']),
 ])
 
@@ -52,11 +49,6 @@ export function createTestingPerDistinctIdPipeline<TInput extends TestingPerDist
             e.branching<EventBranch, void>(classifyEvent, (branches) =>
                 branches
                     .branch('client_ingestion_warning', (b) => createClientIngestionWarningSubpipeline(b))
-                    .branch('heatmap', (b) =>
-                        createTestingHeatmapSubpipeline(b, {
-                            outputs,
-                        })
-                    )
                     .branch('ai', (b) =>
                         createTestingAiEventSubpipeline(b, {
                             outputs,

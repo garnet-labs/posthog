@@ -9,7 +9,7 @@ import { HealthCheckResult, HealthCheckResultError, PluginServerService, Plugins
 import { logger } from '../utils/logger'
 import { PromiseScheduler } from '../utils/promise-scheduler'
 import { TeamManager } from '../utils/team-manager'
-import { EVENTS_OUTPUT, HEATMAPS_OUTPUT } from './analytics/outputs'
+import { EVENTS_OUTPUT } from './analytics/outputs'
 import {
     TestingJoinedIngestionPipelineConfig,
     TestingJoinedIngestionPipelineContext,
@@ -31,7 +31,6 @@ export type IngestionTestingConsumerFullConfig = Pick<
     | 'INGESTION_CONSUMER_GROUP_ID'
     | 'INGESTION_CONSUMER_DLQ_TOPIC'
     | 'CLICKHOUSE_JSON_EVENTS_KAFKA_TOPIC'
-    | 'CLICKHOUSE_HEATMAPS_KAFKA_TOPIC'
     | 'KAFKA_BATCH_START_LOGGING_ENABLED'
 >
 
@@ -96,13 +95,6 @@ export class IngestionTestingConsumer {
             [EVENTS_OUTPUT]: [
                 {
                     topic: this.config.CLICKHOUSE_JSON_EVENTS_KAFKA_TOPIC,
-                    producer: this.kafkaProducer!,
-                    producerName: 'default',
-                },
-            ],
-            [HEATMAPS_OUTPUT]: [
-                {
-                    topic: this.config.CLICKHOUSE_HEATMAPS_KAFKA_TOPIC,
                     producer: this.kafkaProducer!,
                     producerName: 'default',
                 },

@@ -43,6 +43,7 @@ export enum PluginServerMode {
     ingestion_v2_testing = 'ingestion-v2-testing',
     ingestion_v2_combined = 'ingestion-v2-combined',
     ingestion_traces = 'ingestion-traces',
+    ingestion_heatmaps = 'ingestion-heatmaps',
     cdp_hogflow_scheduler = 'cdp-hogflow-scheduler',
 }
 

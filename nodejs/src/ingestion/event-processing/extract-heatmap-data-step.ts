@@ -4,7 +4,7 @@ import { PreIngestionEvent, RawClickhouseHeatmapEvent, TimestampFormat } from '.
 import { logger } from '../../utils/logger'
 import { castTimestampOrNow } from '../../utils/utils'
 import { isDistinctIdIllegal } from '../../worker/ingestion/persons/person-merge-service'
-import { HEATMAPS_OUTPUT, HeatmapsOutput } from '../analytics/outputs'
+import { HEATMAPS_OUTPUT, HeatmapsOutput } from '../heatmaps/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineWarning } from '../pipelines/pipeline.interface'
 import { PipelineResult, drop, isOkResult, ok } from '../pipelines/results'

@@ -22,15 +22,9 @@ import {
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
 } from '../../common/outputs'
+import { HEATMAPS_OUTPUT } from '../../heatmaps/outputs'
 import { IngestionOutputDefinition } from '../../outputs/resolver'
-import {
-    AI_EVENTS_OUTPUT,
-    ASYNC_OUTPUT,
-    EVENTS_OUTPUT,
-    HEATMAPS_OUTPUT,
-    PERSONS_OUTPUT,
-    PERSON_DISTINCT_IDS_OUTPUT,
-} from '../outputs'
+import { AI_EVENTS_OUTPUT, ASYNC_OUTPUT, EVENTS_OUTPUT, PERSONS_OUTPUT, PERSON_DISTINCT_IDS_OUTPUT } from '../outputs'
 import { DEFAULT_PRODUCER, ProducerName } from './producers'
 
 /** Static config for all analytics ingestion outputs. */

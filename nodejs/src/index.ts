@@ -6,6 +6,7 @@ import { PluginServer } from '~/server'
 import { NodeServer } from '~/servers/base-server'
 import { ErrorTrackingServer } from '~/servers/error-tracking-server'
 import { IngestionGeneralServer } from '~/servers/ingestion-general-server'
+import { IngestionHeatmapsServer } from '~/servers/ingestion-heatmaps-server'
 import { IngestionLogsServer } from '~/servers/ingestion-logs-server'
 import { IngestionSessionReplayServer } from '~/servers/ingestion-session-replay-server'
 import { IngestionTracesServer } from '~/servers/ingestion-traces-server'
@@ -34,6 +35,9 @@ function createServer(): NodeServer {
 
         case PluginServerMode.ingestion_traces:
             return new IngestionTracesServer()
+
+        case PluginServerMode.ingestion_heatmaps:
+            return new IngestionHeatmapsServer()
 
         default:
             // CDP modes, evaluation scheduler, local dev (null), local-cdp
