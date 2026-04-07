@@ -83,7 +83,6 @@ WORLD_WRITABLE_VOLUMES = [
     "sandbox-pycharm",
 ]
 
-SANDBOX_BACKUP_XML = REPO_ROOT / "docker/clickhouse/config.d/sandbox-backup.xml"
 INTENT_MAP_FILE = REPO_ROOT / "devenv" / "intent-map.yaml"
 
 def _all_sandbox_profiles() -> frozenset[str]:
@@ -655,15 +654,6 @@ def _ensure_cache_volumes() -> None:
         docker_volume_run(vol, "chmod 777 /data")
 
 
-def _copy_sandbox_backup_xml(worktree_path: str) -> None:
-    """Ensure ClickHouse backup config exists in the worktree."""
-    dest_dir = Path(worktree_path) / "docker/clickhouse/config.d"
-    dest = dest_dir / "sandbox-backup.xml"
-    if dest.resolve() == SANDBOX_BACKUP_XML.resolve():
-        return
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SANDBOX_BACKUP_XML, dest)
-
 
 def _init_cache_cleanup(port: int, worktree: str) -> None:
     info("Cleaning up cache init containers...")
@@ -694,7 +684,6 @@ def init_cache_from_master() -> None:
         fatal("Could not check out cache branch for cache init.")
 
     try:
-        _copy_sandbox_backup_xml(init_worktree)
         info("Building and starting containers...")
         compose(init_project, init_port, init_worktree, "up", "-d", "--build", capture=True)
 
@@ -991,7 +980,6 @@ def cmd_create(branch: str, base_branch: str = "master", no_attach: bool = False
     port = entry.port
     _ensure_cache_volumes()
     _ensure_jetbrains()
-    _copy_sandbox_backup_xml(worktree_path)
 
     # Build or verify the database cache
     cache_ready = _is_cache_ready()
