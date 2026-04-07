@@ -449,7 +449,7 @@ def process_message(message: Any) -> None:
         )
 
         if export_signal.is_final_batch:
-            logger.info(
+            logger.debug(
                 "final_batch_received",
                 total_batches=export_signal.total_batches,
                 total_rows=export_signal.total_rows,
