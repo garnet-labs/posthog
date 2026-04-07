@@ -1,3 +1,5 @@
+from typing import Any
+
 from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
