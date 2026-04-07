@@ -30,18 +30,22 @@ class Migration(migrations.Migration):
                 to="posthog.team",
             ),
         ),
-        migrations.AddConstraint(
+        migrations.AlterField(
             model_name="ducklakecatalog",
-            constraint=models.CheckConstraint(
-                check=models.Q(team__isnull=False) | models.Q(organization__isnull=False),
-                name="ducklakecatalog_has_owner",
+            name="organization",
+            field=models.OneToOneField(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="ducklake_catalog",
+                to="posthog.organization",
             ),
         ),
-        migrations.AddConstraint(
+        migrations.AlterField(
             model_name="duckgresserver",
-            constraint=models.CheckConstraint(
-                check=models.Q(team__isnull=False) | models.Q(organization__isnull=False),
-                name="duckgresserver_has_owner",
+            name="organization",
+            field=models.OneToOneField(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="duckgres_server",
+                to="posthog.organization",
             ),
         ),
     ]

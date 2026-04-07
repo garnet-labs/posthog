@@ -33,8 +33,6 @@ class DuckLakeCatalog(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
         "posthog.Organization",
         on_delete=models.CASCADE,
         related_name="ducklake_catalog",
-        null=True,
-        blank=True,
     )
 
     # Database connection settings
@@ -62,12 +60,6 @@ class DuckLakeCatalog(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
         db_table = "posthog_ducklakecatalog"
         verbose_name = "DuckLake catalog"
         verbose_name_plural = "DuckLake catalogs"
-        constraints = [
-            models.CheckConstraint(
-                check=models.Q(team__isnull=False) | models.Q(organization__isnull=False),
-                name="ducklakecatalog_has_owner",
-            ),
-        ]
 
     def to_public_config(self) -> dict[str, str]:
         """Convert to a config dict without secrets (safe for logging/debugging)."""
@@ -114,8 +106,6 @@ class DuckgresServer(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
         "posthog.Organization",
         on_delete=models.CASCADE,
         related_name="duckgres_server",
-        null=True,
-        blank=True,
     )
     host = models.CharField(max_length=255)
     port = models.IntegerField(default=5432)
@@ -128,9 +118,3 @@ class DuckgresServer(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
         db_table = "posthog_duckgresserver"
         verbose_name = "Duckgres server"
         verbose_name_plural = "Duckgres servers"
-        constraints = [
-            models.CheckConstraint(
-                check=models.Q(team__isnull=False) | models.Q(organization__isnull=False),
-                name="duckgresserver_has_owner",
-            ),
-        ]
