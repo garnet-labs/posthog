@@ -6,7 +6,12 @@ import {
 } from '../../common/producers'
 import { KafkaProducerRegistryBuilder } from '../../outputs/kafka-producer-registry-builder'
 
-export type { DefaultProducer, WarpstreamProducer, DefaultProducerConfigKey, ProducerName } from '../../common/producers'
+export type {
+    DefaultProducer,
+    WarpstreamProducer,
+    DefaultProducerConfigKey,
+    ProducerName,
+} from '../../common/producers'
 
 /** Register all producers on the builder. Call `.build(config)` to resolve. */
 export function registerProducers(kafkaClientRack: string | undefined) {

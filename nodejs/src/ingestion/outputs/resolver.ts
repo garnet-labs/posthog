@@ -43,9 +43,7 @@ export function resolveIngestionOutputs<O extends string, P extends string>(
         const producerName = (process.env[definition.producerOverrideEnvVar] ?? definition.defaultProducerName) as P
         const topic = process.env[definition.topicOverrideEnvVar] ?? definition.defaultTopic
 
-        const targets: IngestionOutputTarget[] = [
-            { topic, producer: registry.getProducer(producerName), producerName },
-        ]
+        const targets: IngestionOutputTarget[] = [{ topic, producer: registry.getProducer(producerName), producerName }]
 
         const secondaryTopic = definition.secondaryTopicEnvVar
             ? process.env[definition.secondaryTopicEnvVar]
