@@ -24,24 +24,63 @@ fn is_cancelled(cancel_token: Option<&CancellationToken>) -> bool {
     cancel_token.is_some_and(CancellationToken::is_cancelled)
 }
 
-/// Hint the kernel to evict page cache pages for a file after it has been fully read.
-/// This is a best-effort operation: failure is logged but does not abort the upload.
-/// Only effective on Linux; a no-op on other platforms.
-fn advise_dontneed(file: &File, path: &Path) {
+/// Hint the kernel about file access patterns and evict page cache incrementally.
+/// Best-effort: failure is logged at debug level. Only effective on Linux.
+///
+/// Stores the raw fd (valid for the lifetime of the File) to avoid borrowing
+/// the File, which would conflict with mutable reads.
+struct PageCacheAdvisor {
     #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::io::AsRawFd;
-        let fd = file.as_raw_fd();
-        // SAFETY: fd is valid for the lifetime of `file`, and posix_fadvise is safe to call
-        // with any fd/offset/len combination — invalid values simply return an error code.
-        let ret = unsafe { libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_DONTNEED) };
-        if ret != 0 {
-            tracing::debug!("posix_fadvise(DONTNEED) returned {ret} for {path:?} (non-fatal)");
+    fd: std::os::unix::io::RawFd,
+    #[cfg(target_os = "linux")]
+    path: std::path::PathBuf,
+    bytes_read: i64,
+}
+
+impl PageCacheAdvisor {
+    fn new(file: &File, path: &Path) -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::io::AsRawFd;
+            let fd = file.as_raw_fd();
+            // Hint sequential access so the kernel does aggressive readahead
+            // and is more willing to evict behind the read cursor.
+            let ret = unsafe { libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_SEQUENTIAL) };
+            if ret != 0 {
+                tracing::debug!(
+                    "posix_fadvise(SEQUENTIAL) returned {ret} for {path:?} (non-fatal)"
+                );
+            }
+            Self {
+                fd,
+                path: path.to_path_buf(),
+                bytes_read: 0,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (file, path);
+            Self { bytes_read: 0 }
         }
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (file, path);
+
+    /// Evict pages read so far. Call after each chunk to keep page cache
+    /// bounded to ~one chunk instead of accumulating the entire file.
+    fn evict(&mut self, bytes_just_read: usize) {
+        self.bytes_read += bytes_just_read as i64;
+
+        #[cfg(target_os = "linux")]
+        {
+            let ret = unsafe {
+                libc::posix_fadvise(self.fd, 0, self.bytes_read, libc::POSIX_FADV_DONTNEED)
+            };
+            if ret != 0 {
+                tracing::debug!(
+                    "posix_fadvise(DONTNEED) returned {ret} for {:?} (non-fatal)",
+                    self.path
+                );
+            }
+        }
     }
 }
 
@@ -112,6 +151,7 @@ impl S3Uploader {
             .with_context(|| format!("Failed to initiate multipart upload: {s3_key}"))?;
 
         let mut write = WriteMultipart::new_with_chunk_size(upload, MULTIPART_PART_SIZE);
+        let mut advisor = PageCacheAdvisor::new(&file, local_path);
 
         loop {
             if is_cancelled(cancel_token) {
@@ -141,12 +181,14 @@ impl S3Uploader {
             };
             buf.truncate(n);
 
+            // Evict pages we just read before reading more — keeps page cache bounded
+            // to ~one chunk instead of accumulating the entire file.
+            advisor.evict(n);
+
             // Bytes::from(Vec<u8>) takes ownership without copying.
             // WriteMultipart::put accumulates chunks and submits a part when chunk_size is reached.
             write.put(Bytes::from(buf));
         }
-
-        advise_dontneed(&file, local_path);
 
         write
             .finish()
