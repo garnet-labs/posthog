@@ -315,6 +315,7 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                             })
                                         }
                                         options={[
+                                            { value: '5min' as DataWarehouseSyncInterval, label: '5 mins' },
                                             { value: '15min' as DataWarehouseSyncInterval, label: '15 mins' },
                                             { value: '30min' as DataWarehouseSyncInterval, label: '30 mins' },
                                             { value: '1hour' as DataWarehouseSyncInterval, label: '1 hour' },
