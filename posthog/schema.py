@@ -1870,6 +1870,7 @@ class ExternalDataSourceType(StrEnum):
     GRANOLA = "Granola"
     BUILD_BETTER = "BuildBetter"
     CONVEX = "Convex"
+    CLICK_HOUSE = "ClickHouse"
 
 
 class ExternalQueryErrorCode(StrEnum):
