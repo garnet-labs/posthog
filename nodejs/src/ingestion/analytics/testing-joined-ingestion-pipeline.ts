@@ -4,12 +4,13 @@ import { Team } from '../../types'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
 import { TeamManager } from '../../utils/team-manager'
 import { DlqOutput, IngestionWarningsOutput } from '../common/outputs'
+import { HeatmapsOutput } from '../heatmaps/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { BatchPipelineBuilder } from '../pipelines/builders/batch-pipeline-builders'
 import { OkResultWithContext } from '../pipelines/pipeline.interface'
 import { PipelineConfig } from '../pipelines/result-handling-pipeline'
 import { ok } from '../pipelines/results'
-import { EventOutput, HeatmapsOutput } from './outputs'
+import { EventOutput } from './outputs'
 import {
     TestingPerDistinctIdPipelineConfig,
     TestingPerDistinctIdPipelineInput,

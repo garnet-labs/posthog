@@ -20,18 +20,12 @@ import { createPrepareEventStep } from '../event-processing/prepare-event-step'
 import { createProcessGroupsStep } from '../event-processing/process-groups-step'
 import { createProcessPersonlessStep } from '../event-processing/process-personless-step'
 import { createProcessPersonsStep } from '../event-processing/process-persons-step'
+import { HeatmapsOutput } from '../heatmaps/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
 import { TopHogWrapper, sum, sumOk, sumResult, timer } from '../pipelines/extensions/tophog'
 import { isDropResult } from '../pipelines/results'
-import {
-    AsyncOutput,
-    EVENTS_OUTPUT,
-    EventOutput,
-    HeatmapsOutput,
-    PersonDistinctIdsOutput,
-    PersonsOutput,
-} from './outputs'
+import { AsyncOutput, EVENTS_OUTPUT, EventOutput, PersonDistinctIdsOutput, PersonsOutput } from './outputs'
 
 export interface EventSubpipelineInput {
     message: Message

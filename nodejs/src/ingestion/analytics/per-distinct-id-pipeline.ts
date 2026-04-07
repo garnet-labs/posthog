@@ -11,6 +11,7 @@ import { AiEventSubpipelineInput, createAiEventSubpipeline } from '../ai/pipelin
 import { IngestionWarningsOutput } from '../common/outputs'
 import { EventPipelineRunnerOptions } from '../event-processing/event-pipeline-options'
 import { SplitAiEventsStepConfig } from '../event-processing/split-ai-events-step'
+import { HeatmapsOutput } from '../heatmaps/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
 import { TopHogWrapper } from '../pipelines/extensions/tophog'
@@ -19,14 +20,7 @@ import {
     createClientIngestionWarningSubpipeline,
 } from './client-ingestion-warning-subpipeline'
 import { EventSubpipelineInput, createEventSubpipeline } from './event-subpipeline'
-import {
-    AiEventOutput,
-    AsyncOutput,
-    EventOutput,
-    HeatmapsOutput,
-    PersonDistinctIdsOutput,
-    PersonsOutput,
-} from './outputs'
+import { AiEventOutput, AsyncOutput, EventOutput, PersonDistinctIdsOutput, PersonsOutput } from './outputs'
 
 export type PerDistinctIdPipelineInput = EventSubpipelineInput &
     ClientIngestionWarningSubpipelineInput &

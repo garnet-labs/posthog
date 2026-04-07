@@ -10,9 +10,10 @@ import { createEmitEventStep } from '../event-processing/emit-event-step'
 import { createExtractHeatmapDataStep } from '../event-processing/extract-heatmap-data-step'
 import { createNormalizeEventStep } from '../event-processing/normalize-event-step'
 import { createPrepareEventStep } from '../event-processing/prepare-event-step'
+import { HeatmapsOutput } from '../heatmaps/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
-import { EVENTS_OUTPUT, EventOutput, HeatmapsOutput } from './outputs'
+import { EVENTS_OUTPUT, EventOutput } from './outputs'
 
 export interface TestingEventSubpipelineInput {
     message: Message

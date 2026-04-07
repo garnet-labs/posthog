@@ -33,14 +33,7 @@ import {
     JoinedIngestionPipelineInput,
     createJoinedIngestionPipeline,
 } from './analytics'
-import {
-    AiEventOutput,
-    AsyncOutput,
-    EventOutput,
-    HeatmapsOutput,
-    PersonDistinctIdsOutput,
-    PersonsOutput,
-} from './analytics/outputs'
+import { AiEventOutput, AsyncOutput, EventOutput, PersonDistinctIdsOutput, PersonsOutput } from './analytics/outputs'
 import { EventFilterManager } from './common/event-filters'
 import {
     AppMetricsOutput,
@@ -53,6 +46,7 @@ import {
 import { IngestionConsumerConfig } from './config'
 import { CookielessManager } from './cookieless/cookieless-manager'
 import { parseSplitAiEventsConfig } from './event-processing/split-ai-events-step'
+import { HeatmapsOutput } from './heatmaps/outputs'
 import { IngestionOutputs } from './outputs/ingestion-outputs'
 import { createOkContext } from './pipelines/helpers'
 import { TopHog } from './tophog'
