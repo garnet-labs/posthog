@@ -240,8 +240,7 @@ sudo -u ubuntu HOME=/home/ubuntu mkdir -p "$(dirname "$WORKTREE_DIR")"
 sudo -u ubuntu HOME=/home/ubuntu git worktree add "$WORKTREE_DIR" "$SANDBOX_BRANCH"
 
 log "Creating sandbox via bin/sandbox create..."
-cd "$WORKTREE_DIR"
-sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 bin/sandbox create '$SANDBOX_BRANCH' --no-attach"
+sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 '$WORKTREE_DIR/bin/sandbox' create '$SANDBOX_BRANCH' --no-attach"
 
 BOOT_STATUS="complete"
 log "Cloud sandbox boot complete at $(date)"
