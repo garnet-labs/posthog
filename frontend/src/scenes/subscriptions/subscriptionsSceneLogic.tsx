@@ -23,6 +23,8 @@ import {
 } from '~/generated/core/api.schemas'
 import { Breadcrumb } from '~/types'
 
+import type { subscriptionsSceneLogicType } from './subscriptionsSceneLogicType'
+
 const PAGE_SIZE = 20
 
 export enum SubscriptionsTab {
@@ -188,7 +190,7 @@ function buildSubscriptionsListOrdering(sorting: Sorting | null): string {
     return `${dir}${field}`
 }
 
-export const subscriptionsSceneLogic = kea([
+export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
     path(['scenes', 'subscriptions', 'subscriptionsSceneLogic']),
     tabAwareScene(),
     connect(() => ({ values: [userLogic, ['user']] })),
@@ -202,7 +204,7 @@ export const subscriptionsSceneLogic = kea([
         setTargetTypeFilter: (targetType: SubscriptionsListTargetType | null) => ({ targetType }),
         applySubscriptionsQueryFromUrl: (query: SubscriptionsQueryFromUrl) => ({ query }),
         deleteSubscriptionSuccess: true,
-    } as Parameters<typeof actions>[0]),
+    }),
     reducers({
         search: [
             '',
