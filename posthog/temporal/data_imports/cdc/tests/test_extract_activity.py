@@ -5,7 +5,7 @@ from typing import Literal
 import pytest
 from unittest.mock import MagicMock, patch
 
-from posthog.temporal.data_imports.cdc.activities import CDCExtractInput, _flush_deferred_runs, cdc_extract_activity
+from posthog.temporal.data_imports.cdc.activities import CDCExtractActivity, CDCExtractInput, cdc_extract_activity
 from posthog.temporal.data_imports.cdc.types import ChangeEvent
 
 
@@ -45,16 +45,17 @@ def _make_source(source_id=None, job_inputs=None):
     return source
 
 
-def _make_schema(name, cdc_mode="streaming", source=None, schema_id=None):
+def _make_schema(name, cdc_mode="streaming", cdc_table_mode="consolidated", source=None, schema_id=None):
     schema = MagicMock()
     schema.id = schema_id or uuid.uuid4()
     schema.name = name
     schema.team_id = 1
     schema.source = source
     schema.sync_type = "cdc"
-    schema.sync_type_config = {"cdc_mode": cdc_mode}
+    schema.sync_type_config = {"cdc_mode": cdc_mode, "cdc_table_mode": cdc_table_mode}
     schema.is_cdc = True
     schema.cdc_mode = cdc_mode
+    schema.cdc_table_mode = cdc_table_mode
     schema.should_sync = True
     schema.deleted = False
     schema.save = MagicMock()
@@ -66,7 +67,7 @@ _CDC_ACTIVITY_PATCHES = [
     "posthog.temporal.data_imports.cdc.activities.close_old_connections",
     "posthog.temporal.data_imports.cdc.activities.ExternalDataJob",
     "posthog.temporal.data_imports.cdc.activities.ExternalDataSource",
-    "posthog.temporal.data_imports.cdc.activities._get_cdc_schemas",
+    "posthog.temporal.data_imports.cdc.activities.CDCExtractActivity._get_cdc_schemas",
     "posthog.temporal.data_imports.cdc.activities.get_cdc_adapter",
     "posthog.temporal.data_imports.cdc.activities.S3BatchWriter",
     "posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer",
@@ -175,6 +176,14 @@ class TestGetCDCAdapter:
         assert reader._params.slot_name == ""
 
 
+def _make_extract_activity(source, log=None) -> CDCExtractActivity:
+    """Build a CDCExtractActivity with source and log pre-injected for unit tests."""
+    activity_obj = CDCExtractActivity(CDCExtractInput(team_id=1, source_id=source.id))
+    activity_obj.source = source
+    activity_obj.log = log or MagicMock()
+    return activity_obj
+
+
 class TestFlushDeferredRuns:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     def test_sends_kafka_messages_for_deferred_runs(self, MockProducer):
@@ -203,8 +212,7 @@ class TestFlushDeferredRuns:
             }
         ]
 
-        log = MagicMock()
-        _flush_deferred_runs(schema, source, log)
+        _make_extract_activity(source)._flush_deferred_runs(schema)
 
         mock_producer.send_batch_notification.assert_called_once()
         mock_producer.flush.assert_called_once()
@@ -218,8 +226,7 @@ class TestFlushDeferredRuns:
         schema = _make_schema("users", cdc_mode="streaming", source=source)
         schema.sync_type_config = {"cdc_mode": "streaming"}
 
-        log = MagicMock()
-        _flush_deferred_runs(schema, source, log)
+        _make_extract_activity(source)._flush_deferred_runs(schema)
 
         MockProducer.assert_not_called()
         schema.save.assert_not_called()
@@ -251,8 +258,7 @@ class TestFlushDeferredRuns:
             for i in range(3)
         ]
 
-        log = MagicMock()
-        _flush_deferred_runs(schema, source, log)
+        _make_extract_activity(source)._flush_deferred_runs(schema)
 
         # 3 deferred runs, each with 1 batch → 3 send calls, 3 flush calls (one per producer)
         assert mock_producer.send_batch_notification.call_count == 3
@@ -267,7 +273,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -317,7 +323,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -364,7 +370,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -418,7 +424,7 @@ class TestCDCExtractActivity:
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
     def test_no_changes_returns_early_with_completed_status(
@@ -457,7 +463,7 @@ class TestCDCExtractActivity:
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
     def test_no_cdc_schemas_returns_early(
@@ -481,7 +487,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -528,7 +534,7 @@ class TestCDCExtractActivity:
 
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
     def test_reader_closed_on_error(
@@ -563,7 +569,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -615,7 +621,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -660,7 +666,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.unpause_external_data_schedule", create=True)
     @patch("posthog.temporal.data_imports.cdc.activities.activity")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
     def test_truncate_only_batch_sets_snapshot_and_advances_slot(
@@ -702,7 +708,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -751,7 +757,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -806,7 +812,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -854,7 +860,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -921,7 +927,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -977,7 +983,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
@@ -1039,7 +1045,7 @@ class TestCDCExtractActivity:
     @patch("posthog.temporal.data_imports.cdc.activities.KafkaBatchProducer")
     @patch("posthog.temporal.data_imports.cdc.activities.S3BatchWriter")
     @patch("posthog.temporal.data_imports.cdc.activities.get_cdc_adapter")
-    @patch("posthog.temporal.data_imports.cdc.activities._get_cdc_schemas")
+    @patch.object(CDCExtractActivity, "_get_cdc_schemas")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataSource")
     @patch("posthog.temporal.data_imports.cdc.activities.ExternalDataJob")
     @patch("posthog.temporal.data_imports.cdc.activities.close_old_connections")
