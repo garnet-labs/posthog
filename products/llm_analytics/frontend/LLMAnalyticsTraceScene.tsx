@@ -1767,7 +1767,7 @@ const EventContent = React.memo(
                                                   <EvalsTabContent
                                                       generationEventId={event.id}
                                                       timestamp={event.createdAt}
-                                                      event={event.event}
+                                                      event={(event as LLMTraceEvent).event}
                                                       distinctId={trace.distinctId}
                                                   />
                                               ),
