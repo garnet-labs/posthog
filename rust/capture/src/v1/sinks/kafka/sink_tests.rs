@@ -9,7 +9,7 @@ use crate::v1::context::Context;
 use crate::v1::sinks::event::Event;
 use crate::v1::sinks::sink::Sink;
 use crate::v1::sinks::types::{BatchSummary, Outcome};
-use crate::v1::sinks::{Config, Destination, SinkName, Sinks};
+use crate::v1::sinks::{Config, Destination, SinkName};
 
 use super::mock::MockProducer;
 use super::producer::ProduceError;
@@ -206,25 +206,19 @@ impl HarnessBuilder {
         }
 
         let producer = Arc::new(mock);
-        let producers: HashMap<SinkName, Arc<MockProducer>> =
-            [(SinkName::Msk, Arc::clone(&producer))]
-                .into_iter()
-                .collect();
 
-        let sinks_config = Sinks {
-            default: SinkName::Msk,
-            configs: [(
-                SinkName::Msk,
-                Config {
-                    produce_timeout: self.produce_timeout,
-                    kafka: test_kafka_config(),
-                },
-            )]
-            .into_iter()
-            .collect(),
+        let config = Config {
+            produce_timeout: self.produce_timeout,
+            kafka: test_kafka_config(),
         };
 
-        let sink = KafkaSink::new(producers, sinks_config, CaptureMode::Events, handle.clone());
+        let sink = KafkaSink::new(
+            SinkName::Msk,
+            Arc::clone(&producer),
+            config,
+            CaptureMode::Events,
+            handle.clone(),
+        );
 
         TestHarness {
             sink,
@@ -250,7 +244,7 @@ async fn single_event_success() {
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].key(), "evt-1");
@@ -278,7 +272,7 @@ async fn non_publishable_events_skipped() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].key(), "evt-1");
@@ -296,36 +290,14 @@ async fn destination_drop_skips_without_result() {
     let event = FakeEvent::ok("evt-1").with_destination(Destination::Drop);
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert!(results.is_empty());
     assert_eq!(h.producer.record_count(), 0);
 }
 
 // ---------------------------------------------------------------------------
-// 4. Sink not configured
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn sink_not_configured() {
-    let h = TestHarness::new();
-    let e1 = FakeEvent::ok("evt-1");
-    let e2 = FakeEvent::ok("evt-2").with_publish(false);
-    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2];
-
-    // Request SinkName::Ws, but only Msk is configured
-    let results = h.sink.publish_batch(SinkName::Ws, &h.ctx, &events).await;
-
-    // Only the publishable event gets a result
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].key(), "evt-1");
-    assert_eq!(results[0].outcome(), Outcome::FatalError);
-    assert_eq!(results[0].cause(), Some("sink_not_configured"));
-    assert_eq!(h.producer.record_count(), 0);
-}
-
-// ---------------------------------------------------------------------------
-// 5. Sink unavailable (producer not ready)
+// 4. Sink unavailable (producer not ready)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -335,7 +307,7 @@ async fn sink_unavailable() {
     let e2 = FakeEvent::ok("evt-2");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 2);
     for r in &results {
@@ -346,7 +318,7 @@ async fn sink_unavailable() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Send-time retriable error (queue full)
+// 5. Send-time retriable error (queue full)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -360,7 +332,7 @@ async fn send_error_retriable_queue_full() {
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].key(), "evt-1");
@@ -370,7 +342,7 @@ async fn send_error_retriable_queue_full() {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Send-time fatal error (event too big)
+// 6. Send-time fatal error (event too big)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -383,7 +355,7 @@ async fn send_error_fatal_event_too_big() {
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::FatalError);
@@ -391,7 +363,7 @@ async fn send_error_fatal_event_too_big() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Ack-time retriable error (delivery cancelled)
+// 7. Ack-time retriable error (delivery cancelled)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -402,7 +374,7 @@ async fn ack_error_retriable_delivery_cancelled() {
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].key(), "evt-1");
@@ -414,7 +386,7 @@ async fn ack_error_retriable_delivery_cancelled() {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Ack-time retriable kafka error (topic auth failed — infrastructure
+// 8. Ack-time retriable kafka error (topic auth failed — infrastructure
 //    misconfiguration, may succeed on a different pod)
 // ---------------------------------------------------------------------------
 
@@ -429,7 +401,7 @@ async fn ack_error_retriable_topic_auth() {
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::RetriableError);
@@ -439,7 +411,7 @@ async fn ack_error_retriable_topic_auth() {
 }
 
 // ---------------------------------------------------------------------------
-// 10. Produce timeout
+// 9. Produce timeout
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -451,7 +423,7 @@ async fn produce_timeout_single() {
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].key(), "evt-1");
@@ -470,7 +442,7 @@ async fn produce_timeout_batch_all_pending_get_timeout() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 3);
     for r in &results {
@@ -480,7 +452,7 @@ async fn produce_timeout_batch_all_pending_get_timeout() {
 }
 
 // ---------------------------------------------------------------------------
-// 11. Serialization failure
+// 10. Serialization failure
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -489,7 +461,7 @@ async fn serialization_failure() {
     let event = FakeEvent::ok("evt-1").with_payload(Err("bad json".into()));
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].key(), "evt-1");
@@ -504,7 +476,7 @@ async fn serialization_failure() {
 }
 
 // ---------------------------------------------------------------------------
-// 12. Mixed batch (some succeed, some fail)
+// 11. Mixed batch (some succeed, some fail)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -515,7 +487,7 @@ async fn mixed_batch_success_and_serialize_error() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 3);
 
@@ -535,7 +507,7 @@ async fn mixed_batch_success_and_serialize_error() {
 }
 
 // ---------------------------------------------------------------------------
-// 13. BatchSummary correctness
+// 12. BatchSummary correctness
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -546,7 +518,7 @@ async fn batch_summary_from_mixed_results() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     let summary = BatchSummary::from_results(&results);
 
     assert_eq!(summary.total, 3);
@@ -559,13 +531,23 @@ async fn batch_summary_from_mixed_results() {
 }
 
 // ---------------------------------------------------------------------------
-// 14. Flush delegates to producers
+// 13. Flush delegates to producer
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn flush_ok() {
     let h = TestHarness::new();
     assert!(h.sink.flush().await.is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// 14. Sink::name() returns configured name
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sink_name_returns_configured_name() {
+    let h = TestHarness::new();
+    assert_eq!(h.sink.name(), SinkName::Msk);
 }
 
 // ---------------------------------------------------------------------------
@@ -578,7 +560,7 @@ async fn destination_historical_routes_to_correct_topic() {
     let event = FakeEvent::ok("evt-1").with_destination(Destination::AnalyticsHistorical);
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::Success);
@@ -593,7 +575,7 @@ async fn destination_overflow_routes_to_correct_topic() {
     let event = FakeEvent::ok("evt-1").with_destination(Destination::Overflow);
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::Success);
@@ -608,7 +590,7 @@ async fn destination_dlq_routes_to_correct_topic() {
     let event = FakeEvent::ok("evt-1").with_destination(Destination::Dlq);
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::Success);
@@ -627,41 +609,13 @@ async fn destination_custom_routes_to_custom_topic() {
     let event = FakeEvent::ok("evt-1").with_destination(Destination::Custom("my_topic".into()));
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::Success);
     h.producer.with_records(|records| {
         assert_eq!(records[0].topic, "my_topic");
     });
-}
-
-// ---------------------------------------------------------------------------
-// Sink::publish() single-event convenience method
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn publish_single_event_success() {
-    let h = TestHarness::new();
-    let event = FakeEvent::ok("evt-1");
-
-    let result = h.sink.publish(SinkName::Msk, &h.ctx, &event).await;
-
-    assert!(result.is_some());
-    let r = result.unwrap();
-    assert_eq!(r.key(), "evt-1");
-    assert_eq!(r.outcome(), Outcome::Success);
-}
-
-#[tokio::test]
-async fn publish_single_non_publishable_returns_none() {
-    let h = TestHarness::new();
-    let event = FakeEvent::ok("evt-1").with_publish(false);
-
-    let result = h.sink.publish(SinkName::Msk, &h.ctx, &event).await;
-
-    assert!(result.is_none());
-    assert_eq!(h.producer.record_count(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -678,7 +632,7 @@ async fn batch_summary_with_timeouts() {
     let e2 = FakeEvent::ok("evt-2");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     let summary = BatchSummary::from_results(&results);
 
     assert_eq!(summary.total, 2);
@@ -722,7 +676,7 @@ async fn health_not_refreshed_on_full_timeout() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     for r in &results {
         assert_eq!(r.outcome(), Outcome::Timeout);
     }
@@ -753,7 +707,7 @@ async fn health_not_refreshed_on_full_send_error() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     for r in &results {
         assert_eq!(r.outcome(), Outcome::RetriableError);
     }
@@ -781,7 +735,7 @@ async fn health_not_refreshed_on_full_ack_error() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     for r in &results {
         assert_eq!(r.outcome(), Outcome::RetriableError);
     }
@@ -808,7 +762,7 @@ async fn health_not_refreshed_on_full_serialization_error() {
     let e3 = FakeEvent::ok("evt-3").with_payload(Err("bad".into()));
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     for r in &results {
         assert_eq!(r.outcome(), Outcome::FatalError);
     }
@@ -835,7 +789,7 @@ async fn health_refreshed_on_full_success() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     for r in &results {
         assert_eq!(r.outcome(), Outcome::Success);
     }
@@ -862,7 +816,7 @@ async fn health_refreshed_on_partial_success() {
     let e3 = FakeEvent::ok("evt-3");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
 
-    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
     let summary = BatchSummary::from_results(&results);
     assert!(summary.succeeded > 0);
     assert!(summary.fatal > 0);

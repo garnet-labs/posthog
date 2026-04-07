@@ -40,9 +40,11 @@ pub fn error_code_tag(code: RDKafkaErrorCode) -> &'static str {
 
 /// Full-fidelity error enum capturing every failure mode in the Kafka sink.
 /// `SinkResult` trait methods derive their output from this.
+///
+/// Note: "sink not found" is handled at the Router level (`RouterError`),
+/// not here. This enum only covers failures within a single configured sink.
 #[derive(Debug)]
 pub enum KafkaSinkError {
-    SinkNotConfigured,
     SinkUnavailable,
     SerializationFailed(String),
     Produce(ProduceError),
@@ -53,7 +55,6 @@ pub enum KafkaSinkError {
 impl KafkaSinkError {
     pub fn outcome(&self) -> Outcome {
         match self {
-            Self::SinkNotConfigured => Outcome::FatalError,
             Self::SinkUnavailable => Outcome::RetriableError,
             Self::SerializationFailed(_) => Outcome::FatalError,
             Self::Produce(e) => {
@@ -70,7 +71,6 @@ impl KafkaSinkError {
 
     pub fn as_tag(&self) -> &'static str {
         match self {
-            Self::SinkNotConfigured => "sink_not_configured",
             Self::SinkUnavailable => "sink_unavailable",
             Self::SerializationFailed(_) => "serialization_failed",
             Self::Produce(e) => e.as_tag(),
@@ -81,7 +81,6 @@ impl KafkaSinkError {
 
     pub fn detail(&self) -> Cow<'_, str> {
         match self {
-            Self::SinkNotConfigured => Cow::Borrowed("sink not configured"),
             Self::SinkUnavailable => Cow::Borrowed("sink unavailable"),
             Self::SerializationFailed(m) => Cow::Owned(format!("serialization failed: {m}")),
             Self::Produce(e) => Cow::Owned(format!("{e}")),

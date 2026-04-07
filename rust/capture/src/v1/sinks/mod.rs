@@ -1,6 +1,7 @@
 pub mod constants;
 pub mod event;
 pub mod kafka;
+pub mod router;
 pub mod sink;
 pub mod types;
 
@@ -12,6 +13,7 @@ use envconfig::Envconfig;
 
 pub use event::Event;
 pub use kafka::KafkaSink;
+pub use router::{Router, RouterError};
 pub use sink::Sink;
 pub use types::{Destination, Outcome, SinkResult};
 

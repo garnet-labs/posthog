@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,28 +13,31 @@ use crate::v1::context::Context;
 use crate::v1::sinks::event::{build_context_headers, Event};
 use crate::v1::sinks::sink::Sink;
 use crate::v1::sinks::types::{BatchSummary, Outcome, SinkResult};
-use crate::v1::sinks::{SinkName, Sinks};
+use crate::v1::sinks::{Config, SinkName};
 
 use super::producer::ProduceRecord;
 use super::types::{KafkaResult, KafkaSinkError};
 use super::KafkaProducerTrait;
 
 pub struct KafkaSink<P: KafkaProducerTrait> {
-    producers: HashMap<SinkName, Arc<P>>,
-    config: Sinks,
+    name: SinkName,
+    producer: Arc<P>,
+    config: Config,
     capture_mode: CaptureMode,
     handle: lifecycle::Handle,
 }
 
 impl<P: KafkaProducerTrait> KafkaSink<P> {
     pub fn new(
-        producers: HashMap<SinkName, Arc<P>>,
-        config: Sinks,
+        name: SinkName,
+        producer: Arc<P>,
+        config: Config,
         capture_mode: CaptureMode,
         handle: lifecycle::Handle,
     ) -> Self {
         Self {
-            producers,
+            name,
+            producer,
             config,
             capture_mode,
             handle,
@@ -44,7 +47,7 @@ impl<P: KafkaProducerTrait> KafkaSink<P> {
 
 /// Reject every publishable event in `events` with the same error,
 /// incrementing a single counter for the batch. Used for pre-flight
-/// failures (sink not configured, producer not ready).
+/// failures (producer not ready).
 fn reject_publishable(
     events: &[&(dyn Event + Send + Sync)],
     error_fn: fn() -> KafkaSinkError,
@@ -79,23 +82,16 @@ fn reject_publishable(
 
 #[async_trait]
 impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
-    async fn publish(
-        &self,
-        sink: SinkName,
-        ctx: &Context,
-        event: &(dyn Event + Send + Sync),
-    ) -> Option<Box<dyn SinkResult>> {
-        let results = self.publish_batch(sink, ctx, &[event]).await;
-        results.into_iter().next()
+    fn name(&self) -> SinkName {
+        self.name
     }
 
     async fn publish_batch(
         &self,
-        sink: SinkName,
         ctx: &Context,
         events: &[&(dyn Event + Send + Sync)],
     ) -> Vec<Box<dyn SinkResult>> {
-        let sink_str = sink.as_str();
+        let sink_str = self.name.as_str();
         let mode = self.capture_mode.as_tag();
 
         let span = info_span!(
@@ -115,29 +111,8 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         let path = ctx.path.clone();
         let attempt = ctx.attempt.to_string();
 
-        let sink_cfg = match self.config.configs.get(&sink) {
-            Some(c) => c,
-            None => {
-                crate::ctx_log!(
-                    Level::ERROR,
-                    ctx,
-                    sink = sink_str,
-                    "sink not configured — rejecting batch"
-                );
-                return reject_publishable(
-                    events,
-                    || KafkaSinkError::SinkNotConfigured,
-                    sink_str,
-                    mode,
-                    &path,
-                    &attempt,
-                );
-            }
-        };
-        let producer = &self.producers[&sink];
-
         // Per-sink health gate
-        if !producer.is_ready() {
+        if !self.producer.is_ready() {
             crate::ctx_log!(
                 Level::ERROR,
                 ctx,
@@ -178,7 +153,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
 
             let uuid_key = event.uuid_key().to_string();
 
-            let topic = match sink_cfg.kafka.topic_for(event.destination()) {
+            let topic = match self.config.kafka.topic_for(event.destination()) {
                 Some(t) => t,
                 None => continue,
             };
@@ -227,7 +202,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 headers,
             };
 
-            match producer.send(record) {
+            match self.producer.send(record) {
                 Ok(ack_future) => {
                     enqueued_keys.push(uuid_key.clone());
                     pending.push(async move {
@@ -258,7 +233,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         // rdkafka's delivery callback send() returns Err (silently ignored).
         // The message still completes in librdkafka (or times out via
         // message.timeout.ms); we just stop waiting for the ack.
-        let deadline = tokio::time::Instant::now() + sink_cfg.produce_timeout;
+        let deadline = tokio::time::Instant::now() + self.config.produce_timeout;
         let mut resolved_keys: HashSet<String> = HashSet::new();
 
         loop {
@@ -375,41 +350,16 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         results
     }
 
-    fn sinks(&self) -> Vec<SinkName> {
-        self.producers.keys().copied().collect()
-    }
-
     async fn flush(&self) -> anyhow::Result<()> {
-        let mut set = tokio::task::JoinSet::new();
-        for (name, producer) in &self.producers {
-            let timeout = self
-                .config
-                .configs
-                .get(name)
-                .map(|c| c.produce_timeout)
-                .unwrap_or(crate::v1::sinks::constants::DEFAULT_PRODUCE_TIMEOUT);
-            let producer = producer.clone();
-            let name_str = name.as_str();
-            set.spawn_blocking(move || {
-                producer
-                    .flush(timeout)
-                    .map_err(|e| anyhow::anyhow!("{name_str}: flush error: {e:#}"))
-            });
-        }
-        let mut first_err: Option<anyhow::Error> = None;
-        while let Some(result) = set.join_next().await {
-            if let Err(e) = result
-                .map_err(|e| anyhow::anyhow!("flush task panicked: {e:#}"))
-                .and_then(|r| r)
-            {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
-            }
-        }
-        match first_err {
-            Some(e) => Err(e),
-            None => Ok(()),
-        }
+        let timeout = self.config.produce_timeout;
+        let producer = self.producer.clone();
+        let name_str = self.name.as_str();
+        tokio::task::spawn_blocking(move || {
+            producer
+                .flush(timeout)
+                .map_err(|e| anyhow::anyhow!("{name_str}: flush error: {e:#}"))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("flush task panicked: {e:#}"))?
     }
 }

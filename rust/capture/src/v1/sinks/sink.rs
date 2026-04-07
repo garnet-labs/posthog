@@ -5,30 +5,20 @@ use crate::v1::sinks::event::Event;
 use crate::v1::sinks::types::SinkResult;
 use crate::v1::sinks::SinkName;
 
-/// Backend-agnostic publishing interface.
+/// Backend-agnostic publishing interface for a single sink target.
 #[async_trait]
 pub trait Sink: Send + Sync {
-    /// Publish a single event to a specific sink. Returns None if the
-    /// event was filtered (should_publish false / Destination::Drop).
-    async fn publish(
-        &self,
-        sink: SinkName,
-        ctx: &Context,
-        event: &(dyn Event + Send + Sync),
-    ) -> Option<Box<dyn SinkResult>>;
+    /// Identity of this sink (used for metrics and logging).
+    fn name(&self) -> SinkName;
 
-    /// Publish a batch of events to a specific sink. Returns one result
-    /// per published event -- skipped events produce no result.
+    /// Publish a batch of events. Returns one result per published event --
+    /// skipped events (should_publish false / Destination::Drop) produce no result.
     async fn publish_batch(
         &self,
-        sink: SinkName,
         ctx: &Context,
         events: &[&(dyn Event + Send + Sync)],
     ) -> Vec<Box<dyn SinkResult>>;
 
-    /// Which sinks are available for writing.
-    fn sinks(&self) -> Vec<SinkName>;
-
-    /// Flush the underlying producer(s) for graceful shutdown.
+    /// Flush the underlying producer for graceful shutdown.
     async fn flush(&self) -> anyhow::Result<()>;
 }
