@@ -350,7 +350,6 @@ def _claude_auth_dir() -> str:
 def _ssh_authorized_keys_path() -> str:
     """Collect SSH public keys into a file that can be mounted into containers."""
     keys_file = REGISTRY_DIR / "authorized_keys"
-    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     ssh_dir = Path.home() / ".ssh"
     keys = []
     if ssh_dir.is_dir():
@@ -693,51 +692,12 @@ def init_cache_from_master() -> None:
 
     try:
         _copy_sandbox_backup_xml(init_worktree)
+        info("Building and starting containers...")
+        compose(init_project, init_port, init_worktree, "up", "-d", "--build", capture=True)
 
-        # Build the app image and start only infra services (no app container).
-        # The old approach started the full app with mprocs/phrocs just to run
-        # migrations — this runs them directly instead.
-        info("Building app image...")
-        compose(init_project, init_port, init_worktree, "build", "app", capture=True)
-        info("Starting infra services...")
-        compose(init_project, init_port, init_worktree, "up", "-d",
-                "db", "redis7", "clickhouse", "kafka", "zookeeper", "objectstorage", capture=True)
-
-        # Wait for infra to be healthy
-        info("Waiting for infra services to be healthy...")
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            result = run(
-                ["docker", "inspect", "--format", "{{.State.Health.Status}}",
-                 f"{init_project}-db-1"],
-                check=False, capture=True,
-            )
-            if result.returncode == 0 and result.stdout.strip() == "healthy":
-                break
-            time.sleep(2)
-        else:
-            fatal("Infra services did not become healthy within 120s")
-
-        # Run migrations and demo data setup directly — no mprocs, no pnpm, no node deps.
-        run_cmd = ["docker", "compose", "--progress=quiet", "-p", init_project,
-                   "-f", str(COMPOSE_FILE), "-f", str(PROFILES_FILE),
-                   "run", "--rm", "--no-deps", "--entrypoint", "",
-                   "-e", "SKIP_SERVICE_VERSION_REQUIREMENTS=1",
-                   "app"]
-
-        info("Installing Python dependencies...")
-        run(run_cmd + ["uv", "sync", "--frozen"],
-            env_extra=_compose_env(init_port, init_worktree))
-
-        info("Running migrations...")
-        run(run_cmd + ["python", "manage.py", "migrate"],
-            env_extra=_compose_env(init_port, init_worktree))
-        run(run_cmd + ["python", "manage.py", "migrate_clickhouse"],
-            env_extra=_compose_env(init_port, init_worktree))
-
-        info("Setting up demo data...")
-        run(run_cmd + ["python", "manage.py", "setup_dev", "--no-data"],
-            env_extra=_compose_env(init_port, init_worktree))
+        info("Waiting for master to boot...")
+        if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
+            fatal("Cache init failed. See logs above.")
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
