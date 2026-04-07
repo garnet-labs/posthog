@@ -375,30 +375,6 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                         },
                     },
                     {
-                        title: 'Primary key',
-                        key: 'primary_key',
-                        isHidden: isDirectQuerySource || !schemas.some((s) => s.sync_type === 'incremental'),
-                        render: function RenderPrimaryKey(_, schema) {
-                            if (schema.sync_type !== 'incremental') {
-                                return null
-                            }
-
-                            if (schema.primary_key_columns && schema.primary_key_columns.length > 0) {
-                                return (
-                                    <div className="flex items-center gap-1 flex-wrap">
-                                        {schema.primary_key_columns.map((col) => (
-                                            <LemonTag key={col} type="default">
-                                                {col}
-                                            </LemonTag>
-                                        ))}
-                                    </div>
-                                )
-                            }
-
-                            return <span className="text-xs text-muted-foreground">Auto-detect</span>
-                        },
-                    },
-                    {
                         title: isDirectQuerySource ? 'Queryable' : 'Enabled',
                         key: 'should_sync',
                         sorter: (a, b) => Number(a.should_sync) - Number(b.should_sync),
