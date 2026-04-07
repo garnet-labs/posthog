@@ -50,9 +50,9 @@ _MAX_SLOTS_10 = ("max_replication_slots", [("10",)])
 _SLOT_COUNT_2 = ("COUNT", [("2",)])
 _SLOT_COUNT_10 = ("COUNT", [("10",)])
 _SLOT_EXISTS = ("slot_name", [(1,)])
-_SLOT_NOT_EXISTS = ("slot_name", [])
+_SLOT_NOT_EXISTS: tuple[str, list] = ("slot_name", [])
 _PUB_EXISTS = ("pubname", [(1,)])
-_PUB_NOT_EXISTS = ("pubname", [])
+_PUB_NOT_EXISTS: tuple[str, list] = ("pubname", [])
 
 
 class TestValidateCDCPrerequisites:

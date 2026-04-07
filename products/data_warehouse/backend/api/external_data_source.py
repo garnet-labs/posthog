@@ -741,20 +741,12 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
                 s.get("name") for s in payload_schemas if s.get("sync_type") == "cdc" and s.get("should_sync", False)
             ]
             if cdc_table_names:
-                from posthog.temporal.data_imports.sources.postgres.postgres import (
-                    get_primary_key_columns,
-                    pg_connection,
-                )
+                from posthog.temporal.data_imports.sources.postgres.cdc.slot_manager import cdc_pg_connection
+                from posthog.temporal.data_imports.sources.postgres.postgres import get_primary_key_columns
 
-                with source.with_ssh_tunnel(source_config) as (host, port):
-                    with pg_connection(
-                        host=host,
-                        port=port,
-                        user=source_config.user,
-                        password=source_config.password,
-                        database=source_config.database,
-                    ) as conn:
-                        pk_columns_by_table = get_primary_key_columns(conn, source_config.schema, cdc_table_names)
+                db_schema = payload.get("schema", "public")
+                with cdc_pg_connection(new_source_model) as conn:
+                    pk_columns_by_table = get_primary_key_columns(conn, db_schema, cdc_table_names)
 
         # Create all ExternalDataSchema objects and enable syncing for active schemas
         for schema in payload_schemas:

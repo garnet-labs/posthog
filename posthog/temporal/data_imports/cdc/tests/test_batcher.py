@@ -179,10 +179,10 @@ class TestChangeEventBatcher:
         assert not batcher.should_flush
 
         batcher.add(_make_event(columns={"id": 3}))
-        assert batcher.should_flush
+        assert batcher.should_flush is True  # noqa: E712
 
-        batcher.flush()
-        assert not batcher.should_flush
+        batcher.flush()  # type: ignore[unreachable]
+        assert batcher.should_flush is False  # noqa: E712
 
     def test_should_flush_byte_threshold(self):
         batcher = ChangeEventBatcher(max_bytes=500)
