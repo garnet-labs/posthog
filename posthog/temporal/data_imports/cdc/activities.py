@@ -751,9 +751,6 @@ def validate_cdc_prerequisites_activity(inputs: ValidateCDCPrerequisitesInput) -
 # Orphan slot sweeper
 # ---------------------------------------------------------------------------
 
-DEFAULT_LAG_WARNING_THRESHOLD_MB = 1024
-DEFAULT_LAG_CRITICAL_THRESHOLD_MB = 10240
-
 
 @activity.defn
 def cleanup_orphan_slots_activity() -> None:
@@ -788,29 +785,26 @@ def cleanup_orphan_slots_activity() -> None:
     )
 
     for source in cdc_sources:
-        job_inputs = source.job_inputs or {}
-        slot_name = job_inputs["cdc_slot_name"]
-        pub_name = job_inputs["cdc_publication_name"]
-        management_mode = job_inputs.get("cdc_management_mode", "posthog")
-
         try:
             adapter = get_cdc_adapter(source)
         except ValueError:
             continue
 
+        cdc_config = adapter.parse_cdc_config(source)
+
         source_log = log.bind(
             source_id=str(source.id),
             team_id=source.team_id,
-            slot_name=slot_name,
-            management_mode=management_mode,
+            slot_name=cdc_config.slot_name,
+            management_mode=cdc_config.management_mode,
         )
 
         # 1. Deleted sources — clean up PostHog-managed slots
-        if source.deleted and management_mode == "posthog":
+        if source.deleted and cdc_config.management_mode == "posthog":
             source_log.info("cleaning_up_deleted_source_slot")
             try:
                 with adapter.management_connection(source, connect_timeout=10) as conn:
-                    adapter.drop_resources(conn, slot_name, pub_name)
+                    adapter.drop_resources(conn, cdc_config.slot_name, cdc_config.publication_name)
             except Exception:
                 source_log.exception("failed_to_cleanup_deleted_source_slot")
             continue
@@ -821,7 +815,7 @@ def cleanup_orphan_slots_activity() -> None:
 
         try:
             with adapter.management_connection(source, connect_timeout=10) as conn:
-                lag_bytes = adapter.get_lag_bytes(conn, slot_name)
+                lag_bytes = adapter.get_lag_bytes(conn, cdc_config.slot_name)
         except Exception:
             source_log.exception("failed_to_check_slot_lag")
             continue
@@ -831,36 +825,33 @@ def cleanup_orphan_slots_activity() -> None:
             continue
 
         lag_mb = lag_bytes / (1024 * 1024)
-        warning_threshold = job_inputs.get("cdc_lag_warning_threshold_mb", DEFAULT_LAG_WARNING_THRESHOLD_MB)
-        critical_threshold = job_inputs.get("cdc_lag_critical_threshold_mb", DEFAULT_LAG_CRITICAL_THRESHOLD_MB)
-        auto_drop = job_inputs.get("cdc_auto_drop_slot", True)
 
-        if lag_mb >= critical_threshold:
+        if lag_mb >= cdc_config.lag_critical_threshold_mb:
             source_log.error(
                 "slot_lag_critical",
                 lag_mb=round(lag_mb, 1),
-                threshold_mb=critical_threshold,
+                threshold_mb=cdc_config.lag_critical_threshold_mb,
             )
 
-            if management_mode == "posthog" and auto_drop:
+            if cdc_config.management_mode == "posthog" and cdc_config.auto_drop_slot:
                 source_log.warning("auto_dropping_slot_critical_lag")
                 try:
                     with adapter.management_connection(source, connect_timeout=10) as conn:
-                        adapter.drop_resources(conn, slot_name, pub_name)
+                        adapter.drop_resources(conn, cdc_config.slot_name, cdc_config.publication_name)
 
                     source.status = ExternalDataSource.Status.ERROR
                     source.save(update_fields=["status", "updated_at"])
                 except Exception:
                     source_log.exception("failed_to_auto_drop_slot")
-            elif management_mode == "self_managed":
+            elif cdc_config.management_mode == "self_managed":
                 source.status = ExternalDataSource.Status.ERROR
                 source.save(update_fields=["status", "updated_at"])
 
-        elif lag_mb >= warning_threshold:
+        elif lag_mb >= cdc_config.lag_warning_threshold_mb:
             source_log.warning(
                 "slot_lag_warning",
                 lag_mb=round(lag_mb, 1),
-                threshold_mb=warning_threshold,
+                threshold_mb=cdc_config.lag_warning_threshold_mb,
             )
 
     log.info("cleanup_orphan_slots_completed", sources_checked=len(cdc_sources))

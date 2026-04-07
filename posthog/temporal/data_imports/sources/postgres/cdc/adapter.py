@@ -6,6 +6,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
+from posthog.temporal.data_imports.sources.postgres.cdc.config import PostgresCDCConfig
+
 if TYPE_CHECKING:
     from posthog.temporal.data_imports.cdc.types import CDCStreamReader
 
@@ -13,6 +15,9 @@ if TYPE_CHECKING:
 
 
 class PostgresCDCAdapter:
+    def parse_cdc_config(self, source: ExternalDataSource) -> PostgresCDCConfig:
+        return PostgresCDCConfig.from_source(source)
+
     def create_reader(self, source: ExternalDataSource) -> CDCStreamReader:
         from posthog.temporal.data_imports.sources.postgres.cdc.stream_reader import (
             PgCDCConnectionParams,
@@ -20,6 +25,7 @@ class PostgresCDCAdapter:
         )
 
         inputs = source.job_inputs or {}
+        cdc_config = self.parse_cdc_config(source)
         params = PgCDCConnectionParams(
             host=inputs.get("host", ""),
             port=int(inputs.get("port", 5432)),
@@ -27,8 +33,8 @@ class PostgresCDCAdapter:
             user=inputs.get("user", ""),
             password=inputs.get("password", ""),
             sslmode=inputs.get("sslmode", "prefer"),
-            slot_name=inputs.get("cdc_slot_name", ""),
-            publication_name=inputs.get("cdc_publication_name", ""),
+            slot_name=cdc_config.slot_name,
+            publication_name=cdc_config.publication_name,
         )
         return PgCDCStreamReader(params, source=source)
 
