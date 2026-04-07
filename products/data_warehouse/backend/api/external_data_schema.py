@@ -19,6 +19,7 @@ from posthog.models.activity_logging.activity_log import ActivityContextBase, De
 from posthog.models.signals import model_activity_signal, mutable_receiver
 from posthog.temporal.data_imports.sources import SourceRegistry
 from posthog.temporal.data_imports.sources.common.base import WebhookSource
+from posthog.temporal.data_imports.sources.postgres.cdc.config import PostgresCDCConfig
 
 from products.data_warehouse.backend.data_load.service import (
     cancel_external_data_workflow,
@@ -362,16 +363,13 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         sync_type: str | None,
     ) -> None:
         """Manage CDC publication tables when a schema is toggled or newly set to CDC."""
-        job_inputs = source.job_inputs or {}
-        management_mode = job_inputs.get("cdc_management_mode", "posthog")
-
-        if management_mode != "posthog":
+        cdc_config = PostgresCDCConfig.from_source(source)
+        if cdc_config.management_mode != "posthog" or not cdc_config.publication_name:
             return
 
-        pub_name = job_inputs.get("cdc_publication_name")
-        db_schema = job_inputs.get("schema", "public")
-        if not pub_name:
-            return
+        pub_name = cdc_config.publication_name
+        # `schema` is the postgres database schema name, not a CDC field — read raw.
+        db_schema = (source.job_inputs or {}).get("schema", "public")
 
         newly_set_to_cdc = (
             sync_type == ExternalDataSchema.SyncType.CDC and instance.sync_type != ExternalDataSchema.SyncType.CDC

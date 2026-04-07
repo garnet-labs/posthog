@@ -114,16 +114,15 @@ class ExternalDataSource(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
         Only drops resources for PostHog-managed mode. Self-managed slots are
         never dropped by PostHog.
         """
-        job_inputs = self.job_inputs or {}
-        if not job_inputs.get("cdc_enabled"):
-            return
+        # Lazy import: top-level would create a circular import via
+        # posthog.temporal.data_imports.sources.__init__ → SourceRegistry → helpers.py
+        # → ExternalDataSource (this module).
+        from posthog.temporal.data_imports.sources.postgres.cdc.config import PostgresCDCConfig
 
-        if job_inputs.get("cdc_management_mode") != "posthog":
+        cdc_config = PostgresCDCConfig.from_source(self)
+        if not cdc_config.enabled or cdc_config.management_mode != "posthog":
             return
-
-        slot_name = job_inputs.get("cdc_slot_name")
-        pub_name = job_inputs.get("cdc_publication_name")
-        if not slot_name or not pub_name:
+        if not cdc_config.slot_name or not cdc_config.publication_name:
             return
 
         # Delete the CDC extraction schedule
@@ -142,12 +141,12 @@ class ExternalDataSource(ModelActivityMixin, CreatedMetaFields, UpdatedMetaField
             )
 
             with cdc_pg_connection(self, connect_timeout=10) as conn:
-                drop_slot_and_publication(conn, slot_name, pub_name)
+                drop_slot_and_publication(conn, cdc_config.slot_name, cdc_config.publication_name)
         except Exception:
             logger.exception(
                 "Failed to drop CDC slot/publication on source DB (best-effort)",
                 source_id=str(self.id),
-                slot_name=slot_name,
+                slot_name=cdc_config.slot_name,
             )
 
     def reload_schemas(self):

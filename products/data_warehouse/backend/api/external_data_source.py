@@ -45,6 +45,7 @@ from posthog.rbac.user_access_control import UserAccessControlSerializerMixin
 from posthog.temporal.data_imports.sources import SourceRegistry
 from posthog.temporal.data_imports.sources.common.base import ExternalWebhookInfo, FieldType, WebhookSource
 from posthog.temporal.data_imports.sources.common.config import Config
+from posthog.temporal.data_imports.sources.postgres.cdc.config import PostgresCDCConfig
 
 from products.data_warehouse.backend.api.external_data_schema import (
     ExternalDataSchemaSerializer,
@@ -816,12 +817,13 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
 
             # For CDC schemas with PostHog-managed mode, add table to publication
             if is_cdc_schema and should_sync and cdc_enabled:
-                job_inputs = new_source_model.job_inputs or {}
-                if job_inputs.get("cdc_management_mode", "posthog") == "posthog":
-                    pub_name = job_inputs.get("cdc_publication_name")
-                    db_schema_name = job_inputs.get("schema", "public")
-                    if pub_name:
-                        self._add_table_to_cdc_publication(source, source_config, pub_name, db_schema_name, schema_name)
+                cdc_config = PostgresCDCConfig.from_source(new_source_model)
+                if cdc_config.management_mode == "posthog" and cdc_config.publication_name:
+                    # `schema` is the postgres database schema name, not a CDC field — read raw.
+                    db_schema_name = (new_source_model.job_inputs or {}).get("schema", "public")
+                    self._add_table_to_cdc_publication(
+                        source, source_config, cdc_config.publication_name, db_schema_name, schema_name
+                    )
 
             if new_source_model.is_direct_postgres and should_sync:
                 schema_model.table = upsert_direct_postgres_table(
