@@ -889,6 +889,7 @@ export const parseEventHeaders = (headers?: MessageHeader[]): EventHeaders => {
     const result: EventHeaders = {
         force_disable_person_processing: false,
         historical_migration: false,
+        process_heatmap: false,
     }
 
     headers?.forEach((header) => {
@@ -915,6 +916,8 @@ export const parseEventHeaders = (headers?: MessageHeader[]): EventHeaders => {
                 }
             } else if (key === 'historical_migration') {
                 result.historical_migration = value === 'true'
+            } else if (key === 'process_heatmap') {
+                result.process_heatmap = value === 'true'
             }
         })
     })
@@ -930,6 +933,7 @@ export const parseEventHeaders = (headers?: MessageHeader[]): EventHeaders => {
         'now',
         'force_disable_person_processing',
         'historical_migration',
+        'process_heatmap',
     ] as const
     trackedHeaders.forEach((header) => {
         const status = result[header] ? 'present' : 'absent'

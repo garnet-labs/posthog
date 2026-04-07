@@ -27,6 +27,7 @@ describe('createParseHeadersStep', () => {
                     distinct_id: 'test-user',
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -49,6 +50,7 @@ describe('createParseHeadersStep', () => {
                     token: 'test-token',
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -68,6 +70,7 @@ describe('createParseHeadersStep', () => {
                 headers: {
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -87,6 +90,7 @@ describe('createParseHeadersStep', () => {
                 headers: {
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -113,6 +117,7 @@ describe('createParseHeadersStep', () => {
                     distinct_id: 'second-user',
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -141,6 +146,7 @@ describe('createParseHeadersStep', () => {
                     now: new Date('2023-01-01T12:00:00Z'),
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -167,6 +173,7 @@ describe('createParseHeadersStep', () => {
                     timestamp: '2023-01-01T00:00:00Z',
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -193,6 +200,7 @@ describe('createParseHeadersStep', () => {
                     timestamp: '2023-01-01T00:00:00Z',
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -221,6 +229,7 @@ describe('createParseHeadersStep', () => {
                     distinct_id: 'test-user',
                     force_disable_person_processing: false,
                     historical_migration: false,
+                    process_heatmap: false,
                 },
             })
         )
@@ -248,6 +257,7 @@ describe('createParseHeadersStep', () => {
                         session_id: 'test-session-123',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -268,6 +278,7 @@ describe('createParseHeadersStep', () => {
                         session_id: 'string-session-456',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -288,6 +299,7 @@ describe('createParseHeadersStep', () => {
                         session_id: '0192e72a-1dd2-7714-8000-8b3e4c123456',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -308,6 +320,7 @@ describe('createParseHeadersStep', () => {
                         session_id: 'Custom-Session-ID',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -329,6 +342,7 @@ describe('createParseHeadersStep', () => {
                         distinct_id: 'test-user',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -350,6 +364,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: true,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -369,6 +384,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -388,6 +404,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -408,6 +425,7 @@ describe('createParseHeadersStep', () => {
                         token: 'test-token',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -427,6 +445,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: true,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -446,6 +465,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -471,6 +491,7 @@ describe('createParseHeadersStep', () => {
                         distinct_id: 'test-user',
                         force_disable_person_processing: true,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -493,6 +514,7 @@ describe('createParseHeadersStep', () => {
                         now: new Date('2023-01-01T12:00:00Z'),
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -513,6 +535,7 @@ describe('createParseHeadersStep', () => {
                         now: new Date('2023-01-01T12:00:00Z'),
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -539,6 +562,7 @@ describe('createParseHeadersStep', () => {
                         now: new Date('2023-01-01T12:00:00Z'),
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -560,6 +584,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: true,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -579,6 +604,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -598,6 +624,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -618,6 +645,7 @@ describe('createParseHeadersStep', () => {
                         token: 'test-token',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -637,6 +665,7 @@ describe('createParseHeadersStep', () => {
                     headers: {
                         force_disable_person_processing: false,
                         historical_migration: true,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -663,6 +692,7 @@ describe('createParseHeadersStep', () => {
                         distinct_id: 'test-user',
                         force_disable_person_processing: false,
                         historical_migration: true,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -685,6 +715,7 @@ describe('createParseHeadersStep', () => {
                         distinct_id: 'user\uFFFD123',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
@@ -705,6 +736,50 @@ describe('createParseHeadersStep', () => {
                         token: 'test\uFFFDtoken',
                         force_disable_person_processing: false,
                         historical_migration: false,
+                        process_heatmap: false,
+                    },
+                })
+            )
+        })
+    })
+
+    describe('process_heatmap header', () => {
+        it('should parse process_heatmap as true when value is "true"', async () => {
+            const input = {
+                message: {
+                    headers: [{ process_heatmap: Buffer.from('true') }],
+                } as Pick<Message, 'headers'>,
+            }
+            const result = await step(input)
+
+            expect(result).toEqual(
+                ok({
+                    ...input,
+                    headers: {
+                        force_disable_person_processing: false,
+                        historical_migration: false,
+                        process_heatmap: true,
+                    },
+                })
+            )
+        })
+
+        it('should parse process_heatmap as false when missing', async () => {
+            const input = {
+                message: {
+                    headers: [{ token: Buffer.from('test-token') }],
+                } as Pick<Message, 'headers'>,
+            }
+            const result = await step(input)
+
+            expect(result).toEqual(
+                ok({
+                    ...input,
+                    headers: {
+                        token: 'test-token',
+                        force_disable_person_processing: false,
+                        historical_migration: false,
+                        process_heatmap: false,
                     },
                 })
             )
