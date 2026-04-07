@@ -182,9 +182,9 @@ class TestRegisterCDCCompanionTable(BaseTest):
         )
 
         schema.refresh_from_db()
-        table = schema.table
-        assert table is not None
-        assert table.name.endswith("orders_cdc")
+        table_name = getattr(schema.table, "name", None)
+        assert table_name is not None
+        assert table_name.endswith("orders_cdc")
 
     def test_skips_zero_rows(self):
         source, job, schema = self._create_source_and_job()
