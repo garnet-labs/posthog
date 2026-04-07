@@ -72,6 +72,7 @@ fn test_issue() -> Issue {
         name: None,
         description: None,
         created_at: Utc::now(),
+        first_seen: Some(Utc::now()),
     }
 }
 

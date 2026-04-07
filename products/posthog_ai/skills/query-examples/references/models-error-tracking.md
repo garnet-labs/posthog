@@ -10,6 +10,7 @@ Column | Type | Nullable | Description
 `id` | uuid | NOT NULL | Primary key (UUID)
 `team_id` | integer | NOT NULL | FK to `system.teams.id`
 `created_at` | timestamp with tz | NOT NULL | Creation timestamp
+`first_seen` | timestamp with tz | NULL | When the issue was first observed
 `status` | varchar | NOT NULL | Issue status (see Status Values below)
 `name` | text | NULL | Issue name (typically the exception type/message)
 `description` | text | NULL | User-provided description

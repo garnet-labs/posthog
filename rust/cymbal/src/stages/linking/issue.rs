@@ -131,6 +131,7 @@ async fn resolve_issue(
         team_id,
         name.to_string(),
         description.to_string(),
+        event_timestamp,
         &mut *txn,
     )
     .await?;

@@ -34,6 +34,7 @@ pub struct Issue {
     pub name: Option<String>,
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub first_seen: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -72,7 +73,7 @@ impl Issue {
             r#"
             -- the "eligible_for_assignment!" forces sqlx to assume not null, which is correct in this case, but
             -- generally a risky override of sqlx's normal type checking
-            SELECT i.id, i.team_id, i.status, i.name, i.description, i.created_at
+            SELECT i.id, i.team_id, i.status, i.name, i.description, i.created_at, i.first_seen
             FROM posthog_errortrackingissue i
             JOIN posthog_errortrackingissuefingerprintv2 f ON i.id = f.issue_id
             WHERE f.team_id = $1 AND f.fingerprint = $2
@@ -97,7 +98,7 @@ impl Issue {
         let res = sqlx::query_as!(
             Issue,
             r#"
-            SELECT id, team_id, status, name, description, created_at FROM posthog_errortrackingissue
+            SELECT id, team_id, status, name, description, created_at, first_seen FROM posthog_errortrackingissue
             WHERE team_id = $1 AND id = $2
             "#,
             team_id,
@@ -113,6 +114,7 @@ impl Issue {
         team_id: i32,
         name: String,
         description: String,
+        first_seen: DateTime<Utc>,
         executor: E,
     ) -> Result<Issue, UnhandledError>
     where
@@ -127,19 +129,21 @@ impl Issue {
             name: Some(name),
             description: Some(description),
             created_at: Utc::now(),
+            first_seen: Some(first_seen),
         };
 
         sqlx::query!(
             r#"
-            INSERT INTO posthog_errortrackingissue (id, team_id, status, name, description, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO posthog_errortrackingissue (id, team_id, status, name, description, created_at, first_seen)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
             issue.id,
             issue.team_id,
             issue.status.to_string(),
             issue.name,
             issue.description,
-            issue.created_at
+            issue.created_at,
+            issue.first_seen,
         )
         .execute(executor)
         .await?;

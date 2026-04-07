@@ -4296,6 +4296,16 @@
                   "table": null,
                   "type": "datetime"
               },
+              "first_seen": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "first_seen",
+                  "id": null,
+                  "name": "first_seen",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "datetime"
+              },
               "status": {
                   "chain": null,
                   "fields": null,
@@ -9478,6 +9488,16 @@
                   "hogql_value": "created_at",
                   "id": null,
                   "name": "created_at",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "datetime"
+              },
+              "first_seen": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "first_seen",
+                  "id": null,
+                  "name": "first_seen",
                   "schema_valid": true,
                   "table": null,
                   "type": "datetime"

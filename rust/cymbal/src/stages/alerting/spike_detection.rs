@@ -665,6 +665,7 @@ mod tests {
                 name: Some("Test Issue".to_string()),
                 description: Some("Test Description".to_string()),
                 created_at: Utc::now(),
+                first_seen: Some(Utc::now()),
             }
         }
 
@@ -997,6 +998,7 @@ mod tests {
             name: Some("Test".to_string()),
             description: Some("Test".to_string()),
             created_at: Utc::now(),
+            first_seen: Some(Utc::now()),
         };
 
         let issues_by_id = HashMap::from([

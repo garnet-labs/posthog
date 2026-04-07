@@ -36,6 +36,7 @@ class ErrorTrackingIssue(UUIDTModel):
 
     team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
+    first_seen = models.DateTimeField(null=True, blank=True)
     status = models.TextField(choices=Status.choices, default=Status.ACTIVE, null=False)
     name = models.TextField(null=True, blank=True)
     description = models.TextField(null=True, blank=True)
@@ -56,6 +57,11 @@ class ErrorTrackingIssue(UUIDTModel):
             ErrorTrackingSpikeEvent.objects.filter(team=self.team, issue_id__in=issue_ids).update(issue=self)
             ErrorTrackingIssue.objects.filter(team=self.team, id__in=issue_ids).delete()
             update_error_tracking_issue_fingerprint_overrides(team_id=self.team.pk, overrides=overrides)
+            # Recalculate first_seen from all fingerprints now belonging to this issue
+            self.first_seen = ErrorTrackingIssueFingerprintV2.objects.filter(
+                team_id=self.team.pk, issue_id=self.id
+            ).aggregate(first_seen=models.Min("first_seen"))["first_seen"]
+            self.save(update_fields=["first_seen"])
 
     def split(self, fingerprints: list[dict]) -> list["ErrorTrackingIssue"]:
         own_fingerprints = set(
@@ -72,10 +78,15 @@ class ErrorTrackingIssue(UUIDTModel):
                 fp = entry["fingerprint"]
                 if fp not in own_fingerprints:
                     continue
+                # Get first_seen from the fingerprint being split off
+                fp_first_seen = ErrorTrackingIssueFingerprintV2.objects.filter(
+                    team_id=self.team.pk, fingerprint=fp
+                ).values_list("first_seen", flat=True).first()
                 new_issue = ErrorTrackingIssue.objects.create(
                     team=self.team,
                     name=entry.get("name") or "Untitled issue",
                     description=entry.get("description"),
+                    first_seen=fp_first_seen,
                 )
                 new_issues.append(new_issue)
                 overrides.extend(
@@ -84,6 +95,11 @@ class ErrorTrackingIssue(UUIDTModel):
                     )
                 )
             update_error_tracking_issue_fingerprint_overrides(team_id=self.team.pk, overrides=overrides)
+            # Recalculate first_seen for the original issue after split
+            self.first_seen = ErrorTrackingIssueFingerprintV2.objects.filter(
+                team_id=self.team.pk, issue_id=self.id
+            ).aggregate(first_seen=models.Min("first_seen"))["first_seen"]
+            self.save(update_fields=["first_seen"])
             # Spike events are no longer meaningful after splitting since the issue composition changed
             ErrorTrackingSpikeEvent.objects.filter(team=self.team, issue=self).delete()
         return new_issues

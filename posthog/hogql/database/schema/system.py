@@ -599,6 +599,7 @@ error_tracking_issues: PostgresTable = PostgresTable(
         "id": StringDatabaseField(name="id"),
         "team_id": IntegerDatabaseField(name="team_id"),
         "created_at": DateTimeDatabaseField(name="created_at"),
+        "first_seen": DateTimeDatabaseField(name="first_seen"),
         "status": StringDatabaseField(name="status"),
         "name": StringDatabaseField(name="name"),
         "description": StringDatabaseField(name="description"),
