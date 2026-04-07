@@ -398,10 +398,7 @@ describe('consumer', () => {
 
         it('should not trigger timeout if task completes in time', async () => {
             const task = triggerablePromise()
-            await simulateMessageWithBackgroundTask(
-                [createKafkaMessage({ offset: 1, partition: 0 })],
-                task.promise
-            )
+            await simulateMessageWithBackgroundTask([createKafkaMessage({ offset: 1, partition: 0 })], task.promise)
 
             expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
 
