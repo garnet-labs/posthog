@@ -2376,6 +2376,106 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                             canOpenModal: true,
                             canOpenInsight: true,
                         },
+                        {
+                            kind: 'query',
+                            tileId: TileId.BOT_AI_REFERRALS,
+                            title: 'AI referral traffic',
+                            layout: {
+                                colSpanClassName: 'md:col-span-1',
+                            },
+                            query: {
+                                full: true,
+                                kind: NodeKind.DataTableNode,
+                                source: {
+                                    kind: NodeKind.WebStatsTableQuery,
+                                    breakdownBy: WebStatsBreakdown.InitialReferringDomain,
+                                    properties: [
+                                        {
+                                            key: '$initial_referring_domain',
+                                            value: [
+                                                'chatgpt.com',
+                                                'openai.com',
+                                                'perplexity.ai',
+                                                'claude.ai',
+                                                'anthropic.com',
+                                                'you.com',
+                                                'phind.com',
+                                                'gemini.google.com',
+                                            ],
+                                            operator: PropertyOperator.Exact,
+                                            type: PropertyFilterType.Session,
+                                        },
+                                    ],
+                                    dateRange,
+                                    compareFilter,
+                                    sampling,
+                                    limit: 10,
+                                    filterTestAccounts,
+                                    tags: WEB_ANALYTICS_DEFAULT_QUERY_TAGS,
+                                },
+                                embedded: true,
+                                showActions: true,
+                            },
+                            insightProps: createInsightProps(TileId.BOT_AI_REFERRALS, 'table'),
+                            canOpenModal: true,
+                            canOpenInsight: true,
+                        },
+                        {
+                            kind: 'query',
+                            tileId: TileId.BOT_AI_ENGAGEMENT,
+                            title: 'AI referral engagement',
+                            layout: {
+                                colSpanClassName: 'md:col-span-1',
+                            },
+                            query: {
+                                kind: NodeKind.InsightVizNode,
+                                source: {
+                                    kind: NodeKind.TrendsQuery,
+                                    dateRange,
+                                    interval,
+                                    series: [
+                                        {
+                                            event: '$pageview',
+                                            kind: NodeKind.EventsNode,
+                                            math: BaseMathType.UniqueUsers,
+                                            name: 'Pageview',
+                                            custom_name: 'AI-referred visitors',
+                                        },
+                                    ],
+                                    trendsFilter: {
+                                        display: ChartDisplayType.ActionsLineGraph,
+                                    },
+                                    breakdownFilter: {
+                                        breakdown: '$initial_referring_domain',
+                                        breakdown_type: 'session',
+                                    },
+                                    properties: [
+                                        {
+                                            key: '$initial_referring_domain',
+                                            value: [
+                                                'chatgpt.com',
+                                                'openai.com',
+                                                'perplexity.ai',
+                                                'claude.ai',
+                                                'anthropic.com',
+                                                'you.com',
+                                                'phind.com',
+                                                'gemini.google.com',
+                                            ],
+                                            operator: PropertyOperator.Exact,
+                                            type: PropertyFilterType.Session,
+                                        },
+                                    ],
+                                    filterTestAccounts,
+                                    compareFilter,
+                                    tags: WEB_ANALYTICS_DEFAULT_QUERY_TAGS,
+                                },
+                                hidePersonsModal: true,
+                                embedded: true,
+                            },
+                            insightProps: createInsightProps(TileId.BOT_AI_ENGAGEMENT),
+                            canOpenInsight: true,
+                        },
                     ]
                     return botTiles.filter(isNotNil)
                 }

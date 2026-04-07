@@ -89,6 +89,7 @@ export enum TileId {
     BOT_PATHS = 'BOT_PATHS',
     BOT_SOURCES = 'BOT_SOURCES',
     BOT_AI_REFERRALS = 'BOT_AI_REFERRALS',
+    BOT_AI_ENGAGEMENT = 'BOT_AI_ENGAGEMENT',
 }
 
 export enum ProductTab {
