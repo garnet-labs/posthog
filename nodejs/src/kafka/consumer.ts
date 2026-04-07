@@ -72,6 +72,12 @@ const consumedBatchBackpressureDuration = new Histogram({
     labelNames: ['topic', 'groupId'],
 })
 
+const counterBackgroundTaskTimeout = new Counter({
+    name: 'consumer_background_task_timeout_total',
+    help: 'Count of background tasks that hit the timeout and were force-resolved',
+    labelNames: ['topic', 'groupId'],
+})
+
 const gaugeBatchUtilization = new Gauge({
     name: 'consumer_batch_utilization',
     help: 'Indicates how big batches are we are processing compared to the max batch size. Useful as a scaling metric',
@@ -726,7 +732,25 @@ export class KafkaConsumer {
                     // TRICKY: The commit logic needs to be aware of background work. If we were to just store offsets here,
                     // it would be hard to mix background work with non-background work.
                     // So we just create pretend work to simplify the rest of the logic
-                    const backgroundTask = result?.backgroundTask ?? Promise.resolve()
+                    const rawBackgroundTask = result?.backgroundTask
+                    const backgroundTaskTimeoutMs = defaultConfig.CONSUMER_BACKGROUND_TASK_TIMEOUT_MS
+                    const backgroundTask = rawBackgroundTask
+                        ? new Promise<void>((resolve) => {
+                              const timer = setTimeout(() => {
+                                  logger.error('🔥', 'background_task_timeout', {
+                                      topic,
+                                      groupId,
+                                      timeoutMs: backgroundTaskTimeoutMs,
+                                  })
+                                  counterBackgroundTaskTimeout.inc({ topic, groupId })
+                                  resolve()
+                              }, backgroundTaskTimeoutMs)
+                              void rawBackgroundTask.finally(() => {
+                                  clearTimeout(timer)
+                                  resolve()
+                              })
+                          })
+                        : Promise.resolve()
                     const stopBackgroundTaskTimer = result?.backgroundTask
                         ? consumedBatchBackgroundDuration.startTimer({
                               topic: this.config.topic,

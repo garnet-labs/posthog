@@ -353,6 +353,100 @@ describe('consumer', () => {
         })
     })
 
+    describe('background task timeout', () => {
+        let eachBatch: jest.Mock
+
+        beforeEach(async () => {
+            defaultConfig.CONSUMER_BACKGROUND_TASK_TIMEOUT_MS = 10 // Short timeout for tests
+            consumer['maxBackgroundTasks'] = 3
+            eachBatch = jest.fn(() => Promise.resolve({}))
+            await consumer.connect(eachBatch)
+        })
+
+        afterEach(() => {
+            defaultConfig.CONSUMER_BACKGROUND_TASK_TIMEOUT_MS = 60_000
+        })
+
+        const simulateMessageWithBackgroundTask = async (
+            messages: Message[],
+            backgroundTask: Promise<any>
+        ): Promise<void> => {
+            eachBatch.mockImplementationOnce(() => Promise.resolve({ backgroundTask }))
+            consumeCallback(null, messages)
+            await delay(1)
+        }
+
+        it('should commit offsets when a background task times out', async () => {
+            // Create a task that will never resolve
+            const stuckTask = triggerablePromise()
+            await simulateMessageWithBackgroundTask(
+                [createKafkaMessage({ offset: 1, partition: 0 })],
+                stuckTask.promise
+            )
+
+            // Offsets should not be stored yet
+            expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
+
+            // Wait for the timeout to fire
+            await delay(50)
+
+            // Offsets should now be stored despite the task never resolving
+            expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
+                { offset: 2, partition: 0, topic: 'test-topic' },
+            ])
+        })
+
+        it('should not trigger timeout if task completes in time', async () => {
+            const task = triggerablePromise()
+            await simulateMessageWithBackgroundTask(
+                [createKafkaMessage({ offset: 1, partition: 0 })],
+                task.promise
+            )
+
+            expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
+
+            // Resolve before timeout
+            task.resolve()
+            await delay(1)
+
+            expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
+                { offset: 2, partition: 0, topic: 'test-topic' },
+            ])
+        })
+
+        it('should unblock subsequent tasks when an earlier task times out', async () => {
+            const stuckTask = triggerablePromise()
+            await simulateMessageWithBackgroundTask(
+                [createKafkaMessage({ offset: 1, partition: 0 })],
+                stuckTask.promise
+            )
+
+            const normalTask = triggerablePromise()
+            await simulateMessageWithBackgroundTask(
+                [createKafkaMessage({ offset: 2, partition: 0 })],
+                normalTask.promise
+            )
+
+            // Resolve the second task immediately
+            normalTask.resolve()
+            await delay(1)
+
+            // Neither should have committed yet - second is waiting on first
+            expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
+
+            // Wait for the stuck task to time out
+            await delay(50)
+
+            // Both offsets should now be stored
+            expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
+                { offset: 2, partition: 0, topic: 'test-topic' },
+            ])
+            expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
+                { offset: 3, partition: 0, topic: 'test-topic' },
+            ])
+        })
+    })
+
     describe('rebalancing', () => {
         it('should set rebalancing state during partition revocation', () => {
             expect(consumer['rebalanceCoordination'].isRebalancing).toBe(false)
