@@ -780,6 +780,41 @@ class DataWarehouseViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
 
     # --- Managed warehouse provisioning (proxied to duckgres) ---
 
+    def _create_or_update_duckgres_server(self, database_name: str, password: str) -> None:
+        """Create or update a DuckgresServer model for the team's organization."""
+        from posthog.ducklake.models import DuckgresServer
+
+        pg_url = getattr(django_settings, "DUCKGRES_PG_URL", None)
+        pg_port = getattr(django_settings, "DUCKGRES_PG_PORT", 5432)
+        if not pg_url:
+            logger.warning("DUCKGRES_PG_URL not configured, skipping DuckgresServer creation")
+            return
+        try:
+            DuckgresServer.objects.update_or_create(
+                organization=self.team.organization,
+                defaults={
+                    "host": pg_url,
+                    "port": pg_port,
+                    "database": database_name,
+                    "username": "root",
+                    "password": password,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to create DuckgresServer", team_id=self.team_id)
+
+    def _update_duckgres_server_password(self, password: str) -> None:
+        """Update the stored password for the org's DuckgresServer."""
+        from posthog.ducklake.models import DuckgresServer
+
+        try:
+            server = DuckgresServer.objects.filter(organization=self.team.organization).first()
+            if server:
+                server.password = password
+                server.save(update_fields=["password", "updated_at"])
+        except Exception:
+            logger.exception("Failed to update DuckgresServer password", team_id=self.team_id)
+
     def _is_managed_warehouse_enabled(self) -> bool:
         try:
             return posthoganalytics.feature_enabled(
@@ -862,7 +897,7 @@ class DataWarehouseViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
         database_name = request.data.get("database_name")
         if not database_name:
             return Response({"error": "database_name is required"}, status=status.HTTP_400_BAD_REQUEST)
-        return self._provisioning_request(
+        resp = self._provisioning_request(
             "POST",
             "/provision",
             json_body={
@@ -870,6 +905,11 @@ class DataWarehouseViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
                 "metadata_store": {"type": "aurora", "aurora": {"min_acu": 0.5, "max_acu": 2}},
             },
         )
+        if resp.status_code == 202 and isinstance(resp.data, dict):
+            password = resp.data.get("password", "")
+            if password:
+                self._create_or_update_duckgres_server(database_name=database_name, password=password)
+        return resp
 
     @extend_schema(
         responses={
@@ -930,7 +970,12 @@ class DataWarehouseViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     @action(methods=["POST"], detail=False, url_path="reset-password")
     def reset_password(self, request: Request, **kwargs) -> Response:
         """Reset the root password for the managed warehouse."""
-        return self._provisioning_request("POST", "/reset-password")
+        resp = self._provisioning_request("POST", "/reset-password")
+        if resp.status_code == 200 and isinstance(resp.data, dict):
+            password = resp.data.get("password", "")
+            if password:
+                self._update_duckgres_server_password(password=password)
+        return resp
 
     @extend_schema(
         parameters=[
