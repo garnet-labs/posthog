@@ -197,7 +197,7 @@ def WRITABLE_SESSION_REPLAY_FEATURES_TABLE_SQL(on_cluster=False):
         on_cluster_clause=ON_CLUSTER_CLAUSE(on_cluster),
         engine=Distributed(
             data_table=SESSION_REPLAY_FEATURES_DATA_TABLE(),
-            sharding_key="sipHash64(distinct_id)",
+            sharding_key="sipHash64(session_id)",
         ),
     )
 
@@ -208,7 +208,7 @@ def DISTRIBUTED_SESSION_REPLAY_FEATURES_TABLE_SQL(on_cluster=False):
         on_cluster_clause=ON_CLUSTER_CLAUSE(on_cluster),
         engine=Distributed(
             data_table=SESSION_REPLAY_FEATURES_DATA_TABLE(),
-            sharding_key="sipHash64(distinct_id)",
+            sharding_key="sipHash64(session_id)",
         ),
     )
 
