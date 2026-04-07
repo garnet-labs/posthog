@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -83,6 +83,11 @@ type Metrics struct {
 	Children   int       `json:"child_process_count"`
 	FDs        int32     `json:"fd_count"`
 	SampledAt  time.Time `json:"last_sampled_at"`
+
+	// Running totals for computing averages at process exit.
+	sumMemMB  float64
+	sumCPUPct float64
+	samples   int64
 }
 
 // Snapshot is a point-in-time view of a process suitable for serialization.
@@ -127,11 +132,10 @@ type Process struct {
 	unread    bool             // true when new output arrived since the last MarkRead call
 	waitDone  chan struct{}    // closed by the goroutine that calls cmd.Wait()
 
-	startedAt      time.Time
-	readyAt        time.Time
-	exitCode       *int
-	metrics        *Metrics
-	metricsEnabled atomic.Bool
+	startedAt time.Time
+	readyAt   time.Time
+	exitCode  *int
+	metrics   *Metrics
 }
 
 func NewProcess(name string, cfg config.ProcConfig, scrollback int, globalShell string) *Process {
@@ -169,10 +173,6 @@ func (s Status) IsRunning() bool {
 
 func (p *Process) IsRunning() bool {
 	return p.Status().IsRunning()
-}
-
-func (p *Process) SetMetricsEnabled(on bool) {
-	p.metricsEnabled.Store(on)
 }
 
 // CPUPercent returns the most recently sampled CPU usage, or 0 if not yet sampled.
@@ -360,6 +360,9 @@ func (p *Process) sampleMetrics() {
 	p.metrics.Children = len(all) - 1
 	p.metrics.FDs = fds
 	p.metrics.SampledAt = time.Now()
+	p.metrics.sumMemMB += rssMB
+	p.metrics.sumCPUPct += cpuPct
+	p.metrics.samples++
 	p.mu.Unlock()
 }
 
@@ -707,45 +710,52 @@ func (p *Process) startMetricsSampler(pid int, send func(tea.Msg)) {
 			return
 		}
 
-		if !p.metricsEnabled.Load() {
-			continue
-		}
-
 		p.sampleMetrics()
 		send(MetricsMsg{})
 	}
 }
 
-// collectProcessTree returns ps and all its descendants.
+// collectProcessTree returns root and all its descendants by walking only
+// the processes in the same process group (pgid == root PID, set via
+// Setpgid). This avoids the expensive gops.Processes() call that
+// enumerates every process on the machine.
 func collectProcessTree(root *gops.Process) []*gops.Process {
-	allProcs, err := gops.Processes()
-	if err != nil {
+	pids, err := pgroupPIDs(root.Pid)
+	if err != nil || len(pids) == 0 {
 		return []*gops.Process{root}
 	}
 
-	// Build parent → children index
-	byPID := make(map[int32]*gops.Process, len(allProcs))
-	childrenOf := make(map[int32][]*gops.Process)
-	for _, p := range allProcs {
-		byPID[p.Pid] = p
-		ppid, err := p.Ppid()
-		if err == nil && ppid > 0 {
-			childrenOf[ppid] = append(childrenOf[ppid], p)
+	result := make([]*gops.Process, 0, len(pids))
+	for _, pid := range pids {
+		if pid == root.Pid {
+			result = append(result, root)
+		} else if p, err := gops.NewProcess(pid); err == nil {
+			result = append(result, p)
 		}
 	}
-
-	// BFS from root
-	result := []*gops.Process{root}
-	queue := []*gops.Process{root}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, child := range childrenOf[cur.Pid] {
-			result = append(result, child)
-			queue = append(queue, child)
-		}
+	if len(result) == 0 {
+		return []*gops.Process{root}
 	}
 	return result
+}
+
+// pgroupPIDs returns the PIDs belonging to the given process group.
+func pgroupPIDs(pgid int32) ([]int32, error) {
+	out, err := exec.Command("pgrep", "-g", fmt.Sprintf("%d", pgid)).Output()
+	if err != nil {
+		return nil, err
+	}
+	var pids []int32
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.ParseInt(line, 10, 32)
+		if err == nil {
+			pids = append(pids, int32(pid))
+		}
+	}
+	return pids, nil
 }
 
 // stopSignal returns the syscall signal to use when stopping the process,
@@ -894,6 +904,10 @@ func (p *Process) trackProcessCompleted(st Status) {
 		stats.PeakMemMB = m.PeakMemMB
 		stats.PeakCPUPct = m.PeakCPUPct
 		stats.CPUTimeS = m.CPUTimeS
+		if m.samples > 0 {
+			stats.AvgMemMB = m.sumMemMB / float64(m.samples)
+			stats.AvgCPUPct = m.sumCPUPct / float64(m.samples)
+		}
 	}
 	telemetry.TrackProcessCompleted(stats)
 }

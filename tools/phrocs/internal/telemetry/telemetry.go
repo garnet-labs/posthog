@@ -81,6 +81,8 @@ type ProcessStats struct {
 	DurationS  float64
 	PeakMemMB  float64
 	PeakCPUPct float64
+	AvgMemMB   float64
+	AvgCPUPct  float64
 	CPUTimeS   float64
 }
 
@@ -122,6 +124,8 @@ func Flush(timeout time.Duration) {
 			"duration_s":              stats.DurationS,
 			"peak_mem_rss_mb":         stats.PeakMemMB,
 			"peak_cpu_percent":        stats.PeakCPUPct,
+			"avg_mem_rss_mb":          stats.AvgMemMB,
+			"avg_cpu_percent":         stats.AvgCPUPct,
 			"cpu_time_s":              stats.CPUTimeS,
 		}
 		if stats.ExitCode != nil {

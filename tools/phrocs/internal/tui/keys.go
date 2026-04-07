@@ -174,7 +174,6 @@ func (m Model) handleInfoKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (Model, []tea.
 
 	case key.Matches(msg, m.keys.InfoMode), msg.Code == tea.KeyEscape:
 		m.infoMode = false
-		m.disableAllMetrics()
 		if !m.isDockerMode() {
 			m.reloadActiveLines()
 			m.viewport.GotoBottom()
@@ -409,7 +408,6 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, 
 
 	case key.Matches(msg, m.keys.InfoMode):
 		m.infoMode = true
-		m.toggleMetricsOnSelectedProc()
 		m.refreshInfoContent()
 		m.viewport.GotoTop()
 		m.dbg("info mode: enter")

@@ -501,7 +501,6 @@ func (m Model) loadActiveProc() (Model, []tea.Cmd) {
 		m.searchCursor = 0
 		m.activeLines = nil
 		m.infoMode = false
-		m.disableAllMetrics()
 		m.keys.LazyDocker.SetEnabled(true)
 		m.keys.ProcViewer.SetEnabled(false)
 		m.viewport.SetContent(docker.RenderContainerStatusTable(m.containers, m.viewport.Width()))
@@ -511,9 +510,7 @@ func (m Model) loadActiveProc() (Model, []tea.Cmd) {
 		m.containers = nil
 		m.keys.LazyDocker.SetEnabled(false)
 		m.keys.ProcViewer.SetEnabled(true)
-		m.disableAllMetrics()
 		if m.infoMode {
-			m.toggleMetricsOnSelectedProc()
 			m.refreshInfoContent()
 		} else {
 			m.reloadActiveLines()
@@ -529,12 +526,6 @@ func (m Model) loadActiveProc() (Model, []tea.Cmd) {
 		m.recomputeSearch()
 	}
 	return m, cmds
-}
-
-func (m *Model) disableAllMetrics() {
-	for _, p := range m.services {
-		p.SetMetricsEnabled(false)
-	}
 }
 
 // Reloads activeLines from the process buffer and pushes to the viewport.
@@ -612,10 +603,4 @@ func (m *Model) sortServices() {
 		}
 	}
 	m.ensureSidebarCursorVisible()
-}
-
-func (m Model) toggleMetricsOnSelectedProc() {
-	if p := m.activeProc(); p != nil {
-		p.SetMetricsEnabled(true)
-	}
 }
