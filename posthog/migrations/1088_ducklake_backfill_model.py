@@ -4,16 +4,6 @@ from django.db import migrations, models
 import posthog.models.utils
 
 
-def backfill_from_catalogs(apps, schema_editor):
-    """Create DuckLakeBackfill rows for existing DuckLakeCatalog entries."""
-    DuckLakeCatalog = apps.get_model("posthog", "DuckLakeCatalog")
-    DuckLakeBackfill = apps.get_model("posthog", "DuckLakeBackfill")
-
-    backfills = [DuckLakeBackfill(team_id=catalog.team_id, enabled=True) for catalog in DuckLakeCatalog.objects.all()]
-    if backfills:
-        DuckLakeBackfill.objects.bulk_create(backfills, ignore_conflicts=True)
-
-
 class Migration(migrations.Migration):
     dependencies = [
         ("posthog", "1087_alertconfiguration_schedule_restriction"),
@@ -56,5 +46,4 @@ class Migration(migrations.Migration):
                 "verbose_name_plural": "DuckLake backfills",
             },
         ),
-        migrations.RunPython(backfill_from_catalogs, migrations.RunPython.noop),
     ]
