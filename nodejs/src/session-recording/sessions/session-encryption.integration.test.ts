@@ -19,8 +19,8 @@ import { SessionTracker } from './session-tracker'
 
 jest.mock('./session-feature-recorder', () => ({
     SessionFeatureRecorder: jest.fn().mockImplementation(() => ({
-        recordMessage: jest.fn().mockResolvedValue(undefined),
-        end: jest.fn().mockResolvedValue({
+        recordMessage: jest.fn().mockReturnValue(undefined),
+        end: jest.fn().mockReturnValue({
             startDateTime: DateTime.now(),
             endDateTime: DateTime.now(),
             eventCount: 0,

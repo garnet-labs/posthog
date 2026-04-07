@@ -124,8 +124,8 @@ jest.mock('./session-console-log-recorder', () => ({
 
 jest.mock('./session-feature-recorder', () => ({
     SessionFeatureRecorder: jest.fn().mockImplementation((_sessionId, _teamId, _batchId) => ({
-        recordMessage: jest.fn().mockResolvedValue(undefined),
-        end: jest.fn().mockResolvedValue({
+        recordMessage: jest.fn().mockReturnValue(undefined),
+        end: jest.fn().mockReturnValue({
             startDateTime: null,
             endDateTime: null,
             eventCount: 0,
