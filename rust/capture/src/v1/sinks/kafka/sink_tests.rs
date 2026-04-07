@@ -560,10 +560,10 @@ async fn batch_summary_from_mixed_results() {
 // 14. Flush delegates to producers
 // ---------------------------------------------------------------------------
 
-#[test]
-fn flush_ok() {
+#[tokio::test]
+async fn flush_ok() {
     let h = TestHarness::new();
-    assert!(h.sink.flush().is_ok());
+    assert!(h.sink.flush().await.is_ok());
 }
 
 // ---------------------------------------------------------------------------

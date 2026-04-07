@@ -42,7 +42,7 @@ pub trait Sink: Send + Sync {
     fn sinks(&self) -> Vec<SinkName>;
 
     /// Flush the underlying producer(s) for graceful shutdown.
-    fn flush(&self) -> anyhow::Result<()>;
+    async fn flush(&self) -> anyhow::Result<()>;
 }
 
 pub struct KafkaSink<P: KafkaProducerTrait> {
@@ -409,7 +409,8 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         self.producers.keys().copied().collect()
     }
 
-    fn flush(&self) -> anyhow::Result<()> {
+    async fn flush(&self) -> anyhow::Result<()> {
+        let mut set = tokio::task::JoinSet::new();
         for (name, producer) in &self.producers {
             let timeout = self
                 .config
@@ -417,10 +418,28 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 .get(name)
                 .map(|c| c.produce_timeout)
                 .unwrap_or(super::constants::DEFAULT_PRODUCE_TIMEOUT);
-            producer
-                .flush(timeout)
-                .map_err(|e| anyhow::anyhow!("{}: flush error: {e:#}", name.as_str()))?;
+            let producer = producer.clone();
+            let name_str = name.as_str();
+            set.spawn_blocking(move || {
+                producer
+                    .flush(timeout)
+                    .map_err(|e| anyhow::anyhow!("{name_str}: flush error: {e:#}"))
+            });
         }
-        Ok(())
+        let mut first_err: Option<anyhow::Error> = None;
+        while let Some(result) = set.join_next().await {
+            if let Err(e) = result
+                .map_err(|e| anyhow::anyhow!("flush task panicked: {e:#}"))
+                .and_then(|r| r)
+            {
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+        }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
