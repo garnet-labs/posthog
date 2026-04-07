@@ -71,12 +71,18 @@ impl Event for FakeEvent {
         self.event_headers.clone()
     }
 
-    fn partition_key(&self, _ctx: &Context) -> String {
-        self.partition_key.clone()
+    fn write_partition_key(&self, _ctx: &Context, buf: &mut String) {
+        buf.push_str(&self.partition_key);
     }
 
-    fn serialize(&self, _ctx: &Context) -> Result<String, String> {
-        self.payload.clone()
+    fn serialize_into(&self, _ctx: &Context, buf: &mut String) -> Result<(), String> {
+        match &self.payload {
+            Ok(p) => {
+                buf.push_str(p);
+                Ok(())
+            }
+            Err(e) => Err(e.clone()),
+        }
     }
 }
 

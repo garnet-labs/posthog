@@ -16,16 +16,17 @@ pub trait Event: Send + Sync {
     /// backend target (e.g. Kafka topic) using its own config.
     fn destination(&self) -> &Destination;
 
-    /// Event-owned metadata as key-value pairs. The Sink passes these through
-    /// `build_headers` to merge with Context-level headers before converting
-    /// to transport-specific format.
+    /// Event-owned metadata as key-value pairs. The Sink merges these with
+    /// context-level headers before converting to transport-specific format.
     fn headers(&self) -> Vec<(String, String)>;
 
-    /// Partition/routing key for the backend. Needs Context for token, IP, etc.
-    fn partition_key(&self, ctx: &Context) -> String;
+    /// Write the partition/routing key into a caller-provided buffer.
+    /// The caller clears `buf` between events; implementations just append.
+    fn write_partition_key(&self, ctx: &Context, buf: &mut String);
 
-    /// Serialize into the payload string for the backend.
-    fn serialize(&self, ctx: &Context) -> Result<String, String>;
+    /// Serialize the event payload into a caller-provided buffer.
+    /// The caller clears `buf` between events; implementations just append.
+    fn serialize_into(&self, ctx: &Context, buf: &mut String) -> Result<(), String>;
 }
 
 /// Build the context-level headers that are identical for every event in a
@@ -38,15 +39,6 @@ pub fn build_context_headers(ctx: &Context) -> Vec<(String, String)> {
     if ctx.historical_migration {
         headers.push(("historical_migration".into(), "true".into()));
     }
-    headers
-}
-
-/// Merge event-level headers with Context-level headers into a complete,
-/// transport-agnostic set. The Sink converts the result to its own format
-/// (e.g. Kafka OwnedHeaders).
-pub fn build_headers(ctx: &Context, event_headers: Vec<(String, String)>) -> Vec<(String, String)> {
-    let mut headers = event_headers;
-    headers.extend(build_context_headers(ctx));
     headers
 }
 
@@ -87,24 +79,5 @@ mod tests {
         ctx.historical_migration = false;
         let headers = build_context_headers(&ctx);
         assert!(header_val(&headers, "historical_migration").is_none());
-    }
-
-    #[test]
-    fn build_headers_preserves_event_headers_first() {
-        let ctx = test_utils::test_context();
-        let event_headers = vec![("custom_key".into(), "custom_val".into())];
-        let merged = build_headers(&ctx, event_headers);
-
-        assert_eq!(merged[0].0, "custom_key");
-        assert_eq!(merged[0].1, "custom_val");
-        assert_eq!(header_val(&merged, "token"), Some(ctx.api_token.clone()));
-    }
-
-    #[test]
-    fn build_headers_with_empty_event_headers() {
-        let ctx = test_utils::test_context();
-        let merged = build_headers(&ctx, vec![]);
-        assert!(header_val(&merged, "token").is_some());
-        assert!(header_val(&merged, "now").is_some());
     }
 }

@@ -8,11 +8,36 @@ use rdkafka::error::KafkaError;
 use crate::v1::sinks::kafka::producer::{ProduceError, ProduceRecord};
 use crate::v1::sinks::SinkName;
 
+// ---------------------------------------------------------------------------
+// OwnedProduceRecord — owned copy for test assertions
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct OwnedProduceRecord {
+    pub topic: String,
+    pub key: Option<String>,
+    pub payload: String,
+}
+
+impl<'a> From<ProduceRecord<'a>> for OwnedProduceRecord {
+    fn from(r: ProduceRecord<'a>) -> Self {
+        Self {
+            topic: r.topic.to_owned(),
+            key: r.key.map(str::to_owned),
+            payload: r.payload.to_owned(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MockProducer
+// ---------------------------------------------------------------------------
+
 /// Mock Kafka producer for testing. Captures sent records and supports
 /// configurable error injection and ack delays.
 pub struct MockProducer {
     sink: SinkName,
-    records: Arc<Mutex<Vec<ProduceRecord>>>,
+    records: Arc<Mutex<Vec<OwnedProduceRecord>>>,
     send_error: Option<fn() -> ProduceError>,
     ack_error: Option<fn() -> ProduceError>,
     ack_delay: Option<Duration>,
@@ -59,7 +84,7 @@ impl MockProducer {
 
     pub fn with_records<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&[ProduceRecord]) -> R,
+        F: FnOnce(&[OwnedProduceRecord]) -> R,
     {
         let guard = self.records.lock().unwrap();
         f(&guard)
@@ -73,11 +98,11 @@ impl MockProducer {
 impl super::KafkaProducerTrait for MockProducer {
     type Ack = Pin<Box<dyn Future<Output = Result<(), ProduceError>> + Send>>;
 
-    fn send(&self, record: ProduceRecord) -> Result<Self::Ack, ProduceError> {
+    fn send(&self, record: ProduceRecord<'_>) -> Result<Self::Ack, ProduceError> {
         if let Some(err_fn) = &self.send_error {
             return Err(err_fn());
         }
-        self.records.lock().unwrap().push(record);
+        self.records.lock().unwrap().push(record.into());
         let ack_error = self.ack_error;
         let delay = self.ack_delay;
         Ok(Box::pin(async move {

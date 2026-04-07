@@ -65,10 +65,10 @@ impl ProduceError {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub struct ProduceRecord {
-    pub topic: String,
-    pub key: Option<String>,
-    pub payload: String,
+pub struct ProduceRecord<'a> {
+    pub topic: &'a str,
+    pub key: Option<&'a str>,
+    pub payload: &'a str,
     pub headers: OwnedHeaders,
 }
 
@@ -186,12 +186,12 @@ impl KafkaProducer {
 impl super::KafkaProducerTrait for KafkaProducer {
     type Ack = SendHandle;
 
-    fn send(&self, record: ProduceRecord) -> Result<SendHandle, ProduceError> {
+    fn send(&self, record: ProduceRecord<'_>) -> Result<SendHandle, ProduceError> {
         match self.inner.send_result(FutureRecord {
-            topic: &record.topic,
-            payload: Some(&record.payload),
+            topic: record.topic,
+            payload: Some(record.payload),
             partition: None,
-            key: record.key.as_deref(),
+            key: record.key,
             timestamp: None,
             headers: Some(record.headers),
         }) {

@@ -93,23 +93,26 @@ impl SinkEvent for WrappedEvent {
         h
     }
 
-    fn partition_key(&self, ctx: &Context) -> String {
+    fn write_partition_key(&self, ctx: &Context, buf: &mut String) {
+        use std::fmt::Write;
         if self.event.options.cookieless_mode == Some(true) {
             let ip = if ctx.capture_internal {
-                "127.0.0.1".to_string()
+                "127.0.0.1"
             } else {
-                ctx.client_ip.to_string()
+                // client_ip.to_string() allocates; write! into the buffer avoids that
+                let _ = write!(buf, "{}:{}", ctx.api_token, ctx.client_ip);
+                return;
             };
-            format!("{}:{}", ctx.api_token, ip)
+            let _ = write!(buf, "{}:{}", ctx.api_token, ip);
         } else {
-            format!("{}:{}", ctx.api_token, self.event.distinct_id)
+            let _ = write!(buf, "{}:{}", ctx.api_token, self.event.distinct_id);
         }
     }
 
-    fn serialize(&self, _ctx: &Context) -> Result<String, String> {
+    fn serialize_into(&self, _ctx: &Context, _buf: &mut String) -> Result<(), String> {
         // TODO: builds IngestionEvent from self + Context, applies $-prefix
         // remapping, IP redaction, property merging. Tackled separately.
-        unimplemented!("WrappedEvent::serialize")
+        unimplemented!("WrappedEvent::serialize_into")
     }
 }
 
@@ -535,12 +538,20 @@ mod tests {
         assert_eq!(h[0], ("skip_person_processing".into(), "true".into()));
     }
 
+    fn partition_key(ev: &WrappedEvent, ctx: &Context) -> String {
+        let mut buf = String::new();
+        ev.write_partition_key(ctx, &mut buf);
+        buf
+    }
+
     #[test]
     fn partition_key_normal_mode() {
         let ctx = test_utils::test_context();
         let ev = ok_wrapped("$pageview", "user-42");
-        let key = ev.partition_key(&ctx);
-        assert_eq!(key, format!("{}:user-42", ctx.api_token));
+        assert_eq!(
+            partition_key(&ev, &ctx),
+            format!("{}:user-42", ctx.api_token)
+        );
     }
 
     #[test]
@@ -548,8 +559,10 @@ mod tests {
         let ctx = test_utils::test_context();
         let mut ev = ok_wrapped("$pageview", "user-42");
         ev.event.options.cookieless_mode = Some(true);
-        let key = ev.partition_key(&ctx);
-        assert_eq!(key, format!("{}:{}", ctx.api_token, ctx.client_ip));
+        assert_eq!(
+            partition_key(&ev, &ctx),
+            format!("{}:{}", ctx.api_token, ctx.client_ip)
+        );
     }
 
     #[test]
@@ -558,8 +571,10 @@ mod tests {
         ctx.capture_internal = true;
         let mut ev = ok_wrapped("$pageview", "user-42");
         ev.event.options.cookieless_mode = Some(true);
-        let key = ev.partition_key(&ctx);
-        assert_eq!(key, format!("{}:127.0.0.1", ctx.api_token));
+        assert_eq!(
+            partition_key(&ev, &ctx),
+            format!("{}:127.0.0.1", ctx.api_token)
+        );
     }
 
     #[test]

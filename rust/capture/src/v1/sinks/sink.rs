@@ -179,21 +179,18 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             );
         }
 
-        // Pre-compute context-level Kafka headers once for the batch.
-        // Per-event headers are merged on top inside the loop.
+        // Pre-compute context-level headers once for the batch.
         let ctx_headers = build_context_headers(ctx);
-        let mut base_owned_headers = rdkafka::message::OwnedHeaders::new();
-        for (k, v) in &ctx_headers {
-            base_owned_headers = base_owned_headers.insert(rdkafka::message::Header {
-                key: k,
-                value: Some(v.as_bytes()),
-            });
-        }
 
         let enqueued_at = Utc::now();
         let mut results: Vec<SinkOutput> = Vec::new();
         let mut set = JoinSet::new();
         let mut pending_keys: HashSet<String> = HashSet::new();
+
+        // Reusable buffers — cleared each iteration, amortised to zero allocs
+        // after the first event.
+        let mut payload_buf = String::with_capacity(4096);
+        let mut key_buf = String::with_capacity(128);
 
         // Phase 1: enqueue sequentially to preserve per-partition ordering
         for event in events {
@@ -204,44 +201,52 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             let uuid_key = event.uuid_key().to_string();
 
             let topic = match sink_cfg.kafka.topic_for(event.destination()) {
-                Some(t) => t.to_string(),
+                Some(t) => t,
                 None => continue,
             };
 
-            let payload = match event.serialize(ctx) {
-                Ok(p) => p,
-                Err(e) => {
-                    counter!(
-                        "capture_v1_kafka_publish_total",
-                        "mode" => mode,
-                        "cluster" => sink_str,
-                        "outcome" => Outcome::FatalError.as_tag(),
-                        "path" => path.clone(),
-                        "attempt" => attempt.clone(),
-                    )
-                    .increment(1);
-                    results.push(SinkOutput::Kafka(KafkaResult::err(
-                        uuid_key,
-                        KafkaSinkError::SerializationFailed(e),
-                        enqueued_at,
-                    )));
-                    continue;
-                }
-            };
+            payload_buf.clear();
+            if let Err(e) = event.serialize_into(ctx, &mut payload_buf) {
+                counter!(
+                    "capture_v1_kafka_publish_total",
+                    "mode" => mode,
+                    "cluster" => sink_str,
+                    "outcome" => Outcome::FatalError.as_tag(),
+                    "path" => path.clone(),
+                    "attempt" => attempt.clone(),
+                )
+                .increment(1);
+                results.push(SinkOutput::Kafka(KafkaResult::err(
+                    uuid_key,
+                    KafkaSinkError::SerializationFailed(e),
+                    enqueued_at,
+                )));
+                continue;
+            }
 
-            let mut owned = base_owned_headers.clone();
+            // Build OwnedHeaders from scratch per event (avoids cloning a base).
+            let mut headers = rdkafka::message::OwnedHeaders::new();
+            for (k, v) in &ctx_headers {
+                headers = headers.insert(rdkafka::message::Header {
+                    key: k,
+                    value: Some(v.as_bytes()),
+                });
+            }
             for (k, v) in &event.headers() {
-                owned = owned.insert(rdkafka::message::Header {
+                headers = headers.insert(rdkafka::message::Header {
                     key: k,
                     value: Some(v.as_bytes()),
                 });
             }
 
+            key_buf.clear();
+            event.write_partition_key(ctx, &mut key_buf);
+
             let record = ProduceRecord {
                 topic,
-                key: Some(event.partition_key(ctx)),
-                payload,
-                headers: owned,
+                key: Some(&key_buf),
+                payload: &payload_buf,
+                headers,
             };
 
             match producer.send(record) {
