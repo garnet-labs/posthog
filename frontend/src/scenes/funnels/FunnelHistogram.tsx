@@ -1,10 +1,10 @@
 import './FunnelHistogram.scss'
 
-import useSize from '@react-hook/size'
 import clsx from 'clsx'
 import { useValues } from 'kea'
 import { useRef } from 'react'
 
+import useSize from 'lib/hooks/useSize'
 import { hashCodeForString, humanFriendlyDuration } from 'lib/utils'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { Histogram } from 'scenes/insights/views/Histogram'
