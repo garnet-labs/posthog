@@ -932,7 +932,7 @@ def decompress(data: Any, compression: str):
 
 
 # Used by non-DRF endpoints from capture.py and decide.py (/decide, /batch, /capture, etc)
-def load_data_from_request(request):
+def load_data_from_request(request: HttpRequest) -> dict | list | None:
     if request.method == "POST":
         if request.content_type in ["", "text/plain", "application/json"]:
             data = request.body
@@ -983,7 +983,7 @@ def get_machine_id() -> str:
     return hashlib.md5(uuid.getnode().to_bytes(6, "little")).hexdigest()
 
 
-def get_table_size(table_name) -> str:
+def get_table_size(table_name: str) -> str:
     from django.db import connection
 
     query = (
@@ -996,7 +996,7 @@ def get_table_size(table_name) -> str:
     return dict_from_cursor_fetchall(cursor)[0]["size"]
 
 
-def get_table_approx_count(table_name) -> str:
+def get_table_approx_count(table_name: str) -> str:
     from django.db import connection
 
     query = f"SELECT reltuples::BIGINT as \"approx_count\" FROM pg_class WHERE relname = '{table_name}'"
