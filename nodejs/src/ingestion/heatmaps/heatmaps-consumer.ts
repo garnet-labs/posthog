@@ -27,10 +27,9 @@ export interface HeatmapsConsumerDeps {
     teamManager: TeamManager
 }
 
-// Useful for consumer lag calculation — same metric name as other consumers,
-// differentiated by groupId label. Each pipeline runs in its own process.
+// Useful for consumer lag calculation
 const latestOffsetTimestampGauge = new Gauge({
-    name: 'latest_processed_timestamp_ms',
+    name: 'heatmaps_latest_processed_timestamp_ms',
     help: 'Timestamp of the latest offset that has been committed.',
     labelNames: ['topic', 'partition', 'groupId'],
     aggregator: 'max',
