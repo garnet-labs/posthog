@@ -233,6 +233,16 @@ sudo -u ubuntu HOME=/home/ubuntu git checkout "$SANDBOX_BRANCH"
 log "Creating sandbox via bin/sandbox create..."
 sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 bin/sandbox create '$SANDBOX_BRANCH' --no-attach"
 
+log "Waiting for app to be healthy..."
+HEALTH_DEADLINE=$((SECONDS + 600))
+while [ "$SECONDS" -lt "$HEALTH_DEADLINE" ]; do
+    if curl -sf "http://localhost:48001/_health" > /dev/null 2>&1; then
+        log "App is healthy"
+        break
+    fi
+    sleep 5
+done
+
 BOOT_STATUS="complete"
 log "Cloud sandbox boot complete at $(date)"
 log "Total boot time: ${SECONDS}s"

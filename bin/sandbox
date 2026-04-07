@@ -691,6 +691,18 @@ def init_cache_from_master() -> None:
         if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
             fatal("Cache init failed. See logs above.")
 
+        # Pre-compile all Rust binaries so the cargo-target volume is warm.
+        # mprocs starts Rust services via `cargo run` which compiles on demand,
+        # but the health check passes (Django) before Rust finishes. Build them
+        # explicitly so subsequent sandboxes get cached dependency artifacts.
+        app = f"{init_project}-app-1"
+        info("Pre-compiling Rust services (populating cargo-target cache)...")
+        run(
+            ["docker", "exec", "-e", "CARGO_TARGET_DIR=/cache/cargo-target", app,
+             "bash", "-c", "cd /workspace/rust && cargo build --workspace"],
+            check=False,
+        )
+
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
         compose(init_project, init_port, init_worktree, "stop", "db", capture=True)
@@ -1507,9 +1519,9 @@ def _cloud_get_tailscale_key(config: dict) -> str:
         return data["SecretString"]
 
     # Prompt and save
-    key = input("Tailscale reusable auth key: ").strip()
+    key = input("Tailscale auth key (reusable + ephemeral): ").strip()
     if not key:
-        fatal("Tailscale auth key is required. Generate one at https://login.tailscale.com/admin/settings/keys")
+        fatal("Tailscale auth key is required.\n  Generate a reusable + ephemeral key at https://login.tailscale.com/admin/settings/keys\n  (Ephemeral ensures nodes auto-remove when instances terminate.)")
     config["tailscale_auth_key"] = key
     _save_cloud_config(config)
     return key
@@ -1818,7 +1830,7 @@ def cmd_cloud_destroy(branch: str) -> None:
     success("Instance terminating.")
 
     if hostname:
-        info(f"Note: Tailscale node '{hostname}' will appear offline. Remove it manually from the Tailscale admin console if desired.")
+        info(f"Tailscale node '{hostname}' will auto-remove after ~30-60 min offline (ephemeral key).")
 
 
 def cmd_cloud_list() -> None:
