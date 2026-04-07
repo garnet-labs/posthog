@@ -190,7 +190,7 @@ pub struct Config {
     #[envconfig(default = "1")]
     pub cache_warming_lookback_hours: u64,
 
-    #[envconfig(default = "5000")]
+    #[envconfig(default = "1000")]
     pub cache_warming_max_entries: usize,
 
     #[envconfig(default = "32")]
@@ -198,6 +198,16 @@ pub struct Config {
 
     #[envconfig(default = "180")]
     pub cache_warming_timeout_seconds: u64,
+
+    // Peer-aware warming: only warm symbol sets for teams routed to this pod.
+    // Set to the headless K8s Service hostname to enable (e.g. "cymbal-headless.posthog.svc.cluster.local").
+    #[envconfig(default = "")]
+    pub cache_warming_peer_hostname: String,
+
+    // This pod's IP address, set via K8s Downward API (fieldRef: status.podIP).
+    // Required for peer-aware warming to identify this pod in the DNS result.
+    #[envconfig(from = "POD_IP", default = "")]
+    pub pod_ip: String,
 }
 
 impl Config {
