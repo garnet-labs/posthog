@@ -394,8 +394,8 @@ runcmd:
                 "org = team.organization",
                 "user = User.objects.filter(email='ci@posthog.com').first() or User.objects.create_and_join(org, 'ci@posthog.com', 'CiTest123!', 'Hobby CI')",
                 "raw_key = generate_random_token_personal()",
-                "PersonalAPIKey.objects.filter(user=user, label='ci-smoke-test').delete()",
-                "PersonalAPIKey.objects.create(",
+                "_ = PersonalAPIKey.objects.filter(user=user, label='ci-smoke-test').delete()",
+                "_ = PersonalAPIKey.objects.create(",
                 "    user=user, label='ci-smoke-test',",
                 "    secure_value=hash_key_value(raw_key),",
                 "    mask_value=mask_key_value(raw_key),",
@@ -405,13 +405,13 @@ runcmd:
         )
         encoded_script = base64.b64encode(setup_script.encode()).decode()
         result = self.run_ssh_command(
-            f"cd /hobby && sudo -E docker-compose -f docker-compose.yml exec -T web bash -c 'echo {encoded_script} | base64 -d | python manage.py shell'",
+            f"cd /hobby && sudo -E docker-compose -f docker-compose.yml exec -T web bash -c 'echo {encoded_script} | base64 -d > /tmp/setup.py && python manage.py shell < /tmp/setup.py'",
             timeout=60,
         )
         if result["exit_code"] != 0:
             return (
                 False,
-                f"User setup failed (exit {result['exit_code']}): stderr={result['stderr'][:500]} stdout={result['stdout'][:500]}",
+                f"User setup failed (exit {result['exit_code']}): stderr={result['stderr'][:2000]} stdout={result['stdout'][:2000]}",
             )
 
         output_line = [line for line in result["stdout"].strip().split("\n") if "|||" in line]
