@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 
 import { IconInfo, IconList } from '@posthog/icons'
-import { LemonButton, Tooltip } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, Tooltip } from '@posthog/lemon-ui'
 
 import { IconAreaChart } from 'lib/lemon-ui/icons'
 import { AddMetricButton } from 'scenes/experiments/Metrics/AddMetricButton'
@@ -99,6 +99,12 @@ export function Metrics({ isSecondary }: { isSecondary?: boolean }): JSX.Element
                     </div>
                 </div>
             </div>
+            {isSecondary && metrics.length > 0 && (
+                <LemonBanner type="warning" className="mb-2">
+                    Secondary metrics are exploratory. Each additional metric increases the chance of a false positive.
+                    Use primary metrics for decision-making.
+                </LemonBanner>
+            )}
             {metrics.length > 0 ? (
                 <>
                     <MetricsTable

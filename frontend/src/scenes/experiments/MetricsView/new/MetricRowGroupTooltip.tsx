@@ -45,10 +45,15 @@ export const renderTooltipContent = (variantResult: ExperimentVariantResult, met
             </div>
 
             {isBayesianResult(variantResult) ? (
-                <div className="flex justify-between items-center">
-                    <span className="text-muted-alt font-semibold">Chance to win:</span>
-                    <span className="font-semibold">{formatChanceToWinForGoal(variantResult, metric.goal)}</span>
-                </div>
+                <>
+                    <div className="flex justify-between items-center">
+                        <span className="text-muted-alt font-semibold">Chance to win:</span>
+                        <span className="font-semibold">{formatChanceToWinForGoal(variantResult, metric.goal)}</span>
+                    </div>
+                    <p className="text-xs text-muted-alt mt-1 mb-0">
+                        Probability this variant outperforms control — not a percentage lift.
+                    </p>
+                </>
             ) : (
                 <div className="flex justify-between items-center">
                     <span className="text-muted-alt font-semibold">P-value:</span>

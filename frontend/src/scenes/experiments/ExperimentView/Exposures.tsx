@@ -277,11 +277,13 @@ export function Exposures(): JSX.Element {
                             <Spinner className="text-lg" />
                         ) : (
                             <>
-                                <span>
-                                    {totalExposures > 100000
-                                        ? humanFriendlyLargeNumber(totalExposures)
-                                        : humanFriendlyNumber(totalExposures)}
-                                </span>
+                                <Tooltip title="Cumulative unique users exposed to the experiment. A user is counted once at first exposure, not per event.">
+                                    <span className="cursor-help">
+                                        {totalExposures > 100000
+                                            ? humanFriendlyLargeNumber(totalExposures)
+                                            : humanFriendlyNumber(totalExposures)}
+                                    </span>
+                                </Tooltip>
                                 {exposures?.timeseries?.length > 0 && <MicroChart exposures={exposures} />}
                                 {filteredVariants.length > 0 && (
                                     <div className="ml-2 flex items-center gap-4">
