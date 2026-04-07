@@ -658,8 +658,11 @@ def _ensure_cache_volumes() -> None:
 def _copy_sandbox_backup_xml(worktree_path: str) -> None:
     """Ensure ClickHouse backup config exists in the worktree."""
     dest_dir = Path(worktree_path) / "docker/clickhouse/config.d"
+    dest = dest_dir / "sandbox-backup.xml"
+    if dest.resolve() == SANDBOX_BACKUP_XML.resolve():
+        return
     dest_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SANDBOX_BACKUP_XML, dest_dir / "sandbox-backup.xml")
+    shutil.copy2(SANDBOX_BACKUP_XML, dest)
 
 
 def _init_cache_cleanup(port: int, worktree: str) -> None:
