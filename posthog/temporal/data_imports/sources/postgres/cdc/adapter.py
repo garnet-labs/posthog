@@ -30,7 +30,7 @@ class PostgresCDCAdapter:
             slot_name=inputs.get("cdc_slot_name", ""),
             publication_name=inputs.get("cdc_publication_name", ""),
         )
-        return PgCDCStreamReader(params)
+        return PgCDCStreamReader(params, source=source)
 
     @contextmanager
     def management_connection(self, source: ExternalDataSource, connect_timeout: int = 15) -> Iterator[Any]:

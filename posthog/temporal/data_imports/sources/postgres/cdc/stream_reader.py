@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import psycopg
 from psycopg import sql
@@ -17,6 +18,9 @@ from psycopg import sql
 from posthog.temporal.data_imports.cdc.types import ChangeEvent
 from posthog.temporal.data_imports.sources.postgres.cdc.decoder import PgOutputDecoder
 from posthog.temporal.data_imports.sources.postgres.postgres import _connect_to_postgres, get_primary_key_columns
+
+if TYPE_CHECKING:
+    from products.data_warehouse.backend.models import ExternalDataSource
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +42,38 @@ class PgCDCStreamReader:
 
     Uses pg_logical_slot_peek_binary_changes() for non-destructive reads
     and pg_replication_slot_advance() for explicit position confirmation.
+
+    SSH tunneling: when ``source`` is provided, ``connect()`` opens an SSH tunnel
+    via ``PostgresSource.with_ssh_tunnel`` and rewrites the connection host/port to
+    the local tunnel endpoint. The tunnel stays open until ``close()`` is called,
+    so both the streaming cursor and short-lived ``confirm_position`` connections
+    use the same tunnel.
     """
 
-    def __init__(self, params: PgCDCConnectionParams) -> None:
+    def __init__(self, params: PgCDCConnectionParams, source: ExternalDataSource | None = None) -> None:
         self._params = params
+        self._source = source
         self._conn: psycopg.Connection | None = None
         self._decoder = PgOutputDecoder()
+        self._tunnel_cm = None
+        self._effective_host: str = params.host
+        self._effective_port: int = params.port
 
     def connect(self) -> None:
+        # If a source is provided, enter the SSH tunnel context (no-op if SSH is disabled).
+        # The tunnel must stay open for the lifetime of the reader so confirm_position
+        # connections can also reach the source DB.
+        if self._source is not None:
+            from posthog.temporal.data_imports.sources.postgres.source import PostgresSource
+
+            source_impl = PostgresSource()
+            config = source_impl.parse_config(self._source.job_inputs or {})
+            self._tunnel_cm = source_impl.with_ssh_tunnel(config)
+            self._effective_host, self._effective_port = self._tunnel_cm.__enter__()
+
         self._conn = _connect_to_postgres(
-            host=self._params.host,
-            port=self._params.port,
+            host=self._effective_host,
+            port=self._effective_port,
             database=self._params.database,
             user=self._params.user,
             password=self._params.password,
@@ -92,19 +117,28 @@ class PgCDCStreamReader:
         """Advance the replication slot to the given LSN.
 
         This consumes all WAL up to and including the given position.
-        Only call after successful processing of all events.
+        Safe to call mid-iteration of ``read_changes()`` because it opens its own
+        short-lived connection rather than reusing the streaming cursor's connection
+        (which can't run other queries while the named server-side cursor is active).
         """
-        if self._conn is None:
-            raise RuntimeError("Not connected. Call connect() first.")
-
         query = sql.SQL("SELECT pg_replication_slot_advance({slot_name}, {lsn})").format(
             slot_name=sql.Literal(self._params.slot_name),
             lsn=sql.Literal(position),
         )
 
-        with self._conn.cursor() as cur:
-            cur.execute(query)
-        self._conn.commit()
+        advance_conn = _connect_to_postgres(
+            host=self._effective_host,
+            port=self._effective_port,
+            database=self._params.database,
+            user=self._params.user,
+            password=self._params.password,
+        )
+        try:
+            with advance_conn.cursor() as cur:
+                cur.execute(query)
+            advance_conn.commit()
+        finally:
+            advance_conn.close()
 
         logger.info("Advanced slot %s to position %s", self._params.slot_name, position)
 
@@ -142,3 +176,6 @@ class PgCDCStreamReader:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+        if self._tunnel_cm is not None:
+            self._tunnel_cm.__exit__(None, None, None)
+            self._tunnel_cm = None
