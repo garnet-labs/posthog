@@ -3,6 +3,7 @@
 //! This module handles processing of regular analytics events (pageviews, custom events,
 //! exceptions, etc.) as opposed to recordings (session replay).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::DateTime;
@@ -20,6 +21,80 @@ use crate::{
     utils::uuid_v7,
     v0_request::{DataType, ProcessedEvent, ProcessedEventMetadata, ProcessingContext},
 };
+
+/// Property keys that the heatmap extraction pipeline reads from the event.
+/// When a non-$$heatmap event carries heatmap data, we produce a second message
+/// to the heatmaps topic containing only these properties.
+const HEATMAP_PROPERTY_KEYS: &[&str] = &[
+    "$heatmap_data",
+    "$viewport_height",
+    "$viewport_width",
+    "$session_id",
+    "$prev_pageview_pathname",
+    "$prev_pageview_max_scroll",
+    "$current_url",
+];
+
+/// Returns true if this event carries data that the heatmap extraction pipeline would process.
+fn has_heatmap_data(event: &RawEvent) -> bool {
+    event.properties.contains_key("$heatmap_data")
+        || (event.properties.contains_key("$prev_pageview_pathname")
+            && event.properties.contains_key("$current_url"))
+}
+
+/// Create a stripped-down $$heatmap event from a non-$$heatmap event that contains heatmap data.
+/// The redirect carries only the properties the heatmap pipeline needs, and gets a new UUID
+/// to avoid deduplication with the original event.
+fn create_heatmap_redirect(
+    event: &RawEvent,
+    historical_cfg: router::HistoricalConfig,
+    context: &ProcessingContext,
+) -> Result<ProcessedEvent, CaptureError> {
+    let mut properties = HashMap::new();
+
+    for key in HEATMAP_PROPERTY_KEYS {
+        if let Some(value) = event.properties.get(*key) {
+            properties.insert(key.to_string(), value.clone());
+        }
+    }
+
+    // Preserve distinct_id and $cookieless_mode — needed for routing key generation
+    if let Some(value) = event.properties.get("distinct_id") {
+        properties.insert("distinct_id".to_string(), value.clone());
+    }
+    if let Some(value) = event.properties.get("$cookieless_mode") {
+        properties.insert("$cookieless_mode".to_string(), value.clone());
+    }
+
+    let heatmap_event = RawEvent {
+        token: event.token.clone(),
+        distinct_id: event.distinct_id.clone(),
+        uuid: Some(uuid_v7()),
+        event: "$$heatmap".to_string(),
+        properties,
+        timestamp: event.timestamp.clone(),
+        offset: event.offset,
+        set: None,
+        set_once: None,
+    };
+
+    let mut processed = process_single_event(&heatmap_event, historical_cfg, context)?;
+    processed.metadata.process_heatmap = true;
+    Ok(processed)
+}
+
+/// Strip heatmap-only properties from a ProcessedEvent's serialized data field
+/// and mark it so the pipeline knows heatmap data was already redirected.
+fn strip_heatmap_data(event: &mut ProcessedEvent) {
+    if let Ok(mut raw_event) = serde_json::from_str::<RawEvent>(&event.event.data) {
+        if raw_event.properties.remove("$heatmap_data").is_some() {
+            if let Ok(data) = serde_json::to_string(&raw_event) {
+                event.event.data = data;
+            }
+        }
+    }
+    event.metadata.process_heatmap = true;
+}
 
 /// Process a single analytics event from RawEvent to ProcessedEvent
 #[instrument(skip_all, fields(event_name, request_id))]
@@ -92,6 +167,7 @@ pub fn process_single_event(
         skip_person_processing: false,
         redirect_to_dlq: false,
         redirect_to_topic: None,
+        process_heatmap: false,
     };
 
     if historical_cfg.should_reroute(metadata.data_type, parsed_timestamp.timestamp) {
@@ -142,10 +218,40 @@ pub async fn process_events<'a>(
     Span::current().record("request_id", &context.request_id);
     Span::current().record("is_mirror_deploy", context.is_mirror_deploy);
 
+    // Identify which raw events need heatmap redirects before `events` is shadowed.
+    let needs_heatmap_redirect: Vec<bool> = events
+        .iter()
+        .map(|e| e.event != "$$heatmap" && has_heatmap_data(e))
+        .collect();
+
+    let mut heatmap_redirects: Vec<ProcessedEvent> = Vec::new();
+    for (e, needs_redirect) in events.iter().zip(needs_heatmap_redirect.iter()) {
+        if *needs_redirect {
+            match create_heatmap_redirect(e, historical_cfg.clone(), context) {
+                Ok(processed) => {
+                    metrics::counter!("capture_heatmap_redirects_created").increment(1);
+                    heatmap_redirects.push(processed);
+                }
+                Err(err) => {
+                    error!("failed to create heatmap redirect: {err:#}");
+                }
+            }
+        }
+    }
+
     let mut events: Vec<ProcessedEvent> = events
         .iter()
         .map(|e| process_single_event(e, historical_cfg.clone(), context))
         .collect::<Result<Vec<ProcessedEvent>, CaptureError>>()?;
+
+    // Strip heatmap data from originals that got redirects
+    for (event, needs_redirect) in events.iter_mut().zip(needs_heatmap_redirect.iter()) {
+        if *needs_redirect {
+            strip_heatmap_data(event);
+        }
+    }
+
+    events.extend(heatmap_redirects);
 
     debug_or_info!(chatty_debug_enabled, context=?context, event_count=?events.len(), "created ProcessedEvents batch");
 
@@ -834,5 +940,219 @@ mod tests {
             captured[0].metadata.redirect_to_topic,
             Some("custom_events_topic".to_string())
         );
+    }
+
+    fn create_event_with_heatmap_data() -> RawEvent {
+        let mut properties = HashMap::new();
+        properties.insert("distinct_id".to_string(), json!("test_user"));
+        properties.insert(
+            "$heatmap_data".to_string(),
+            json!({"https://example.com": [{"x": 100, "y": 200, "target_fixed": false, "type": "click"}]}),
+        );
+        properties.insert("$viewport_height".to_string(), json!(900));
+        properties.insert("$viewport_width".to_string(), json!(1440));
+        properties.insert("$session_id".to_string(), json!("session-abc"));
+        properties.insert("$current_url".to_string(), json!("https://example.com"));
+        properties.insert(
+            "other_prop".to_string(),
+            json!("should_not_appear_in_redirect"),
+        );
+
+        RawEvent {
+            uuid: Some(uuid_v7()),
+            distinct_id: None,
+            event: "$pageview".to_string(),
+            properties,
+            timestamp: Some("2023-01-01T11:00:00Z".to_string()),
+            offset: None,
+            set: None,
+            set_once: None,
+            token: Some("test_token".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_has_heatmap_data_with_heatmap_data_property() {
+        let event = create_event_with_heatmap_data();
+        assert!(has_heatmap_data(&event));
+    }
+
+    #[test]
+    fn test_has_heatmap_data_with_scroll_depth_properties() {
+        let mut properties = HashMap::new();
+        properties.insert("distinct_id".to_string(), json!("test_user"));
+        properties.insert("$prev_pageview_pathname".to_string(), json!("/old"));
+        properties.insert("$current_url".to_string(), json!("https://example.com/new"));
+
+        let event = RawEvent {
+            uuid: Some(uuid_v7()),
+            distinct_id: None,
+            event: "$pageview".to_string(),
+            properties,
+            timestamp: None,
+            offset: None,
+            set: None,
+            set_once: None,
+            token: Some("test_token".to_string()),
+        };
+        assert!(has_heatmap_data(&event));
+    }
+
+    #[test]
+    fn test_has_heatmap_data_without_heatmap_properties() {
+        let event = create_test_event(None, None, None);
+        assert!(!has_heatmap_data(&event));
+    }
+
+    #[test]
+    fn test_create_heatmap_redirect_properties_and_metadata() {
+        let now = Utc::now();
+        let context = create_test_context(now, None);
+        let event = create_event_with_heatmap_data();
+        let historical_cfg = router::HistoricalConfig::new(false, 1);
+
+        let redirect = create_heatmap_redirect(&event, historical_cfg, &context).unwrap();
+
+        assert_eq!(redirect.metadata.data_type, DataType::HeatmapMain);
+        assert_eq!(redirect.metadata.event_name, "$$heatmap");
+        assert!(redirect.metadata.process_heatmap);
+        assert_eq!(redirect.event.event, "$$heatmap");
+        assert_ne!(redirect.event.uuid, event.uuid.unwrap());
+
+        let data: RawEvent = serde_json::from_str(&redirect.event.data).unwrap();
+        assert!(data.properties.contains_key("$heatmap_data"));
+        assert!(data.properties.contains_key("$viewport_height"));
+        assert!(data.properties.contains_key("$viewport_width"));
+        assert!(data.properties.contains_key("$session_id"));
+        assert!(data.properties.contains_key("$current_url"));
+        assert!(data.properties.contains_key("distinct_id"));
+        assert!(
+            !data.properties.contains_key("other_prop"),
+            "redirect should only contain heatmap properties"
+        );
+    }
+
+    #[test]
+    fn test_strip_heatmap_data_removes_property_and_sets_flag() {
+        let now = Utc::now();
+        let context = create_test_context(now, None);
+        let event = create_event_with_heatmap_data();
+        let historical_cfg = router::HistoricalConfig::new(false, 1);
+
+        let mut processed = process_single_event(&event, historical_cfg, &context).unwrap();
+        assert!(!processed.metadata.process_heatmap);
+
+        strip_heatmap_data(&mut processed);
+
+        assert!(processed.metadata.process_heatmap);
+        let data: RawEvent = serde_json::from_str(&processed.event.data).unwrap();
+        assert!(!data.properties.contains_key("$heatmap_data"));
+        assert!(
+            data.properties.contains_key("$viewport_height"),
+            "non-$heatmap_data properties should be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_events_creates_heatmap_redirect() {
+        let now = Utc::now();
+        let context = create_test_context(now, None);
+        let events = vec![create_event_with_heatmap_data()];
+
+        let sink = Arc::new(MockSink::new());
+        let dropper = Arc::new(limiters::token_dropper::TokenDropper::default());
+        let historical_cfg = router::HistoricalConfig::new(false, 1);
+
+        let result = process_events(
+            sink.clone(),
+            dropper,
+            None,
+            historical_cfg,
+            &events,
+            &context,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let captured = sink.get_events();
+        assert_eq!(captured.len(), 2, "should produce original + redirect");
+
+        let original = &captured[0];
+        assert_eq!(original.event.event, "$pageview");
+        assert!(original.metadata.process_heatmap);
+        let orig_data: RawEvent = serde_json::from_str(&original.event.data).unwrap();
+        assert!(
+            !orig_data.properties.contains_key("$heatmap_data"),
+            "$heatmap_data should be stripped from original"
+        );
+
+        let redirect = &captured[1];
+        assert_eq!(redirect.event.event, "$$heatmap");
+        assert_eq!(redirect.metadata.data_type, DataType::HeatmapMain);
+        assert!(redirect.metadata.process_heatmap);
+    }
+
+    #[tokio::test]
+    async fn test_process_events_no_redirect_for_heatmap_event() {
+        let now = Utc::now();
+        let context = create_test_context(now, None);
+
+        let mut event = create_event_with_heatmap_data();
+        event.event = "$$heatmap".to_string();
+        let events = vec![event];
+
+        let sink = Arc::new(MockSink::new());
+        let dropper = Arc::new(limiters::token_dropper::TokenDropper::default());
+        let historical_cfg = router::HistoricalConfig::new(false, 1);
+
+        let result = process_events(
+            sink.clone(),
+            dropper,
+            None,
+            historical_cfg,
+            &events,
+            &context,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let captured = sink.get_events();
+        assert_eq!(
+            captured.len(),
+            1,
+            "$$heatmap events should not produce a redirect"
+        );
+        assert_eq!(captured[0].metadata.data_type, DataType::HeatmapMain);
+        assert!(!captured[0].metadata.process_heatmap);
+    }
+
+    #[tokio::test]
+    async fn test_process_events_no_redirect_without_heatmap_data() {
+        let now = Utc::now();
+        let context = create_test_context(now, None);
+        let events = vec![create_test_event(
+            Some("2023-01-01T11:00:00Z".to_string()),
+            None,
+            None,
+        )];
+
+        let sink = Arc::new(MockSink::new());
+        let dropper = Arc::new(limiters::token_dropper::TokenDropper::default());
+        let historical_cfg = router::HistoricalConfig::new(false, 1);
+
+        let result = process_events(
+            sink.clone(),
+            dropper,
+            None,
+            historical_cfg,
+            &events,
+            &context,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let captured = sink.get_events();
+        assert_eq!(captured.len(), 1);
+        assert!(!captured[0].metadata.process_heatmap);
     }
 }

@@ -189,6 +189,9 @@ pub struct ProcessedEventMetadata {
     pub redirect_to_dlq: bool,
     /// Redirect this event to a custom topic (set by event restrictions)
     pub redirect_to_topic: Option<String>,
+    /// Signal to the pipeline that heatmap data for this event was redirected
+    /// to the heatmaps topic and should not be extracted again
+    pub process_heatmap: bool,
 }
 
 #[cfg(test)]
