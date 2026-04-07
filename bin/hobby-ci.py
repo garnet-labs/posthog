@@ -1547,7 +1547,9 @@ def main():
             droplet_id=droplet_id,
             ssh_private_key=ssh_key,
         )
-        health_success, failure_details = ht.test_deployment_with_details()
+        preview_mode = os.environ.get("PREVIEW_MODE", "false") == "true"
+        stability = 300 if preview_mode else 60
+        health_success, failure_details = ht.test_deployment_with_details(stability_period=stability)
 
         pr_ctx = PRCommentContext.from_env()
         if pr_ctx:
