@@ -1,5 +1,6 @@
 import { PlatformSupportConfig } from 'lib/components/SupportedPlatforms/types'
 import { EitherMembershipLevel, FEATURE_FLAGS } from 'lib/constants'
+import type { FeatureFlagsSet } from 'lib/logic/featureFlagLogic'
 
 import { AccessControlLevel, AccessControlResourceType, Realm, TeamPublicType, TeamType } from '~/types'
 
@@ -212,7 +213,7 @@ export type SettingId =
     | 'banner'
 
 type FeatureFlagKey = keyof typeof FEATURE_FLAGS
-export type SettingFlagMatcher = (featureFlags: Record<string, boolean | string | undefined>) => boolean
+export type SettingFlagMatcher = (featureFlags: FeatureFlagsSet) => boolean
 
 export type Setting = {
     id: SettingId
