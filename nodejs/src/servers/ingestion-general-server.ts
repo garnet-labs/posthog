@@ -18,7 +18,13 @@ import {
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import { registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
 import { ProducerName, registerProducers } from '../ingestion/analytics/config/producers'
+import { ClientWarningsConsumer } from '../ingestion/clientwarnings'
 import {
+    registerClientWarningsOutputs,
+    registerProducers as registerClientWarningsProducers,
+} from '../ingestion/clientwarnings'
+import {
+    ClientWarningsOutputsConfig,
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
     IngestionOutputsConfig,
@@ -28,6 +34,7 @@ import {
     KafkaWarpstreamProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
+    getDefaultClientWarningsOutputsConfig,
     getDefaultIngestionOutputsConfig,
     getDefaultKafkaProducerEnvConfig,
     getDefaultKafkaWarpstreamProducerEnvConfig,
@@ -71,6 +78,7 @@ export type IngestionGeneralServerConfig = BaseServerConfig &
     KafkaProducerEnvConfig &
     KafkaWarpstreamProducerEnvConfig &
     IngestionOutputsConfig &
+    ClientWarningsOutputsConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
     KafkaConsumerBaseConfig &
@@ -98,6 +106,7 @@ export class IngestionGeneralServer implements NodeServer {
 
     private postgres?: PostgresRouter
     private ingestionProducerRegistry?: KafkaProducerRegistry<ProducerName>
+    private pipelineCleanups: (() => Promise<void>)[] = []
     private redisPool?: RedisPool
     private cookielessRedisPool?: RedisPool
     private cookielessManager?: CookielessManager
@@ -109,6 +118,7 @@ export class IngestionGeneralServer implements NodeServer {
             ...overrideConfigWithEnv(getDefaultKafkaProducerEnvConfig()),
             ...overrideConfigWithEnv(getDefaultKafkaWarpstreamProducerEnvConfig()),
             ...overrideConfigWithEnv(getDefaultIngestionOutputsConfig()),
+            ...overrideConfigWithEnv(getDefaultClientWarningsOutputsConfig()),
             ...config,
         }
         this.lifecycle = new ServerLifecycle(this.config)
@@ -207,6 +217,28 @@ export class IngestionGeneralServer implements NodeServer {
                 await consumer.start()
                 return consumer.service
             })
+        } else if (this.config.INGESTION_PIPELINE === 'clientwarnings') {
+            // Production: dedicated client warnings pipeline
+            const clientWarningsProducerRegistry = await registerClientWarningsProducers(
+                this.config.KAFKA_CLIENT_RACK
+            ).build(this.config)
+            const clientWarningsOutputs = registerClientWarningsOutputs().build(
+                clientWarningsProducerRegistry,
+                this.config
+            )
+
+            serviceLoaders.push(async () => {
+                const consumer = new ClientWarningsConsumer(this.config, {
+                    outputs: clientWarningsOutputs,
+                    teamManager,
+                })
+                await consumer.start()
+                return consumer.service
+            })
+
+            this.pipelineCleanups.push(async () => {
+                await clientWarningsProducerRegistry.disconnectAll()
+            })
         } else {
             // Build producer registry — producer creation blocks until the broker
             // is reachable (rdkafka retries indefinitely), so the server will hang
@@ -241,15 +273,14 @@ export class IngestionGeneralServer implements NodeServer {
 
             if (isCombinedMode) {
                 // Local dev / hobby: run multiple consumers for all ingestion topics in one process
-                const consumersOptions = [
+                const analyticsConsumersOptions = [
                     { topic: KAFKA_EVENTS_PLUGIN_INGESTION, group_id: 'clickhouse-ingestion' },
                     { topic: KAFKA_EVENTS_PLUGIN_INGESTION_HISTORICAL, group_id: 'clickhouse-ingestion-historical' },
                     { topic: KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW, group_id: 'clickhouse-ingestion-overflow' },
-                    { topic: 'client_iwarnings_ingestion', group_id: 'client_iwarnings_ingestion' },
                     { topic: 'heatmaps_ingestion', group_id: 'heatmaps_ingestion' },
                 ]
 
-                for (const consumerOption of consumersOptions) {
+                for (const consumerOption of analyticsConsumersOptions) {
                     serviceLoaders.push(async () => {
                         const consumer = new IngestionConsumer(this.config, ingestionDeps, {
                             INGESTION_CONSUMER_CONSUME_TOPIC: consumerOption.topic,
@@ -259,6 +290,27 @@ export class IngestionGeneralServer implements NodeServer {
                         return consumer.service
                     })
                 }
+
+                // Client warnings consumer in combined mode
+                const clientWarningsOutputs = registerClientWarningsOutputs().build(
+                    this.ingestionProducerRegistry,
+                    this.config
+                )
+                serviceLoaders.push(async () => {
+                    const consumer = new ClientWarningsConsumer(
+                        this.config,
+                        {
+                            outputs: clientWarningsOutputs,
+                            teamManager,
+                        },
+                        {
+                            INGESTION_CONSUMER_CONSUME_TOPIC: 'client_iwarnings_ingestion',
+                            INGESTION_CONSUMER_GROUP_ID: 'client_iwarnings_ingestion',
+                        }
+                    )
+                    await consumer.start()
+                    return consumer.service
+                })
             } else {
                 // Production ingestion-v2: single consumer using config-provided topic
                 serviceLoaders.push(async () => {
@@ -289,6 +341,9 @@ export class IngestionGeneralServer implements NodeServer {
             additionalCleanup: async () => {
                 await this.ingestionProducerRegistry?.disconnectAll()
                 this.cookielessManager?.shutdown()
+                for (const cleanup of this.pipelineCleanups) {
+                    await cleanup()
+                }
             },
         }
     }

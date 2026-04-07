@@ -17,7 +17,7 @@ import {
 } from '../config/kafka-topics'
 import type { PostgresRouterConfig } from '../utils/db/postgres'
 import { isDevEnv, isProdEnv } from '../utils/env-utils'
-import { DEFAULT_PRODUCER, type ProducerName } from './common/producers'
+import { DEFAULT_PRODUCER, type DefaultProducer, type ProducerName } from './common/producers'
 
 // =============================================================================
 // Infrastructure sub-config types
@@ -424,6 +424,24 @@ export type IngestionOutputsConfig = {
 
     INGESTION_OUTPUT_TOPHOG_TOPIC: string
     INGESTION_OUTPUT_TOPHOG_PRODUCER: ProducerName
+}
+
+/** Config type for client warnings pipeline output keys. */
+export type ClientWarningsOutputsConfig = {
+    CLIENT_WARNINGS_OUTPUT_INGESTION_WARNINGS_TOPIC: string
+    CLIENT_WARNINGS_OUTPUT_INGESTION_WARNINGS_PRODUCER: DefaultProducer
+
+    CLIENT_WARNINGS_OUTPUT_DLQ_TOPIC: string
+    CLIENT_WARNINGS_OUTPUT_DLQ_PRODUCER: DefaultProducer
+}
+
+export function getDefaultClientWarningsOutputsConfig(): ClientWarningsOutputsConfig {
+    return {
+        CLIENT_WARNINGS_OUTPUT_INGESTION_WARNINGS_TOPIC: KAFKA_INGESTION_WARNINGS,
+        CLIENT_WARNINGS_OUTPUT_INGESTION_WARNINGS_PRODUCER: DEFAULT_PRODUCER,
+        CLIENT_WARNINGS_OUTPUT_DLQ_TOPIC: KAFKA_EVENTS_PLUGIN_INGESTION_DLQ,
+        CLIENT_WARNINGS_OUTPUT_DLQ_PRODUCER: DEFAULT_PRODUCER,
+    }
 }
 
 export function getDefaultIngestionOutputsConfig(): IngestionOutputsConfig {
