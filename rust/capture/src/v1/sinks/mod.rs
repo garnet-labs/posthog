@@ -11,9 +11,9 @@ use std::time::Duration;
 use envconfig::Envconfig;
 
 pub use event::Event;
-pub use kafka::types::{KafkaResult, KafkaSinkError};
-pub use sink::{KafkaSink, Sink};
-pub use types::{Destination, Outcome, SinkOutput, SinkResult};
+pub use kafka::KafkaSink;
+pub use sink::Sink;
+pub use types::{Destination, Outcome, SinkResult};
 
 // ---------------------------------------------------------------------------
 // SinkName

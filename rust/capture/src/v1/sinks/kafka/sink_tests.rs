@@ -7,11 +7,13 @@ use rdkafka::error::RDKafkaErrorCode;
 use crate::config::CaptureMode;
 use crate::v1::context::Context;
 use crate::v1::sinks::event::Event;
-use crate::v1::sinks::kafka::mock::MockProducer;
-use crate::v1::sinks::kafka::producer::ProduceError;
-use crate::v1::sinks::sink::{KafkaSink, Sink};
-use crate::v1::sinks::types::{BatchSummary, Outcome, SinkResult};
+use crate::v1::sinks::sink::Sink;
+use crate::v1::sinks::types::{BatchSummary, Outcome};
 use crate::v1::sinks::{Config, Destination, SinkName, Sinks};
+
+use super::mock::MockProducer;
+use super::producer::ProduceError;
+use super::sink::KafkaSink;
 
 // ---------------------------------------------------------------------------
 // FakeEvent

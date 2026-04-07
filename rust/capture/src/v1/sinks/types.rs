@@ -2,8 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::v1::sinks::kafka::types::KafkaResult;
-
 /// Kafka topic routing for a processed event.
 /// `Drop` means the event should not be produced at all.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -67,48 +65,6 @@ pub trait SinkResult: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// SinkOutput
-// ---------------------------------------------------------------------------
-
-/// Concrete enum wrapping backend-specific results. Avoids per-event Box
-/// allocation while keeping `Sink` object-safe for `dyn Sink` composition.
-pub enum SinkOutput {
-    Kafka(KafkaResult),
-}
-
-impl SinkResult for SinkOutput {
-    fn key(&self) -> &str {
-        match self {
-            Self::Kafka(r) => r.key(),
-        }
-    }
-
-    fn outcome(&self) -> Outcome {
-        match self {
-            Self::Kafka(r) => r.outcome(),
-        }
-    }
-
-    fn cause(&self) -> Option<&'static str> {
-        match self {
-            Self::Kafka(r) => r.cause(),
-        }
-    }
-
-    fn detail(&self) -> Option<Cow<'_, str>> {
-        match self {
-            Self::Kafka(r) => r.detail(),
-        }
-    }
-
-    fn elapsed(&self) -> Option<chrono::Duration> {
-        match self {
-            Self::Kafka(r) => r.elapsed(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // BatchSummary
 // ---------------------------------------------------------------------------
 
@@ -124,7 +80,7 @@ pub struct BatchSummary {
 }
 
 impl BatchSummary {
-    pub fn from_results(results: &[SinkOutput]) -> Self {
+    pub fn from_results(results: &[Box<dyn SinkResult>]) -> Self {
         let mut succeeded = 0usize;
         let mut retriable = 0usize;
         let mut fatal = 0usize;
