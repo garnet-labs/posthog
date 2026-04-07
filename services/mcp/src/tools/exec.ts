@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { formatResponse } from '@/lib/response'
 
+import { TOKEN_CHAR_LIMIT, listAvailablePaths, resolveSchemaPath, summarizeSchema } from './schema-utils'
 import type { Context, Tool, ZodObjectAny } from './types'
 
 const ExecSchema = z.object({
@@ -9,10 +10,11 @@ const ExecSchema = z.object({
         .string()
         .describe(
             'CLI-style command string. Supported commands:\n' +
-                '  tools                         — list available tool names\n' +
-                '  search <regex_pattern>         — search tools by JavaScript regex (matches name, title, description)\n' +
-                '  info <tool_name>              — show tool name, description, and input schema\n' +
-                '  call <tool_name> <json_input> — call a tool with JSON input'
+                '  tools                                    — list available tool names\n' +
+                '  search <regex_pattern>                   — search tools by JavaScript regex (matches name, title, description)\n' +
+                '  info <tool_name>                         — show tool name, description, and input schema (summarized if too large)\n' +
+                '  schema <tool_name> [field_path]          — drill into a specific field schema (supports dot-notation, e.g. series, breakdownFilter.breakdowns)\n' +
+                '  call <tool_name> <json_input>            — call a tool with JSON input'
         ),
 })
 
@@ -90,12 +92,60 @@ export function createExecTool(
                         throw new Error('Usage: info <tool_name>')
                     }
                     const tool = findTool(allTools, rest)
+                    const fullSchema = z.toJSONSchema(tool.schema)
+                    const fullOutput = JSON.stringify({
+                        name: tool.name,
+                        title: tool.title,
+                        description: tool.description,
+                        annotations: tool.annotations,
+                        inputSchema: fullSchema,
+                    })
+
+                    if (fullOutput.length <= TOKEN_CHAR_LIMIT) {
+                        return fullOutput
+                    }
+
+                    // Schema too large — return summary with drill-down hints
                     return JSON.stringify({
                         name: tool.name,
                         title: tool.title,
                         description: tool.description,
                         annotations: tool.annotations,
-                        inputSchema: z.toJSONSchema(tool.schema),
+                        inputSchema: summarizeSchema(fullSchema as Record<string, unknown>, tool.name),
+                    })
+                }
+
+                case 'schema': {
+                    if (!rest) {
+                        throw new Error('Usage: schema <tool_name> [field_path]')
+                    }
+                    const { verb: schemaToolName, rest: fieldPath } = parseCommand(rest)
+                    const schemaTool = findTool(allTools, schemaToolName)
+                    const fullJsonSchema = z.toJSONSchema(schemaTool.schema) as Record<string, unknown>
+
+                    if (!fieldPath) {
+                        return JSON.stringify(summarizeSchema(fullJsonSchema, schemaToolName))
+                    }
+
+                    const resolved = resolveSchemaPath(fullJsonSchema, fieldPath)
+                    if (!resolved) {
+                        const available = listAvailablePaths(fullJsonSchema, fieldPath)
+                        throw new Error(`Unknown path "${fieldPath}". Available: ${available.join(', ')}`)
+                    }
+
+                    const serialized = JSON.stringify({
+                        field: fieldPath,
+                        schema: resolved,
+                    })
+                    if (serialized.length <= TOKEN_CHAR_LIMIT) {
+                        return serialized
+                    }
+
+                    // Field schema too large — return summary with sub-path hints
+                    return JSON.stringify({
+                        field: fieldPath,
+                        note: `Full schema is ${Math.ceil(serialized.length / 6000)}k+ tokens. Showing summary. Drill into sub-fields for details.`,
+                        schema: summarizeSchema(resolved as Record<string, unknown>, schemaToolName, fieldPath),
                     })
                 }
 
@@ -123,7 +173,7 @@ export function createExecTool(
                 }
 
                 default:
-                    throw new Error(`Unknown command: "${verb}". Supported commands: tools, search, info, call`)
+                    throw new Error(`Unknown command: "${verb}". Supported commands: tools, search, info, schema, call`)
             }
         },
     }
