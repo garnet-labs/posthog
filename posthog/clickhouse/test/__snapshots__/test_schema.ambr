@@ -4224,7 +4224,7 @@
       max_scroll_y SimpleAggregateFunction(max, Float64),
       unique_click_target_count SimpleAggregateFunction(sum, Int64),
       text_selection_count SimpleAggregateFunction(sum, Int64)
-  ) ENGINE = Distributed('posthog', 'posthog_test', 'sharded_session_replay_features', sipHash64(distinct_id))
+  ) ENGINE = Distributed('posthog', 'posthog_test', 'sharded_session_replay_features', sipHash64(session_id))
   
   '''
 # ---
@@ -6569,7 +6569,7 @@
       max_scroll_y SimpleAggregateFunction(max, Float64),
       unique_click_target_count SimpleAggregateFunction(sum, Int64),
       text_selection_count SimpleAggregateFunction(sum, Int64)
-  ) ENGINE = Distributed('posthog', 'posthog_test', 'sharded_session_replay_features', sipHash64(distinct_id))
+  ) ENGINE = Distributed('posthog', 'posthog_test', 'sharded_session_replay_features', sipHash64(session_id))
   
   '''
 # ---
