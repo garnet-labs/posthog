@@ -188,14 +188,22 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
             else:
                 row_counts = {}
 
-            with pg_connection(
-                host=host,
-                port=port,
-                user=config.user,
-                password=config.password,
-                database=config.database,
-            ) as conn:
-                tables_with_pks = set(get_primary_key_columns(conn, config.schema, list(db_schemas.keys())).keys())
+            # PK lookup powers `supports_cdc`. Wrap in try/except so a permissions
+            # quirk on `information_schema` (rare but possible) only disables CDC
+            # advertising for this listing instead of breaking schema discovery for
+            # everyone — including non-CDC users.
+            try:
+                with pg_connection(
+                    host=host,
+                    port=port,
+                    user=config.user,
+                    password=config.password,
+                    database=config.database,
+                ) as conn:
+                    tables_with_pks = set(get_primary_key_columns(conn, config.schema, list(db_schemas.keys())).keys())
+            except Exception as e:
+                capture_exception(e)
+                tables_with_pks = set()
 
         for table_name, columns in db_schemas.items():
             incremental_field_tuples = filter_postgres_incremental_fields(columns)
