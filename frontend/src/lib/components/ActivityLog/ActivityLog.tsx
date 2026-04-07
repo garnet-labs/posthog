@@ -1,5 +1,6 @@
 import './ActivityLog.scss'
 
+import useSize from '@react-hook/size'
 import clsx from 'clsx'
 import { useValues } from 'kea'
 import { router } from 'kea-router'
@@ -12,7 +13,6 @@ import { ActivityLogLogicProps, activityLogLogic } from 'lib/components/Activity
 import { ActivityChange, HumanizedActivityLogItem } from 'lib/components/ActivityLog/humanizeActivity'
 import { TZLabel } from 'lib/components/TZLabel'
 import { FEATURE_FLAGS } from 'lib/constants'
-import useSize from 'lib/hooks/useSize'
 import { IconLink } from 'lib/lemon-ui/icons'
 import { LemonSkeleton } from 'lib/lemon-ui/LemonSkeleton'
 import { PaginationControl, usePagination } from 'lib/lemon-ui/PaginationControl'

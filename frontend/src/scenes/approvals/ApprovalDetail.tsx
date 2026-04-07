@@ -1,3 +1,4 @@
+import useSize from '@react-hook/size'
 import { useActions, useValues } from 'kea'
 import { useRef } from 'react'
 
@@ -6,7 +7,6 @@ import { LemonTag, lemonToast } from '@posthog/lemon-ui'
 import MonacoDiffEditor from 'lib/components/MonacoDiffEditor'
 import { NotFound } from 'lib/components/NotFound'
 import { dayjs } from 'lib/dayjs'
-import useSize from 'lib/hooks/useSize'
 import { LemonDivider } from 'lib/lemon-ui/LemonDivider'
 import { LemonSkeleton } from 'lib/lemon-ui/LemonSkeleton'
 import { LemonTabs } from 'lib/lemon-ui/LemonTabs'

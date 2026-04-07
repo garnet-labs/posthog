@@ -1,13 +1,13 @@
 import './PlayerFrame.scss'
 import './PlayerFrameLLMHighlight.scss'
 
+import useSize from '@react-hook/size'
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { useCallback, useEffect, useRef } from 'react'
 
 import { Handler, viewportResizeDimension } from '@posthog/rrweb-types'
 
-import useSize from 'lib/hooks/useSize'
 import { sessionRecordingPlayerLogic } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 
 const BASE_CLICK_INDICATOR_DURATION_S = 1 / 3
