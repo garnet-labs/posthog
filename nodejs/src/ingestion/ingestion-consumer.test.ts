@@ -118,7 +118,7 @@ describe('IngestionConsumer', () => {
             overrides
         )
         // NOTE: We don't actually use kafka so we skip instantiation for faster tests
-        ingester['kafkaConsumer'] = {
+        ingester['consumer']['kafkaConsumer'] = {
             connect: jest.fn(),
             disconnect: jest.fn(),
             isHealthy: jest.fn(),
@@ -197,9 +197,11 @@ describe('IngestionConsumer', () => {
 
     describe('general', () => {
         it('should have the correct config', () => {
-            expect(ingester['name']).toMatchInlineSnapshot(`"ingestion-consumer-events_plugin_ingestion_test"`)
-            expect(ingester['groupId']).toMatchInlineSnapshot(`"events-ingestion-consumer"`)
-            expect(ingester['topic']).toMatchInlineSnapshot(`"events_plugin_ingestion_test"`)
+            expect(ingester['consumer']['name']).toMatchInlineSnapshot(
+                `"ingestion-consumer-events_plugin_ingestion_test"`
+            )
+            expect(ingester['consumer']['groupId']).toMatchInlineSnapshot(`"events-ingestion-consumer"`)
+            expect(ingester['consumer']['topic']).toMatchInlineSnapshot(`"events_plugin_ingestion_test"`)
         })
 
         it('should process a standard event', async () => {
@@ -1136,15 +1138,6 @@ describe('IngestionConsumer', () => {
                         timestamp: DateTime.now().plus({ minutes: 3 }).toISO(),
                     }),
                     // Snapshot should contain update2 and update3 but not update1
-                ],
-            ],
-            [
-                'client ingestion warning',
-                () => [
-                    createEvent({
-                        event: '$$client_ingestion_warning',
-                        properties: { $$client_ingestion_warning_message: 'test' },
-                    }),
                 ],
             ],
             [

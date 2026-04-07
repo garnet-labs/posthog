@@ -235,7 +235,7 @@ describe.each(FLAG_COMBINATIONS)('Person Updates E2E ($#)', (config) => {
             outputs,
             clickhouseGroupRepository: new ClickhouseGroupRepository(outputs),
         })
-        ingester['kafkaConsumer'] = {
+        ingester['consumer']['kafkaConsumer'] = {
             connect: jest.fn(),
             disconnect: jest.fn(),
             isHealthy: jest.fn(),

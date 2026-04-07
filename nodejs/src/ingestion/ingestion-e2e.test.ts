@@ -260,7 +260,7 @@ const createTestWithTeamIngester = (baseConfig: Partial<PluginsServerConfig> = {
                 clickhouseGroupRepository: new ClickhouseGroupRepository(outputs),
             })
             // NOTE: We don't actually use kafka so we skip instantiation for faster tests
-            ingester['kafkaConsumer'] = {
+            ingester['consumer']['kafkaConsumer'] = {
                 connect: jest.fn(),
                 disconnect: jest.fn(),
                 isHealthy: jest.fn(),

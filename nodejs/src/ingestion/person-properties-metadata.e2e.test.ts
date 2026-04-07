@@ -186,7 +186,7 @@ const createTestWithTeamIngester = (baseConfig: Partial<PluginsServerConfig> = {
                 outputs,
                 clickhouseGroupRepository: new ClickhouseGroupRepository(outputs),
             })
-            ingester['kafkaConsumer'] = {
+            ingester['consumer']['kafkaConsumer'] = {
                 connect: jest.fn(),
                 disconnect: jest.fn(),
                 isHealthy: jest.fn(),
