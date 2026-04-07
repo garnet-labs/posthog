@@ -153,9 +153,19 @@ class VercelConnectCallbackViewSet(viewsets.GenericViewSet):
 
 
 class EnvironmentMappingSerializer(serializers.Serializer):
-    production = serializers.IntegerField(required=True)
-    preview = serializers.IntegerField(required=False)
-    development = serializers.IntegerField(required=False)
+    def to_internal_value(self, data: dict) -> dict[str, int]:
+        if not isinstance(data, dict):
+            raise serializers.ValidationError("Expected a mapping of environment names to project IDs.")
+        if "production" not in data:
+            raise serializers.ValidationError({"production": "This field is required."})
+        result: dict[str, int] = {}
+        for env_name, team_id in data.items():
+            if not isinstance(env_name, str) or not env_name.strip():
+                raise serializers.ValidationError(f"Invalid environment name: {env_name!r}")
+            if not isinstance(team_id, int):
+                raise serializers.ValidationError({env_name: "A valid integer is required."})
+            result[env_name] = team_id
+        return result
 
 
 class VercelConnectLinkSerializer(serializers.Serializer):
@@ -178,10 +188,8 @@ class VercelConnectLinkViewSet(viewsets.GenericViewSet):
         user = cast(User, request.user)
         session_key = serializer.validated_data["session"]
         organization_id = serializer.validated_data["organization_id"]
-        env_mapping = serializer.validated_data["environment_mapping"]
+        env_mapping: dict[str, int] = serializer.validated_data["environment_mapping"]
         production_team_id = env_mapping["production"]
-        preview_team_id = env_mapping.get("preview", production_team_id)
-        development_team_id = env_mapping.get("development", production_team_id)
 
         try:
             cached_data = _load_connect_session(session_key)
@@ -226,7 +234,7 @@ class VercelConnectLinkViewSet(viewsets.GenericViewSet):
                     "Please unlink the existing one first or choose a different organization."
                 )
 
-        unique_team_ids = {production_team_id, preview_team_id, development_team_id}
+        unique_team_ids = set(env_mapping.values())
         teams_by_id: dict[int, Team] = {}
         for tid in unique_team_ids:
             try:
@@ -250,11 +258,7 @@ class VercelConnectLinkViewSet(viewsets.GenericViewSet):
                     "vercel_team_id": cached_data.get("team_id"),
                     "vercel_user_id": cached_data["user_id"],
                     "configuration_id": cached_data.get("configuration_id"),
-                    "environment_mapping": {
-                        "production": production_team_id,
-                        "preview": preview_team_id,
-                        "development": development_team_id,
-                    },
+                    "environment_mapping": env_mapping,
                     "user_mappings": {
                         cached_data["user_id"]: user.pk,
                     },
@@ -281,7 +285,7 @@ class VercelConnectLinkViewSet(viewsets.GenericViewSet):
         from ee.vercel.integration import VercelIntegration
 
         production_resource = resources[production_team_id]
-        secrets = self._build_env_secrets(teams_by_id, production_team_id, preview_team_id, development_team_id)
+        secrets = self._build_env_secrets(teams_by_id, env_mapping)
 
         client = VercelAPIClient(bearer_token=cached_data["access_token"])
         import_result = client.import_resource(
@@ -324,32 +328,23 @@ class VercelConnectLinkViewSet(viewsets.GenericViewSet):
     @staticmethod
     def _build_env_secrets(
         teams_by_id: dict[int, Team],
-        production_id: int,
-        preview_id: int,
-        development_id: int,
+        env_mapping: dict[str, int],
     ) -> list[dict]:
         from posthog.utils import absolute_uri
 
+        production_id = env_mapping["production"]
         prod_team = teams_by_id[production_id]
-        preview_team = teams_by_id[preview_id]
-        dev_team = teams_by_id[development_id]
 
-        all_same = production_id == preview_id == development_id
+        overrides: dict[str, str] = {}
+        for env_name, team_id in env_mapping.items():
+            if env_name != "production" and team_id != production_id:
+                overrides[env_name] = teams_by_id[team_id].api_token
 
         secrets: list[dict] = [
             {
                 "name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
                 "value": prod_team.api_token,
-                **(
-                    {}
-                    if all_same
-                    else {
-                        "environmentOverrides": {
-                            "preview": preview_team.api_token,
-                            "development": dev_team.api_token,
-                        }
-                    }
-                ),
+                **({"environmentOverrides": overrides} if overrides else {}),
             },
             {
                 "name": "NEXT_PUBLIC_POSTHOG_HOST",
