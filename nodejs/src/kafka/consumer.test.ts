@@ -357,13 +357,15 @@ describe('consumer', () => {
         let eachBatch: jest.Mock
 
         beforeEach(async () => {
-            defaultConfig.CONSUMER_BACKGROUND_TASK_TIMEOUT_MS = 10 // Short timeout for tests
+            jest.useFakeTimers()
+            defaultConfig.CONSUMER_BACKGROUND_TASK_TIMEOUT_MS = 10_000
             consumer['maxBackgroundTasks'] = 3
             eachBatch = jest.fn(() => Promise.resolve({}))
             await consumer.connect(eachBatch)
         })
 
         afterEach(() => {
+            jest.useRealTimers()
             defaultConfig.CONSUMER_BACKGROUND_TASK_TIMEOUT_MS = 60_000
         })
 
@@ -373,24 +375,21 @@ describe('consumer', () => {
         ): Promise<void> => {
             eachBatch.mockImplementationOnce(() => Promise.resolve({ backgroundTask }))
             consumeCallback(null, messages)
-            await delay(1)
+            await jest.advanceTimersByTimeAsync(1)
         }
 
         it('should commit offsets when a background task times out', async () => {
-            // Create a task that will never resolve
             const stuckTask = triggerablePromise()
             await simulateMessageWithBackgroundTask(
                 [createKafkaMessage({ offset: 1, partition: 0 })],
                 stuckTask.promise
             )
 
-            // Offsets should not be stored yet
             expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
 
-            // Wait for the timeout to fire
-            await delay(50)
+            // Advance past the timeout
+            await jest.advanceTimersByTimeAsync(10_000)
 
-            // Offsets should now be stored despite the task never resolving
             expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
                 { offset: 2, partition: 0, topic: 'test-topic' },
             ])
@@ -402,9 +401,8 @@ describe('consumer', () => {
 
             expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
 
-            // Resolve before timeout
             task.resolve()
-            await delay(1)
+            await jest.advanceTimersByTimeAsync(1)
 
             expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
                 { offset: 2, partition: 0, topic: 'test-topic' },
@@ -424,17 +422,15 @@ describe('consumer', () => {
                 normalTask.promise
             )
 
-            // Resolve the second task immediately
             normalTask.resolve()
-            await delay(1)
+            await jest.advanceTimersByTimeAsync(1)
 
             // Neither should have committed yet - second is waiting on first
             expect(mockRdKafkaConsumer.offsetsStore).not.toHaveBeenCalled()
 
-            // Wait for the stuck task to time out
-            await delay(50)
+            // Advance past the timeout to unblock the stuck task
+            await jest.advanceTimersByTimeAsync(10_000)
 
-            // Both offsets should now be stored
             expect(mockRdKafkaConsumer.offsetsStore).toHaveBeenCalledWith([
                 { offset: 2, partition: 0, topic: 'test-topic' },
             ])

@@ -751,7 +751,7 @@ export class KafkaConsumer {
                               })
                           })
                         : Promise.resolve()
-                    const stopBackgroundTaskTimer = result?.backgroundTask
+                    const stopBackgroundTaskTimer = rawBackgroundTask
                         ? consumedBatchBackgroundDuration.startTimer({
                               topic: this.config.topic,
                               groupId: this.config.groupId,
