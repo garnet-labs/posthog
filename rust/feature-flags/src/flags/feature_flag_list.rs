@@ -27,12 +27,6 @@ impl FeatureFlagList {
     pub fn prepare_regexes(&mut self) {
         for flag in &mut self.flags {
             Self::prepare_group_regexes(&mut flag.filters.groups);
-            // super_groups currently only use Exact operators (early access enrollment),
-            // so prepare_regex() will no-op for each filter. We walk them anyway for
-            // forward-compatibility if super_groups ever gain regex-based filters.
-            if let Some(super_groups) = &mut flag.filters.super_groups {
-                Self::prepare_group_regexes(super_groups);
-            }
         }
     }
 
@@ -1222,7 +1216,6 @@ mod tests {
         // Filter structure
         assert_eq!(full_flag.filters.groups.len(), 1);
         assert!(full_flag.filters.multivariate.is_some());
-        assert!(full_flag.filters.super_groups.is_some());
         assert_eq!(full_flag.filters.feature_enrollment, Some(true));
         assert!(full_flag.filters.holdout.is_some());
         let holdout = full_flag.filters.holdout.as_ref().unwrap();
@@ -1319,7 +1312,6 @@ mod tests {
                 multivariate: None,
                 aggregation_group_type_index: None,
                 payloads: None,
-                super_groups: None,
                 feature_enrollment: None,
                 holdout: None,
             },

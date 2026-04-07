@@ -209,24 +209,23 @@ class FeatureFlagMatcher:
         highest_priority_evaluation_reason = FeatureFlagMatchReason.NO_CONDITION_MATCH
         highest_priority_index = 0
 
-        # Match for boolean super condition first
-        if feature_flag.filters.get("super_groups", None):
+        # Match for feature enrollment (early access features) first
+        if feature_flag.has_feature_enrollment:
             (
                 is_match,
-                super_condition_value,
+                enrollment_value,
                 evaluation_reason,
-            ) = self.is_super_condition_match(feature_flag)
+            ) = self.is_feature_enrollment_match(feature_flag)
             if is_match:
-                payload = self.get_matching_payload(super_condition_value, None, feature_flag)
+                payload = self.get_matching_payload(enrollment_value, None, feature_flag)
                 return FeatureFlagMatch(
-                    match=super_condition_value,
+                    match=enrollment_value,
                     reason=evaluation_reason,
                     condition_index=0,
                     payload=payload,
                 )
 
         # Match for holdout condition
-        # TODO: Flags shouldn't have both super_groups and holdout
         # TODO: Validate only multivariant flags to have holdouts
         if feature_flag.filters.get("holdout", None):
             (
@@ -371,37 +370,21 @@ class FeatureFlagMatcher:
         variant = f"holdout-{holdout['id']}"
         return True, variant, FeatureFlagMatchReason.HOLDOUT_CONDITION_VALUE
 
-    def is_super_condition_match(self, feature_flag: FeatureFlag) -> tuple[bool, bool, FeatureFlagMatchReason]:
-        # TODO: Right now super conditions with property overrides bork when the database is down,
-        # because we're still going to the database in the line below. Ideally, we should not go to the database.
-        # Don't skip test: test_super_condition_with_override_properties_doesnt_make_database_requests when this is fixed.
-        # This also doesn't handle the case when the super condition has a property & a non-100 percentage rollout; but
-        # we don't support that with super conditions anyway.
-        super_condition_value_is_set = self._super_condition_is_set(feature_flag)
-        super_condition_value = self._super_condition_matches(feature_flag)
+    def is_feature_enrollment_match(self, feature_flag: FeatureFlag) -> tuple[bool, bool, FeatureFlagMatchReason]:
+        """Check if a person is enrolled in an early access feature.
 
-        if super_condition_value_is_set:
+        Uses the `feature_enrollment` boolean on the flag's filters.
+        The enrollment property key is derived as `$feature_enrollment/{flag_key}`.
+        """
+        enrollment_is_set = self._get_query_condition(f"flag_{feature_flag.pk}_enrollment_is_set")
+        enrollment_matches = self._get_query_condition(f"flag_{feature_flag.pk}_enrollment")
+
+        if enrollment_is_set:
             return (
                 True,
-                super_condition_value,
+                enrollment_matches,
                 FeatureFlagMatchReason.SUPER_CONDITION_VALUE,
             )
-
-        # Evaluate if properties are empty
-        if feature_flag.super_conditions and len(feature_flag.super_conditions) > 0:
-            condition = feature_flag.super_conditions[0]
-
-            if not condition.get("properties"):
-                is_match, evaluation_reason = self.is_condition_match(feature_flag, condition, 0)
-                return (
-                    True,
-                    is_match,
-                    (
-                        FeatureFlagMatchReason.SUPER_CONDITION_VALUE
-                        if evaluation_reason == FeatureFlagMatchReason.CONDITION_MATCH
-                        else evaluation_reason
-                    ),
-                )
 
         return False, False, FeatureFlagMatchReason.NO_CONDITION_MATCH
 
@@ -441,12 +424,6 @@ class FeatureFlagMatcher:
             return False, FeatureFlagMatchReason.OUT_OF_ROLLOUT_BOUND
 
         return True, FeatureFlagMatchReason.CONDITION_MATCH
-
-    def _super_condition_matches(self, feature_flag: FeatureFlag) -> bool:
-        return self._get_query_condition(f"flag_{feature_flag.pk}_super_condition")
-
-    def _super_condition_is_set(self, feature_flag: FeatureFlag) -> Optional[bool]:
-        return self._get_query_condition(f"flag_{feature_flag.pk}_super_condition_is_set")
 
     def _condition_matches(
         self,
@@ -637,24 +614,30 @@ class FeatureFlagMatcher:
                     self.cohorts_cache.update(all_cohorts)
                 # release conditions
                 for feature_flag in self.feature_flags:
-                    # super release conditions
-                    if feature_flag.super_conditions and len(feature_flag.super_conditions) > 0:
-                        condition = feature_flag.super_conditions[0]
-                        prop_key = (condition.get("properties") or [{}])[0].get("key")
-                        if prop_key:
-                            key = f"flag_{feature_flag.pk}_super_condition"
-                            condition_eval(key, condition)
+                    # feature enrollment conditions (early access features)
+                    if feature_flag.has_feature_enrollment:
+                        enrollment_key = f"$feature_enrollment/{feature_flag.key}"
+                        enrollment_condition = {
+                            "properties": [
+                                {
+                                    "key": enrollment_key,
+                                    "type": "person",
+                                    "operator": "exact",
+                                    "value": ["true"],
+                                }
+                            ]
+                        }
+                        condition_eval(f"flag_{feature_flag.pk}_enrollment", enrollment_condition)
 
-                            is_set_key = f"flag_{feature_flag.pk}_super_condition_is_set"
-                            is_set_condition = {
-                                "properties": [
-                                    {
-                                        "key": prop_key,
-                                        "operator": "is_set",
-                                    }
-                                ]
-                            }
-                            condition_eval(is_set_key, is_set_condition)
+                        is_set_condition = {
+                            "properties": [
+                                {
+                                    "key": enrollment_key,
+                                    "operator": "is_set",
+                                }
+                            ]
+                        }
+                        condition_eval(f"flag_{feature_flag.pk}_enrollment_is_set", is_set_condition)
 
                     for index, condition in enumerate(feature_flag.conditions):
                         key = f"flag_{feature_flag.pk}_condition_{index}"
