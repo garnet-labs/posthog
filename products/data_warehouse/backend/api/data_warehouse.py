@@ -793,6 +793,7 @@ class DataWarehouseViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
             DuckgresServer.objects.update_or_create(
                 organization=self.team.organization,
                 defaults={
+                    "team": self.team,
                     "host": pg_url,
                     "port": pg_port,
                     "database": database_name,
