@@ -16,7 +16,7 @@ tools:
         operation: change_requests_list
         enabled: true
         scopes:
-            - feature_flag:read
+            - approvals:read
         annotations:
             readOnly: true
             destructive: false
@@ -31,7 +31,7 @@ tools:
         operation: change_requests_retrieve
         enabled: true
         scopes:
-            - feature_flag:read
+            - approvals:read
         annotations:
             readOnly: true
             destructive: false
@@ -45,7 +45,7 @@ tools:
         operation: approval_policies_list
         enabled: true
         scopes:
-            - feature_flag:read
+            - approvals:read
         annotations:
             readOnly: true
             destructive: false
@@ -59,7 +59,7 @@ tools:
         operation: approval_policies_retrieve
         enabled: true
         scopes:
-            - feature_flag:read
+            - approvals:read
         annotations:
             readOnly: true
             destructive: false

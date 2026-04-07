@@ -2190,7 +2190,7 @@
         "feature": "platform_features",
         "summary": "List pending and resolved approval requests.",
         "title": "List pending and resolved approval requests.",
-        "required_scopes": ["feature_flag:read"],
+        "required_scopes": ["approvals:read"],
         "new_mcp": true,
         "annotations": {
             "destructiveHint": false,
@@ -2205,7 +2205,7 @@
         "feature": "platform_features",
         "summary": "Get details of a specific approval request.",
         "title": "Get details of a specific approval request.",
-        "required_scopes": ["feature_flag:read"],
+        "required_scopes": ["approvals:read"],
         "new_mcp": true,
         "annotations": {
             "destructiveHint": false,
@@ -2220,7 +2220,7 @@
         "feature": "platform_features",
         "summary": "List approval policies for the project.",
         "title": "List approval policies for the project.",
-        "required_scopes": ["feature_flag:read"],
+        "required_scopes": ["approvals:read"],
         "new_mcp": true,
         "annotations": {
             "destructiveHint": false,
@@ -2235,7 +2235,7 @@
         "feature": "platform_features",
         "summary": "Get a specific approval policy.",
         "title": "Get a specific approval policy.",
-        "required_scopes": ["feature_flag:read"],
+        "required_scopes": ["approvals:read"],
         "new_mcp": true,
         "annotations": {
             "destructiveHint": false,
