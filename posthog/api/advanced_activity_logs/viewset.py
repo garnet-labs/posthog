@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from django.db.models import Q, QuerySet
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import BasePagination, CursorPagination, PageNumberPagination
@@ -183,17 +183,20 @@ class ActivityLogViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet, mixins
 
 
 class OptionalBooleanField(serializers.BooleanField):
-    """
-    A BooleanField that returns None when not present in the request.
-
-    DRF's standard BooleanField evaluates missing fields to False.
-    """
+    """BooleanField that returns None when missing instead of False."""
 
     default_empty_html = None
 
     def __init__(self, **kwargs):
         kwargs.setdefault("allow_null", True)
         super().__init__(**kwargs)
+
+
+@extend_schema_field({"type": "string"})
+class JSONStringFilterField(serializers.JSONField):
+    """JSONField exposed as a JSON-encoded string in the schema (for query string clients)."""
+
+    pass
 
 
 class AdvancedActivityLogFiltersSerializer(serializers.Serializer):
@@ -203,7 +206,7 @@ class AdvancedActivityLogFiltersSerializer(serializers.Serializer):
     scopes = serializers.ListField(child=serializers.CharField(), required=False, default=[])
     activities = serializers.ListField(child=serializers.CharField(), required=False, default=[])
     search_text = serializers.CharField(required=False, allow_blank=True)
-    detail_filters = serializers.JSONField(required=False, default={})
+    detail_filters = JSONStringFilterField(required=False)
     hogql_filter = serializers.CharField(required=False, allow_blank=True)
     was_impersonated = OptionalBooleanField(required=False)
     is_system = OptionalBooleanField(required=False)

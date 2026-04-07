@@ -260,14 +260,13 @@ export const AdvancedActivityLogsListParams = /* @__PURE__ */ zod.object({
 })
 
 export const advancedActivityLogsListQueryActivitiesDefault = []
-export const advancedActivityLogsListQueryDetailFiltersDefault = {}
 export const advancedActivityLogsListQueryItemIdsDefault = []
 export const advancedActivityLogsListQueryScopesDefault = []
 export const advancedActivityLogsListQueryUsersDefault = []
 
 export const AdvancedActivityLogsListQueryParams = /* @__PURE__ */ zod.object({
     activities: zod.array(zod.string()).default(advancedActivityLogsListQueryActivitiesDefault),
-    detail_filters: zod.unknown().default(advancedActivityLogsListQueryDetailFiltersDefault),
+    detail_filters: zod.string().optional(),
     end_date: zod.iso.datetime({}).optional(),
     hogql_filter: zod.string().optional(),
     is_system: zod.boolean().nullish(),

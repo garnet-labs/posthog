@@ -33665,7 +33665,7 @@ export namespace Schemas {
 
     export type AdvancedActivityLogsListParams = {
     activities?: string[];
-    detail_filters?: unknown;
+    detail_filters?: string;
     end_date?: string;
     hogql_filter?: string;
     /**

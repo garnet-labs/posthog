@@ -9,7 +9,7 @@
             "type": "array"
         },
         "detail_filters": {
-            "default": {}
+            "type": "string"
         },
         "end_date": {
             "format": "date-time",
