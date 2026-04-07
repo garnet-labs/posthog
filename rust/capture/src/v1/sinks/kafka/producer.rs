@@ -50,6 +50,16 @@ impl ProduceError {
         }
     }
 
+    pub fn is_queue_full(&self) -> bool {
+        matches!(
+            self,
+            Self::Kafka {
+                code: RDKafkaErrorCode::QueueFull,
+                ..
+            }
+        )
+    }
+
     /// Stable, low-cardinality tag for metrics and log aggregation.
     pub fn as_tag(&self) -> &'static str {
         match self {
@@ -186,7 +196,10 @@ impl KafkaProducer {
 impl super::KafkaProducerTrait for KafkaProducer {
     type Ack = SendHandle;
 
-    fn send(&self, record: ProduceRecord<'_>) -> Result<SendHandle, ProduceError> {
+    fn send<'a>(
+        &self,
+        record: ProduceRecord<'a>,
+    ) -> Result<SendHandle, (ProduceError, ProduceRecord<'a>)> {
         match self.inner.send_result(FutureRecord {
             topic: record.topic,
             payload: Some(record.payload),
@@ -196,7 +209,15 @@ impl super::KafkaProducerTrait for KafkaProducer {
             headers: Some(record.headers),
         }) {
             Ok(future) => Ok(SendHandle { inner: future }),
-            Err((e, _)) => Err(produce_error_from_kafka(e)),
+            Err((e, returned)) => {
+                let returned_record = ProduceRecord {
+                    topic: returned.topic,
+                    key: returned.key,
+                    payload: returned.payload.unwrap_or(""),
+                    headers: returned.headers.unwrap_or_else(OwnedHeaders::new),
+                };
+                Err((produce_error_from_kafka(e), returned_record))
+            }
         }
     }
 

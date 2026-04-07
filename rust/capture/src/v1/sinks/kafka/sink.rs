@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -195,34 +196,72 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             key_buf.clear();
             event.write_partition_key(ctx, &mut key_buf);
 
-            let record = ProduceRecord {
+            let mut record = ProduceRecord {
                 topic,
                 key: Some(&key_buf),
                 payload: &payload_buf,
                 headers,
             };
 
-            match self.producer.send(record) {
-                Ok(ack_future) => {
-                    enqueued_keys.push(uuid_key.clone());
-                    pending.push(async move {
-                        let result = ack_future.await;
-                        (uuid_key, Utc::now(), result)
-                    });
+            let enqueue_retry_max = self.config.kafka.enqueue_retry_max;
+            let enqueue_poll = Duration::from_millis(self.config.kafka.enqueue_poll_ms as u64);
+            let mut hit_queue_full = false;
+
+            for enqueue_attempt in 0..=enqueue_retry_max {
+                if enqueue_attempt > 0 {
+                    tokio::time::sleep(enqueue_poll).await;
                 }
-                Err(e) => {
-                    let sink_err = KafkaSinkError::Produce(e);
-                    let outcome = sink_err.outcome();
-                    counter!(
-                        "capture_v1_kafka_publish_total",
-                        "mode" => mode,
-                        "cluster" => sink_str,
-                        "outcome" => outcome.as_tag(),
-                        "path" => path.clone(),
-                        "attempt" => attempt.clone(),
-                    )
-                    .increment(1);
-                    results.push(Box::new(KafkaResult::err(uuid_key, sink_err, enqueued_at)));
+
+                match self.producer.send(record) {
+                    Ok(ack_future) => {
+                        if hit_queue_full {
+                            counter!(
+                                "capture_v1_kafka_queue_full_retries_total",
+                                "mode" => mode,
+                                "cluster" => sink_str,
+                                "result" => "recovered",
+                            )
+                            .increment(1);
+                        }
+                        let key = uuid_key.clone();
+                        enqueued_keys.push(uuid_key);
+                        pending.push(async move {
+                            let result = ack_future.await;
+                            (key, Utc::now(), result)
+                        });
+                        break;
+                    }
+                    Err((e, returned_record))
+                        if e.is_queue_full() && enqueue_attempt < enqueue_retry_max =>
+                    {
+                        hit_queue_full = true;
+                        record = returned_record;
+                        continue;
+                    }
+                    Err((e, _)) => {
+                        if hit_queue_full || e.is_queue_full() {
+                            counter!(
+                                "capture_v1_kafka_queue_full_retries_total",
+                                "mode" => mode,
+                                "cluster" => sink_str,
+                                "result" => "exhausted",
+                            )
+                            .increment(1);
+                        }
+                        let sink_err = KafkaSinkError::Produce(e);
+                        let outcome = sink_err.outcome();
+                        counter!(
+                            "capture_v1_kafka_publish_total",
+                            "mode" => mode,
+                            "cluster" => sink_str,
+                            "outcome" => outcome.as_tag(),
+                            "path" => path.clone(),
+                            "attempt" => attempt.clone(),
+                        )
+                        .increment(1);
+                        results.push(Box::new(KafkaResult::err(uuid_key, sink_err, enqueued_at)));
+                        break;
+                    }
                 }
             }
         }

@@ -23,7 +23,10 @@ use producer::{ProduceError, ProduceRecord};
 pub trait KafkaProducerTrait: Send + Sync {
     type Ack: Future<Output = Result<(), ProduceError>> + Send;
 
-    fn send(&self, record: ProduceRecord<'_>) -> Result<Self::Ack, ProduceError>;
+    fn send<'a>(
+        &self,
+        record: ProduceRecord<'a>,
+    ) -> Result<Self::Ack, (ProduceError, ProduceRecord<'a>)>;
     fn flush(&self, timeout: Duration) -> Result<(), KafkaError>;
     fn is_ready(&self) -> bool;
     fn sink_name(&self) -> SinkName;

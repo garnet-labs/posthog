@@ -123,10 +123,13 @@ impl TestHarness {
         HarnessBuilder {
             produce_timeout: Duration::from_secs(30),
             send_error: None,
+            send_error_count: None,
             ack_error: None,
             ack_delay: None,
             not_ready: false,
             liveness: None,
+            enqueue_retry_max: None,
+            enqueue_poll_ms: None,
         }
     }
 }
@@ -134,10 +137,13 @@ impl TestHarness {
 struct HarnessBuilder {
     produce_timeout: Duration,
     send_error: Option<fn() -> ProduceError>,
+    send_error_count: Option<u32>,
     ack_error: Option<fn() -> ProduceError>,
     ack_delay: Option<Duration>,
     not_ready: bool,
     liveness: Option<(Duration, Duration)>,
+    enqueue_retry_max: Option<u32>,
+    enqueue_poll_ms: Option<u32>,
 }
 
 impl HarnessBuilder {
@@ -148,6 +154,11 @@ impl HarnessBuilder {
 
     fn send_error(mut self, f: fn() -> ProduceError) -> Self {
         self.send_error = Some(f);
+        self
+    }
+
+    fn send_error_count(mut self, n: u32) -> Self {
+        self.send_error_count = Some(n);
         self
     }
 
@@ -168,6 +179,16 @@ impl HarnessBuilder {
 
     fn with_liveness(mut self, deadline: Duration, poll_interval: Duration) -> Self {
         self.liveness = Some((deadline, poll_interval));
+        self
+    }
+
+    fn enqueue_retry_max(mut self, n: u32) -> Self {
+        self.enqueue_retry_max = Some(n);
+        self
+    }
+
+    fn enqueue_poll_ms(mut self, ms: u32) -> Self {
+        self.enqueue_poll_ms = Some(ms);
         self
     }
 
@@ -195,6 +216,9 @@ impl HarnessBuilder {
         if let Some(f) = self.send_error {
             mock = mock.with_send_error(f);
         }
+        if let Some(n) = self.send_error_count {
+            mock = mock.with_send_error_count(n);
+        }
         if let Some(f) = self.ack_error {
             mock = mock.with_ack_error(f);
         }
@@ -207,9 +231,17 @@ impl HarnessBuilder {
 
         let producer = Arc::new(mock);
 
+        let mut kafka_config = test_kafka_config();
+        if let Some(n) = self.enqueue_retry_max {
+            kafka_config.enqueue_retry_max = n;
+        }
+        if let Some(ms) = self.enqueue_poll_ms {
+            kafka_config.enqueue_poll_ms = ms;
+        }
+
         let config = Config {
             produce_timeout: self.produce_timeout,
-            kafka: test_kafka_config(),
+            kafka: kafka_config,
         };
 
         let sink = KafkaSink::new(
@@ -328,6 +360,7 @@ async fn send_error_retriable_queue_full() {
             code: RDKafkaErrorCode::QueueFull,
             retriable: true,
         })
+        .enqueue_retry_max(0)
         .build();
     let event = FakeEvent::ok("evt-1");
     let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
@@ -336,6 +369,84 @@ async fn send_error_retriable_queue_full() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].key(), "evt-1");
+    assert_eq!(results[0].outcome(), Outcome::RetriableError);
+    assert_eq!(results[0].cause(), Some("queue_full"));
+    assert_eq!(h.producer.record_count(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// 5b. QueueFull retry succeeds after drain
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn queue_full_retry_succeeds_after_drain() {
+    let h = TestHarness::builder()
+        .send_error(|| ProduceError::Kafka {
+            code: RDKafkaErrorCode::QueueFull,
+            retriable: true,
+        })
+        .send_error_count(2)
+        .enqueue_retry_max(3)
+        .enqueue_poll_ms(1)
+        .build();
+    let event = FakeEvent::ok("evt-1");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
+
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].key(), "evt-1");
+    assert_eq!(results[0].outcome(), Outcome::Success);
+    assert_eq!(h.producer.record_count(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// 5c. QueueFull retry exhausted
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn queue_full_retry_exhausted() {
+    let h = TestHarness::builder()
+        .send_error(|| ProduceError::Kafka {
+            code: RDKafkaErrorCode::QueueFull,
+            retriable: true,
+        })
+        .enqueue_retry_max(2)
+        .enqueue_poll_ms(1)
+        .build();
+    let event = FakeEvent::ok("evt-1");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
+
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].key(), "evt-1");
+    assert_eq!(results[0].outcome(), Outcome::RetriableError);
+    assert_eq!(results[0].cause(), Some("queue_full"));
+    assert_eq!(h.producer.record_count(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// 5d. QueueFull retry disabled (enqueue_retry_max = 0)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn queue_full_retry_zero_max_disables_retry() {
+    let h = TestHarness::builder()
+        .send_error(|| ProduceError::Kafka {
+            code: RDKafkaErrorCode::QueueFull,
+            retriable: true,
+        })
+        .send_error_count(1)
+        .enqueue_retry_max(0)
+        .enqueue_poll_ms(1)
+        .build();
+    let event = FakeEvent::ok("evt-1");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&event];
+
+    let results = h.sink.publish_batch(&h.ctx, &events).await;
+
+    assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome(), Outcome::RetriableError);
     assert_eq!(results[0].cause(), Some("queue_full"));
     assert_eq!(h.producer.record_count(), 0);
@@ -701,6 +812,7 @@ async fn health_not_refreshed_on_full_send_error() {
             code: RDKafkaErrorCode::QueueFull,
             retriable: true,
         })
+        .enqueue_retry_max(0)
         .build();
     let e1 = FakeEvent::ok("evt-1");
     let e2 = FakeEvent::ok("evt-2");

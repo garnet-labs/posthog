@@ -57,6 +57,16 @@ pub struct Config {
     #[envconfig(default = "10000")]
     pub statistics_interval_ms: u32,
 
+    // -- QueueFull backpressure --
+    /// Max enqueue retry attempts when rdkafka returns QueueFull.
+    /// 0 = no retries (immediate failure, pre-backpressure behavior).
+    #[envconfig(default = "3")]
+    pub enqueue_retry_max: u32,
+    /// Pause between QueueFull retry attempts (ms). Gives rdkafka's
+    /// background poller time to drain in-flight deliveries.
+    #[envconfig(default = "33")]
+    pub enqueue_poll_ms: u32,
+
     // -- Topics (all required -- envconfig errors if any are missing) --
     pub topic_main: String,
     pub topic_historical: String,
@@ -117,6 +127,8 @@ mod tests {
         env.insert("METADATA_MAX_AGE_MS".into(), "30000".into());
         env.insert("SOCKET_TIMEOUT_MS".into(), "30000".into());
         env.insert("STATISTICS_INTERVAL_MS".into(), "5000".into());
+        env.insert("ENQUEUE_RETRY_MAX".into(), "5".into());
+        env.insert("ENQUEUE_POLL_MS".into(), "50".into());
 
         let cfg = Config::init_from_hashmap(&env).unwrap();
         assert_eq!(cfg.hosts, "localhost:9092");
@@ -135,6 +147,8 @@ mod tests {
         assert_eq!(cfg.metadata_max_age_ms, 30000);
         assert_eq!(cfg.socket_timeout_ms, 30000);
         assert_eq!(cfg.statistics_interval_ms, 5000);
+        assert_eq!(cfg.enqueue_retry_max, 5);
+        assert_eq!(cfg.enqueue_poll_ms, 50);
         assert_eq!(cfg.topic_main, "events_main");
     }
 
@@ -157,6 +171,8 @@ mod tests {
         assert_eq!(cfg.metadata_max_age_ms, 15000);
         assert_eq!(cfg.socket_timeout_ms, 5000);
         assert_eq!(cfg.statistics_interval_ms, 10000);
+        assert_eq!(cfg.enqueue_retry_max, 3);
+        assert_eq!(cfg.enqueue_poll_ms, 33);
     }
 
     #[test]
