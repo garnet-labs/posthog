@@ -510,7 +510,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     def set_output(self, request, pk=None, **kwargs):
         task_run = cast(TaskRun, self.get_object())
         task = cast(Task, task_run.task)
-        output_data = request.validated_request["output"]
+        output_data = request.validated_data["output"]
 
         if task.json_schema:
             try:
