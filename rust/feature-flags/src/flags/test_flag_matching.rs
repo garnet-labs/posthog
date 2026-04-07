@@ -8935,6 +8935,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_mixed_targeting_unmatched_person_outranks_skipped_group_condition() {
+        // Regression test for the reason-priority ordering. When a person condition is
+        // evaluated and fails to match, and a group condition is skipped because the
+        // caller didn't provide that group type, the surfaced reason should reflect the
+        // person condition's NoConditionMatch — not the group condition's NoGroupType.
+        // The person result is more informative: it tells the caller their properties
+        // didn't match, rather than implying they need to send a group key that the
+        // person condition wouldn't have used anyway.
+        let context = TestContext::new(None).await;
+        let cohort_cache = Arc::new(CohortCacheManager::new(
+            context.non_persons_reader.clone(),
+            None,
+            None,
+        ));
+        let team = context.insert_new_team(None).await.unwrap();
+
+        let flag = mock!(FeatureFlag,
+            team_id: team.id,
+            key: "mixed-flag".mock_into(),
+            filters: FlagFilters {
+                groups: vec![
+                    // Condition 0: person-aggregated, requires email=test@example.com
+                    FlagPropertyGroup {
+                        properties: Some(vec![PropertyFilter {
+                            key: "email".to_string(),
+                            value: Some(json!("test@example.com")),
+                            operator: Some(OperatorType::Exact),
+                            prop_type: PropertyType::Person,
+                            group_type_index: None,
+                            negation: None,
+                            compiled_regex: None,
+                        }]),
+                        rollout_percentage: Some(100.0),
+                        variant: None,
+                        aggregation_group_type_index: None,
+                    },
+                    // Condition 1: group-aggregated (organization), requires industry=tech
+                    FlagPropertyGroup {
+                        properties: Some(vec![PropertyFilter {
+                            key: "industry".to_string(),
+                            value: Some(json!("tech")),
+                            operator: Some(OperatorType::Exact),
+                            prop_type: PropertyType::Group,
+                            group_type_index: Some(1),
+                            negation: None,
+                            compiled_regex: None,
+                        }]),
+                        rollout_percentage: Some(100.0),
+                        variant: None,
+                        aggregation_group_type_index: Some(Some(1)),
+                    },
+                ],
+                multivariate: None,
+                aggregation_group_type_index: None,
+                payloads: None,
+                super_groups: None,
+                feature_enrollment: None,
+                holdout: None,
+            }
+        );
+
+        let group_type_cache =
+            mock_group_type_cache([("organization".to_string(), 1)].into_iter().collect());
+
+        // Person properties don't match the condition, and no groups are provided.
+        let person_overrides = HashMap::from([("email".to_string(), json!("other@example.com"))]);
+
+        let mut matcher = FeatureFlagMatcher::new(
+            "test_user".to_string(),
+            None,
+            team.id,
+            context.create_postgres_router(),
+            cohort_cache.clone(),
+            group_type_cache,
+            None,
+        );
+
+        matcher
+            .prepare_flag_evaluation_state(&[&flag])
+            .await
+            .unwrap();
+
+        let result = matcher
+            .get_match(&flag, Some(&person_overrides), None, None, &None)
+            .unwrap();
+
+        assert!(!result.matches);
+        assert_eq!(
+            result.reason,
+            FeatureFlagMatchReason::NoConditionMatch,
+            "Should surface the person condition's NoConditionMatch, not the group condition's NoGroupType"
+        );
+        assert_eq!(result.condition_index, Some(0));
+    }
+
+    #[tokio::test]
     async fn test_mixed_targeting_group_condition_matches_before_person_condition() {
         // When both conditions could match, the first one (group) wins because conditions
         // are evaluated in order.
