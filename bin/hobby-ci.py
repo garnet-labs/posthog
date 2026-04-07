@@ -387,23 +387,28 @@ runcmd:
         print("📝 Creating test user and fetching API keys via Django shell...", flush=True)
         setup_script = (
             "from posthog.models import User, Organization, Team, PersonalAPIKey;"
-            "from rest_framework_simplejwt.tokens import AccessToken;"
-            "org, _ = Organization.objects.get_or_create(name='Hobby CI Test');"
-            "user = User.objects.create_user("
-            "  email='ci@posthog.com', password='CiTest123', organization=org, first_name='Hobby CI'"
+            "from posthog.models.utils import generate_random_token_personal, mask_key_value, hash_key_value;"
+            "team = Team.objects.first();"
+            "org = team.organization;"
+            "user = User.objects.filter(email='ci@posthog.com').first() or User.objects.create_and_join(org, 'ci@posthog.com', 'CiTest123!', 'Hobby CI');"
+            "raw_key = generate_random_token_personal();"
+            "PersonalAPIKey.objects.filter(user=user, label='ci-smoke-test').delete();"
+            "PersonalAPIKey.objects.create("
+            "  user=user, label='ci-smoke-test',"
+            "  secure_value=hash_key_value(raw_key),"
+            "  mask_value=mask_key_value(raw_key),"
             ");"
-            "team = Team.objects.filter(organization=org).first();"
-            "api_key = PersonalAPIKey.objects.create("
-            "  user=user, label='ci-smoke-test', team=team,"
-            ");"
-            "print(f'{team.api_token}|||{api_key.value}');"
+            "print(f'{team.api_token}|||{raw_key}');"
         )
         result = self.run_ssh_command(
             f'cd /hobby && sudo -E docker-compose -f docker-compose.yml exec -T web python manage.py shell -c "{setup_script}"',
             timeout=60,
         )
         if result["exit_code"] != 0:
-            return False, f"User setup failed (exit {result['exit_code']}): {result['stderr'][:200]}"
+            return (
+                False,
+                f"User setup failed (exit {result['exit_code']}): stderr={result['stderr'][:500]} stdout={result['stdout'][:500]}",
+            )
 
         output_line = [line for line in result["stdout"].strip().split("\n") if "|||" in line]
         if not output_line:
@@ -1547,7 +1552,9 @@ def main():
             droplet_id=droplet_id,
             ssh_private_key=ssh_key,
         )
-        health_success, failure_details = ht.test_deployment_with_details()
+        preview_mode = os.environ.get("PREVIEW_MODE", "false") == "true"
+        stability = 300 if preview_mode else 60
+        health_success, failure_details = ht.test_deployment_with_details(stability_period=stability)
 
         pr_ctx = PRCommentContext.from_env()
         if pr_ctx:

@@ -403,7 +403,7 @@ jobs:
                       console.log(`Updated deployment ${deploymentId} to in_progress`);
             - name: Run smoke tests on DO
               id: test
-              timeout-minutes: 45
+              timeout-minutes: 50
               run: |
                   set +e
                   uv run bin/hobby-ci.py test
