@@ -10,6 +10,12 @@ export interface SessionFeatureBlock {
     distinctId: string
     batchId: string
     features: FeatureEndResult
+    isDeleted?: boolean
+}
+
+export interface DeletionFeatureBlock {
+    sessionId: string
+    teamId: number
 }
 
 export class SessionFeatureStore {
@@ -72,6 +78,7 @@ export class SessionFeatureStore {
             max_scroll_y: block.features.maxScrollY,
             click_target_ids: block.features.clickTargetIds,
             text_selection_count: block.features.textSelectionCount,
+            is_deleted: block.isDeleted ? 1 : 0,
         }))
 
         await this.producer.queueMessages({
@@ -85,5 +92,25 @@ export class SessionFeatureStore {
         await this.producer.flush()
 
         logger.info('🧠', 'session_feature_store_stored', { count: events.length })
+    }
+
+    public async storeDeletionMarkers(blocks: DeletionFeatureBlock[]): Promise<void> {
+        const events = blocks.map((block) => ({
+            session_id: block.sessionId,
+            team_id: block.teamId,
+            is_deleted: 1,
+        }))
+
+        await this.producer.queueMessages({
+            topic: this.kafkaTopic,
+            messages: events.map((event) => ({
+                key: event.session_id,
+                value: JSON.stringify(event),
+            })),
+        })
+
+        await this.producer.flush()
+
+        logger.info('🧠', 'session_feature_store_deletion_markers_stored', { count: events.length })
     }
 }
