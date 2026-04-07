@@ -24,6 +24,7 @@ import { TaxonomicPopover, TaxonomicPopoverProps } from 'lib/components/Taxonomi
 import { IconWithCount, SortableDragIcon } from 'lib/lemon-ui/icons'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { getEventNamesForAction } from 'lib/utils'
+import { getDefaultEventLabel, getDefaultEventName } from 'lib/utils/getAppContext'
 import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import { funnelDataLogic } from 'scenes/funnels/funnelDataLogic'
 import { insightDataLogic } from 'scenes/insights/insightDataLogic'
@@ -38,6 +39,7 @@ import {
     BaseMathType,
     EntityTypes,
     InsightShortId,
+    InsightType,
     PropertyFilterType,
     PropertyFilterValue,
     PropertyOperator,
@@ -247,12 +249,32 @@ export function ActionFilterRow({
         ) : (
             <SeriesLetter seriesIndex={index} hasBreakdown={hasBreakdown} />
         )
+
+    const hasConfiguredSelection = !(
+        filter.type === EntityTypes.EVENTS &&
+        filter.id === getDefaultEventName() &&
+        filter.name === getDefaultEventLabel() &&
+        filter.properties == null &&
+        ((insightType === InsightType.TRENDS && filter.math === 'total') ||
+            (insightType === InsightType.STICKINESS && filter.math === 'dau') ||
+            ((insightType === InsightType.FUNNELS ||
+                insightType === InsightType.RETENTION ||
+                insightType === InsightType.LIFECYCLE) &&
+                filter.math == null))
+    )
+    const defaultEntityGroupType =
+        filter.type === EntityTypes.ACTIONS
+            ? TaxonomicFilterGroupType.Actions
+            : filter.type === EntityTypes.DATA_WAREHOUSE
+              ? TaxonomicFilterGroupType.DataWarehouse
+              : TaxonomicFilterGroupType.Events
+
     const filterElement = (
         <TaxonomicPopover
             data-attr={'trend-element-subject-' + index}
             fullWidth
             truncate
-            groupType={TaxonomicFilterGroupType.SuggestedFilters}
+            groupType={hasConfiguredSelection ? defaultEntityGroupType : TaxonomicFilterGroupType.SuggestedFilters}
             value={getValue(value, filter)}
             filter={filter}
             onChange={(changedValue, taxonomicGroupType, item) => {
