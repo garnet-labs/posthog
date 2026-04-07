@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     network_request_duration_count Int64,
     max_scroll_y Float64,
     click_target_ids Array(Int64),
-    text_selection_count Int64
+    text_selection_count Int64,
+    is_deleted UInt8
 ) ENGINE = {engine}
 """
 
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     network_request_duration_count SimpleAggregateFunction(sum, Int64),
     max_scroll_y SimpleAggregateFunction(max, Float64),
     unique_click_target_count AggregateFunction(uniqExact, Int64),
-    text_selection_count SimpleAggregateFunction(sum, Int64)
+    text_selection_count SimpleAggregateFunction(sum, Int64),
+    is_deleted SimpleAggregateFunction(max, UInt8) DEFAULT 0
 ) ENGINE = {engine}
 """
 
@@ -185,7 +187,8 @@ sum(network_request_duration_sum_of_squares) as network_request_duration_sum_of_
 sum(network_request_duration_count) as network_request_duration_count,
 max(max_scroll_y) as max_scroll_y,
 uniqExactArrayState(click_target_ids) as unique_click_target_count,
-sum(text_selection_count) as text_selection_count
+sum(text_selection_count) as text_selection_count,
+max(is_deleted) as is_deleted
 FROM {database}.kafka_session_replay_features
 GROUP BY session_id, team_id
 """
