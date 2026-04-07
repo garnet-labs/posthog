@@ -862,7 +862,7 @@ def track_task_run_completion(sender, instance: TaskRun, created: bool, **kwargs
             instance.track_structured_result()
     except Exception as e:
         logger.warning(
-            "task_run.track_structured_result_failed",
+            "task_run.track_task_run_completion_failed",
             task_run_id=str(instance.id),
             error=str(e),
         )
