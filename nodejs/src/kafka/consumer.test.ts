@@ -3,7 +3,7 @@ import { CODES, Message, MessageHeader, KafkaConsumer as RdKafkaConsumer } from 
 import { defaultConfig } from '~/config/config'
 
 import { delay } from '../utils/utils'
-import { KafkaConsumer, parseEventHeaders, parseKafkaHeaders } from './consumer'
+import { KafkaConsumer, parseEventHeaders, parseKafkaHeaders, withBackgroundTaskTimeout } from './consumer'
 
 jest.mock('./admin', () => ({
     ensureTopicExists: jest.fn().mockResolvedValue(undefined),
@@ -87,6 +87,63 @@ const triggerablePromise = (): {
     })
     return result
 }
+
+describe('withBackgroundTaskTimeout', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    const labels = { topic: 'test-topic', groupId: 'test-group' }
+
+    it('should resolve when the task resolves before timeout', async () => {
+        const task = triggerablePromise()
+        const wrapped = withBackgroundTaskTimeout(task.promise, 10_000, false, labels)
+
+        task.resolve()
+        await jest.advanceTimersByTimeAsync(1)
+
+        await expect(wrapped).resolves.toBeUndefined()
+    })
+
+    it('should resolve on timeout when forceResolve is true', async () => {
+        const task = triggerablePromise()
+        const wrapped = withBackgroundTaskTimeout(task.promise, 10_000, true, labels)
+
+        await jest.advanceTimersByTimeAsync(10_000)
+
+        await expect(wrapped).resolves.toBeUndefined()
+    })
+
+    it('should not resolve on timeout when forceResolve is false', async () => {
+        const task = triggerablePromise()
+        const wrapped = withBackgroundTaskTimeout(task.promise, 10_000, false, labels)
+
+        let resolved = false
+        void wrapped.then(() => {
+            resolved = true
+        })
+
+        await jest.advanceTimersByTimeAsync(10_000)
+        expect(resolved).toBe(false)
+
+        // Only resolves when the actual task completes
+        task.resolve()
+        await jest.advanceTimersByTimeAsync(1)
+        expect(resolved).toBe(true)
+    })
+
+    it('should handle double resolve safely when task completes after timeout', async () => {
+        const task = triggerablePromise()
+        const wrapped = withBackgroundTaskTimeout(task.promise, 10_000, true, labels)
+
+        await jest.advanceTimersByTimeAsync(10_000)
+        await expect(wrapped).resolves.toBeUndefined()
+
+        // Second resolve is a no-op
+        task.resolve()
+        await jest.advanceTimersByTimeAsync(1)
+        await expect(wrapped).resolves.toBeUndefined()
+    })
+})
 
 describe('consumer', () => {
     afterEach(() => {
