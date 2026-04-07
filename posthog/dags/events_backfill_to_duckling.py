@@ -69,7 +69,7 @@ from posthog.dags.events_backfill_to_ducklake import (
     MAX_RETRY_ATTEMPTS,
 )
 from posthog.ducklake.common import attach_catalog, escape, get_ducklake_catalog_by_team_org, get_org_config
-from posthog.ducklake.models import DuckLakeCatalog
+from posthog.ducklake.models import DuckLakeBackfill, DuckLakeCatalog
 from posthog.ducklake.storage import configure_cross_account_connection
 
 logger = structlog.get_logger(__name__)
@@ -1792,10 +1792,8 @@ def duckling_events_daily_backfill_sensor(
     new_partitions: list[str] = []
     run_requests: list[RunRequest] = []
 
-    # Find all team-backed duckling configurations (org-only catalogs are not
-    # processable by per-project backfills)
-    for catalog in DuckLakeCatalog.objects.filter(team__isnull=False):
-        partition_key = f"{catalog.team_id}_{yesterday}"
+    for backfill in DuckLakeBackfill.objects.filter(enabled=True):
+        partition_key = f"{backfill.team_id}_{yesterday}"
 
         if partition_key not in existing:
             # New partition - create and trigger run
@@ -1806,7 +1804,7 @@ def duckling_events_daily_backfill_sensor(
                     run_key=f"{partition_key}_new",
                 )
             )
-            context.log.info(f"Creating partition for team_id={catalog.team_id}, date={yesterday}")
+            context.log.info(f"Creating partition for team_id={backfill.team_id}, date={yesterday}")
         else:
             # Existing partition - check if the last run failed and needs retry
             # Query for runs with this partition key (stored in dagster/partition tag)
@@ -1829,12 +1827,12 @@ def duckling_events_daily_backfill_sensor(
                         )
                     )
                     context.log.info(
-                        f"Retrying failed partition team_id={catalog.team_id}, date={yesterday} "
+                        f"Retrying failed partition team_id={backfill.team_id}, date={yesterday} "
                         f"(previous run: {latest_run.run_id[:8]})"
                     )
                     logger.info(
                         "duckling_sensor_retry_failed_partition",
-                        team_id=catalog.team_id,
+                        team_id=backfill.team_id,
                         date=yesterday,
                         previous_run_id=latest_run.run_id,
                     )
@@ -1843,7 +1841,7 @@ def duckling_events_daily_backfill_sensor(
                     DagsterRunStatus.QUEUED,
                 ):
                     context.log.debug(
-                        f"Skipping partition team_id={catalog.team_id}, date={yesterday} - run in progress"
+                        f"Skipping partition team_id={backfill.team_id}, date={yesterday} - run in progress"
                     )
 
     if new_partitions:
@@ -1927,11 +1925,9 @@ def duckling_events_full_backfill_sensor(
         except json.JSONDecodeError:
             cursor_data = {}
 
-    # Get team-backed catalogs (org-only catalogs are not processable by
-    # per-project backfills)
-    catalogs = list(DuckLakeCatalog.objects.filter(team__isnull=False).order_by("team_id"))
-    if not catalogs:
-        context.log.info("No team-backed DuckLakeCatalog entries found")
+    backfills = list(DuckLakeBackfill.objects.filter(enabled=True).order_by("team_id"))
+    if not backfills:
+        context.log.info("No enabled DuckLakeBackfill entries found")
         return SensorResult(run_requests=[])
 
     # Find where to resume from
@@ -1939,11 +1935,11 @@ def duckling_events_full_backfill_sensor(
     resume_month = cursor_data.get("next_month")
     cached_earliest = cursor_data.get("earliest")
 
-    # Find the catalog to resume from (or start from first)
+    # Find the backfill entry to resume from (or start from first)
     start_idx = 0
     if resume_team_id:
-        for i, cat in enumerate(catalogs):
-            if cat.team_id == resume_team_id:
+        for i, bf in enumerate(backfills):
+            if bf.team_id == resume_team_id:
                 start_idx = i
                 break
 
@@ -1951,13 +1947,13 @@ def duckling_events_full_backfill_sensor(
     run_requests: list[RunRequest] = []
     existing_partitions = set(context.instance.get_dynamic_partitions("duckling_events_backfill"))
 
-    # Process catalogs starting from where we left off
-    for catalog_idx, catalog in enumerate(catalogs[start_idx:], start=start_idx):
+    # Process backfills starting from where we left off
+    for bf_idx, bf in enumerate(backfills[start_idx:], start=start_idx):
         if len(new_partitions) >= BACKFILL_MONTHS_PER_TICK:
-            context.log.info(f"Batch limit reached, will continue from team {catalog.team_id}")
+            context.log.info(f"Batch limit reached, will continue from team {bf.team_id}")
             break
 
-        team_id: int = catalog.team_id  # type: ignore[assignment]  # filtered by team__isnull=False
+        team_id = bf.team_id
 
         # Determine start month - use cached value if resuming same team
         if team_id == resume_team_id and cached_earliest:
@@ -2013,9 +2009,9 @@ def duckling_events_full_backfill_sensor(
             }
         else:
             # Done with this team, move to next
-            next_idx = catalog_idx + 1
-            if next_idx < len(catalogs):
-                cursor_data = {"team_id": catalogs[next_idx].team_id}
+            next_idx = bf_idx + 1
+            if next_idx < len(backfills):
+                cursor_data = {"team_id": backfills[next_idx].team_id}
             else:
                 # All teams done - reset cursor to check again tomorrow
                 cursor_data = {"completed": timezone.now().date().isoformat()}
@@ -2073,8 +2069,8 @@ def duckling_persons_daily_backfill_sensor(
     new_partitions: list[str] = []
     run_requests: list[RunRequest] = []
 
-    for catalog in DuckLakeCatalog.objects.filter(team__isnull=False):
-        partition_key = f"{catalog.team_id}_{yesterday}"
+    for backfill in DuckLakeBackfill.objects.filter(enabled=True):
+        partition_key = f"{backfill.team_id}_{yesterday}"
 
         if partition_key not in existing:
             new_partitions.append(partition_key)
@@ -2084,7 +2080,7 @@ def duckling_persons_daily_backfill_sensor(
                     run_key=f"{partition_key}_persons_new",
                 )
             )
-            context.log.info(f"Creating persons partition for team_id={catalog.team_id}, date={yesterday}")
+            context.log.info(f"Creating persons partition for team_id={backfill.team_id}, date={yesterday}")
         else:
             runs = context.instance.get_runs(
                 filters=RunsFilter(
@@ -2103,10 +2099,10 @@ def duckling_persons_daily_backfill_sensor(
                             run_key=f"{partition_key}_persons_retry_{latest_run.run_id[:8]}",
                         )
                     )
-                    context.log.info(f"Retrying failed persons partition team_id={catalog.team_id}, date={yesterday}")
+                    context.log.info(f"Retrying failed persons partition team_id={backfill.team_id}, date={yesterday}")
                     logger.info(
                         "duckling_persons_sensor_retry_failed_partition",
-                        team_id=catalog.team_id,
+                        team_id=backfill.team_id,
                         date=yesterday,
                         previous_run_id=latest_run.run_id,
                     )
@@ -2115,7 +2111,7 @@ def duckling_persons_daily_backfill_sensor(
                     DagsterRunStatus.QUEUED,
                 ):
                     context.log.debug(
-                        f"Skipping persons partition team_id={catalog.team_id}, date={yesterday} - run in progress"
+                        f"Skipping persons partition team_id={backfill.team_id}, date={yesterday} - run in progress"
                     )
 
     if new_partitions:
@@ -2163,11 +2159,9 @@ def duckling_persons_full_backfill_sensor(
         To restart from scratch, reset the cursor in Dagster UI:
         Sensors -> duckling_persons_full_backfill_sensor -> Reset cursor
     """
-    # Get team-backed catalogs (org-only catalogs are not processable by
-    # per-project backfills)
-    catalogs = list(DuckLakeCatalog.objects.filter(team__isnull=False).order_by("team_id"))
-    if not catalogs:
-        context.log.info("No team-backed DuckLakeCatalog entries found")
+    backfills = list(DuckLakeBackfill.objects.filter(enabled=True).order_by("team_id"))
+    if not backfills:
+        context.log.info("No enabled DuckLakeBackfill entries found")
         return SensorResult(run_requests=[])
 
     # Check existing partitions
@@ -2176,8 +2170,8 @@ def duckling_persons_full_backfill_sensor(
     new_partitions: list[str] = []
     run_requests: list[RunRequest] = []
 
-    for catalog in catalogs:
-        team_id: int = catalog.team_id  # type: ignore[assignment]  # filtered by team__isnull=False
+    for bf in backfills:
+        team_id = bf.team_id
         partition_key = str(team_id)
 
         if partition_key not in existing_partitions:
