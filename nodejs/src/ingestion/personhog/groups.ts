@@ -37,7 +37,10 @@ function protoGroupToDomain(proto: ProtoGroup): DomainGroup {
 }
 
 export class PersonHogGroupOperations {
-    constructor(private client: Client<typeof PersonHogService>) {}
+    private client: Client<typeof PersonHogService>
+    constructor(client: Client<typeof PersonHogService>) {
+        this.client = client
+    }
 
     async fetchGroup(teamId: number, groupTypeIndex: number, groupKey: string): Promise<DomainGroup | undefined> {
         const response = await this.client.getGroup(

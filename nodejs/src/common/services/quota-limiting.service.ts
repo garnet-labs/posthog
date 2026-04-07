@@ -27,10 +27,12 @@ export interface QuotaLimitingResult {
 export class QuotaLimiting {
     private readonly limitedTokensLoader: LazyLoader<Record<string, number>>
 
-    constructor(
-        private readonly redisPool: RedisPool,
-        private readonly teamManager: TeamManager
-    ) {
+    private readonly redisPool: RedisPool
+    private readonly teamManager: TeamManager
+
+    constructor(redisPool: RedisPool, teamManager: TeamManager) {
+        this.redisPool = redisPool
+        this.teamManager = teamManager
         this.limitedTokensLoader = new LazyLoader({
             name: 'quota_limited_tokens',
             loader: async (resources: string[]) => {

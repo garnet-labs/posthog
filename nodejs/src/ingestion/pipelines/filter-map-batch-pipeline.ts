@@ -29,11 +29,18 @@ export class FilterMapBatchPipeline<
     RSub extends string = never,
 > implements BatchPipeline<TInput, TOutput, CInput, COutput | CIntermediate, RPrev | RSub>
 {
+    private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, CIntermediate, RPrev>
+    private mappingFn: FilterMapMappingFunction<TIntermediate, TMapped, CIntermediate, CMapped>
+    private subPipeline: BatchPipeline<TMapped, TOutput, CMapped, COutput, RSub>
     constructor(
-        private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, CIntermediate, RPrev>,
-        private mappingFn: FilterMapMappingFunction<TIntermediate, TMapped, CIntermediate, CMapped>,
-        private subPipeline: BatchPipeline<TMapped, TOutput, CMapped, COutput, RSub>
-    ) {}
+        previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, CIntermediate, RPrev>,
+        mappingFn: FilterMapMappingFunction<TIntermediate, TMapped, CIntermediate, CMapped>,
+        subPipeline: BatchPipeline<TMapped, TOutput, CMapped, COutput, RSub>
+    ) {
+        this.previousPipeline = previousPipeline
+        this.mappingFn = mappingFn
+        this.subPipeline = subPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.previousPipeline.feed(elements)

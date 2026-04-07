@@ -3,48 +3,56 @@ import { isDevEnv, isProdEnv, isTestEnv } from '../utils/env-utils'
 
 export const DEFAULT_HTTP_SERVER_PORT = 6738
 
-export enum KafkaSecurityProtocol {
-    Plaintext = 'PLAINTEXT',
-    SaslPlaintext = 'SASL_PLAINTEXT',
-    Ssl = 'SSL',
-    SaslSsl = 'SASL_SSL',
-}
+export const KafkaSecurityProtocol = {
+    Plaintext: 'PLAINTEXT',
+    SaslPlaintext: 'SASL_PLAINTEXT',
+    Ssl: 'SSL',
+    SaslSsl: 'SASL_SSL',
+} as const
 
-export enum KafkaSaslMechanism {
-    Plain = 'plain',
-    ScramSha256 = 'scram-sha-256',
-    ScramSha512 = 'scram-sha-512',
-}
+export type KafkaSecurityProtocol = (typeof KafkaSecurityProtocol)[keyof typeof KafkaSecurityProtocol]
+
+export const KafkaSaslMechanism = {
+    Plain: 'plain',
+    ScramSha256: 'scram-sha-256',
+    ScramSha512: 'scram-sha-512',
+} as const
+
+export type KafkaSaslMechanism = (typeof KafkaSaslMechanism)[keyof typeof KafkaSaslMechanism]
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
-export enum PluginServerMode {
-    ingestion_v2 = 'ingestion-v2',
-    local_cdp = 'local-cdp',
-    recordings_blob_ingestion_v2 = 'recordings-blob-ingestion-v2',
+export const PluginServerMode = {
+    ingestion_v2: 'ingestion-v2',
+    local_cdp: 'local-cdp',
+    recordings_blob_ingestion_v2: 'recordings-blob-ingestion-v2',
+
     // TODO: Remove once charts deploy with mode=recordings-blob-ingestion-v2 for overflow pods
-    recordings_blob_ingestion_v2_overflow = 'recordings-blob-ingestion-v2-overflow',
-    cdp_processed_events = 'cdp-processed-events',
-    cdp_person_updates = 'cdp-person-updates',
-    cdp_data_warehouse_events = 'cdp-data-warehouse-events',
-    cdp_internal_events = 'cdp-internal-events',
-    cdp_cyclotron_worker = 'cdp-cyclotron-worker',
-    cdp_precalculated_filters = 'cdp-precalculated-filters',
-    cdp_cohort_membership = 'cdp-cohort-membership',
-    cdp_cyclotron_worker_hogflow = 'cdp-cyclotron-worker-hogflow',
-    cdp_api = 'cdp-api',
-    cdp_legacy_on_event = 'cdp-legacy-on-event',
-    evaluation_scheduler = 'evaluation-scheduler',
-    ingestion_logs = 'ingestion-logs',
-    ingestion_error_tracking = 'ingestion-errortracking',
-    cdp_batch_hogflow_requests = 'cdp-batch-hogflow-requests',
-    cdp_cyclotron_v2_janitor = 'cdp-cyclotron-v2-janitor',
-    recording_api = 'recording-api',
-    ingestion_v2_testing = 'ingestion-v2-testing',
-    ingestion_v2_combined = 'ingestion-v2-combined',
-    ingestion_traces = 'ingestion-traces',
-    cdp_hogflow_scheduler = 'cdp-hogflow-scheduler',
-}
+    recordings_blob_ingestion_v2_overflow: 'recordings-blob-ingestion-v2-overflow',
+
+    cdp_processed_events: 'cdp-processed-events',
+    cdp_person_updates: 'cdp-person-updates',
+    cdp_data_warehouse_events: 'cdp-data-warehouse-events',
+    cdp_internal_events: 'cdp-internal-events',
+    cdp_cyclotron_worker: 'cdp-cyclotron-worker',
+    cdp_precalculated_filters: 'cdp-precalculated-filters',
+    cdp_cohort_membership: 'cdp-cohort-membership',
+    cdp_cyclotron_worker_hogflow: 'cdp-cyclotron-worker-hogflow',
+    cdp_api: 'cdp-api',
+    cdp_legacy_on_event: 'cdp-legacy-on-event',
+    evaluation_scheduler: 'evaluation-scheduler',
+    ingestion_logs: 'ingestion-logs',
+    ingestion_error_tracking: 'ingestion-errortracking',
+    cdp_batch_hogflow_requests: 'cdp-batch-hogflow-requests',
+    cdp_cyclotron_v2_janitor: 'cdp-cyclotron-v2-janitor',
+    recording_api: 'recording-api',
+    ingestion_v2_testing: 'ingestion-v2-testing',
+    ingestion_v2_combined: 'ingestion-v2-combined',
+    ingestion_traces: 'ingestion-traces',
+    cdp_hogflow_scheduler: 'cdp-hogflow-scheduler',
+} as const
+
+export type PluginServerMode = (typeof PluginServerMode)[keyof typeof PluginServerMode]
 
 export const stringToPluginServerMode = Object.fromEntries(
     Object.entries(PluginServerMode).map(([key, value]) => [

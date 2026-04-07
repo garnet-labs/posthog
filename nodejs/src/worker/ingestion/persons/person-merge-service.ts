@@ -91,7 +91,9 @@ export const isDistinctIdIllegal = (id: string): boolean => {
  */
 export class PersonMergeService {
     private personCreateService: PersonCreateService
-    constructor(private context: PersonContext) {
+    private context: PersonContext
+    constructor(context: PersonContext) {
+        this.context = context
         this.personCreateService = new PersonCreateService(context)
     }
 

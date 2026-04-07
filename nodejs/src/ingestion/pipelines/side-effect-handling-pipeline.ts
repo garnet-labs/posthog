@@ -18,11 +18,18 @@ export type SideEffectHandlingConfig = {
 export class SideEffectHandlingPipeline<TInput, TOutput, CInput, COutput = CInput, R extends string = never>
     implements BatchPipeline<TInput, TOutput, CInput, COutput, R>
 {
+    private subPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    private promiseScheduler: PromiseSchedulerInterface
+    private config: SideEffectHandlingConfig
     constructor(
-        private subPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
-        private promiseScheduler: PromiseSchedulerInterface,
-        private config: SideEffectHandlingConfig = { await: false }
-    ) {}
+        subPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
+        promiseScheduler: PromiseSchedulerInterface,
+        config: SideEffectHandlingConfig = { await: false }
+    ) {
+        this.subPipeline = subPipeline
+        this.promiseScheduler = promiseScheduler
+        this.config = config
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.subPipeline.feed(elements)

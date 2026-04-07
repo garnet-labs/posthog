@@ -29,7 +29,10 @@ function protoPersonToDomain(proto: ProtoPerson): InternalPerson {
 }
 
 export class PersonHogPersonOperations {
-    constructor(private client: Client<typeof PersonHogService>) {}
+    private client: Client<typeof PersonHogService>
+    constructor(client: Client<typeof PersonHogService>) {
+        this.client = client
+    }
 
     async fetchPersonsByDistinctIds(
         teamPersons: { teamId: number; distinctId: string }[]

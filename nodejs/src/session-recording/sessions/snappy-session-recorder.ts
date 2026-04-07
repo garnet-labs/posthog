@@ -85,11 +85,15 @@ export class SnappySessionRecorder {
     private segmentationEvents: SegmentationEvent[] = []
     private droppedUrlsCount: number = 0
 
-    constructor(
-        public readonly sessionId: string,
-        public readonly teamId: number,
-        public readonly batchId: string
-    ) {}
+    public readonly sessionId: string
+    public readonly teamId: number
+    public readonly batchId: string
+
+    constructor(sessionId: string, teamId: number, batchId: string) {
+        this.sessionId = sessionId
+        this.teamId = teamId
+        this.batchId = batchId
+    }
 
     /**
      * Records a message containing events for this session

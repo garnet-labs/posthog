@@ -25,7 +25,10 @@ export type EventSchemaMap = Map<string, EventSchemaEnforcement>
 export class EventSchemaEnforcementManager {
     private lazyLoader: LazyLoader<EventSchemaMap>
 
-    constructor(private postgres: PostgresRouter) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         this.lazyLoader = new LazyLoader({
             name: 'EventSchemaEnforcementManager',
             refreshAgeMs: 2 * 60 * 1000, // 2 minutes

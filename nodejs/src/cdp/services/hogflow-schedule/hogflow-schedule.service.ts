@@ -56,7 +56,10 @@ export class HogFlowScheduleService {
     private readonly healthTimeoutMs: number
     private readonly internalFetchService: InternalFetchService
 
-    constructor(private config: PluginsServerConfig) {
+    private config: PluginsServerConfig
+
+    constructor(config: PluginsServerConfig) {
+        this.config = config
         this.pollIntervalMs = config.HOGFLOW_SCHEDULER_POLL_INTERVAL_MS
         this.maxPollIntervalMs = config.HOGFLOW_SCHEDULER_MAX_POLL_INTERVAL_MS
         this.healthTimeoutMs = config.HOGFLOW_SCHEDULER_HEALTH_TIMEOUT_MS

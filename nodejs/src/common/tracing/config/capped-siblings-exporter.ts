@@ -19,10 +19,12 @@ type Key = string // `${traceId}:${parentSpanId}:${name}`
  * It also keeps spans with an error or a duration >= minDurationMs.
  */
 export class CappedSiblingsExporter implements SpanExporter {
-    constructor(
-        private delegate: SpanExporter,
-        private opts: { maxPerGroup: number; minDurationMs?: number } = { maxPerGroup: 2 }
-    ) {}
+    private delegate: SpanExporter
+    private opts: { maxPerGroup: number; minDurationMs?: number }
+    constructor(delegate: SpanExporter, opts: { maxPerGroup: number; minDurationMs?: number } = { maxPerGroup: 2 }) {
+        this.delegate = delegate
+        this.opts = opts
+    }
 
     export(spans: ReadableSpan[], done: (r: { code: any }) => void): void {
         const counts = new Map<Key, number>()

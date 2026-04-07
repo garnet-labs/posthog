@@ -310,15 +310,15 @@ Allowed timestamp formats support ISO and ClickHouse formats according to
  necessarily accept all possible ISO timestamps. */
 export function castTimestampOrNow(
     timestamp?: DateTime | string | null,
-    timestampFormat?: TimestampFormat.ISO
+    timestampFormat?: typeof TimestampFormat.ISO
 ): ISOTimestamp
 export function castTimestampOrNow(
     timestamp: DateTime | string | null,
-    timestampFormat: TimestampFormat.ClickHouse
+    timestampFormat: typeof TimestampFormat.ClickHouse
 ): ClickHouseTimestamp
 export function castTimestampOrNow(
     timestamp: DateTime | string | null,
-    timestampFormat: TimestampFormat.ClickHouseSecondPrecision
+    timestampFormat: typeof TimestampFormat.ClickHouseSecondPrecision
 ): ClickHouseTimestampSecondPrecision
 export function castTimestampOrNow(
     timestamp?: DateTime | string | null,
@@ -336,14 +336,17 @@ export function castTimestampOrNow(
 const DATETIME_FORMAT_CLICKHOUSE_SECOND_PRECISION = 'yyyy-MM-dd HH:mm:ss'
 const DATETIME_FORMAT_CLICKHOUSE = 'yyyy-MM-dd HH:mm:ss.u'
 
-export function castTimestampToClickhouseFormat(timestamp: DateTime, timestampFormat: TimestampFormat.ISO): ISOTimestamp
 export function castTimestampToClickhouseFormat(
     timestamp: DateTime,
-    timestampFormat: TimestampFormat.ClickHouse
+    timestampFormat: typeof TimestampFormat.ISO
+): ISOTimestamp
+export function castTimestampToClickhouseFormat(
+    timestamp: DateTime,
+    timestampFormat: typeof TimestampFormat.ClickHouse
 ): ClickHouseTimestamp
 export function castTimestampToClickhouseFormat(
     timestamp: DateTime,
-    timestampFormat: TimestampFormat.ClickHouseSecondPrecision
+    timestampFormat: typeof TimestampFormat.ClickHouseSecondPrecision
 ): ClickHouseTimestampSecondPrecision
 export function castTimestampToClickhouseFormat(
     timestamp: DateTime,

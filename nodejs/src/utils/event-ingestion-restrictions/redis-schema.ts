@@ -3,12 +3,14 @@ import { z } from 'zod'
 import { RestrictionFilters, RestrictionRule, RestrictionType } from './rules'
 
 // Redis key names for each restriction type
-export enum RedisRestrictionType {
-    DROP_EVENT_FROM_INGESTION = 'drop_event_from_ingestion',
-    SKIP_PERSON_PROCESSING = 'skip_person_processing',
-    FORCE_OVERFLOW_FROM_INGESTION = 'force_overflow_from_ingestion',
-    REDIRECT_TO_DLQ = 'redirect_to_dlq',
-}
+export const RedisRestrictionType = {
+    DROP_EVENT_FROM_INGESTION: 'drop_event_from_ingestion',
+    SKIP_PERSON_PROCESSING: 'skip_person_processing',
+    FORCE_OVERFLOW_FROM_INGESTION: 'force_overflow_from_ingestion',
+    REDIRECT_TO_DLQ: 'redirect_to_dlq',
+} as const
+
+export type RedisRestrictionType = (typeof RedisRestrictionType)[keyof typeof RedisRestrictionType]
 
 export const REDIS_KEY_PREFIX = 'event_ingestion_restriction_dynamic_config'
 

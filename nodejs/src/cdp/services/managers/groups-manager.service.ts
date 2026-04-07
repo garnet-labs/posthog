@@ -29,10 +29,12 @@ export class GroupsManagerService {
     private groupTypesLoader: LazyLoader<GroupTypeMapping>
     private groupPropertiesLoader: LazyLoader<Record<string, any>>
 
-    constructor(
-        private teamManager: TeamManager,
-        private groupRepository: GroupRepository
-    ) {
+    private teamManager: TeamManager
+    private groupRepository: GroupRepository
+
+    constructor(teamManager: TeamManager, groupRepository: GroupRepository) {
+        this.teamManager = teamManager
+        this.groupRepository = groupRepository
         this.groupTypesLoader = new LazyLoader({
             name: 'groups_manager_types',
             refreshAgeMs: 10 * 60 * 1000, // 10 minutes - group types rarely change

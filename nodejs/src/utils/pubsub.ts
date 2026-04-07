@@ -12,7 +12,10 @@ export class PubSub {
     private redisPublisher?: Redis
     private promises: PromiseScheduler
 
-    constructor(private redisPool: RedisPool) {
+    private redisPool: RedisPool
+
+    constructor(redisPool: RedisPool) {
+        this.redisPool = redisPool
         this.eventEmitter = new EventEmitter()
         this.promises = new PromiseScheduler()
     }

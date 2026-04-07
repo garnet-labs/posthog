@@ -21,10 +21,13 @@ export class CyclotronJobQueueKafka {
     private queue?: CyclotronJobQueueKind
     private consumeBatch?: (invocations: CyclotronJobInvocation[]) => Promise<{ backgroundTask: Promise<any> }>
 
-    constructor(
-        private kafkaClientRack: string | undefined,
-        private config: Pick<CdpConfig, 'CDP_CYCLOTRON_COMPRESS_KAFKA_DATA'>
-    ) {}
+    private kafkaClientRack: string | undefined
+    private config: Pick<CdpConfig, 'CDP_CYCLOTRON_COMPRESS_KAFKA_DATA'>
+
+    constructor(kafkaClientRack: string | undefined, config: Pick<CdpConfig, 'CDP_CYCLOTRON_COMPRESS_KAFKA_DATA'>) {
+        this.kafkaClientRack = kafkaClientRack
+        this.config = config
+    }
 
     /**
      * Helper to only start the producer related code (e.g. when not a consumer)

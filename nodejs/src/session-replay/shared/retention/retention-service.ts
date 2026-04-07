@@ -8,11 +8,14 @@ function isValidRetentionPeriod(retentionPeriod: string): retentionPeriod is Ret
 }
 
 export class RetentionService {
-    constructor(
-        private redisPool: RedisPool,
-        private teamService: TeamService,
-        private keyPrefix = '@posthog/replay/'
-    ) {}
+    private redisPool: RedisPool
+    private teamService: TeamService
+    private keyPrefix
+    constructor(redisPool: RedisPool, teamService: TeamService, keyPrefix = '@posthog/replay/') {
+        this.redisPool = redisPool
+        this.teamService = teamService
+        this.keyPrefix = keyPrefix
+    }
 
     private generateRedisKey(sessionId: string): string {
         return `${this.keyPrefix}session-retention-${sessionId}`

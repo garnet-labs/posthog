@@ -103,11 +103,14 @@ export class LogsIngestionConsumer {
     protected overflowTopic?: string
     protected dlqTopic?: string
 
+    private deps: LogsIngestionConsumerDeps
+
     constructor(
         config: LogsIngestionConsumerConfig,
-        private deps: LogsIngestionConsumerDeps,
+        deps: LogsIngestionConsumerDeps,
         overrides: Partial<LogsIngestionConsumerConfig> = {}
     ) {
+        this.deps = deps
         // The group and topic are configurable allowing for multiple ingestion consumers to be run in parallel
         this.groupId = overrides.LOGS_INGESTION_CONSUMER_GROUP_ID ?? config.LOGS_INGESTION_CONSUMER_GROUP_ID
         this.topic = overrides.LOGS_INGESTION_CONSUMER_CONSUME_TOPIC ?? config.LOGS_INGESTION_CONSUMER_CONSUME_TOPIC

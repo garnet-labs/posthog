@@ -89,7 +89,10 @@ export class LazyLoader<T> {
           }
         | undefined
 
-    constructor(private readonly options: LazyLoaderOptions<T>) {
+    private readonly options: LazyLoaderOptions<T>
+
+    constructor(options: LazyLoaderOptions<T>) {
+        this.options = options
         this.cache = {}
         this.lastUsed = {}
         this.cacheUntil = {}

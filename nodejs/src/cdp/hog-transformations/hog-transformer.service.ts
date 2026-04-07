@@ -79,16 +79,34 @@ export class HogTransformerService {
     private cachedGeoIp?: GeoIp
     private cachedTransformationFunctions?: ReturnType<typeof getTransformationFunctions>
 
+    private hogFunctionManager: HogFunctionManagerService
+    private hogExecutor: HogExecutorService
+    private hogWatcher: HogWatcherService
+    private hogFunctionMonitoringService: HogFunctionMonitoringService
+    private pluginExecutor: LegacyPluginExecutorService
+    private geoipService: GeoIPService
+    private redis: RedisV2
+    private config: HogTransformerConfig
+
     constructor(
-        private hogFunctionManager: HogFunctionManagerService,
-        private hogExecutor: HogExecutorService,
-        private hogWatcher: HogWatcherService,
-        private hogFunctionMonitoringService: HogFunctionMonitoringService,
-        private pluginExecutor: LegacyPluginExecutorService,
-        private geoipService: GeoIPService,
-        private redis: RedisV2,
-        private config: HogTransformerConfig
-    ) {}
+        hogFunctionManager: HogFunctionManagerService,
+        hogExecutor: HogExecutorService,
+        hogWatcher: HogWatcherService,
+        hogFunctionMonitoringService: HogFunctionMonitoringService,
+        pluginExecutor: LegacyPluginExecutorService,
+        geoipService: GeoIPService,
+        redis: RedisV2,
+        config: HogTransformerConfig
+    ) {
+        this.hogFunctionManager = hogFunctionManager
+        this.hogExecutor = hogExecutor
+        this.hogWatcher = hogWatcher
+        this.hogFunctionMonitoringService = hogFunctionMonitoringService
+        this.pluginExecutor = pluginExecutor
+        this.geoipService = geoipService
+        this.redis = redis
+        this.config = config
+    }
 
     public async start(): Promise<void> {}
 

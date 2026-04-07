@@ -8,10 +8,13 @@ type CommitOffsetsCallback = (offsets: TopicPartitionOffset[]) => Promise<void>
 export class KafkaOffsetManager {
     private partitionOffsets: Map<number, number> = new Map()
 
-    constructor(
-        private readonly commitOffsets: CommitOffsetsCallback,
-        private readonly topic: string
-    ) {}
+    private readonly commitOffsets: CommitOffsetsCallback
+    private readonly topic: string
+
+    constructor(commitOffsets: CommitOffsetsCallback, topic: string) {
+        this.commitOffsets = commitOffsets
+        this.topic = topic
+    }
 
     public trackOffset({ partition, offset }: PartitionOffset): void {
         // We track the next offset to process

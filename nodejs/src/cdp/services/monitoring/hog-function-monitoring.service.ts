@@ -69,11 +69,19 @@ export class HogFunctionMonitoringService {
 
     private warehouseKafkaProducer?: KafkaProducerWrapper
 
+    private outputs: IngestionOutputs<MonitoringOutput>
+    private internalCaptureService: InternalCaptureService
+    private teamManager: TeamManager
+
     constructor(
-        private outputs: IngestionOutputs<MonitoringOutput>,
-        private internalCaptureService: InternalCaptureService,
-        private teamManager: TeamManager
-    ) {}
+        outputs: IngestionOutputs<MonitoringOutput>,
+        internalCaptureService: InternalCaptureService,
+        teamManager: TeamManager
+    ) {
+        this.outputs = outputs
+        this.internalCaptureService = internalCaptureService
+        this.teamManager = teamManager
+    }
 
     setWarehouseKafkaProducer(producer: KafkaProducerWrapper): void {
         this.warehouseKafkaProducer = producer

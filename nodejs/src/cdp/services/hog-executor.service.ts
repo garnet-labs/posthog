@@ -179,13 +179,24 @@ export type HogExecutorExecuteAsyncOptions = HogExecutorExecuteOptions & {
 }
 
 export class HogExecutorService {
+    private config: HogExecutorConfig
+    private asyncContext: HogExecutorAsyncContext
+    private hogInputsService: HogInputsService
+    private emailService: EmailService
+    private recipientTokensService: RecipientTokensService
     constructor(
-        private config: HogExecutorConfig,
-        private asyncContext: HogExecutorAsyncContext,
-        private hogInputsService: HogInputsService,
-        private emailService: EmailService,
-        private recipientTokensService: RecipientTokensService
-    ) {}
+        config: HogExecutorConfig,
+        asyncContext: HogExecutorAsyncContext,
+        hogInputsService: HogInputsService,
+        emailService: EmailService,
+        recipientTokensService: RecipientTokensService
+    ) {
+        this.config = config
+        this.asyncContext = asyncContext
+        this.hogInputsService = hogInputsService
+        this.emailService = emailService
+        this.recipientTokensService = recipientTokensService
+    }
 
     async buildInputsWithGlobals(
         hogFunction: HogFunctionType,

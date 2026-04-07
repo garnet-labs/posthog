@@ -56,14 +56,31 @@ const POSTGRES_UNAVAILABLE_ERROR_MESSAGES = [
     'server login has been failing', // PgBouncer cannot authenticate with upstream PG
 ]
 
-export enum PostgresUse {
-    COMMON_READ, // Read replica on the common tables, uses need to account for possible replication delay
-    COMMON_WRITE, // Main PG master with common tables, we need to move as many queries away from it as possible
-    PLUGIN_STORAGE_RW, // Plugin Storage table, no read replica for it
-    PERSONS_READ, // Person database, read replica
-    PERSONS_WRITE, // Person database, write
-    BEHAVIORAL_COHORTS_RW, // Behavioral cohorts database for behavioral cohorts
-}
+export const PostgresUse = {
+    COMMON_READ: 0,
+
+    // Read replica on the common tables, uses need to account for possible replication delay
+    COMMON_WRITE: 1,
+
+    // Main PG master with common tables, we need to move as many queries away from it as possible
+    PLUGIN_STORAGE_RW: 2,
+
+    // Plugin Storage table, no read replica for it
+    PERSONS_READ: 3,
+
+    // Person database, read replica
+    PERSONS_WRITE: 4,
+
+    // Person database, write
+    BEHAVIORAL_COHORTS_RW: 5,
+} as const
+
+export type PostgresUse = (typeof PostgresUse)[keyof typeof PostgresUse]
+
+const PostgresUseName = Object.fromEntries(Object.entries(PostgresUse).map(([k, v]) => [v, k])) as Record<
+    PostgresUse,
+    keyof typeof PostgresUse
+>
 
 export class TransactionClient {
     readonly target: PostgresUse
@@ -174,10 +191,10 @@ export class PostgresRouter {
         queryFailureLogLevel: 'error' | 'warn' = 'error'
     ): Promise<QueryResult<R>> {
         if (target instanceof TransactionClient) {
-            const wrappedTag = `${PostgresUse[target.target]}:Tx<${tag}>`
+            const wrappedTag = `${PostgresUseName[target.target]}:Tx<${tag}>`
             return postgresQuery(target.client, queryString, values, wrappedTag, queryFailureLogLevel, target.target)
         } else {
-            const wrappedTag = `${PostgresUse[target]}<${tag}>`
+            const wrappedTag = `${PostgresUseName[target]}<${tag}>`
             return postgresQuery(this.pools.get(target)!, queryString, values, wrappedTag, queryFailureLogLevel, target)
         }
     }
@@ -187,7 +204,7 @@ export class PostgresRouter {
         tag: string,
         transaction: (client: TransactionClient) => Promise<ReturnType>
     ): Promise<ReturnType> {
-        const wrappedTag = `${PostgresUse[usage]}:Tx<${tag}>`
+        const wrappedTag = `${PostgresUseName[usage]}:Tx<${tag}>`
 
         return withSpan('postgres', 'query.postgres_transaction', { tag: wrappedTag }, async () => {
             const timeout = timeoutGuard(`Postgres slow transaction warning after 30 sec!`)
@@ -266,6 +283,6 @@ export function handlePostgresError(error: Error, databaseUse: PostgresUse): voi
         return
     }
 
-    postgresErrorCounter.inc({ error_type: matchedMessage, database_use: PostgresUse[databaseUse] })
+    postgresErrorCounter.inc({ error_type: matchedMessage, database_use: PostgresUseName[databaseUse] })
     throw new DependencyUnavailableError(error.message, 'Postgres', error)
 }

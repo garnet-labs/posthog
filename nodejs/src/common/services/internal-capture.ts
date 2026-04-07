@@ -29,7 +29,10 @@ type CapturePayloadFormat = {
 }
 
 export class InternalCaptureService {
-    constructor(private config: Pick<CommonConfig, 'CAPTURE_INTERNAL_URL'>) {}
+    private config: Pick<CommonConfig, 'CAPTURE_INTERNAL_URL'>
+    constructor(config: Pick<CommonConfig, 'CAPTURE_INTERNAL_URL'>) {
+        this.config = config
+    }
 
     private prepareEvent(event: InternalCaptureEvent): CapturePayloadFormat {
         const properties = { ...(event.properties ?? {}), capture_internal: true }

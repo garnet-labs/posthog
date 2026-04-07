@@ -37,10 +37,13 @@ export class RecordingApi {
     private clickhouseClient: ClickHouseClient | null = null
     private recordingService: RecordingService | null = null
 
-    constructor(
-        private config: RecordingApiConfig,
-        private postgres: PostgresRouter
-    ) {}
+    private config: RecordingApiConfig
+    private postgres: PostgresRouter
+
+    constructor(config: RecordingApiConfig, postgres: PostgresRouter) {
+        this.config = config
+        this.postgres = postgres
+    }
 
     public get service(): PluginServerService {
         return {

@@ -9,7 +9,10 @@ type MessageFunctionActionType = 'function_email' | 'function_sms'
 type MessageAction = Extract<HogFlowAction, { type: MessageFunctionActionType }>
 
 export class RecipientPreferencesService {
-    constructor(private recipientsManager: RecipientsManagerService) {}
+    private recipientsManager: RecipientsManagerService
+    constructor(recipientsManager: RecipientsManagerService) {
+        this.recipientsManager = recipientsManager
+    }
 
     public async shouldSkipAction(
         invocation: CyclotronJobInvocationHogFunction,

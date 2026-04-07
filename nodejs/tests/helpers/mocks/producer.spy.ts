@@ -39,7 +39,9 @@ export class KafkaProducerObserver {
         Parameters<typeof KafkaProducerWrapper.prototype.produce>
     >
 
-    constructor(private producer: KafkaProducerWrapper) {
+    private producer: KafkaProducerWrapper
+    constructor(producer: KafkaProducerWrapper) {
+        this.producer = producer
         // Spy on the methods we need
         this.produceSpy = jest.spyOn(producer, 'produce')
     }

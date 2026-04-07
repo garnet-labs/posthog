@@ -75,12 +75,17 @@ export class SessionConsoleLogRecorder {
     private consoleWarnCount: number = 0
     private consoleErrorCount: number = 0
 
-    constructor(
-        public readonly sessionId: string,
-        public readonly teamId: number,
-        public readonly batchId: string,
-        private readonly store: SessionConsoleLogStore
-    ) {}
+    public readonly sessionId: string
+    public readonly teamId: number
+    public readonly batchId: string
+    private readonly store: SessionConsoleLogStore
+
+    constructor(sessionId: string, teamId: number, batchId: string, store: SessionConsoleLogStore) {
+        this.sessionId = sessionId
+        this.teamId = teamId
+        this.batchId = batchId
+        this.store = store
+    }
 
     /**
      * Records a message containing events for this session

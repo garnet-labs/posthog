@@ -37,15 +37,22 @@ const REDIS_KEY_TOKENS = `${BASE_REDIS_KEY}/tokens`
 const REDIS_KEY_STATE = `${BASE_REDIS_KEY}/state`
 const REDIS_KEY_STATE_LOCK = `${BASE_REDIS_KEY}/state-lock`
 
-export enum HogWatcherState {
-    healthy = 1,
-    degraded = 2,
-    disabled = 3,
+export const HogWatcherState = {
+    healthy: 1,
+    degraded: 2,
+    disabled: 3,
 
     // These are states that we do not auto transition into - can only be modified by the admin tool
-    forcefully_degraded = 11,
-    forcefully_disabled = 12,
-}
+    forcefully_degraded: 11,
+
+    forcefully_disabled: 12,
+} as const
+
+export type HogWatcherState = (typeof HogWatcherState)[keyof typeof HogWatcherState]
+
+export const HogWatcherStateName = Object.fromEntries(
+    Object.entries(HogWatcherState).map(([k, v]) => [v, k])
+) as Record<HogWatcherState, keyof typeof HogWatcherState>
 
 export type HogWatcherFunctionState = {
     tokens: number
@@ -95,11 +102,14 @@ export class HogWatcherService {
         complete: () => void
     } | null = null
 
-    constructor(
-        private teamManager: TeamManager,
-        private config: HogWatcherConfig,
-        private redis: RedisV2
-    ) {
+    private teamManager: TeamManager
+    private config: HogWatcherConfig
+    private redis: RedisV2
+
+    constructor(teamManager: TeamManager, config: HogWatcherConfig, redis: RedisV2) {
+        this.teamManager = teamManager
+        this.config = config
+        this.redis = redis
         this.costsMapping = {
             hog: {
                 lowerBound: this.config.hogCostTimingLowerMs,
@@ -153,8 +163,8 @@ export class HogWatcherService {
                 hog_function_type: hogFunction.type,
                 hog_function_name: hogFunction.name,
                 hog_function_template_id: hogFunction.template_id,
-                state: HogWatcherState[state], // Convert numeric state to readable string
-                previous_state: HogWatcherState[previousState], // Convert numeric state to readable string
+                state: HogWatcherStateName[state], // Convert numeric state to readable string
+                previous_state: HogWatcherStateName[previousState], // Convert numeric state to readable string
             })
         }
     }
@@ -209,7 +219,7 @@ export class HogWatcherService {
                 const state = res ? res[resIndex + 1][1] : undefined
 
                 acc[id] = {
-                    state: state ? Number(state) : HogWatcherState.healthy,
+                    state: (state ? Number(state) : HogWatcherState.healthy) as HogWatcherState,
                     tokens: tokens,
                 }
 
@@ -302,7 +312,7 @@ export class HogWatcherService {
         const res = await this.redis.usePipeline({ name: 'forceStateChange' }, (pipeline) => {
             for (const [hogFunction, state] of changes) {
                 hogFunctionStateChange.inc({
-                    state: HogWatcherState[state],
+                    state: HogWatcherStateName[state],
                     kind: hogFunction.type,
                 })
 
@@ -334,7 +344,7 @@ export class HogWatcherService {
         await Promise.all(
             changes.map(async ([hogFunction, state], index) => {
                 const [stateResult] = getRedisPipelineResults(res, index, numOperations)
-                const previousState = Number(stateResult[1] ?? HogWatcherState.healthy)
+                const previousState = Number(stateResult[1] ?? HogWatcherState.healthy) as HogWatcherState
                 if (previousState !== state) {
                     await this.onStateChange({
                         hogFunction,
@@ -406,7 +416,7 @@ export class HogWatcherService {
         Object.values(functionCosts).map((functionCost, index) => {
             const [stateResult, lockResult, tokenResult] = getRedisPipelineResults(res, index, 3)
 
-            const currentState: HogWatcherState = Number(stateResult[1] ?? HogWatcherState.healthy)
+            const currentState = Number(stateResult[1] ?? HogWatcherState.healthy) as HogWatcherState
             // V2 returns [tokensBefore, tokensAfter], we use tokensAfter
             const tokens = Number(tokenResult[1]?.[1] ?? this.config.bucketSize)
             const newState = this.calculateNewState(tokens)

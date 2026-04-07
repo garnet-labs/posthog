@@ -55,7 +55,11 @@ const actionMatchMsSummary = new Summary({
 export function castingCompare(
     a: any,
     b: any,
-    operator: PropertyOperator.Exact | PropertyOperator.IsNot | PropertyOperator.LessThan | PropertyOperator.GreaterThan
+    operator:
+        | typeof PropertyOperator.Exact
+        | typeof PropertyOperator.IsNot
+        | typeof PropertyOperator.LessThan
+        | typeof PropertyOperator.GreaterThan
 ): boolean {
     // Do null transformation first
     // Clickhouse treats the string "null" as null, while here we treat them as different values
@@ -132,7 +136,10 @@ export function matchString(actual: string, expected: string, matching: StringMa
 }
 
 export class ActionMatcher {
-    constructor(private actionManager: ActionManager) {}
+    private actionManager: ActionManager
+    constructor(actionManager: ActionManager) {
+        this.actionManager = actionManager
+    }
 
     public hasWebhooks(teamId: number): boolean {
         return Object.keys(this.actionManager.getTeamActions(teamId)).length > 0

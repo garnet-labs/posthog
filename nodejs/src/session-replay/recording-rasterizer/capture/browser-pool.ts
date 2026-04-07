@@ -25,7 +25,11 @@ export class BrowserPool {
     private slots = new Map<Page, BrowserSlot>()
     private idle: BrowserSlot[] = []
 
-    constructor(private recycleAfter: number = config.browserRecycleAfter) {}
+    private recycleAfter: number
+
+    constructor(recycleAfter: number = config.browserRecycleAfter) {
+        this.recycleAfter = recycleAfter
+    }
 
     private async launchBrowser(): Promise<BrowserSlot> {
         const args = config.disableBrowserSecurity ? [...LAUNCH_ARGS, '--disable-web-security'] : LAUNCH_ARGS

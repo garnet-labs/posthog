@@ -104,20 +104,37 @@ export class BatchingPipeline<
 
     private options: BatchingPipelineOptions
 
+    private subPipeline: BatchPipeline<TInput & CBatch, TOutput, CInput & BatchingContext, COutput, R>
+
+    private beforePipeline: Pipeline<
+        BeforeBatchInput<TInput, CInput>,
+        BeforeBatchOutput<TInput, CInput, CBatch>,
+        Record<string, never>
+    >
+
+    private afterPipeline: Pipeline<
+        AfterBatchInput<TOutput, COutput, CBatch, R>,
+        AfterBatchOutput<TOutput, COutput, CBatch, R>,
+        Record<string, never>
+    >
+
     constructor(
-        private subPipeline: BatchPipeline<TInput & CBatch, TOutput, CInput & BatchingContext, COutput, R>,
-        private beforePipeline: Pipeline<
+        subPipeline: BatchPipeline<TInput & CBatch, TOutput, CInput & BatchingContext, COutput, R>,
+        beforePipeline: Pipeline<
             BeforeBatchInput<TInput, CInput>,
             BeforeBatchOutput<TInput, CInput, CBatch>,
             Record<string, never>
         >,
-        private afterPipeline: Pipeline<
+        afterPipeline: Pipeline<
             AfterBatchInput<TOutput, COutput, CBatch, R>,
             AfterBatchOutput<TOutput, COutput, CBatch, R>,
             Record<string, never>
         >,
         options?: Partial<BatchingPipelineOptions>
     ) {
+        this.subPipeline = subPipeline
+        this.beforePipeline = beforePipeline
+        this.afterPipeline = afterPipeline
         this.options = { ...BATCHING_PIPELINE_DEFAULTS, ...options }
     }
 

@@ -31,10 +31,12 @@ export class HogFlowManagerService {
     private lazyLoader: LazyLoader<HogFlow>
     private lazyLoaderByTeam: LazyLoader<HogFlowTeamInfo[]>
 
-    constructor(
-        private postgres: PostgresRouter,
-        private pubSub: PubSub
-    ) {
+    private postgres: PostgresRouter
+    private pubSub: PubSub
+
+    constructor(postgres: PostgresRouter, pubSub: PubSub) {
+        this.postgres = postgres
+        this.pubSub = pubSub
         this.lazyLoaderByTeam = new LazyLoader({
             name: 'hog_flow_manager_by_team',
             loader: async (teamIds) => await this.fetchTeamHogFlows(teamIds),

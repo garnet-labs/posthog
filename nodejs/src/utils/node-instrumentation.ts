@@ -10,7 +10,11 @@ export class NodeInstrumentation {
     private threadPerformanceInterval?: NodeJS.Timeout
     private lastEventLoopUtilization?: EventLoopUtilization
 
-    constructor(private instrumentThreadPerformance: boolean) {}
+    private instrumentThreadPerformance: boolean
+
+    constructor(instrumentThreadPerformance: boolean) {
+        this.instrumentThreadPerformance = instrumentThreadPerformance
+    }
 
     setupThreadPerformanceInterval(): void {
         if (!this.instrumentThreadPerformance) {

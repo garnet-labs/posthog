@@ -15,11 +15,14 @@ import { PersonPropertyService } from './person-property-service'
  * to handle the different person processing flows
  */
 export class PersonEventProcessor {
-    constructor(
-        private context: PersonContext,
-        private propertyService: PersonPropertyService,
-        private mergeService: PersonMergeService
-    ) {}
+    private context: PersonContext
+    private propertyService: PersonPropertyService
+    private mergeService: PersonMergeService
+    constructor(context: PersonContext, propertyService: PersonPropertyService, mergeService: PersonMergeService) {
+        this.context = context
+        this.propertyService = propertyService
+        this.mergeService = mergeService
+    }
 
     async processEvent(): Promise<PipelineResult<Person, AsyncOutput>> {
         // First, handle any identify/alias/merge operations

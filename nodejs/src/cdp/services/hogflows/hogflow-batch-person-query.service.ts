@@ -22,7 +22,10 @@ export interface BlastRadiusPersonsResponse {
  * Endpoints: /internal/hog_flows/user_blast_radius and /internal/hog_flows/user_blast_radius_persons
  */
 export class HogFlowBatchPersonQueryService {
-    constructor(private internalFetchService: InternalFetchService) {}
+    private internalFetchService: InternalFetchService
+    constructor(internalFetchService: InternalFetchService) {
+        this.internalFetchService = internalFetchService
+    }
 
     /**
      * Get count of users affected by filters

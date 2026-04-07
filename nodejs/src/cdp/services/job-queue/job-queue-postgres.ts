@@ -28,9 +28,22 @@ export class CyclotronJobQueuePostgres {
     private cyclotronManager?: CyclotronManager
     private consumeBatch?: (invocations: CyclotronJobInvocation[]) => Promise<{ backgroundTask: Promise<any> }>
 
+    private consumerBatchSize: number
+
+    private config: Pick<
+        CdpConfig,
+        | 'CYCLOTRON_DATABASE_URL'
+        | 'CYCLOTRON_SHARD_DEPTH_LIMIT'
+        | 'CDP_CYCLOTRON_COMPRESS_VM_STATE'
+        | 'CDP_CYCLOTRON_USE_BULK_COPY_JOB'
+        | 'CDP_CYCLOTRON_BATCH_DELAY_MS'
+        | 'CDP_CYCLOTRON_INSERT_MAX_BATCH_SIZE'
+        | 'CDP_CYCLOTRON_INSERT_PARALLEL_BATCHES'
+    >
+
     constructor(
-        private consumerBatchSize: number,
-        private config: Pick<
+        consumerBatchSize: number,
+        config: Pick<
             CdpConfig,
             | 'CYCLOTRON_DATABASE_URL'
             | 'CYCLOTRON_SHARD_DEPTH_LIMIT'
@@ -40,7 +53,10 @@ export class CyclotronJobQueuePostgres {
             | 'CDP_CYCLOTRON_INSERT_MAX_BATCH_SIZE'
             | 'CDP_CYCLOTRON_INSERT_PARALLEL_BATCHES'
         >
-    ) {}
+    ) {
+        this.consumerBatchSize = consumerBatchSize
+        this.config = config
+    }
 
     /**
      * Helper to only start the producer related code (e.g. when not a consumer)

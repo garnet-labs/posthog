@@ -73,11 +73,10 @@ interface PersonUpdateResult {
 }
 
 class MaxRetriesError extends Error {
-    constructor(
-        message: string,
-        public latestPersonUpdate: PersonUpdate
-    ) {
+    public latestPersonUpdate: PersonUpdate
+    constructor(message: string, latestPersonUpdate: PersonUpdate) {
         super(message)
+        this.latestPersonUpdate = latestPersonUpdate
         this.name = 'MaxRetriesError'
     }
 }
@@ -129,11 +128,16 @@ export class BatchWritingPersonsStore implements PersonsStore, BatchWritingStore
     // Cache for batch personless distinct ID insert results (is_merged values)
     private personlessBatchResults: Map<string, boolean>
 
+    private personRepository: PersonRepository
+    private ingestionWarningsOutputs: IngestionOutputs<IngestionWarningsOutput>
+
     constructor(
-        private personRepository: PersonRepository,
-        private ingestionWarningsOutputs: IngestionOutputs<IngestionWarningsOutput>,
+        personRepository: PersonRepository,
+        ingestionWarningsOutputs: IngestionOutputs<IngestionWarningsOutput>,
         options?: Partial<BatchWritingPersonsStoreOptions>
     ) {
+        this.personRepository = personRepository
+        this.ingestionWarningsOutputs = ingestionWarningsOutputs
         this.options = { ...DEFAULT_OPTIONS, ...options }
         this.distinctIdToPersonId = new Map()
         this.personUpdateCache = new Map()

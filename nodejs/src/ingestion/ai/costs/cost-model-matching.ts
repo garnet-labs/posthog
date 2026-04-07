@@ -8,12 +8,14 @@ import type { ModelCostRow, ResolvedModelCost } from './providers/types'
 // Work around for new gemini models that require special cost calculations
 const SPECIAL_COST_MODELS = ['gemini-2.5-pro-preview']
 
-export enum CostModelSource {
-    OpenRouter = 'openrouter',
-    Manual = 'manual',
-    Custom = 'custom',
-    Passthrough = 'passthrough',
-}
+export const CostModelSource = {
+    OpenRouter: 'openrouter',
+    Manual: 'manual',
+    Custom: 'custom',
+    Passthrough: 'passthrough',
+} as const
+
+export type CostModelSource = (typeof CostModelSource)[keyof typeof CostModelSource]
 
 export interface CostModelResult {
     cost: ResolvedModelCost

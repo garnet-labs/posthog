@@ -14,10 +14,16 @@ export class ConcurrentBatchProcessingPipeline<
 {
     private promiseQueue: Promise<PipelineResultWithContext<TOutput, COutput, RPrev | RStep>>[] = []
 
+    private processor: Pipeline<TIntermediate, TOutput, COutput, RStep>
+    private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+
     constructor(
-        private processor: Pipeline<TIntermediate, TOutput, COutput, RStep>,
-        private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
-    ) {}
+        processor: Pipeline<TIntermediate, TOutput, COutput, RStep>,
+        previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+    ) {
+        this.processor = processor
+        this.previousPipeline = previousPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.previousPipeline.feed(elements)

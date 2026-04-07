@@ -25,7 +25,10 @@ const MAX_GROUP_TYPES_PER_TEAM = 5
 export class PostgresGroupRepository
     implements GroupRepository, RawPostgresGroupRepository, GroupRepositoryTransaction
 {
-    constructor(public postgres: PostgresRouter) {}
+    public postgres: PostgresRouter
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
+    }
 
     async fetchGroup(
         teamId: TeamId,

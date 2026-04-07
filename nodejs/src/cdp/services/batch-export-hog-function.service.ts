@@ -39,15 +39,30 @@ const batchExportRequestBodySchema = z.object({
 export class BatchExportHogFunctionService {
     private promiseScheduler: PromiseScheduler
 
+    private siteUrl: string
+    private teamManager: TeamManager
+    private groupsManager: GroupsManagerService
+    private hogFunctionManager: HogFunctionManagerService
+    private hogExecutor: HogExecutorService
+    private hogWatcher: HogWatcherService
+    private hogFunctionMonitoringService: HogFunctionMonitoringService
+
     constructor(
-        private siteUrl: string,
-        private teamManager: TeamManager,
-        private groupsManager: GroupsManagerService,
-        private hogFunctionManager: HogFunctionManagerService,
-        private hogExecutor: HogExecutorService,
-        private hogWatcher: HogWatcherService,
-        private hogFunctionMonitoringService: HogFunctionMonitoringService
+        siteUrl: string,
+        teamManager: TeamManager,
+        groupsManager: GroupsManagerService,
+        hogFunctionManager: HogFunctionManagerService,
+        hogExecutor: HogExecutorService,
+        hogWatcher: HogWatcherService,
+        hogFunctionMonitoringService: HogFunctionMonitoringService
     ) {
+        this.siteUrl = siteUrl
+        this.teamManager = teamManager
+        this.groupsManager = groupsManager
+        this.hogFunctionManager = hogFunctionManager
+        this.hogExecutor = hogExecutor
+        this.hogWatcher = hogWatcher
+        this.hogFunctionMonitoringService = hogFunctionMonitoringService
         this.promiseScheduler = new PromiseScheduler()
     }
 

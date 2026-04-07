@@ -49,10 +49,13 @@ export class LegacyPluginExecutorService {
     private pluginState: Record<string, PluginState> = {}
     private cachedGeoIp?: GeoIp
 
-    constructor(
-        private postgres: PostgresRouter,
-        private geoipService: GeoIPService
-    ) {}
+    private postgres: PostgresRouter
+    private geoipService: GeoIPService
+
+    constructor(postgres: PostgresRouter, geoipService: GeoIPService) {
+        this.postgres = postgres
+        this.geoipService = geoipService
+    }
 
     private legacyStorage(teamId: number, pluginConfigId?: number | string): Pick<StorageExtension, 'get' | 'set'> {
         if (!pluginConfigId) {

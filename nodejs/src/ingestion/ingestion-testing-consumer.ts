@@ -58,9 +58,12 @@ export class IngestionTestingConsumer {
         TestingJoinedIngestionPipelineContext
     >
 
+    private config: IngestionTestingConsumerFullConfig
+    private deps: IngestionTestingConsumerDeps
+
     constructor(
-        private config: IngestionTestingConsumerFullConfig,
-        private deps: IngestionTestingConsumerDeps,
+        config: IngestionTestingConsumerFullConfig,
+        deps: IngestionTestingConsumerDeps,
         overrides: Partial<
             Pick<
                 PluginsServerConfig,
@@ -68,6 +71,8 @@ export class IngestionTestingConsumer {
             >
         > = {}
     ) {
+        this.config = config
+        this.deps = deps
         this.groupId = overrides.INGESTION_CONSUMER_GROUP_ID ?? config.INGESTION_CONSUMER_GROUP_ID
         this.topic = overrides.INGESTION_CONSUMER_CONSUME_TOPIC ?? config.INGESTION_CONSUMER_CONSUME_TOPIC
         this.dlqTopic = overrides.INGESTION_CONSUMER_DLQ_TOPIC ?? config.INGESTION_CONSUMER_DLQ_TOPIC

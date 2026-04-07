@@ -34,7 +34,10 @@ export class CyclotronV2Worker {
     private readonly heartbeatTimeoutMs: number
     private readonly includeEmptyBatches: boolean
 
-    constructor(private config: CyclotronV2WorkerConfig) {
+    private config: CyclotronV2WorkerConfig
+
+    constructor(config: CyclotronV2WorkerConfig) {
+        this.config = config
         this.pool = new Pool({
             connectionString: config.pool.dbUrl,
             max: config.pool.maxConnections ?? 10,

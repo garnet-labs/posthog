@@ -18,14 +18,16 @@ import { SessionTracker } from './session-tracker'
 import { EndResult, SnappySessionRecorder } from './snappy-session-recorder'
 
 // RRWeb event type constants
-const enum EventType {
-    DomContentLoaded = 0,
-    Load = 1,
-    FullSnapshot = 2,
-    IncrementalSnapshot = 3,
-    Meta = 4,
-    Custom = 5,
-}
+const EventType = {
+    DomContentLoaded: 0,
+    Load: 1,
+    FullSnapshot: 2,
+    IncrementalSnapshot: 3,
+    Meta: 4,
+    Custom: 5,
+} as const
+
+type EventType = (typeof EventType)[keyof typeof EventType]
 
 interface RRWebEvent {
     type: EventType
@@ -48,11 +50,15 @@ export class SnappySessionRecorderMock {
     private endDateTime: DateTime | null = null
     private _distinctId: string | null = null
 
-    constructor(
-        public readonly sessionId: string,
-        public readonly teamId: number,
-        private readonly batchId: string
-    ) {}
+    public readonly sessionId: string
+    public readonly teamId: number
+    private readonly batchId: string
+
+    constructor(sessionId: string, teamId: number, batchId: string) {
+        this.sessionId = sessionId
+        this.teamId = teamId
+        this.batchId = batchId
+    }
 
     public recordMessage(message: ParsedMessageData): number {
         let bytesWritten = 0

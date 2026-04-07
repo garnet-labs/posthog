@@ -46,7 +46,10 @@ const convertFetchResponse = (response: FetchResponse, text: string): Response =
  */
 
 export class NativeDestinationExecutorService {
-    constructor(private serverConfig: CdpFetchConfig) {}
+    private serverConfig: CdpFetchConfig
+    constructor(serverConfig: CdpFetchConfig) {
+        this.serverConfig = serverConfig
+    }
 
     public async execute(
         invocation: CyclotronJobInvocationHogFunction

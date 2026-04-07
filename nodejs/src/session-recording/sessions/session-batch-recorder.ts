@@ -68,17 +68,34 @@ export class SessionBatchRecorder {
     private readonly batchId: string
     private readonly rateLimiter: SessionRateLimiter
 
+    private readonly offsetManager: KafkaOffsetManager
+    private readonly storage: SessionBatchFileStorage
+    private readonly metadataStore: SessionMetadataStore
+    private readonly consoleLogStore: SessionConsoleLogStore
+    private readonly sessionTracker: SessionTracker
+    private readonly sessionFilter: SessionFilter
+    private readonly keyStore: KeyStore
+    private readonly encryptor: RecordingEncryptor
+
     constructor(
-        private readonly offsetManager: KafkaOffsetManager,
-        private readonly storage: SessionBatchFileStorage,
-        private readonly metadataStore: SessionMetadataStore,
-        private readonly consoleLogStore: SessionConsoleLogStore,
-        private readonly sessionTracker: SessionTracker,
-        private readonly sessionFilter: SessionFilter,
-        private readonly keyStore: KeyStore,
-        private readonly encryptor: RecordingEncryptor,
+        offsetManager: KafkaOffsetManager,
+        storage: SessionBatchFileStorage,
+        metadataStore: SessionMetadataStore,
+        consoleLogStore: SessionConsoleLogStore,
+        sessionTracker: SessionTracker,
+        sessionFilter: SessionFilter,
+        keyStore: KeyStore,
+        encryptor: RecordingEncryptor,
         maxEventsPerSessionPerBatch: number = Number.MAX_SAFE_INTEGER
     ) {
+        this.offsetManager = offsetManager
+        this.storage = storage
+        this.metadataStore = metadataStore
+        this.consoleLogStore = consoleLogStore
+        this.sessionTracker = sessionTracker
+        this.sessionFilter = sessionFilter
+        this.keyStore = keyStore
+        this.encryptor = encryptor
         this.batchId = uuidv7()
         this.rateLimiter = new SessionRateLimiter(maxEventsPerSessionPerBatch)
         logger.debug('🔁', 'session_batch_recorder_created', { batchId: this.batchId })

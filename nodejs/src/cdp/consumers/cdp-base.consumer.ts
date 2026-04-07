@@ -72,10 +72,12 @@ export abstract class CdpConsumerBase<TConfig extends CdpConsumerBaseConfig = Cd
 
     protected heartbeat = () => {}
 
-    constructor(
-        protected config: TConfig,
-        protected deps: CdpConsumerBaseDeps
-    ) {
+    protected config: TConfig
+    protected deps: CdpConsumerBaseDeps
+
+    constructor(config: TConfig, deps: CdpConsumerBaseDeps) {
+        this.config = config
+        this.deps = deps
         const services = createCdpCoreServices(config, deps)
 
         this.redis = services.redis

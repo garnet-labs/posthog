@@ -12,10 +12,15 @@ export class SequentialBatchPipeline<
     RStep extends string = never,
 > implements BatchPipeline<TInput, TOutput, CInput, COutput, RPrev | RStep>
 {
+    private currentPipeline: Pipeline<TIntermediate, TOutput, COutput, RStep>
+    private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
     constructor(
-        private currentPipeline: Pipeline<TIntermediate, TOutput, COutput, RStep>,
-        private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
-    ) {}
+        currentPipeline: Pipeline<TIntermediate, TOutput, COutput, RStep>,
+        previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+    ) {
+        this.currentPipeline = currentPipeline
+        this.previousPipeline = previousPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.previousPipeline.feed(elements)

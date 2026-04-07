@@ -20,11 +20,12 @@ export class SessionConsoleLogStore {
     private pendingMessages: ConsoleLogEntry[] = []
     private readonly messageLimit: number
 
-    constructor(
-        private readonly producer: KafkaProducerWrapper,
-        private readonly topic: string,
-        options: { messageLimit: number }
-    ) {
+    private readonly producer: KafkaProducerWrapper
+    private readonly topic: string
+
+    constructor(producer: KafkaProducerWrapper, topic: string, options: { messageLimit: number }) {
+        this.producer = producer
+        this.topic = topic
         this.messageLimit = options.messageLimit
         logger.debug('session_console_log_store_created')
         if (!this.topic) {

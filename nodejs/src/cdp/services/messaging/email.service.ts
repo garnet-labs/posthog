@@ -37,12 +37,17 @@ export class EmailService {
 
     private recipientTokensService: RecipientTokensService
 
+    private sesConfig: EmailServiceConfig
+    private integrationManager: IntegrationManagerService
+
     constructor(
-        private sesConfig: EmailServiceConfig,
-        private integrationManager: IntegrationManagerService,
+        sesConfig: EmailServiceConfig,
+        integrationManager: IntegrationManagerService,
         encryptionSaltKeys: string,
         siteUrl: string
     ) {
+        this.sesConfig = sesConfig
+        this.integrationManager = integrationManager
         this.sesV2Client = this.sesConfig.sesRegion
             ? new SESv2Client({
                   region: this.sesConfig.sesRegion,

@@ -174,7 +174,9 @@ export class TemplateTester {
 
     public mockFetch = jest.fn()
     public mockPrint = jest.fn()
-    constructor(private _template: HogFunctionTemplate) {
+    private _template: HogFunctionTemplate
+    constructor(_template: HogFunctionTemplate) {
+        this._template = _template
         this.template = {
             ..._template,
             bytecode: [],

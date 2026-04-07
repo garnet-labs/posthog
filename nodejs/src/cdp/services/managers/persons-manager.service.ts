@@ -31,11 +31,14 @@ export class PersonsManagerService {
     private lazyLoaderByPersonId: LazyLoader<PersonManagerPerson>
     private lazyLoaderByDistinctId: LazyLoader<PersonManagerPersonWithDistinctId>
 
-    constructor(
-        private teamManager: TeamManager,
-        private personRepository: PersonRepository,
-        private siteUrl: string
-    ) {
+    private teamManager: TeamManager
+    private personRepository: PersonRepository
+    private siteUrl: string
+
+    constructor(teamManager: TeamManager, personRepository: PersonRepository, siteUrl: string) {
+        this.teamManager = teamManager
+        this.personRepository = personRepository
+        this.siteUrl = siteUrl
         this.lazyLoaderByPersonId = new LazyLoader({
             name: 'person_manager_lookup_by_person_id',
             loader: async (ids) => await this.fetchPersonsByPersonIds(ids),

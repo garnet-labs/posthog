@@ -37,10 +37,15 @@ export class GroupProcessingBuilder<
     TKey = string,
     R extends string = never,
 > {
+    private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    private groupingFn: GroupingFunction<TOutput, TKey>
     constructor(
-        private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
-        private groupingFn: GroupingFunction<TOutput, TKey>
-    ) {}
+        previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
+        groupingFn: GroupingFunction<TOutput, TKey>
+    ) {
+        this.previousPipeline = previousPipeline
+        this.groupingFn = groupingFn
+    }
 
     /**
      * Process items within each group sequentially through the provided pipeline.
@@ -59,10 +64,15 @@ export class GroupProcessingBuilder<
  * Builder for grouped batch pipelines that allows configuring how groups are processed.
  */
 export class GroupingBatchPipelineBuilder<TInput, TOutput, CInput, COutput, TKey, R extends string = never> {
+    private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    private groupingFn: GroupingFunction<TOutput, TKey>
     constructor(
-        private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
-        private groupingFn: GroupingFunction<TOutput, TKey>
-    ) {}
+        previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
+        groupingFn: GroupingFunction<TOutput, TKey>
+    ) {
+        this.previousPipeline = previousPipeline
+        this.groupingFn = groupingFn
+    }
 
     /**
      * Process groups concurrently. Returns a builder to configure how items within each group are processed.
@@ -78,7 +88,10 @@ export class GroupingBatchPipelineBuilder<TInput, TOutput, CInput, COutput, TKey
 }
 
 export class BatchPipelineBuilder<TInput, TOutput, CInput, COutput = CInput, R extends string = never> {
-    constructor(protected pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {}
+    protected pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    constructor(pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {
+        this.pipeline = pipeline
+    }
 
     pipeBatch<U, R2 extends string = never>(
         step: BatchProcessingStep<TOutput, U, R2>
@@ -216,7 +229,10 @@ export class MessageAwareBatchPipelineBuilder<
     COutput extends { message: Message } = CInput,
     R extends string = never,
 > {
-    constructor(protected pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {}
+    protected pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    constructor(pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {
+        this.pipeline = pipeline
+    }
 
     handleResults<RConfig extends string = never>(
         config: PipelineConfig<R | RConfig>
@@ -236,7 +252,10 @@ export class ResultHandledBatchPipelineBuilder<
     COutput extends { message: Message } = CInput,
     R extends string = never,
 > {
-    constructor(protected pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {}
+    protected pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    constructor(pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {
+        this.pipeline = pipeline
+    }
 
     handleSideEffects(
         promiseScheduler: PromiseScheduler,

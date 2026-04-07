@@ -14,11 +14,14 @@ export class SessionTracker {
     // Since Kafka partitions by session ID, the same session always hits the same consumer
     private readonly localCache: LRUCache<string, true>
 
+    private readonly redisPool: RedisPool
+
     constructor(
-        private readonly redisPool: RedisPool,
+        redisPool: RedisPool,
         localCacheTtlMs: number,
         localCacheMaxSize: number = DEFAULT_LOCAL_CACHE_MAX_SIZE
     ) {
+        this.redisPool = redisPool
         this.localCache = new LRUCache({
             max: localCacheMaxSize,
             ttl: localCacheTtlMs,

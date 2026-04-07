@@ -6,11 +6,14 @@ const CACHE_KEY_PREFIX = '@posthog/replay/recording-key'
 const REDIS_CACHE_TTL_SECONDS = 60 * 60 * 24 // 24 hours
 
 export class RedisCachedKeyStore implements KeyStore {
-    constructor(
-        private readonly delegate: KeyStore,
-        private readonly redisPool: RedisPool,
-        private readonly ttlSeconds: number = REDIS_CACHE_TTL_SECONDS
-    ) {}
+    private readonly delegate: KeyStore
+    private readonly redisPool: RedisPool
+    private readonly ttlSeconds: number
+    constructor(delegate: KeyStore, redisPool: RedisPool, ttlSeconds: number = REDIS_CACHE_TTL_SECONDS) {
+        this.delegate = delegate
+        this.redisPool = redisPool
+        this.ttlSeconds = ttlSeconds
+    }
 
     private cacheKey(sessionId: string, teamId: number): string {
         return `${CACHE_KEY_PREFIX}:${teamId}:${sessionId}`

@@ -3,7 +3,10 @@ import sodium from 'libsodium-wrappers'
 import { EncryptResult, KeyStore, RecordingEncryptor, SessionKey, SessionKeyDeletedError } from '../types'
 
 export class SodiumRecordingEncryptor implements RecordingEncryptor {
-    constructor(private keyStore: KeyStore) {}
+    private keyStore: KeyStore
+    constructor(keyStore: KeyStore) {
+        this.keyStore = keyStore
+    }
 
     async start(): Promise<void> {
         await sodium.ready

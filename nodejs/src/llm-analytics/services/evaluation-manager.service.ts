@@ -23,10 +23,12 @@ export class EvaluationManagerService {
     private lazyLoader: LazyLoader<Evaluation>
     private lazyLoaderByTeam: LazyLoader<EvaluationInfo[]>
 
-    constructor(
-        private postgres: PostgresRouter,
-        private pubSub: PubSub
-    ) {
+    private postgres: PostgresRouter
+    private pubSub: PubSub
+
+    constructor(postgres: PostgresRouter, pubSub: PubSub) {
+        this.postgres = postgres
+        this.pubSub = pubSub
         this.lazyLoaderByTeam = new LazyLoader({
             name: 'evaluation_manager_by_team',
             loader: async (teamIds) => await this.fetchTeamEvaluations(teamIds),

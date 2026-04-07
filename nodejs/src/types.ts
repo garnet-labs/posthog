@@ -81,11 +81,12 @@ export class HealthCheckResultOk extends HealthCheckResult {
 }
 
 export class HealthCheckResultError extends HealthCheckResult {
-    constructor(
-        public message: string,
-        public details: Record<string, any>
-    ) {
+    public message: string
+    public details: Record<string, any>
+    constructor(message: string, details: Record<string, any>) {
         super('error')
+        this.message = message
+        this.details = details
     }
 
     public toResponse(serviceId: string): HealthCheckResultResponse {
@@ -94,11 +95,12 @@ export class HealthCheckResultError extends HealthCheckResult {
 }
 
 export class HealthCheckResultDegraded extends HealthCheckResult {
-    constructor(
-        public message: string,
-        public details: Record<string, any>
-    ) {
+    public message: string
+    public details: Record<string, any>
+    constructor(message: string, details: Record<string, any>) {
         super('degraded')
+        this.message = message
+        this.details = details
     }
     public toResponse(serviceId: string): HealthCheckResultResponse {
         return { service: serviceId, status: this.status, message: this.message, details: this.details }
@@ -177,11 +179,13 @@ export type TeamId = Team['id']
  */
 export type ProjectId = Team['id'] & { __brand: 'ProjectId' }
 
-export enum MetricMathOperations {
-    Increment = 'increment',
-    Max = 'max',
-    Min = 'min',
-}
+export const MetricMathOperations = {
+    Increment: 'increment',
+    Max: 'max',
+    Min: 'min',
+} as const
+
+export type MetricMathOperations = (typeof MetricMathOperations)[keyof typeof MetricMathOperations]
 
 export type StoredMetricMathOperations = 'max' | 'min' | 'sum'
 export type StoredPluginMetrics = Record<string, StoredMetricMathOperations> | null
@@ -199,28 +203,34 @@ export interface JobSpec {
     payload?: Record<string, JobPayloadFieldOptions>
 }
 
-export enum CookielessServerHashMode {
-    Disabled = 0,
-    Stateless = 1,
-    Stateful = 2,
-}
+export const CookielessServerHashMode = {
+    Disabled: 0,
+    Stateless: 1,
+    Stateful: 2,
+} as const
 
-export enum AlertLevel {
-    P0 = 0,
-    P1 = 1,
-    P2 = 2,
-    P3 = 3,
-    P4 = 4,
-}
+export type CookielessServerHashMode = (typeof CookielessServerHashMode)[keyof typeof CookielessServerHashMode]
 
-export enum Service {
-    PluginServer = 'plugin_server',
-    DjangoServer = 'django_server',
-    Redis = 'redis',
-    Postgres = 'postgres',
-    ClickHouse = 'clickhouse',
-    Kafka = 'kafka',
-}
+export const AlertLevel = {
+    P0: 0,
+    P1: 1,
+    P2: 2,
+    P3: 3,
+    P4: 4,
+} as const
+
+export type AlertLevel = (typeof AlertLevel)[keyof typeof AlertLevel]
+
+export const Service = {
+    PluginServer: 'plugin_server',
+    DjangoServer: 'django_server',
+    Redis: 'redis',
+    Postgres: 'postgres',
+    ClickHouse: 'clickhouse',
+    Kafka: 'kafka',
+} as const
+
+export type Service = (typeof Service)[keyof typeof Service]
 export interface Alert {
     id: string
     level: AlertLevel
@@ -633,21 +643,23 @@ export interface Hook {
 }
 
 /** Sync with posthog/frontend/src/types.ts */
-export enum PropertyOperator {
-    Exact = 'exact',
-    IsNot = 'is_not',
-    IContains = 'icontains',
-    NotIContains = 'not_icontains',
-    Regex = 'regex',
-    NotRegex = 'not_regex',
-    GreaterThan = 'gt',
-    LessThan = 'lt',
-    IsSet = 'is_set',
-    IsNotSet = 'is_not_set',
-    IsDateBefore = 'is_date_before',
-    IsDateAfter = 'is_date_after',
-    IsCleanedPathExact = 'is_cleaned_path_exact',
-}
+export const PropertyOperator = {
+    Exact: 'exact',
+    IsNot: 'is_not',
+    IContains: 'icontains',
+    NotIContains: 'not_icontains',
+    Regex: 'regex',
+    NotRegex: 'not_regex',
+    GreaterThan: 'gt',
+    LessThan: 'lt',
+    IsSet: 'is_set',
+    IsNotSet: 'is_not_set',
+    IsDateBefore: 'is_date_before',
+    IsDateAfter: 'is_date_after',
+    IsCleanedPathExact: 'is_cleaned_path_exact',
+} as const
+
+export type PropertyOperator = (typeof PropertyOperator)[keyof typeof PropertyOperator]
 
 /** Sync with posthog/frontend/src/types.ts */
 interface PropertyFilterBase {
@@ -709,11 +721,13 @@ export type PropertyFilter =
     | HogQLPropertyFilter
 
 /** Sync with posthog/frontend/src/types.ts */
-export enum StringMatching {
-    Contains = 'contains',
-    Regex = 'regex',
-    Exact = 'exact',
-}
+export const StringMatching = {
+    Contains: 'contains',
+    Regex: 'regex',
+    Exact: 'exact',
+} as const
+
+export type StringMatching = (typeof StringMatching)[keyof typeof StringMatching]
 
 export interface ActionStep {
     tag_name: string | null
@@ -775,11 +789,13 @@ export interface RawSessionReplayEvent {
     /* TODO what columns do we need */
 }
 
-export enum TimestampFormat {
-    ClickHouseSecondPrecision = 'clickhouse-second-precision',
-    ClickHouse = 'clickhouse',
-    ISO = 'iso',
-}
+export const TimestampFormat = {
+    ClickHouseSecondPrecision: 'clickhouse-second-precision',
+    ClickHouse: 'clickhouse',
+    ISO: 'iso',
+} as const
+
+export type TimestampFormat = (typeof TimestampFormat)[keyof typeof TimestampFormat]
 
 export interface JobsConsumerControl {
     stop: () => Promise<void>
@@ -790,34 +806,43 @@ export type IngestEventResponse =
     | { success: true; actionMatches: Action[]; preIngestionEvent: PreIngestionEvent | null }
     | { success: false; error: string }
 
-export enum UnixTimestampPropertyTypeFormat {
-    UNIX_TIMESTAMP = 'unix_timestamp',
-    UNIX_TIMESTAMP_MILLISECONDS = 'unix_timestamp_milliseconds',
-}
+export const UnixTimestampPropertyTypeFormat = {
+    UNIX_TIMESTAMP: 'unix_timestamp',
+    UNIX_TIMESTAMP_MILLISECONDS: 'unix_timestamp_milliseconds',
+} as const
 
-export enum DateTimePropertyTypeFormat {
-    ISO8601_DATE = 'YYYY-MM-DDThh:mm:ssZ',
-    FULL_DATE = 'YYYY-MM-DD hh:mm:ss',
-    FULL_DATE_INCREASING = 'DD-MM-YYYY hh:mm:ss',
-    DATE = 'YYYY-MM-DD',
-    RFC_822 = 'rfc_822',
-    WITH_SLASHES = 'YYYY/MM/DD hh:mm:ss',
-    WITH_SLASHES_INCREASING = 'DD/MM/YYYY hh:mm:ss',
-}
+export type UnixTimestampPropertyTypeFormat =
+    (typeof UnixTimestampPropertyTypeFormat)[keyof typeof UnixTimestampPropertyTypeFormat]
 
-export enum PropertyType {
-    DateTime = 'DateTime',
-    String = 'String',
-    Numeric = 'Numeric',
-    Boolean = 'Boolean',
-}
+export const DateTimePropertyTypeFormat = {
+    ISO8601_DATE: 'YYYY-MM-DDThh:mm:ssZ',
+    FULL_DATE: 'YYYY-MM-DD hh:mm:ss',
+    FULL_DATE_INCREASING: 'DD-MM-YYYY hh:mm:ss',
+    DATE: 'YYYY-MM-DD',
+    RFC_822: 'rfc_822',
+    WITH_SLASHES: 'YYYY/MM/DD hh:mm:ss',
+    WITH_SLASHES_INCREASING: 'DD/MM/YYYY hh:mm:ss',
+} as const
 
-export enum PropertyDefinitionTypeEnum {
-    Event = 1,
-    Person = 2,
-    Group = 3,
-    Session = 4,
-}
+export type DateTimePropertyTypeFormat = (typeof DateTimePropertyTypeFormat)[keyof typeof DateTimePropertyTypeFormat]
+
+export const PropertyType = {
+    DateTime: 'DateTime',
+    String: 'String',
+    Numeric: 'Numeric',
+    Boolean: 'Boolean',
+} as const
+
+export type PropertyType = (typeof PropertyType)[keyof typeof PropertyType]
+
+export const PropertyDefinitionTypeEnum = {
+    Event: 1,
+    Person: 2,
+    Group: 3,
+    Session: 4,
+} as const
+
+export type PropertyDefinitionTypeEnum = (typeof PropertyDefinitionTypeEnum)[keyof typeof PropertyDefinitionTypeEnum]
 
 export type ResolvedGroups = Record<string, number>
 
@@ -845,23 +870,30 @@ export interface EventPropertyType {
 
 export type GroupTypeToColumnIndex = Record<string, GroupTypeIndex>
 
-export enum PropertyUpdateOperation {
-    Set = 'set',
-    SetOnce = 'set_once',
-}
+export const PropertyUpdateOperation = {
+    Set: 'set',
+    SetOnce: 'set_once',
+} as const
 
-export enum OrganizationPluginsAccessLevel {
-    NONE = 0,
-    CONFIG = 3,
-    INSTALL = 6,
-    ROOT = 9,
-}
+export type PropertyUpdateOperation = (typeof PropertyUpdateOperation)[keyof typeof PropertyUpdateOperation]
 
-export enum OrganizationMembershipLevel {
-    Member = 1,
-    Admin = 8,
-    Owner = 15,
-}
+export const OrganizationPluginsAccessLevel = {
+    NONE: 0,
+    CONFIG: 3,
+    INSTALL: 6,
+    ROOT: 9,
+} as const
+
+export type OrganizationPluginsAccessLevel =
+    (typeof OrganizationPluginsAccessLevel)[keyof typeof OrganizationPluginsAccessLevel]
+
+export const OrganizationMembershipLevel = {
+    Member: 1,
+    Admin: 8,
+    Owner: 15,
+} as const
+
+export type OrganizationMembershipLevel = (typeof OrganizationMembershipLevel)[keyof typeof OrganizationMembershipLevel]
 
 export interface PipelineEvent extends Omit<PluginEvent, 'team_id'> {
     team_id?: number | null

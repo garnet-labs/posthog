@@ -12,10 +12,15 @@ export class IngestionWarningHandlingBatchPipeline<
     R extends string = never,
 > implements BatchPipeline<TInput, TOutput, CInput, COutput, R>
 {
+    private outputs: IngestionOutputs<IngestionWarningsOutput>
+    private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
     constructor(
-        private outputs: IngestionOutputs<IngestionWarningsOutput>,
-        private previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
-    ) {}
+        outputs: IngestionOutputs<IngestionWarningsOutput>,
+        previousPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    ) {
+        this.outputs = outputs
+        this.previousPipeline = previousPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.previousPipeline.feed(elements)

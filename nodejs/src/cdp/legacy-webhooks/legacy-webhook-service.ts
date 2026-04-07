@@ -21,13 +21,22 @@ export class LegacyWebhookService {
     protected actionManager: ActionManager
     protected actionMatcher: ActionMatcher
 
+    private postgres: PostgresRouter
+    private teamManager: TeamManager
+    private groupTypeManager: GroupTypeManager
+    private groupRepository: GroupRepository
+
     constructor(
-        private postgres: PostgresRouter,
-        private teamManager: TeamManager,
-        private groupTypeManager: GroupTypeManager,
-        private groupRepository: GroupRepository,
+        postgres: PostgresRouter,
+        teamManager: TeamManager,
+        groupTypeManager: GroupTypeManager,
+        groupRepository: GroupRepository,
         pubSub: PubSub
     ) {
+        this.postgres = postgres
+        this.teamManager = teamManager
+        this.groupTypeManager = groupTypeManager
+        this.groupRepository = groupRepository
         this.actionManager = new ActionManager(postgres, pubSub)
         this.actionMatcher = new ActionMatcher(this.actionManager)
     }

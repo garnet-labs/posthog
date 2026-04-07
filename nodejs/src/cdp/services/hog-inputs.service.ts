@@ -14,11 +14,10 @@ export const EXTEND_OBJECT_KEY = '$$_extend_object'
 export class HogInputsService {
     private recipientTokensService: RecipientTokensService
 
-    constructor(
-        private integrationManager: IntegrationManagerService,
-        encryptionSaltKeys: string,
-        siteUrl: string
-    ) {
+    private integrationManager: IntegrationManagerService
+
+    constructor(integrationManager: IntegrationManagerService, encryptionSaltKeys: string, siteUrl: string) {
+        this.integrationManager = integrationManager
         this.recipientTokensService = new RecipientTokensService(encryptionSaltKeys, siteUrl)
     }
 

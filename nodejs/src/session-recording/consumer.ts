@@ -87,14 +87,17 @@ export class SessionRecordingIngester {
     private readonly keyStore: KeyStore
     private readonly encryptor: RecordingEncryptor
 
+    private config: SessionRecordingIngesterConfig
+
     constructor(
-        private config: SessionRecordingIngesterConfig,
+        config: SessionRecordingIngesterConfig,
         postgres: PostgresRouter,
         kafkaMetadataProducer: KafkaProducerWrapper,
         kafkaMessageProducer: KafkaProducerWrapper,
         redisPool: RedisPool,
         restrictionRedisPool: RedisPool
     ) {
+        this.config = config
         this.topic = config.INGESTION_SESSION_REPLAY_CONSUMER_CONSUME_TOPIC
         this.consumerGroupId = config.INGESTION_SESSION_REPLAY_CONSUMER_GROUP_ID
         this.isDebugLoggingEnabled = buildIntegerMatcher(config.SESSION_RECORDING_DEBUG_PARTITION, true)

@@ -14,7 +14,10 @@ interface TeamServiceData {
 export class TeamService {
     private readonly teamRefresher: BackgroundRefresher<TeamServiceData>
 
-    constructor(private postgres: PostgresRouter) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         this.teamRefresher = new BackgroundRefresher(
             () => this.fetchTeamTokensWithRecordings(),
             5 * 60 * 1000, // 5 minutes

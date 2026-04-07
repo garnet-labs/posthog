@@ -8,7 +8,7 @@
 import { SnapshotEvent } from './kafka/types'
 import { RRWebEventSource, RRWebEventType } from './rrweb-types'
 
-const activeSources = [
+const activeSources: readonly number[] = [
     RRWebEventSource.MouseMove,
     RRWebEventSource.MouseInteraction,
     RRWebEventSource.Scroll,

@@ -16,11 +16,13 @@ import { SessionConsoleLogStore } from './session-console-log-store'
 import { SessionFilter } from './session-filter'
 import { SessionTracker } from './session-tracker'
 
-const enum EventType {
-    FullSnapshot = 2,
-    IncrementalSnapshot = 3,
-    Meta = 4,
-}
+const EventType = {
+    FullSnapshot: 2,
+    IncrementalSnapshot: 3,
+    Meta: 4,
+} as const
+
+type EventType = (typeof EventType)[keyof typeof EventType]
 
 describe('session recording encryption integration', () => {
     let recorder: SessionBatchRecorder

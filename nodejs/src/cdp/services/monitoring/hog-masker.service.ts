@@ -91,7 +91,10 @@ function getTtl(invocation: CyclotronJobInvocation, maskingConfig: HogFunctionMa
 
 // Hog masker is meant to be done per batch
 export class HogMaskerService {
-    constructor(private redis: RedisV2) {}
+    private redis: RedisV2
+    constructor(redis: RedisV2) {
+        this.redis = redis
+    }
 
     public async filterByMasking<T extends CyclotronJobInvocation>(
         invocations: T[]

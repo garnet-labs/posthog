@@ -6,10 +6,12 @@ import { RecipientManagerRecipient } from '../managers/recipients-manager.servic
 export class RecipientTokensService {
     private jwt: JWT
 
-    constructor(
-        private encryptionSaltKeys: string,
-        private siteUrl: string
-    ) {
+    private encryptionSaltKeys: string
+    private siteUrl: string
+
+    constructor(encryptionSaltKeys: string, siteUrl: string) {
+        this.encryptionSaltKeys = encryptionSaltKeys
+        this.siteUrl = siteUrl
         this.jwt = new JWT(encryptionSaltKeys ?? '')
     }
 

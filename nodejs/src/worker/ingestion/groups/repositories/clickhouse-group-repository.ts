@@ -8,7 +8,10 @@ import { GroupTypeIndex, TeamId, TimestampFormat } from '../../../../types'
 import { castTimestampOrNow } from '../../../../utils/utils'
 
 export class ClickhouseGroupRepository {
-    constructor(private outputs: IngestionOutputs<GroupsOutput>) {}
+    private outputs: IngestionOutputs<GroupsOutput>
+    constructor(outputs: IngestionOutputs<GroupsOutput>) {
+        this.outputs = outputs
+    }
 
     public async upsertGroup(
         teamId: TeamId,

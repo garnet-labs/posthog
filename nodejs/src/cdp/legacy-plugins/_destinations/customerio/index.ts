@@ -26,11 +26,13 @@ type CustomerIoMeta = LegacyDestinationPluginMeta & {
     }
 }
 
-enum EventsConfig {
-    SEND_ALL = '1',
-    SEND_EMAILS = '2',
-    SEND_IDENTIFIED = '3',
-}
+const EventsConfig = {
+    SEND_ALL: '1',
+    SEND_EMAILS: '2',
+    SEND_IDENTIFIED: '3',
+} as const
+
+type EventsConfig = (typeof EventsConfig)[keyof typeof EventsConfig]
 
 const EVENTS_CONFIG_MAP = {
     'Send all events': EventsConfig.SEND_ALL,

@@ -62,12 +62,21 @@ export const addTrackingToEmail = (html: string, invocation: CyclotronJobInvocat
 export class EmailTrackingService {
     private sesWebhookHandler: SesWebhookHandler
 
+    private hogFunctionManager: HogFunctionManagerService
+    private hogFlowManager: HogFlowManagerService
+    private hogFunctionMonitoringService: HogFunctionMonitoringService
+    private recipientsManager: RecipientsManagerService
+
     constructor(
-        private hogFunctionManager: HogFunctionManagerService,
-        private hogFlowManager: HogFlowManagerService,
-        private hogFunctionMonitoringService: HogFunctionMonitoringService,
-        private recipientsManager: RecipientsManagerService
+        hogFunctionManager: HogFunctionManagerService,
+        hogFlowManager: HogFlowManagerService,
+        hogFunctionMonitoringService: HogFunctionMonitoringService,
+        recipientsManager: RecipientsManagerService
     ) {
+        this.hogFunctionManager = hogFunctionManager
+        this.hogFlowManager = hogFlowManager
+        this.hogFunctionMonitoringService = hogFunctionMonitoringService
+        this.recipientsManager = recipientsManager
         this.sesWebhookHandler = new SesWebhookHandler()
     }
 

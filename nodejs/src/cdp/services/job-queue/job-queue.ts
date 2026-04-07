@@ -63,11 +63,14 @@ export class CyclotronJobQueue {
     private jobQueueKafka: CyclotronJobQueueKafka
     private stripPersonMatcher: ValueMatcher<number>
 
-    constructor(
-        private consumerBatchSize: number,
-        private kafkaClientRack: string | undefined,
-        private config: CdpConfig
-    ) {
+    private consumerBatchSize: number
+    private kafkaClientRack: string | undefined
+    private config: CdpConfig
+
+    constructor(consumerBatchSize: number, kafkaClientRack: string | undefined, config: CdpConfig) {
+        this.consumerBatchSize = consumerBatchSize
+        this.kafkaClientRack = kafkaClientRack
+        this.config = config
         this.producerMapping = getProducerMapping(this.config.CDP_CYCLOTRON_JOB_QUEUE_PRODUCER_MAPPING)
         this.producerTeamMapping = getProducerTeamMapping(this.config.CDP_CYCLOTRON_JOB_QUEUE_PRODUCER_TEAM_MAPPING)
         this.producerForceScheduledToPostgres = this.config.CDP_CYCLOTRON_JOB_QUEUE_PRODUCER_FORCE_SCHEDULED_TO_POSTGRES

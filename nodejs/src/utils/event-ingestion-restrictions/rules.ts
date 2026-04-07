@@ -1,10 +1,12 @@
 // Restriction types that can be applied to events
-export enum RestrictionType {
-    DROP_EVENT = 1,
-    SKIP_PERSON_PROCESSING = 2,
-    FORCE_OVERFLOW = 3,
-    REDIRECT_TO_DLQ = 4,
-}
+export const RestrictionType = {
+    DROP_EVENT: 1,
+    SKIP_PERSON_PROCESSING: 2,
+    FORCE_OVERFLOW: 3,
+    REDIRECT_TO_DLQ: 4,
+} as const
+
+export type RestrictionType = (typeof RestrictionType)[keyof typeof RestrictionType]
 
 // Internal event context for matching against restrictions
 // Field names match EventHeaders for direct pass-through

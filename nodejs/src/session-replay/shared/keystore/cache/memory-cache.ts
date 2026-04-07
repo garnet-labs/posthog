@@ -8,10 +8,10 @@ const MEMORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 export class MemoryCachedKeyStore implements KeyStore {
     private readonly cache: LRUCache<string, SessionKey>
 
-    constructor(
-        private readonly delegate: KeyStore,
-        options?: { maxSize?: number; ttlMs?: number }
-    ) {
+    private readonly delegate: KeyStore
+
+    constructor(delegate: KeyStore, options?: { maxSize?: number; ttlMs?: number }) {
+        this.delegate = delegate
         this.cache = new LRUCache({
             max: options?.maxSize ?? MEMORY_CACHE_MAX_SIZE,
             ttl: options?.ttlMs ?? MEMORY_CACHE_TTL_MS,

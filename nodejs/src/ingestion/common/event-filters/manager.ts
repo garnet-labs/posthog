@@ -12,7 +12,10 @@ import { EventFilterRowSchema, EventFilterRule } from './schema'
 export class EventFilterManager {
     private refresher: BackgroundRefresher<Map<number, EventFilterRule>>
 
-    constructor(private postgres: PostgresRouter) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         this.refresher = new BackgroundRefresher(async () => this.fetchAllFilters(), 60_000)
 
         void this.refresher.get().catch((error) => {

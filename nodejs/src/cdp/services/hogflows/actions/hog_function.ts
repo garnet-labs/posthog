@@ -19,11 +19,18 @@ type FunctionActionType = 'function' | 'function_email' | 'function_sms'
 type Action = Extract<HogFlowAction, { type: FunctionActionType }>
 
 export class HogFunctionHandler implements ActionHandler {
+    private hogFlowFunctionsService: HogFlowFunctionsService
+    private recipientPreferencesService: RecipientPreferencesService
+    private hogFlowActionBillingType: 'fetch' | 'email'
     constructor(
-        private hogFlowFunctionsService: HogFlowFunctionsService,
-        private recipientPreferencesService: RecipientPreferencesService,
-        private hogFlowActionBillingType: 'fetch' | 'email'
-    ) {}
+        hogFlowFunctionsService: HogFlowFunctionsService,
+        recipientPreferencesService: RecipientPreferencesService,
+        hogFlowActionBillingType: 'fetch' | 'email'
+    ) {
+        this.hogFlowFunctionsService = hogFlowFunctionsService
+        this.recipientPreferencesService = recipientPreferencesService
+        this.hogFlowActionBillingType = hogFlowActionBillingType
+    }
 
     async execute({
         invocation,

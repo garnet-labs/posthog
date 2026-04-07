@@ -12,7 +12,10 @@ type RawTeam = Omit<Team, 'available_features'> & {
 export class TeamManager {
     private lazyLoader: LazyLoader<Team>
 
-    constructor(private postgres: PostgresRouter) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         this.lazyLoader = new LazyLoader({
             name: 'TeamManager',
             refreshAgeMs: 2 * 60 * 1000, // 2 minute

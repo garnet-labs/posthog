@@ -65,7 +65,10 @@ export class ServerLifecycle {
     private podTerminationTimer?: NodeJS.Timeout
     private processListeners: Map<string, (...args: any[]) => void> = new Map()
 
-    constructor(private config: BaseServerConfig) {
+    private config: BaseServerConfig
+
+    constructor(config: BaseServerConfig) {
+        this.config = config
         this.expressApp = setupExpressApp({ internalApiSecret: this.config.INTERNAL_API_SECRET })
         this.nodeInstrumentation = new NodeInstrumentation(this.config.INSTRUMENT_THREAD_PERFORMANCE)
         this.setupContinuousProfiling()

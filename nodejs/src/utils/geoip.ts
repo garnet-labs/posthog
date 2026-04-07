@@ -35,7 +35,10 @@ export class GeoIPService {
     private _mmdb?: ReaderModel
     private _mmdbMetadata?: MmdbMetadata
 
-    constructor(private mmdbFileLocation: string) {
+    private mmdbFileLocation: string
+
+    constructor(mmdbFileLocation: string) {
+        this.mmdbFileLocation = mmdbFileLocation
         logger.info('🌎', 'GeoIPService created')
         // NOTE: We typically clean these up in a shutdown task but this isn't necessary anymore as the server shutdown cancels all scheduled jobs
         // We should rely on that instead

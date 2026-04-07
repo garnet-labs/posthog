@@ -10,7 +10,11 @@ export class SessionRateLimiter {
     private readonly limitedSessions = new Set<string>()
     private readonly sessionPartitions = new Map<string, number>()
 
-    constructor(private readonly maxEventsPerSession: number = Number.MAX_SAFE_INTEGER) {}
+    private readonly maxEventsPerSession: number
+
+    constructor(maxEventsPerSession: number = Number.MAX_SAFE_INTEGER) {
+        this.maxEventsPerSession = maxEventsPerSession
+    }
 
     /**
      * Handle a message for a session

@@ -1,33 +1,39 @@
 import { PipelineWarning } from './pipeline.interface'
 
-export enum PipelineResultType {
-    OK,
-    DLQ,
-    DROP,
-    REDIRECT,
-}
+export const PipelineResultType = {
+    OK: 0,
+    DLQ: 1,
+    DROP: 2,
+    REDIRECT: 3,
+} as const
+
+export type PipelineResultType = (typeof PipelineResultType)[keyof typeof PipelineResultType]
+
+export const PipelineResultTypeName = Object.fromEntries(
+    Object.entries(PipelineResultType).map(([k, v]) => [v, k])
+) as Record<PipelineResultType, keyof typeof PipelineResultType>
 
 export type PipelineResultOk<T> = {
-    type: PipelineResultType.OK
+    type: typeof PipelineResultType.OK
     value: T
     sideEffects: Promise<unknown>[]
     warnings: PipelineWarning[]
 }
 export type PipelineResultDlq = {
-    type: PipelineResultType.DLQ
+    type: typeof PipelineResultType.DLQ
     reason: string
     error: unknown
     sideEffects: Promise<unknown>[]
     warnings: PipelineWarning[]
 }
 export type PipelineResultDrop = {
-    type: PipelineResultType.DROP
+    type: typeof PipelineResultType.DROP
     reason: string
     sideEffects: Promise<unknown>[]
     warnings: PipelineWarning[]
 }
 export type PipelineResultRedirect<R extends string = never> = {
-    type: PipelineResultType.REDIRECT
+    type: typeof PipelineResultType.REDIRECT
     reason: string
     output: R
     preserveKey?: boolean

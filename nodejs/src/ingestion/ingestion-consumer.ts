@@ -121,9 +121,12 @@ export class IngestionConsumer {
         typeof createJoinedIngestionPipeline<JoinedIngestionPipelineInput, JoinedIngestionPipelineContext>
     >
 
+    private config: IngestionConsumerFullConfig
+    private deps: IngestionConsumerDeps
+
     constructor(
-        private config: IngestionConsumerFullConfig,
-        private deps: IngestionConsumerDeps,
+        config: IngestionConsumerFullConfig,
+        deps: IngestionConsumerDeps,
         overrides: Partial<
             Pick<
                 IngestionConsumerConfig,
@@ -134,6 +137,8 @@ export class IngestionConsumer {
             >
         > = {}
     ) {
+        this.config = config
+        this.deps = deps
         // The group and topic are configurable allowing for multiple ingestion consumers to be run in parallel
         this.groupId = overrides.INGESTION_CONSUMER_GROUP_ID ?? config.INGESTION_CONSUMER_GROUP_ID
         this.topic = overrides.INGESTION_CONSUMER_CONSUME_TOPIC ?? config.INGESTION_CONSUMER_CONSUME_TOPIC

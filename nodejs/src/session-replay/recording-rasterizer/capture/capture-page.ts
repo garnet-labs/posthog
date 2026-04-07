@@ -33,11 +33,14 @@ export const playerHtmlCache = {
  * optional log forwarding, and frame filtering for puppeteer-capture.
  */
 export class CapturePage {
-    private constructor(
-        readonly page: Page,
-        readonly playerUrl: string,
-        readonly playerHtml: string
-    ) {}
+    readonly page: Page
+    readonly playerUrl: string
+    readonly playerHtml: string
+    private constructor(page: Page, playerUrl: string, playerHtml: string) {
+        this.page = page
+        this.playerUrl = playerUrl
+        this.playerHtml = playerHtml
+    }
 
     /**
      * Prepare a pooled page for capture: set the viewport, optionally

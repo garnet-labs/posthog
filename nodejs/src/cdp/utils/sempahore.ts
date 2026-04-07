@@ -1,7 +1,11 @@
 export class Semaphore {
     private waiting: Array<() => void> = []
 
-    constructor(private permits: number) {}
+    private permits: number
+
+    constructor(permits: number) {
+        this.permits = permits
+    }
 
     private async acquire(): Promise<void> {
         if (this.permits > 0) {

@@ -66,11 +66,14 @@ export class HogFunctionManagerService {
     private lazyLoader: LazyLoader<HogFunctionType>
     private lazyLoaderByTeam: LazyLoader<HogFunctionTeamInfo[]>
 
-    constructor(
-        private postgres: PostgresRouter,
-        private pubSub: PubSub,
-        private encryptedFields: EncryptedFields
-    ) {
+    private postgres: PostgresRouter
+    private pubSub: PubSub
+    private encryptedFields: EncryptedFields
+
+    constructor(postgres: PostgresRouter, pubSub: PubSub, encryptedFields: EncryptedFields) {
+        this.postgres = postgres
+        this.pubSub = pubSub
+        this.encryptedFields = encryptedFields
         this.lazyLoaderByTeam = new LazyLoader({
             name: 'hog_function_manager_by_team',
             loader: async (teamIds) => await this.fetchTeamHogFunctions(teamIds),

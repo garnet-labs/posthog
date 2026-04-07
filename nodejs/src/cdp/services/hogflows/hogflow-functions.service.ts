@@ -15,11 +15,18 @@ type Action = Extract<HogFlowAction, { type: FunctionActionType }>
 
 // Helper class that can turn a hog flow action into a hog function
 export class HogFlowFunctionsService {
+    private siteUrl: string
+    private hogFunctionTemplateManager: HogFunctionTemplateManagerService
+    private hogFunctionExecutor: HogExecutorService
     constructor(
-        private siteUrl: string,
-        private hogFunctionTemplateManager: HogFunctionTemplateManagerService,
-        private hogFunctionExecutor: HogExecutorService
-    ) {}
+        siteUrl: string,
+        hogFunctionTemplateManager: HogFunctionTemplateManagerService,
+        hogFunctionExecutor: HogExecutorService
+    ) {
+        this.siteUrl = siteUrl
+        this.hogFunctionTemplateManager = hogFunctionTemplateManager
+        this.hogFunctionExecutor = hogFunctionExecutor
+    }
 
     async buildHogFunction(hogFlow: HogFlow, configuration: Action['config']): Promise<HogFunctionType> {
         const template = await this.hogFunctionTemplateManager.getHogFunctionTemplate(configuration.template_id)

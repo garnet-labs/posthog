@@ -89,11 +89,11 @@ export class CdpLegacyEventsConsumer extends CdpConsumerBase<CdpLegacyEventsCons
 
     private appMetrics: LegacyPluginAppMetrics
 
-    constructor(
-        config: CdpLegacyEventsConsumerConfig,
-        protected override deps: CdpLegacyEventsConsumerDeps
-    ) {
+    protected deps: CdpLegacyEventsConsumerDeps
+
+    constructor(config: CdpLegacyEventsConsumerConfig, deps: CdpLegacyEventsConsumerDeps) {
         super(config, deps)
+        this.deps = deps
 
         this.kafkaConsumer = new KafkaConsumer({
             groupId: config.CDP_LEGACY_EVENT_CONSUMER_GROUP_ID,

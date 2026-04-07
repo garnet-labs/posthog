@@ -19,11 +19,14 @@ export class RequestInterceptor {
     private onSettled: (() => void) | null = null
     private mainFrame: Frame
 
-    constructor(
-        private capturePage: CapturePage,
-        private blockProxy: BlockProxy,
-        private log: Logger = createLogger()
-    ) {
+    private capturePage: CapturePage
+    private blockProxy: BlockProxy
+    private log: Logger
+
+    constructor(capturePage: CapturePage, blockProxy: BlockProxy, log: Logger = createLogger()) {
+        this.capturePage = capturePage
+        this.blockProxy = blockProxy
+        this.log = log
         this.mainFrame = capturePage.page.mainFrame()
     }
 

@@ -154,11 +154,14 @@ export function createTopHogWrapper(tracker: TopHogRegistry): TopHogWrapper {
 }
 
 class InputMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput> {
-    constructor(
-        private readonly tracker: Recorder,
-        private readonly key: (input: TInput) => Record<string, string>,
-        private readonly value: (input: TInput) => number
-    ) {}
+    private readonly tracker: Recorder
+    private readonly key: (input: TInput) => Record<string, string>
+    private readonly value: (input: TInput) => number
+    constructor(tracker: Recorder, key: (input: TInput) => Record<string, string>, value: (input: TInput) => number) {
+        this.tracker = tracker
+        this.key = key
+        this.value = value
+    }
 
     start(input: TInput): (result: PipelineResult<TOutput, string>) => void {
         this.tracker.record(this.key(input), this.value(input))
@@ -167,11 +170,18 @@ class InputMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput> {
 }
 
 class CompletionMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput> {
+    private readonly tracker: Recorder
+    private readonly key: (result: PipelineResult<TOutput, string>, input: TInput) => Record<string, string>
+    private readonly value: (result: PipelineResult<TOutput, string>, input: TInput) => number
     constructor(
-        private readonly tracker: Recorder,
-        private readonly key: (result: PipelineResult<TOutput, string>, input: TInput) => Record<string, string>,
-        private readonly value: (result: PipelineResult<TOutput, string>, input: TInput) => number
-    ) {}
+        tracker: Recorder,
+        key: (result: PipelineResult<TOutput, string>, input: TInput) => Record<string, string>,
+        value: (result: PipelineResult<TOutput, string>, input: TInput) => number
+    ) {
+        this.tracker = tracker
+        this.key = key
+        this.value = value
+    }
 
     start(input: TInput): (result: PipelineResult<TOutput, string>) => void {
         return (result) => {
@@ -181,11 +191,18 @@ class CompletionMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput>
 }
 
 class OutputMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput> {
+    private readonly tracker: Recorder
+    private readonly key: (output: TOutput, input: TInput) => Record<string, string>
+    private readonly value: (output: TOutput, input: TInput) => number
     constructor(
-        private readonly tracker: Recorder,
-        private readonly key: (output: TOutput, input: TInput) => Record<string, string>,
-        private readonly value: (output: TOutput, input: TInput) => number
-    ) {}
+        tracker: Recorder,
+        key: (output: TOutput, input: TInput) => Record<string, string>,
+        value: (output: TOutput, input: TInput) => number
+    ) {
+        this.tracker = tracker
+        this.key = key
+        this.value = value
+    }
 
     start(input: TInput): (result: PipelineResult<TOutput, string>) => void {
         return (result) => {
@@ -197,10 +214,12 @@ class OutputMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput> {
 }
 
 class TimingMetric<TInput, TOutput> implements TopHogMetric<TInput, TOutput> {
-    constructor(
-        private readonly tracker: Recorder,
-        private readonly key: (input: TInput) => Record<string, string>
-    ) {}
+    private readonly tracker: Recorder
+    private readonly key: (input: TInput) => Record<string, string>
+    constructor(tracker: Recorder, key: (input: TInput) => Record<string, string>) {
+        this.tracker = tracker
+        this.key = key
+    }
 
     start(input: TInput): (result: PipelineResult<TOutput, string>) => void {
         const k = this.key(input)

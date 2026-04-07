@@ -1,7 +1,7 @@
 import { instrumentFn } from '../../common/tracing/tracing-utils'
 import { pipelineStepDurationHistogram } from './metrics'
 import { OkResultWithContext, Pipeline, PipelineResultWithContext } from './pipeline.interface'
-import { PipelineResult, PipelineResultType, isOkResult } from './results'
+import { PipelineResult, PipelineResultTypeName, isOkResult } from './results'
 import { ProcessingStep } from './steps'
 
 export class StepPipeline<TInput, TIntermediate, TOutput, C, RPrev extends string = never, RStep extends string = never>
@@ -9,10 +9,15 @@ export class StepPipeline<TInput, TIntermediate, TOutput, C, RPrev extends strin
 {
     private stepName: string
 
+    private currentStep: (value: TIntermediate) => Promise<PipelineResult<TOutput, RStep>>
+    private previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
+
     constructor(
-        private currentStep: (value: TIntermediate) => Promise<PipelineResult<TOutput, RStep>>,
-        private previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
+        currentStep: (value: TIntermediate) => Promise<PipelineResult<TOutput, RStep>>,
+        previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
     ) {
+        this.currentStep = currentStep
+        this.previousPipeline = previousPipeline
         this.stepName = currentStep.name || 'anonymousStep'
     }
 
@@ -41,7 +46,7 @@ export class StepPipeline<TInput, TIntermediate, TOutput, C, RPrev extends strin
             currentResult = await instrumentFn({ key: this.stepName, sendException: false, measureTime: false }, () =>
                 this.currentStep(previousResult.value)
             )
-            end({ result: PipelineResultType[currentResult.type].toLowerCase() })
+            end({ result: PipelineResultTypeName[currentResult.type].toLowerCase() })
         } catch (e) {
             end({ result: 'exception' })
             throw e

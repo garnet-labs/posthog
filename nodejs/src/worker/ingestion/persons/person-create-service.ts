@@ -10,7 +10,10 @@ import { PersonsStoreTransaction } from './persons-store-transaction'
 import { PersonPropertiesSizeViolationError } from './repositories/person-repository'
 
 export class PersonCreateService {
-    constructor(private context: PersonContext) {}
+    private context: PersonContext
+    constructor(context: PersonContext) {
+        this.context = context
+    }
 
     /**
      * @returns [Person, boolean that indicates if person was created or not, true if person was created by this call, false if found existing person from concurrent creation]

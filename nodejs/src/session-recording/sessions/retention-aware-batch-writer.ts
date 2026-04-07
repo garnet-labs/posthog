@@ -15,10 +15,12 @@ import {
 class RetentionAwareBatchFileWriter implements SessionBatchFileWriter {
     private writerMap: { [key in RetentionPeriod]: SessionBatchFileWriter | null }
 
-    constructor(
-        private readonly retentionService: RetentionService,
-        private readonly storageMap: { [key in RetentionPeriod]: SessionBatchFileStorage }
-    ) {
+    private readonly retentionService: RetentionService
+    private readonly storageMap: { [key in RetentionPeriod]: SessionBatchFileStorage }
+
+    constructor(retentionService: RetentionService, storageMap: { [key in RetentionPeriod]: SessionBatchFileStorage }) {
+        this.retentionService = retentionService
+        this.storageMap = storageMap
         this.writerMap = ValidRetentionPeriods.reduce(
             (writers, retentionPeriod) => {
                 writers[retentionPeriod] = null
@@ -67,13 +69,24 @@ class RetentionAwareBatchFileWriter implements SessionBatchFileWriter {
 export class RetentionAwareStorage implements SessionBatchFileStorage {
     private storageMap: { [key in RetentionPeriod]: SessionBatchFileStorage }
 
+    private readonly s3: S3Client
+    private readonly bucket: string
+    private readonly prefix: string
+    private readonly timeout: number
+    private readonly retentionService: RetentionService
+
     constructor(
-        private readonly s3: S3Client,
-        private readonly bucket: string,
-        private readonly prefix: string,
-        private readonly timeout: number = 5000,
-        private readonly retentionService: RetentionService
+        s3: S3Client,
+        bucket: string,
+        prefix: string,
+        timeout: number = 5000,
+        retentionService: RetentionService
     ) {
+        this.s3 = s3
+        this.bucket = bucket
+        this.prefix = prefix
+        this.timeout = timeout
+        this.retentionService = retentionService
         this.storageMap = ValidRetentionPeriods.reduce(
             (storage, retentionPeriod) => {
                 storage[retentionPeriod] = new S3SessionBatchFileStorage(

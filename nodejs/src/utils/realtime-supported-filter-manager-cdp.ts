@@ -32,7 +32,10 @@ interface CohortRow {
 export class RealtimeSupportedFilterManagerCDP {
     private lazyLoader: LazyLoader<RealtimeSupportedFiltersByType>
 
-    constructor(private postgres: PostgresRouter) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         this.lazyLoader = new LazyLoader({
             name: 'RealtimeSupportedFilterManagerCDP',
             refreshAgeMs: 5 * 60 * 1000, // 5 minutes

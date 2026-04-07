@@ -22,12 +22,16 @@ class S3SessionBatchFileWriter implements SessionBatchFileWriter {
     private rejectCallbacks: ((error: Error) => void)[] = []
     private uploadStartTime: number
 
-    constructor(
-        private readonly s3: S3Client,
-        private readonly bucket: string,
-        private readonly prefix: string,
-        private readonly timeout: number
-    ) {
+    private readonly s3: S3Client
+    private readonly bucket: string
+    private readonly prefix: string
+    private readonly timeout: number
+
+    constructor(s3: S3Client, bucket: string, prefix: string, timeout: number) {
+        this.s3 = s3
+        this.bucket = bucket
+        this.prefix = prefix
+        this.timeout = timeout
         this.stream = new PassThrough()
         this.key = this.generateKey()
         this.uploadStartTime = Date.now()
@@ -162,12 +166,15 @@ class S3SessionBatchFileWriter implements SessionBatchFileWriter {
 }
 
 export class S3SessionBatchFileStorage implements SessionBatchFileStorage {
-    constructor(
-        private readonly s3: S3Client,
-        private readonly bucket: string,
-        private readonly prefix: string,
-        private readonly timeout: number = 5000
-    ) {
+    private readonly s3: S3Client
+    private readonly bucket: string
+    private readonly prefix: string
+    private readonly timeout: number
+    constructor(s3: S3Client, bucket: string, prefix: string, timeout: number = 5000) {
+        this.s3 = s3
+        this.bucket = bucket
+        this.prefix = prefix
+        this.timeout = timeout
         logger.debug('🔁', 's3_session_batch_writer_created', { bucket, prefix })
     }
 

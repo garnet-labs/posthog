@@ -10,12 +10,16 @@ import { PersonHogClient, shouldUseGrpc } from './client'
 import { timedGrpc, timedPostgres } from './metrics'
 
 export class PersonHogGroupRepository implements GroupRepository {
-    constructor(
-        private postgres: GroupRepository,
-        private grpcClient: PersonHogClient,
-        private grpcPercentage: number,
-        private clientLabel: string
-    ) {}
+    private postgres: GroupRepository
+    private grpcClient: PersonHogClient
+    private grpcPercentage: number
+    private clientLabel: string
+    constructor(postgres: GroupRepository, grpcClient: PersonHogClient, grpcPercentage: number, clientLabel: string) {
+        this.postgres = postgres
+        this.grpcClient = grpcClient
+        this.grpcPercentage = grpcPercentage
+        this.clientLabel = clientLabel
+    }
 
     async fetchGroup(
         teamId: TeamId,

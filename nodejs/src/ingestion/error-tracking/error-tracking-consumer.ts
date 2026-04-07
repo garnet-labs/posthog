@@ -107,10 +107,12 @@ export class ErrorTrackingConsumer {
     protected overflowLaneTTLRefreshService?: OverflowRedirectService
     protected topHog?: TopHog
 
-    constructor(
-        private config: ErrorTrackingConsumerOptions,
-        private deps: ErrorTrackingConsumerDeps
-    ) {
+    private config: ErrorTrackingConsumerOptions
+    private deps: ErrorTrackingConsumerDeps
+
+    constructor(config: ErrorTrackingConsumerOptions, deps: ErrorTrackingConsumerDeps) {
+        this.config = config
+        this.deps = deps
         this.kafkaConsumer = new KafkaConsumer({
             groupId: config.groupId,
             topic: config.topic,

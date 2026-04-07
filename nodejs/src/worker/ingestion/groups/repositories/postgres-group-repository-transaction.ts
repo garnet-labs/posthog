@@ -15,10 +15,12 @@ import { GroupRepositoryTransaction } from './group-repository-transaction.inter
 import { RawPostgresGroupRepository } from './raw-postgres-group-repository.interface'
 
 export class PostgresGroupRepositoryTransaction implements GroupRepositoryTransaction {
-    constructor(
-        private tx: TransactionClient,
-        private repository: RawPostgresGroupRepository
-    ) {}
+    private tx: TransactionClient
+    private repository: RawPostgresGroupRepository
+    constructor(tx: TransactionClient, repository: RawPostgresGroupRepository) {
+        this.tx = tx
+        this.repository = repository
+    }
 
     async fetchGroup(
         teamId: TeamId,

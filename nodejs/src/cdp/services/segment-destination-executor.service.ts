@@ -94,7 +94,10 @@ const convertFetchResponse = <Data = unknown>(response: FetchResponse, text: str
  */
 
 export class SegmentDestinationExecutorService {
-    constructor(private serverConfig: CdpFetchConfig) {}
+    private serverConfig: CdpFetchConfig
+    constructor(serverConfig: CdpFetchConfig) {
+        this.serverConfig = serverConfig
+    }
 
     public async execute(
         invocation: CyclotronJobInvocationHogFunction

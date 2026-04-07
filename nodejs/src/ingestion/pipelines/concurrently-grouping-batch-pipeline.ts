@@ -36,11 +36,19 @@ export class ConcurrentlyGroupingBatchPipeline<
     // Completed result batches ready to be returned
     private completedResults: PipelineResultWithContext<TOutput, COutput, RPrev | RStep>[][] = []
 
+    private groupingFn: GroupingFunction<TIntermediate, TKey>
+    private processor: Pipeline<TIntermediate, TOutput, COutput, RStep>
+    private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+
     constructor(
-        private groupingFn: GroupingFunction<TIntermediate, TKey>,
-        private processor: Pipeline<TIntermediate, TOutput, COutput, RStep>,
-        private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
-    ) {}
+        groupingFn: GroupingFunction<TIntermediate, TKey>,
+        processor: Pipeline<TIntermediate, TOutput, COutput, RStep>,
+        previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+    ) {
+        this.groupingFn = groupingFn
+        this.processor = processor
+        this.previousPipeline = previousPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.previousPipeline.feed(elements)

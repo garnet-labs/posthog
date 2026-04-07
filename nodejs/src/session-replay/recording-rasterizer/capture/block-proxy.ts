@@ -17,10 +17,13 @@ export class BlockProxy {
     private teamId = 0
     private sessionId = ''
 
-    constructor(
-        private cfg: { recordingApiBaseUrl: string; recordingApiSecret: string },
-        private log: Logger = createLogger()
-    ) {}
+    private cfg: { recordingApiBaseUrl: string; recordingApiSecret: string }
+    private log: Logger
+
+    constructor(cfg: { recordingApiBaseUrl: string; recordingApiSecret: string }, log: Logger = createLogger()) {
+        this.cfg = cfg
+        this.log = log
+    }
 
     get blockCount(): number {
         return this.blocks.length

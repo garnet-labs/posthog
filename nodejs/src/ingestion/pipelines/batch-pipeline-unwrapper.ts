@@ -7,7 +7,10 @@ import { isOkResult } from './results'
  * This unwrapper filters out non-OK results and returns only the unwrapped values.
  */
 export class BatchPipelineUnwrapper<TInput, TOutput, C, R extends string = never> {
-    constructor(private batchPipeline: BatchPipeline<TInput, TOutput, C, C, R>) {}
+    private batchPipeline: BatchPipeline<TInput, TOutput, C, C, R>
+    constructor(batchPipeline: BatchPipeline<TInput, TOutput, C, C, R>) {
+        this.batchPipeline = batchPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, C>[]): void {
         this.batchPipeline.feed(elements)

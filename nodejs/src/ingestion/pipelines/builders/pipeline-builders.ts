@@ -34,7 +34,10 @@ export class StartPipelineBuilder<T, C> {
 }
 
 export class PipelineBuilder<TInput, TOutput, C, R extends string = never> {
-    constructor(protected pipeline: Pipeline<TInput, TOutput, C, R>) {}
+    protected pipeline: Pipeline<TInput, TOutput, C, R>
+    constructor(pipeline: Pipeline<TInput, TOutput, C, R>) {
+        this.pipeline = pipeline
+    }
 
     pipe<U, R2 extends string = never>(step: ProcessingStep<TOutput, U, R2>): PipelineBuilder<TInput, U, C, R | R2> {
         return new PipelineBuilder(new StepPipeline(step, this.pipeline))
@@ -75,11 +78,18 @@ export class BranchingPipelineBuilder<
     RPrev extends string = never,
     RBranch extends string = never,
 > {
+    private decisionFn: BranchDecisionFn<TIntermediate, TBranch>
+    private previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
+    private branches: Partial<Record<TBranch, Pipeline<TIntermediate, TOutput, C, RBranch>>>
     constructor(
-        private decisionFn: BranchDecisionFn<TIntermediate, TBranch>,
-        private previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>,
-        private branches: Partial<Record<TBranch, Pipeline<TIntermediate, TOutput, C, RBranch>>> = {}
-    ) {}
+        decisionFn: BranchDecisionFn<TIntermediate, TBranch>,
+        previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>,
+        branches: Partial<Record<TBranch, Pipeline<TIntermediate, TOutput, C, RBranch>>> = {}
+    ) {
+        this.decisionFn = decisionFn
+        this.previousPipeline = previousPipeline
+        this.branches = branches
+    }
 
     branch<B extends TRemaining, R2 extends string = never>(
         branchName: B,

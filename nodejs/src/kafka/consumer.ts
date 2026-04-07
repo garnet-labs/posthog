@@ -181,10 +181,10 @@ export class KafkaConsumer {
     }
     private consumerLogStatsLevel: LogLevel
 
-    constructor(
-        private config: KafkaConsumerConfig,
-        rdKafkaConfig: RdKafkaConsumerConfig = {}
-    ) {
+    private config: KafkaConsumerConfig
+
+    constructor(config: KafkaConsumerConfig, rdKafkaConfig: RdKafkaConsumerConfig = {}) {
+        this.config = config
         this.backgroundTask = []
         this.podName = process.env.HOSTNAME || hostname()
         this.lastBackgroundTaskCompletionTime = Date.now()

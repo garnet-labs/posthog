@@ -7,9 +7,11 @@ const HOG_FUNCTION_TEMPLATE_FIELDS = ['id', 'template_id', 'sha', 'name', 'input
 
 export class HogFunctionTemplateManagerService {
     private lazyLoader: LazyLoader<DBHogFunctionTemplate>
+    private postgres: PostgresRouter
     // private started: boolean
 
-    constructor(private postgres: PostgresRouter) {
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         // this.started = false
 
         this.lazyLoader = new LazyLoader({

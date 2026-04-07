@@ -22,13 +22,14 @@ export type InternalPersonWithDistinctId = InternalPerson & {
 }
 
 export class PersonPropertiesSizeViolationError extends Error {
-    constructor(
-        message: string,
-        public teamId: number,
-        public personId?: string,
-        public distinctId?: string
-    ) {
+    public teamId: number
+    public personId?: string
+    public distinctId?: string
+    constructor(message: string, teamId: number, personId?: string, distinctId?: string) {
         super(message)
+        this.teamId = teamId
+        this.personId = personId
+        this.distinctId = distinctId
         this.name = 'PersonPropertiesSizeViolationError'
     }
     readonly isRetriable = false

@@ -40,10 +40,12 @@ export class ResultHandlingPipeline<
     R extends string = never,
 > implements BatchPipeline<TInput, TOutput, CInput, COutput, R>
 {
-    constructor(
-        private pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>,
-        private config: PipelineConfig<R>
-    ) {}
+    private pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    private config: PipelineConfig<R>
+    constructor(pipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>, config: PipelineConfig<R>) {
+        this.pipeline = pipeline
+        this.config = config
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.pipeline.feed(elements)

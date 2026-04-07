@@ -23,12 +23,16 @@ import { PersonHogClient, shouldUseGrpc } from './client'
 import { timedGrpc, timedPostgres } from './metrics'
 
 export class PersonHogPersonRepository implements PersonRepository {
-    constructor(
-        private postgres: PersonRepository,
-        private grpcClient: PersonHogClient,
-        private grpcPercentage: number,
-        private clientLabel: string
-    ) {}
+    private postgres: PersonRepository
+    private grpcClient: PersonHogClient
+    private grpcPercentage: number
+    private clientLabel: string
+    constructor(postgres: PersonRepository, grpcClient: PersonHogClient, grpcPercentage: number, clientLabel: string) {
+        this.postgres = postgres
+        this.grpcClient = grpcClient
+        this.grpcPercentage = grpcPercentage
+        this.clientLabel = clientLabel
+    }
 
     // Read operations — route to gRPC based on percentage
 

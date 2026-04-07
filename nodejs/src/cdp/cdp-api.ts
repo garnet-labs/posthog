@@ -36,7 +36,7 @@ import { HogFunctionManagerService } from './services/managers/hog-function-mana
 import { EmailTrackingService } from './services/messaging/email-tracking.service'
 import { RecipientTokensService } from './services/messaging/recipient-tokens.service'
 import { HogFunctionMonitoringService } from './services/monitoring/hog-function-monitoring.service'
-import { HogWatcherService, HogWatcherState } from './services/monitoring/hog-watcher.service'
+import { HogWatcherService, HogWatcherState, HogWatcherStateName } from './services/monitoring/hog-watcher.service'
 import { NativeDestinationExecutorService } from './services/native-destination-executor.service'
 import { SegmentDestinationExecutorService } from './services/segment-destination-executor.service'
 import { HOG_FUNCTION_TEMPLATES } from './templates'
@@ -65,10 +65,12 @@ export class CdpApi {
     private cdpWarehouseKafkaProducer?: KafkaProducerWrapper
     private batchExportHogFunctionService: BatchExportHogFunctionService
 
-    constructor(
-        private config: PluginsServerConfig,
-        private deps: CdpApiDeps
-    ) {
+    private config: PluginsServerConfig
+    private deps: CdpApiDeps
+
+    constructor(config: PluginsServerConfig, deps: CdpApiDeps) {
+        this.config = config
+        this.deps = deps
         const services = createCdpCoreServices(config, deps, 'cdp-api-redis')
 
         this.hogFunctionManager = services.hogFunctionManager
@@ -253,7 +255,7 @@ export class CdpApi {
                 const statesArray = Object.entries(allStates)
                     .map(([functionId, state]) => ({
                         function_id: functionId,
-                        state: HogWatcherState[state.state], // Convert numeric state to readable string
+                        state: HogWatcherStateName[state.state], // Convert numeric state to readable string
                         tokens: state.tokens,
                         state_numeric: state.state,
                     }))

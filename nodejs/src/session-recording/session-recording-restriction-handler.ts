@@ -8,13 +8,24 @@ import { PromiseScheduler } from '../utils/promise-scheduler'
 import { SessionRecordingIngesterMetrics } from './metrics'
 
 export class SessionRecordingRestrictionHandler {
+    private restrictionManager: EventIngestionRestrictionManager
+    private overflowTopic: string
+    private overflowProducer: KafkaProducerWrapper | undefined
+    private promiseScheduler: PromiseScheduler
+    private consumeOverflow: boolean
     constructor(
-        private restrictionManager: EventIngestionRestrictionManager,
-        private overflowTopic: string,
-        private overflowProducer: KafkaProducerWrapper | undefined,
-        private promiseScheduler: PromiseScheduler,
-        private consumeOverflow: boolean
-    ) {}
+        restrictionManager: EventIngestionRestrictionManager,
+        overflowTopic: string,
+        overflowProducer: KafkaProducerWrapper | undefined,
+        promiseScheduler: PromiseScheduler,
+        consumeOverflow: boolean
+    ) {
+        this.restrictionManager = restrictionManager
+        this.overflowTopic = overflowTopic
+        this.overflowProducer = overflowProducer
+        this.promiseScheduler = promiseScheduler
+        this.consumeOverflow = consumeOverflow
+    }
 
     /**
      * Apply event ingestion restrictions to session recording messages.

@@ -20,19 +20,42 @@ export class PersonContext {
     public readonly eventProperties: Properties
     public updateIsIdentified: boolean = false
 
+    public readonly event: PluginEvent
+    public readonly team: Team
+    public readonly distinctId: string
+    public readonly timestamp: DateTime
+    public readonly processPerson: boolean
+    public readonly outputs: PersonOutputs
+    public readonly personStore: PersonsStore
+    public readonly measurePersonJsonbSize: number
+    public readonly mergeMode: MergeMode
+    public readonly updateAllProperties: boolean
+    public readonly shouldUpdateLastSeenAt: boolean
+
     constructor(
-        public readonly event: PluginEvent,
-        public readonly team: Team,
-        public readonly distinctId: string,
-        public readonly timestamp: DateTime,
-        public readonly processPerson: boolean, // $process_person_profile flag from the event
-        public readonly outputs: PersonOutputs,
-        public readonly personStore: PersonsStore,
-        public readonly measurePersonJsonbSize: number = 0,
-        public readonly mergeMode: MergeMode,
-        public readonly updateAllProperties: boolean = false, // When true, all property changes trigger person updates
-        public readonly shouldUpdateLastSeenAt: boolean = false
+        event: PluginEvent,
+        team: Team,
+        distinctId: string,
+        timestamp: DateTime,
+        processPerson: boolean,
+        outputs: PersonOutputs,
+        personStore: PersonsStore,
+        measurePersonJsonbSize: number = 0,
+        mergeMode: MergeMode,
+        updateAllProperties: boolean = false,
+        shouldUpdateLastSeenAt: boolean = false
     ) {
+        this.event = event
+        this.team = team
+        this.distinctId = distinctId
+        this.timestamp = timestamp
+        this.processPerson = processPerson
+        this.outputs = outputs
+        this.personStore = personStore
+        this.measurePersonJsonbSize = measurePersonJsonbSize
+        this.mergeMode = mergeMode
+        this.updateAllProperties = updateAllProperties
+        this.shouldUpdateLastSeenAt = shouldUpdateLastSeenAt
         this.eventProperties = event.properties!
     }
 

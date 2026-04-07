@@ -16,10 +16,12 @@ export type HogRateLimit = {
 }
 
 export class HogRateLimiterService {
-    constructor(
-        private config: HogRateLimiterConfig,
-        private redis: RedisV2
-    ) {}
+    private config: HogRateLimiterConfig
+    private redis: RedisV2
+    constructor(config: HogRateLimiterConfig, redis: RedisV2) {
+        this.config = config
+        this.redis = redis
+    }
 
     private rateLimitArgs(id: string, cost: number): [string, number, number, number, number, number] {
         const nowSeconds = Math.round(Date.now() / 1000)

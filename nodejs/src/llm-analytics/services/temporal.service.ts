@@ -29,7 +29,11 @@ export class TemporalService {
     private client?: Client
     private connecting?: Promise<Client>
 
-    constructor(private config: TemporalServiceConfig) {}
+    private config: TemporalServiceConfig
+
+    constructor(config: TemporalServiceConfig) {
+        this.config = config
+    }
 
     private async ensureConnected(): Promise<Client> {
         if (this.client) {

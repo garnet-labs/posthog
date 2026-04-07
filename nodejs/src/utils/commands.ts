@@ -11,7 +11,10 @@ import { PubSub } from './pubsub'
  * don't need access to the pubsub redis
  */
 export class ServerCommands {
-    constructor(private pubSub: PubSub) {}
+    private pubSub: PubSub
+    constructor(pubSub: PubSub) {
+        this.pubSub = pubSub
+    }
 
     public get service(): PluginServerService {
         return {

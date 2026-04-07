@@ -12,7 +12,7 @@ import { captureException } from '../../utils/posthog'
 import { shouldBlockHogFlowDueToQuota } from '../services/hogflows/hogflow-quota-limiting'
 import { CyclotronJobQueue } from '../services/job-queue/job-queue'
 import { HogRateLimiterService } from '../services/monitoring/hog-rate-limiter.service'
-import { HogWatcherState } from '../services/monitoring/hog-watcher.service'
+import { HogWatcherState, HogWatcherStateName } from '../services/monitoring/hog-watcher.service'
 import {
     CyclotronJobInvocation,
     CyclotronJobInvocationHogFunction,
@@ -168,7 +168,7 @@ export class CdpEventsConsumer<
 
                 counterHogFunctionStateOnEvent
                     .labels({
-                        state: HogWatcherState[state],
+                        state: HogWatcherStateName[state],
                         kind: item.hogFunction.type,
                     })
                     .inc()

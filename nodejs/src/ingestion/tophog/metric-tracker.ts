@@ -10,14 +10,28 @@ export interface Tracker {
 export class MetricTracker<TStored> {
     private entries: Map<string, TStored> = new Map()
 
+    readonly metricName: string
+    private readonly topN: number
+    private readonly maxKeys: number
+    private readonly store: (stored: TStored | undefined, value: number) => TStored
+    private readonly compute: (stored: TStored) => number
+    private readonly countFn: (stored: TStored) => number
+
     constructor(
-        readonly metricName: string,
-        private readonly topN: number,
-        private readonly maxKeys: number,
-        private readonly store: (stored: TStored | undefined, value: number) => TStored,
-        private readonly compute: (stored: TStored) => number,
-        private readonly countFn: (stored: TStored) => number
-    ) {}
+        metricName: string,
+        topN: number,
+        maxKeys: number,
+        store: (stored: TStored | undefined, value: number) => TStored,
+        compute: (stored: TStored) => number,
+        countFn: (stored: TStored) => number
+    ) {
+        this.metricName = metricName
+        this.topN = topN
+        this.maxKeys = maxKeys
+        this.store = store
+        this.compute = compute
+        this.countFn = countFn
+    }
 
     record(key: Record<string, string>, value: number): void {
         const serializedKey = JSON.stringify(key)

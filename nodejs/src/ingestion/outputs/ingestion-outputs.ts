@@ -34,7 +34,10 @@ export type IngestionOutput = IngestionOutputTarget[]
  * @see `resolveIngestionOutputs()` for building an instance from output definitions.
  */
 export class IngestionOutputs<O extends string> {
-    constructor(private outputs: Record<O, IngestionOutput>) {}
+    private outputs: Record<O, IngestionOutput>
+    constructor(outputs: Record<O, IngestionOutput>) {
+        this.outputs = outputs
+    }
 
     /**
      * Produce a single message to the given output.

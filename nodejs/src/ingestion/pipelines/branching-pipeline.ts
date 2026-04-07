@@ -21,11 +21,18 @@ export class BranchingPipeline<
     RBranch extends string = never,
 > implements Pipeline<TInput, TOutput, C, RPrev | RBranch>
 {
+    private decisionFn: BranchDecisionFn<TIntermediate, TBranch>
+    private branches: Partial<Record<TBranch, Pipeline<TIntermediate, TOutput, C, RBranch>>>
+    private previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
     constructor(
-        private decisionFn: BranchDecisionFn<TIntermediate, TBranch>,
-        private branches: Partial<Record<TBranch, Pipeline<TIntermediate, TOutput, C, RBranch>>>,
-        private previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
-    ) {}
+        decisionFn: BranchDecisionFn<TIntermediate, TBranch>,
+        branches: Partial<Record<TBranch, Pipeline<TIntermediate, TOutput, C, RBranch>>>,
+        previousPipeline: Pipeline<TInput, TIntermediate, C, RPrev>
+    ) {
+        this.decisionFn = decisionFn
+        this.branches = branches
+        this.previousPipeline = previousPipeline
+    }
 
     async process(
         input: OkResultWithContext<TInput, C>

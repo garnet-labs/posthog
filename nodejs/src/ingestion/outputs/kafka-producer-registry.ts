@@ -28,10 +28,13 @@ function redactConfig(config: ProducerGlobalConfig): Record<string, unknown> {
 export class KafkaProducerRegistry<P extends string> {
     private producers: Map<P, Promise<KafkaProducerWrapper>> = new Map()
 
-    constructor(
-        private kafkaClientRack: string | undefined,
-        private configMaps: Record<P, Partial<Record<AllowedConfigKey, string>>>
-    ) {}
+    private kafkaClientRack: string | undefined
+    private configMaps: Record<P, Partial<Record<AllowedConfigKey, string>>>
+
+    constructor(kafkaClientRack: string | undefined, configMaps: Record<P, Partial<Record<AllowedConfigKey, string>>>) {
+        this.kafkaClientRack = kafkaClientRack
+        this.configMaps = configMaps
+    }
 
     /**
      * Get or create a producer by its typed name.

@@ -33,10 +33,15 @@ export class BaseBatchPipeline<
 {
     private stepName: string
 
+    private currentStep: BatchProcessingStep<TIntermediate, TOutput, RStep>
+    private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+
     constructor(
-        private currentStep: BatchProcessingStep<TIntermediate, TOutput, RStep>,
-        private previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
+        currentStep: BatchProcessingStep<TIntermediate, TOutput, RStep>,
+        previousPipeline: BatchPipeline<TInput, TIntermediate, CInput, COutput, RPrev>
     ) {
+        this.currentStep = currentStep
+        this.previousPipeline = previousPipeline
         this.stepName = this.currentStep.name || 'anonymousBatchStep'
     }
 

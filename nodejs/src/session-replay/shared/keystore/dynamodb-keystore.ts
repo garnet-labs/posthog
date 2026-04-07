@@ -19,11 +19,14 @@ const TOMBSTONE_TTL_SECONDS = 30 * 24 * 60 * 60 // 30 days
  * Used in production cloud environments for secure key management.
  */
 export class DynamoDBKeyStore implements KeyStore {
-    constructor(
-        private dynamoDBClient: DynamoDBClient,
-        private kmsClient: KMSClient,
-        private retentionService: RetentionService
-    ) {}
+    private dynamoDBClient: DynamoDBClient
+    private kmsClient: KMSClient
+    private retentionService: RetentionService
+    constructor(dynamoDBClient: DynamoDBClient, kmsClient: KMSClient, retentionService: RetentionService) {
+        this.dynamoDBClient = dynamoDBClient
+        this.kmsClient = kmsClient
+        this.retentionService = retentionService
+    }
 
     async start(): Promise<void> {
         await sodium.ready

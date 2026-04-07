@@ -21,7 +21,11 @@ interface AggregatedMetric {
 export class EventFiltersBatchAppMetrics {
     private counts = new Map<string, AggregatedMetric>()
 
-    constructor(private outputs: IngestionOutputs<AppMetricsOutput>) {}
+    private outputs: IngestionOutputs<AppMetricsOutput>
+
+    constructor(outputs: IngestionOutputs<AppMetricsOutput>) {
+        this.outputs = outputs
+    }
 
     increment(teamId: number, filterId: string, metricName: string): void {
         const k = `${teamId}:${filterId}:${metricName}`

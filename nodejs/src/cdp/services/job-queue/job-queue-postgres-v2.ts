@@ -30,9 +30,20 @@ export class CyclotronJobQueuePostgresV2 {
     private worker?: CyclotronV2Worker
     private pendingJobs = new Map<string, CyclotronV2DequeuedJob>()
 
+    private consumerBatchSize: number
+
+    private config: Pick<
+        CdpConfig,
+        | 'CYCLOTRON_NODE_DATABASE_URL'
+        | 'CYCLOTRON_SHARD_DEPTH_LIMIT'
+        | 'CDP_CYCLOTRON_BATCH_DELAY_MS'
+        | 'CDP_CYCLOTRON_INSERT_MAX_BATCH_SIZE'
+        | 'CDP_CYCLOTRON_INSERT_PARALLEL_BATCHES'
+    >
+
     constructor(
-        private consumerBatchSize: number,
-        private config: Pick<
+        consumerBatchSize: number,
+        config: Pick<
             CdpConfig,
             | 'CYCLOTRON_NODE_DATABASE_URL'
             | 'CYCLOTRON_SHARD_DEPTH_LIMIT'
@@ -40,7 +51,10 @@ export class CyclotronJobQueuePostgresV2 {
             | 'CDP_CYCLOTRON_INSERT_MAX_BATCH_SIZE'
             | 'CDP_CYCLOTRON_INSERT_PARALLEL_BATCHES'
         >
-    ) {}
+    ) {
+        this.consumerBatchSize = consumerBatchSize
+        this.config = config
+    }
 
     public async startAsProducer(): Promise<void> {
         if (!this.config.CYCLOTRON_NODE_DATABASE_URL) {

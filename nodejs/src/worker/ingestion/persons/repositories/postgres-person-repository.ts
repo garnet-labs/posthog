@@ -63,10 +63,10 @@ export class PostgresPersonRepository
 {
     private options: PostgresPersonRepositoryOptions
 
-    constructor(
-        private postgres: PostgresRouter,
-        options?: Partial<PostgresPersonRepositoryOptions>
-    ) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter, options?: Partial<PostgresPersonRepositoryOptions>) {
+        this.postgres = postgres
         this.options = { ...DEFAULT_OPTIONS, ...options }
     }
 
@@ -548,11 +548,7 @@ export class PostgresPersonRepository
                     violation_type: 'create_person_size_violation',
                 })
 
-                throw new PersonPropertiesSizeViolationError(
-                    `Person properties create would exceed size limit`,
-                    teamId,
-                    undefined
-                )
+                throw new PersonPropertiesSizeViolationError(`Person properties create would exceed size limit`, teamId)
             }
 
             // Re-throw other errors

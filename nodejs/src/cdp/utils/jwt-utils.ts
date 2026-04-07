@@ -1,8 +1,10 @@
 import jwt from 'jsonwebtoken'
 
-export enum PosthogJwtAudience {
-    SUBSCRIPTION_PREFERENCES = 'posthog:messaging:subscription_preferences',
-}
+export const PosthogJwtAudience = {
+    SUBSCRIPTION_PREFERENCES: 'posthog:messaging:subscription_preferences',
+} as const
+
+export type PosthogJwtAudience = (typeof PosthogJwtAudience)[keyof typeof PosthogJwtAudience]
 
 export class JWT {
     private secrets: string[] = []

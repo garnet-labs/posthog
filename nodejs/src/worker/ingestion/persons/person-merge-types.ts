@@ -40,11 +40,11 @@ export class PersonMergeRaceConditionError extends PersonMergeError {
 export class PersonMergePersonNotFoundError extends PersonMergeError {
     readonly type = 'PERSON_NOT_FOUND' as const
 
-    constructor(
-        message: string,
-        public readonly personType: 'source' | 'target'
-    ) {
+    public readonly personType: 'source' | 'target'
+
+    constructor(message: string, personType: 'source' | 'target') {
         super(message)
+        this.personType = personType
     }
 }
 

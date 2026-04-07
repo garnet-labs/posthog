@@ -1,8 +1,10 @@
-export enum NodeEnv {
-    Development = 'dev',
-    Production = 'prod',
-    Test = 'test',
-}
+export const NodeEnv = {
+    Development: 'dev',
+    Production: 'prod',
+    Test: 'test',
+} as const
+
+export type NodeEnv = (typeof NodeEnv)[keyof typeof NodeEnv]
 
 export function stringToBoolean(value: unknown, strict?: false): boolean
 export function stringToBoolean(value: unknown, strict: true): boolean | null

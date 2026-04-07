@@ -4,10 +4,12 @@ import { FetchOptions, FetchResponse, internalFetch } from '~/utils/request'
 import { tryCatch } from '~/utils/try-catch'
 
 export class InternalFetchService {
-    constructor(
-        private internalApiBaseUrl: string,
-        private internalApiSecret: string
-    ) {}
+    private internalApiBaseUrl: string
+    private internalApiSecret: string
+    constructor(internalApiBaseUrl: string, internalApiSecret: string) {
+        this.internalApiBaseUrl = internalApiBaseUrl
+        this.internalApiSecret = internalApiSecret
+    }
 
     async fetch({
         urlPath,

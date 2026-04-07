@@ -13,10 +13,12 @@ import { PersonRepositoryTransaction } from './repositories/person-repository-tr
  * This can be used by any store that implements PersonsStore.
  */
 export class PersonsStoreTransaction {
-    constructor(
-        private store: PersonsStore,
-        private tx: PersonRepositoryTransaction
-    ) {}
+    private store: PersonsStore
+    private tx: PersonRepositoryTransaction
+    constructor(store: PersonsStore, tx: PersonRepositoryTransaction) {
+        this.store = store
+        this.tx = tx
+    }
 
     async createPerson(
         createdAt: DateTime,

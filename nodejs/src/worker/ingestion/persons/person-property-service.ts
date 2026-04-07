@@ -11,7 +11,9 @@ import { PersonPropertiesSizeViolationError } from './repositories/person-reposi
  */
 export class PersonPropertyService {
     private personCreateService: PersonCreateService
-    constructor(private context: PersonContext) {
+    private context: PersonContext
+    constructor(context: PersonContext) {
+        this.context = context
         this.personCreateService = new PersonCreateService(context)
     }
 

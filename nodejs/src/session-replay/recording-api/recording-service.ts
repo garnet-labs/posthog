@@ -37,16 +37,33 @@ interface BlockListingRow {
 }
 
 export class RecordingService {
+    private s3Client: S3Client
+    private s3Bucket: string
+    private s3Prefix: string
+    private keyStore: KeyStore
+    private decryptor: RecordingDecryptor
+    private metadataStore?: SessionMetadataStore
+    private postgres?: PostgresRouter
+    private clickhouse?: ClickHouseClient
     constructor(
-        private s3Client: S3Client,
-        private s3Bucket: string,
-        private s3Prefix: string,
-        private keyStore: KeyStore,
-        private decryptor: RecordingDecryptor,
-        private metadataStore?: SessionMetadataStore,
-        private postgres?: PostgresRouter,
-        private clickhouse?: ClickHouseClient
-    ) {}
+        s3Client: S3Client,
+        s3Bucket: string,
+        s3Prefix: string,
+        keyStore: KeyStore,
+        decryptor: RecordingDecryptor,
+        metadataStore?: SessionMetadataStore,
+        postgres?: PostgresRouter,
+        clickhouse?: ClickHouseClient
+    ) {
+        this.s3Client = s3Client
+        this.s3Bucket = s3Bucket
+        this.s3Prefix = s3Prefix
+        this.keyStore = keyStore
+        this.decryptor = decryptor
+        this.metadataStore = metadataStore
+        this.postgres = postgres
+        this.clickhouse = clickhouse
+    }
 
     validateS3Key(key: string): boolean {
         const pattern = `^${this.s3Prefix}/(${ValidRetentionPeriods.join('|')})/\\d+-[0-9a-f]{16}$`

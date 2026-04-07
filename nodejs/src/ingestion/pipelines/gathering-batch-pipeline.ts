@@ -3,7 +3,10 @@ import { BatchPipeline, BatchPipelineResultWithContext, OkResultWithContext } fr
 export class GatheringBatchPipeline<TInput, TOutput, CInput, COutput = CInput, R extends string = never>
     implements BatchPipeline<TInput, TOutput, CInput, COutput, R>
 {
-    constructor(private subPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {}
+    private subPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>
+    constructor(subPipeline: BatchPipeline<TInput, TOutput, CInput, COutput, R>) {
+        this.subPipeline = subPipeline
+    }
 
     feed(elements: OkResultWithContext<TInput, CInput>[]): void {
         this.subPipeline.feed(elements)

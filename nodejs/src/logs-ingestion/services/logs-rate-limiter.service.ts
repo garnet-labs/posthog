@@ -54,10 +54,12 @@ export class LogsRateLimiterService {
     private disabledTeamIds: Set<number> | '*' | null
     private enabledTeamIds: Set<number> | '*' | null
 
-    constructor(
-        private config: LogsRateLimiterConfig,
-        private redis: RedisV2
-    ) {
+    private config: LogsRateLimiterConfig
+    private redis: RedisV2
+
+    constructor(config: LogsRateLimiterConfig, redis: RedisV2) {
+        this.config = config
+        this.redis = redis
         this.teamBucketSizes = this.parseTeamConfig(config.LOGS_LIMITER_TEAM_BUCKET_SIZE_KB)
         this.teamRefillRates = this.parseTeamConfig(config.LOGS_LIMITER_TEAM_REFILL_RATE_KB_PER_SECOND)
         this.disabledTeamIds = this.parseTeamIdList(config.LOGS_LIMITER_DISABLED_FOR_TEAMS)

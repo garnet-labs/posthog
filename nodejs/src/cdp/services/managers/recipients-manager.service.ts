@@ -39,7 +39,10 @@ export type RecipientManagerRecipient = {
 export class RecipientsManagerService {
     private lazyLoader: LazyLoader<RecipientManagerRecipient>
 
-    constructor(private postgres: PostgresRouter) {
+    private postgres: PostgresRouter
+
+    constructor(postgres: PostgresRouter) {
+        this.postgres = postgres
         this.lazyLoader = new LazyLoader({
             name: 'recipients_manager',
             loader: async (ids) => await this.fetchRecipients(ids),

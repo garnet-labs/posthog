@@ -1,56 +1,62 @@
 import { SnapshotEvent } from './kafka/types'
 
-export enum RRWebEventType {
-    DomContentLoaded = 0,
-    Load = 1,
-    FullSnapshot = 2,
-    IncrementalSnapshot = 3,
-    Meta = 4,
-    Custom = 5,
-    Plugin = 6,
-}
+export const RRWebEventType = {
+    DomContentLoaded: 0,
+    Load: 1,
+    FullSnapshot: 2,
+    IncrementalSnapshot: 3,
+    Meta: 4,
+    Custom: 5,
+    Plugin: 6,
+} as const
 
-export enum RRWebEventSource {
-    Mutation = 0,
-    MouseMove = 1,
-    MouseInteraction = 2,
-    Scroll = 3,
-    ViewportResize = 4,
-    Input = 5,
-    TouchMove = 6,
-    MediaInteraction = 7,
-    StyleSheetRule = 8,
-    CanvasMutation = 9,
-    Font = 10,
-    Log = 11,
-    Drag = 12,
-    StyleDeclaration = 13,
-    Selection = 14,
-    AdoptedStyleSheet = 15,
-}
+export type RRWebEventType = (typeof RRWebEventType)[keyof typeof RRWebEventType]
 
-export enum MouseInteractions {
-    MouseUp = 0,
-    MouseDown = 1,
-    Click = 2,
-    ContextMenu = 3,
-    DblClick = 4,
-    Focus = 5,
-    Blur = 6,
-    TouchStart = 7,
-    TouchMove_Departed = 8,
-    TouchEnd = 9,
-    TouchCancel = 10,
-}
+export const RRWebEventSource = {
+    Mutation: 0,
+    MouseMove: 1,
+    MouseInteraction: 2,
+    Scroll: 3,
+    ViewportResize: 4,
+    Input: 5,
+    TouchMove: 6,
+    MediaInteraction: 7,
+    StyleSheetRule: 8,
+    CanvasMutation: 9,
+    Font: 10,
+    Log: 11,
+    Drag: 12,
+    StyleDeclaration: 13,
+    Selection: 14,
+    AdoptedStyleSheet: 15,
+} as const
 
-const CLICK_TYPES = [
+export type RRWebEventSource = (typeof RRWebEventSource)[keyof typeof RRWebEventSource]
+
+export const MouseInteractions = {
+    MouseUp: 0,
+    MouseDown: 1,
+    Click: 2,
+    ContextMenu: 3,
+    DblClick: 4,
+    Focus: 5,
+    Blur: 6,
+    TouchStart: 7,
+    TouchMove_Departed: 8,
+    TouchEnd: 9,
+    TouchCancel: 10,
+} as const
+
+export type MouseInteractions = (typeof MouseInteractions)[keyof typeof MouseInteractions]
+
+const CLICK_TYPES: readonly number[] = [
     MouseInteractions.Click,
     MouseInteractions.DblClick,
     MouseInteractions.TouchEnd,
     MouseInteractions.ContextMenu, // right click
 ]
 
-const MOUSE_ACTIVITY_SOURCES = [
+const MOUSE_ACTIVITY_SOURCES: readonly number[] = [
     RRWebEventSource.MouseInteraction,
     RRWebEventSource.MouseMove,
     RRWebEventSource.TouchMove,
@@ -85,8 +91,10 @@ export function hrefFrom(inputEvent: SnapshotEvent): string | undefined {
 }
 
 // Constants for log levels
-export enum ConsoleLogLevel {
-    Info = 'info',
-    Warn = 'warn',
-    Error = 'error',
-}
+export const ConsoleLogLevel = {
+    Info: 'info',
+    Warn: 'warn',
+    Error: 'error',
+} as const
+
+export type ConsoleLogLevel = (typeof ConsoleLogLevel)[keyof typeof ConsoleLogLevel]
