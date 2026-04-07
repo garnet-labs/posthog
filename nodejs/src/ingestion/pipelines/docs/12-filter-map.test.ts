@@ -24,8 +24,6 @@ import { createTestTeam } from '../../../../tests/helpers/team'
 import { Team } from '../../../types'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput, OVERFLOW_OUTPUT } from '../../common/outputs'
-import { IngestionOutputs } from '../../outputs/ingestion-outputs'
-import { SingleIngestionOutput } from '../../outputs/single-ingestion-output'
 import { newBatchPipelineBuilder } from '../builders'
 import { createOkContext } from '../helpers'
 import { PipelineWarning } from '../pipeline.interface'
@@ -43,35 +41,13 @@ describe('Filter Map', () => {
      */
     it('filterMap enables team-aware processing with non-OK passthrough', async () => {
         const processedEvents: Array<{ eventName: string; teamId: number }> = []
-        const producedMessages: any[] = []
         const promiseScheduler = new PromiseScheduler()
         const mockWarningOutputs = createMockIngestionOutputs<IngestionWarningsOutput>()
-        const mockKafkaProducer = {
-            produce: jest.fn((msg) => {
-                producedMessages.push(msg)
-                return Promise.resolve()
-            }),
-            queueMessages: jest.fn((msg) => {
-                producedMessages.push(msg)
-                return Promise.resolve()
-            }),
-        }
+        const mockOutputs = createMockIngestionOutputs<
+            typeof DLQ_OUTPUT | typeof OVERFLOW_OUTPUT | typeof INGESTION_WARNINGS_OUTPUT
+        >()
         const pipelineConfig = {
-            outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockKafkaProducer as any, 'test'),
-                [OVERFLOW_OUTPUT]: new SingleIngestionOutput(
-                    'test',
-                    'overflow-topic',
-                    mockKafkaProducer as any,
-                    'test'
-                ),
-                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
-                    'test',
-                    'clickhouse_ingestion_warnings',
-                    mockKafkaProducer as any,
-                    'test'
-                ),
-            }),
+            outputs: mockOutputs,
             promiseScheduler,
         }
 
@@ -186,14 +162,11 @@ describe('Filter Map', () => {
             { eventName: 'deprecated_event', teamId: 3 },
         ])
 
-        // Verify Kafka producer was called for DLQ and redirect
-        const topics = producedMessages.map((msg) => msg.topic)
-
         // DLQ was called for the team lookup failure
-        expect(topics).toContain('test-dlq')
+        expect(mockOutputs.produce).toHaveBeenCalledWith(DLQ_OUTPUT, expect.anything())
 
         // Redirect was called for the overflow event
-        expect(topics).toContain('overflow-topic')
+        expect(mockOutputs.produce).toHaveBeenCalledWith(OVERFLOW_OUTPUT, expect.anything())
 
         // Ingestion warning was produced for deprecated event via outputs
         expect(mockWarningOutputs.queueMessages).toHaveBeenCalledTimes(1)

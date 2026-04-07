@@ -1,3 +1,4 @@
+import { createMockIngestionOutputs } from '../../../tests/helpers/mock-ingestion-outputs'
 import { MessageSizeTooLarge } from '../../utils/db/error'
 import { BatchWritingGroupStore } from '../../worker/ingestion/groups/batch-writing-group-store'
 import { PersonOutputs } from '../../worker/ingestion/persons/person-context'
@@ -5,8 +6,6 @@ import { FlushResult, PersonsStore } from '../../worker/ingestion/persons/person
 import { PERSONS_OUTPUT, PERSON_DISTINCT_IDS_OUTPUT } from '../analytics/outputs'
 import { emitIngestionWarning } from '../common/ingestion-warnings'
 import { INGESTION_WARNINGS_OUTPUT } from '../common/outputs'
-import { IngestionOutputs } from '../outputs/ingestion-outputs'
-import { SingleIngestionOutput } from '../outputs/single-ingestion-output'
 import { AfterBatchInput } from '../pipelines/batching-pipeline'
 import { isOkResult, ok } from '../pipelines/results'
 import { FlushBatchStoresStepConfig, createFlushBatchStoresStep } from './flush-batch-stores-step'
@@ -34,20 +33,9 @@ describe('flush-batch-stores-step', () => {
             reset: jest.fn(),
         } as any
 
-        const mockProducer = {
-            produce: jest.fn().mockResolvedValue(undefined),
-            queueMessages: jest.fn().mockResolvedValue(undefined),
-        } as any
-        mockOutputs = new IngestionOutputs({
-            [PERSONS_OUTPUT]: new SingleIngestionOutput('test', 'person_updates', mockProducer, 'test'),
-            [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-                'test',
-                'person_distinct_ids',
-                mockProducer,
-                'test'
-            ),
-            [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput('test', 'ingestion_warnings', mockProducer, 'test'),
-        })
+        mockOutputs = createMockIngestionOutputs<
+            typeof PERSONS_OUTPUT | typeof PERSON_DISTINCT_IDS_OUTPUT | typeof INGESTION_WARNINGS_OUTPUT
+        >()
 
         storesConfig = {
             personsStore: mockPersonsStore,

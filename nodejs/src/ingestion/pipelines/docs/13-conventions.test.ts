@@ -34,13 +34,10 @@ import { Message } from 'node-rdkafka'
 import { createTestMessage } from '../../../../tests/helpers/kafka-message'
 import { createMockIngestionOutputs } from '../../../../tests/helpers/mock-ingestion-outputs'
 import { createTestTeam } from '../../../../tests/helpers/team'
-import { KafkaProducerWrapper } from '../../../kafka/producer'
 import { Team } from '../../../types'
 import { parseJSON } from '../../../utils/json-parse'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput, OVERFLOW_OUTPUT } from '../../common/outputs'
-import { IngestionOutputs } from '../../outputs/ingestion-outputs'
-import { SingleIngestionOutput } from '../../outputs/single-ingestion-output'
 import { newBatchPipelineBuilder, newPipelineBuilder } from '../builders'
 import { PipelineBuilder, StartPipelineBuilder } from '../builders/pipeline-builders'
 import { createOkContext } from '../helpers'
@@ -378,10 +375,6 @@ describe('Pipeline Phases', () => {
     it('pipelines are organized into preprocessing and processing phases', async () => {
         const phaseLog: string[] = []
         const promiseScheduler = new PromiseScheduler()
-        const mockKafkaProducer = {
-            producer: {},
-            queueMessages: jest.fn().mockResolvedValue(undefined),
-        } as unknown as KafkaProducerWrapper
 
         interface RawInput {
             message: Message
@@ -452,16 +445,9 @@ describe('Pipeline Phases', () => {
         }
 
         const pipelineConfig: PipelineConfig = {
-            outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockKafkaProducer, 'test'),
-                [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', '', mockKafkaProducer, 'test'),
-                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
-                    'test',
-                    'warnings_test',
-                    mockKafkaProducer,
-                    'test'
-                ),
-            }),
+            outputs: createMockIngestionOutputs<
+                typeof DLQ_OUTPUT | typeof OVERFLOW_OUTPUT | typeof INGESTION_WARNINGS_OUTPUT
+            >(),
             promiseScheduler,
         }
 

@@ -1,10 +1,9 @@
 import { Message } from 'node-rdkafka'
 
+import { createMockIngestionOutputs } from '../../../tests/helpers/mock-ingestion-outputs'
 import { emitIngestionWarning } from '../../ingestion/common/ingestion-warnings'
-import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT } from '../../ingestion/common/outputs'
+import { DLQ_OUTPUT } from '../../ingestion/common/outputs'
 import { IngestionOutputs } from '../../ingestion/outputs/ingestion-outputs'
-import { SingleIngestionOutput } from '../../ingestion/outputs/single-ingestion-output'
-import { KafkaProducerWrapper } from '../../kafka/producer'
 import { logger } from '../../utils/logger'
 import { captureException } from '../../utils/posthog'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
@@ -26,32 +25,14 @@ const mockLogger = logger as jest.Mocked<typeof logger>
 const mockCaptureException = captureException as jest.MockedFunction<typeof captureException>
 const mockEmitIngestionWarning = emitIngestionWarning as jest.MockedFunction<typeof emitIngestionWarning>
 
-function createMockOutputs(mockKafkaProducer: KafkaProducerWrapper) {
-    return new IngestionOutputs({
-        [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockKafkaProducer, 'test'),
-        [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
-            'test',
-            'test-ingestion-warnings',
-            mockKafkaProducer,
-            'test'
-        ),
-    })
-}
-
 describe('produceMessageToDLQ', () => {
-    let mockKafkaProducer: jest.Mocked<KafkaProducerWrapper>
-    let mockOutputs: IngestionOutputs<'dlq' | 'ingestion_warnings'>
+    let mockOutputs: jest.Mocked<IngestionOutputs<'dlq' | 'ingestion_warnings'>>
     let mockMessage: Message
 
     beforeEach(() => {
         jest.clearAllMocks()
 
-        mockKafkaProducer = {
-            queueMessages: jest.fn() as any,
-            produce: jest.fn() as any,
-        } as any
-
-        mockOutputs = createMockOutputs(mockKafkaProducer)
+        mockOutputs = createMockIngestionOutputs<'dlq' | 'ingestion_warnings'>()
 
         mockMessage = {
             value: Buffer.from('test message'),
@@ -100,8 +81,7 @@ describe('produceMessageToDLQ', () => {
             { alwaysSend: true }
         )
 
-        expect(mockKafkaProducer.produce).toHaveBeenCalledWith({
-            topic: 'test-dlq',
+        expect(mockOutputs.produce).toHaveBeenCalledWith(DLQ_OUTPUT, {
             value: mockMessage.value,
             key: mockMessage.key,
             headers: expect.objectContaining({
@@ -153,8 +133,7 @@ describe('produceMessageToDLQ', () => {
 
         await produceMessageToDLQ(mockOutputs, messageWithMixedHeaders, error, stepName)
 
-        expect(mockKafkaProducer.produce).toHaveBeenCalledWith({
-            topic: 'test-dlq',
+        expect(mockOutputs.produce).toHaveBeenCalledWith(DLQ_OUTPUT, {
             value: messageWithMixedHeaders.value,
             key: messageWithMixedHeaders.key,
             headers: expect.objectContaining({
@@ -173,7 +152,8 @@ describe('produceMessageToDLQ', () => {
 
         await produceMessageToDLQ(mockOutputs, mockMessage, error, stepName)
 
-        expect(mockKafkaProducer.produce).toHaveBeenCalledWith(
+        expect(mockOutputs.produce).toHaveBeenCalledWith(
+            DLQ_OUTPUT,
             expect.objectContaining({
                 headers: expect.objectContaining({
                     dlq_reason: 'String error',
@@ -187,7 +167,7 @@ describe('produceMessageToDLQ', () => {
         const stepName = 'test-step'
         const dlqError = new Error('DLQ failed')
 
-        mockKafkaProducer.produce = jest.fn().mockRejectedValue(dlqError)
+        mockOutputs.produce.mockRejectedValue(dlqError)
 
         await produceMessageToDLQ(mockOutputs, mockMessage, error, stepName)
 
@@ -404,15 +384,12 @@ describe('Header processing utilities', () => {
     })
 
     it('should correctly process different header types in produceMessageToDLQ', async () => {
-        const mockKafkaProducer = {
-            produce: jest.fn().mockResolvedValue(undefined),
-        } as unknown as KafkaProducerWrapper
+        const headerMockOutputs = createMockIngestionOutputs<'dlq' | 'ingestion_warnings'>()
 
-        const mockOutputs = createMockOutputs(mockKafkaProducer)
+        await produceMessageToDLQ(headerMockOutputs, mockMessage, new Error('test'), 'test-step')
 
-        await produceMessageToDLQ(mockOutputs, mockMessage, new Error('test'), 'test-step')
-
-        expect(mockKafkaProducer.produce).toHaveBeenCalledWith(
+        expect(headerMockOutputs.produce).toHaveBeenCalledWith(
+            DLQ_OUTPUT,
             expect.objectContaining({
                 headers: expect.objectContaining({
                     stringHeader: 'string-value',
