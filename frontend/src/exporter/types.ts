@@ -1,14 +1,8 @@
+import { NotebookType } from 'scenes/notebooks/types'
 import { SessionRecordingPlayerMode } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 
 import { SharingConfigurationSettings } from '~/queries/schema/schema-general'
-import {
-    DashboardType,
-    DataColorThemeModel,
-    HeatmapExportContext,
-    InsightModel,
-    NotebookType,
-    SessionRecordingType,
-} from '~/types'
+import { DashboardType, DataColorThemeModel, HeatmapExportContext, InsightModel, SessionRecordingType } from '~/types'
 
 export enum ExportType {
     Image = 'image',

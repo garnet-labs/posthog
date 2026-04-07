@@ -1,8 +1,30 @@
+import '@testing-library/jest-dom'
+
 import { render } from '@testing-library/react'
 
 import { Exporter } from '~/exporter/Exporter'
 import { ExportType, ExportedData } from '~/exporter/types'
 import { initKeaTests } from '~/test/init'
+
+// Mock NodeWrapper to avoid circular dependencies
+jest.mock('scenes/notebooks/Nodes/NodeWrapper', () => ({
+    createPostHogWidgetNode: jest.fn(() => ({})),
+}))
+
+// Mock maplibre-gl to avoid window.URL.createObjectURL issues
+jest.mock('maplibre-gl', () => ({
+    __esModule: true,
+    default: {
+        Marker: jest.fn(),
+        Map: jest.fn(),
+        NavigationControl: jest.fn(),
+        addProtocol: jest.fn(),
+    },
+    Marker: jest.fn(),
+    Map: jest.fn(),
+    NavigationControl: jest.fn(),
+    addProtocol: jest.fn(),
+}))
 
 beforeEach(() => {
     initKeaTests()
