@@ -37,6 +37,8 @@ describe('resolveIngestionOutputs', () => {
             defaultProducerName: 'PRIMARY',
             producerOverrideEnvVar: 'TEST_EVENTS_PRODUCER',
             topicOverrideEnvVar: 'TEST_EVENTS_TOPIC',
+            secondaryTopicEnvVar: 'TEST_EVENTS_SECONDARY_TOPIC',
+            secondaryProducerEnvVar: 'TEST_EVENTS_SECONDARY_PRODUCER',
         },
         ai_events: {
             defaultTopic: 'clickhouse_ai_events',
@@ -118,5 +120,79 @@ describe('resolveIngestionOutputs', () => {
         const registry = createRegistry({ PRIMARY: createMockProducer(), SECONDARY: createMockProducer() })
         const outputs = resolveIngestionOutputs(registry, {})
         await expect(outputs.checkHealth()).resolves.toEqual([])
+    })
+
+    describe('secondary targets', () => {
+        it('does not add secondary target when env vars are not set', async () => {
+            const primary = createMockProducer()
+            const secondary = createMockProducer()
+            const registry = createRegistry({ PRIMARY: primary, SECONDARY: secondary })
+
+            const outputs = resolveIngestionOutputs(registry, testDefinitions)
+
+            await outputs.produce('events', { value: Buffer.from('test'), key: Buffer.from('key') })
+            expect(primary.produce).toHaveBeenCalledTimes(1)
+            expect(secondary.produce).not.toHaveBeenCalled()
+        })
+
+        it('adds secondary target when both env vars are set', async () => {
+            process.env.TEST_EVENTS_SECONDARY_TOPIC = 'events_v2'
+            process.env.TEST_EVENTS_SECONDARY_PRODUCER = 'SECONDARY'
+            const primary = createMockProducer()
+            const secondary = createMockProducer()
+            const registry = createRegistry({ PRIMARY: primary, SECONDARY: secondary })
+
+            const outputs = resolveIngestionOutputs(registry, testDefinitions)
+
+            await outputs.produce('events', { value: Buffer.from('test'), key: Buffer.from('key') })
+            expect(primary.produce).toHaveBeenCalledWith({
+                topic: 'clickhouse_events',
+                value: Buffer.from('test'),
+                key: Buffer.from('key'),
+            })
+            expect(secondary.produce).toHaveBeenCalledWith({
+                topic: 'events_v2',
+                value: Buffer.from('test'),
+                key: Buffer.from('key'),
+            })
+        })
+
+        it('does not add secondary target when only topic env var is set', async () => {
+            process.env.TEST_EVENTS_SECONDARY_TOPIC = 'events_v2'
+            const primary = createMockProducer()
+            const registry = createRegistry({ PRIMARY: primary, SECONDARY: createMockProducer() })
+
+            const outputs = resolveIngestionOutputs(registry, testDefinitions)
+
+            await outputs.produce('events', { value: Buffer.from('test'), key: Buffer.from('key') })
+            expect(primary.produce).toHaveBeenCalledTimes(1)
+        })
+
+        it('does not add secondary target when only producer env var is set', async () => {
+            process.env.TEST_EVENTS_SECONDARY_PRODUCER = 'SECONDARY'
+            const primary = createMockProducer()
+            const secondary = createMockProducer()
+            const registry = createRegistry({ PRIMARY: primary, SECONDARY: secondary })
+
+            const outputs = resolveIngestionOutputs(registry, testDefinitions)
+
+            await outputs.produce('events', { value: Buffer.from('test'), key: Buffer.from('key') })
+            expect(primary.produce).toHaveBeenCalledTimes(1)
+            expect(secondary.produce).not.toHaveBeenCalled()
+        })
+
+        it('secondary target does not affect other outputs', async () => {
+            process.env.TEST_EVENTS_SECONDARY_TOPIC = 'events_v2'
+            process.env.TEST_EVENTS_SECONDARY_PRODUCER = 'SECONDARY'
+            const primary = createMockProducer()
+            const secondary = createMockProducer()
+            const registry = createRegistry({ PRIMARY: primary, SECONDARY: secondary })
+
+            const outputs = resolveIngestionOutputs(registry, testDefinitions)
+
+            await outputs.produce('ai_events', { value: Buffer.from('test'), key: Buffer.from('key') })
+            expect(primary.produce).toHaveBeenCalledTimes(1)
+            expect(secondary.produce).not.toHaveBeenCalled()
+        })
     })
 })

@@ -25,10 +25,12 @@ import {
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
     KafkaProducerEnvConfig,
+    KafkaWarpstreamProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
     getDefaultIngestionOutputsConfig,
     getDefaultKafkaProducerEnvConfig,
+    getDefaultKafkaWarpstreamProducerEnvConfig,
 } from '../ingestion/config'
 import { CookielessManager } from '../ingestion/cookieless/cookieless-manager'
 import { IngestionConsumer, IngestionConsumerDeps } from '../ingestion/ingestion-consumer'
@@ -67,6 +69,7 @@ export type IngestionGeneralServerConfig = BaseServerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
     KafkaProducerEnvConfig &
+    KafkaWarpstreamProducerEnvConfig &
     IngestionOutputsConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
@@ -104,6 +107,7 @@ export class IngestionGeneralServer implements NodeServer {
         this.config = {
             ...defaultConfig,
             ...overrideConfigWithEnv(getDefaultKafkaProducerEnvConfig()),
+            ...overrideConfigWithEnv(getDefaultKafkaWarpstreamProducerEnvConfig()),
             ...overrideConfigWithEnv(getDefaultIngestionOutputsConfig()),
             ...config,
         }

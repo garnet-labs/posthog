@@ -60,10 +60,14 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
         const record: Record<string, IngestionOutput> = {}
 
         for (const [name, def] of this.definitions) {
-            record[name] = {
-                topic: config[def.topicKey],
-                producer: registry.getProducer(config[def.producerKey]),
-            }
+            const producerName = config[def.producerKey]
+            record[name] = [
+                {
+                    topic: config[def.topicKey],
+                    producer: registry.getProducer(producerName),
+                    producerName,
+                },
+            ]
         }
 
         // TypeScript cannot verify that an imperatively-built Record has all keys of a

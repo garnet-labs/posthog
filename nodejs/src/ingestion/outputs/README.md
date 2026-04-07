@@ -1,6 +1,6 @@
 # Ingestion Outputs
 
-Ingestion pipelines need to produce messages to Kafka — events, heatmaps, ingestion warnings, etc. Each of these destinations is an **output**. An output has a topic and a producer, both configurable at deploy time without code changes.
+Ingestion pipelines need to produce messages to Kafka — events, heatmaps, ingestion warnings, etc. Each of these destinations is an **output**. An output has one or more targets (each a topic + producer pair), all configurable at deploy time without code changes.
 
 ## Why
 
@@ -8,7 +8,7 @@ Previously, pipelines received raw `KafkaProducerWrapper` instances and hardcode
 
 ## What this module provides
 
-**A named output abstraction.** Pipeline steps produce messages to an output by name (e.g. `'events'`). The output resolves to a topic and producer at startup. Steps never see the producer directly.
+**A named output abstraction.** Pipeline steps produce messages to an output by name (e.g. `'events'`). The output resolves to one or more targets at startup. Steps never see the producer directly.
 
 **Configurable producer routing.** Each output has a default producer, overridable via the config object (backed by env vars). Producers are defined with their own config key → rdkafka config mapping, validated with zod at startup.
 
@@ -16,15 +16,37 @@ Previously, pipelines received raw `KafkaProducerWrapper` instances and hardcode
 
 **Compile-time config validation.** Both the producer registry builder and the outputs builder enforce at compile time that the server config contains all required keys. Missing keys are caught by the type checker, not at runtime.
 
-**Health checks.** `IngestionOutputs` can verify broker connectivity and topic existence at startup, and provide ongoing health status for Kubernetes readiness probes.
+**Dual writes.** Each output can optionally have a secondary target (topic + producer on a different broker). When secondary env vars are set, every `produce()` and `queueMessages()` call fans out to both targets in parallel. This enables writing to two Kafka clusters simultaneously without any pipeline step changes.
+
+**Per-target metrics.** All produce metrics (`ingestion_outputs_latency_seconds`, `ingestion_outputs_errors_total`, `ingestion_outputs_message_value_bytes`, `ingestion_outputs_batch_size`) include `producer_name` and `topic` labels, so primary and secondary writes are independently observable in Grafana.
+
+**Health checks.** `IngestionOutputs` can verify broker connectivity and topic existence at startup, and provide ongoing health status for Kubernetes readiness probes. Health checks cover all targets, including secondary ones.
 
 ## Concepts
 
-A **producer** is a Kafka connection configured via the server config object. Each producer has a name (e.g. `'DEFAULT'`) and a mapping from config key names to rdkafka config keys. `KafkaProducerRegistryBuilder` creates all producers at startup, returning a typed `KafkaProducerRegistry<P>` where `P` is the union of registered producer names.
+A **producer** is a Kafka connection configured via the server config object. Each producer has a name (e.g. `'DEFAULT'`) and a mapping from config key names to rdkafka config keys. `KafkaProducerRegistryBuilder` creates all producers at startup, returning a typed `KafkaProducerRegistry<P>` where `P` is the union of registered producer names. The producer name is set on the `KafkaProducerWrapper` instance and used in metrics labels.
 
-An **output** is a named destination (e.g. `'events'`, `'heatmaps'`). Each output points to a producer and a topic, both resolved from the config object. `IngestionOutputsBuilder` registers outputs with their config key pairs, then `build(registry, config)` resolves them — verifying at compile time that all config keys exist and producer values match the registry's type.
+A **target** is a single Kafka destination: a topic, a producer, and the producer's name. An output contains one or more targets.
 
-`IngestionOutputs` is the interface pipeline steps use to produce messages. It maps each output name to its resolved producer and topic, exposing `produce()` and `queueMessages()` methods that route messages to the right Kafka cluster and topic without the caller needing to know the details.
+An **output** is a named destination (e.g. `'events'`, `'heatmaps'`). Each output has a primary target and optionally a secondary target for dual writes. Both are configurable via env vars so you can re-route outputs between clusters or topics at deploy time without touching code.
+
+`IngestionOutputs` is the interface pipeline steps use to produce messages. It maps each output name to its resolved targets, exposing `produce()` and `queueMessages()` methods that route messages to the right Kafka cluster(s) and topic(s) without the caller needing to know the details.
+
+`IngestionOutputsBuilder` registers outputs with their config key pairs, then `build(registry, config)` resolves them — verifying at compile time that all config keys exist and producer values match the registry's type.
+
+## Dual writes
+
+To enable dual writes for a specific output, set both secondary env vars:
+
+```bash
+# Example: dual-write events to a secondary WarpStream cluster
+INGESTION_OUTPUT_EVENTS_SECONDARY_TOPIC=events_json_v2
+INGESTION_OUTPUT_EVENTS_SECONDARY_PRODUCER=WARPSTREAM
+```
+
+Both env vars must be set — if only one is set, the secondary target is skipped. The secondary producer must be defined in the pipeline's `producers.ts` with its own env var config mapping.
+
+When dual writes are active, `produce()` and `queueMessages()` write to both targets in parallel. If either target fails, the call fails. Other outputs are unaffected — dual writes are per-output.
 
 ## Conventions
 
@@ -46,6 +68,8 @@ To add a new producer:
 1. Add the name constant and config map to the pipeline's `producers.ts`
 2. Add the config keys to `KafkaProducerEnvConfig` with defaults
 3. Add a `.register()` call on the `KafkaProducerRegistryBuilder` in the server
+
+To enable dual writes for an existing output, set the `secondaryTopicEnvVar` and `secondaryProducerEnvVar` fields on the output definition, then configure the env vars at deploy time.
 
 ## File layout
 

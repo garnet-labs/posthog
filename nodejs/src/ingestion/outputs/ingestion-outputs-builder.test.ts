@@ -9,6 +9,8 @@ describe('IngestionOutputsBuilder', () => {
         return {
             produce: jest.fn().mockResolvedValue(undefined),
             queueMessages: jest.fn().mockResolvedValue(undefined),
+            checkConnection: jest.fn().mockResolvedValue(undefined),
+            checkTopicExists: jest.fn().mockResolvedValue(undefined),
         } as unknown as KafkaProducerWrapper
     }
 

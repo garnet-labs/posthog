@@ -16,9 +16,11 @@ import {
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
     KafkaProducerEnvConfig,
+    KafkaWarpstreamProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
     getDefaultKafkaProducerEnvConfig,
+    getDefaultKafkaWarpstreamProducerEnvConfig,
 } from '../ingestion/config'
 import {
     ErrorTrackingConsumerConfig,
@@ -58,6 +60,7 @@ export type ErrorTrackingServerConfig = BaseServerConfig &
     HogTransformerServiceConfig &
     KafkaBrokerConfig &
     KafkaProducerEnvConfig &
+    KafkaWarpstreamProducerEnvConfig &
     ErrorTrackingOutputsConfig &
     DatabaseConnectionConfig &
     RedisConnectionsConfig &
@@ -87,6 +90,7 @@ export class ErrorTrackingServer implements NodeServer {
         this.config = {
             ...defaultConfig,
             ...overrideConfigWithEnv(getDefaultKafkaProducerEnvConfig()),
+            ...overrideConfigWithEnv(getDefaultKafkaWarpstreamProducerEnvConfig()),
             ...overrideConfigWithEnv(getDefaultErrorTrackingOutputsConfig()),
             ...config,
         }
