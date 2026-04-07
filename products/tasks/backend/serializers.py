@@ -217,6 +217,12 @@ class TaskRunDetailSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class TaskRunSetOutputRequestSerializer(serializers.Serializer):
+    output = serializers.JSONField(
+        help_text="Output data from the run. Validated against the task's json_schema if one is set."
+    )
+
+
 class ErrorResponseSerializer(serializers.Serializer):
     error = serializers.CharField(help_text="Error message")
 
@@ -352,6 +358,77 @@ class ConnectionTokenResponseSerializer(serializers.Serializer):
     """Response containing a JWT token for direct sandbox connection"""
 
     token = serializers.CharField(help_text="JWT token for authenticating with the sandbox")
+
+
+class CreateAndRunRequestSerializer(serializers.Serializer):
+    """Request body for creating a task and immediately running it."""
+
+    title = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Task title. If blank, one is generated from the description.",
+    )
+    description = serializers.CharField(
+        required=True,
+        help_text="Task description / prompt for the agent.",
+    )
+    origin_product = serializers.ChoiceField(
+        choices=Task.OriginProduct.choices,
+        required=False,
+        default=Task.OriginProduct.USER_CREATED,
+        help_text="Which product originated this task.",
+    )
+    repository = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+        help_text="GitHub repository in 'org/repo' format.",
+    )
+    mode = serializers.ChoiceField(
+        choices=["interactive", "background"],
+        required=False,
+        default="background",
+        help_text="Execution mode for the run.",
+    )
+    branch = serializers.CharField(
+        required=False,
+        allow_null=True,
+        default=None,
+        max_length=255,
+        help_text="Git branch to checkout in the sandbox.",
+    )
+    create_pr = serializers.BooleanField(
+        required=False,
+        default=True,
+        help_text="Whether the agent should create a pull request.",
+    )
+    json_schema = serializers.JSONField(
+        required=False,
+        default=None,
+        help_text="JSON Schema (or Pydantic model schema) for structured output validation.",
+    )
+    internal = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="If true, the task is for internal use and hidden from end users.",
+    )
+    sandbox_environment_id = serializers.UUIDField(
+        required=False,
+        default=None,
+        help_text="Optional sandbox environment to apply for this run.",
+    )
+
+    def validate_repository(self, value):
+        if not value:
+            return value
+        parts = value.split("/")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise serializers.ValidationError("Repository must be in the format organization/repository")
+        return value.lower()
 
 
 class TaskRunCreateRequestSerializer(serializers.Serializer):

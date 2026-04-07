@@ -58,6 +58,7 @@ from .serializers import (
     TaskRunRelayMessageRequestSerializer,
     TaskRunRelayMessageResponseSerializer,
     TaskRunSessionLogsQuerySerializer,
+    TaskRunSetOutputRequestSerializer,
     TaskRunUpdateSerializer,
     TaskSerializer,
 )
@@ -492,7 +493,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         serializer.save(team=self.team, task=task)
 
     @validated_request(
-        request_serializer=None,
+        request_serializer=TaskRunSetOutputRequestSerializer,
         responses={
             200: OpenApiResponse(response=TaskRunDetailSerializer, description="Run with updated output"),
             404: OpenApiResponse(description="Run not found"),
@@ -509,12 +510,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     def set_output(self, request, pk=None, **kwargs):
         task_run = cast(TaskRun, self.get_object())
         task = cast(Task, task_run.task)
-        output_data = request.data.get("output", {})
-        if not isinstance(output_data, dict):
-            return Response(
-                ErrorResponseSerializer({"error": "output must be a dictionary"}).data,
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        output_data = request.validated_request["output"]
 
         if task.json_schema:
             try:
@@ -526,6 +522,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                 )
         task_run.output = output_data
         task_run.save(update_fields=["output", "updated_at"])
+        self._signal_workflow_completion(task_run, TaskRun.Status.COMPLETED, None)
         self._post_slack_update_for_pr(task_run)
 
         return Response(TaskRunDetailSerializer(task_run, context=self.get_serializer_context()).data)
