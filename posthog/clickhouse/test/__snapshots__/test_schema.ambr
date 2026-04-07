@@ -4226,7 +4226,7 @@
       max_scroll_y SimpleAggregateFunction(max, Float64),
       unique_click_target_count AggregateFunction(uniqExact, Int64),
       text_selection_count SimpleAggregateFunction(sum, Int64),
-      is_deleted SimpleAggregateFunction(max, UInt8)
+      is_deleted SimpleAggregateFunction(max, UInt8) DEFAULT 0
   ) ENGINE = Distributed('posthog', 'posthog_test', 'sharded_session_replay_features', sipHash64(session_id))
   
   '''
@@ -5393,7 +5393,7 @@
       max_scroll_y SimpleAggregateFunction(max, Float64),
       unique_click_target_count AggregateFunction(uniqExact, Int64),
       text_selection_count SimpleAggregateFunction(sum, Int64),
-      is_deleted SimpleAggregateFunction(max, UInt8)
+      is_deleted SimpleAggregateFunction(max, UInt8) DEFAULT 0
   ) ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/77f1df52-4b43-11e9-910f-b8ca3a9b9f3e_{shard}/posthog.session_replay_features', '{replica}')
   
       PARTITION BY toYYYYMM(min_first_timestamp)
@@ -6484,7 +6484,7 @@
       max_scroll_y SimpleAggregateFunction(max, Float64),
       unique_click_target_count AggregateFunction(uniqExact, Int64),
       text_selection_count SimpleAggregateFunction(sum, Int64),
-      is_deleted SimpleAggregateFunction(max, UInt8)
+      is_deleted SimpleAggregateFunction(max, UInt8) DEFAULT 0
   ) ENGINE = Distributed('posthog', 'posthog_test', 'sharded_session_replay_features', sipHash64(session_id))
   
   '''
@@ -8336,7 +8336,7 @@
       max_scroll_y SimpleAggregateFunction(max, Float64),
       unique_click_target_count AggregateFunction(uniqExact, Int64),
       text_selection_count SimpleAggregateFunction(sum, Int64),
-      is_deleted SimpleAggregateFunction(max, UInt8)
+      is_deleted SimpleAggregateFunction(max, UInt8) DEFAULT 0
   ) ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/77f1df52-4b43-11e9-910f-b8ca3a9b9f3e_{shard}/posthog.session_replay_features', '{replica}')
   
       PARTITION BY toYYYYMM(min_first_timestamp)
