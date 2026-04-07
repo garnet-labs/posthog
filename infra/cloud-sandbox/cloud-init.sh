@@ -106,6 +106,16 @@ chown -R ubuntu:ubuntu "$CLAUDE_AUTH_DIR"
 
 # --- Install Docker, zstd, git ---
 log "Installing Docker and dependencies..."
+# Pin overlay2 storage driver to match the build-cache archive.
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'DAEMONJSON'
+{
+  "features": {
+    "containerd-snapshotter": false
+  },
+  "storage-driver": "overlay2"
+}
+DAEMONJSON
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl gnupg zstd git python3-yaml
 install -m 0755 -d /etc/apt/keyrings

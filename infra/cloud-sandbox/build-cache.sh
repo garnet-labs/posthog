@@ -66,6 +66,18 @@ fi
 
 # --- Install Docker ---
 log "Installing Docker..."
+# Pin overlay2 storage driver. Docker CE 29+ defaults to containerd snapshotters
+# ("overlayfs"), which stores image layers outside /var/lib/docker/. We archive
+# /var/lib/docker/ for the sandbox cache, so we need overlay2 to keep everything there.
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'DAEMONJSON'
+{
+  "features": {
+    "containerd-snapshotter": false
+  },
+  "storage-driver": "overlay2"
+}
+DAEMONJSON
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl gnupg zstd git python3-yaml unzip
 install -m 0755 -d /etc/apt/keyrings
