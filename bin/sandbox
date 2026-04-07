@@ -726,7 +726,7 @@ def init_cache_from_master() -> None:
                    "app"]
 
         info("Installing Python dependencies...")
-        run(run_cmd + ["uv", "sync", "--frozen", "--no-dev"],
+        run(run_cmd + ["uv", "sync", "--frozen"],
             env_extra=_compose_env(init_port, init_worktree))
 
         info("Running migrations...")
