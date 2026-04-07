@@ -48,7 +48,6 @@
         "build:survey-sdk-docs": "ts-node -r tsconfig-paths/register --transpile-only ./bin/docs/build-survey-sdk-docs.ts"
     },
     "dependencies": {
-        "@babel/runtime": "^7.24.0",
         "@base-ui/react": "^1.3.0",
         "@dagrejs/dagre": "^1.1.5",
         "@dnd-kit/core": "^6.0.8",
