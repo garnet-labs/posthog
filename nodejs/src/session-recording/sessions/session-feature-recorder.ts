@@ -32,6 +32,50 @@ interface RRWebEventData {
     }
 }
 
+/**
+ * Per-batch ML features extracted from RRWEB data.
+ *
+ * FEATURES
+ *
+ * Session duration: max_last_timestamp - min_first_timestamp (seconds)
+ *
+ * Additive counters (Note: divide by session duration for rate):
+ *   - event_count
+ *   - click_count
+ *   - keypress_count
+ *   - mouse_activity_count
+ *   - rage_click_count
+ *   - dead_click_count
+ *   - scroll_event_count
+ *   - quick_back_count
+ *   - page_visit_count
+ *   - console_error_count
+ *   - console_error_after_click_count
+ *   - network_request_count
+ *   - network_failed_request_count
+ *   - text_selection_count
+ *
+ * Max aggregates:
+ *   - max_idle_gap_ms
+ *   - max_scroll_y
+ *
+ * Sufficient statistics:
+ *   - Mouse position mean:    mouse_sum_x / mouse_position_count
+ *   - Mouse position stddev:  sqrt(mouse_sum_x_squared / mouse_position_count - (mouse_sum_x / mouse_position_count)^2)
+ *   - Mouse velocity mean:    mouse_velocity_sum / mouse_velocity_count
+ *   - Mouse velocity stddev:  sqrt(mouse_velocity_sum_of_squares / mouse_velocity_count - (mouse_velocity_sum / mouse_velocity_count)^2)
+ *   - Inter-action gap mean:  inter_action_gap_sum_ms / inter_action_gap_count
+ *   - Inter-action gap stddev: sqrt(inter_action_gap_sum_of_squares_ms / inter_action_gap_count - (inter_action_gap_sum_ms / inter_action_gap_count)^2)
+ *   - Network duration mean:  network_request_duration_sum / network_request_duration_count
+ *   - Network duration stddev: sqrt(network_request_duration_sum_of_squares / network_request_duration_count - (network_request_duration_sum / network_request_duration_count)^2)
+ *   - Scroll magnitude/event: total_scroll_magnitude / scroll_event_count
+ *   - Mouse direction change rate: mouse_direction_change_count / mouse_distance_traveled
+ *
+ * Set-based metrics:
+ *   - Unique click targets:   uniqExactMerge(unique_click_target_count)
+ *   - Unique URLs visited:    uniqExactMerge(unique_url_count)
+ *   - Page revisit count:     page_visit_count - uniqExactMerge(unique_url_count)
+ */
 export interface FeatureEndResult {
     startDateTime: DateTime
     endDateTime: DateTime
@@ -75,7 +119,7 @@ export interface FeatureEndResult {
     // Navigation features
     quickBackCount: number
     pageVisitCount: number
-    pageRevisitCount: number
+    visitedUrls: string[]
 
     // Error features
     consoleErrorCount: number
@@ -92,7 +136,7 @@ export interface FeatureEndResult {
     maxScrollY: number
 
     // Click target diversity
-    uniqueClickTargetCount: number
+    clickTargetIds: number[]
 
     // Text selection
     textSelectionCount: number
@@ -157,7 +201,6 @@ export class SessionFeatureRecorder {
     // Navigation features
     private quickBackCount = 0
     private pageVisitCount = 0
-    private pageRevisitCount = 0
     private visitedUrls: Set<string> = new Set()
     private lastNavigationTimestamp: number | null = null
     private lastNavigationUrl: string | null = null
@@ -416,9 +459,6 @@ export class SessionFeatureRecorder {
         }
 
         this.pageVisitCount++
-        if (this.visitedUrls.has(eventUrl)) {
-            this.pageRevisitCount++
-        }
         this.visitedUrls.add(eventUrl)
         this.urlChangedSinceLastClick = true
 
@@ -549,7 +589,7 @@ export class SessionFeatureRecorder {
 
             quickBackCount: this.quickBackCount,
             pageVisitCount: this.pageVisitCount,
-            pageRevisitCount: this.pageRevisitCount,
+            visitedUrls: Array.from(this.visitedUrls),
 
             consoleErrorCount: this.consoleErrorCount,
             consoleErrorAfterClickCount: this.consoleErrorAfterClickCount,
@@ -562,7 +602,7 @@ export class SessionFeatureRecorder {
 
             maxScrollY: this.maxScrollY,
 
-            uniqueClickTargetCount: this.clickTargetIds.size,
+            clickTargetIds: Array.from(this.clickTargetIds),
 
             textSelectionCount: this.textSelectionCount,
         }

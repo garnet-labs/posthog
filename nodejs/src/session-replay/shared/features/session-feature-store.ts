@@ -61,7 +61,7 @@ export class SessionFeatureStore {
             max_idle_gap_ms: block.features.maxIdleGapMs,
             quick_back_count: block.features.quickBackCount,
             page_visit_count: block.features.pageVisitCount,
-            page_revisit_count: block.features.pageRevisitCount,
+            visited_urls: block.features.visitedUrls,
             console_error_count: block.features.consoleErrorCount,
             console_error_after_click_count: block.features.consoleErrorAfterClickCount,
             network_request_count: block.features.networkRequestCount,
@@ -70,7 +70,7 @@ export class SessionFeatureStore {
             network_request_duration_sum_of_squares: block.features.networkRequestDurationSumOfSquares,
             network_request_duration_count: block.features.networkRequestDurationCount,
             max_scroll_y: block.features.maxScrollY,
-            unique_click_target_count: block.features.uniqueClickTargetCount,
+            click_target_ids: block.features.clickTargetIds,
             text_selection_count: block.features.textSelectionCount,
         }))
 

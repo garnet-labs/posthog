@@ -729,7 +729,7 @@ describe('SessionFeatureRecorder', () => {
             recorder.recordMessage(createMessage(events))
             const result = recorder.end()
 
-            expect(result.pageRevisitCount).toBe(1)
+            expect(result.visitedUrls).toEqual(['https://example.com/', 'https://example.com/about'])
         })
 
         it('should count quickBack when a different URL is navigated to within 2000ms', () => {
@@ -1047,7 +1047,7 @@ describe('SessionFeatureRecorder', () => {
                 },
             }) as unknown as SnapshotEvent
 
-        it('should count unique click targets by rrweb node id', () => {
+        it('should collect unique click target ids by rrweb node id', () => {
             const events = [
                 makeClickEventWithTarget(1000, 10),
                 makeClickEventWithTarget(2000, 20),
@@ -1056,23 +1056,25 @@ describe('SessionFeatureRecorder', () => {
             recorder.recordMessage(createMessage(events))
             const result = recorder.end()
 
-            expect(result.uniqueClickTargetCount).toBe(2)
+            expect(result.clickTargetIds).toEqual(expect.arrayContaining([10, 20]))
+            expect(result.clickTargetIds).toHaveLength(2)
         })
 
-        it('should return 0 when no clicks occur', () => {
+        it('should return empty array when no clicks occur', () => {
             recorder.recordMessage(createMessage([makeKeypressEvent(1000)]))
             const result = recorder.end()
 
-            expect(result.uniqueClickTargetCount).toBe(0)
+            expect(result.clickTargetIds).toEqual([])
         })
 
-        it('should count each distinct target exactly once across messages', () => {
+        it('should collect each distinct target exactly once across messages', () => {
             recorder.recordMessage(createMessage([makeClickEventWithTarget(1000, 5)]))
             recorder.recordMessage(createMessage([makeClickEventWithTarget(2000, 5)]))
             recorder.recordMessage(createMessage([makeClickEventWithTarget(3000, 15)]))
             const result = recorder.end()
 
-            expect(result.uniqueClickTargetCount).toBe(2)
+            expect(result.clickTargetIds).toEqual(expect.arrayContaining([5, 15]))
+            expect(result.clickTargetIds).toHaveLength(2)
         })
     })
 
@@ -1118,7 +1120,8 @@ describe('SessionFeatureRecorder', () => {
             expect(result.networkRequestDurationSumOfSquares).toBe(0)
             expect(result.networkRequestDurationCount).toBe(0)
             expect(result.maxScrollY).toBe(0)
-            expect(result.uniqueClickTargetCount).toBe(0)
+            expect(result.clickTargetIds).toEqual([])
+            expect(result.visitedUrls).toEqual([])
             expect(result.textSelectionCount).toBe(0)
         })
     })
