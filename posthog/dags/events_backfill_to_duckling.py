@@ -10,7 +10,7 @@ instances with their own RDS catalog and S3 bucket.
 
 Architecture:
     DuckLakeCatalog (Django model)
-        │ lookup by team_id
+        │ lookup by team_id → organization_id
         ▼
     ClickHouse (events table)
         │ export via s3() - bucket policy allows ClickHouse EC2 role
@@ -68,7 +68,7 @@ from posthog.dags.events_backfill_to_ducklake import (
     EXPECTED_DUCKLAKE_COLUMNS,
     MAX_RETRY_ATTEMPTS,
 )
-from posthog.ducklake.common import attach_catalog, escape, get_ducklake_catalog_for_team, get_org_config
+from posthog.ducklake.common import attach_catalog, escape, get_ducklake_catalog_by_team_org, get_org_config
 from posthog.ducklake.models import DuckLakeCatalog
 from posthog.ducklake.storage import configure_cross_account_connection
 
@@ -1483,7 +1483,7 @@ def duckling_events_backfill(context: AssetExecutionContext, config: DucklingBac
     )
 
     # Look up the duckling configuration
-    catalog = get_ducklake_catalog_for_team(team_id)
+    catalog = get_ducklake_catalog_by_team_org(team_id)
     if catalog is None:
         raise ValueError(f"No DuckLakeCatalog found for team_id={team_id}")
 
@@ -1621,7 +1621,7 @@ def duckling_persons_backfill(context: AssetExecutionContext, config: DucklingBa
         run_id=run_id,
     )
 
-    catalog = get_ducklake_catalog_for_team(team_id)
+    catalog = get_ducklake_catalog_by_team_org(team_id)
     if catalog is None:
         raise ValueError(f"No DuckLakeCatalog found for team_id={team_id}")
 
@@ -1957,6 +1957,9 @@ def duckling_events_full_backfill_sensor(
 
         team_id = catalog.team_id
         if team_id is None:
+            context.log.warning(
+                f"DuckLakeCatalog id={catalog.id} has no team_id — backfill requires a team-backed catalog, skipping"
+            )
             continue
 
         # Determine start month - use cached value if resuming same team

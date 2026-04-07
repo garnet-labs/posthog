@@ -1812,7 +1812,11 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         from posthog.ducklake.client import execute_ducklake_query
 
         try:
-            result = execute_ducklake_query(self.team_id, query=HogQLQuery(query=query["query"]))
+            result = execute_ducklake_query(
+                self.team_id,
+                query=HogQLQuery(query=query["query"]),
+                organization_id=str(self.team.organization_id),
+            )
             response_data: dict = {
                 "results": result.results,
                 "columns": result.columns,

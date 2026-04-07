@@ -31,13 +31,13 @@ class DuckLakeTableResult:
     file_size_delta_bytes: int = 0
 
 
-def _make_duckgres_conninfo(team_id: int) -> str:
+def _make_duckgres_conninfo(team_id: int, *, organization_id: str | None = None) -> str:
     from posthog.ducklake.common import _duckgres_dev_config, _get_org_id_for_team
 
     if is_dev_mode():
         config = _duckgres_dev_config()
     else:
-        org_id = _get_org_id_for_team(team_id)
+        org_id = organization_id or _get_org_id_for_team(team_id)
         config = get_duckgres_config_for_org(org_id)
     return make_conninfo(
         host=config["DUCKGRES_HOST"],
@@ -85,11 +85,15 @@ def execute_ducklake_query(
     *,
     sql: str | None = None,
     query: HogQLQuery | None = None,
+    organization_id: str | None = None,
 ) -> DuckLakeQueryResult:
     """Execute a query against a team's duckgres server.
 
     Accepts either raw SQL or a HogQLQuery (which gets compiled to
     Postgres-dialect SQL). Exactly one of `sql` or `query` must be provided.
+
+    Pass organization_id to skip the Team→Organization lookup when org
+    context is already available from the caller.
     """
     if sql and query:
         raise ValueError("Provide either sql or query, not both")
@@ -102,7 +106,7 @@ def execute_ducklake_query(
 
     assert sql is not None
 
-    conninfo = _make_duckgres_conninfo(team_id)
+    conninfo = _make_duckgres_conninfo(team_id, organization_id=organization_id)
     with psycopg.connect(conninfo) as conn:
         _set_search_path(conn)
         with conn.cursor() as cur:
@@ -139,16 +143,26 @@ def _calculate_table_size(conninfo: str, safe_schema: str, safe_table: str) -> i
         return 0
 
 
-def execute_ducklake_create_table(team_id: int, sql: str, schema_name: str, table_name: str) -> DuckLakeTableResult:
+def execute_ducklake_create_table(
+    team_id: int,
+    sql: str,
+    schema_name: str,
+    table_name: str,
+    *,
+    organization_id: str | None = None,
+) -> DuckLakeTableResult:
     """Execute a query via duckgres and materialize the result as a DuckLake table.
 
     Creates or replaces a table in the given schema using CREATE OR REPLACE TABLE ... AS.
     The table is stored natively in DuckLake (Parquet on S3 + Postgres catalog metadata).
+
+    Pass organization_id to skip the Team→Organization lookup when org
+    context is already available from the caller.
     """
     safe_schema = sanitize_ducklake_identifier(schema_name, default_prefix="shadow")
     safe_table = sanitize_ducklake_identifier(table_name, default_prefix="model")
     qualified = psql.Identifier(safe_schema, safe_table)
-    conninfo = _make_duckgres_conninfo(team_id)
+    conninfo = _make_duckgres_conninfo(team_id, organization_id=organization_id)
     # capture previous table size before replacing — best-effort, don't block materialization
     previous_file_size_bytes = _calculate_table_size(conninfo, safe_schema, safe_table)
     with psycopg.connect(conninfo) as conn:
