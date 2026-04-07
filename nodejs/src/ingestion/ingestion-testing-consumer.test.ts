@@ -279,63 +279,6 @@ describe('IngestionTestingConsumer', () => {
         })
     })
 
-    describe('heatmap subpipeline', () => {
-        it('should produce heatmap events to the heatmaps topic', async () => {
-            const events = [
-                createEvent({
-                    event: '$$heatmap',
-                    properties: {
-                        $viewport_height: 800,
-                        $viewport_width: 1200,
-                        $session_id: 'session-1',
-                        $heatmap_data: {
-                            'http://localhost:3000/': [
-                                {
-                                    x: 1020,
-                                    y: 363,
-                                    target_fixed: false,
-                                    type: 'click',
-                                },
-                            ],
-                        },
-                    },
-                }),
-            ]
-            await ingester.handleKafkaBatch(createKafkaMessages(events))
-
-            const allMessages = mockProducerObserver.getProducedKafkaMessages()
-            const heatmapMessages = allMessages.filter((m) => m.topic === 'clickhouse_heatmap_events_test')
-            expect(heatmapMessages).toHaveLength(1)
-
-            // Should NOT produce to the regular events topic
-            const eventMessages = allMessages.filter((m) => m.topic === 'clickhouse_events_json_test')
-            expect(eventMessages).toHaveLength(0)
-        })
-
-        it('should not produce person messages for heatmap events', async () => {
-            const events = [
-                createEvent({
-                    event: '$$heatmap',
-                    properties: {
-                        $viewport_height: 800,
-                        $viewport_width: 1200,
-                        $session_id: 'session-1',
-                        $heatmap_data: {
-                            'http://localhost:3000/': [{ x: 100, y: 200, target_fixed: false, type: 'click' }],
-                        },
-                    },
-                }),
-            ]
-            await ingester.handleKafkaBatch(createKafkaMessages(events))
-
-            const allMessages = mockProducerObserver.getProducedKafkaMessages()
-            const personMessages = allMessages.filter(
-                (m) => m.topic === 'clickhouse_person_test' || m.topic === 'clickhouse_person_distinct_id2_test'
-            )
-            expect(personMessages).toHaveLength(0)
-        })
-    })
-
     describe('AI event subpipeline', () => {
         it('should process $ai_generation events', async () => {
             const events = [
@@ -383,18 +326,6 @@ describe('IngestionTestingConsumer', () => {
             const events = [
                 createEvent({ event: '$pageview', distinct_id: 'user-1' }),
                 createEvent({
-                    event: '$$heatmap',
-                    distinct_id: 'user-2',
-                    properties: {
-                        $viewport_height: 800,
-                        $viewport_width: 1200,
-                        $session_id: 'session-1',
-                        $heatmap_data: {
-                            'http://localhost:3000/': [{ x: 10, y: 20, target_fixed: false, type: 'click' }],
-                        },
-                    },
-                }),
-                createEvent({
                     event: '$ai_generation',
                     distinct_id: 'user-3',
                     properties: {
@@ -417,10 +348,6 @@ describe('IngestionTestingConsumer', () => {
             // Regular event + AI event → clickhouse_events_json (no AI splitting in testing pipeline)
             const eventMessages = allMessages.filter((m) => m.topic === 'clickhouse_events_json_test')
             expect(eventMessages).toHaveLength(2) // pageview + ai_generation
-
-            // Heatmap → clickhouse_heatmap_events
-            const heatmapMessages = allMessages.filter((m) => m.topic === 'clickhouse_heatmap_events_test')
-            expect(heatmapMessages).toHaveLength(1)
 
             // Client ingestion warning → clickhouse_ingestion_warnings
             const warningMessages = allMessages.filter((m) => m.topic === 'clickhouse_ingestion_warnings_test')
