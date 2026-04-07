@@ -40,6 +40,9 @@ export class ClientWarningsConsumer {
                         throw new Error(`Output topic verification failed for: ${topicFailures.join(', ')}`)
                     }
                 },
+                getBackgroundWork: async () => {
+                    await promiseScheduler.waitForAll()
+                },
             },
             overrides
         )
