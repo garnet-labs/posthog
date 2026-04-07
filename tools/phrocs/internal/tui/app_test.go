@@ -1150,28 +1150,6 @@ func TestHint_renderedInFooter(t *testing.T) {
 	}
 }
 
-func TestHint_crashSetsHintImmediately(t *testing.T) {
-	m := readyModel(t, "backend", "frontend")
-
-	m = update(m, process.StatusMsg{Name: "backend", Status: process.StatusCrashed})
-	if m.hintText == "" {
-		t.Error("expected crash hint")
-	}
-	if !strings.Contains(m.hintText, "backend crashed") {
-		t.Errorf("expected crash hint to mention process name, got %q", m.hintText)
-	}
-}
-
-func TestHint_crashDoesNotOverrideExisting(t *testing.T) {
-	m := readyModel(t, "backend", "frontend")
-	m.hintText = "existing hint"
-
-	m = update(m, process.StatusMsg{Name: "backend", Status: process.StatusCrashed})
-	if m.hintText != "existing hint" {
-		t.Errorf("crash should not override existing hint, got %q", m.hintText)
-	}
-}
-
 func TestHint_notShownInModalModes(t *testing.T) {
 	modes := []struct {
 		name string

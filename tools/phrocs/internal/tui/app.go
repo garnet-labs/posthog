@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -242,12 +241,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sortServices()
 		m.updateProcKeys()
-
-		if msg.Status == process.StatusCrashed && m.hintText == "" && !m.isAnyModalMode() {
-			m.hintText = fmt.Sprintf("%s crashed -- press 'r' to restart or 'i' for details", msg.Name)
-			m.hintSecsLeft = hintDurationSecs
-			cmds = append(cmds, hintCountdownTick())
-		}
 
 	case process.FocusMsg:
 		m.dbg("focus: proc=%s (via IPC)", msg.Name)
