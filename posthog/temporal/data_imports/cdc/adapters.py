@@ -53,11 +53,18 @@ def get_cdc_adapter(source: ExternalDataSource) -> CDCSourceAdapter:
     """
     from posthog.temporal.data_imports.sources.postgres.cdc.adapter import PostgresCDCAdapter
 
-    adapters: dict[str, CDCSourceAdapter] = {
-        "Postgres": PostgresCDCAdapter(),
+    from products.data_warehouse.backend.types import ExternalDataSourceType
+
+    adapters: dict[ExternalDataSourceType, CDCSourceAdapter] = {
+        ExternalDataSourceType.POSTGRES: PostgresCDCAdapter(),
     }
 
-    adapter = adapters.get(source.source_type)
+    try:
+        source_type = ExternalDataSourceType(source.source_type)
+    except ValueError as e:
+        raise ValueError(f"CDC is not supported for source type: {source.source_type}") from e
+
+    adapter = adapters.get(source_type)
     if adapter is None:
         raise ValueError(f"CDC is not supported for source type: {source.source_type}")
     return adapter

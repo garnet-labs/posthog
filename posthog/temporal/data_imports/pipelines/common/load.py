@@ -126,8 +126,6 @@ async def _seed_cdc_companion_from_snapshot(
     """
     import asyncio
 
-    import pyarrow as pa
-
     from posthog.temporal.data_imports.cdc.batcher import (
         CDC_OP_COLUMN,
         CDC_TIMESTAMP_COLUMN,
