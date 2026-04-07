@@ -11,6 +11,7 @@ import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig } from '../common/config'
 import { defaultConfig, overrideConfigWithEnv } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
+import { ProducerName, registerProducers } from '../ingestion/common/producers'
 import {
     DatabaseConnectionConfig,
     KafkaBrokerConfig,
@@ -29,7 +30,6 @@ import {
 } from '../ingestion/error-tracking/config'
 import { registerErrorTrackingOutputs } from '../ingestion/error-tracking/config/outputs'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
-import { ProducerName, registerProducers } from '../ingestion/error-tracking/outputs/producers'
 import { KafkaProducerRegistry } from '../ingestion/outputs'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { PluginServerService, RedisPool } from '../types'

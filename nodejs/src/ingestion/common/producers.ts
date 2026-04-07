@@ -1,4 +1,5 @@
 import type { AllowedConfigKey } from '../outputs/kafka-producer-config'
+import { KafkaProducerRegistryBuilder } from '../outputs/kafka-producer-registry-builder'
 
 /**
  * DEFAULT uses the existing KAFKA_PRODUCER_* env vars — backwards compatible
@@ -75,3 +76,10 @@ export const WARPSTREAM_PRODUCER_CONFIG_MAP = {
 /** The config keys referenced by `WARPSTREAM_PRODUCER_CONFIG_MAP`. */
 export type WarpstreamProducerConfigKey =
     (typeof WARPSTREAM_PRODUCER_CONFIG_MAP)[keyof typeof WARPSTREAM_PRODUCER_CONFIG_MAP]
+
+/** Register all producers on the builder. Call `.build(config)` to resolve. */
+export function registerProducers(kafkaClientRack: string | undefined) {
+    return new KafkaProducerRegistryBuilder(kafkaClientRack)
+        .register(DEFAULT_PRODUCER, DEFAULT_PRODUCER_CONFIG_MAP)
+        .register(WARPSTREAM_PRODUCER, WARPSTREAM_PRODUCER_CONFIG_MAP)
+}
