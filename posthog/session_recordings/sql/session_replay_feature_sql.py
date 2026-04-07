@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     max_idle_gap_ms Float64,
     quick_back_count Int64,
     page_visit_count Int64,
-    page_revisit_count Int64,
+    visited_urls Array(String),
     console_error_count Int64,
     console_error_after_click_count Int64,
     network_request_count Int64,
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     network_request_duration_sum_of_squares Float64,
     network_request_duration_count Int64,
     max_scroll_y Float64,
-    unique_click_target_count Int64,
+    click_target_ids Array(Int64),
     text_selection_count Int64
 ) ENGINE = {engine}
 """
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     max_idle_gap_ms SimpleAggregateFunction(max, Float64),
     quick_back_count SimpleAggregateFunction(sum, Int64),
     page_visit_count SimpleAggregateFunction(sum, Int64),
-    page_revisit_count SimpleAggregateFunction(sum, Int64),
+    unique_url_count AggregateFunction(uniqExact, String),
     console_error_count SimpleAggregateFunction(sum, Int64),
     console_error_after_click_count SimpleAggregateFunction(sum, Int64),
     network_request_count SimpleAggregateFunction(sum, Int64),
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     network_request_duration_sum_of_squares SimpleAggregateFunction(sum, Float64),
     network_request_duration_count SimpleAggregateFunction(sum, Int64),
     max_scroll_y SimpleAggregateFunction(max, Float64),
-    unique_click_target_count SimpleAggregateFunction(sum, Int64),
+    unique_click_target_count AggregateFunction(uniqExact, Int64),
     text_selection_count SimpleAggregateFunction(sum, Int64)
 ) ENGINE = {engine}
 """
@@ -175,7 +175,7 @@ sum(inter_action_gap_sum_of_squares_ms) as inter_action_gap_sum_of_squares_ms,
 max(max_idle_gap_ms) as max_idle_gap_ms,
 sum(quick_back_count) as quick_back_count,
 sum(page_visit_count) as page_visit_count,
-sum(page_revisit_count) as page_revisit_count,
+uniqExactArrayState(visited_urls) as unique_url_count,
 sum(console_error_count) as console_error_count,
 sum(console_error_after_click_count) as console_error_after_click_count,
 sum(network_request_count) as network_request_count,
@@ -184,7 +184,7 @@ sum(network_request_duration_sum) as network_request_duration_sum,
 sum(network_request_duration_sum_of_squares) as network_request_duration_sum_of_squares,
 sum(network_request_duration_count) as network_request_duration_count,
 max(max_scroll_y) as max_scroll_y,
-sum(unique_click_target_count) as unique_click_target_count,
+uniqExactArrayState(click_target_ids) as unique_click_target_count,
 sum(text_selection_count) as text_selection_count
 FROM {database}.kafka_session_replay_features
 GROUP BY session_id, team_id
