@@ -49,11 +49,11 @@ class CDCExtractionWorkflow(PostHogWorkflow):
                 team_id=inputs.team_id,
                 source_id=inputs.source_id,
             ),
-            start_to_close_timeout=dt.timedelta(minutes=30),
-            heartbeat_timeout=dt.timedelta(minutes=5),
+            start_to_close_timeout=dt.timedelta(hours=2),
+            heartbeat_timeout=dt.timedelta(minutes=10),
             retry_policy=RetryPolicy(
-                initial_interval=dt.timedelta(seconds=10),
-                maximum_interval=dt.timedelta(seconds=120),
+                initial_interval=dt.timedelta(seconds=30),
+                maximum_interval=dt.timedelta(minutes=5),
                 maximum_attempts=3,
             ),
         )
