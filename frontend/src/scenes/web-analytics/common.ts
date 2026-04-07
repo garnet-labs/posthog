@@ -82,6 +82,13 @@ export enum TileId {
     MARKETING = 'MARKETING',
     MARKETING_CAMPAIGN_BREAKDOWN = 'MARKETING_CAMPAIGN_BREAKDOWN',
     MARKETING_NON_INTEGRATED_CONVERSIONS = 'MARKETING_NON_INTEGRATED_CONVERSIONS',
+
+    // Bot Analytics Tiles
+    BOT_OVERVIEW = 'BOT_OVERVIEW',
+    BOT_TRENDS = 'BOT_TRENDS',
+    BOT_PATHS = 'BOT_PATHS',
+    BOT_SOURCES = 'BOT_SOURCES',
+    BOT_AI_REFERRALS = 'BOT_AI_REFERRALS',
 }
 
 export enum ProductTab {
@@ -92,9 +99,12 @@ export enum ProductTab {
     MARKETING = 'marketing',
     HEALTH = 'health',
     LIVE = 'live',
+    BOT_ANALYTICS = 'bot-analytics',
 }
 
 export type DeviceType = 'Desktop' | 'Mobile'
+
+export type BotTrafficFilter = 'regular' | 'bot' | 'all'
 
 export type WebVitalsPercentile = PropertyMathType.P75 | PropertyMathType.P90 | PropertyMathType.P99
 
