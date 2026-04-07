@@ -1,6 +1,9 @@
+from datetime import UTC, datetime
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from parameterized import parameterized
 from rest_framework import status
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
@@ -75,6 +78,8 @@ class TestSubscriptionTemporal(APILicensedTest):
             "id": data["id"],
             "dashboard": None,
             "insight": self.insight.id,
+            "insight_short_id": self.insight.short_id,
+            "resource_name": self.insight.name or self.insight.derived_name,
             "dashboard_export_insights": [],
             "target_type": "email",
             "target_value": "test@posthog.com",
@@ -589,3 +594,219 @@ class TestSubscriptionTemporal(APILicensedTest):
         assert delivery_team2 is not None
         assert sub_team1.integration_id == delivery_team1.id
         assert sub_team2.integration_id == delivery_team2.id
+
+    def test_list_subscriptions_defaults_to_newest_created_first(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        r1 = self._create_subscription(title="Older")
+        assert r1.status_code == status.HTTP_201_CREATED
+        first_id = r1.json()["id"]
+
+        r2 = self._create_subscription(title="Newer")
+        assert r2.status_code == status.HTTP_201_CREATED
+        second_id = r2.json()["id"]
+
+        list_res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/")
+        assert list_res.status_code == status.HTTP_200_OK
+        results = list_res.json()["results"]
+        ids = [row["id"] for row in results]
+        assert ids.index(second_id) < ids.index(first_id)
+
+    def test_list_subscriptions_order_by_next_delivery_date(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        r1 = self._create_subscription(title="Later delivery")
+        r2 = self._create_subscription(title="Earlier delivery")
+        assert r1.status_code == status.HTTP_201_CREATED
+        assert r2.status_code == status.HTTP_201_CREATED
+        first_id = r1.json()["id"]
+        second_id = r2.json()["id"]
+
+        Subscription.objects.filter(id=first_id).update(next_delivery_date=datetime(2030, 6, 1, tzinfo=UTC))
+        Subscription.objects.filter(id=second_id).update(next_delivery_date=datetime(2030, 1, 1, tzinfo=UTC))
+
+        asc_res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"ordering": "next_delivery_date"})
+        assert asc_res.status_code == status.HTTP_200_OK
+        asc_ids = [row["id"] for row in asc_res.json()["results"]]
+        assert asc_ids.index(second_id) < asc_ids.index(first_id)
+
+        desc_res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"ordering": "-next_delivery_date"})
+        assert desc_res.status_code == status.HTTP_200_OK
+        desc_ids = [row["id"] for row in desc_res.json()["results"]]
+        assert desc_ids.index(first_id) < desc_ids.index(second_id)
+
+    @parameterized.expand(
+        [
+            ("title",),
+            ("-title",),
+            ("created_at",),
+            ("-created_at",),
+            ("created_by__email",),
+            ("-created_by__email",),
+        ]
+    )
+    def test_list_subscriptions_accepts_ordering_param(self, mock_sync, ordering):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"ordering": ordering})
+        assert res.status_code == status.HTTP_200_OK
+
+    def test_list_subscriptions_search_filters_by_title(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        self._create_subscription(title="UniqueSearchableTitle")
+        self._create_subscription(title="OtherThing")
+
+        list_res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"search": "UniqueSearchableTitle"})
+        assert list_res.status_code == status.HTTP_200_OK
+        results = list_res.json()["results"]
+        assert len(results) == 1
+        assert results[0]["title"] == "UniqueSearchableTitle"
+
+    def test_list_subscriptions_filter_by_resource_type(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        self.dashboard.tiles.create(insight=self.insight)
+        dash_res = self.client.post(
+            f"/api/projects/{self.team.id}/subscriptions",
+            {
+                "dashboard": self.dashboard.id,
+                "dashboard_export_insights": [self.insight.id],
+                "target_type": "email",
+                "target_value": "test@posthog.com",
+                "frequency": "weekly",
+                "interval": 1,
+                "start_date": "2022-01-01T00:00:00",
+                "title": "Dashboard sub",
+            },
+        )
+        assert dash_res.status_code == status.HTTP_201_CREATED
+        dash_id = dash_res.json()["id"]
+
+        insight_res = self._create_subscription(title="Insight sub")
+        assert insight_res.status_code == status.HTTP_201_CREATED
+        insight_id = insight_res.json()["id"]
+
+        only_insight = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"resource_type": "insight"})
+        assert only_insight.status_code == status.HTTP_200_OK
+        ids = {r["id"] for r in only_insight.json()["results"]}
+        assert insight_id in ids
+        assert dash_id not in ids
+
+        only_dashboard = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"resource_type": "dashboard"})
+        assert only_dashboard.status_code == status.HTTP_200_OK
+        ids_d = {r["id"] for r in only_dashboard.json()["results"]}
+        assert dash_id in ids_d
+        assert insight_id not in ids_d
+
+    def test_list_subscriptions_filter_by_created_by_uuid(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        self._create_subscription(title="Mine")
+        other_user = self._create_user("other@posthog.com")
+
+        self.client.force_login(other_user)
+        self._create_subscription(title="Theirs")
+
+        self.client.force_login(self.user)
+        list_res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"created_by": str(self.user.uuid)})
+        assert list_res.status_code == status.HTTP_200_OK
+        results = list_res.json()["results"]
+        assert len(results) == 1
+        assert results[0]["title"] == "Mine"
+
+    def test_list_subscriptions_invalid_created_by_returns_400(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"created_by": "not-a-uuid"})
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "created_by" in res.json()
+
+    def test_list_subscriptions_search_matches_insight_name(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        named_insight = Insight.objects.create(
+            filters=Filter(data=self.insight_filter_dict).to_dict(),
+            team=self.team,
+            created_by=self.user,
+            name="UniqueInsightNameForSearchTest",
+        )
+        match_res = self._create_subscription(insight=named_insight.id, title="DifferentTitle")
+        assert match_res.status_code == status.HTTP_201_CREATED
+        self._create_subscription(title="Noise")
+
+        list_res = self.client.get(
+            f"/api/projects/{self.team.id}/subscriptions/", {"search": "UniqueInsightNameForSearchTest"}
+        )
+        assert list_res.status_code == status.HTTP_200_OK
+        results = list_res.json()["results"]
+        assert len(results) == 1
+        assert results[0]["title"] == "DifferentTitle"
+
+    def test_list_subscriptions_filter_by_target_type(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        self._create_subscription(title="Email sub")
+        slack_integration = Integration.objects.create(team=self.team, kind="slack", config={})
+        slack_res = self._create_subscription(
+            title="Slack sub",
+            target_type="slack",
+            target_value="C1234|#general",
+            integration_id=slack_integration.id,
+        )
+        assert slack_res.status_code == status.HTTP_201_CREATED
+        slack_id = slack_res.json()["id"]
+
+        only_slack = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": "slack"})
+        assert only_slack.status_code == status.HTTP_200_OK
+        slack_results = only_slack.json()["results"]
+        assert len(slack_results) == 1
+        assert slack_results[0]["id"] == slack_id
+        assert slack_results[0]["target_type"] == "slack"
+
+    def test_list_subscriptions_invalid_target_type_returns_400(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": "not_a_channel"})
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert res.json().get("attr") == "target_type"
+
+    def test_list_subscriptions_filter_by_target_type_webhook(self, mock_sync):
+        mock_client = MagicMock()
+        mock_client.start_workflow = AsyncMock()
+        mock_sync.return_value = mock_client
+
+        webhook_res = self._create_subscription(
+            title="Webhook sub",
+            target_type="webhook",
+            target_value="https://example.com/hook",
+        )
+        assert webhook_res.status_code == status.HTTP_201_CREATED
+        webhook_id = webhook_res.json()["id"]
+
+        only_webhook = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": "webhook"})
+        assert only_webhook.status_code == status.HTTP_200_OK
+        webhook_results = only_webhook.json()["results"]
+        assert len(webhook_results) == 1
+        assert webhook_results[0]["id"] == webhook_id
+        assert webhook_results[0]["target_type"] == "webhook"
