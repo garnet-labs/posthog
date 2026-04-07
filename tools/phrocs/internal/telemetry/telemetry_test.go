@@ -42,6 +42,14 @@ func enabledConfig() configFile {
 	}
 }
 
+// clearPending drains accumulated stats so tests don't leak between each other.
+func clearPending(t *testing.T) {
+	t.Helper()
+	mu.Lock()
+	pending = nil
+	mu.Unlock()
+}
+
 func TestLoadConfig_missingFile(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := loadConfig()
@@ -143,7 +151,9 @@ func TestIsEnabled_noFirstRunNotice(t *testing.T) {
 	}
 }
 
-func TestTrackProcessCompleted_sendsCorrectPayload(t *testing.T) {
+func TestFlush_sendsCorrectPayload(t *testing.T) {
+	clearPending(t)
+
 	var received atomic.Value
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +248,59 @@ func TestTrackProcessCompleted_sendsCorrectPayload(t *testing.T) {
 	}
 }
 
-func TestTrackProcessCompleted_nilExitCodeOmitted(t *testing.T) {
+func TestFlush_batchesMultipleEvents(t *testing.T) {
+	clearPending(t)
+
+	var received atomic.Value
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received.Store(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("CI", "")
+	t.Setenv("POSTHOG_TELEMETRY_OPT_OUT", "")
+	t.Setenv("DO_NOT_TRACK", "")
+	t.Setenv("POSTHOG_TELEMETRY_HOST", srv.URL)
+	writeConfig(t, enabledConfig())
+
+	TrackProcessCompleted(ProcessStats{Name: "web", Status: "done", DurationS: 10})
+	TrackProcessCompleted(ProcessStats{Name: "worker", Status: "crashed", DurationS: 5})
+	TrackProcessCompleted(ProcessStats{Name: "plugin-server", Status: "done", DurationS: 20})
+
+	Flush(2 * time.Second)
+
+	raw, ok := received.Load().([]byte)
+	if !ok || raw == nil {
+		t.Fatal("server did not receive a request")
+	}
+
+	var payload struct {
+		Batch []struct {
+			Properties map[string]any `json:"properties"`
+		} `json:"batch"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if len(payload.Batch) != 3 {
+		t.Fatalf("batch length: got %d, want 3", len(payload.Batch))
+	}
+
+	names := []string{"web", "worker", "plugin-server"}
+	for i, ev := range payload.Batch {
+		if ev.Properties["process_name"] != names[i] {
+			t.Errorf("batch[%d] process_name: got %v, want %q", i, ev.Properties["process_name"], names[i])
+		}
+	}
+}
+
+func TestFlush_nilExitCodeOmitted(t *testing.T) {
+	clearPending(t)
+
 	var received atomic.Value
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +341,9 @@ func TestTrackProcessCompleted_nilExitCodeOmitted(t *testing.T) {
 	}
 }
 
-func TestTrackProcessCompleted_disabledNoRequest(t *testing.T) {
+func TestFlush_disabledNoRequest(t *testing.T) {
+	clearPending(t)
+
 	var called atomic.Int32
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,7 +365,9 @@ func TestTrackProcessCompleted_disabledNoRequest(t *testing.T) {
 	}
 }
 
-func TestTrackProcessCompleted_noAnonymousID(t *testing.T) {
+func TestFlush_noAnonymousID(t *testing.T) {
+	clearPending(t)
+
 	var called atomic.Int32
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +395,8 @@ func TestTrackProcessCompleted_noAnonymousID(t *testing.T) {
 }
 
 func TestFlush_respectsTimeout(t *testing.T) {
+	clearPending(t)
+
 	unblock := make(chan struct{})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,6 +421,30 @@ func TestFlush_respectsTimeout(t *testing.T) {
 
 	if elapsed > 1*time.Second {
 		t.Errorf("Flush took %v, expected it to respect the 200ms timeout", elapsed)
+	}
+}
+
+func TestFlush_noPendingNoRequest(t *testing.T) {
+	clearPending(t)
+
+	var called atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("CI", "")
+	t.Setenv("POSTHOG_TELEMETRY_OPT_OUT", "")
+	t.Setenv("DO_NOT_TRACK", "")
+	t.Setenv("POSTHOG_TELEMETRY_HOST", srv.URL)
+	writeConfig(t, enabledConfig())
+
+	Flush(500 * time.Millisecond)
+
+	if called.Load() != 0 {
+		t.Error("expected no HTTP request when no events are pending")
 	}
 }
 

@@ -21,7 +21,8 @@ const defaultHost = "https://us.i.posthog.com"
 
 var (
 	httpClient = &http.Client{Timeout: 5 * time.Second}
-	inflight   sync.WaitGroup
+	mu         sync.Mutex
+	pending    []ProcessStats
 )
 
 // configFile mirrors the relevant fields from hogli_telemetry.json.
@@ -83,9 +84,17 @@ type ProcessStats struct {
 	CPUTimeS   float64
 }
 
-// TrackProcessCompleted queues a fire-and-forget POST with the process's
-// peak resource usage. Safe to call from any goroutine.
+// TrackProcessCompleted accumulates process stats to be sent in a single
+// batch when Flush is called. Safe to call from any goroutine.
 func TrackProcessCompleted(stats ProcessStats) {
+	mu.Lock()
+	defer mu.Unlock()
+	pending = append(pending, stats)
+}
+
+// Flush sends all accumulated process stats in a single batched POST.
+// Call once before phrocs exits.
+func Flush(timeout time.Duration) {
 	if !isEnabled() {
 		return
 	}
@@ -94,30 +103,41 @@ func TrackProcessCompleted(stats ProcessStats) {
 		return
 	}
 
-	props := map[string]any{
-		"$process_person_profile": false,
-		"$groups":                 map[string]string{"project": "hogli"},
-		"process_name":            stats.Name,
-		"status":                  stats.Status,
-		"duration_s":              stats.DurationS,
-		"peak_mem_rss_mb":         stats.PeakMemMB,
-		"peak_cpu_percent":        stats.PeakCPUPct,
-		"cpu_time_s":              stats.CPUTimeS,
-	}
-	if stats.ExitCode != nil {
-		props["exit_code"] = *stats.ExitCode
+	mu.Lock()
+	batch := pending
+	pending = nil
+	mu.Unlock()
+
+	if len(batch) == 0 {
+		return
 	}
 
-	event := map[string]any{
-		"event":       "phrocs_process_completed",
-		"distinct_id": cfg.AnonymousID,
-		"properties":  props,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
+	events := make([]any, 0, len(batch))
+	for _, stats := range batch {
+		props := map[string]any{
+			"$process_person_profile": false,
+			"$groups":                 map[string]string{"project": "hogli"},
+			"process_name":            stats.Name,
+			"status":                  stats.Status,
+			"duration_s":              stats.DurationS,
+			"peak_mem_rss_mb":         stats.PeakMemMB,
+			"peak_cpu_percent":        stats.PeakCPUPct,
+			"cpu_time_s":              stats.CPUTimeS,
+		}
+		if stats.ExitCode != nil {
+			props["exit_code"] = *stats.ExitCode
+		}
+		events = append(events, map[string]any{
+			"event":       "phrocs_process_completed",
+			"distinct_id": cfg.AnonymousID,
+			"properties":  props,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 
 	body := map[string]any{
 		"api_key": apiKey,
-		"batch":   []any{event},
+		"batch":   events,
 	}
 
 	data, err := json.Marshal(body)
@@ -125,25 +145,15 @@ func TrackProcessCompleted(stats ProcessStats) {
 		return
 	}
 
-	inflight.Add(1)
+	done := make(chan struct{})
 	go func() {
-		defer inflight.Done()
-		url := host() + "/batch/"
-		resp, err := httpClient.Post(url, "application/json", bytes.NewReader(data))
+		defer close(done)
+		resp, err := httpClient.Post(host()+"/batch/", "application/json", bytes.NewReader(data))
 		if err == nil {
 			_ = resp.Body.Close()
 		}
 	}()
-}
 
-// Flush blocks until all in-flight telemetry POSTs complete or timeout
-// elapses. Call before phrocs exits.
-func Flush(timeout time.Duration) {
-	done := make(chan struct{})
-	go func() {
-		inflight.Wait()
-		close(done)
-	}()
 	select {
 	case <-done:
 	case <-time.After(timeout):
