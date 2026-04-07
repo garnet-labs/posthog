@@ -7,7 +7,7 @@ use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use metrics::{counter, histogram};
-use tracing::{debug, info_span, Level};
+use tracing::Level;
 
 use crate::config::CaptureMode;
 use crate::v1::context::Context;
@@ -95,18 +95,6 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
         let sink_str = self.name.as_str();
         let mode = self.capture_mode.as_tag();
 
-        let span = info_span!(
-            "v1_publish_batch",
-            sink = sink_str,
-            mode = mode,
-            token = %ctx.api_token,
-            path = %ctx.path,
-            batch_size = events.len(),
-            request_id = %ctx.request_id,
-            attempt = ctx.attempt,
-        );
-        let _guard = span.enter();
-
         // Pre-compute label values used across all counter calls in this batch.
         // `sink_str` and `mode` are &'static str (zero-cost); only path/attempt allocate.
         let path = ctx.path.clone();
@@ -118,6 +106,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 Level::ERROR,
                 ctx,
                 sink = sink_str,
+                mode = mode,
                 "producer not ready — rejecting batch"
             );
             return reject_publishable(
@@ -359,16 +348,22 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
 
         let summary = BatchSummary::from_results(&results);
         if summary.all_ok() {
-            debug!(%summary, "batch published");
+            crate::ctx_log!(Level::DEBUG, ctx,
+                sink = sink_str,
+                mode = mode,
+                %summary,
+                "batch published");
         } else if summary.succeeded == 0 {
             crate::ctx_log!(Level::ERROR, ctx,
                 sink = sink_str,
+                mode = mode,
                 %summary,
                 errors = ?summary.errors,
                 "batch fully failed");
         } else {
             crate::ctx_log!(Level::WARN, ctx,
                 sink = sink_str,
+                mode = mode,
                 %summary,
                 errors = ?summary.errors,
                 "batch partially failed");

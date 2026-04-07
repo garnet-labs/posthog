@@ -699,8 +699,7 @@ All error-related metrics use stable, low-cardinality tags derived from:
 
 | Level | When | Location |
 |---|---|---|
-| `info_span!("v1_publish_batch", ...)` | Wraps entire batch | `kafka/sink.rs` |
-| `debug!` | All events succeeded | `kafka/sink.rs` |
+| `DEBUG` (via `ctx_log!`) | All events succeeded | `kafka/sink.rs` |
 | `WARN` (via `ctx_log!`) | Partial batch failure | `kafka/sink.rs` |
 | `ERROR` (via `ctx_log!`) | Full batch failure | `kafka/sink.rs` |
 | `ERROR` (via `ctx_log!`) | Producer not ready | `kafka/sink.rs` |

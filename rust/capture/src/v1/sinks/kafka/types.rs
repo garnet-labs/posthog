@@ -96,6 +96,7 @@ impl KafkaSinkError {
 
 /// Kafka-specific implementation of [`SinkResult`]. Outcome is derived from
 /// the error -- no explicit outcome field.
+#[derive(Debug)]
 pub struct KafkaResult {
     uuid_key: String,
     error: Option<KafkaSinkError>,
