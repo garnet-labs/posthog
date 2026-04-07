@@ -2,7 +2,7 @@ from typing import Optional, Protocol, Union, cast, runtime_checkable
 
 from rest_framework.exceptions import ValidationError
 
-from posthog.schema import BreakdownAttributionType, BreakdownType, StepOrderValue
+from posthog.schema import BreakdownAttributionType, BreakdownType, FunnelsDataWarehouseNode, StepOrderValue
 
 from posthog.hogql import ast
 from posthog.hogql.constants import DEFAULT_RETURNED_ROWS, HogQLQuerySettings
@@ -122,6 +122,12 @@ class FunnelUDF(FunnelUDFMixin, FunnelBase):
         # The synthetic branch produces dummy placeholders, not real events/timestamps
         if self._include_matched_events() or self.context.includeTimestamp or self.context.includePrecedingTimestamp:
             return False
+        # Session aggregation needs person_id which the lightweight qualifying query doesn't include
+        if self._is_session_aggregation():
+            return False
+        # Data warehouse steps aren't in the events table so the qualifying query can't check them
+        if any(isinstance(s, FunnelsDataWarehouseNode) for s in self.context.query.series[:2]):
+            return False
         return True
 
     def _build_synthetic_branch(self) -> ast.SelectQuery:
@@ -138,7 +144,7 @@ class FunnelUDF(FunnelUDFMixin, FunnelBase):
         if self._is_session_aggregation():
             person_id_select = "any(person_id) as person_id,"
 
-        inner_event_query = self._get_inner_event_query()
+        inner_event_query = self._get_qualifying_event_query()
 
         # Must match the UDF's non-nullable Array(Float64) return type, otherwise the UNION ALL fails
         non_nullable_empty_float_array = "arrayMap(x -> assumeNotNull(x), arrayFilter(x -> 0, [toFloat(0)]))"
@@ -267,7 +273,7 @@ class FunnelUDF(FunnelUDFMixin, FunnelBase):
                 GROUP BY aggregation_target
                 HAVING countIf(step_0 = 1) > 0 AND countIf(step_1 = 1) > 0
             """,
-                {"iq": self._get_inner_event_query()},
+                {"iq": self._get_qualifying_event_query()},
             )
 
             assert inner_select.select_from is not None

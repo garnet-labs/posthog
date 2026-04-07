@@ -349,6 +349,14 @@ class FunnelBase(ABC):
 
         return funnel_events_query
 
+    def _get_qualifying_event_query(self) -> ast.SelectQuery:
+        """Lightweight event query with only aggregation_target, step_0, step_1.
+
+        Used by the pre-filter qualifying subquery and synthetic branch to avoid
+        scanning all step columns, exclusions, breakdowns, and extra fields.
+        """
+        return FunnelEventQuery(context=self.context).to_query(qualifying_only=True)
+
     def _get_cohort_breakdown_join(self) -> ast.JoinExpr:
         breakdown = self.context.breakdown
 

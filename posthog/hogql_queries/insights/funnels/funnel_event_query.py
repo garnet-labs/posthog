@@ -101,7 +101,9 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
 
         return result
 
-    def to_query(self, skip_entity_filter=False, skip_step_filter=False) -> ast.SelectQuery:
+    def to_query(
+        self, skip_entity_filter=False, skip_step_filter=False, qualifying_only=False
+    ) -> ast.SelectQuery:
         table_configs_to_steps: dict[str, TableConfigWithSteps] = {}
         seen_config_keys: dict[tuple[str, str, str, str], int] = {}
 
@@ -140,14 +142,21 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
 
         for key, config in table_configs_to_steps.items():
             if key == "events":
+                steps = cast(Sequence[tuple[int, EventsNode | ActionsNode]], config.steps_with_index)
+                if qualifying_only:
+                    steps = [(i, e) for i, e in steps if i < 2]
                 queries.append(
                     self._build_events_table_query(
-                        steps_with_index=cast(Sequence[tuple[int, EventsNode | ActionsNode]], config.steps_with_index),
+                        steps_with_index=steps,
                         skip_entity_filter=skip_entity_filter,
                         skip_step_filter=skip_step_filter,
+                        qualifying_only=qualifying_only,
                     )
                 )
             else:
+                if qualifying_only:
+                    # Data warehouse tables don't participate in the lightweight qualifying query
+                    continue
                 queries.append(
                     self._build_data_warehouse_table_query(
                         table_config_index=config.table_config_index,
@@ -176,11 +185,12 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
         steps_with_index: Sequence[tuple[int, EventsNode | ActionsNode]],
         skip_entity_filter: bool,
         skip_step_filter: bool,
+        qualifying_only: bool = False,
     ) -> ast.SelectQuery:
-        all_step_cols = self._get_funnel_cols()
+        all_step_cols = self._get_funnel_cols(qualifying_only=qualifying_only)
 
         select: list[ast.Expr] = [
-            ast.Alias(alias="timestamp", expr=ast.Field(chain=[self.EVENT_TABLE_ALIAS, "timestamp"])),
+            *([] if qualifying_only else [ast.Alias(alias="timestamp", expr=ast.Field(chain=[self.EVENT_TABLE_ALIAS, "timestamp"]))]),
             ast.Alias(alias="aggregation_target", expr=self._aggregation_target_expr()),
             *all_step_cols,
         ]
@@ -274,27 +284,32 @@ class FunnelEventQuery(DataWarehouseSchemaMixin):
         self,
         table_entity: Optional[FunnelsDataWarehouseNode] = None,
         table_config_index: Optional[int] = None,
+        qualifying_only: bool = False,
     ) -> list[ast.Expr]:
         cols: list[ast.Expr] = []
 
-        # extra fields
-        cols.extend(self._get_extra_fields(table_entity, table_config_index))
+        if not qualifying_only:
+            # extra fields
+            cols.extend(self._get_extra_fields(table_entity, table_config_index))
 
-        # step cols
-        for index, entity in enumerate(self.context.query.series):
-            step_col = self._get_step_col(step_entity=entity, table_entity=table_entity, step_index=index)
+        # step cols — only step_0 and step_1 for qualifying queries
+        series = self.context.query.series
+        step_range = range(min(2, len(series))) if qualifying_only else range(len(series))
+        for index in step_range:
+            step_col = self._get_step_col(step_entity=series[index], table_entity=table_entity, step_index=index)
             cols.append(step_col)
 
-        # exclusion cols
-        if self.context.funnelsFilter.exclusions:
-            for index, exclusions in enumerate(self.exclusions_by_index):
-                exclusion_col_expr = self._get_exclusions_col(
-                    exclusions=exclusions, table_entity=table_entity, step_index=index
-                )
-                cols.append(exclusion_col_expr)
+        if not qualifying_only:
+            # exclusion cols
+            if self.context.funnelsFilter.exclusions:
+                for index, exclusions in enumerate(self.exclusions_by_index):
+                    exclusion_col_expr = self._get_exclusions_col(
+                        exclusions=exclusions, table_entity=table_entity, step_index=index
+                    )
+                    cols.append(exclusion_col_expr)
 
-        # breakdown (attribution) col
-        cols.extend(self._get_breakdown_select_prop(table_entity))
+            # breakdown (attribution) col
+            cols.extend(self._get_breakdown_select_prop(table_entity))
 
         return cols
 
