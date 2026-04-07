@@ -101,9 +101,9 @@ fn test_kafka_config() -> super::config::Config {
 struct TestHarness {
     sink: KafkaSink<MockProducer>,
     producer: Arc<MockProducer>,
+    handle: lifecycle::Handle,
     ctx: Context,
-    // Keep the manager alive so handles remain valid.
-    _manager: lifecycle::Manager,
+    _monitor: lifecycle::MonitorGuard,
 }
 
 impl TestHarness {
@@ -118,6 +118,7 @@ impl TestHarness {
             ack_error: None,
             ack_delay: None,
             not_ready: false,
+            liveness: None,
         }
     }
 }
@@ -128,6 +129,7 @@ struct HarnessBuilder {
     ack_error: Option<fn() -> ProduceError>,
     ack_delay: Option<Duration>,
     not_ready: bool,
+    liveness: Option<(Duration, Duration)>,
 }
 
 impl HarnessBuilder {
@@ -156,12 +158,30 @@ impl HarnessBuilder {
         self
     }
 
+    fn with_liveness(mut self, deadline: Duration, poll_interval: Duration) -> Self {
+        self.liveness = Some((deadline, poll_interval));
+        self
+    }
+
     fn build(self) -> TestHarness {
-        let mut manager = lifecycle::Manager::builder("test")
+        let mut builder = lifecycle::Manager::builder("test")
             .with_trap_signals(false)
-            .build();
-        let handle = manager.register("kafka_sink_test", lifecycle::ComponentOptions::new());
+            .with_prestop_check(false);
+
+        if let Some((_, poll_interval)) = self.liveness {
+            builder = builder.with_health_poll_interval(poll_interval);
+        }
+
+        let mut manager = builder.build();
+
+        let mut opts = lifecycle::ComponentOptions::new();
+        if let Some((deadline, _)) = self.liveness {
+            opts = opts.with_liveness_deadline(deadline);
+        }
+        let handle = manager.register("kafka_sink_test", opts);
         handle.report_healthy();
+
+        let monitor = manager.monitor_background();
 
         let mut mock = MockProducer::new(SinkName::Msk, handle.clone());
         if let Some(f) = self.send_error {
@@ -196,17 +216,18 @@ impl HarnessBuilder {
             .collect(),
         };
 
-        let sink = KafkaSink::new(producers, sinks_config, CaptureMode::Events, handle);
+        let sink = KafkaSink::new(producers, sinks_config, CaptureMode::Events, handle.clone());
 
         TestHarness {
             sink,
             producer,
+            handle,
             ctx: {
                 let mut ctx = crate::v1::test_utils::test_context();
                 ctx.created_at = None;
                 ctx
             },
-            _manager: manager,
+            _monitor: monitor,
         }
     }
 }
@@ -522,7 +543,8 @@ async fn batch_summary_from_mixed_results() {
 
     assert_eq!(summary.total, 3);
     assert_eq!(summary.succeeded, 2);
-    assert_eq!(summary.failed, 1);
+    assert_eq!(summary.retriable, 0);
+    assert_eq!(summary.fatal, 1);
     assert_eq!(summary.timed_out, 0);
     assert!(!summary.all_ok());
     assert_eq!(summary.errors.get("serialization_failed").copied(), Some(1));
@@ -653,8 +675,193 @@ async fn batch_summary_with_timeouts() {
 
     assert_eq!(summary.total, 2);
     assert_eq!(summary.succeeded, 0);
+    assert_eq!(summary.retriable, 0);
+    assert_eq!(summary.fatal, 0);
     assert_eq!(summary.timed_out, 2);
-    assert_eq!(summary.failed, 0);
     assert!(!summary.all_ok());
     assert_eq!(summary.errors.get("timeout").copied(), Some(2));
+}
+
+// ===========================================================================
+// Health heartbeat tests
+//
+// Production-proportional timing (100x faster, same ratios):
+//   production: liveness_deadline=30s, health_poll=2s, produce_timeout=30s
+//   test:       liveness_deadline=300ms, health_poll=20ms, produce_timeout=300ms
+// ===========================================================================
+
+const HEALTH_TEST_LIVENESS_DEADLINE: Duration = Duration::from_millis(300);
+const HEALTH_TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const HEALTH_TEST_PRODUCE_TIMEOUT: Duration = Duration::from_millis(300);
+/// Sleep long enough for the liveness deadline to expire + poll to detect it.
+const HEALTH_TEST_UNHEALTHY_SLEEP: Duration = Duration::from_millis(500);
+/// Sleep just long enough for the poll to run, but well before deadline expiry.
+const HEALTH_TEST_HEALTHY_SLEEP: Duration = Duration::from_millis(50);
+
+// ---------------------------------------------------------------------------
+// Health: all events timeout -> no heartbeat -> is_healthy becomes false
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_not_refreshed_on_full_timeout() {
+    let h = TestHarness::builder()
+        .with_liveness(HEALTH_TEST_LIVENESS_DEADLINE, HEALTH_TEST_POLL_INTERVAL)
+        .ack_delay(Duration::from_secs(10))
+        .produce_timeout(HEALTH_TEST_PRODUCE_TIMEOUT)
+        .build();
+    let e1 = FakeEvent::ok("evt-1");
+    let e2 = FakeEvent::ok("evt-2");
+    let e3 = FakeEvent::ok("evt-3");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    for r in &results {
+        assert_eq!(r.outcome(), Outcome::Timeout);
+    }
+
+    tokio::time::sleep(HEALTH_TEST_UNHEALTHY_SLEEP).await;
+    assert!(
+        !h.handle.is_healthy(),
+        "handle should be unhealthy after full timeout batch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Health: all events fail at send (queue full) -> no heartbeat
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_not_refreshed_on_full_send_error() {
+    let h = TestHarness::builder()
+        .with_liveness(HEALTH_TEST_LIVENESS_DEADLINE, HEALTH_TEST_POLL_INTERVAL)
+        .produce_timeout(HEALTH_TEST_PRODUCE_TIMEOUT)
+        .send_error(|| ProduceError::Kafka {
+            code: RDKafkaErrorCode::QueueFull,
+            retriable: true,
+        })
+        .build();
+    let e1 = FakeEvent::ok("evt-1");
+    let e2 = FakeEvent::ok("evt-2");
+    let e3 = FakeEvent::ok("evt-3");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    for r in &results {
+        assert_eq!(r.outcome(), Outcome::RetriableError);
+    }
+
+    tokio::time::sleep(HEALTH_TEST_UNHEALTHY_SLEEP).await;
+    assert!(
+        !h.handle.is_healthy(),
+        "handle should be unhealthy after full send error batch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Health: all events fail at ack (delivery cancelled) -> no heartbeat
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_not_refreshed_on_full_ack_error() {
+    let h = TestHarness::builder()
+        .with_liveness(HEALTH_TEST_LIVENESS_DEADLINE, HEALTH_TEST_POLL_INTERVAL)
+        .produce_timeout(HEALTH_TEST_PRODUCE_TIMEOUT)
+        .ack_error(|| ProduceError::DeliveryCancelled)
+        .build();
+    let e1 = FakeEvent::ok("evt-1");
+    let e2 = FakeEvent::ok("evt-2");
+    let e3 = FakeEvent::ok("evt-3");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    for r in &results {
+        assert_eq!(r.outcome(), Outcome::RetriableError);
+    }
+
+    tokio::time::sleep(HEALTH_TEST_UNHEALTHY_SLEEP).await;
+    assert!(
+        !h.handle.is_healthy(),
+        "handle should be unhealthy after full ack error batch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Health: all events fail serialization -> no heartbeat
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_not_refreshed_on_full_serialization_error() {
+    let h = TestHarness::builder()
+        .with_liveness(HEALTH_TEST_LIVENESS_DEADLINE, HEALTH_TEST_POLL_INTERVAL)
+        .produce_timeout(HEALTH_TEST_PRODUCE_TIMEOUT)
+        .build();
+    let e1 = FakeEvent::ok("evt-1").with_payload(Err("bad".into()));
+    let e2 = FakeEvent::ok("evt-2").with_payload(Err("bad".into()));
+    let e3 = FakeEvent::ok("evt-3").with_payload(Err("bad".into()));
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    for r in &results {
+        assert_eq!(r.outcome(), Outcome::FatalError);
+    }
+
+    tokio::time::sleep(HEALTH_TEST_UNHEALTHY_SLEEP).await;
+    assert!(
+        !h.handle.is_healthy(),
+        "handle should be unhealthy after full serialization error batch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Health: all events succeed -> heartbeat refreshed -> is_healthy stays true
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_refreshed_on_full_success() {
+    let h = TestHarness::builder()
+        .with_liveness(HEALTH_TEST_LIVENESS_DEADLINE, HEALTH_TEST_POLL_INTERVAL)
+        .produce_timeout(HEALTH_TEST_PRODUCE_TIMEOUT)
+        .build();
+    let e1 = FakeEvent::ok("evt-1");
+    let e2 = FakeEvent::ok("evt-2");
+    let e3 = FakeEvent::ok("evt-3");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    for r in &results {
+        assert_eq!(r.outcome(), Outcome::Success);
+    }
+
+    tokio::time::sleep(HEALTH_TEST_HEALTHY_SLEEP).await;
+    assert!(
+        h.handle.is_healthy(),
+        "handle should stay healthy after successful batch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Health: mixed batch (some succeed, some fail) -> heartbeat refreshed
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_refreshed_on_partial_success() {
+    let h = TestHarness::builder()
+        .with_liveness(HEALTH_TEST_LIVENESS_DEADLINE, HEALTH_TEST_POLL_INTERVAL)
+        .produce_timeout(HEALTH_TEST_PRODUCE_TIMEOUT)
+        .build();
+    let e1 = FakeEvent::ok("evt-1");
+    let e2 = FakeEvent::ok("evt-2").with_payload(Err("bad".into()));
+    let e3 = FakeEvent::ok("evt-3");
+    let events: Vec<&(dyn Event + Send + Sync)> = vec![&e1, &e2, &e3];
+
+    let results = h.sink.publish_batch(SinkName::Msk, &h.ctx, &events).await;
+    let summary = BatchSummary::from_results(&results);
+    assert!(summary.succeeded > 0);
+    assert!(summary.fatal > 0);
+
+    tokio::time::sleep(HEALTH_TEST_HEALTHY_SLEEP).await;
+    assert!(
+        h.handle.is_healthy(),
+        "handle should stay healthy when at least one event succeeded"
+    );
 }

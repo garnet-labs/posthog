@@ -116,7 +116,8 @@ impl SinkResult for SinkOutput {
 pub struct BatchSummary {
     pub total: usize,
     pub succeeded: usize,
-    pub failed: usize,
+    pub retriable: usize,
+    pub fatal: usize,
     pub timed_out: usize,
     /// Counts keyed by cause tag (e.g. "queue_full", "timeout").
     pub errors: HashMap<String, usize>,
@@ -125,7 +126,8 @@ pub struct BatchSummary {
 impl BatchSummary {
     pub fn from_results(results: &[SinkOutput]) -> Self {
         let mut succeeded = 0usize;
-        let mut failed = 0usize;
+        let mut retriable = 0usize;
+        let mut fatal = 0usize;
         let mut timed_out = 0usize;
         let mut errors: HashMap<String, usize> = HashMap::new();
 
@@ -138,8 +140,14 @@ impl BatchSummary {
                         *errors.entry(tag.to_string()).or_default() += 1;
                     }
                 }
-                Outcome::RetriableError | Outcome::FatalError => {
-                    failed += 1;
+                Outcome::RetriableError => {
+                    retriable += 1;
+                    if let Some(tag) = r.cause() {
+                        *errors.entry(tag.to_string()).or_default() += 1;
+                    }
+                }
+                Outcome::FatalError => {
+                    fatal += 1;
                     if let Some(tag) = r.cause() {
                         *errors.entry(tag.to_string()).or_default() += 1;
                     }
@@ -151,14 +159,15 @@ impl BatchSummary {
         Self {
             total: results.len(),
             succeeded,
-            failed,
+            retriable,
+            fatal,
             timed_out,
             errors,
         }
     }
 
     pub fn all_ok(&self) -> bool {
-        self.failed == 0 && self.timed_out == 0
+        self.retriable == 0 && self.fatal == 0 && self.timed_out == 0
     }
 }
 
@@ -166,8 +175,8 @@ impl fmt::Display for BatchSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} total, {} ok, {} failed, {} timed_out",
-            self.total, self.succeeded, self.failed, self.timed_out
+            "{} total, {} ok, {} retriable, {} fatal, {} timed_out",
+            self.total, self.succeeded, self.retriable, self.fatal, self.timed_out
         )?;
         if !self.errors.is_empty() {
             let mut pairs: Vec<_> = self.errors.iter().collect();

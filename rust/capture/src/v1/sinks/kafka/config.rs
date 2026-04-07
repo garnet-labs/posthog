@@ -24,12 +24,13 @@ pub struct Config {
     #[envconfig(default = "400")]
     pub queue_mib: u32,
     /// Time before we stop retrying producing a message (ms).
-    #[envconfig(default = "20000")]
+    /// Allows ~6 retry cycles at 5s socket timeout.
+    #[envconfig(default = "30000")]
     pub message_timeout_ms: u32,
     #[envconfig(default = "1000000")]
     pub message_max_bytes: u32,
     /// none, gzip, snappy, lz4, zstd
-    #[envconfig(default = "none")]
+    #[envconfig(default = "lz4")]
     pub compression_codec: String,
     #[envconfig(default = "all")]
     pub acks: String,
@@ -40,14 +41,16 @@ pub struct Config {
     #[envconfig(default = "1000000")]
     pub batch_size: u32,
     /// How often librdkafka refreshes topic metadata from brokers (ms).
-    #[envconfig(default = "20000")]
+    /// Low value ensures fast leader discovery on broker failover.
+    #[envconfig(default = "5000")]
     pub metadata_refresh_interval_ms: u32,
     /// Max age of cached metadata before forced refresh (ms). Should be
     /// `>= 3x` metadata_refresh_interval_ms. Keeping this low ensures
     /// stale broker state is flushed promptly after recovery.
-    #[envconfig(default = "60000")]
+    #[envconfig(default = "15000")]
     pub metadata_max_age_ms: u32,
-    #[envconfig(default = "60000")]
+    /// Timeout for socket operations (ms). Lower = faster dead broker detection.
+    #[envconfig(default = "5000")]
     pub socket_timeout_ms: u32,
     /// How often librdkafka fires the stats callback (ms). Controls the
     /// refresh cadence for broker health, queue depth, and RTT gauges.
@@ -143,16 +146,16 @@ mod tests {
         assert_eq!(cfg.client_id, "");
         assert_eq!(cfg.linger_ms, 20);
         assert_eq!(cfg.queue_mib, 400);
-        assert_eq!(cfg.message_timeout_ms, 20000);
+        assert_eq!(cfg.message_timeout_ms, 30000);
         assert_eq!(cfg.message_max_bytes, 1000000);
-        assert_eq!(cfg.compression_codec, "none");
+        assert_eq!(cfg.compression_codec, "lz4");
         assert_eq!(cfg.acks, "all");
         assert!(!cfg.enable_idempotence);
         assert_eq!(cfg.batch_num_messages, 10000);
         assert_eq!(cfg.batch_size, 1000000);
-        assert_eq!(cfg.metadata_refresh_interval_ms, 20000);
-        assert_eq!(cfg.metadata_max_age_ms, 60000);
-        assert_eq!(cfg.socket_timeout_ms, 60000);
+        assert_eq!(cfg.metadata_refresh_interval_ms, 5000);
+        assert_eq!(cfg.metadata_max_age_ms, 15000);
+        assert_eq!(cfg.socket_timeout_ms, 5000);
         assert_eq!(cfg.statistics_interval_ms, 10000);
     }
 

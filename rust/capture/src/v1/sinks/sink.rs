@@ -394,7 +394,9 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             .increment(*count as u64);
         }
 
-        self.handle.report_healthy();
+        if summary.succeeded > 0 {
+            self.handle.report_healthy();
+        }
         results
     }
 
