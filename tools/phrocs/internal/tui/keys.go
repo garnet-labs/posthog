@@ -227,6 +227,9 @@ func (m *Model) updateProcKeys() {
 }
 
 func (m Model) handleNormalKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	// Any keypress dismisses the active hint
+	m.hintText = ""
+
 	// When the active process is waiting for input, buffer keystrokes and send them on Enter.
 	p := m.activeProc()
 	procHasPrompt := p != nil && m.focusedPane == focusOutput && p.HasPrompt()

@@ -121,6 +121,7 @@ class MprocsConfig(BaseModel):
     procs: dict[str, dict[str, Any]]
     mouse_scroll_speed: int = 1
     scrollback: int = 10000
+    hints: list[str] = []
     posthog_config: DevenvConfig | None = None  # embedded source config
 
     def to_yaml_dict(self) -> dict[str, Any]:
@@ -131,6 +132,8 @@ class MprocsConfig(BaseModel):
         result["procs"] = self.procs
         result["mouse_scroll_speed"] = self.mouse_scroll_speed
         result["scrollback"] = self.scrollback
+        if self.hints:
+            result["hints"] = self.hints
         return result
 
 
@@ -231,6 +234,16 @@ class MprocsGenerator(ConfigGenerator):
             procs=procs,
             mouse_scroll_speed=global_settings.get("mouse_scroll_speed", 1),
             scrollback=global_settings.get("scrollback", 10000),
+            hints=[
+                "Run `hogli doctor` for a quick health check",
+                "Run `hogli doctor:disk` to reclaim disk space",
+                "Run `hogli doctor:zombies` to find orphaned processes",
+                "Run `hogli dev:explain` to see why each service is running",
+                "Run `hogli dev:demo-data` to generate test data",
+                "Run `hogli migrations:run` to apply pending migrations",
+                "Run `hogli db:pg` to open a PostgreSQL shell",
+                "Run `hogli categories` to see all available commands",
+            ],
             posthog_config=source_config,
         )
 

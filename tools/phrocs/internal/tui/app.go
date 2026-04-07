@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
@@ -12,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/posthog/posthog/phrocs/internal/config"
 	"github.com/posthog/posthog/phrocs/internal/docker"
+	"github.com/posthog/posthog/phrocs/internal/hints"
 	"github.com/posthog/posthog/phrocs/internal/process"
 )
 
@@ -97,6 +100,11 @@ type Model struct {
 	setupError   string   // error message from applying changes
 	configPath   string   // path to the running config file
 
+	// Hints: transient footer messages with countdown
+	hintText      string
+	hintSecsLeft  int // seconds remaining on current hint
+	hintProvider  *hints.Provider
+
 	// Info mode: replaces the output viewport with process stats
 	infoMode bool
 
@@ -145,6 +153,7 @@ func New(mgr *process.Manager, cfg *config.Config, configPath string, logger *lo
 		hideHelp:         cfg.HideKeymapWindow,
 		procListWidth:    cfg.ProcListWidth,
 		configPath:       configPath,
+		hintProvider:     hints.NewProvider(cfg.Hints),
 		keys:             keys,
 		help:             h,
 		spinner:          spinner.New(spinner.WithSpinner(spinner.MiniDot)),
@@ -160,7 +169,7 @@ func (m Model) dbg(format string, args ...any) {
 
 // Note: Processes are started externally before p.Run()
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.spinner.Tick)
+	return tea.Batch(tea.RequestBackgroundColor, m.spinner.Tick, hintCheckTick(hintInitialDelay))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -234,6 +243,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sortServices()
 		m.updateProcKeys()
 
+		if msg.Status == process.StatusCrashed && m.hintText == "" && !m.isAnyModalMode() {
+			m.hintText = fmt.Sprintf("%s crashed -- press 'r' to restart or 'i' for details", msg.Name)
+			m.hintSecsLeft = hintDurationSecs
+			cmds = append(cmds, hintCountdownTick())
+		}
+
 	case process.FocusMsg:
 		m.dbg("focus: proc=%s (via IPC)", msg.Name)
 		for i, p := range m.services {
@@ -288,6 +303,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.searchQuery != "" {
 				m.updateSearchForLine(msg.Line, lineIndex, evicted)
+			}
+		}
+
+	case hintCheckMsg:
+		if m.hintText == "" && !m.isAnyModalMode() {
+			if hint := m.hintProvider.PickHint(); hint != "" {
+				m.dbg("hint: show %q", hint)
+				m.hintText = hint
+				m.hintSecsLeft = hintDurationSecs
+				cmds = append(cmds, hintCountdownTick())
+			}
+		}
+		cmds = append(cmds, hintCheckTick(hintCheckInterval))
+
+	case hintCountdownMsg:
+		if m.hintText != "" {
+			m.hintSecsLeft--
+			if m.hintSecsLeft <= 0 {
+				m.dbg("hint: expired")
+				m.hintText = ""
+			} else {
+				cmds = append(cmds, hintCountdownTick())
 			}
 		}
 
@@ -618,4 +655,37 @@ func (m Model) toggleMetricsOnSelectedProc() {
 	if p := m.activeProc(); p != nil {
 		p.SetMetricsEnabled(true)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Hints
+// ---------------------------------------------------------------------------
+
+const (
+	hintInitialDelay  = 30 * time.Second
+	hintCheckInterval = 3 * time.Minute
+	hintDurationSecs  = 5
+	hintBarWidth      = 5
+)
+
+// hintCheckMsg fires periodically to see if a new hint should be shown.
+type hintCheckMsg struct{}
+
+// hintCountdownMsg fires every second to decrement the countdown bar.
+type hintCountdownMsg struct{}
+
+func hintCheckTick(delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return hintCheckMsg{}
+	})
+}
+
+func hintCountdownTick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return hintCountdownMsg{}
+	})
+}
+
+func (m Model) isAnyModalMode() bool {
+	return m.copyMode || m.searchMode || m.infoMode || m.setupMode || m.hedgehogMode
 }

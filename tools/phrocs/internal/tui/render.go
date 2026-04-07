@@ -272,6 +272,9 @@ func (m Model) renderFooter() string {
 			lipgloss.NewStyle().Foreground(colorYellow).Render(matchInfo),
 		)
 	}
+	if m.hintText != "" {
+		return footerStyle.Width(m.width - 2).Render(m.renderHintBar())
+	}
 	if m.hideHelp {
 		return ""
 	}
@@ -395,6 +398,22 @@ func (m Model) renderInfo() string {
 	lines = append(lines, row("  Buffered lines", fmt.Sprintf("%d", len(p.Lines()))))
 
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderHintBar() string {
+	filled := m.hintSecsLeft
+	if filled > hintBarWidth {
+		filled = hintBarWidth
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	empty := hintBarWidth - filled
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	barStyled := lipgloss.NewStyle().Foreground(colorBrightBlack).Render(bar)
+
+	return hintStyle.Render("Hint: "+m.hintText) + "  " + barStyled
 }
 
 func formatDuration(d time.Duration) string {

@@ -37,6 +37,7 @@ type Config struct {
 	MouseScrollSpeed int                   `yaml:"mouse_scroll_speed"`
 	ProcListWidth    int                   `yaml:"proc_list_width"`
 	Scrollback       int                   `yaml:"scrollback"`
+	Hints            []string              `yaml:"hints"`
 }
 
 // ResolveConfigPath returns the config file path to use. If explicit is

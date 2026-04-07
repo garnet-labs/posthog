@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,6 +29,17 @@ func testConfig(names ...string) *config.Config {
 func readyModel(t *testing.T, names ...string) Model {
 	t.Helper()
 	cfg := testConfig(names...)
+	mgr := process.NewManager(cfg)
+	m := New(mgr, cfg, "", nil)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	return next.(Model)
+}
+
+// readyModelWithHints returns a ready model with hint strings configured.
+func readyModelWithHints(t *testing.T, hints []string, names ...string) Model {
+	t.Helper()
+	cfg := testConfig(names...)
+	cfg.Hints = hints
 	mgr := process.NewManager(cfg)
 	m := New(mgr, cfg, "", nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -1038,5 +1050,160 @@ func TestHedgehog_gravity(t *testing.T) {
 	}
 	if m.hedgehogVelY != 0 {
 		t.Errorf("velY should reset to 0 on landing, got %d", m.hedgehogVelY)
+	}
+}
+
+// ── Hints ────────────────────────────────────────────────────────────────────
+
+var testHints = []string{"hint one", "hint two", "hint three"}
+
+func TestHint_shownOnTickInNormalMode(t *testing.T) {
+	m := readyModelWithHints(t, testHints, "backend")
+
+	m = update(m, hintCheckMsg{})
+	if m.hintText == "" {
+		t.Error("expected a hint after tick in normal mode")
+	}
+	if m.hintSecsLeft != hintDurationSecs {
+		t.Errorf("hintSecsLeft: got %d, want %d", m.hintSecsLeft, hintDurationSecs)
+	}
+}
+
+func TestHint_notShownWithoutConfig(t *testing.T) {
+	m := readyModel(t, "backend") // no hints in config
+
+	m = update(m, hintCheckMsg{})
+	if m.hintText != "" {
+		t.Errorf("expected no hint without config, got %q", m.hintText)
+	}
+}
+
+func TestHint_notShownInCopyMode(t *testing.T) {
+	m := readyModelWithHints(t, testHints, "backend")
+	m.copyMode = true
+
+	m = update(m, hintCheckMsg{})
+	if m.hintText != "" {
+		t.Errorf("expected no hint in copy mode, got %q", m.hintText)
+	}
+}
+
+func TestHint_notShownInSearchMode(t *testing.T) {
+	m := readyModelWithHints(t, testHints, "backend")
+	m.searchMode = true
+
+	m = update(m, hintCheckMsg{})
+	if m.hintText != "" {
+		t.Errorf("expected no hint in search mode, got %q", m.hintText)
+	}
+}
+
+func TestHint_clearedOnKeypress(t *testing.T) {
+	m := readyModel(t, "backend")
+	m.hintText = "some hint"
+
+	m = update(m, keypress('j'))
+	if m.hintText != "" {
+		t.Errorf("hint should be cleared on keypress, got %q", m.hintText)
+	}
+}
+
+func TestHint_countdownDecrement(t *testing.T) {
+	m := readyModel(t, "backend")
+	m.hintText = "some hint"
+	m.hintSecsLeft = 5
+
+	m = update(m, hintCountdownMsg{})
+	if m.hintSecsLeft != 4 {
+		t.Errorf("hintSecsLeft: got %d, want 4", m.hintSecsLeft)
+	}
+	if m.hintText == "" {
+		t.Error("hint should still be active")
+	}
+}
+
+func TestHint_countdownExpires(t *testing.T) {
+	m := readyModel(t, "backend")
+	m.hintText = "some hint"
+	m.hintSecsLeft = 1
+
+	m = update(m, hintCountdownMsg{})
+	if m.hintText != "" {
+		t.Errorf("hint should be cleared when countdown reaches 0, got %q", m.hintText)
+	}
+}
+
+func TestHint_renderedInFooter(t *testing.T) {
+	m := readyModel(t, "backend")
+	m.hintText = "Press 'i' for process info"
+	m.hintSecsLeft = 8
+
+	footer := m.renderFooter()
+	if !strings.Contains(footer, "Press 'i' for process info") {
+		t.Errorf("footer should contain hint text, got: %s", footer)
+	}
+	if !strings.Contains(footer, "Hint:") {
+		t.Errorf("footer should contain 'Hint:' prefix, got: %s", footer)
+	}
+	if !strings.Contains(footer, "█") {
+		t.Errorf("footer should contain countdown bar, got: %s", footer)
+	}
+}
+
+func TestHint_crashSetsHintImmediately(t *testing.T) {
+	m := readyModel(t, "backend", "frontend")
+
+	m = update(m, process.StatusMsg{Name: "backend", Status: process.StatusCrashed})
+	if m.hintText == "" {
+		t.Error("expected crash hint")
+	}
+	if !strings.Contains(m.hintText, "backend crashed") {
+		t.Errorf("expected crash hint to mention process name, got %q", m.hintText)
+	}
+}
+
+func TestHint_crashDoesNotOverrideExisting(t *testing.T) {
+	m := readyModel(t, "backend", "frontend")
+	m.hintText = "existing hint"
+
+	m = update(m, process.StatusMsg{Name: "backend", Status: process.StatusCrashed})
+	if m.hintText != "existing hint" {
+		t.Errorf("crash should not override existing hint, got %q", m.hintText)
+	}
+}
+
+func TestHint_notShownInModalModes(t *testing.T) {
+	modes := []struct {
+		name string
+		set  func(*Model)
+	}{
+		{"info", func(m *Model) { m.infoMode = true }},
+		{"setup", func(m *Model) { m.setupMode = true }},
+		{"hedgehog", func(m *Model) { m.hedgehogMode = true }},
+	}
+	for _, tt := range modes {
+		t.Run(tt.name, func(t *testing.T) {
+			m := readyModelWithHints(t, testHints, "backend")
+			tt.set(&m)
+			m = update(m, hintCheckMsg{})
+			if m.hintText != "" {
+				t.Errorf("expected no hint in %s mode, got %q", tt.name, m.hintText)
+			}
+		})
+	}
+}
+
+func TestHint_navigationWorksWithActiveHint(t *testing.T) {
+	m := readyModel(t, "backend", "celery", "frontend")
+	m.hintText = "some hint"
+	m.hintSecsLeft = 5
+
+	// j should navigate AND clear the hint
+	m = update(m, keypress('j'))
+	if m.servicesCursor != 1 {
+		t.Errorf("cursor: got %d, want 1", m.servicesCursor)
+	}
+	if m.hintText != "" {
+		t.Errorf("hint should be cleared after navigation, got %q", m.hintText)
 	}
 }
