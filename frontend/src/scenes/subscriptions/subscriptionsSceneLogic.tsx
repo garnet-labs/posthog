@@ -18,6 +18,7 @@ import {
     SubscriptionsListResourceType,
     TargetTypeEnumApi,
     type PaginatedSubscriptionListApi,
+    type SubscriptionApi,
     type SubscriptionsListTargetType,
 } from '~/generated/core/api.schemas'
 import { Breadcrumb } from '~/types'
@@ -30,6 +31,9 @@ export enum SubscriptionsTab {
     Dashboard = 'dashboard',
     Insight = 'insight',
 }
+
+/** Widen initial tab so `currentTab` reducer state is `SubscriptionsTab`, not the literal `SubscriptionsTab.All`. */
+const DEFAULT_SUBSCRIPTIONS_TAB: SubscriptionsTab = SubscriptionsTab.All
 
 /** Query keys owned by the subscriptions list scene (merged into the router; other params are preserved). */
 const SUBSCRIPTIONS_URL_KEYS = ['tab', 'search', 'created_by', 'target_type', 'page'] as const
@@ -198,7 +202,7 @@ export const subscriptionsSceneLogic = kea([
         setTargetTypeFilter: (targetType: SubscriptionsListTargetType | null) => ({ targetType }),
         applySubscriptionsQueryFromUrl: (query: SubscriptionsQueryFromUrl) => ({ query }),
         deleteSubscriptionSuccess: true,
-    }),
+    } as Parameters<typeof actions>[0]),
     reducers({
         search: [
             '',
@@ -217,7 +221,7 @@ export const subscriptionsSceneLogic = kea([
             },
         ],
         currentTab: [
-            SubscriptionsTab.All,
+            DEFAULT_SUBSCRIPTIONS_TAB,
             {
                 setCurrentTab: (_, { tab }) => tab,
                 applySubscriptionsQueryFromUrl: (_, { query }) => query.tab,
@@ -232,6 +236,7 @@ export const subscriptionsSceneLogic = kea([
                 setCurrentTab: () => 1,
                 setSubscriptionsSorting: () => 1,
                 setTargetTypeFilter: () => 1,
+                deleteSubscriptionSuccess: () => 1,
                 applySubscriptionsQueryFromUrl: (_, { query }) => query.page,
             },
         ],
@@ -336,7 +341,14 @@ export const subscriptionsSceneLogic = kea([
     tabAwareUrlToAction(({ actions, values }) => ({
         [urls.subscriptions()]: (_, searchParams) => {
             const parsed = parseSubscriptionsSearchParams(searchParams)
-            if (subscriptionsListStateEqual(parsed, values)) {
+            const listState = {
+                currentTab: values.currentTab,
+                search: values.search,
+                createdByUuid: values.createdByUuid,
+                targetTypeFilter: values.targetTypeFilter,
+                page: values.page,
+            }
+            if (subscriptionsListStateEqual(parsed, listState)) {
                 return
             }
             actions.applySubscriptionsQueryFromUrl(parsed)
@@ -345,15 +357,16 @@ export const subscriptionsSceneLogic = kea([
     selectors(({ actions }) => ({
         subscriptions: [
             (s) => [s.subscriptionsResponse],
-            (subscriptionsResponse) => subscriptionsResponse?.results ?? [],
+            (subscriptionsResponse: PaginatedSubscriptionListApi | null): SubscriptionApi[] =>
+                subscriptionsResponse?.results ?? [],
         ],
         subscriptionsLoading: [
             (s) => [s.subscriptionsResponseLoading],
-            (subscriptionsResponseLoading) => Boolean(subscriptionsResponseLoading),
+            (subscriptionsResponseLoading: boolean | undefined): boolean => Boolean(subscriptionsResponseLoading),
         ],
         pagination: [
             (s) => [s.page, s.subscriptionsResponse],
-            (page, subscriptionsResponse): PaginationManual => {
+            (page: number, subscriptionsResponse: PaginatedSubscriptionListApi | null): PaginationManual => {
                 const count = subscriptionsResponse?.count ?? 0
                 // usePagination uses `entryCount || null`; 0 is treated as missing and breaks pageCount / next button.
                 // LemonTable shows "No …" when the page is empty, so inflating 0→1 only satisfies the hook.

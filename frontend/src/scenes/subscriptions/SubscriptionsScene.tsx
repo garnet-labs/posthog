@@ -18,6 +18,7 @@ import type { SubscriptionApi } from '~/generated/core/api.schemas'
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 import { ProductKey } from '~/queries/schema/schema-general'
+import type { InsightShortId } from '~/types'
 import { AvailableFeature } from '~/types'
 
 import { SubscriptionsFiltersBar } from './SubscriptionsFiltersBar'
@@ -27,7 +28,7 @@ import { SubscriptionsTable, subscriptionName } from './SubscriptionsTable'
 
 function editHref(sub: SubscriptionApi): string | null {
     if (sub.insight && sub.insight_short_id) {
-        return urls.insightSubcription(sub.insight_short_id, String(sub.id))
+        return urls.insightSubcription(sub.insight_short_id as InsightShortId, String(sub.id))
     }
     if (sub.dashboard) {
         return urls.dashboardSubscription(sub.dashboard, String(sub.id))

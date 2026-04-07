@@ -118,8 +118,9 @@ function buildColumns(renderRowActions: (sub: SubscriptionApi) => JSX.Element): 
         },
         {
             title: 'Recurrence',
+            key: 'summary',
             dataIndex: 'summary',
-            render: (summary: SubscriptionApi['summary']) => summary || '—',
+            render: (_value: unknown, sub: SubscriptionApi) => sub.summary || '—',
         },
         {
             title: 'Next delivery',
@@ -138,12 +139,9 @@ function buildColumns(renderRowActions: (sub: SubscriptionApi) => JSX.Element): 
                 ),
         },
         {
-            ...(createdByColumn<SubscriptionApi>() as LemonTableColumn<
-                SubscriptionApi,
-                keyof SubscriptionApi | undefined
-            >),
+            ...(createdByColumn() as unknown as LemonTableColumn<SubscriptionApi, 'created_by'>),
             sorter: true,
-        },
+        } as LemonTableColumn<SubscriptionApi, keyof SubscriptionApi | undefined>,
         {
             ...(atColumn<SubscriptionApi>('created_at', 'Created') as LemonTableColumn<
                 SubscriptionApi,
