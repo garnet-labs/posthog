@@ -1444,8 +1444,10 @@ const EventContent = React.memo(
         showBillingInfo?: boolean
     }): JSX.Element => {
         const traceLogic = useMountedLogic(llmAnalyticsTraceLogic)
+        const traceDataLogic = useMountedLogic(llmAnalyticsTraceDataLogic)
         const { featureFlags } = useValues(featureFlagLogic)
         const { displayOption, lineNumber, initialTab, viewMode, highlightMessageIndex } = useValues(traceLogic)
+        const { effectiveEventId } = useValues(traceDataLogic)
         const { handleTextViewFallback, copyLinePermalink, setViewMode } = useActions(traceLogic)
 
         const node = event && isLLMEvent(event) ? findNodeForEvent(tree, event.id) : null
@@ -1457,6 +1459,11 @@ const EventContent = React.memo(
 
         const isGenerationEvent = event && isLLMEvent(event) && event.event === '$ai_generation'
 
+        // Check if the originally selected event (effectiveEventId) is a generation event
+        // This ensures the Evaluations tab stays visible even when viewing Summary at trace level
+        const effectiveEventNode = effectiveEventId ? findNodeForEvent(tree, effectiveEventId) : null
+        const isEffectiveEventGeneration = effectiveEventNode?.event.event === '$ai_generation'
+
         const promptName = event && isLLMEvent(event) ? event.properties['$ai_prompt_name'] : null
         const promptVersion = event && isLLMEvent(event) ? event.properties['$ai_prompt_version'] : null
         const showPromptButton = !!promptName
@@ -1465,7 +1472,8 @@ const EventContent = React.memo(
 
         const showSaveToDatasetButton = featureFlags[FEATURE_FLAGS.LLM_ANALYTICS_DATASETS]
 
-        const showEvalsTab = isGenerationEvent && featureFlags[FEATURE_FLAGS.LLM_ANALYTICS_EVALUATIONS]
+        const showEvalsTab =
+            (isGenerationEvent || isEffectiveEventGeneration) && featureFlags[FEATURE_FLAGS.LLM_ANALYTICS_EVALUATIONS]
 
         const showSummaryTab =
             featureFlags[FEATURE_FLAGS.LLM_ANALYTICS_SUMMARIZATION] ||
