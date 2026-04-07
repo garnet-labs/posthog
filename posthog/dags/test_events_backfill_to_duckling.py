@@ -761,7 +761,7 @@ class TestFullBackfillSensorEarliestDate:
 
         catalog = MagicMock()
         catalog.team_id = 1
-        mock_catalog_cls.objects.all.return_value.order_by.return_value = [catalog]
+        mock_catalog_cls.objects.filter.return_value.order_by.return_value = [catalog]
 
         instance = DagsterInstance.ephemeral()
         context = build_sensor_context(instance=instance)
@@ -784,7 +784,7 @@ class TestFullBackfillSensorEarliestDate:
 
         catalog = MagicMock()
         catalog.team_id = 1
-        mock_catalog_cls.objects.all.return_value.order_by.return_value = [catalog]
+        mock_catalog_cls.objects.filter.return_value.order_by.return_value = [catalog]
 
         instance = DagsterInstance.ephemeral()
         context = build_sensor_context(instance=instance)
