@@ -50,6 +50,7 @@ REGISTRY_FILE = REGISTRY_DIR / "registry.json"
 CONFIG_FILE = REGISTRY_DIR / "config.json"
 CLOUD_CONFIG_FILE = REGISTRY_DIR / "cloud-config.json"
 CLOUD_INIT_TEMPLATE = REPO_ROOT / "infra" / "cloud-sandbox" / "cloud-init.sh"
+BUILD_CACHE_TEMPLATE = REPO_ROOT / "infra" / "cloud-sandbox" / "build-cache.sh"
 
 PORT_BASE = 48001
 
@@ -349,6 +350,7 @@ def _claude_auth_dir() -> str:
 def _ssh_authorized_keys_path() -> str:
     """Collect SSH public keys into a file that can be mounted into containers."""
     keys_file = REGISTRY_DIR / "authorized_keys"
+    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     ssh_dir = Path.home() / ".ssh"
     keys = []
     if ssh_dir.is_dir():
@@ -691,12 +693,51 @@ def init_cache_from_master() -> None:
 
     try:
         _copy_sandbox_backup_xml(init_worktree)
-        info("Building and starting containers...")
-        compose(init_project, init_port, init_worktree, "up", "-d", "--build", capture=True)
 
-        info("Waiting for master to boot...")
-        if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
-            fatal("Cache init failed. See logs above.")
+        # Build the app image and start only infra services (no app container).
+        # The old approach started the full app with mprocs/phrocs just to run
+        # migrations — this runs them directly instead.
+        info("Building app image...")
+        compose(init_project, init_port, init_worktree, "build", "app", capture=True)
+        info("Starting infra services...")
+        compose(init_project, init_port, init_worktree, "up", "-d",
+                "db", "redis7", "clickhouse", "kafka", "zookeeper", "objectstorage", capture=True)
+
+        # Wait for infra to be healthy
+        info("Waiting for infra services to be healthy...")
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            result = run(
+                ["docker", "inspect", "--format", "{{.State.Health.Status}}",
+                 f"{init_project}-db-1"],
+                check=False, capture=True,
+            )
+            if result.returncode == 0 and result.stdout.strip() == "healthy":
+                break
+            time.sleep(2)
+        else:
+            fatal("Infra services did not become healthy within 120s")
+
+        # Run migrations and demo data setup directly — no mprocs, no pnpm, no node deps.
+        run_cmd = ["docker", "compose", "--progress=quiet", "-p", init_project,
+                   "-f", str(COMPOSE_FILE), "-f", str(PROFILES_FILE),
+                   "run", "--rm", "--no-deps", "--entrypoint", "",
+                   "-e", "SKIP_SERVICE_VERSION_REQUIREMENTS=1",
+                   "app"]
+
+        info("Installing Python dependencies...")
+        run(run_cmd + ["uv", "sync", "--frozen", "--no-dev"],
+            env_extra=_compose_env(init_port, init_worktree))
+
+        info("Running migrations...")
+        run(run_cmd + ["python", "manage.py", "migrate"],
+            env_extra=_compose_env(init_port, init_worktree))
+        run(run_cmd + ["python", "manage.py", "migrate_clickhouse"],
+            env_extra=_compose_env(init_port, init_worktree))
+
+        info("Setting up demo data...")
+        run(run_cmd + ["python", "manage.py", "setup_dev", "--no-data"],
+            env_extra=_compose_env(init_port, init_worktree))
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
@@ -1318,11 +1359,19 @@ def _ensure_cloud_config() -> dict:
     config = _load_cloud_config()
     changed = False
 
-    if "ami_id" not in config:
-        val = input("AMI ID (from build-ami.sh output): ").strip()
-        if not val:
-            fatal("AMI ID is required. Run infra/cloud-sandbox/build-ami.sh first.")
-        config["ami_id"] = val
+    # Migrate from old AMI-based config
+    if "ami_id" in config:
+        info("Migrating cloud config: removing ami_id (no longer needed)")
+        del config["ami_id"]
+        changed = True
+
+    if "s3_bucket" not in config:
+        val = input("S3 bucket for Docker cache [posthog-sandbox-cache]: ").strip() or "posthog-sandbox-cache"
+        config["s3_bucket"] = val
+        changed = True
+    if "s3_key" not in config:
+        val = input("S3 key for Docker cache archive [docker-data.tar.zst]: ").strip() or "docker-data.tar.zst"
+        config["s3_key"] = val
         changed = True
     if "security_group_id" not in config:
         val = input("Security group ID: ").strip()
@@ -1467,6 +1516,7 @@ def _cloud_render_user_data(
     claude_credentials: str,
     claude_settings: str,
     claude_json: str,
+    s3_archive_url: str,
 ) -> str:
     """Render the cloud-init script with sandbox-specific values."""
     import base64
@@ -1479,11 +1529,12 @@ def _cloud_render_user_data(
         "__SANDBOX_BRANCH__": branch,
         "__SANDBOX_OWNER__": owner,
         "__SANDBOX_HOSTNAME__": hostname,
-        "__TAILSCALE_AUTH_KEY__": tailscale_key,
-        "__SSH_AUTHORIZED_KEYS__": ssh_keys,
+        "__TAILSCALE_AUTH_KEY_B64__": base64.b64encode(tailscale_key.encode()).decode() if tailscale_key else "",
+        "__SSH_AUTHORIZED_KEYS_B64__": base64.b64encode(ssh_keys.encode()).decode() if ssh_keys else "",
         "__CLAUDE_CREDENTIALS_B64__": base64.b64encode(claude_credentials.encode()).decode() if claude_credentials else "",
         "__CLAUDE_SETTINGS_B64__": base64.b64encode(claude_settings.encode()).decode() if claude_settings else "",
         "__CLAUDE_JSON_B64__": base64.b64encode(claude_json.encode()).decode() if claude_json else "",
+        "__S3_ARCHIVE_URL_B64__": base64.b64encode(s3_archive_url.encode()).decode() if s3_archive_url else "",
     }
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)
@@ -1567,6 +1618,59 @@ def _cloud_gather_auth() -> tuple[str, str, str, str]:
     return ssh_keys_str, claude_credentials, claude_settings, claude_json
 
 
+def _cloud_discover_ubuntu_ami(config: dict) -> str:
+    """Find the latest Ubuntu 24.04 x86_64 AMI from Canonical."""
+    info("Discovering latest Ubuntu 24.04 AMI...")
+    result = _aws(
+        config,
+        "ec2",
+        "describe-images",
+        "--owners",
+        "099720109477",
+        "--filters",
+        "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
+        "Name=state,Values=available",
+        "--query",
+        "sort_by(Images, &CreationDate)[-1].ImageId",
+        "--output",
+        "text",
+    )
+    ami_id = result.stdout.strip()
+    if not ami_id or ami_id == "None":
+        fatal("Could not find Ubuntu 24.04 AMI. Check your AWS region and credentials.")
+    info(f"  Using AMI: {ami_id}")
+    return ami_id
+
+
+def _cloud_generate_presigned_url(config: dict) -> str:
+    """Generate a pre-signed S3 URL for the Docker cache archive."""
+    bucket = config["s3_bucket"]
+    key = config["s3_key"]
+    s3_uri = f"s3://{bucket}/{key}"
+
+    # Verify the object exists
+    result = _aws(config, "s3", "ls", s3_uri)
+    if not result.stdout.strip():
+        fatal(
+            f"Docker cache archive not found at {s3_uri}\n"
+            "  Upload it first: bin/sandbox cloud upload-cache"
+        )
+
+    info(f"Generating pre-signed URL for {s3_uri}...")
+    result = _aws(
+        config,
+        "s3",
+        "presign",
+        s3_uri,
+        "--expires-in",
+        "3600",
+    )
+    url = result.stdout.strip()
+    if not url:
+        fatal("Failed to generate pre-signed S3 URL")
+    return url
+
+
 def cmd_cloud_create(branch: str) -> None:
     config = _ensure_cloud_config()
     owner = _cloud_get_owner()
@@ -1586,6 +1690,12 @@ def cmd_cloud_create(branch: str) -> None:
     info(f"Creating cloud sandbox for '{branch}'...")
     info(f"  Tailscale hostname: {hostname}")
 
+    # Auto-discover Ubuntu AMI (no custom AMI needed)
+    ami_id = _cloud_discover_ubuntu_ami(config)
+
+    # Generate pre-signed S3 URL for Docker cache
+    s3_archive_url = _cloud_generate_presigned_url(config)
+
     tailscale_key = _cloud_get_tailscale_key(config)
     ssh_keys, claude_credentials, claude_settings, claude_json = _cloud_gather_auth()
 
@@ -1598,11 +1708,12 @@ def cmd_cloud_create(branch: str) -> None:
         claude_credentials=claude_credentials,
         claude_settings=claude_settings,
         claude_json=claude_json,
+        s3_archive_url=s3_archive_url,
     )
 
-    # AWS user data limit is 16KB. The base64-encoded template with credentials
-    # can exceed this if settings or keys are unusually large.
-    user_data_bytes = len(user_data)
+    # AWS user data limit is 16KB (decoded size).
+    import base64 as _b64
+    user_data_bytes = len(_b64.b64decode(user_data))
     if user_data_bytes > 16384:
         fatal(
             f"User data is {user_data_bytes} bytes, exceeding AWS 16KB limit.\n"
@@ -1615,7 +1726,7 @@ def cmd_cloud_create(branch: str) -> None:
         "ec2",
         "run-instances",
         "--image-id",
-        config["ami_id"],
+        ami_id,
         "--instance-type",
         "m6id.2xlarge",
         "--subnet-id",
@@ -1904,6 +2015,235 @@ def cmd_cloud_idea(branch: str) -> None:
     info(f"  Project: /workspace")
 
 
+def cmd_cloud_upload_cache() -> None:
+    """Archive local Docker data and upload to S3 for cloud sandbox boot."""
+    config = _ensure_cloud_config()
+    bucket = config["s3_bucket"]
+    key = config["s3_key"]
+    s3_uri = f"s3://{bucket}/{key}"
+    archive_path = "/tmp/docker-data.tar.zst"
+
+    info("Archiving Docker data for cloud sandbox cache...")
+
+    # Check Docker is running and has images
+    result = run(["docker", "info", "--format", "{{.Images}}"], capture=True, check=False)
+    if result.returncode != 0:
+        fatal("Docker is not running. Start Docker first.")
+    image_count = result.stdout.strip()
+    info(f"  Docker has {image_count} images")
+
+    # Stop all sandbox containers first for a cleaner snapshot
+    info("Stopping sandbox containers...")
+    run(["docker", "compose", "-p", "sandbox-cache-init", "down", "-t", "0"], check=False, capture=True)
+
+    # Archive Docker data from inside a container. This works on both Linux
+    # (direct access) and macOS (OrbStack/Docker Desktop — the container sees
+    # the real /var/lib/docker inside the Linux VM).
+    info("Creating archive (this may take a few minutes)...")
+    run(
+        [
+            "docker", "run", "--rm",
+            "-v", "/var/lib/docker:/docker:ro",
+            "-v", "/tmp:/output",
+            "alpine", "sh", "-c",
+            "apk add --no-cache zstd > /dev/null 2>&1 && "
+            "tar cf - -C /docker . | zstd -T0 -3 > /output/docker-data.tar.zst",
+        ],
+    )
+
+    # The archive is in /tmp inside the Docker VM. On Linux, that's the host /tmp.
+    # On macOS (OrbStack/Docker Desktop), we need to copy it out.
+    if sys.platform == "darwin":
+        info("Copying archive from Docker VM to host...")
+        run(
+            [
+                "docker", "run", "--rm",
+                "-v", "/tmp:/input:ro",
+                "-v", f"{Path(archive_path).parent}:/output",
+                "alpine", "cp", "/input/docker-data.tar.zst", "/output/docker-data.tar.zst",
+            ],
+        )
+
+    archive_size = Path(archive_path).stat().st_size
+    info(f"  Archive size: {archive_size / (1024 * 1024):.0f} MB")
+
+    info(f"Uploading to {s3_uri}...")
+    _aws(config, "s3", "cp", archive_path, s3_uri, capture=False)
+
+    info("Cleaning up temp file...")
+    Path(archive_path).unlink(missing_ok=True)
+
+    success(f"Docker cache uploaded to {s3_uri}")
+    info(f"  Archive size: {archive_size / (1024 * 1024):.0f} MB")
+    info("  Cloud sandboxes will download this at boot time.")
+
+
+def _cloud_export_credentials(config: dict) -> str:
+    """Export current AWS credentials as shell env vars for embedding in user data."""
+    result = subprocess.run(
+        [
+            "aws", "configure", "export-credentials",
+            "--profile", config["aws_profile"],
+            "--format", "process",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fatal(
+            "Could not export AWS credentials. Make sure you're logged in:\n"
+            f"  aws sso login --profile {config['aws_profile']}"
+        )
+    creds = json.loads(result.stdout)
+    # Build shell export lines
+    lines = [
+        f'export AWS_ACCESS_KEY_ID="{creds["AccessKeyId"]}"',
+        f'export AWS_SECRET_ACCESS_KEY="{creds["SecretAccessKey"]}"',
+    ]
+    if creds.get("SessionToken"):
+        lines.append(f'export AWS_SESSION_TOKEN="{creds["SessionToken"]}"')
+    return "\n".join(lines)
+
+
+def cmd_cloud_build_cache() -> None:
+    """Launch an EC2 instance to build the sandbox cache and upload to S3."""
+    import base64
+
+    config = _ensure_cloud_config()
+    ami_id = _cloud_discover_ubuntu_ami(config)
+
+    # Export current AWS credentials for the build instance to upload to S3
+    info("Exporting AWS credentials for build instance...")
+    aws_creds_env = _cloud_export_credentials(config)
+
+    # Render the build-cache user data template
+    template = BUILD_CACHE_TEMPLATE.read_text()
+    # Use the current branch so the build instance has local fixes
+    current_branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    if current_branch == "HEAD":
+        current_branch = ""  # detached HEAD, use master
+
+    replacements = {
+        "__AWS_CREDENTIALS_B64__": base64.b64encode(aws_creds_env.encode()).decode(),
+        "__BUILD_BRANCH__": current_branch,
+        "__S3_BUCKET__": config["s3_bucket"],
+        "__S3_KEY__": config["s3_key"],
+        "__AWS_REGION__": config["region"],
+    }
+    for placeholder, value in replacements.items():
+        template = template.replace(placeholder, value)
+
+    user_data = base64.b64encode(template.encode()).decode()
+
+    info(f"Launching cache builder instance...")
+    info(f"  S3 target: s3://{config['s3_bucket']}/{config['s3_key']}")
+
+    result = _aws(
+        config,
+        "ec2",
+        "run-instances",
+        "--image-id",
+        ami_id,
+        "--instance-type",
+        "m6id.2xlarge",
+        "--subnet-id",
+        config["subnet_id"],
+        "--security-group-ids",
+        config["security_group_id"],
+        "--block-device-mappings",
+        "DeviceName=/dev/sda1,Ebs={VolumeSize=40,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}",
+        "--metadata-options",
+        "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2",
+        "--user-data",
+        user_data,
+        "--instance-initiated-shutdown-behavior",
+        "stop",
+        "--tag-specifications",
+        json.dumps(
+            [
+                {
+                    "ResourceType": "instance",
+                    "Tags": [
+                        {"Key": "Name", "Value": "sandbox-cache-builder"},
+                        {"Key": "sandbox", "Value": "true"},
+                        {"Key": "sandbox-cache-builder", "Value": "true"},
+                    ],
+                }
+            ]
+        ),
+    )
+
+    data = json.loads(result.stdout)
+    instance_id = data["Instances"][0]["InstanceId"]
+    info(f"  Instance: {instance_id}")
+    info("Waiting for build to complete (instance stops itself when done)...")
+    info("  This typically takes 15-20 minutes.")
+    info(f"  SSH:  aws ec2-instance-connect ssh --instance-id {instance_id} "
+         f"--connection-type eice --os-user ubuntu --profile {config['aws_profile']}")
+    info(f"  Logs: sudo tail -f /var/log/sandbox-build-cache.log")
+
+    # Poll instance state — it stops itself on completion or failure
+    timeout = 3600
+    elapsed = 0
+    interval = 30
+    s3_uri = f"s3://{config['s3_bucket']}/{config['s3_key']}"
+    while elapsed < timeout:
+        state_result = _aws(
+            config,
+            "ec2",
+            "describe-instances",
+            "--instance-ids",
+            instance_id,
+            "--query",
+            "Reservations[0].Instances[0].State.Name",
+            "--output",
+            "text",
+        )
+        state = state_result.stdout.strip()
+
+        if state in ("stopped", "stopping", "terminated", "shutting-down"):
+            if state == "stopping":
+                time.sleep(30)
+            # Check if the build succeeded by verifying S3 object
+            info("Build instance stopped. Verifying S3 upload...")
+            verify = _aws(config, "s3", "ls", s3_uri)
+            if verify.stdout.strip():
+                success("Cache built and uploaded successfully!")
+                info(f"  {s3_uri}")
+                parts = verify.stdout.strip().split()
+                if len(parts) >= 3:
+                    size_bytes = int(parts[2])
+                    info(f"  Size: {size_bytes / (1024 * 1024):.0f} MB")
+            else:
+                error("Build failed — S3 object not found.")
+                info(f"  Start instance to debug:")
+                info(f"    aws ec2 start-instances --instance-ids {instance_id} "
+                     f"--profile {config['aws_profile']} --region {config['region']}")
+                info(f"  Then: sudo cat /var/log/sandbox-build-cache.log")
+            # Clean up
+            if state != "terminated":
+                info(f"Terminating build instance...")
+                _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)
+            return
+
+        elapsed_min = elapsed // 60
+        if elapsed_min > 0 and elapsed % 60 == 0:
+            info(f"  [{elapsed_min}m] Instance state: {state}")
+
+        time.sleep(interval)
+        elapsed += interval
+
+    # Timeout — terminate the instance
+    error(f"Build timed out after {timeout // 60} minutes.")
+    info(f"Terminating instance {instance_id}...")
+    _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -1978,6 +2318,8 @@ examples:
         p.add_argument("branch")
 
     cloud_sub.add_parser("list", aliases=["ls"], help="List your cloud sandboxes")
+    cloud_sub.add_parser("upload-cache", help="Archive Docker data and upload to S3")
+    cloud_sub.add_parser("build-cache", help="Launch EC2 to build cache and upload to S3")
 
     return parser
 
@@ -2004,6 +2346,8 @@ def main() -> None:
             "logs": lambda: cmd_cloud_logs(args.branch),
             "code": lambda: cmd_cloud_code(args.branch),
             "idea": lambda: cmd_cloud_idea(args.branch),
+            "upload-cache": cmd_cloud_upload_cache,
+            "build-cache": cmd_cloud_build_cache,
         }
         dispatch = {args.command: lambda: cloud_dispatch[args.cloud_command]()}
     else:

@@ -1,105 +1,186 @@
-# Cloud Sandbox Handoff
+# Cloud Sandboxes
 
-## What was built
+## How it works
 
-Two repos were changed:
+Cloud sandboxes run on EC2 instances with the same Docker Compose stack as local sandboxes.
+No custom AMI is needed — instances boot from a stock Ubuntu 24.04 AMI and download
+pre-built Docker data from S3.
 
-**posthog repo** (the main one):
+**Boot flow** (stock Ubuntu, ~3-5 min total):
 
-- `bin/sandbox` -- added `sandbox cloud` subcommands (create, destroy, list, sleep, wake, shell, open, logs, code). These use the `aws` CLI via subprocess to manage EC2 instances. Instance state is tracked entirely via EC2 tags (no local registry).
-- `bin/sandbox-entrypoint.py` -- `.git` worktree patching uses `is_file()` check (works for both worktrees and normal clones).
-- `infra/cloud-sandbox/build-ami.sh` -- bash script that launches an EC2 instance, installs Docker + Tailscale, clones the repo, builds the sandbox Docker image, pulls all compose images, boots the stack to run migrations, then snapshots as an AMI.
-- `infra/cloud-sandbox/cloud-init.sh` -- user data template. At boot: joins Tailscale, writes SSH keys + Claude auth, git fetches branch, starts docker compose. Placeholders like `__SANDBOX_BRANCH__` are replaced by the CLI at launch time.
-- `infra/cloud-sandbox/auto-sleep.sh` -- cron script (runs every 10 min): if no SSH sessions for 2 hours, gracefully stops docker compose and shuts down the instance.
-- `infra/cloud-sandbox/DECISIONS.md` -- documents all decisions and remaining placeholders.
+1. Install Tailscale, join network (enables SSH for debugging)
+2. Write SSH keys + Claude Code auth
+3. Install Docker, zstd, git, python3-yaml
+4. Detect + format + mount NVMe instance store (m6id has a fast local SSD)
+5. Download `docker-data.tar.zst` from S3 via pre-signed URL (~2-5s for ~2GB)
+6. Extract to NVMe, symlink `/var/lib/docker`
+7. Start Docker (all images + volumes already loaded)
+8. Clone PostHog repo (to NVMe if available)
+9. Create git worktree for the branch
+10. `bin/sandbox create <branch> --no-attach` (same code path as local)
 
-**posthog-cloud-infra repo:**
+**Key files:**
 
-- `terraform/modules/cloud-sandbox/` -- Terraform module: IAM role (ECR pull, SSM, optional Secrets Manager), security group (egress-only, Tailscale handles access), launch template (m6i.2xlarge, 100GB gp3, IMDSv2).
-- `terraform/environments/aws-accnt-remote-dev/us-east-1/cloud-sandbox/terragrunt.hcl` -- deploys the module into the Remote Dev account (193801311984), wires up the existing VPC/subnets via the networking dependency.
+- `bin/sandbox` — CLI with `cloud` subcommands (create, destroy, list, shell, logs, etc.)
+- `infra/cloud-sandbox/cloud-init.sh` — user data template, does all setup on stock Ubuntu
+- `~/.posthog-sandboxes/cloud-config.json` — local config (S3 bucket, AWS settings, Tailscale key)
 
-## How cloud sandboxes work
+## Prerequisites
 
-1. `sandbox cloud create my-feature` launches an EC2 from a pre-built AMI in the Remote Dev account
-2. Cloud-init joins Tailscale, fetches the branch, starts `docker compose -f docker-compose.sandbox.yml up`
-3. The sandbox is the same self-contained compose stack that runs locally (Postgres, ClickHouse, Kafka, Redis, etc. + the app container)
-4. `sandbox cloud shell my-feature` SSHs via Tailscale hostname with agent forwarding, attaches to the mprocs tmux session inside the container
-5. `sandbox cloud sleep` gracefully stops compose then stops the EC2 instance (~$8/mo EBS). `sandbox cloud wake` restarts it (~1-2 min).
-6. Auto-sleep cron shuts down after 2 hours with no SSH sessions.
+- AWS CLI configured with a profile that has EC2 + S3 access in the target account
+- A Tailscale account with a reusable auth key
+  (generate at https://login.tailscale.com/admin/settings/keys — enable "Reusable")
+- SSH keys in `~/.ssh/*.pub`
+- An S3 bucket for the Docker cache archive
+- A security group with outbound internet access
+- A subnet with internet access (for package installs and S3 download)
 
-## What the Mac agent needs to do
+## One-time setup
 
-### Step 1: Deploy the Terraform
-
-```bash
-cd posthog-cloud-infra/terraform/environments/aws-accnt-remote-dev/us-east-1/cloud-sandbox
-terragrunt apply
-```
-
-Note the outputs: `launch_template_id`, `subnet_ids`. These are needed by the CLI.
-
-### Step 2: Build the first AMI
-
-```bash
-cd posthog/infra/cloud-sandbox
-chmod +x build-ami.sh
-SANDBOX_SECURITY_GROUP=<sg-id> SANDBOX_SUBNET_ID=<subnet-id> ./build-ami.sh
-```
-
-This takes ~15-20 min. **No SSH required** -- all provisioning happens via cloud-init user data on the instance. The script:
-
-- Finds the latest Ubuntu 24.04 AMI
-- Launches an instance with a user-data script that does all the setup
-- Polls an EC2 tag (`build-status`) until the instance reports `complete`
-- Stops the instance and snapshots as AMI
-- Outputs the AMI ID
-
-The build script needs these env vars (or will use defaults):
-
-- `AWS_REGION` (default: us-east-1)
-- `SANDBOX_SECURITY_GROUP` -- from Terraform output
-- `SANDBOX_SUBNET_ID` -- from Terraform output (pick one private subnet)
-- `SANDBOX_INSTANCE_PROFILE` -- (default: cloud-sandbox)
-- `AWS_KEY_NAME` -- optional, for SSH debug access if needed
-
-If the build fails, you can debug via SSM Session Manager:
+### 1. Create the S3 bucket
 
 ```bash
-aws ssm start-session --target <instance-id>
-cat /var/log/sandbox-ami-build.log
+aws s3 mb s3://posthog-sandbox-cache --region us-east-1 --profile remote-dev
 ```
 
-### Step 3: Update Terraform with the AMI
+### 2. Build and upload the Docker cache
 
-Edit `posthog-cloud-infra/terraform/environments/aws-accnt-remote-dev/us-east-1/cloud-sandbox/terragrunt.hcl`, set `ami_id` to the AMI ID from step 2, then `terragrunt apply` again.
+This must be done on a **Linux machine** (not macOS) because it archives
+`/var/lib/docker` directly. Use an existing cloud sandbox or a fresh EC2 instance.
 
-### Step 4: Test it
+**Option A: From an existing sandbox or Linux dev machine:**
 
 ```bash
-cd posthog
-bin/sandbox cloud create test-branch
+# Build the database cache (Postgres + ClickHouse migrations, Docker images)
+bin/sandbox rebuild-cache
+
+# Archive Docker data and upload to S3
+bin/sandbox cloud upload-cache
 ```
 
-On first run, it prompts for:
-
-- Launch template ID (from Terraform output)
-- Subnet ID (pick one private subnet)
-- AWS region (us-east-1)
-- AWS CLI profile name
-- Tailscale auth key (generate a reusable key from the Tailscale admin console -- personal account is fine for testing)
-
+On first run, `upload-cache` prompts for S3 bucket name and key.
 These are saved to `~/.posthog-sandboxes/cloud-config.json`.
 
-Then:
+**Option B: From a fresh EC2 instance (bootstrapping):**
 
 ```bash
-bin/sandbox cloud list              # verify it shows up
-bin/sandbox cloud shell test-branch # SSH in
-bin/sandbox cloud sleep test-branch # stop instance
-bin/sandbox cloud wake test-branch  # restart
-bin/sandbox cloud destroy test-branch # clean up
+# Launch a temporary m6id.2xlarge, SSH in, then:
+sudo apt-get update && sudo apt-get install -y docker.io python3-yaml git zstd
+sudo usermod -aG docker ubuntu
+# Log out and back in for group change
+git clone https://github.com/PostHog/posthog.git && cd posthog
+python3 bin/sandbox rebuild-cache
+python3 bin/sandbox cloud upload-cache
+# Then terminate the instance
 ```
 
-## Key things to watch for
+### 3. First cloud sandbox
 
-1. **Tailscale reconnection after stop/start** -- reusable auth keys handle this, but verify the hostname persists.
+```bash
+bin/sandbox cloud create my-feature-branch
+```
+
+On first run, the CLI prompts for:
+
+- **S3 bucket** — where the Docker cache archive lives (default: `posthog-sandbox-cache`)
+- **S3 key** — archive filename (default: `docker-data.tar.zst`)
+- **Security group ID** — must allow outbound internet
+- **Subnet ID** — must have internet access (public or NAT)
+- **AWS region** — default: `us-east-1`
+- **AWS CLI profile** — default: `default`
+- **Tailscale auth key** — reusable key from the Tailscale admin console
+
+These are saved to `~/.posthog-sandboxes/cloud-config.json`. Example:
+
+```json
+{
+  "s3_bucket": "posthog-sandbox-cache",
+  "s3_key": "docker-data.tar.zst",
+  "security_group_id": "sg-0bc3b0b24358a9011",
+  "subnet_id": "subnet-0c1d4a3f75f7734d8",
+  "region": "us-east-1",
+  "aws_profile": "remote-dev",
+  "tailscale_auth_key": "tskey-auth-..."
+}
+```
+
+## Daily usage
+
+```bash
+# Create a cloud sandbox for a branch
+bin/sandbox cloud create my-branch
+
+# List your cloud sandboxes
+bin/sandbox cloud list
+
+# SSH into the sandbox (attaches to mprocs tmux session)
+bin/sandbox cloud shell my-branch
+
+# Open PostHog web UI in browser
+bin/sandbox cloud open my-branch
+
+# Tail boot + app logs
+bin/sandbox cloud logs my-branch
+
+# Open VSCode Remote-SSH to the sandbox
+bin/sandbox cloud code my-branch
+
+# Open JetBrains Gateway
+bin/sandbox cloud idea my-branch
+
+# Terminate the instance
+bin/sandbox cloud destroy my-branch
+```
+
+## Updating the Docker cache
+
+When the sandbox Docker image changes significantly (new dependencies, schema changes),
+rebuild and re-upload the cache:
+
+```bash
+# On a Linux machine:
+bin/sandbox rebuild-cache
+bin/sandbox cloud upload-cache
+```
+
+New cloud sandboxes will automatically use the updated cache.
+There is no AMI to rebuild — just upload and go.
+
+## Debugging
+
+**Check boot progress** while waiting for Tailscale:
+
+```bash
+aws ec2-instance-connect ssh \
+    --instance-id <instance-id> \
+    --connection-type eice \
+    --os-user ubuntu \
+    --profile remote-dev
+# Then:
+sudo cat /var/log/sandbox-boot.log
+```
+
+**Once Tailscale is up** (SSH poll succeeds), the CLI automatically tails the boot log.
+
+**Common issues:**
+
+- **SSH poll times out (3 min)**: Cloud-init may have failed before Tailscale joined.
+  Use EC2 Instance Connect (above) to check the boot log.
+- **S3 download fails**: Pre-signed URL expires after 1 hour.
+  If boot takes longer than expected, the download will fail.
+  Destroy and recreate.
+- **"No Docker cache archive found"**: Run `bin/sandbox cloud upload-cache` first.
+- **posthog-worktree flox error**: This is handled — cloud-init creates the worktree
+  directly with `git worktree add`, bypassing `posthog-worktree` (which needs flox).
+
+## Architecture decisions
+
+- **Stock Ubuntu AMI** — auto-discovered via `aws ec2 describe-images`. No custom AMI
+  to build or maintain. Canonical publishes new AMIs regularly; we always get the latest.
+- **S3 pre-signed URLs** — instances need no IAM instance profile. The CLI generates
+  a 1-hour pre-signed URL at launch time and embeds it in user data.
+- **NVMe instance store** — m6id instances have a fast local NVMe SSD (~400GB).
+  Docker data and the git repo are placed on NVMe for fast I/O. Falls back to EBS
+  gracefully if no NVMe is available.
+- **Same code path as local** — `bin/sandbox create` runs identically on cloud and local.
+  Cloud-init just sets up the environment (Docker, git, worktree) before calling it.
