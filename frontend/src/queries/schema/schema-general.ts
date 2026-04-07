@@ -156,6 +156,7 @@ export enum NodeKind {
     ExperimentQuery = 'ExperimentQuery',
     ExperimentExposureQuery = 'ExperimentExposureQuery',
     ExperimentEventExposureConfig = 'ExperimentEventExposureConfig',
+    ExperimentActorsQuery = 'ExperimentActorsQuery',
     ExperimentTrendsQuery = 'ExperimentTrendsQuery',
     ExperimentFunnelsQuery = 'ExperimentFunnelsQuery',
     ExperimentDataWarehouseNode = 'ExperimentDataWarehouseNode',
@@ -2110,7 +2111,13 @@ export type CachedActorsQueryResponse = CachedQueryResponse<ActorsQueryResponse>
 
 export interface ActorsQuery extends DataNode<ActorsQueryResponse> {
     kind: NodeKind.ActorsQuery
-    source?: InsightActorsQuery | FunnelsActorsQuery | FunnelCorrelationActorsQuery | StickinessActorsQuery | HogQLQuery
+    source?:
+        | InsightActorsQuery
+        | FunnelsActorsQuery
+        | FunnelCorrelationActorsQuery
+        | ExperimentActorsQuery
+        | StickinessActorsQuery
+        | HogQLQuery
     select?: HogQLExpression[]
     search?: string
     /** Currently only person filters supported. No filters for querying groups. See `filter_conditions()` in actor_strategies.py. */
@@ -3362,6 +3369,15 @@ export type ExperimentRetentionMetric = ExperimentMetricBaseProperties & {
 export const isExperimentRetentionMetric = (metric: ExperimentMetric): metric is ExperimentRetentionMetric =>
     metric.metric_type === ExperimentMetricType.RETENTION
 
+// Legacy experiment query type guards
+export const isExperimentTrendsQuery = (
+    query: ExperimentTrendsQuery | ExperimentFunnelsQuery
+): query is ExperimentTrendsQuery => query.kind === NodeKind.ExperimentTrendsQuery
+
+export const isExperimentFunnelsQuery = (
+    query: ExperimentTrendsQuery | ExperimentFunnelsQuery
+): query is ExperimentFunnelsQuery => query.kind === NodeKind.ExperimentFunnelsQuery
+
 export type ExperimentMeanMetricTypeProps = Omit<ExperimentMeanMetric, keyof ExperimentMetricBaseProperties>
 export type ExperimentFunnelMetricTypeProps = Omit<ExperimentFunnelMetric, keyof ExperimentMetricBaseProperties>
 export type ExperimentRatioMetricTypeProps = Omit<ExperimentRatioMetric, keyof ExperimentMetricBaseProperties>
@@ -3438,6 +3454,16 @@ export interface LegacyExperimentQueryResponse {
     stats_version?: integer
     p_value: number
     credible_intervals: Record<string, [number, number]>
+}
+
+export interface ExperimentActorsQuery extends InsightActorsQueryBase {
+    kind: NodeKind.ExperimentActorsQuery
+    source: ExperimentQuery
+    /** Index of the step for which we want to get actors for, per experiment variant.
+     * Positive for converted persons, negative for dropped off persons. */
+    funnelStep?: integer
+    /** The variant key for filtering actors. For experiments, this filters by feature flag variant (e.g., 'control', 'test'). */
+    funnelStepBreakdown?: BreakdownKeyType
 }
 
 export interface SessionData {
@@ -3727,7 +3753,12 @@ export type CachedInsightActorsQueryOptionsResponse = CachedQueryResponse<Insigh
 
 export interface InsightActorsQueryOptions extends Node<InsightActorsQueryOptionsResponse> {
     kind: NodeKind.InsightActorsQueryOptions
-    source: InsightActorsQuery | FunnelsActorsQuery | FunnelCorrelationActorsQuery | StickinessActorsQuery
+    source:
+        | InsightActorsQuery
+        | FunnelsActorsQuery
+        | FunnelCorrelationActorsQuery
+        | StickinessActorsQuery
+        | ExperimentActorsQuery
 }
 
 export interface DatabaseSchemaSchema {
@@ -4009,6 +4040,17 @@ export interface TrendsAlertConfig {
     series_index: integer
     /** When true, evaluate the current (still incomplete) time interval in addition to completed ones. */
     check_ongoing_interval?: boolean
+}
+
+/** One blocked period for quiet hours: 24-hour HH:MM in the project timezone; interval is half-open [start, end). */
+export interface AlertScheduleRestrictionWindow {
+    start: string
+    end: string
+}
+
+/** Quiet hours: local time windows when the alert must not run. At most five windows after API normalization. */
+export interface AlertScheduleRestriction {
+    blocked_windows: AlertScheduleRestrictionWindow[]
 }
 
 // Detector types for anomaly detection alerts
@@ -5067,6 +5109,9 @@ export type ConversionGoalFilter = (EventsNode | ActionsNode | DataWarehouseNode
 export enum AttributionMode {
     FirstTouch = 'first_touch',
     LastTouch = 'last_touch',
+    Linear = 'linear',
+    TimeDecay = 'time_decay',
+    PositionBased = 'position_based',
 }
 
 export enum MatchField {
