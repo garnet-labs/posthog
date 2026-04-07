@@ -24,6 +24,14 @@ exec > /var/log/sandbox-boot.log 2>&1
 SECONDS=0
 log() { echo "==> [${SECONDS}s] $*"; }
 
+# Write boot status on exit so the CLI can detect failure quickly.
+BOOT_STATUS="failed"
+cleanup() {
+    log "Boot status: $BOOT_STATUS"
+    echo "$BOOT_STATUS" > /var/log/sandbox-boot-status
+}
+trap cleanup EXIT
+
 log "Cloud sandbox boot starting at $(date)"
 
 # --- Variables (replaced by bin/sandbox at launch time) ---
@@ -147,6 +155,19 @@ else
     log "Symlinked /var/lib/docker -> /mnt/nvme/docker"
 fi
 
+# --- Clone PostHog repo (background, overlaps with S3 download) ---
+log "Cloning PostHog repo (background)..."
+clone_repo() {
+    if [ -n "$NVME_DEV" ]; then
+        sudo -u ubuntu git clone https://github.com/PostHog/posthog.git /mnt/nvme/posthog
+        ln -s /mnt/nvme/posthog "$REPO_DIR"
+    else
+        sudo -u ubuntu git clone https://github.com/PostHog/posthog.git "$REPO_DIR"
+    fi
+}
+clone_repo &
+CLONE_PID=$!
+
 # --- Download and extract Docker cache from S3 ---
 if [ -n "$S3_ARCHIVE_URL" ]; then
     log "Downloading Docker cache from S3..."
@@ -179,15 +200,9 @@ systemctl start docker
 log "Docker started"
 log "Docker info: $(docker info --format '{{.DockerRootDir}}, Images: {{.Images}}, Driver: {{.Driver}}')"
 
-# --- Clone PostHog repo ---
-log "Cloning PostHog repo..."
-if [ -n "$NVME_DEV" ]; then
-    # Clone to NVMe for faster git operations
-    sudo -u ubuntu git clone https://github.com/PostHog/posthog.git /mnt/nvme/posthog
-    ln -s /mnt/nvme/posthog "$REPO_DIR"
-else
-    sudo -u ubuntu git clone https://github.com/PostHog/posthog.git "$REPO_DIR"
-fi
+# --- Wait for repo clone ---
+log "Waiting for repo clone..."
+wait $CLONE_PID || { log "ERROR: git clone failed"; exit 1; }
 log "Repo cloned"
 
 # --- Pre-populate sandbox config to skip interactive prompts ---
@@ -217,6 +232,7 @@ sudo -u ubuntu HOME=/home/ubuntu git worktree add "$WORKTREE_DIR" "$SANDBOX_BRAN
 log "Creating sandbox via bin/sandbox create..."
 sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 bin/sandbox create '$SANDBOX_BRANCH' --no-attach"
 
+BOOT_STATUS="complete"
 log "Cloud sandbox boot complete at $(date)"
 log "Total boot time: ${SECONDS}s"
 log "Tailscale hostname: $SANDBOX_HOSTNAME"
