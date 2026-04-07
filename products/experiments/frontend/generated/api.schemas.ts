@@ -428,8 +428,6 @@ export type ExperimentApiParameters = {
     minimum_detectable_effect?: number
 } | null | null
 
-export type ExperimentApiSavedMetricsIdsItem = { [key: string]: unknown }
-
 /**
  * Exposure configuration including filter test accounts and custom exposure events.
  * @nullable
@@ -599,7 +597,7 @@ export interface ExperimentApi {
      * IDs of shared saved metrics to attach to this experiment. Each item has 'id' (saved metric ID) and 'metadata' with 'type' (primary or secondary).
      * @nullable
      */
-    saved_metrics_ids?: ExperimentApiSavedMetricsIdsItem[] | null
+    saved_metrics_ids?: unknown[] | null
     filters?: unknown
     /** Whether the experiment is archived. */
     archived?: boolean
@@ -675,8 +673,6 @@ export type PatchedExperimentApiParameters = {
     /** Minimum detectable effect in percentage. Lower values require more users but detect smaller changes. Suggest 20-30%% for most experiments. */
     minimum_detectable_effect?: number
 } | null | null
-
-export type PatchedExperimentApiSavedMetricsIdsItem = { [key: string]: unknown }
 
 /**
  * Exposure configuration including filter test accounts and custom exposure events.
@@ -979,7 +975,7 @@ export interface PatchedExperimentApi {
      * IDs of shared saved metrics to attach to this experiment. Each item has 'id' (saved metric ID) and 'metadata' with 'type' (primary or secondary).
      * @nullable
      */
-    saved_metrics_ids?: PatchedExperimentApiSavedMetricsIdsItem[] | null
+    saved_metrics_ids?: unknown[] | null
     filters?: unknown
     /** Whether the experiment is archived. */
     archived?: boolean

@@ -14541,8 +14541,6 @@ export namespace Schemas {
       minimum_detectable_effect?: number;
     } | null | null;
 
-    export type ExperimentSavedMetricsIdsItem = {[key: string]: unknown};
-
     /**
      * Exposure configuration including filter test accounts and custom exposure events.
      * @nullable
@@ -14895,7 +14893,7 @@ export namespace Schemas {
        * IDs of shared saved metrics to attach to this experiment. Each item has 'id' (saved metric ID) and 'metadata' with 'type' (primary or secondary).
        * @nullable
        */
-      saved_metrics_ids?: ExperimentSavedMetricsIdsItem[] | null;
+      saved_metrics_ids?: unknown[] | null;
       filters?: unknown;
       /** Whether the experiment is archived. */
       archived?: boolean;
@@ -23793,8 +23791,6 @@ export namespace Schemas {
       minimum_detectable_effect?: number;
     } | null | null;
 
-    export type PatchedExperimentSavedMetricsIdsItem = {[key: string]: unknown};
-
     /**
      * Exposure configuration including filter test accounts and custom exposure events.
      * @nullable
@@ -24096,7 +24092,7 @@ export namespace Schemas {
        * IDs of shared saved metrics to attach to this experiment. Each item has 'id' (saved metric ID) and 'metadata' with 'type' (primary or secondary).
        * @nullable
        */
-      saved_metrics_ids?: PatchedExperimentSavedMetricsIdsItem[] | null;
+      saved_metrics_ids?: unknown[] | null;
       filters?: unknown;
       /** Whether the experiment is archived. */
       archived?: boolean;
