@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use metrics::{counter, histogram};
-use tokio::task::JoinSet;
-use tracing::{debug, error, info_span, Level};
+use tracing::{debug, info_span, Level};
 
 use crate::config::CaptureMode;
 use crate::v1::context::Context;
@@ -184,8 +185,11 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
 
         let enqueued_at = Utc::now();
         let mut results: Vec<SinkOutput> = Vec::new();
-        let mut set = JoinSet::new();
-        let mut pending_keys: HashSet<String> = HashSet::new();
+        // FuturesUnordered polls ack futures inline — no per-event tokio::spawn.
+        // DeliveryFuture is a oneshot receiver (pure I/O wait, no CPU work), so
+        // single-task polling is strictly cheaper than spawning real tasks.
+        let mut pending = FuturesUnordered::new();
+        let mut enqueued_keys: Vec<String> = Vec::new();
 
         // Reusable buffers — cleared each iteration, amortised to zero allocs
         // after the first event.
@@ -251,11 +255,10 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
 
             match producer.send(record) {
                 Ok(ack_future) => {
-                    pending_keys.insert(uuid_key.clone());
-                    set.spawn(async move {
+                    enqueued_keys.push(uuid_key.clone());
+                    pending.push(async move {
                         let result = ack_future.await;
-                        let completed_at = Utc::now();
-                        (uuid_key, completed_at, result)
+                        (uuid_key, Utc::now(), result)
                     });
                 }
                 Err(e) => {
@@ -279,14 +282,19 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
             }
         }
 
-        // Phase 2: drain JoinSet with per-sink deadline
+        // Phase 2: drain ack futures with per-sink deadline.
+        // Dropping remaining futures on timeout is safe: the underlying
+        // DeliveryFuture is a oneshot::Receiver — dropping it just means
+        // rdkafka's delivery callback send() returns Err (silently ignored).
+        // The message still completes in librdkafka (or times out via
+        // message.timeout.ms); we just stop waiting for the ack.
         let deadline = tokio::time::Instant::now() + sink_cfg.produce_timeout;
-        let mut timed_out = false;
+        let mut resolved_keys: HashSet<String> = HashSet::new();
 
-        while !pending_keys.is_empty() {
-            match tokio::time::timeout_at(deadline, set.join_next()).await {
-                Ok(Some(Ok((uuid_key, completed_at, ack)))) => {
-                    pending_keys.remove(&uuid_key);
+        loop {
+            match tokio::time::timeout_at(deadline, pending.next()).await {
+                Ok(Some((uuid_key, completed_at, ack))) => {
+                    resolved_keys.insert(uuid_key.clone());
                     match ack {
                         Ok(()) => {
                             counter!(
@@ -334,42 +342,34 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                         }
                     }
                 }
-                Ok(Some(Err(join_err))) => {
-                    error!(error = %format!("{join_err:#}"), "join error during publish_batch");
-                }
                 Ok(None) => break,
-                Err(_) => {
-                    timed_out = true;
-                    set.abort_all();
-                    break;
-                }
+                Err(_) => break,
             }
         }
 
-        // Phase 3: remaining pending keys are from timeout or panicked tasks
-        if !pending_keys.is_empty() {
-            let sink_err_fn: fn() -> KafkaSinkError = if timed_out {
-                || KafkaSinkError::Timeout
-            } else {
-                || KafkaSinkError::TaskPanicked
-            };
-            let sample_outcome = sink_err_fn().outcome();
+        // Phase 3: keys enqueued but not resolved are timed-out events.
+        // (With FuturesUnordered, the only way to have residue is a deadline
+        // break — there are no JoinErrors / task panics to handle.)
+        let timed_out_keys: Vec<_> = enqueued_keys
+            .into_iter()
+            .filter(|k| !resolved_keys.contains(k))
+            .collect();
+        if !timed_out_keys.is_empty() {
             counter!(
                 "capture_v1_kafka_publish_total",
                 "mode" => mode,
                 "cluster" => sink_str,
-                "outcome" => sample_outcome.as_tag(),
+                "outcome" => Outcome::Timeout.as_tag(),
                 "path" => path.clone(),
                 "attempt" => attempt.clone(),
             )
-            .increment(pending_keys.len() as u64);
-            let gave_up_at = if timed_out { Some(Utc::now()) } else { None };
-            for uuid_key in pending_keys {
-                let mut result = KafkaResult::err(uuid_key, sink_err_fn(), enqueued_at);
-                if let Some(t) = gave_up_at {
-                    result = result.with_completed_at(t);
-                }
-                results.push(SinkOutput::Kafka(result));
+            .increment(timed_out_keys.len() as u64);
+            let gave_up_at = Utc::now();
+            for uuid_key in timed_out_keys {
+                results.push(SinkOutput::Kafka(
+                    KafkaResult::err(uuid_key, KafkaSinkError::Timeout, enqueued_at)
+                        .with_completed_at(gave_up_at),
+                ));
             }
         }
 
