@@ -971,7 +971,7 @@ def cmd_create(branch: str, base_branch: str = "master", no_attach: bool = False
 
     worktree_path = ensure_worktree(branch, base_branch)
 
-    if Path(worktree_path).resolve() == REPO_ROOT.resolve():
+    if not no_attach and Path(worktree_path).resolve() == REPO_ROOT.resolve():
         fatal(
             f"Cannot create a sandbox on the branch currently checked out in the main repo.\n"
             f"  Either check out a different branch first, or create the sandbox on a new branch:\n"

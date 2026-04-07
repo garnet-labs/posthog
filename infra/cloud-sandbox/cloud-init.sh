@@ -222,25 +222,16 @@ mkdir -p "$SANDBOX_CONFIG_DIR"
 echo '{"jetbrains": null}' > "$SANDBOX_CONFIG_DIR/config.json"
 chown -R ubuntu:ubuntu "$SANDBOX_CONFIG_DIR"
 
-# --- Fetch branch and create worktree ---
+# --- Checkout branch ---
 log "Fetching branch $SANDBOX_BRANCH..."
 cd "$REPO_DIR"
 sudo -u ubuntu HOME=/home/ubuntu git fetch origin --quiet
 sudo -u ubuntu HOME=/home/ubuntu git fetch origin "$SANDBOX_BRANCH" --quiet \
     || log "WARNING: fetch of $SANDBOX_BRANCH failed, will try with available refs"
-
-# Detach HEAD to avoid "already checked out" errors
-sudo -u ubuntu HOME=/home/ubuntu git checkout --detach HEAD
-
-# Create worktree directly with git (posthog-worktree requires flox, not available on cloud)
-# bin/sandbox create's find_worktree() will discover this and skip posthog-worktree.
-WORKTREE_DIR="/home/ubuntu/.worktrees/posthog/$SANDBOX_BRANCH"
-log "Creating worktree at $WORKTREE_DIR..."
-sudo -u ubuntu HOME=/home/ubuntu mkdir -p "$(dirname "$WORKTREE_DIR")"
-sudo -u ubuntu HOME=/home/ubuntu git worktree add "$WORKTREE_DIR" "$SANDBOX_BRANCH"
+sudo -u ubuntu HOME=/home/ubuntu git checkout "$SANDBOX_BRANCH"
 
 log "Creating sandbox via bin/sandbox create..."
-sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 '$WORKTREE_DIR/bin/sandbox' create '$SANDBOX_BRANCH' --no-attach"
+sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 bin/sandbox create '$SANDBOX_BRANCH' --no-attach"
 
 BOOT_STATUS="complete"
 log "Cloud sandbox boot complete at $(date)"
