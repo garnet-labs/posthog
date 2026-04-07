@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from django.conf import settings
 
+import numpy as np
 import pyarrow as pa
 import deltalake as deltalake
 import pyarrow.compute as pc
@@ -32,16 +33,25 @@ def _first_per_pk_table(pa_table: pa.Table, pk_columns: list[str]) -> pa.Table:
     if not pk_columns or pa_table.num_rows == 0:
         return pa_table
 
-    pk_arrays = [pa_table.column(col).to_pylist() for col in pk_columns]
-    seen: set[tuple] = set()
-    indices: list[int] = []
-    for i in range(pa_table.num_rows):
-        key = tuple(arr[i] for arr in pk_arrays)
-        if key not in seen:
-            seen.add(key)
-            indices.append(i)
+    # Strategy: tag every row with its position, group by PK, and for each PK
+    # take the smallest position. That position is the first time we saw that PK.
+    # Sorting those positions at the end restores the original row order.
+    #
+    # We use numpy for the final sort because pyarrow's type stubs for
+    # `pc.sort_indices` / `Array.take` are currently broken — numpy's stubs work.
+    idx_col_name = "__ph_cdc_row_idx"
 
-    return pa_table.take(indices)
+    # 1. Add a row-position column: [0, 1, 2, ..., n-1]
+    indexed = pa_table.append_column(idx_col_name, pa.array(range(pa_table.num_rows), type=pa.int64()))
+
+    # 2. Group by PK, keeping only the smallest position per PK (= first occurrence)
+    grouped = indexed.group_by(pk_columns).aggregate([(idx_col_name, "min")])
+
+    # 3. Sort those positions ascending so the output mirrors the input row order
+    first_indices = np.sort(grouped.column(f"{idx_col_name}_min").to_numpy())
+
+    # 4. Materialize the rows at those positions from the original table
+    return pa_table.take(first_indices)
 
 
 class DeltaTableHelper:
