@@ -1,5 +1,8 @@
-import { IngestionOutput, IngestionOutputTarget, IngestionOutputs } from './ingestion-outputs'
+import { DualWriteIngestionOutput } from './dual-write-ingestion-output'
+import { IngestionOutput } from './ingestion-output'
+import { IngestionOutputs } from './ingestion-outputs'
 import { KafkaProducerRegistry } from './kafka-producer-registry'
+import { SingleIngestionOutput } from './single-ingestion-output'
 
 /**
  * Static definition of an ingestion output.
@@ -43,7 +46,7 @@ export function resolveIngestionOutputs<O extends string, P extends string>(
         const producerName = (process.env[definition.producerOverrideEnvVar] ?? definition.defaultProducerName) as P
         const topic = process.env[definition.topicOverrideEnvVar] ?? definition.defaultTopic
 
-        const targets: IngestionOutputTarget[] = [{ topic, producer: registry.getProducer(producerName), producerName }]
+        const primary = new SingleIngestionOutput(outputName, topic, registry.getProducer(producerName), producerName)
 
         const secondaryTopic = definition.secondaryTopicEnvVar
             ? process.env[definition.secondaryTopicEnvVar]
@@ -53,14 +56,18 @@ export function resolveIngestionOutputs<O extends string, P extends string>(
             : undefined
 
         if (secondaryTopic && secondaryProducerName) {
-            targets.push({
-                topic: secondaryTopic,
-                producer: registry.getProducer(secondaryProducerName),
-                producerName: secondaryProducerName,
-            })
+            resolved[outputName] = new DualWriteIngestionOutput(
+                primary,
+                new SingleIngestionOutput(
+                    outputName,
+                    secondaryTopic,
+                    registry.getProducer(secondaryProducerName),
+                    secondaryProducerName
+                )
+            )
+        } else {
+            resolved[outputName] = primary
         }
-
-        resolved[outputName] = targets
     }
 
     // Safe cast: every key in Record<O, ...> has been resolved above.

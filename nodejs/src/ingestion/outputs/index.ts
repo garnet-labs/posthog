@@ -1,4 +1,7 @@
-export { IngestionOutputs, IngestionOutput, IngestionOutputTarget } from './ingestion-outputs'
+export { IngestionOutput } from './ingestion-output'
+export { SingleIngestionOutput } from './single-ingestion-output'
+export { DualWriteIngestionOutput } from './dual-write-ingestion-output'
+export { IngestionOutputs } from './ingestion-outputs'
 export { IngestionOutputMessage } from './types'
 export { IngestionOutputDefinition, resolveIngestionOutputs } from './resolver'
 export { AllowedConfigKey, getProducerConfig, parseProducerConfig } from './kafka-producer-config'

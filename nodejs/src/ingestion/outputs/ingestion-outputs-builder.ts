@@ -1,5 +1,8 @@
-import { IngestionOutput, IngestionOutputs } from './ingestion-outputs'
+import { DualWriteIngestionOutput } from './dual-write-ingestion-output'
+import { IngestionOutput } from './ingestion-output'
+import { IngestionOutputs } from './ingestion-outputs'
 import { KafkaProducerRegistry } from './kafka-producer-registry'
+import { SingleIngestionOutput } from './single-ingestion-output'
 
 /**
  * Static definition of an ingestion output — just the config keys for topic and producer.
@@ -7,9 +10,21 @@ import { KafkaProducerRegistry } from './kafka-producer-registry'
  * Defaults (topic name, producer name) live in the config object's default values,
  * not in the definition. This keeps definitions pure config-key references.
  */
-export interface OutputDefinition<TK extends string, PK extends string> {
+interface PrimaryDef<TK extends string, PK extends string> {
     topicKey: TK
     producerKey: PK
+}
+
+interface SecondaryDef<TK extends string, PK extends string, STK extends string, SPK extends string>
+    extends PrimaryDef<TK, PK> {
+    secondaryTopicKey: STK
+    secondaryProducerKey: SPK
+}
+
+function hasSecondary<TK extends string, PK extends string>(
+    def: PrimaryDef<TK, PK>
+): def is SecondaryDef<TK, PK, TK, PK> {
+    return 'secondaryTopicKey' in def && 'secondaryProducerKey' in def
 }
 
 /**
@@ -20,6 +35,9 @@ export interface OutputDefinition<TK extends string, PK extends string> {
  * - The config contains all accumulated topic keys as `string`
  * - The config contains all accumulated producer keys as `P` (the registry's producer name type)
  *
+ * Use `registerDualWrite()` to enable dual writes for an output — when the config
+ * contains non-empty values for both secondary keys, a second target is added.
+ *
  * @example
  * ```ts
  * const outputs = new IngestionOutputsBuilder()
@@ -29,7 +47,7 @@ export interface OutputDefinition<TK extends string, PK extends string> {
  * ```
  */
 export class IngestionOutputsBuilder<O extends string = never, TK extends string = never, PK extends string = never> {
-    private definitions = new Map<string, { topicKey: TK; producerKey: PK }>()
+    constructor(private readonly definitions: Map<string, PrimaryDef<TK, PK>> = new Map()) {}
 
     /**
      * Register an output with its config key pair.
@@ -39,12 +57,32 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
      */
     register<Name extends string, NewTK extends string, NewPK extends string>(
         name: Name,
-        definition: OutputDefinition<NewTK, NewPK>
+        definition: PrimaryDef<NewTK, NewPK>
     ): IngestionOutputsBuilder<O | Name, TK | NewTK, PK | NewPK> {
-        const next = new IngestionOutputsBuilder<O | Name, TK | NewTK, PK | NewPK>()
-        next.definitions = new Map(this.definitions)
-        next.definitions.set(name, definition)
-        return next
+        const defs = new Map<string, PrimaryDef<TK | NewTK, PK | NewPK>>(this.definitions)
+        defs.set(name, definition)
+        return new IngestionOutputsBuilder(defs)
+    }
+
+    /**
+     * Register an output with primary and secondary config key pairs for dual writes.
+     *
+     * When both secondary topic and producer are non-empty in the config at build time,
+     * produces will fan out to both targets. Otherwise falls back to single output.
+     */
+    registerDualWrite<
+        Name extends string,
+        NewTK extends string,
+        NewPK extends string,
+        NewSTK extends string,
+        NewSPK extends string,
+    >(
+        name: Name,
+        definition: SecondaryDef<NewTK, NewPK, NewSTK, NewSPK>
+    ): IngestionOutputsBuilder<O | Name, TK | NewTK | NewSTK, PK | NewPK | NewSPK> {
+        const defs = new Map<string, PrimaryDef<TK | NewTK | NewSTK, PK | NewPK | NewSPK>>(this.definitions)
+        defs.set(name, definition)
+        return new IngestionOutputsBuilder(defs)
     }
 
     /**
@@ -61,13 +99,32 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
 
         for (const [name, def] of this.definitions) {
             const producerName = config[def.producerKey]
-            record[name] = [
-                {
-                    topic: config[def.topicKey],
-                    producer: registry.getProducer(producerName),
-                    producerName,
-                },
-            ]
+            const primary = new SingleIngestionOutput(
+                name,
+                config[def.topicKey],
+                registry.getProducer(producerName),
+                producerName
+            )
+
+            if (hasSecondary(def)) {
+                const secondaryTopic = config[def.secondaryTopicKey]
+                const secondaryProducerName = config[def.secondaryProducerKey]
+                if (secondaryTopic && secondaryProducerName) {
+                    record[name] = new DualWriteIngestionOutput(
+                        primary,
+                        new SingleIngestionOutput(
+                            name,
+                            secondaryTopic,
+                            registry.getProducer(secondaryProducerName),
+                            secondaryProducerName
+                        )
+                    )
+                } else {
+                    record[name] = primary
+                }
+            } else {
+                record[name] = primary
+            }
         }
 
         // TypeScript cannot verify that an imperatively-built Record has all keys of a

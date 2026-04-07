@@ -56,6 +56,7 @@ import { createTestMessage } from '../../../../tests/helpers/kafka-message'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../../common/outputs'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../../outputs/single-ingestion-output'
 import { newBatchPipelineBuilder } from '../builders'
 import { createOkContext } from '../helpers'
 import { PipelineResult, dlq, drop, isDlqResult, isDropResult, isRedirectResult, ok, redirect } from '../results'
@@ -85,11 +86,14 @@ describe('Result Handling', () => {
 
         const pipelineConfig = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'my-dlq-topic', producer: mockProducer as any, producerName: 'test' }],
-                [OVERFLOW_OUTPUT]: [{ topic: 'overflow-topic', producer: mockProducer as any, producerName: 'test' }],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    { topic: 'ingestion_warnings_test', producer: mockProducer as any, producerName: 'test' },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'my-dlq-topic', mockProducer as any, 'test'),
+                [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', 'overflow-topic', mockProducer as any, 'test'),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'ingestion_warnings_test',
+                    mockProducer as any,
+                    'test'
+                ),
             }),
             promiseScheduler: promiseScheduler,
         }
@@ -152,11 +156,14 @@ describe('Result Handling', () => {
 
         const pipelineConfig = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'dlq-topic', producer: mockProducer as any, producerName: 'test' }],
-                [OVERFLOW_OUTPUT]: [{ topic: 'overflow-topic', producer: mockProducer as any, producerName: 'test' }],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    { topic: 'ingestion_warnings_test', producer: mockProducer as any, producerName: 'test' },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'dlq-topic', mockProducer as any, 'test'),
+                [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', 'overflow-topic', mockProducer as any, 'test'),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'ingestion_warnings_test',
+                    mockProducer as any,
+                    'test'
+                ),
             }),
             promiseScheduler: promiseScheduler,
         }
@@ -219,14 +226,20 @@ describe('Result Handling', () => {
 
         const pipelineConfig = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'dlq-topic', producer: mockProducer as any, producerName: 'test' }],
-                [HIGH_PRIORITY_OUTPUT]: [
-                    { topic: 'high-priority-topic', producer: mockProducer as any, producerName: 'test' },
-                ],
-                [BROADCAST_OUTPUT]: [{ topic: 'broadcast-topic', producer: mockProducer as any, producerName: 'test' }],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    { topic: 'ingestion_warnings_test', producer: mockProducer as any, producerName: 'test' },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'dlq-topic', mockProducer as any, 'test'),
+                [HIGH_PRIORITY_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'high-priority-topic',
+                    mockProducer as any,
+                    'test'
+                ),
+                [BROADCAST_OUTPUT]: new SingleIngestionOutput('test', 'broadcast-topic', mockProducer as any, 'test'),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'ingestion_warnings_test',
+                    mockProducer as any,
+                    'test'
+                ),
             }),
             promiseScheduler: promiseScheduler,
         }

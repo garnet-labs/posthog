@@ -25,6 +25,7 @@ import { Team } from '../../../types'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput, OVERFLOW_OUTPUT } from '../../common/outputs'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../../outputs/single-ingestion-output'
 import { newBatchPipelineBuilder } from '../builders'
 import { createOkContext } from '../helpers'
 import { PipelineWarning } from '../pipeline.interface'
@@ -57,17 +58,19 @@ describe('Filter Map', () => {
         }
         const pipelineConfig = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'test-dlq', producer: mockKafkaProducer as any, producerName: 'test' }],
-                [OVERFLOW_OUTPUT]: [
-                    { topic: 'overflow-topic', producer: mockKafkaProducer as any, producerName: 'test' },
-                ],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    {
-                        topic: 'clickhouse_ingestion_warnings',
-                        producer: mockKafkaProducer as any,
-                        producerName: 'test',
-                    },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockKafkaProducer as any, 'test'),
+                [OVERFLOW_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'overflow-topic',
+                    mockKafkaProducer as any,
+                    'test'
+                ),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'clickhouse_ingestion_warnings',
+                    mockKafkaProducer as any,
+                    'test'
+                ),
             }),
             promiseScheduler,
         }

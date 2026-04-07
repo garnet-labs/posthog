@@ -6,6 +6,7 @@ import { PERSONS_OUTPUT, PERSON_DISTINCT_IDS_OUTPUT } from '../analytics/outputs
 import { emitIngestionWarning } from '../common/ingestion-warnings'
 import { INGESTION_WARNINGS_OUTPUT } from '../common/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../outputs/single-ingestion-output'
 import { AfterBatchInput } from '../pipelines/batching-pipeline'
 import { isOkResult, ok } from '../pipelines/results'
 import { FlushBatchStoresStepConfig, createFlushBatchStoresStep } from './flush-batch-stores-step'
@@ -38,13 +39,14 @@ describe('flush-batch-stores-step', () => {
             queueMessages: jest.fn().mockResolvedValue(undefined),
         } as any
         mockOutputs = new IngestionOutputs({
-            [PERSONS_OUTPUT]: [{ topic: 'person_updates', producer: mockProducer, producerName: 'test' }],
-            [PERSON_DISTINCT_IDS_OUTPUT]: [
-                { topic: 'person_distinct_ids', producer: mockProducer, producerName: 'test' },
-            ],
-            [INGESTION_WARNINGS_OUTPUT]: [
-                { topic: 'ingestion_warnings', producer: mockProducer, producerName: 'test' },
-            ],
+            [PERSONS_OUTPUT]: new SingleIngestionOutput('test', 'person_updates', mockProducer, 'test'),
+            [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                'person_distinct_ids',
+                mockProducer,
+                'test'
+            ),
+            [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput('test', 'ingestion_warnings', mockProducer, 'test'),
         })
 
         storesConfig = {

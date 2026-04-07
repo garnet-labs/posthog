@@ -11,6 +11,7 @@ import { parseJSON } from '../../../utils/json-parse'
 import { AI_EVENTS_OUTPUT, EVENTS_OUTPUT, PERSONS_OUTPUT, PERSON_DISTINCT_IDS_OUTPUT } from '../../analytics/outputs'
 import { INGESTION_WARNINGS_OUTPUT } from '../../common/outputs'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../../outputs/single-ingestion-output'
 import { newPipelineBuilder } from '../../pipelines/builders'
 import { createOkContext } from '../../pipelines/helpers'
 import { PipelineResultType } from '../../pipelines/results'
@@ -75,41 +76,31 @@ function buildPipeline(configOverrides: Partial<AiEventSubpipelineConfig> = {}) 
             PERSON_PROPERTIES_UPDATE_ALL: false,
         },
         outputs: new IngestionOutputs({
-            [EVENTS_OUTPUT]: [
-                {
-                    topic: 'events_topic',
-                    producer: { produce: mockProduce } as any,
-                    producerName: 'test',
-                },
-            ],
-            [AI_EVENTS_OUTPUT]: [
-                {
-                    topic: 'ai_events_topic',
-                    producer: { produce: mockProduce } as any,
-                    producerName: 'test',
-                },
-            ],
-            [INGESTION_WARNINGS_OUTPUT]: [
-                {
-                    topic: 'ingestion_warnings_topic',
-                    producer: { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
-                    producerName: 'test',
-                },
-            ],
-            [PERSONS_OUTPUT]: [
-                {
-                    topic: 'persons_topic',
-                    producer: { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
-                    producerName: 'test',
-                },
-            ],
-            [PERSON_DISTINCT_IDS_OUTPUT]: [
-                {
-                    topic: 'person_distinct_ids_topic',
-                    producer: { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
-                    producerName: 'test',
-                },
-            ],
+            [EVENTS_OUTPUT]: new SingleIngestionOutput('test', 'events_topic', { produce: mockProduce } as any, 'test'),
+            [AI_EVENTS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                'ai_events_topic',
+                { produce: mockProduce } as any,
+                'test'
+            ),
+            [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                'ingestion_warnings_topic',
+                { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
+                'test'
+            ),
+            [PERSONS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                'persons_topic',
+                { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
+                'test'
+            ),
+            [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                'person_distinct_ids_topic',
+                { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
+                'test'
+            ),
         }),
         teamManager: {
             setTeamIngestedEvent: jest.fn().mockResolvedValue(undefined),

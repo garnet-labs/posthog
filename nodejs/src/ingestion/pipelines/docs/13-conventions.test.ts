@@ -40,6 +40,7 @@ import { parseJSON } from '../../../utils/json-parse'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput, OVERFLOW_OUTPUT } from '../../common/outputs'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../../outputs/single-ingestion-output'
 import { newBatchPipelineBuilder, newPipelineBuilder } from '../builders'
 import { PipelineBuilder, StartPipelineBuilder } from '../builders/pipeline-builders'
 import { createOkContext } from '../helpers'
@@ -452,11 +453,14 @@ describe('Pipeline Phases', () => {
 
         const pipelineConfig: PipelineConfig = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'test-dlq', producer: mockKafkaProducer, producerName: 'test' }],
-                [OVERFLOW_OUTPUT]: [{ topic: '', producer: mockKafkaProducer, producerName: 'test' }],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    { topic: 'warnings_test', producer: mockKafkaProducer, producerName: 'test' },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockKafkaProducer, 'test'),
+                [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', '', mockKafkaProducer, 'test'),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'warnings_test',
+                    mockKafkaProducer,
+                    'test'
+                ),
             }),
             promiseScheduler,
         }

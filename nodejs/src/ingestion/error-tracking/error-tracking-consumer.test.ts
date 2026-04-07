@@ -12,6 +12,7 @@ import { UUIDT } from '~/utils/utils'
 import { PersonRepository } from '~/worker/ingestion/persons/repositories/person-repository'
 
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../outputs/single-ingestion-output'
 import { ErrorTrackingConsumer, ErrorTrackingHogTransformer } from './error-tracking-consumer'
 
 /** Creates a mock KafkaConsumer for tests that don't need actual Kafka connections */
@@ -160,13 +161,16 @@ describe('ErrorTrackingConsumer', () => {
         mockHogTransformer = createMockHogTransformer()
         const deps = {
             outputs: new IngestionOutputs({
-                events: [{ topic: config.outputTopic, producer: hub.kafkaProducer, producerName: 'test' }],
-                ingestion_warnings: [
-                    { topic: 'clickhouse_ingestion_warnings_test', producer: hub.kafkaProducer, producerName: 'test' },
-                ],
-                dlq: [{ topic: config.dlqTopic, producer: hub.kafkaProducer, producerName: 'test' }],
-                overflow: [{ topic: config.overflowTopic || '', producer: hub.kafkaProducer, producerName: 'test' }],
-                tophog: [{ topic: 'clickhouse_tophog_test', producer: hub.kafkaProducer, producerName: 'test' }],
+                events: new SingleIngestionOutput('test', config.outputTopic, hub.kafkaProducer, 'test'),
+                ingestion_warnings: new SingleIngestionOutput(
+                    'test',
+                    'clickhouse_ingestion_warnings_test',
+                    hub.kafkaProducer,
+                    'test'
+                ),
+                dlq: new SingleIngestionOutput('test', config.dlqTopic, hub.kafkaProducer, 'test'),
+                overflow: new SingleIngestionOutput('test', config.overflowTopic || '', hub.kafkaProducer, 'test'),
+                tophog: new SingleIngestionOutput('test', 'clickhouse_tophog_test', hub.kafkaProducer, 'test'),
             }),
             teamManager: hub.teamManager,
             hogTransformer: mockHogTransformer,

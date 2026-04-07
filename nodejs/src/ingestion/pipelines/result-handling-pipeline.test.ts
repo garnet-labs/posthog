@@ -12,6 +12,7 @@ import {
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../common/outputs'
 import { OverflowOutput } from '../common/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../outputs/single-ingestion-output'
 import { createContext } from './helpers'
 import { PipelineConfig, ResultHandlingPipeline } from './result-handling-pipeline'
 import { dlq, drop, ok, redirect } from './results'
@@ -70,15 +71,14 @@ describe('ResultHandlingPipeline', () => {
 
         config = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'test-dlq', producer: mockDlqProducer, producerName: 'test' }],
-                [OVERFLOW_OUTPUT]: [{ topic: 'overflow-topic', producer: mockRedirectProducer, producerName: 'test' }],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    {
-                        topic: 'ingestion_warnings_test',
-                        producer: mockIngestionWarningsProducer,
-                        producerName: 'test',
-                    },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockDlqProducer, 'test'),
+                [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', 'overflow-topic', mockRedirectProducer, 'test'),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'ingestion_warnings_test',
+                    mockIngestionWarningsProducer,
+                    'test'
+                ),
             }),
             promiseScheduler: mockPromiseScheduler,
         }
@@ -615,15 +615,14 @@ describe('Integration tests', () => {
 
         config = {
             outputs: new IngestionOutputs({
-                [DLQ_OUTPUT]: [{ topic: 'test-dlq', producer: mockDlqProducer, producerName: 'test' }],
-                [OVERFLOW_OUTPUT]: [{ topic: 'overflow-topic', producer: mockRedirectProducer, producerName: 'test' }],
-                [INGESTION_WARNINGS_OUTPUT]: [
-                    {
-                        topic: 'ingestion_warnings_test',
-                        producer: mockIngestionWarningsProducer,
-                        producerName: 'test',
-                    },
-                ],
+                [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockDlqProducer, 'test'),
+                [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', 'overflow-topic', mockRedirectProducer, 'test'),
+                [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                    'test',
+                    'ingestion_warnings_test',
+                    mockIngestionWarningsProducer,
+                    'test'
+                ),
             }),
             promiseScheduler: mockPromiseScheduler,
         }

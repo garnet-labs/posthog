@@ -3,6 +3,7 @@ import { Message } from 'node-rdkafka'
 import { emitIngestionWarning } from '../../ingestion/common/ingestion-warnings'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT } from '../../ingestion/common/outputs'
 import { IngestionOutputs } from '../../ingestion/outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../../ingestion/outputs/single-ingestion-output'
 import { KafkaProducerWrapper } from '../../kafka/producer'
 import { logger } from '../../utils/logger'
 import { captureException } from '../../utils/posthog'
@@ -27,10 +28,13 @@ const mockEmitIngestionWarning = emitIngestionWarning as jest.MockedFunction<typ
 
 function createMockOutputs(mockKafkaProducer: KafkaProducerWrapper) {
     return new IngestionOutputs({
-        [DLQ_OUTPUT]: [{ topic: 'test-dlq', producer: mockKafkaProducer, producerName: 'test' }],
-        [INGESTION_WARNINGS_OUTPUT]: [
-            { topic: 'test-ingestion-warnings', producer: mockKafkaProducer, producerName: 'test' },
-        ],
+        [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'test-dlq', mockKafkaProducer, 'test'),
+        [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+            'test',
+            'test-ingestion-warnings',
+            mockKafkaProducer,
+            'test'
+        ),
     })
 }
 

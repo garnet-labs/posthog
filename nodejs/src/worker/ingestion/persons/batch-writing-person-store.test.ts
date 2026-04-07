@@ -2,6 +2,7 @@ import { DateTime } from 'luxon'
 
 import { INGESTION_WARNINGS_OUTPUT } from '~/ingestion/common/outputs'
 import { IngestionOutputs } from '~/ingestion/outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '~/ingestion/outputs/single-ingestion-output'
 import { InternalPerson, TeamId } from '~/types'
 import { MessageSizeTooLarge } from '~/utils/db/error'
 import { PostgresRouter } from '~/utils/db/postgres'
@@ -77,13 +78,12 @@ describe('BatchWritingPersonStore', () => {
         } as unknown as PostgresRouter
 
         mockIngestionWarningsOutputs = new IngestionOutputs({
-            [INGESTION_WARNINGS_OUTPUT]: [
-                {
-                    topic: 'ingestion_warnings_test',
-                    producer: { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
-                    producerName: 'test',
-                },
-            ],
+            [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                'ingestion_warnings_test',
+                { queueMessages: jest.fn().mockResolvedValue(undefined) } as any,
+                'test'
+            ),
         })
 
         mockRepo = createMockRepository()

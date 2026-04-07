@@ -13,6 +13,7 @@ import { PromiseScheduler } from '../../utils/promise-scheduler'
 import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../common/outputs'
 import { createApplyEventRestrictionsStep, createParseHeadersStep } from '../event-preprocessing'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
+import { SingleIngestionOutput } from '../outputs/single-ingestion-output'
 import { TopHogRegistry } from '../pipelines/extensions/tophog'
 import { drop, ok, redirect } from '../pipelines/results'
 import {
@@ -154,11 +155,14 @@ describe('session-replay-pipeline', () => {
         mockKafkaProducer = createMockKafkaProducer()
         mockIngestionWarningProducer = createMockKafkaProducer()
         outputs = new IngestionOutputs({
-            [INGESTION_WARNINGS_OUTPUT]: [
-                { topic: KAFKA_INGESTION_WARNINGS, producer: mockIngestionWarningProducer, producerName: 'test' },
-            ],
-            [DLQ_OUTPUT]: [{ topic: 'dlq-topic', producer: mockKafkaProducer, producerName: 'test' }],
-            [OVERFLOW_OUTPUT]: [{ topic: 'overflow-topic', producer: mockKafkaProducer, producerName: 'test' }],
+            [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
+                'test',
+                KAFKA_INGESTION_WARNINGS,
+                mockIngestionWarningProducer,
+                'test'
+            ),
+            [DLQ_OUTPUT]: new SingleIngestionOutput('test', 'dlq-topic', mockKafkaProducer, 'test'),
+            [OVERFLOW_OUTPUT]: new SingleIngestionOutput('test', 'overflow-topic', mockKafkaProducer, 'test'),
         })
 
         // The restriction manager is not actually used since we mock createApplyEventRestrictionsStep
