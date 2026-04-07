@@ -148,6 +148,7 @@ export function getPluginServerCapabilities(
             }
         case PluginServerMode.ingestion_logs:
         case PluginServerMode.ingestion_traces:
+        case PluginServerMode.ingestion_heatmaps:
             throw new Error(`Mode ${mode} is handled by a dedicated server, not PluginServer`)
         case PluginServerMode.ingestion_error_tracking:
             return {
