@@ -405,7 +405,7 @@ runcmd:
         )
         encoded_script = base64.b64encode(setup_script.encode()).decode()
         result = self.run_ssh_command(
-            f"cd /hobby && echo {encoded_script} | base64 -d | sudo -E docker-compose -f docker-compose.yml exec -T web python manage.py shell",
+            f"cd /hobby && sudo -E docker-compose -f docker-compose.yml exec -T web bash -c 'echo {encoded_script} | base64 -d | python manage.py shell'",
             timeout=60,
         )
         if result["exit_code"] != 0:
