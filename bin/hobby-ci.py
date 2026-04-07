@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import shlex
+import base64
 import datetime
 from dataclasses import dataclass
 
@@ -385,23 +386,26 @@ runcmd:
         base_url = f"http://{self.droplet.ip_address}"  # HTTP: avoid DNS/TLS in CI
 
         print("📝 Creating test user and fetching API keys via Django shell...", flush=True)
-        setup_script = (
-            "from posthog.models import User, Organization, Team, PersonalAPIKey;"
-            "from posthog.models.utils import generate_random_token_personal, mask_key_value, hash_key_value;"
-            "team = Team.objects.first();"
-            "org = team.organization;"
-            "user = User.objects.filter(email='ci@posthog.com').first() or User.objects.create_and_join(org, 'ci@posthog.com', 'CiTest123!', 'Hobby CI');"
-            "raw_key = generate_random_token_personal();"
-            "PersonalAPIKey.objects.filter(user=user, label='ci-smoke-test').delete();"
-            "PersonalAPIKey.objects.create("
-            "  user=user, label='ci-smoke-test',"
-            "  secure_value=hash_key_value(raw_key),"
-            "  mask_value=mask_key_value(raw_key),"
-            ");"
-            "print(f'{team.api_token}|||{raw_key}');"
+        setup_script = "\n".join(
+            [
+                "from posthog.models import User, Organization, Team, PersonalAPIKey",
+                "from posthog.models.utils import generate_random_token_personal, mask_key_value, hash_key_value",
+                "team = Team.objects.first()",
+                "org = team.organization",
+                "user = User.objects.filter(email='ci@posthog.com').first() or User.objects.create_and_join(org, 'ci@posthog.com', 'CiTest123!', 'Hobby CI')",
+                "raw_key = generate_random_token_personal()",
+                "PersonalAPIKey.objects.filter(user=user, label='ci-smoke-test').delete()",
+                "PersonalAPIKey.objects.create(",
+                "    user=user, label='ci-smoke-test',",
+                "    secure_value=hash_key_value(raw_key),",
+                "    mask_value=mask_key_value(raw_key),",
+                ")",
+                "print(f'{team.api_token}|||{raw_key}')",
+            ]
         )
+        encoded_script = base64.b64encode(setup_script.encode()).decode()
         result = self.run_ssh_command(
-            f'cd /hobby && sudo -E docker-compose -f docker-compose.yml exec -T web python manage.py shell -c "{setup_script}"',
+            f"cd /hobby && echo {encoded_script} | base64 -d | sudo -E docker-compose -f docker-compose.yml exec -T web python manage.py shell",
             timeout=60,
         )
         if result["exit_code"] != 0:
