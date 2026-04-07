@@ -1957,7 +1957,7 @@ def duckling_events_full_backfill_sensor(
             context.log.info(f"Batch limit reached, will continue from team {catalog.team_id}")
             break
 
-        team_id = catalog.team_id
+        team_id: int = catalog.team_id  # type: ignore[assignment]  # filtered by team__isnull=False
 
         # Determine start month - use cached value if resuming same team
         if team_id == resume_team_id and cached_earliest:
@@ -2177,7 +2177,7 @@ def duckling_persons_full_backfill_sensor(
     run_requests: list[RunRequest] = []
 
     for catalog in catalogs:
-        team_id = catalog.team_id
+        team_id: int = catalog.team_id  # type: ignore[assignment]  # filtered by team__isnull=False
         partition_key = str(team_id)
 
         if partition_key not in existing_partitions:
