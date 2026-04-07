@@ -16,14 +16,23 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.UUIDField(
-                        default=posthog.models.utils.UUIDT,
+                        default=posthog.models.utils.uuid7,
                         editable=False,
                         primary_key=True,
                         serialize=False,
                     ),
                 ),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        to="posthog.user",
+                    ),
+                ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("updated_at", models.DateTimeField(auto_now=True, null=True, blank=True)),
                 (
                     "team",
                     models.OneToOneField(
