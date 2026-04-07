@@ -78,9 +78,7 @@ fn create_heatmap_redirect(
         set_once: None,
     };
 
-    let mut processed = process_single_event(&heatmap_event, historical_cfg, context)?;
-    processed.metadata.process_heatmap = true;
-    Ok(processed)
+    process_single_event(&heatmap_event, historical_cfg, context)
 }
 
 /// Strip heatmap-only properties from a ProcessedEvent's serialized data field
@@ -93,7 +91,7 @@ fn strip_heatmap_data(event: &mut ProcessedEvent) {
             }
         }
     }
-    event.metadata.process_heatmap = true;
+    event.metadata.skip_heatmap_processing = true;
 }
 
 /// Process a single analytics event from RawEvent to ProcessedEvent
@@ -167,7 +165,7 @@ pub fn process_single_event(
         skip_person_processing: false,
         redirect_to_dlq: false,
         redirect_to_topic: None,
-        process_heatmap: false,
+        skip_heatmap_processing: false,
     };
 
     if historical_cfg.should_reroute(metadata.data_type, parsed_timestamp.timestamp) {
@@ -1015,7 +1013,7 @@ mod tests {
 
         assert_eq!(redirect.metadata.data_type, DataType::HeatmapMain);
         assert_eq!(redirect.metadata.event_name, "$$heatmap");
-        assert!(redirect.metadata.process_heatmap);
+        assert!(!redirect.metadata.skip_heatmap_processing);
         assert_eq!(redirect.event.event, "$$heatmap");
         assert_ne!(redirect.event.uuid, event.uuid.unwrap());
 
@@ -1040,11 +1038,11 @@ mod tests {
         let historical_cfg = router::HistoricalConfig::new(false, 1);
 
         let mut processed = process_single_event(&event, historical_cfg, &context).unwrap();
-        assert!(!processed.metadata.process_heatmap);
+        assert!(!processed.metadata.skip_heatmap_processing);
 
         strip_heatmap_data(&mut processed);
 
-        assert!(processed.metadata.process_heatmap);
+        assert!(processed.metadata.skip_heatmap_processing);
         let data: RawEvent = serde_json::from_str(&processed.event.data).unwrap();
         assert!(!data.properties.contains_key("$heatmap_data"));
         assert!(
@@ -1079,7 +1077,7 @@ mod tests {
 
         let original = &captured[0];
         assert_eq!(original.event.event, "$pageview");
-        assert!(original.metadata.process_heatmap);
+        assert!(original.metadata.skip_heatmap_processing);
         let orig_data: RawEvent = serde_json::from_str(&original.event.data).unwrap();
         assert!(
             !orig_data.properties.contains_key("$heatmap_data"),
@@ -1089,7 +1087,7 @@ mod tests {
         let redirect = &captured[1];
         assert_eq!(redirect.event.event, "$$heatmap");
         assert_eq!(redirect.metadata.data_type, DataType::HeatmapMain);
-        assert!(redirect.metadata.process_heatmap);
+        assert!(!redirect.metadata.skip_heatmap_processing);
     }
 
     #[tokio::test]
@@ -1123,7 +1121,7 @@ mod tests {
             "$$heatmap events should not produce a redirect"
         );
         assert_eq!(captured[0].metadata.data_type, DataType::HeatmapMain);
-        assert!(!captured[0].metadata.process_heatmap);
+        assert!(!captured[0].metadata.skip_heatmap_processing);
     }
 
     #[tokio::test]
@@ -1153,6 +1151,6 @@ mod tests {
         assert!(result.is_ok());
         let captured = sink.get_events();
         assert_eq!(captured.len(), 1);
-        assert!(!captured[0].metadata.process_heatmap);
+        assert!(!captured[0].metadata.skip_heatmap_processing);
     }
 }

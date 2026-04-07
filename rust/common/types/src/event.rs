@@ -119,7 +119,7 @@ pub struct CapturedEventHeaders {
     pub now: Option<String>,
     pub force_disable_person_processing: Option<bool>,
     pub historical_migration: Option<bool>,
-    pub process_heatmap: Option<bool>,
+    pub skip_heatmap_processing: Option<bool>,
     pub dlq_reason: Option<String>,
     pub dlq_step: Option<String>,
     pub dlq_timestamp: Option<String>,
@@ -130,8 +130,8 @@ impl CapturedEventHeaders {
         self.force_disable_person_processing = Some(value);
     }
 
-    pub fn set_process_heatmap(&mut self, value: bool) {
-        self.process_heatmap = Some(value);
+    pub fn set_skip_heatmap_processing(&mut self, value: bool) {
+        self.skip_heatmap_processing = Some(value);
     }
 
     pub fn set_dlq_reason(&mut self, value: String) {
@@ -192,10 +192,10 @@ impl From<CapturedEventHeaders> for OwnedHeaders {
             });
 
         // Only add optional headers when present, to avoid bloating every message.
-        if let Some(process_heatmap) = headers.process_heatmap {
-            let val = process_heatmap.to_string();
+        if let Some(skip_heatmap_processing) = headers.skip_heatmap_processing {
+            let val = skip_heatmap_processing.to_string();
             owned = owned.insert(Header {
-                key: "process_heatmap",
+                key: "skip_heatmap_processing",
                 value: Some(val.as_str()),
             });
         }
@@ -247,8 +247,8 @@ impl From<OwnedHeaders> for CapturedEventHeaders {
             historical_migration: headers_map
                 .get("historical_migration")
                 .and_then(|v| v.parse::<bool>().ok()),
-            process_heatmap: headers_map
-                .get("process_heatmap")
+            skip_heatmap_processing: headers_map
+                .get("skip_heatmap_processing")
                 .and_then(|v| v.parse::<bool>().ok()),
             dlq_reason: headers_map.get("dlq_reason").cloned(),
             dlq_step: headers_map.get("dlq_step").cloned(),
@@ -309,7 +309,7 @@ impl CapturedEvent {
             } else {
                 None
             },
-            process_heatmap: None,
+            skip_heatmap_processing: None,
             dlq_reason: None,
             dlq_step: None,
             dlq_timestamp: None,

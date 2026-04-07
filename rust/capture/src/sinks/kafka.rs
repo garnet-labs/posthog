@@ -317,7 +317,7 @@ impl<P: KafkaProducer> KafkaSinkBase<P> {
         let skip_person_processing = metadata.skip_person_processing;
         let redirect_to_dlq = metadata.redirect_to_dlq;
         let redirect_to_topic = metadata.redirect_to_topic;
-        let process_heatmap = metadata.process_heatmap;
+        let skip_heatmap_processing = metadata.skip_heatmap_processing;
 
         // Use the event's to_headers() method for consistent header serialization
         let mut headers = event.to_headers();
@@ -329,8 +329,8 @@ impl<P: KafkaProducer> KafkaSinkBase<P> {
             headers.set_force_disable_person_processing(true);
         }
 
-        if process_heatmap {
-            headers.set_process_heatmap(true);
+        if skip_heatmap_processing {
+            headers.set_skip_heatmap_processing(true);
         }
 
         // Check for redirect_to_dlq first - takes priority over all other routing
@@ -637,7 +637,7 @@ mod tests {
             skip_person_processing: false,
             redirect_to_dlq: false,
             redirect_to_topic: None,
-            process_heatmap: false,
+            skip_heatmap_processing: false,
         };
 
         let event = ProcessedEvent {
@@ -785,7 +785,7 @@ mod tests {
             now: Some("2023-01-01T12:00:00Z".to_string()),
             force_disable_person_processing: None,
             historical_migration: Some(true),
-            process_heatmap: None,
+            skip_heatmap_processing: None,
             dlq_reason: None,
             dlq_step: None,
             dlq_timestamp: None,
@@ -806,7 +806,7 @@ mod tests {
             now: Some("2023-01-01T12:00:00Z".to_string()),
             force_disable_person_processing: None,
             historical_migration: Some(false),
-            process_heatmap: None,
+            skip_heatmap_processing: None,
             dlq_reason: None,
             dlq_step: None,
             dlq_timestamp: None,
@@ -835,7 +835,7 @@ mod tests {
             now: Some(test_now.clone()),
             force_disable_person_processing: None,
             historical_migration: None,
-            process_heatmap: None,
+            skip_heatmap_processing: None,
             dlq_reason: None,
             dlq_step: None,
             dlq_timestamp: None,
@@ -869,7 +869,7 @@ mod tests {
             now: Some(test_now.clone()),
             force_disable_person_processing: None,
             historical_migration: None,
-            process_heatmap: None,
+            skip_heatmap_processing: None,
             dlq_reason: Some("test reason".to_string()),
             dlq_step: Some("test step".to_string()),
             dlq_timestamp: Some(dlq_timestamp.clone()),
@@ -950,7 +950,7 @@ mod tests {
                 skip_person_processing: input.skip_person_processing,
                 redirect_to_dlq: input.redirect_to_dlq,
                 redirect_to_topic: input.redirect_to_topic.clone(),
-                process_heatmap: false,
+                skip_heatmap_processing: false,
             };
 
             ProcessedEvent { event, metadata }

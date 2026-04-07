@@ -191,7 +191,7 @@ pub struct ProcessedEventMetadata {
     pub redirect_to_topic: Option<String>,
     /// Signal to the pipeline that heatmap data for this event was redirected
     /// to the heatmaps topic and should not be extracted again
-    pub process_heatmap: bool,
+    pub skip_heatmap_processing: bool,
 }
 
 #[cfg(test)]

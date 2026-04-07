@@ -23,7 +23,7 @@ export function createTestEventHeaders(overrides: Partial<EventHeaders> = {}): E
     return {
         force_disable_person_processing: false,
         historical_migration: false,
-        process_heatmap: false,
+        skip_heatmap_processing: false,
         ...overrides,
     }
 }

@@ -542,7 +542,7 @@ fn build_kafka_event(
         skip_person_processing: restrictions.skip_person_processing(),
         redirect_to_dlq: restrictions.redirect_to_dlq(),
         redirect_to_topic: restrictions.redirect_to_topic().map(|s| s.to_string()),
-        process_heatmap: false,
+        skip_heatmap_processing: false,
     };
 
     // Create ProcessedEvent

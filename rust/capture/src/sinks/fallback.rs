@@ -160,7 +160,7 @@ mod tests {
                 skip_person_processing: false,
                 redirect_to_dlq: false,
                 redirect_to_topic: None,
-                process_heatmap: false,
+                skip_heatmap_processing: false,
             },
         };
 
@@ -210,7 +210,7 @@ mod tests {
                 skip_person_processing: false,
                 redirect_to_dlq: false,
                 redirect_to_topic: None,
-                process_heatmap: false,
+                skip_heatmap_processing: false,
             },
         };
 

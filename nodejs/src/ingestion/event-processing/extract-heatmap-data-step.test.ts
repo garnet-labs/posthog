@@ -432,10 +432,10 @@ describe('createExtractHeatmapDataStep', () => {
         })
     })
 
-    describe('process_heatmap header (capture redirect)', () => {
-        it('skips extraction and strips $heatmap_data when process_heatmap is true', async () => {
+    describe('skip_heatmap_processing header (capture redirect)', () => {
+        it('skips extraction and strips $heatmap_data when skip_heatmap_processing is true', async () => {
             const event = createTestEvent()
-            const headers = createTestEventHeaders({ process_heatmap: true })
+            const headers = createTestEventHeaders({ skip_heatmap_processing: true })
 
             const result = await step({ preparedEvent: event, headers })
 
@@ -449,10 +449,10 @@ describe('createExtractHeatmapDataStep', () => {
             expect(mockOutputs.queueMessages).not.toHaveBeenCalled()
         })
 
-        it('does not mutate the original event when process_heatmap is true', async () => {
+        it('does not mutate the original event when skip_heatmap_processing is true', async () => {
             const event = createTestEvent()
             const originalEvent = cloneObject(event)
-            const headers = createTestEventHeaders({ process_heatmap: true })
+            const headers = createTestEventHeaders({ skip_heatmap_processing: true })
 
             await step({ preparedEvent: event, headers })
 
@@ -460,9 +460,9 @@ describe('createExtractHeatmapDataStep', () => {
             expect(event.properties.$heatmap_data).toBeDefined()
         })
 
-        it('extracts normally when process_heatmap is false', async () => {
+        it('extracts normally when skip_heatmap_processing is false', async () => {
             const event = createTestEvent()
-            const headers = createTestEventHeaders({ process_heatmap: false })
+            const headers = createTestEventHeaders({ skip_heatmap_processing: false })
 
             const result = await step({ preparedEvent: event, headers })
 

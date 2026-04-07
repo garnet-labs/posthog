@@ -30,7 +30,7 @@ export function createExtractHeatmapDataStep<TInput extends ExtractHeatmapDataSt
 
         // When capture has already redirected heatmap data to the heatmaps topic,
         // skip extraction here — just strip the property and pass through.
-        if (headers?.process_heatmap) {
+        if (headers?.skip_heatmap_processing) {
             const { $heatmap_data, ...propertiesWithoutHeatmapData } = preparedEvent.properties
             return Promise.resolve(
                 ok({
