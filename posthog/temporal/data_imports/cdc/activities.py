@@ -211,7 +211,7 @@ class CDCExtractActivity:
 
         job = ExternalDataJob.objects.create(
             team_id=self.inputs.team_id,
-            pipeline=self.source,
+            pipeline_id=self.inputs.source_id,
             schema=schema,
             status=ExternalDataJob.Status.RUNNING,
             rows_synced=0,

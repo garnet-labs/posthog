@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -55,7 +56,7 @@ class PgCDCStreamReader:
         self._source = source
         self._conn: psycopg.Connection | None = None
         self._decoder = PgOutputDecoder()
-        self._tunnel_cm = None
+        self._tunnel_cm: AbstractContextManager[tuple[str, int]] | None = None
         self._effective_host: str = params.host
         self._effective_port: int = params.port
 
@@ -68,8 +69,9 @@ class PgCDCStreamReader:
 
             source_impl = PostgresSource()
             config = source_impl.parse_config(self._source.job_inputs or {})
-            self._tunnel_cm = source_impl.with_ssh_tunnel(config)
-            self._effective_host, self._effective_port = self._tunnel_cm.__enter__()
+            tunnel_cm = source_impl.with_ssh_tunnel(config)
+            self._effective_host, self._effective_port = tunnel_cm.__enter__()
+            self._tunnel_cm = tunnel_cm
 
         self._conn = _connect_to_postgres(
             host=self._effective_host,
