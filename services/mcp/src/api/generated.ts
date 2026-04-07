@@ -6863,6 +6863,65 @@ export namespace Schemas {
     }
 
     /**
+     * * `error` - error
+    * `warning` - warning
+     */
+    export type UtmIssueSeverityEnum = typeof UtmIssueSeverityEnum[keyof typeof UtmIssueSeverityEnum];
+
+
+    export const UtmIssueSeverityEnum = {
+      Error: 'error',
+      Warning: 'warning',
+    } as const;
+
+    export interface UtmIssue {
+      /** The UTM field with the issue (e.g. utm_campaign, utm_source) */
+      field: string;
+      /** Issue severity level
+
+    * `error` - error
+    * `warning` - warning */
+      severity: UtmIssueSeverityEnum;
+      /** Human-readable description of the issue */
+      message: string;
+    }
+
+    export interface CampaignAuditResult {
+      /** Campaign name from the ad platform */
+      campaign_name: string;
+      /** Campaign ID from the ad platform */
+      campaign_id: string;
+      /** Integration source name (e.g. google, meta) */
+      source_name: string;
+      /** Total spend for this campaign in the period */
+      spend: number;
+      /** Total clicks for this campaign */
+      clicks: number;
+      /** Total impressions for this campaign */
+      impressions: number;
+      /** Whether matching UTM pageview events were found */
+      has_utm_events: boolean;
+      /** Number of matching UTM pageview events */
+      event_count: number;
+      /** List of detected UTM configuration issues */
+      issues: UtmIssue[];
+    }
+
+    /**
+     * * `none` - none
+    * `auto` - auto
+    * `mapped` - mapped
+     */
+    export type CampaignMatchEnum = typeof CampaignMatchEnum[keyof typeof CampaignMatchEnum];
+
+
+    export const CampaignMatchEnum = {
+      None: 'none',
+      Auto: 'auto',
+      Mapped: 'mapped',
+    } as const;
+
+    /**
      * Supporting evidence
      */
     export type CapabilityStateEvidence = {[key: string]: unknown};
@@ -15897,10 +15956,10 @@ export namespace Schemas {
     * `warning` - Warning
     * `info` - Info
      */
-    export type SeverityEnum = typeof SeverityEnum[keyof typeof SeverityEnum];
+    export type HealthIssueSeverityEnum = typeof HealthIssueSeverityEnum[keyof typeof HealthIssueSeverityEnum];
 
 
-    export const SeverityEnum = {
+    export const HealthIssueSeverityEnum = {
       Critical: 'critical',
       Warning: 'warning',
       Info: 'info',
@@ -15921,7 +15980,7 @@ export namespace Schemas {
     export interface HealthIssue {
       readonly id: string;
       readonly kind: string;
-      readonly severity: SeverityEnum;
+      readonly severity: HealthIssueSeverityEnum;
       readonly status: HealthIssueStatusEnum;
       dismissed?: boolean;
       readonly payload: unknown;
@@ -18414,6 +18473,25 @@ export namespace Schemas {
       new: string;
     }
 
+    export interface LLMPromptList {
+      readonly id: string;
+      /** Unique prompt name using letters, numbers, hyphens, and underscores only. */
+      readonly name: string;
+      /** Prompt payload as JSON or string data. */
+      readonly prompt: unknown;
+      readonly version: number;
+      readonly created_by: UserBasic;
+      readonly created_at: string;
+      readonly updated_at: string;
+      readonly deleted: boolean;
+      readonly is_latest: boolean;
+      readonly latest_version: number;
+      readonly version_count: number;
+      readonly first_version_created_at: string;
+      readonly prompt_preview: string;
+      readonly prompt_size_bytes: number;
+    }
+
     export interface LLMPromptPublic {
       id: string;
       name: string;
@@ -18597,6 +18675,72 @@ export namespace Schemas {
       readonly created_by: UserBasic;
       /** @nullable */
       readonly updated_at: string | null;
+    }
+
+    export interface LogsAlertSimulateBucket {
+      /** Bucket start timestamp. */
+      timestamp: string;
+      /** Number of matching logs in this bucket. */
+      count: number;
+      /** Whether the count crossed the threshold in this bucket. */
+      threshold_breached: boolean;
+      /** Alert state after evaluating this bucket. */
+      state: string;
+      /** Notification action: none, fire, or resolve. */
+      notification: string;
+      /** Human-readable explanation of the state transition. */
+      reason: string;
+    }
+
+    export interface LogsAlertSimulateRequest {
+      /** Filter criteria — same format as LogsAlertConfiguration.filters. */
+      filters: unknown;
+      /**
+       * Threshold count to evaluate against.
+       * @minimum 1
+       */
+      threshold_count: number;
+      /** Whether the alert fires when the count is above or below the threshold.
+
+    * `above` - Above
+    * `below` - Below */
+      threshold_operator: ThresholdOperatorEnum;
+      /** Window size in minutes — determines bucket interval. */
+      window_minutes: number;
+      /**
+       * Total check periods in the N-of-M evaluation window (M).
+       * @minimum 1
+       * @maximum 10
+       */
+      evaluation_periods?: number;
+      /**
+       * How many periods must breach to fire (N in N-of-M).
+       * @minimum 1
+       * @maximum 10
+       */
+      datapoints_to_alarm?: number;
+      /**
+       * Minutes to wait after firing before sending another notification.
+       * @minimum 0
+       */
+      cooldown_minutes?: number;
+      /** Relative date string for how far back to simulate (e.g. '-24h', '-7d', '-30d'). */
+      date_from: string;
+    }
+
+    export interface LogsAlertSimulateResponse {
+      /** Time-bucketed counts with full state machine evaluation. */
+      buckets: LogsAlertSimulateBucket[];
+      /** Number of times the alert would have sent a fire notification. */
+      fire_count: number;
+      /** Number of times the alert would have sent a resolve notification. */
+      resolve_count: number;
+      /** Total number of buckets in the simulation window. */
+      total_buckets: number;
+      /** Threshold count used for evaluation. */
+      threshold_count: number;
+      /** Threshold operator used for evaluation. */
+      threshold_operator: string;
     }
 
     /**
@@ -20135,13 +20279,13 @@ export namespace Schemas {
       results: Integration[];
     }
 
-    export interface PaginatedLLMPromptList {
+    export interface PaginatedLLMPromptListList {
       count: number;
       /** @nullable */
       next?: string | null;
       /** @nullable */
       previous?: string | null;
-      results: LLMPrompt[];
+      results: LLMPromptList[];
     }
 
     export interface PaginatedLLMProviderKeyList {
@@ -23573,7 +23717,7 @@ export namespace Schemas {
     export interface PatchedHealthIssue {
       readonly id?: string;
       readonly kind?: string;
-      readonly severity?: SeverityEnum;
+      readonly severity?: HealthIssueSeverityEnum;
       readonly status?: HealthIssueStatusEnum;
       dismissed?: boolean;
       readonly payload?: unknown;
@@ -29700,6 +29844,20 @@ export namespace Schemas {
       variant_key: string;
     }
 
+    /**
+     * * `none` - none
+    * `auto` - auto
+    * `mapped` - mapped
+     */
+    export type SourceMatchEnum = typeof SourceMatchEnum[keyof typeof SourceMatchEnum];
+
+
+    export const SourceMatchEnum = {
+      None: 'none',
+      Auto: 'auto',
+      Mapped: 'mapped',
+    } as const;
+
     export interface SummaryBullet {
       text: string;
       line_refs: string;
@@ -30725,6 +30883,47 @@ export namespace Schemas {
       affected: number;
       /** Total number of entities of this type in the project */
       total: number;
+    }
+
+    export interface UtmEvent {
+      /** UTM campaign value from pageview events */
+      utm_campaign: string;
+      /** UTM source value from pageview events */
+      utm_source: string;
+      /** Number of pageview events with this UTM combination */
+      event_count: number;
+      /** How utm_campaign matched: none, auto (direct name/id), or mapped (manual mapping)
+
+    * `none` - none
+    * `auto` - auto
+    * `mapped` - mapped */
+      campaign_match: CampaignMatchEnum;
+      /** How utm_source matched: none, auto (default source), or mapped (custom mapping)
+
+    * `none` - none
+    * `auto` - auto
+    * `mapped` - mapped */
+      source_match: SourceMatchEnum;
+      /**
+       * Name of the matched campaign, if any
+       * @nullable
+       */
+      matched_campaign: string | null;
+    }
+
+    export interface UtmAuditResponse {
+      /** Total number of campaigns with spend */
+      total_campaigns: number;
+      /** Number of campaigns with UTM issues */
+      campaigns_with_issues: number;
+      /** Number of campaigns without issues */
+      campaigns_without_issues: number;
+      /** Total spend on campaigns with UTM issues */
+      total_spend_at_risk: number;
+      /** Audit results per campaign */
+      results: CampaignAuditResult[];
+      /** All UTM events with match status */
+      all_utm_events: UtmEvent[];
     }
 
     export interface ViewLinkValidation {
@@ -32068,18 +32267,6 @@ export namespace Schemas {
       Json: 'json',
     } as const;
 
-    export type EnvironmentsPersonsStickinessRetrieveParams = {
-    format?: EnvironmentsPersonsStickinessRetrieveFormat;
-    };
-
-    export type EnvironmentsPersonsStickinessRetrieveFormat = typeof EnvironmentsPersonsStickinessRetrieveFormat[keyof typeof EnvironmentsPersonsStickinessRetrieveFormat];
-
-
-    export const EnvironmentsPersonsStickinessRetrieveFormat = {
-      Csv: 'csv',
-      Json: 'json',
-    } as const;
-
     export type EnvironmentsPersonsTrendsRetrieveParams = {
     format?: EnvironmentsPersonsTrendsRetrieveFormat;
     };
@@ -32712,6 +32899,15 @@ export namespace Schemas {
 
     export type LlmPromptsListParams = {
     /**
+     * Controls how much prompt content is included in list results. 'full' includes the full prompt, 'preview' includes a short prompt_preview, and 'none' omits prompt content entirely.
+
+    * `full` - full
+    * `preview` - preview
+    * `none` - none
+     * @minLength 1
+     */
+    content?: LlmPromptsListContent;
+    /**
      * Number of results to return per page.
      */
     limit?: number;
@@ -32724,6 +32920,15 @@ export namespace Schemas {
      */
     search?: string;
     };
+
+    export type LlmPromptsListContent = typeof LlmPromptsListContent[keyof typeof LlmPromptsListContent];
+
+
+    export const LlmPromptsListContent = {
+      Full: 'full',
+      Preview: 'preview',
+      None: 'none',
+    } as const;
 
     export type LlmPromptsNameRetrieveParams = {
     /**
@@ -32770,6 +32975,20 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    };
+
+    export type MarketingAnalyticsUtmAuditRetrieveParams = {
+    /**
+     * Start date for the audit period
+     * @minLength 1
+     */
+    date_from?: string;
+    /**
+     * End date for the audit period
+     * @minLength 1
+     * @nullable
+     */
+    date_to?: string | null;
     };
 
     export type MaterializedColumnSlotsListParams = {
@@ -35207,18 +35426,6 @@ export namespace Schemas {
 
 
     export const PersonsResetPersonDistinctIdCreateFormat = {
-      Csv: 'csv',
-      Json: 'json',
-    } as const;
-
-    export type PersonsStickinessRetrieveParams = {
-    format?: PersonsStickinessRetrieveFormat;
-    };
-
-    export type PersonsStickinessRetrieveFormat = typeof PersonsStickinessRetrieveFormat[keyof typeof PersonsStickinessRetrieveFormat];
-
-
-    export const PersonsStickinessRetrieveFormat = {
       Csv: 'csv',
       Json: 'json',
     } as const;
