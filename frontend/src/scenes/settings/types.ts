@@ -212,6 +212,7 @@ export type SettingId =
     | 'banner'
 
 type FeatureFlagKey = keyof typeof FEATURE_FLAGS
+export type SettingFlagMatcher = (featureFlags: Record<string, boolean | string | undefined>) => boolean
 
 export type Setting = {
     id: SettingId
@@ -223,10 +224,11 @@ export type Setting = {
 
     /**
      * Feature flag to gate the setting being shown.
-     * If prefixed with !, the condition is inverted - the setting will only be shown if the is flag false.
+     * If prefixed with !, the condition is inverted - the setting will only be shown if the flag is false.
      * When an array is provided, the setting will be shown if ALL of the conditions are met.
+     * A function can be provided for custom matching logic, such as multivariate checks.
      */
-    flag?: FeatureFlagKey | `!${FeatureFlagKey}` | (FeatureFlagKey | `!${FeatureFlagKey}`)[]
+    flag?: FeatureFlagKey | `!${FeatureFlagKey}` | (FeatureFlagKey | `!${FeatureFlagKey}`)[] | SettingFlagMatcher
 
     /**
      * defaults to true if not provided

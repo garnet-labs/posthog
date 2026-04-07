@@ -427,9 +427,13 @@ export const settingsLogic = kea<settingsLogicType>([
             (featureFlags) => {
                 return (x: Pick<Setting, 'flag'>) => {
                     if (!x.flag) {
-                        // No flag condition
                         return true
                     }
+
+                    if (typeof x.flag === 'function') {
+                        return x.flag(featureFlags)
+                    }
+
                     const flagsArray = Array.isArray(x.flag) ? x.flag : [x.flag]
                     for (const flagCondition of flagsArray) {
                         const flag = (
@@ -437,7 +441,7 @@ export const settingsLogic = kea<settingsLogicType>([
                         ) as keyof typeof FEATURE_FLAGS
                         let isConditionMet = featureFlags[FEATURE_FLAGS[flag]]
                         if (flagCondition.startsWith('!')) {
-                            isConditionMet = !isConditionMet // Negated flag condition (!-prefixed)
+                            isConditionMet = !isConditionMet
                         }
                         if (!isConditionMet) {
                             return false

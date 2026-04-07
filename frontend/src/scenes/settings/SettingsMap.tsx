@@ -14,7 +14,7 @@ import { GoalsConfiguration } from '@posthog/products-revenue-analytics/frontend
 
 import { BaseCurrency } from 'lib/components/BaseCurrency/BaseCurrency'
 import { FEATURE_SUPPORT } from 'lib/components/SupportedPlatforms/featureSupport'
-import { OrganizationMembershipLevel } from 'lib/constants'
+import { FEATURE_FLAGS, OrganizationMembershipLevel } from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
 import { BounceRateDurationSetting } from 'scenes/settings/environment/BounceRateDuration'
 import { BounceRatePageViewModeSetting } from 'scenes/settings/environment/BounceRatePageViewMode'
@@ -1017,7 +1017,7 @@ export const SETTINGS_MAP: SettingSection[] = [
                 platformSupport: FEATURE_SUPPORT.errorTrackingExceptionAutocapture,
                 component: <ExceptionAutocaptureToggle />,
                 keywords: ['crash', 'bug', 'exception', 'stack trace'],
-                flag: 'ERROR_TRACKING_SETTINGS_SPLIT',
+                flag: (featureFlags) => featureFlags[FEATURE_FLAGS.ERROR_TRACKING_SETTINGS_SPLIT] === 'test',
             },
             {
                 id: 'error-tracking-integrations',
@@ -1044,7 +1044,7 @@ export const SETTINGS_MAP: SettingSection[] = [
                 platformSupport: FEATURE_SUPPORT.errorTrackingExceptionAutocapture,
                 component: <ExceptionAutocaptureToggle />,
                 keywords: ['crash', 'bug', 'exception', 'stack trace'],
-                flag: '!ERROR_TRACKING_SETTINGS_SPLIT',
+                flag: (featureFlags) => featureFlags[FEATURE_FLAGS.ERROR_TRACKING_SETTINGS_SPLIT] !== 'test',
             },
             {
                 id: 'error-tracking-alerting',
