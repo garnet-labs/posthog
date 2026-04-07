@@ -1,5 +1,5 @@
 import { useValues } from 'kea'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 
 import { LemonButton, LemonSelect } from '@posthog/lemon-ui'
 
@@ -67,29 +67,31 @@ function VercelEnvMappingEditor({
         setDirty(true)
     }
 
-    const handleSave = (): void => {
+    const handleSave = async (): Promise<void> => {
         setSaving(true)
         setError(null)
-        fetch(`/api/organizations/@current/integrations/${integration.id}/environment-mapping/`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': getCookie('posthog_csrftoken') || '',
-            },
-            body: JSON.stringify({
-                production: mapping.production,
-                preview: mapping.preview || mapping.production,
-                development: mapping.development || mapping.production,
-            }),
-        })
-            .then((res) => {
-                if (!res.ok) {
-                    throw new Error('Failed to save')
-                }
-                setDirty(false)
+        try {
+            const res = await fetch(`/api/organizations/@current/integrations/${integration.id}/environment-mapping/`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('posthog_csrftoken') || '',
+                },
+                body: JSON.stringify({
+                    production: mapping.production,
+                    preview: mapping.preview || mapping.production,
+                    development: mapping.development || mapping.production,
+                }),
             })
-            .catch(() => setError('Failed to save environment mapping'))
-            .finally(() => setSaving(false))
+            if (!res.ok) {
+                throw new Error('Failed to save')
+            }
+            setDirty(false)
+        } catch {
+            setError('Failed to save environment mapping')
+        } finally {
+            setSaving(false)
+        }
     }
 
     const teamOptions = teams.map((t) => ({
@@ -102,24 +104,27 @@ function VercelEnvMappingEditor({
             <h4 className="font-semibold text-xs text-muted">Environment mapping</h4>
             <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-center max-w-sm">
                 {(['production', 'preview', 'development'] as const).map((env) => (
-                    <>
-                        <span key={`label-${env}`} className="text-xs font-medium text-muted uppercase">
-                            {env}
-                        </span>
+                    <Fragment key={env}>
+                        <span className="text-xs font-medium text-muted uppercase">{env}</span>
                         <LemonSelect
-                            key={env}
                             size="small"
                             fullWidth
                             value={mapping[env]}
                             onChange={(value) => handleChange(env, value)}
                             options={teamOptions}
                         />
-                    </>
+                    </Fragment>
                 ))}
             </div>
             {error && <p className="text-danger text-xs">{error}</p>}
             {dirty && (
-                <LemonButton type="primary" size="small" loading={saving} onClick={handleSave}>
+                <LemonButton
+                    type="primary"
+                    size="small"
+                    loading={saving}
+                    disabledReason={!mapping.production ? 'Production project is required' : undefined}
+                    onClick={handleSave}
+                >
                     Save mapping
                 </LemonButton>
             )}
