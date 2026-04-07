@@ -66,6 +66,8 @@ function truncateString(str: string, num: number): string {
 
 const INCOMPLETE_SEGMENT_BORDER_DASH = [10, 10]
 
+type TrendsFilterWithTransforms = TrendsFilter & { showFirstDifferences?: boolean }
+
 export function onTooltipClick(
     datasetIndex: number,
     dataIndex: number,
@@ -429,6 +431,28 @@ export function LineGraph_({
         if (showPercentView && Array.isArray(adjustedData)) {
             const count = dataset.count
             adjustedData = adjustedData.map((value) => (typeof value === 'number' ? (value / count) * 100 : value))
+        }
+
+        // Show first differences (x_t - x_{t-1}) when requested.
+        // Keep series length unchanged by setting the first point to null.
+        const trendsFilterWithTransforms = trendsFilter as TrendsFilterWithTransforms | null | undefined
+        if (trendsFilterWithTransforms?.showFirstDifferences && Array.isArray(adjustedData)) {
+            let previousNumericValue: number | null = null
+            adjustedData = adjustedData.map((value) => {
+                if (typeof value !== 'number') {
+                    previousNumericValue = null
+                    return null
+                }
+
+                if (previousNumericValue === null) {
+                    previousNumericValue = value
+                    return null
+                }
+
+                const diff = value - previousNumericValue
+                previousNumericValue = value
+                return diff
+            })
         }
 
         const shouldShowIncompleteLineSegment = type === GraphType.Line && isInProgress && isActiveSeries

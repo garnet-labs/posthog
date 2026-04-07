@@ -8005,6 +8005,7 @@ class TrendsFilter(BaseModel):
     )
     showAlertThresholdLines: bool | None = False
     showConfidenceIntervals: bool | None = None
+    showFirstDifferences: bool | None = None
     showLabelsOnSeries: bool | None = None
     showLegend: bool | None = False
     showMovingAverage: bool | None = None
