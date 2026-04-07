@@ -1,3 +1,5 @@
+from typing import Any
+
 from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -25,6 +27,12 @@ class OrganizationIntegrationSerializer(serializers.ModelSerializer):
             "created_by",
         ]
         read_only_fields = fields
+
+
+class EnvironmentMappingUpdateSerializer(serializers.Serializer):
+    production = serializers.IntegerField(required=True)
+    preview = serializers.IntegerField(required=False)
+    development = serializers.IntegerField(required=False)
 
 
 class OrganizationIntegrationViewSet(
@@ -57,22 +65,17 @@ class OrganizationIntegrationViewSet(
                 {"detail": "Environment mapping is only supported for connectable integrations."}, status=400
             )
 
-        env_mapping = request.data
-        if not isinstance(env_mapping, dict) or "production" not in env_mapping:
-            return Response({"detail": "A mapping with at least 'production' is required."}, status=400)
+        serializer = EnvironmentMappingUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        production_id = serializer.validated_data["production"]
+        preview_id = serializer.validated_data.get("preview", production_id)
+        development_id = serializer.validated_data.get("development", production_id)
 
         from posthog.models.team import Team
 
         org = integration.organization
-        unique_team_ids: set[int] = set()
-        for env_name, team_id in env_mapping.items():
-            if not isinstance(env_name, str) or not env_name.strip():
-                return Response({"detail": f"Invalid environment name: {env_name!r}"}, status=400)
-            if not isinstance(team_id, int):
-                return Response({"detail": f"Invalid project ID for {env_name}: expected integer."}, status=400)
-            unique_team_ids.add(team_id)
-
-        for tid in unique_team_ids:
+        for tid in {production_id, preview_id, development_id}:
             if not Team.objects.filter(pk=tid, organization=org).exists():
                 return Response({"detail": f"Project {tid} does not belong to this organization."}, status=400)
 
@@ -82,7 +85,7 @@ class OrganizationIntegrationViewSet(
 
         teams_by_id: dict[int, Team] = {}
         resources: dict[int, TeamIntegration] = {}
-        for tid in unique_team_ids:
+        for tid in {production_id, preview_id, development_id}:
             teams_by_id[tid] = Team.objects.get(pk=tid, organization=org)
             resources[tid], _ = TeamIntegration.objects.get_or_create(
                 team=teams_by_id[tid],
@@ -91,10 +94,13 @@ class OrganizationIntegrationViewSet(
                 defaults={"config": {"type": "connectable"}},
             )
 
-        integration.config["environment_mapping"] = env_mapping
+        integration.config["environment_mapping"] = {
+            "production": production_id,
+            "preview": preview_id,
+            "development": development_id,
+        }
         integration.save(update_fields=["config"])
 
-        production_id = env_mapping["production"]
         production_team = teams_by_id[production_id]
         production_resource = resources[production_id]
 
@@ -104,7 +110,9 @@ class OrganizationIntegrationViewSet(
         if access_token and integration.integration_id:
             from ee.api.vercel.vercel_connect import VercelConnectLinkViewSet
 
-            secrets = VercelConnectLinkViewSet._build_env_secrets(teams_by_id, env_mapping)
+            secrets = VercelConnectLinkViewSet._build_env_secrets(
+                teams_by_id, production_id, preview_id, development_id
+            )
             client = VercelAPIClient(bearer_token=access_token)
             client.import_resource(
                 integration_config_id=integration.integration_id,

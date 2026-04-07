@@ -2,8 +2,7 @@ import { useValues } from 'kea'
 import { router } from 'kea-router'
 import { useEffect, useState } from 'react'
 
-import { IconX } from '@posthog/icons'
-import { LemonButton, LemonInput, LemonSelect } from '@posthog/lemon-ui'
+import { LemonButton, LemonSelect } from '@posthog/lemon-ui'
 
 import { getCookie } from 'lib/api'
 import { BridgePage } from 'lib/components/BridgePage/BridgePage'
@@ -32,10 +31,6 @@ interface SessionInfo {
     organizations: Organization[]
 }
 
-type EnvMapping = Record<string, number | null>
-
-const DEFAULT_ENVS = ['production', 'preview', 'development']
-
 export function VercelConnect(): JSX.Element {
     const { searchParams } = useValues(router)
     const sessionKey = searchParams.session
@@ -46,12 +41,15 @@ export function VercelConnect(): JSX.Element {
     const [success, setSuccess] = useState(false)
     const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
     const [selectedOrg, setSelectedOrg] = useState<string | null>(null)
-    const [envMapping, setEnvMapping] = useState<EnvMapping>({
+    const [envMapping, setEnvMapping] = useState<{
+        production: number | null
+        preview: number | null
+        development: number | null
+    }>({
         production: null,
         preview: null,
         development: null,
     })
-    const [newEnvName, setNewEnvName] = useState('')
     const [linkedOrgName, setLinkedOrgName] = useState<string>('')
 
     useEffect(() => {
@@ -95,25 +93,6 @@ export function VercelConnect(): JSX.Element {
         }
     }, [selectedOrg, sessionInfo])
 
-    const envNames = Object.keys(envMapping)
-
-    const handleAddEnv = (): void => {
-        const name = newEnvName.trim().toLowerCase().replace(/\s+/g, '-')
-        if (!name || name in envMapping) {
-            return
-        }
-        setEnvMapping((prev) => ({ ...prev, [name]: null }))
-        setNewEnvName('')
-    }
-
-    const handleRemoveEnv = (env: string): void => {
-        setEnvMapping((prev) => {
-            const next = { ...prev }
-            delete next[env]
-            return next
-        })
-    }
-
     const handleLink = (): void => {
         if (!selectedOrg || !sessionKey) {
             return
@@ -121,11 +100,6 @@ export function VercelConnect(): JSX.Element {
 
         setLinking(true)
         setError(null)
-
-        const payload: Record<string, number> = {}
-        for (const [env, teamId] of Object.entries(envMapping)) {
-            payload[env] = teamId || envMapping.production!
-        }
 
         fetch('/api/vercel/connect/complete', {
             method: 'POST',
@@ -136,7 +110,11 @@ export function VercelConnect(): JSX.Element {
             body: JSON.stringify({
                 session: sessionKey,
                 organization_id: selectedOrg,
-                environment_mapping: payload,
+                environment_mapping: {
+                    production: envMapping.production,
+                    preview: envMapping.preview || envMapping.production,
+                    development: envMapping.development || envMapping.production,
+                },
             }),
         })
             .then((res) => {
@@ -252,11 +230,9 @@ export function VercelConnect(): JSX.Element {
 
                     {selectedOrg && availableTeams.length > 0 && (
                         <div className="mb-6 space-y-3">
-                            {envNames.map((env) => (
-                                <div key={env} className="flex items-center gap-2">
-                                    <label className="text-xs font-medium text-muted uppercase w-28 shrink-0">
-                                        {env}
-                                    </label>
+                            {(['production', 'preview', 'development'] as const).map((env) => (
+                                <div key={env}>
+                                    <label className="text-xs font-medium text-muted uppercase mb-1 block">{env}</label>
                                     <LemonSelect
                                         fullWidth
                                         placeholder="Select a project"
@@ -267,34 +243,8 @@ export function VercelConnect(): JSX.Element {
                                             label: t.name,
                                         }))}
                                     />
-                                    {!DEFAULT_ENVS.includes(env) && (
-                                        <LemonButton
-                                            size="xsmall"
-                                            icon={<IconX />}
-                                            tooltip="Remove environment"
-                                            onClick={() => handleRemoveEnv(env)}
-                                        />
-                                    )}
                                 </div>
                             ))}
-                            <div className="flex items-center gap-2">
-                                <LemonInput
-                                    size="small"
-                                    placeholder="e.g. staging"
-                                    value={newEnvName}
-                                    onChange={setNewEnvName}
-                                    onPressEnter={handleAddEnv}
-                                    fullWidth
-                                />
-                                <LemonButton
-                                    size="small"
-                                    type="secondary"
-                                    onClick={handleAddEnv}
-                                    disabledReason={!newEnvName.trim() ? 'Enter environment name' : undefined}
-                                >
-                                    Add
-                                </LemonButton>
-                            </div>
                         </div>
                     )}
 
