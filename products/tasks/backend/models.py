@@ -858,7 +858,7 @@ class CodeInviteRedemption(UUIDModel):
 @receiver(post_save, sender=TaskRun)
 def track_task_run_completion(sender, instance: TaskRun, created: bool, **kwargs):
     try:
-        if not created and instance.state == TaskRun.Status.COMPLETED and instance.output and instance.task.json_schema:
+    if not created and instance.status == TaskRun.Status.COMPLETED and instance.output and instance.task.json_schema:
             instance.track_structured_result()
     except Exception as e:
         logger.warning(
