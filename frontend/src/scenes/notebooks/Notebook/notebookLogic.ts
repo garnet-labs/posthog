@@ -66,6 +66,7 @@ import {
 } from '../types'
 import { updateContentHeading } from '../utils'
 import { NOTEBOOKS_VERSION, migrate } from './migrations/migrate'
+import { notebookCollabLogic } from './notebookCollabLogic'
 import { notebookKernelInfoLogic } from './notebookKernelInfoLogic'
 import type { notebookLogicType } from './notebookLogicType'
 import { notebookSettingsLogic } from './notebookSettingsLogic'
@@ -115,6 +116,8 @@ export const notebookLogic = kea<notebookLogicType>([
             ['kernelInfo'],
             notebookSettingsLogic,
             ['showKernelInfo', 'showTableOfContents'],
+            notebookCollabLogic({ shortId: props.shortId }),
+            ['status as collabStatus', 'clientId as collabClientId'],
         ],
         actions: [
             notebooksModel,
@@ -126,6 +129,8 @@ export const notebookLogic = kea<notebookLogicType>([
                 item_id: props.shortId,
             }),
             ['setItemContext', 'maybeLoadComments'],
+            notebookCollabLogic({ shortId: props.shortId }),
+            ['joinSession as joinCollabSession'],
         ],
     })),
     actions({
@@ -178,6 +183,7 @@ export const notebookLogic = kea<notebookLogicType>([
         openShareModal: true,
         closeShareModal: true,
         setAccessDeniedToNotebook: true,
+        setCollabEnabled: (enabled: boolean) => ({ enabled }),
     }),
     reducers(({ props }) => ({
         isShareModalOpen: [
@@ -290,6 +296,18 @@ export const notebookLogic = kea<notebookLogicType>([
             'small' as 'small' | 'medium',
             {
                 setContainerSize: (_, { containerSize }) => containerSize,
+            },
+        ],
+        collabEnabled: [
+            false,
+            {
+                setCollabEnabled: (_, { enabled }) => enabled,
+            },
+        ],
+        collabVersion: [
+            null as number | null,
+            {
+                loadNotebookSuccess: (_, { notebook }) => notebook?.version ?? null,
             },
         ],
     })),
@@ -486,8 +504,8 @@ export const notebookLogic = kea<notebookLogicType>([
             },
         ],
         syncStatus: [
-            (s) => [s.notebook, s.notebookLoading, s.localContent, s.isLocalOnly, s.previewContent],
-            (notebook, notebookLoading, localContent, isLocalOnly, previewContent): NotebookSyncStatus => {
+            (s) => [s.notebook, s.notebookLoading, s.localContent, s.isLocalOnly, s.previewContent, s.collabEnabled, s.collabStatus],
+            (notebook, notebookLoading, localContent, isLocalOnly, previewContent, collabEnabled, collabStatus): NotebookSyncStatus => {
                 if (previewContent || notebook?.is_template) {
                     return 'synced'
                 }
@@ -495,6 +513,12 @@ export const notebookLogic = kea<notebookLogicType>([
                 if (isLocalOnly) {
                     return 'local'
                 }
+
+                // When collaboration is active, use the collab status
+                if (collabEnabled && collabStatus === 'connected') {
+                    return 'synced'
+                }
+
                 if (!notebook || !localContent) {
                     return 'synced'
                 }
@@ -765,7 +789,7 @@ export const notebookLogic = kea<notebookLogicType>([
                 })
             }
 
-            if (!values.isLocalOnly && values.content && !values.notebookLoading) {
+            if (!values.isLocalOnly && values.content && !values.notebookLoading && !values.collabEnabled) {
                 actions.saveNotebook({
                     content: values.content,
                     title: values.title,
@@ -809,6 +833,11 @@ export const notebookLogic = kea<notebookLogicType>([
         loadNotebookSuccess: () => {
             actions.scheduleNotebookRefresh()
             actions.maybeLoadComments()
+
+            // When collab is enabled and the notebook is loaded, join the collab session
+            if (values.collabEnabled && values.notebook && !values.isLocalOnly) {
+                actions.joinCollabSession()
+            }
         },
 
         exportJSON: () => {
@@ -855,6 +884,12 @@ export const notebookLogic = kea<notebookLogicType>([
             if (values.mode !== 'notebook') {
                 return
             }
+
+            // When collab is enabled, SSE handles real-time sync - no polling needed
+            if (values.collabEnabled) {
+                return
+            }
+
             // Remove any existing refresh timeout
             cache.disposables.dispose('refreshTimeout')
 

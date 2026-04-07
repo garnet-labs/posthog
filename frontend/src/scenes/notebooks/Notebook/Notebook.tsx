@@ -7,6 +7,7 @@ import { useEffect } from 'react'
 import { commandLogic } from 'lib/components/Command/commandLogic'
 import { NotFound } from 'lib/components/NotFound'
 import { EditorFocusPosition, JSONContent } from 'lib/components/RichContentEditor/types'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
 import { useResizeBreakpoints } from 'lib/hooks/useResizeObserver'
 import { LemonBanner } from 'lib/lemon-ui/LemonBanner'
@@ -43,9 +44,11 @@ export function Notebook({
     const logic = notebookLogic(logicProps)
     const { notebook, notebookLoading, editor, conflictWarningVisible, isEditable, isTemplate, notebookMissing } =
         useValues(logic)
-    const { duplicateNotebook, loadNotebook, setEditable, setLocalContent, setContainerSize } = useActions(logic)
+    const { duplicateNotebook, loadNotebook, setEditable, setLocalContent, setContainerSize, setCollabEnabled } =
+        useActions(logic)
     const { isExpanded } = useValues(notebookSettingsLogic)
     const { isCommandOpen } = useValues(commandLogic)
+    const hasCollabNotebooks = useFeatureFlag('NOTEBOOKS_COLLABORATION')
 
     useEffect(() => {
         if (initialContent && mode === 'canvas') {
@@ -63,6 +66,13 @@ export function Notebook({
     useEffect(() => {
         setEditable(editable)
     }, [editable]) // oxlint-disable-line exhaustive-deps
+
+    // Enable collaboration when the feature flag is active and this is a real notebook
+    useEffect(() => {
+        if (hasCollabNotebooks && shortId !== SCRATCHPAD_NOTEBOOK.short_id && mode !== 'canvas') {
+            setCollabEnabled(true)
+        }
+    }, [hasCollabNotebooks, shortId, mode]) // oxlint-disable-line exhaustive-deps
 
     useEffect(() => {
         editor?.setEditable(isEditable)

@@ -1,4 +1,6 @@
+import json
 import math
+import uuid
 import hashlib
 from datetime import timedelta
 from typing import Any, Optional
@@ -35,6 +37,12 @@ from posthog.renderers import SafeJSONRenderer, ServerSentEventRenderer
 from posthog.settings import SERVER_GATEWAY_INTERFACE
 from posthog.utils import relative_date_parse
 
+from products.notebooks.backend.collab import (
+    get_steps_since,
+    initialize_collab_session,
+    submit_steps,
+    subscribe_to_events,
+)
 from products.notebooks.backend.kernel_runtime import build_notebook_sandbox_config, get_kernel_runtime
 from products.notebooks.backend.models import KernelRuntime, Notebook
 from products.notebooks.backend.python_analysis import analyze_python_globals, annotate_python_nodes
@@ -279,6 +287,17 @@ class NotebookKernelConfigSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError("Provide at least one kernel configuration option.")
         return attrs
+
+
+class NotebookCollabStepsSerializer(serializers.Serializer):
+    client_id = serializers.CharField(help_text="Unique identifier for the client session.")
+    version = serializers.IntegerField(
+        help_text="The last version the client has seen. Steps are applied on top of this version."
+    )
+    steps = serializers.ListField(
+        child=serializers.JSONField(),
+        help_text="List of ProseMirror step JSON objects to apply.",
+    )
 
 
 def _format_hogql_response_payload(response: Any) -> dict[str, Any]:
@@ -719,6 +738,191 @@ class NotebookViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, ForbidD
             return Response({"detail": "Failed to fetch dataframe data."}, status=503)
 
         return Response(data)
+
+    @action(methods=["POST"], url_path="collab/join", detail=True)
+    def collab_join(self, request: Request, **kwargs):
+        """Join a collaboration session for this notebook.
+
+        Initializes the Redis collab state from the current Postgres version
+        and returns the document content, version, and a client_id.
+        """
+        notebook = self.get_object()
+        collab_version = initialize_collab_session(
+            notebook_id=str(notebook.short_id),
+            version=notebook.version,
+        )
+        client_id = str(uuid.uuid4())
+        return Response(
+            {
+                "client_id": client_id,
+                "version": collab_version,
+                "doc": notebook.content,
+            }
+        )
+
+    @extend_schema(request=NotebookCollabStepsSerializer)
+    @action(methods=["POST"], url_path="collab/steps", detail=True)
+    def collab_submit_steps(self, request: Request, **kwargs):
+        """Submit editing steps for collaborative editing.
+
+        Accepts ProseMirror steps with a base version. If the version matches,
+        steps are applied and broadcast. If not, returns the steps the client
+        missed so it can rebase locally.
+        """
+        serializer = NotebookCollabStepsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        notebook = self.get_object()
+        result = submit_steps(
+            notebook_id=str(notebook.short_id),
+            client_id=serializer.validated_data["client_id"],
+            steps_json=serializer.validated_data["steps"],
+            last_seen_version=serializer.validated_data["version"],
+        )
+
+        if result.accepted:
+            # Persist the updated document to Postgres asynchronously
+            # For alpha, we do it synchronously on each accepted submission
+            self._persist_notebook_from_steps(notebook, result.version)
+
+            return Response(
+                {
+                    "accepted": True,
+                    "version": result.version,
+                }
+            )
+        else:
+            return Response(
+                {
+                    "accepted": False,
+                    "version": result.version,
+                    "steps": result.steps_since or [],
+                },
+                status=200,
+            )
+
+    @action(methods=["GET"], url_path="collab/steps", detail=True)
+    def collab_get_steps(self, request: Request, **kwargs):
+        """Get steps since a given version for catch-up after reconnect."""
+        notebook = self.get_object()
+        since_version = int(request.query_params.get("since", "0"))
+        current_version, steps = get_steps_since(
+            notebook_id=str(notebook.short_id),
+            since_version=since_version,
+        )
+        return Response(
+            {
+                "version": current_version,
+                "steps": steps,
+            }
+        )
+
+    @action(
+        methods=["GET"],
+        url_path="collab/events",
+        detail=True,
+        renderer_classes=[ServerSentEventRenderer],
+    )
+    def collab_events(self, request: Request, **kwargs):
+        """SSE endpoint for real-time collaboration events.
+
+        Streams step updates and presence events to connected clients.
+        """
+        notebook = self.get_object()
+        notebook_id = str(notebook.short_id)
+        client_id = request.query_params.get("client_id", "")
+        renderer = SafeJSONRenderer()
+
+        def stream():
+            pubsub = subscribe_to_events(notebook_id)
+            try:
+                # Send initial heartbeat
+                yield b"event: connected\ndata: {}\n\n"
+
+                while True:
+                    message = pubsub.get_message(timeout=30)
+                    if message is None:
+                        # Send keepalive
+                        yield b": keepalive\n\n"
+                        continue
+
+                    if message["type"] != "message":
+                        continue
+
+                    data = json.loads(message["data"])
+
+                    # Don't echo steps back to the sender
+                    if data.get("type") == "steps" and data.get("client_id") == client_id:
+                        # Send confirmation instead
+                        confirm = {"type": "confirm", "version": data["version"]}
+                        payload = renderer.render(confirm).decode()
+                        yield f"event: confirm\ndata: {payload}\n\n".encode()
+                        continue
+
+                    payload = renderer.render(data).decode()
+                    yield f"event: {data['type']}\ndata: {payload}\n\n".encode()
+            finally:
+                pubsub.unsubscribe()
+                pubsub.close()
+
+        streaming_content = SyncIterableToAsync(stream()) if SERVER_GATEWAY_INTERFACE == "ASGI" else stream()
+        response = StreamingHttpResponse(
+            streaming_content=streaming_content,
+            content_type=ServerSentEventRenderer.media_type,
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+    def _persist_notebook_from_steps(self, notebook: Notebook, new_version: int) -> None:
+        """Persist the notebook content to Postgres after steps are accepted.
+
+        For alpha, this reconstructs the document from Redis steps applied to
+        the base document. In practice, the client sends the full doc state
+        alongside steps, but for now we just update the version.
+        """
+        # The client will include the resulting document in a periodic save.
+        # For alpha, we update the version to track progress.
+        try:
+            Notebook.objects.filter(pk=notebook.pk).update(
+                version=new_version,
+                last_modified_at=now(),
+                last_modified_by=self.request.user if isinstance(self.request.user, User) else None,
+            )
+        except Exception:
+            logger.exception("notebook_collab_persist_failed", notebook_id=notebook.short_id)
+
+    @action(methods=["POST"], url_path="collab/save", detail=True)
+    def collab_save(self, request: Request, **kwargs):
+        """Persist the current document state from a collaborating client.
+
+        Clients periodically send the full document to persist to Postgres,
+        along with the version it corresponds to.
+        """
+        notebook = self.get_object()
+        content = request.data.get("content")
+        version = request.data.get("version")
+        if content is None or version is None:
+            return Response({"detail": "content and version are required"}, status=400)
+
+        try:
+            with transaction.atomic():
+                locked = Notebook.objects.select_for_update().get(pk=notebook.pk)
+                if version >= locked.version:
+                    locked.content = content
+                    locked.version = version
+                    locked.text_content = request.data.get("text_content", "")
+                    locked.last_modified_at = now()
+                    locked.last_modified_by = self.request.user if isinstance(self.request.user, User) else None
+                    locked.save(
+                        update_fields=["content", "version", "text_content", "last_modified_at", "last_modified_by"]
+                    )
+                    return Response({"saved": True, "version": version})
+                else:
+                    return Response({"saved": False, "version": locked.version})
+        except Exception:
+            logger.exception("notebook_collab_save_failed", notebook_id=notebook.short_id)
+            return Response({"detail": "Failed to save notebook."}, status=500)
 
     @action(methods=["GET"], detail=False)
     def recording_comments(self, request: Request, **kwargs):

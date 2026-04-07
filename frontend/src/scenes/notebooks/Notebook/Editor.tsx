@@ -1,8 +1,10 @@
+import { Extension } from '@tiptap/core'
 import ExtensionDocument from '@tiptap/extension-document'
 import { FloatingMenu } from '@tiptap/extension-floating-menu'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
 import TableOfContents, { getHierarchicalIndexes } from '@tiptap/extension-table-of-contents'
+import { collab, sendableSteps } from '@tiptap/pm/collab'
 import { Placeholder } from '@tiptap/extensions'
 import StarterKit, { StarterKitOptions } from '@tiptap/starter-kit'
 import { useActions, useValues } from 'kea'
@@ -60,6 +62,7 @@ import { CollapsibleHeading } from './CollapsibleHeading'
 import { DropAndPasteHandlerExtension } from './DropAndPasteHandlerExtension'
 import { InlineMenu } from './InlineMenu'
 import { NotebookDefaultBlockOnEnter } from './NotebookDefaultBlockOnEnter'
+import { notebookCollabLogic } from './notebookCollabLogic'
 import { notebookLogic } from './notebookLogic'
 import { NotebookTrailingParagraph } from './NotebookTrailingParagraph'
 import { SlashCommandsExtension } from './SlashCommands'
@@ -71,9 +74,12 @@ const CustomDocument = ExtensionDocument.extend({
 
 export function Editor(): JSX.Element {
     const { shortId, mode, isEditable } = useValues(notebookLogic)
+    const { collabEnabled, collabVersion, collabClientId } = useValues(notebookLogic)
     const { setEditor, onEditorUpdate, onEditorSelectionUpdate, setTableOfContents, insertComment } =
         useActions(notebookLogic)
     const hasCollapsibleSections = useFeatureFlag('NOTEBOOKS_COLLAPSIBLE_SECTIONS')
+    const hasCollabNotebooks = useFeatureFlag('NOTEBOOKS_COLLABORATION')
+    const { sendSteps, bindEditor } = useActions(notebookCollabLogic({ shortId }))
 
     const { resetSuggestions, setPreviousNode } = useActions(insertionSuggestionsLogic)
 
@@ -167,6 +173,18 @@ export function Editor(): JSX.Element {
         NotebookDefaultBlockOnEnter,
     ]
 
+    // Add collaboration plugin when the feature flag is active and we have a session
+    if (hasCollabNotebooks && collabEnabled && collabVersion !== null && collabClientId) {
+        extensions.push(
+            Extension.create({
+                name: 'collaboration',
+                addProseMirrorPlugins() {
+                    return [collab({ version: collabVersion, clientID: collabClientId })]
+                },
+            })
+        )
+    }
+
     if (hasCollapsibleSections) {
         extensions.push(CollapsibleHeading.configure())
     }
@@ -188,6 +206,18 @@ export function Editor(): JSX.Element {
                 }
 
                 setEditor(notebookEditor)
+
+                // Bind editor to collab logic for step-based sync
+                if (hasCollabNotebooks && collabEnabled) {
+                    bindEditor(editor)
+
+                    // Listen for local transactions that produce sendable steps
+                    editor.on('transaction', ({ transaction }) => {
+                        if (transaction.docChanged && sendableSteps(editor.state)) {
+                            sendSteps()
+                        }
+                    })
+                }
             }}
         >
             <FloatingSuggestions />
