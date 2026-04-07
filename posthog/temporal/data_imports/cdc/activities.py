@@ -704,12 +704,14 @@ class CDCExtractActivity:
         for job in self.created_jobs:
             if job.status == ExternalDataJob.Status.RUNNING:
                 job.status = ExternalDataJob.Status.FAILED
-                job.latest_error = str(exc)[:1000]
+                # NOTE: may need to truncate if stack traces grow unwieldy
+                job.latest_error = str(exc)
                 job.finished_at = dt.datetime.now(tz=dt.UTC)
                 job.save(update_fields=["status", "latest_error", "finished_at", "updated_at"])
         for schema in self.cdc_schemas:
             schema.status = ExternalDataSchema.Status.FAILED
-            schema.latest_error = str(exc)[:1000]
+            # NOTE: may need to truncate if stack traces grow unwieldy
+            schema.latest_error = str(exc)
             schema.save(update_fields=["status", "latest_error", "updated_at"])
 
     def _finalize_success(self) -> None:
