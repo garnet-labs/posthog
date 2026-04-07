@@ -18,7 +18,7 @@ import { recentItemsModel } from '~/models/recentItemsModel'
 import { getTreeItemsMetadata, getTreeItemsNew, getTreeItemsProducts } from '~/products'
 import { FileSystemEntry, GroupsQueryResponse } from '~/queries/schema/schema-general'
 import { SETTINGS_MAP } from '~/scenes/settings/SettingsMap'
-import { SettingSectionId } from '~/scenes/settings/types'
+import { Setting, SettingSectionId } from '~/scenes/settings/types'
 import { ActivityTab, GroupTypeIndex, PersonType, SearchResponse } from '~/types'
 
 import type { searchLogicType } from './searchLogicType'
@@ -604,6 +604,22 @@ export const searchLogic = kea<searchLogicType>([
                     return isNegated ? !flagValue : !!flagValue
                 }
 
+                const doesMatchFlagCondition = (flagCondition: Setting['flag']): boolean => {
+                    if (!flagCondition) {
+                        return true
+                    }
+
+                    if (typeof flagCondition === 'function') {
+                        return flagCondition(featureFlags)
+                    }
+
+                    if (Array.isArray(flagCondition)) {
+                        return flagCondition.every(checkFlag)
+                    }
+
+                    return checkFlag(flagCondition)
+                }
+
                 // Skip project-level sections as they are duplicates of environment sections
                 const seenSectionIds = new Set<string>()
 
@@ -627,17 +643,8 @@ export const searchLogic = kea<searchLogicType>([
                     seenSectionIds.add(effectiveSectionId)
 
                     // Filter by feature flag if required
-                    if (section.flag) {
-                        if (Array.isArray(section.flag)) {
-                            // All flags in the array must pass
-                            if (!section.flag.every(checkFlag)) {
-                                continue
-                            }
-                        } else {
-                            if (!checkFlag(section.flag)) {
-                                continue
-                            }
-                        }
+                    if (!doesMatchFlagCondition(section.flag)) {
+                        continue
                     }
 
                     // Create a search item for each settings section
