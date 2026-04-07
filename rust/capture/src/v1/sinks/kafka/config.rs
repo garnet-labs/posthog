@@ -74,7 +74,48 @@ pub struct Config {
     pub topic_dlq: String,
 }
 
+const VALID_ACKS: &[&str] = &["0", "1", "-1", "all"];
+const VALID_COMPRESSION: &[&str] = &["none", "gzip", "snappy", "lz4", "zstd"];
+
 impl Config {
+    /// Validate kafka-specific configuration invariants that would otherwise
+    /// blow up at rdkafka producer creation or silently break runtime health.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.hosts.is_empty(), "empty kafka hosts");
+
+        anyhow::ensure!(
+            self.queue_mib > 0,
+            "queue_mib must be > 0 (got 0, which makes the producer queue zero-size)"
+        );
+
+        anyhow::ensure!(
+            VALID_ACKS.contains(&self.acks.as_str()),
+            "acks must be one of {VALID_ACKS:?} (got {:?})",
+            self.acks
+        );
+
+        anyhow::ensure!(
+            VALID_COMPRESSION.contains(&self.compression_codec.as_str()),
+            "compression_codec must be one of {VALID_COMPRESSION:?} (got {:?})",
+            self.compression_codec
+        );
+
+        anyhow::ensure!(
+            self.statistics_interval_ms > 0,
+            "statistics_interval_ms must be > 0 (0 disables stats callback, breaking health heartbeat)"
+        );
+
+        anyhow::ensure!(
+            self.metadata_max_age_ms >= self.metadata_refresh_interval_ms * 3,
+            "metadata_max_age_ms ({}) should be >= 3x metadata_refresh_interval_ms ({}) \
+             for reliable metadata refresh after broker failover",
+            self.metadata_max_age_ms,
+            self.metadata_refresh_interval_ms
+        );
+
+        Ok(())
+    }
+
     /// Resolve which topic to use for the given destination on this sink.
     pub fn topic_for<'a>(&'a self, dest: &'a Destination) -> Option<&'a str> {
         match dest {
@@ -194,5 +235,74 @@ mod tests {
         let mut env = required_kafka_env();
         env.insert("LINGER_MS".into(), "not_a_number".into());
         assert!(Config::init_from_hashmap(&env).is_err());
+    }
+
+    // -- validate() tests --
+
+    type Mutator = (&'static str, fn(&mut Config));
+
+    fn valid_config() -> Config {
+        Config::init_from_hashmap(&required_kafka_env()).unwrap()
+    }
+
+    #[test]
+    fn validate_accepts_defaults() {
+        assert!(valid_config().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_bad_configs() {
+        let cases: &[Mutator] = &[
+            ("empty_hosts", |c| c.hosts = "".into()),
+            ("queue_mib_zero", |c| c.queue_mib = 0),
+            ("acks_garbage", |c| c.acks = "banana".into()),
+            ("compression_garbage", |c| {
+                c.compression_codec = "brotli".into()
+            }),
+            ("stats_interval_zero", |c| c.statistics_interval_ms = 0),
+            ("metadata_age_too_low", |c| {
+                c.metadata_refresh_interval_ms = 5000;
+                c.metadata_max_age_ms = 10000;
+            }),
+        ];
+
+        for (label, mutate) in cases {
+            let mut cfg = valid_config();
+            mutate(&mut cfg);
+            assert!(
+                cfg.validate().is_err(),
+                "case '{label}' should fail validation"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_accepts_valid_acks_values() {
+        for acks in ["0", "1", "-1", "all"] {
+            let mut cfg = valid_config();
+            cfg.acks = acks.to_string();
+            assert!(cfg.validate().is_ok(), "acks={acks} should be valid");
+        }
+    }
+
+    #[test]
+    fn validate_accepts_all_compression_codecs() {
+        for codec in ["none", "gzip", "snappy", "lz4", "zstd"] {
+            let mut cfg = valid_config();
+            cfg.compression_codec = codec.to_string();
+            assert!(cfg.validate().is_ok(), "codec={codec} should be valid");
+        }
+    }
+
+    #[test]
+    fn validate_metadata_age_boundary() {
+        let mut cfg = valid_config();
+        cfg.metadata_refresh_interval_ms = 5000;
+
+        cfg.metadata_max_age_ms = 14999;
+        assert!(cfg.validate().is_err(), "just under 3x should fail");
+
+        cfg.metadata_max_age_ms = 15000;
+        assert!(cfg.validate().is_ok(), "exactly 3x should pass");
     }
 }

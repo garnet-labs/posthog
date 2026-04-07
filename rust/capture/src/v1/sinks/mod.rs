@@ -92,7 +92,7 @@ impl Config {
             self.produce_timeout,
             msg_timeout,
         );
-        anyhow::ensure!(!self.kafka.hosts.is_empty(), "empty kafka hosts");
+        self.kafka.validate()?;
         Ok(())
     }
 }
@@ -418,6 +418,18 @@ mod tests {
             configs: HashMap::new(),
         };
         assert!(sinks.validate().is_err());
+    }
+
+    #[test]
+    fn config_validate_propagates_kafka_validation() {
+        let mut env = test_env_for(SinkName::Msk);
+        env.insert("CAPTURE_V1_SINK_MSK_KAFKA_QUEUE_MIB".into(), "0".into());
+        let cfg = load_sink_config(SinkName::Msk, &env).unwrap();
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("queue_mib"),
+            "expected queue_mib in error: {err}"
+        );
     }
 
     #[test]
