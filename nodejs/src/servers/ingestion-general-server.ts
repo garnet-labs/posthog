@@ -16,8 +16,8 @@ import {
     KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
-import { ProducerName, createRegistry } from '../ingestion/common/outputs'
+import { createOutputsRegistry } from '../ingestion/analytics/config/outputs'
+import { ProducerName, createProducerRegistry } from '../ingestion/common/outputs'
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
@@ -211,8 +211,10 @@ export class IngestionGeneralServer implements NodeServer {
             // Build producer registry — producer creation blocks until the broker
             // is reachable (rdkafka retries indefinitely), so the server will hang
             // here if a broker is down and the pod never becomes healthy.
-            this.ingestionProducerRegistry = await createRegistry(this.config.KAFKA_CLIENT_RACK).build(this.config)
-            const ingestionOutputs = registerIngestionOutputs().build(this.ingestionProducerRegistry, this.config)
+            this.ingestionProducerRegistry = await createProducerRegistry(this.config.KAFKA_CLIENT_RACK).build(
+                this.config
+            )
+            const ingestionOutputs = createOutputsRegistry().build(this.ingestionProducerRegistry, this.config)
             const clickhouseGroupRepository = new ClickhouseGroupRepository(ingestionOutputs)
 
             const hogTransformerDeps: HogTransformerServiceDeps = {

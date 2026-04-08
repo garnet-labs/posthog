@@ -10,7 +10,7 @@ import {
 import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder'
 
 /** Register all error tracking outputs on the builder. Call `.build(registry, config)` to resolve. */
-export function registerErrorTrackingOutputs() {
+export function createOutputsRegistry() {
     return new IngestionOutputsBuilder()
         .register(EVENTS_OUTPUT, {
             topicKey: 'ERROR_TRACKING_CONSUMER_OUTPUT_TOPIC',

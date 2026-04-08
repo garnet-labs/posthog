@@ -18,7 +18,7 @@ import {
 } from '../outputs'
 
 /** Register all analytics ingestion outputs on the builder. Call `.build(registry, config)` to resolve. */
-export function registerIngestionOutputs() {
+export function createOutputsRegistry() {
     return new IngestionOutputsBuilder()
         .register(EVENTS_OUTPUT, {
             topicKey: 'INGESTION_OUTPUT_EVENTS_TOPIC',

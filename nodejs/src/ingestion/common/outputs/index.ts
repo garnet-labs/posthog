@@ -1,3 +1,3 @@
 export * from './config'
 export * from './producers'
-export { createRegistry } from './producer-registry'
+export { createProducerRegistry } from './producer-registry'
