@@ -126,7 +126,6 @@ import { OrganizationDangerZone } from './organization/OrganizationDangerZone'
 import { OrganizationIntegrations } from './organization/OrganizationIntegrations'
 import { OrganizationSecuritySettings } from './organization/OrganizationSecuritySettings'
 import { OrganizationDisplayName } from './organization/OrgDisplayName'
-import { OrganizationEmailPreferences } from './organization/OrgEmailPreferences'
 import { OrgIPAnonymizationDefault } from './organization/OrgIPAnonymizationDefault'
 import { VerifiedDomains } from './organization/VerifiedDomains/VerifiedDomains'
 import { ProjectDangerZone } from './project/ProjectDangerZone'
@@ -457,7 +456,6 @@ export const SETTINGS_MAP: SettingSection[] = [
                 title: 'Email channel',
                 component: <EmailSection />,
                 allowForTeam: (t) => !!t?.conversations_enabled,
-                flag: 'PRODUCT_SUPPORT_EMAIL_CHANNEL',
                 keywords: ['conversation', 'ticket', 'message', 'support'],
             },
             {
@@ -517,7 +515,6 @@ export const SETTINGS_MAP: SettingSection[] = [
                 platformSupport: FEATURE_SUPPORT.errorTrackingExceptionAutocapture,
                 component: <ExceptionAutocaptureToggle />,
                 keywords: ['crash', 'bug', 'exception', 'stack trace'],
-                flag: 'ERROR_TRACKING_SETTINGS_SPLIT',
             },
             {
                 id: 'error-tracking-integrations',
@@ -544,7 +541,6 @@ export const SETTINGS_MAP: SettingSection[] = [
                 platformSupport: FEATURE_SUPPORT.errorTrackingExceptionAutocapture,
                 component: <ExceptionAutocaptureToggle />,
                 keywords: ['crash', 'bug', 'exception', 'stack trace'],
-                flag: '!ERROR_TRACKING_SETTINGS_SPLIT',
             },
             {
                 id: 'error-tracking-alerting',
@@ -1559,20 +1555,6 @@ export const SETTINGS_MAP: SettingSection[] = [
                 docsUrl: 'https://posthog.com/docs/advanced/proxy',
                 component: <ManagedReverseProxy />,
                 keywords: ['custom domain', 'dns', 'cname', 'ad blocker', 'first party'],
-            },
-        ],
-    },
-    {
-        level: 'organization',
-        id: 'organization-notifications',
-        title: 'Notifications',
-        settings: [
-            {
-                id: 'email-members',
-                title: 'Notification preferences',
-                description: 'Configure which emails your organization members receive from PostHog.',
-                component: <OrganizationEmailPreferences />,
-                keywords: ['email', 'notification', 'digest', 'unsubscribe'],
             },
         ],
     },
