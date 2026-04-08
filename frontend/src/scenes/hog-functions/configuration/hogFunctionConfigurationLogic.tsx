@@ -708,12 +708,24 @@ export const hogFunctionConfigurationLogic = kea<hogFunctionConfigurationLogicTy
 
                 const payload: Record<string, any> = sanitizeConfiguration(data)
 
-                // Auto-switch type when the user selected internal events from the
-                // standard destination event picker (keeps the backend routing correct
-                // without forcing a jarring UI change during editing).
-                const hasInternalEvents = data.filters?.events?.some((e) => isInternalEvent(String(e.id)))
+                // Auto-switch type based on whether the filter contains internal
+                // events, keeping backend routing correct without forcing a
+                // jarring UI change during editing.
+                const events = data.filters?.events ?? []
+                const hasInternalEvents = events.some((e) => isInternalEvent(String(e.id)))
+                const hasRegularEvents = events.some((e) => !isInternalEvent(String(e.id)))
+
+                if (hasInternalEvents && hasRegularEvents) {
+                    lemonToast.error(
+                        'A single destination cannot mix regular events with internal events. Please use separate destinations for each.'
+                    )
+                    return
+                }
+
                 if (hasInternalEvents && payload.type === 'destination') {
                     payload.type = 'internal_destination'
+                } else if (!hasInternalEvents && payload.type === 'internal_destination') {
+                    payload.type = 'destination'
                 }
 
                 // Only sent on create
