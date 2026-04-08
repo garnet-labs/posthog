@@ -91,11 +91,12 @@ fn validate_events(context: &Context, batch: Batch) -> Result<HashMap<Uuid, Wrap
                     uuid,
                     WrappedEvent {
                         event,
+                        uuid,
                         adjusted_timestamp: Some(adjusted),
                         result: EventResult::Ok,
                         details: None,
                         destination: Destination::default(),
-                        skip_person_processing: false,
+                        force_disable_person_processing: false,
                     },
                 );
             }
@@ -104,11 +105,12 @@ fn validate_events(context: &Context, batch: Batch) -> Result<HashMap<Uuid, Wrap
                     uuid,
                     WrappedEvent {
                         event,
+                        uuid,
                         adjusted_timestamp: None,
                         result: EventResult::Drop,
                         details: Some(err.tag()),
                         destination: Destination::default(),
-                        skip_person_processing: false,
+                        force_disable_person_processing: false,
                     },
                 );
             }
@@ -285,7 +287,7 @@ async fn apply_restrictions(
         }
 
         if applied.skip_person_processing() {
-            event.skip_person_processing = true;
+            event.force_disable_person_processing = true;
         }
     }
 }
@@ -844,10 +846,11 @@ mod tests {
     // --- apply_restrictions ---
 
     fn wrapped_event(event_name: &str, distinct_id: &str) -> WrappedEvent {
+        let uuid = Uuid::new_v4();
         WrappedEvent {
             event: Event {
                 event: event_name.to_string(),
-                uuid: Uuid::new_v4().to_string(),
+                uuid: uuid.to_string(),
                 distinct_id: distinct_id.to_string(),
                 timestamp: "2026-03-19T14:29:58.123Z".to_string(),
                 session_id: None,
@@ -855,19 +858,21 @@ mod tests {
                 options: default_options(),
                 properties: raw_obj("{}"),
             },
+            uuid,
             adjusted_timestamp: Some(dt("2026-03-19T14:29:58.123Z")),
             result: EventResult::Ok,
             details: None,
             destination: Destination::default(),
-            skip_person_processing: false,
+            force_disable_person_processing: false,
         }
     }
 
     fn malformed_wrapped_event() -> WrappedEvent {
+        let uuid = Uuid::new_v4();
         WrappedEvent {
             event: Event {
                 event: String::new(),
-                uuid: Uuid::new_v4().to_string(),
+                uuid: uuid.to_string(),
                 distinct_id: "user-1".to_string(),
                 timestamp: "bad".to_string(),
                 session_id: None,
@@ -875,19 +880,17 @@ mod tests {
                 options: default_options(),
                 properties: raw_obj("{}"),
             },
+            uuid,
             adjusted_timestamp: None,
             result: EventResult::Drop,
             details: Some("missing_event_name"),
             destination: Destination::default(),
-            skip_person_processing: false,
+            force_disable_person_processing: false,
         }
     }
 
     fn events_map(events: Vec<WrappedEvent>) -> HashMap<Uuid, WrappedEvent> {
-        events
-            .into_iter()
-            .map(|e| (Uuid::parse_str(&e.event.uuid).unwrap(), e))
-            .collect()
+        events.into_iter().map(|e| (e.uuid, e)).collect()
     }
 
     fn find_by_did<'a>(
@@ -926,7 +929,7 @@ mod tests {
         let ev = find_by_did(&events, "user-1");
         assert_eq!(ev.result, EventResult::Ok);
         assert_eq!(ev.destination, Destination::AnalyticsMain);
-        assert!(!ev.skip_person_processing);
+        assert!(!ev.force_disable_person_processing);
     }
 
     #[tokio::test]
@@ -1054,7 +1057,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restrictions_skip_person_processing() {
+    async fn restrictions_force_disable_person_processing() {
         let service = restriction_service(
             "phc_token",
             vec![Restriction {
@@ -1073,7 +1076,7 @@ mod tests {
         let ev = find_by_did(&events, "user-1");
         assert_eq!(ev.result, EventResult::Ok);
         assert_eq!(ev.destination, Destination::AnalyticsMain);
-        assert!(ev.skip_person_processing);
+        assert!(ev.force_disable_person_processing);
     }
 
     #[tokio::test]
@@ -1283,7 +1286,7 @@ mod tests {
         let limiter = mock_limiter(vec!["phc_tok:user-2"]);
         let ctx = td_context();
         let pre_drop = wrapped_event("$pageview", "user-1");
-        let pre_drop_uuid = Uuid::parse_str(&pre_drop.event.uuid).unwrap();
+        let pre_drop_uuid = pre_drop.uuid;
         let mut events = events_map(vec![pre_drop, wrapped_event("$identify", "user-2")]);
         // Simulate event already dropped by restrictions
         events.get_mut(&pre_drop_uuid).unwrap().result = EventResult::Drop;
@@ -1332,10 +1335,11 @@ mod tests {
     }
 
     fn wrapped_event_at(timestamp: DateTime<Utc>) -> WrappedEvent {
+        let uuid = Uuid::new_v4();
         WrappedEvent {
             event: Event {
                 event: "$pageview".to_string(),
-                uuid: Uuid::new_v4().to_string(),
+                uuid: uuid.to_string(),
                 distinct_id: "user-1".to_string(),
                 timestamp: timestamp.to_rfc3339(),
                 session_id: None,
@@ -1343,11 +1347,12 @@ mod tests {
                 options: default_options(),
                 properties: raw_obj("{}"),
             },
+            uuid,
             adjusted_timestamp: Some(timestamp),
             result: EventResult::Ok,
             details: None,
             destination: Destination::default(),
-            skip_person_processing: false,
+            force_disable_person_processing: false,
         }
     }
 
@@ -1411,14 +1416,14 @@ mod tests {
         let cfg = router::HistoricalConfig::new(true, 30);
         let ctx = test_context(true);
         let ev = wrapped_event("$pageview", "user-1");
-        let uuid = Uuid::parse_str(&ev.event.uuid).unwrap();
+        let ev_uuid = ev.uuid;
         let mut events = events_map(vec![ev]);
-        events.get_mut(&uuid).unwrap().destination = Destination::Overflow;
+        events.get_mut(&ev_uuid).unwrap().destination = Destination::Overflow;
 
         apply_historical_rerouting(&cfg, &ctx, &mut events);
 
         assert_eq!(
-            events.get(&uuid).unwrap().destination,
+            events.get(&ev_uuid).unwrap().destination,
             Destination::Overflow
         );
     }
@@ -1428,15 +1433,15 @@ mod tests {
         let cfg = router::HistoricalConfig::new(true, 30);
         let ctx = test_context(true);
         let ev = wrapped_event("$pageview", "user-1");
-        let uuid = Uuid::parse_str(&ev.event.uuid).unwrap();
+        let ev_uuid = ev.uuid;
         let mut events = events_map(vec![ev]);
-        let e = events.get_mut(&uuid).unwrap();
+        let e = events.get_mut(&ev_uuid).unwrap();
         e.result = EventResult::Drop;
         e.destination = Destination::Drop;
 
         apply_historical_rerouting(&cfg, &ctx, &mut events);
 
-        assert_eq!(events.get(&uuid).unwrap().destination, Destination::Drop);
+        assert_eq!(events.get(&ev_uuid).unwrap().destination, Destination::Drop);
     }
 
     #[test]
@@ -1456,7 +1461,7 @@ mod tests {
         let cfg = router::HistoricalConfig::new(false, 1);
         let ctx = test_context(true);
         let dlq_ev = wrapped_event("$identify", "user-2");
-        let dlq_uuid = Uuid::parse_str(&dlq_ev.event.uuid).unwrap();
+        let dlq_uuid = dlq_ev.uuid;
         let mut events = events_map(vec![wrapped_event("$pageview", "user-1"), dlq_ev]);
         events.get_mut(&dlq_uuid).unwrap().destination = Destination::Dlq;
 

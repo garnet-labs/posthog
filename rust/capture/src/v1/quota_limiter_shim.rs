@@ -251,10 +251,11 @@ mod tests {
     }
 
     fn make_event(name: &str, product_tour_id: Option<&str>) -> WrappedEvent {
+        let uuid = Uuid::now_v7();
         WrappedEvent {
             event: Event {
                 event: name.to_string(),
-                uuid: Uuid::now_v7().to_string(),
+                uuid: uuid.to_string(),
                 distinct_id: "test_user".to_string(),
                 timestamp: "2026-03-26T12:00:00.000Z".to_string(),
                 session_id: None,
@@ -267,6 +268,7 @@ mod tests {
                 },
                 properties: RawValue::from_string("{}".to_owned()).unwrap(),
             },
+            uuid,
             adjusted_timestamp: Some(
                 DateTime::parse_from_rfc3339("2026-03-26T12:00:00Z")
                     .unwrap()
@@ -275,15 +277,12 @@ mod tests {
             result: EventResult::Ok,
             details: None,
             destination: Destination::AnalyticsMain,
-            skip_person_processing: false,
+            force_disable_person_processing: false,
         }
     }
 
     fn events_map(events: Vec<WrappedEvent>) -> HashMap<Uuid, WrappedEvent> {
-        events
-            .into_iter()
-            .map(|e| (Uuid::parse_str(&e.event.uuid).unwrap(), e))
-            .collect()
+        events.into_iter().map(|e| (e.uuid, e)).collect()
     }
 
     fn ok_event_names(events: &HashMap<Uuid, WrappedEvent>) -> Vec<&str> {
@@ -356,7 +355,7 @@ mod tests {
     async fn global_limit_preserves_all_event_states() {
         let limiter = build_limiter("tok", true, &[]).await;
         let bad = make_event("bad_event", None);
-        let bad_uuid = Uuid::parse_str(&bad.event.uuid).unwrap();
+        let bad_uuid = bad.uuid;
         let mut events = events_map(vec![make_event("$pageview", None), bad]);
         // Pre-mark one event as Drop (e.g. from validation)
         let bad_ev = events.get_mut(&bad_uuid).unwrap();
@@ -464,7 +463,7 @@ mod tests {
     async fn survey_limit_excludes_product_tour_events() {
         let limiter = build_limiter("tok", false, &[QuotaResource::Surveys]).await;
         let tour_ev = make_event("survey sent", Some("tour-123"));
-        let tour_uuid = Uuid::parse_str(&tour_ev.event.uuid).unwrap();
+        let tour_uuid = tour_ev.uuid;
         let mut events = events_map(vec![make_event("survey sent", None), tour_ev]);
 
         let result = apply_quota_limits(&limiter, "tok", &mut events).await;
@@ -614,7 +613,7 @@ mod tests {
         // No global limit, but exceptions limited
         let limiter = build_limiter("tok", false, &[QuotaResource::Exceptions]).await;
         let pv = make_event("$pageview", None);
-        let pv_uuid = Uuid::parse_str(&pv.event.uuid).unwrap();
+        let pv_uuid = pv.uuid;
         let mut events = events_map(vec![make_event("$exception", None), pv]);
         // Pre-mark pageview as Drop from a prior validation step
         let pv_ev = events.get_mut(&pv_uuid).unwrap();
@@ -630,7 +629,7 @@ mod tests {
     async fn mixed_pre_existing_and_scoped_still_ok_if_some_remain() {
         let limiter = build_limiter("tok", false, &[QuotaResource::Exceptions]).await;
         let pv = make_event("$pageview", None);
-        let pv_uuid = Uuid::parse_str(&pv.event.uuid).unwrap();
+        let pv_uuid = pv.uuid;
         let mut events = events_map(vec![
             make_event("$exception", None),
             pv,
