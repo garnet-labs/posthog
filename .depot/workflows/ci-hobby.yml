@@ -1,0 +1,355 @@
+# Depot CI Migration
+# Source: .github/workflows/ci-hobby.yml
+#
+# Changes made:
+# - Changed GitHub runs-on labels to their Depot equivalents
+
+# Hobby deployment smoke test and preview workflow
+#
+# Two modes:
+# - Smoke test (default): Creates ephemeral droplet, runs health check, destroys
+# - Preview (hobby-preview label): Creates/updates persistent droplet for manual testing
+#
+# Runs automatically when deployment-related files change, or on-demand via hobby-preview label.
+# Debug: SSH to droplet and run `tail -f /var/log/cloud-init-output.log`
+name: E2E Hobby CI
+on:
+    push:
+        branches:
+            - 'release-*.*'
+    pull_request:
+        types: [opened, synchronize, labeled, unlabeled]
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+    cancel-in-progress: true
+permissions:
+    contents: read
+    pull-requests: write
+    deployments: write
+jobs:
+    # Determine if we should run based on changed files or preview label
+    # See https://github.com/dorny/paths-filter#conditional-execution
+    changes:
+        runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+        timeout-minutes: 5
+        if: github.event_name == 'pull_request'
+        name: Determine need to run hobby checks
+        outputs:
+            should_run: ${{ steps.filter.outputs.hobby == 'true' || steps.check-label.outputs.has_label == 'true' }}
+            installer_changed: ${{ steps.filter.outputs.installer }}
+            label_removed: ${{ steps.check-label.outputs.label_removed }}
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+              id: filter
+              with:
+                  filters: |
+                      hobby:
+                        - Dockerfile
+                        - docker-compose.base.yml
+                        - docker-compose.hobby.yml
+                        # Hobby-specific scripts
+                        - 'bin/deploy-hobby'
+                        - 'bin/hobby-ci.py'
+                        - 'bin/upgrade-hobby'
+                        - 'bin/migrate-*-hobby'
+                        # Docker runtime (Dockerfile CMD chain)
+                        - 'bin/docker'
+                        - 'bin/docker-worker'
+                        - 'bin/docker-worker-beat'
+                        - 'bin/docker-worker-celery'
+                        - 'bin/docker-server'
+                        - 'bin/docker-server-unit'
+                        - 'bin/celery-queues.env'
+                        - 'bin/migrate'
+                        - 'bin/migrate-check'
+                        - 'bin/posthog-node'
+                        - 'bin/hobby-installer/**'
+                        - 'docker/**'
+                        - uv.lock
+                        - .github/workflows/ci-hobby.yml
+                      installer:
+                        - 'bin/hobby-installer/**'
+            - name: Check for preview label
+              id: check-label
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  HOBBY_CHANGED: ${{ steps.filter.outputs.hobby }}
+              with:
+                  script: |
+                      const labels = context.payload.pull_request.labels || [];
+                      const hasLabel = labels.some(l => l.name.toLowerCase() === 'hobby-preview');
+
+                      // Check if hobby-preview label was just removed
+                      const labelRemoved = context.payload.action === 'unlabeled' &&
+                          context.payload.label?.name?.toLowerCase() === 'hobby-preview';
+
+                      console.log(`hobby-preview label: ${hasLabel}, label removed: ${labelRemoved}, hobby files changed: ${process.env.HOBBY_CHANGED}`);
+                      core.setOutput('has_label', hasLabel.toString());
+                      core.setOutput('label_removed', labelRemoved.toString());
+    wait-for-docker-image:
+        name: Wait for Docker image build
+        needs: changes
+        runs-on: depot-ubuntu-24.04 # was: ubuntu-24.04. Mapped standard GitHub runner to Depot equivalent.
+        timeout-minutes: 60
+        if: github.event_name == 'pull_request' && needs.changes.outputs.should_run == 'true'
+        outputs:
+            preview-mode: ${{ steps.check-preview.outputs.preview }}
+            comment-id: ${{ steps.post-comment.outputs.comment-id }}
+            deployment-id: ${{ steps.create-deployment.outputs.deployment-id }}
+            conclusion: ${{ steps.wait-for-image.outputs.conclusion }}
+        steps:
+            - name: 'Check for preview mode'
+              id: check-preview
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: "const fs = require('fs');\nconsole.log(`Fetching labels for PR #${context.issue.number}`);\n\ntry {\n    const { data: pullRequest } = await github.rest.pulls.get({\n        owner: context.repo.owner,\n        repo: context.repo.repo,\n        pull_number: context.issue.number,\n    });\n\n    const labels = pullRequest.labels.map(label => label.name);\n    console.log(`Found labels: ${labels.join(', ')}`);\n\n    const hasPreviewLabel = labels.some(label =>\n        label.toLowerCase() === 'hobby-preview'\n    );\n\n    if (hasPreviewLabel) {\n        console.log('✅ Preview mode enabled - found \"hobby-preview\" label');\n        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'preview=true\\n');\n    } else {\n        console.log('\U0001F9EA Smoke test mode - \"hobby-preview\" label not found');\n        console.log(`Available labels: ${labels.join(', ')}`);\n        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'preview=false\\n');\n    }\n} catch (error) {\n    console.error('Error fetching PR labels:', error.message);\n    console.log('Defaulting to smoke test mode');\n    fs.appendFileSync(process.env.GITHUB_OUTPUT, 'preview=false\\n');\n}\n"
+            - name: Post initial PR comment
+              id: post-comment
+              if: steps.check-preview.outputs.preview == 'true'
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  PREVIEW_MODE: ${{ steps.check-preview.outputs.preview }}
+              with:
+                  script: "const commentMarker = '<!-- hobby-ci-comment -->';\nconst previewMode = process.env.PREVIEW_MODE === 'true';\n\n// Find existing comment to update (in case of workflow retry)\nconst { data: comments } = await github.rest.issues.listComments({\n    owner: context.repo.owner,\n    repo: context.repo.repo,\n    issue_number: context.issue.number,\n});\n\nconst existingComment = comments.find(c => c.body.includes(commentMarker));\n\nconst initialBody = `${commentMarker}\n## \U0001F994 Preview instance\n\n${previewMode ? '\U0001F504 **Preview mode** - Reusing or creating persistent droplet' : '\U0001F9EA **Smoke test mode** - Creating ephemeral droplet'}\n\n⏳ Setting up instance... (this takes ~30 minutes)\n\n**Commit:** \\`${context.sha.substring(0, 7)}\\`\n**Workflow run:** [#${context.runNumber}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;\n\nlet commentId;\nif (existingComment) {\n    // Update existing comment\n    await github.rest.issues.updateComment({\n        owner: context.repo.owner,\n        repo: context.repo.repo,\n        comment_id: existingComment.id,\n        body: initialBody,\n    });\n    commentId = existingComment.id;\n    console.log(`Updated existing comment ${commentId}`);\n} else {\n    // Create new comment\n    const { data: newComment } = await github.rest.issues.createComment({\n        owner: context.repo.owner,\n        repo: context.repo.repo,\n        issue_number: context.issue.number,\n        body: initialBody,\n    });\n    commentId = newComment.id;\n    console.log(`Created new comment ${commentId}`);\n}\n\n// Save comment ID for later update\nconst fs = require('fs');\nconst path = require('path');\nconst outputFile = path.join(process.env.RUNNER_TEMP, 'hobby-comment-id.txt');\nfs.writeFileSync(outputFile, commentId.toString());\n\n// Also set as step output for the changes job to pick up\nconst output = `comment-id=${commentId}`;\nfs.appendFileSync(process.env.GITHUB_OUTPUT, `${output}\\n`);\n"
+            - name: Create GitHub deployment
+              id: create-deployment
+              if: steps.check-preview.outputs.preview == 'true'
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const prNumber = context.issue.number;
+                      const environment = `preview-pr-${prNumber}`;
+
+                      // Use PR branch name - GitHub resolves to SHA and links to PR
+                      const ref = context.payload.pull_request?.head?.ref || context.ref;
+                      const { data: deployment } = await github.rest.repos.createDeployment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          ref: ref,
+                          environment: environment,
+                          auto_merge: false,
+                          required_contexts: [],
+                          description: `Hobby preview for PR #${prNumber}`
+                      });
+
+                      console.log(`Created deployment ${deployment.id} for ${environment}`);
+
+                      // Set initial status to pending (waiting for Docker build)
+                      await github.rest.repos.createDeploymentStatus({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          deployment_id: deployment.id,
+                          state: 'pending',
+                          log_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+                          description: 'Waiting for Docker image build...'
+                      });
+
+                      fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment-id=${deployment.id}\n`);
+            - name: Wait for container image build to complete
+              uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be # v1.2.0
+              id: wait-for-image
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  checkName: Build Docker image
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  timeoutSeconds: 3600
+                  intervalSeconds: 30
+            - name: Update comment - Docker build failed
+              if: always() && steps.check-preview.outputs.preview == 'true' && steps.wait-for-image.outputs.conclusion != 'success'
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  COMMENT_ID: ${{ steps.post-comment.outputs.comment-id }}
+                  BUILD_CONCLUSION: ${{ steps.wait-for-image.outputs.conclusion }}
+              with:
+                  script: "const commentMarker = '<!-- hobby-ci-comment -->';\nconst commentId = process.env.COMMENT_ID;\nconst buildConclusion = process.env.BUILD_CONCLUSION;\n\nconst errorBody = `${commentMarker}\n## \U0001F994 Preview instance\n\n❌ **Docker image build failed**\n\nThe Docker image build did not complete successfully (status: ${buildConclusion}).\n\n**What to do:**\n- Check the [Docker build workflow](${context.payload.repository.html_url}/actions/runs/${context.runId})\n- Look for build errors in the container image build step\n- Fix any Dockerfile syntax errors or dependency issues\n- Push a new commit to retry\n\n**Commit:** \\`${context.sha.substring(0, 7)}\\`\n**Workflow run:** [#${context.runNumber}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;\n\nawait github.rest.issues.updateComment({\n    owner: context.repo.owner,\n    repo: context.repo.repo,\n    comment_id: parseInt(commentId),\n    body: errorBody,\n});\n"
+            - name: Check Docker image build result
+              env:
+                  BUILD_CONCLUSION: ${{ steps.wait-for-image.outputs.conclusion }}
+              run: |
+                  conclusion="$BUILD_CONCLUSION"
+                  if [ "$conclusion" = "skipped" ]; then
+                    echo "Docker image build skipped"
+                    exit 0
+                  elif [ "$conclusion" != "success" ]; then
+                    echo "Docker image build failed with conclusion: $conclusion"
+                    exit 1
+                  fi
+            - name: Update comment - Docker image ready
+              if: steps.check-preview.outputs.preview == 'true' && steps.wait-for-image.outputs.conclusion == 'success'
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  COMMENT_ID: ${{ steps.post-comment.outputs.comment-id }}
+                  PREVIEW_MODE: ${{ steps.check-preview.outputs.preview }}
+              with:
+                  script: "const commentMarker = '<!-- hobby-ci-comment -->';\nconst commentId = process.env.COMMENT_ID;\nconst previewMode = process.env.PREVIEW_MODE === 'true';\n\nconst updatedBody = `${commentMarker}\n## \U0001F994 Preview instance\n\n${previewMode ? '\U0001F504 **Preview mode** - Reusing or creating persistent droplet' : '\U0001F9EA **Smoke test mode** - Creating ephemeral droplet'}\n\n✅ Docker image ready, creating instance...\n\n**Commit:** \\`${context.sha.substring(0, 7)}\\`\n**Workflow run:** [#${context.runNumber}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;\n\nawait github.rest.issues.updateComment({\n    owner: context.repo.owner,\n    repo: context.repo.repo,\n    comment_id: parseInt(commentId),\n    body: updatedBody,\n});\n"
+    hobby-test:
+        runs-on: depot-ubuntu-24.04 # was: ubuntu-24.04. Mapped standard GitHub runner to Depot equivalent.
+        timeout-minutes: 75
+        name: Setup DO Hobby Instance and test
+        needs: [wait-for-docker-image, changes]
+        if: always() && ((needs.changes.outputs.should_run == 'true' && needs.wait-for-docker-image.outputs.conclusion == 'success') || github.event_name == 'push')
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  clean: false
+            - name: Clean up data directories with container permissions
+              run: |
+                  # Use docker to clean up files created by containers
+                  [ -d "data" ] && docker run --rm -v "$(pwd)/data:/data" alpine sh -c "rm -rf /data/seaweedfs /data/minio" || true
+              continue-on-error: true
+            - name: Install uv
+              uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b
+              with:
+                  version: '0.10.2' # pinned: unpinned setup-uv calls GH API on every job, exhausts rate limit
+            - name: Set environment variables from previous job
+              run: |
+                  echo "PREVIEW_MODE=${{ github.event_name == 'pull_request' && needs.wait-for-docker-image.outputs.preview-mode || 'false' }}" >> $GITHUB_ENV
+                  echo "HOBBY_COMMENT_ID=${{ needs.wait-for-docker-image.outputs.comment-id }}" >> $GITHUB_ENV
+                  echo "HOBBY_DEPLOYMENT_ID=${{ needs.wait-for-docker-image.outputs.deployment-id }}" >> $GITHUB_ENV
+            - name: Setup DO Hobby Instance
+              run: uv run bin/hobby-ci.py create "$BRANCH_NAME" "${{ github.run_id }}-${{ github.run_attempt }}" "${{ github.sha }}" "${{ github.event.pull_request.number || 'unknown' }}" 2>&1 | tee /tmp/hobby-ci-output.txt
+              env:
+                  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+                  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_HOBBY_TOKEN }}
+                  DIGITALOCEAN_SSH_PRIVATE_KEY: ${{ secrets.DO_DEPLOY_SSH_PRIVATE_KEY }}
+                  INSTALLER_CHANGED: ${{ needs.changes.outputs.installer_changed || 'false' }}
+            - name: Update comment - Instance created
+              if: env.PREVIEW_MODE == 'true' && env.HOBBY_COMMENT_ID
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: "const fs = require('fs');\nconst commentMarker = '<!-- hobby-ci-comment -->';\nconst commentId = process.env.HOBBY_COMMENT_ID;\nconst previewMode = process.env.PREVIEW_MODE === 'true';\n\nconst dropletInfo = fs.existsSync('/tmp/droplet_info.txt')\n    ? fs.readFileSync('/tmp/droplet_info.txt', 'utf8')\n    : '';\n\n// Parse droplet info for quick access\nlet instanceUrl = '';\nif (dropletInfo) {\n    const urlMatch = dropletInfo.match(/URL: (.*)/);\n    if (urlMatch) instanceUrl = urlMatch[1];\n}\n\nconst updatedBody = `${commentMarker}\n## \U0001F994 Preview instance\n\n${previewMode ? '\U0001F504 **Preview mode** - Reusing or creating persistent droplet' : '\U0001F9EA **Smoke test mode** - Creating ephemeral droplet'}\n\n✅ Instance created, running smoke tests...\n${instanceUrl ? `\\n\U0001F310 **URL:** ${instanceUrl}` : ''}\n\n**Commit:** \\`${context.sha.substring(0, 7)}\\`\n**Workflow run:** [#${context.runNumber}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;\n\nawait github.rest.issues.updateComment({\n    owner: context.repo.owner,\n    repo: context.repo.repo,\n    comment_id: parseInt(commentId),\n    body: updatedBody,\n});\n"
+            - name: Update GitHub deployment - instance created
+              if: env.PREVIEW_MODE == 'true' && env.HOBBY_DEPLOYMENT_ID
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const deploymentId = process.env.HOBBY_DEPLOYMENT_ID;
+
+                      // Parse instance URL from droplet info
+                      let instanceUrl = '';
+                      if (fs.existsSync('/tmp/droplet_info.txt')) {
+                          const dropletInfo = fs.readFileSync('/tmp/droplet_info.txt', 'utf8');
+                          const urlMatch = dropletInfo.match(/URL: (.*)/);
+                          if (urlMatch) instanceUrl = urlMatch[1];
+                      }
+
+                      // Update status to in_progress with URL
+                      await github.rest.repos.createDeploymentStatus({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          deployment_id: parseInt(deploymentId),
+                          state: 'in_progress',
+                          environment_url: instanceUrl || undefined,
+                          log_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+                          description: 'Running smoke tests...'
+                      });
+
+                      console.log(`Updated deployment ${deploymentId} to in_progress`);
+            - name: Run smoke tests on DO
+              id: test
+              timeout-minutes: 60
+              run: |
+                  set +e
+                  uv run bin/hobby-ci.py test
+                  echo "TEST_EXIT_CODE=$?" >> $GITHUB_ENV
+                  exit 0
+              env:
+                  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_HOBBY_TOKEN }}
+                  DIGITALOCEAN_SSH_PRIVATE_KEY: ${{ secrets.DO_DEPLOY_SSH_PRIVATE_KEY }}
+                  GH_TOKEN: ${{ github.token }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  RUN_ID: ${{ github.run_id }}
+                  RUN_ATTEMPT: ${{ github.run_attempt }}
+            - name: Generate demo data
+              if: env.TEST_EXIT_CODE == '0' && env.PREVIEW_MODE == 'true' && env.HOBBY_DROPLET_NEW == 'true'
+              timeout-minutes: 15
+              run: uv run bin/hobby-ci.py generate-demo-data
+              env:
+                  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_HOBBY_TOKEN }}
+                  DIGITALOCEAN_SSH_PRIVATE_KEY: ${{ secrets.DO_DEPLOY_SSH_PRIVATE_KEY }}
+            - name: Update PR comment with final status
+              if: always() && env.PREVIEW_MODE == 'true' && env.HOBBY_COMMENT_ID
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: "const fs = require('fs');\nconst commentMarker = '<!-- hobby-ci-comment -->';\nconst commentId = process.env.HOBBY_COMMENT_ID;\nconst previewMode = process.env.PREVIEW_MODE === 'true';\nconst testExitCode = process.env.TEST_EXIT_CODE;\n\nlet output = '';\ntry {\n    output = fs.readFileSync('/tmp/hobby-ci-output.txt', 'utf8');\n} catch (error) {\n    output = 'Could not read hobby-ci output';\n}\n\nconst dropletInfo = fs.existsSync('/tmp/droplet_info.txt')\n    ? fs.readFileSync('/tmp/droplet_info.txt', 'utf8')\n    : '';\n\n// Parse droplet info for nice display\nlet instanceUrl = '';\nlet sshCommand = '';\nlet dropletIp = '';\nif (dropletInfo) {\n    const urlMatch = dropletInfo.match(/URL: (.*)/);\n    const sshMatch = dropletInfo.match(/SSH: (.*)/);\n    const ipMatch = dropletInfo.match(/Droplet IP: (.*)/);\n    if (urlMatch) instanceUrl = urlMatch[1];\n    if (sshMatch) sshCommand = sshMatch[1];\n    if (ipMatch) dropletIp = ipMatch[1];\n}\n\n// Determine status\nconst testPassed = testExitCode === '0';\nconst instanceCreated = dropletInfo !== '';\n\nlet statusEmoji = '✅';\nlet statusText = previewMode ? 'Preview deployment ready' : 'Smoke test passed';\nlet errorSection = '';\n\nif (!instanceCreated) {\n    statusEmoji = '❌';\n    statusText = 'Instance creation failed';\n    errorSection = `\n### ❌ Deployment Error\n\nThe instance could not be created. Check the deployment output below for details.\n\n**Troubleshooting:**\n- Check if DigitalOcean API is accessible\n- Verify DIGITALOCEAN_TOKEN secret is valid\n- Review cloud-init logs in the workflow artifacts\n\n**Workflow logs:** [View full logs](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;\n} else if (!testPassed) {\n    statusEmoji = '❌';\n    statusText = 'Smoke tests failed';\n\n    // Get last 30 lines of cloud-init logs if available\n    let recentLogs = '';\n    try {\n        const cloudInitLogs = fs.readFileSync('/tmp/cloud-init-output.log', 'utf8');\n        const logLines = cloudInitLogs.trim().split('\\n');\n        recentLogs = logLines.slice(-30).join('\\n');\n    } catch (e) {\n        recentLogs = 'Could not fetch cloud-init logs';\n    }\n\n    errorSection = `\n### ❌ Test Failure\n\nThe deployment was created but health checks failed.\n\n**Quick diagnostics:**\n${instanceUrl ? `- Try accessing manually: ${instanceUrl}` : ''}\n${sshCommand ? `- SSH to debug: \\`${sshCommand}\\`\\n  Then run: \\`tail -f /var/log/cloud-init-output.log\\`\\n  And: \\`docker-compose logs\\`` : ''}\n\n<details>\n<summary>Recent cloud-init logs (last 30 lines)</summary>\n\n\\`\\`\\`\n${recentLogs}\n\\`\\`\\`\n</details>\n\n**Common issues:**\n- Container failed to start (check docker-compose logs)\n- Database migration issues (check postgres/clickhouse logs)\n- Out of memory (instance needs 4GB+)\n\n**Full logs:** Check workflow artifacts or [view logs](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;\n}\n\nconst commentBody = `${commentMarker}\n## \U0001F994 Preview instance\n\n${statusEmoji} **${statusText}**\n\n${instanceUrl ? `### \U0001F310 Access the instance\\n**URL:** ${instanceUrl}\\n` : ''}\n${sshCommand ? `**SSH:** \\`${sshCommand}\\`\\n` : ''}\n${dropletIp ? `**IP:** \\`${dropletIp}\\`\\n` : ''}\n\n**Mode:** ${previewMode ? '\U0001F504 Preview (persistent)' : '\U0001F9EA Smoke test (ephemeral)'}\n**Commit:** \\`${context.sha.substring(0, 7)}\\`\n**Workflow run:** [#${context.runNumber}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n${errorSection}\n${dropletInfo && testPassed ? '\\n<details>\\n<summary>Full instance details</summary>\\n\\n```\\n' + dropletInfo + '```\\n</details>\\n' : ''}\n\n<details>\n<summary>Deployment output</summary>\n\n\\`\\`\\`\n${output}\n\\`\\`\\`\n</details>\n`;\n\nawait github.rest.issues.updateComment({\n    owner: context.repo.owner,\n    repo: context.repo.repo,\n    comment_id: parseInt(commentId),\n    body: commentBody,\n});\n"
+            - name: Update GitHub deployment status
+              if: always() && env.PREVIEW_MODE == 'true' && env.HOBBY_DEPLOYMENT_ID
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const deploymentId = process.env.HOBBY_DEPLOYMENT_ID;
+                      const testExitCode = process.env.TEST_EXIT_CODE;
+                      const testPassed = testExitCode === '0';
+
+                      // Parse instance URL from droplet info
+                      let instanceUrl = '';
+                      if (fs.existsSync('/tmp/droplet_info.txt')) {
+                          const dropletInfo = fs.readFileSync('/tmp/droplet_info.txt', 'utf8');
+                          const urlMatch = dropletInfo.match(/URL: (.*)/);
+                          if (urlMatch) instanceUrl = urlMatch[1];
+                      }
+
+                      const state = testPassed ? 'success' : 'failure';
+                      const description = testPassed
+                          ? 'Preview deployment ready'
+                          : 'Smoke tests failed';
+
+                      await github.rest.repos.createDeploymentStatus({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          deployment_id: parseInt(deploymentId),
+                          state: state,
+                          environment_url: instanceUrl || undefined,
+                          log_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+                          description: description
+                      });
+
+                      console.log(`Updated deployment ${deploymentId} to ${state}`);
+            - name: Fetch logs after test
+              if: always()
+              run: uv run bin/hobby-ci.py fetch-logs || echo "Could not fetch logs"
+              env:
+                  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_HOBBY_TOKEN }}
+                  DIGITALOCEAN_SSH_PRIVATE_KEY: ${{ secrets.DO_DEPLOY_SSH_PRIVATE_KEY }}
+            - name: Show droplet info
+              if: always()
+              run: cat /tmp/droplet_info.txt 2>/dev/null || echo "No droplet info available"
+            - name: Upload logs as artifact
+              if: always()
+              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+              with:
+                  name: hobby-ci-logs
+                  path: |
+                      /tmp/cloud-init-output.log
+                      /tmp/droplet_info.txt
+                      /tmp/docker-compose-logs.txt
+                  if-no-files-found: warn
+            - name: Post-cleanup step
+              if: always() && env.PREVIEW_MODE == 'false'
+              run: uv run bin/hobby-ci.py destroy
+              env:
+                  DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_HOBBY_TOKEN }}
+            - name: Check test result
+              if: always()
+              run: |
+                  if [ "$TEST_EXIT_CODE" != "0" ]; then
+                    echo "❌ Test failed with exit code $TEST_EXIT_CODE"
+                    exit 1
+                  fi
+                  echo "✅ Test passed"
+    # Cleanup preview when hobby-preview label is removed
+    cleanup-on-label-removal:
+        name: Cleanup preview on label removal
+        needs: changes
+        if: needs.changes.outputs.label_removed == 'true'
+        uses: ./.github/workflows/pr-cleanup.yml
+        # these permissions are required by pr-cleanup.yml
+        permissions:
+            deployments: write
+        with:
+            pr_number: ${{ github.event.pull_request.number }}
+        secrets: inherit
