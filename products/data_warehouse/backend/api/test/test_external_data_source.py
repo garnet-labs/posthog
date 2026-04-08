@@ -811,6 +811,7 @@ class TestExternalDataSource(APIBaseTest):
                     "sync_frequency": sync_frequency_interval_to_sync_frequency(schema.sync_frequency_interval),
                     "sync_time_of_day": schema.sync_time_of_day,
                     "description": schema.description,
+                    "cdc_table_mode": "consolidated",
                 }
             ],
         )
