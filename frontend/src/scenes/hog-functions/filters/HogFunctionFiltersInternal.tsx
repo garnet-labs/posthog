@@ -19,57 +19,47 @@ type FilterOption = { value: string; label: string }
 /**
  * Options for the 'Trigger' field on the new destination page
  */
-export const getProductEventFilterOptions = (contextId: HogFunctionConfigurationContextId): FilterOption[] => {
-    switch (contextId) {
-        case 'error-tracking':
-            return [
-                {
-                    label: 'Error tracking issue created',
-                    value: '$error_tracking_issue_created',
-                },
-                {
-                    label: 'Error tracking issue reopened',
-                    value: '$error_tracking_issue_reopened',
-                },
-            ]
-        case 'insight-alerts':
-            return [
-                {
-                    label: 'Insight alert firing',
-                    value: '$insight_alert_firing',
-                },
-            ]
-        case 'logs-alerting':
-            return [
-                {
-                    label: 'Log alert firing',
-                    value: '$logs_alert_firing',
-                },
-                {
-                    label: 'Log alert resolved',
-                    value: '$logs_alert_resolved',
-                },
-            ]
-        case 'discussion-mention':
-            return [
-                {
-                    label: 'Discussion mention',
-                    value: '$discussion_mention_created',
-                },
-            ]
-        default:
-            return [
-                {
-                    label: 'Team activity',
-                    value: '$activity_log_entry_created',
-                },
-                {
-                    label: 'Early access feature updated',
-                    value: '$early_access_feature_updated',
-                },
-            ]
-    }
+const INTERNAL_EVENT_OPTIONS: Record<string, FilterOption[]> = {
+    'error-tracking': [
+        { label: 'Error tracking issue created', value: '$error_tracking_issue_created' },
+        { label: 'Error tracking issue reopened', value: '$error_tracking_issue_reopened' },
+    ],
+    'insight-alerts': [{ label: 'Insight alert firing', value: '$insight_alert_firing' }],
+    'logs-alerting': [
+        { label: 'Log alert firing', value: '$logs_alert_firing' },
+        { label: 'Log alert resolved', value: '$logs_alert_resolved' },
+    ],
+    'discussion-mention': [{ label: 'Discussion mention', value: '$discussion_mention_created' }],
+    'experiment-alerts': [{ label: 'Experiment metric significant', value: '$experiment_metric_significant' }],
+    default: [
+        { label: 'Team activity', value: '$activity_log_entry_created' },
+        { label: 'Early access feature updated', value: '$early_access_feature_updated' },
+    ],
 }
+
+export const getProductEventFilterOptions = (contextId: HogFunctionConfigurationContextId): FilterOption[] => {
+    return INTERNAL_EVENT_OPTIONS[contextId] ?? INTERNAL_EVENT_OPTIONS['default']
+}
+
+/** Returns all internal events across all contexts, deduplicated by value. */
+export const getAllInternalEventFilterOptions = (): FilterOption[] => {
+    const seen = new Set<string>()
+    const result: FilterOption[] = []
+    for (const options of Object.values(INTERNAL_EVENT_OPTIONS)) {
+        for (const option of options) {
+            if (!seen.has(option.value)) {
+                seen.add(option.value)
+                result.push(option)
+            }
+        }
+    }
+    return result
+}
+
+const INTERNAL_EVENT_IDS = new Set(getAllInternalEventFilterOptions().map((o) => o.value))
+
+/** Returns true if the given event ID is an internal event (e.g. $activity_log_entry_created). */
+export const isInternalEvent = (eventId: string): boolean => INTERNAL_EVENT_IDS.has(eventId)
 
 export const getProductEventPropertyFilterOptions = (contextId: HogFunctionConfigurationContextId): string[] => {
     switch (contextId) {

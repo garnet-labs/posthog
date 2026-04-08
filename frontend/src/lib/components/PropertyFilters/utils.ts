@@ -475,8 +475,11 @@ export function taxonomicFilterTypeToPropertyFilterType(
         return PropertyFilterType.Group
     }
 
-    if (filterType === TaxonomicFilterGroupType.EventFeatureFlags) {
-        // Feature flags are just subgroup of event properties
+    if (
+        filterType === TaxonomicFilterGroupType.EventFeatureFlags ||
+        filterType === TaxonomicFilterGroupType.ActivityLogProperties
+    ) {
+        // Feature flags and activity log properties are subgroups of event properties
         return PropertyFilterType.Event
     }
 

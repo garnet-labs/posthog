@@ -61,6 +61,7 @@ import {
     TeamType,
 } from '~/types'
 
+import { isInternalEvent } from '../filters/HogFunctionFiltersInternal'
 import { eventToHogFunctionContextId } from '../sub-templates/sub-templates'
 import type { hogFunctionConfigurationLogicType } from './hogFunctionConfigurationLogicType'
 
@@ -706,6 +707,15 @@ export const hogFunctionConfigurationLogic = kea<hogFunctionConfigurationLogicTy
                 }
 
                 const payload: Record<string, any> = sanitizeConfiguration(data)
+
+                // Auto-switch type when the user selected internal events from the
+                // standard destination event picker (keeps the backend routing correct
+                // without forcing a jarring UI change during editing).
+                const hasInternalEvents = data.filters?.events?.some((e) => isInternalEvent(String(e.id)))
+                if (hasInternalEvents && payload.type === 'destination') {
+                    payload.type = 'internal_destination'
+                }
+
                 // Only sent on create
                 payload.template_id = props.templateId || values.hogFunction?.template?.id
 

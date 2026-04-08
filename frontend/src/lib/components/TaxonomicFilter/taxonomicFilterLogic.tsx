@@ -43,7 +43,7 @@ import { dataWarehouseSettingsSceneLogic } from 'scenes/data-warehouse/settings/
 import { experimentsLogic } from 'scenes/experiments/experimentsLogic'
 import { COHORT_BEHAVIORAL_LIMITATIONS_URL } from 'scenes/feature-flags/constants'
 import {
-    getProductEventFilterOptions,
+    getAllInternalEventFilterOptions,
     getProductEventPropertyFilterOptions,
 } from 'scenes/hog-functions/filters/HogFunctionFiltersInternal'
 import { MaxContextTaxonomicFilterOption } from 'scenes/max/maxTypes'
@@ -459,7 +459,7 @@ export const taxonomicFilterLogic = kea<taxonomicFilterLogicType>([
                         type: TaxonomicFilterGroupType.InternalEvents,
                         options: [
                             { name: 'All internal events', value: null },
-                            ...getProductEventFilterOptions('activity-log').map((item) => ({
+                            ...getAllInternalEventFilterOptions().map((item) => ({
                                 name: item.label,
                                 value: item.value,
                             })),
@@ -478,6 +478,8 @@ export const taxonomicFilterLogic = kea<taxonomicFilterLogicType>([
                             value,
                             group: TaxonomicFilterGroupType.EventProperties,
                         })),
+                        getName: (item: Record<string, any>) => item.name,
+                        getValue: (item: Record<string, any>) => item.value,
                         getIcon: getPropertyDefinitionIcon,
                         getPopoverHeader: () => 'Activity log properties',
                     },

@@ -118,6 +118,7 @@ export function HogFunctionFilters({
                 TaxonomicFilterGroupType.PersonProperties,
                 TaxonomicFilterGroupType.EventFeatureFlags,
                 TaxonomicFilterGroupType.Elements,
+                TaxonomicFilterGroupType.ActivityLogProperties,
                 ...groupsTaxonomicTypes
             )
         }
@@ -276,7 +277,11 @@ export function HogFunctionFilters({
                                                 ? [TaxonomicFilterGroupType.Events]
                                                 : isDataWarehouse
                                                   ? [TaxonomicFilterGroupType.DataWarehouse]
-                                                  : [TaxonomicFilterGroupType.Events, TaxonomicFilterGroupType.Actions]
+                                                  : [
+                                                        TaxonomicFilterGroupType.Events,
+                                                        TaxonomicFilterGroupType.Actions,
+                                                        TaxonomicFilterGroupType.InternalEvents,
+                                                    ]
                                         }
                                         propertiesTaxonomicGroupTypes={taxonomicGroupTypes}
                                         propertyFiltersPopover
