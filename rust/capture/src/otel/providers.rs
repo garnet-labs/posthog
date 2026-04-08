@@ -198,6 +198,21 @@ mod tests {
     }
 
     #[test]
+    fn test_traceloop_span_with_only_llm_request_type() {
+        // Traceloop spans may carry only `llm.request.type` without any
+        // `traceloop.*` prefixed attribute. The dual-prefix design ensures
+        // these are still accepted and classified correctly.
+        assert_eq!(
+            get_event_name(&attrs_with("llm.request.type", "chat")),
+            Some("$ai_generation")
+        );
+        assert_eq!(
+            get_event_name(&attrs_with("llm.request.type", "embedding")),
+            Some("$ai_embedding")
+        );
+    }
+
+    #[test]
     fn test_unsupported_provider_returns_none() {
         assert_eq!(
             get_event_name(&attrs_with("logfire.msg", "running 1 tool")),

@@ -111,10 +111,7 @@ fn make_irrelevant_http_span(trace_id: Vec<u8>, span_id: Vec<u8>) -> Span {
             ),
             make_kv(
                 "url.full",
-                any_value::Value::StringValue(
-                    "https://us.i.posthog.com/e?ip=0&_=1774470113881&ver=1.363.5&compression=gzip-js"
-                        .to_string(),
-                ),
+                any_value::Value::StringValue("https://example.com/api".to_string()),
             ),
         ],
     )
@@ -724,6 +721,53 @@ async fn test_too_many_spans_returns_400() {
                 attributes: vec![make_kv(
                     "posthog.distinct_id",
                     any_value::Value::StringValue("user-limit".to_string()),
+                )],
+                dropped_attributes_count: 0,
+            }),
+            scope_spans: vec![ScopeSpans {
+                scope: None,
+                spans,
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let resp = client
+        .post(ENDPOINT)
+        .header("Content-Type", "application/x-protobuf")
+        .header("Authorization", format!("Bearer {}", TOKEN))
+        .body(request.encode_to_vec())
+        .send()
+        .await;
+
+    assert_eq!(resp.status().as_u16(), 400);
+}
+
+#[tokio::test]
+async fn test_too_many_raw_spans_returns_400() {
+    let sink = CapturingSink::new();
+    let client = make_test_client(&sink);
+
+    // 1001 non-AI spans exceeds the MAX_RAW_SPANS_PER_REQUEST limit of 1000.
+    let spans: Vec<Span> = (0..1001u16)
+        .map(|i| {
+            let id_bytes: Vec<u8> = i.to_be_bytes().iter().chain(&[0u8; 6]).copied().collect();
+            make_span(vec![0; 16], id_bytes, vec![], 0, vec![
+                make_kv(
+                    "http.request.method",
+                    any_value::Value::StringValue("GET".to_string()),
+                ),
+            ])
+        })
+        .collect();
+
+    let request = ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            resource: Some(Resource {
+                attributes: vec![make_kv(
+                    "posthog.distinct_id",
+                    any_value::Value::StringValue("user-raw-limit".to_string()),
                 )],
                 dropped_attributes_count: 0,
             }),

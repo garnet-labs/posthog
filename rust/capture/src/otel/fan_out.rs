@@ -106,7 +106,13 @@ pub fn expand_into_events(
     request: &ExportTraceServiceRequest,
     distinct_id: &str,
 ) -> Vec<SpanEvent> {
-    let mut events = Vec::new();
+    let total_spans: usize = request
+        .resource_spans
+        .iter()
+        .flat_map(|rs| &rs.scope_spans)
+        .map(|ss| ss.spans.len())
+        .sum();
+    let mut events = Vec::with_capacity(total_spans.min(super::MAX_SPANS_PER_REQUEST));
 
     for rs in &request.resource_spans {
         let resource_attrs = rs

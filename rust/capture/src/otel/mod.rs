@@ -41,18 +41,6 @@ fn count_spans(request: &ExportTraceServiceRequest) -> usize {
         .sum()
 }
 
-/// Counts spans that match a supported AI provider using cheap prefix matching
-/// on raw protobuf attributes, without converting to JSON.
-fn count_ai_spans(request: &ExportTraceServiceRequest) -> usize {
-    request
-        .resource_spans
-        .iter()
-        .flat_map(|rs| &rs.scope_spans)
-        .flat_map(|ss| &ss.spans)
-        .filter(|span| providers::get_provider_raw(&span.attributes).is_some())
-        .count()
-}
-
 /// Return an HTTP 400 with a JSON error message.
 ///
 /// Per the OTLP spec (https://opentelemetry.io/docs/specs/otlp/#failures-1), only
@@ -155,33 +143,33 @@ pub async fn otel_handler(
         return Err(err.into_response());
     }
 
-    let ai_span_count = count_ai_spans(&request);
-    let dropped_span_count = raw_span_count.saturating_sub(ai_span_count);
+    let received_at = Utc::now();
+    let distinct_id = identity::extract_distinct_id(&request);
+    let span_events = fan_out::expand_into_events(&request, &distinct_id);
+    let span_count = span_events.len();
+    let dropped_span_count = raw_span_count.saturating_sub(span_count);
+
+    Span::current().record("span_count", span_count);
 
     if dropped_span_count > 0 {
         counter!("capture_ai_otel_spans_filtered").increment(dropped_span_count as u64);
     }
 
-    if ai_span_count == 0 {
+    if span_count == 0 {
         return Ok(Json(json!({})));
     }
-    if ai_span_count > MAX_SPANS_PER_REQUEST {
+    if span_count > MAX_SPANS_PER_REQUEST {
         warn!(
             "OTEL request contains {} AI spans, exceeding limit of {} ({} raw spans received)",
-            ai_span_count, MAX_SPANS_PER_REQUEST, raw_span_count
+            span_count, MAX_SPANS_PER_REQUEST, raw_span_count
         );
         let err = CaptureError::RequestParsingError(format!(
-            "Too many AI spans: {ai_span_count} exceeds limit of {MAX_SPANS_PER_REQUEST}"
+            "Too many AI spans: {span_count} exceeds limit of {MAX_SPANS_PER_REQUEST}"
         ));
         report_internal_error_metrics(err.to_metric_tag(), "otel_validation");
         return Err(err.into_response());
     }
 
-    let received_at = Utc::now();
-    let distinct_id = identity::extract_distinct_id(&request);
-    let span_events = fan_out::expand_into_events(&request, &distinct_id);
-    let span_count = span_events.len();
-    Span::current().record("span_count", span_count);
     counter!("capture_ai_otel_spans_accepted").increment(span_count as u64);
     histogram!("capture_ai_otel_spans_per_request").record(span_count as f64);
 
