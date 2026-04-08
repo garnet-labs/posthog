@@ -55,15 +55,15 @@ describe('createProcessPersonsStep', () => {
 
         personRepository = new PostgresPersonRepository(hub.postgres)
         personOutputs = new IngestionOutputs({
-            [PERSONS_OUTPUT]: new SingleIngestionOutput('test', KAFKA_PERSON, hub.kafkaProducer, 'test'),
+            [PERSONS_OUTPUT]: new SingleIngestionOutput(PERSONS_OUTPUT, KAFKA_PERSON, hub.kafkaProducer, 'test'),
             [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-                'test',
+                INGESTION_WARNINGS_OUTPUT,
                 KAFKA_PERSON_DISTINCT_ID,
                 hub.kafkaProducer,
                 'test'
             ),
             [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
-                'test',
+                INGESTION_WARNINGS_OUTPUT,
                 KAFKA_INGESTION_WARNINGS,
                 hub.kafkaProducer,
                 'test'
@@ -71,7 +71,7 @@ describe('createProcessPersonsStep', () => {
         })
         const ingestionWarningsOutputs = new IngestionOutputs({
             [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
-                'test',
+                INGESTION_WARNINGS_OUTPUT,
                 KAFKA_INGESTION_WARNINGS,
                 hub.kafkaProducer,
                 'test'

@@ -53,9 +53,9 @@ describe('PostgresPersonRepository', () => {
             throw new Error('Failed to create person')
         }
         const personOutputs = new IngestionOutputs({
-            [PERSONS_OUTPUT]: new SingleIngestionOutput('test', KAFKA_PERSON, hub.kafkaProducer, 'test'),
+            [PERSONS_OUTPUT]: new SingleIngestionOutput(PERSONS_OUTPUT, KAFKA_PERSON, hub.kafkaProducer, 'test'),
             [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-                'test',
+                PERSON_DISTINCT_IDS_OUTPUT,
                 KAFKA_PERSON_DISTINCT_ID,
                 hub.kafkaProducer,
                 'test'
@@ -392,9 +392,9 @@ describe('PostgresPersonRepository', () => {
             const kafkaMessages = result.messages
 
             const personOutputs = new IngestionOutputs({
-                [PERSONS_OUTPUT]: new SingleIngestionOutput('test', KAFKA_PERSON, hub.kafkaProducer, 'test'),
+                [PERSONS_OUTPUT]: new SingleIngestionOutput(PERSONS_OUTPUT, KAFKA_PERSON, hub.kafkaProducer, 'test'),
                 [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-                    'test',
+                    PERSON_DISTINCT_IDS_OUTPUT,
                     KAFKA_PERSON_DISTINCT_ID,
                     hub.kafkaProducer,
                     'test'
@@ -1729,9 +1729,9 @@ describe('PostgresPersonRepository', () => {
             const targetPerson = result2.person
 
             const personOutputs = new IngestionOutputs({
-                [PERSONS_OUTPUT]: new SingleIngestionOutput('test', KAFKA_PERSON, hub.kafkaProducer, 'test'),
+                [PERSONS_OUTPUT]: new SingleIngestionOutput(PERSONS_OUTPUT, KAFKA_PERSON, hub.kafkaProducer, 'test'),
                 [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-                    'test',
+                    PERSON_DISTINCT_IDS_OUTPUT,
                     KAFKA_PERSON_DISTINCT_ID,
                     hub.kafkaProducer,
                     'test'

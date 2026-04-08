@@ -18,9 +18,9 @@ import { ProcessPersonlessInput, createProcessPersonlessStep } from './process-p
 
 function createPersonOutputs(hub: Hub) {
     return new IngestionOutputs({
-        [PERSONS_OUTPUT]: new SingleIngestionOutput('test', KAFKA_PERSON, hub.kafkaProducer, 'test'),
+        [PERSONS_OUTPUT]: new SingleIngestionOutput(PERSONS_OUTPUT, KAFKA_PERSON, hub.kafkaProducer, 'test'),
         [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-            'test',
+            PERSON_DISTINCT_IDS_OUTPUT,
             KAFKA_PERSON_DISTINCT_ID,
             hub.kafkaProducer,
             'test'
@@ -80,7 +80,7 @@ describe('createProcessPersonlessStep', () => {
         const personRepository = new PostgresPersonRepository(hub.postgres)
         const ingestionWarningsOutputs = new IngestionOutputs({
             [INGESTION_WARNINGS_OUTPUT]: new SingleIngestionOutput(
-                'test',
+                INGESTION_WARNINGS_OUTPUT,
                 'ingestion_warnings_test',
                 hub.kafkaProducer,
                 'test'

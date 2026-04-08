@@ -282,16 +282,16 @@ describe('ErrorTrackingPipeline', () => {
 
         pipelineConfig = {
             outputs: new IngestionOutputs({
-                events: new SingleIngestionOutput('test', 'clickhouse_events_json_test', mockKafkaProducer, 'test'),
+                events: new SingleIngestionOutput('events', 'clickhouse_events_json_test', mockKafkaProducer, 'test'),
                 ingestion_warnings: new SingleIngestionOutput(
-                    'test',
+                    'ingestion_warnings',
                     'clickhouse_ingestion_warnings_test',
                     mockKafkaProducer,
                     'test'
                 ),
-                dlq: new SingleIngestionOutput('test', 'error_tracking_dlq', mockKafkaProducer, 'test'),
-                overflow: new SingleIngestionOutput('test', 'error_tracking_overflow', mockKafkaProducer, 'test'),
-                tophog: new SingleIngestionOutput('test', 'clickhouse_tophog_test', mockKafkaProducer, 'test'),
+                dlq: new SingleIngestionOutput('dlq', 'error_tracking_dlq', mockKafkaProducer, 'test'),
+                overflow: new SingleIngestionOutput('overflow', 'error_tracking_overflow', mockKafkaProducer, 'test'),
+                tophog: new SingleIngestionOutput('tophog', 'clickhouse_tophog_test', mockKafkaProducer, 'test'),
             }),
             groupId: 'error-tracking-test',
             promiseScheduler,

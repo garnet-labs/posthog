@@ -25,9 +25,9 @@ jest.mock('../../../src/utils/logger')
 
 function createPersonOutputs(kafkaProducer: KafkaProducerWrapper) {
     return new IngestionOutputs({
-        [PERSONS_OUTPUT]: new SingleIngestionOutput('test', KAFKA_PERSON, kafkaProducer, 'test'),
+        [PERSONS_OUTPUT]: new SingleIngestionOutput(PERSONS_OUTPUT, KAFKA_PERSON, kafkaProducer, 'test'),
         [PERSON_DISTINCT_IDS_OUTPUT]: new SingleIngestionOutput(
-            'test',
+            PERSON_DISTINCT_IDS_OUTPUT,
             KAFKA_PERSON_DISTINCT_ID,
             kafkaProducer,
             'test'

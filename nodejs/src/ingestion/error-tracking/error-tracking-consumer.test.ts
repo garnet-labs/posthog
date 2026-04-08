@@ -162,30 +162,25 @@ describe('ErrorTrackingConsumer', () => {
         const deps = {
             outputs: new IngestionOutputs({
                 events: new SingleIngestionOutput(
-                    'test',
+                    'events',
                     hub.ERROR_TRACKING_CONSUMER_OUTPUT_TOPIC,
                     hub.kafkaProducer,
                     'test'
                 ),
                 ingestion_warnings: new SingleIngestionOutput(
-                    'test',
+                    'ingestion_warnings',
                     'clickhouse_ingestion_warnings_test',
                     hub.kafkaProducer,
                     'test'
                 ),
-                dlq: new SingleIngestionOutput(
-                    'test',
-                    hub.ERROR_TRACKING_CONSUMER_DLQ_TOPIC,
-                    hub.kafkaProducer,
-                    'test'
-                ),
+                dlq: new SingleIngestionOutput('dlq', hub.ERROR_TRACKING_CONSUMER_DLQ_TOPIC, hub.kafkaProducer, 'test'),
                 overflow: new SingleIngestionOutput(
-                    'test',
+                    'overflow',
                     hub.ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC || '',
                     hub.kafkaProducer,
                     'test'
                 ),
-                tophog: new SingleIngestionOutput('test', 'clickhouse_tophog_test', hub.kafkaProducer, 'test'),
+                tophog: new SingleIngestionOutput('tophog', 'clickhouse_tophog_test', hub.kafkaProducer, 'test'),
             }),
             teamManager: hub.teamManager,
             hogTransformer: mockHogTransformer,
