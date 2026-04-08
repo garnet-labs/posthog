@@ -23,7 +23,19 @@ def build_rasterization_input(exported_asset_id: int) -> RasterizationActivityIn
     if not session_id:
         raise ValueError(f"ExportedAsset {exported_asset_id} has no session_recording_id in export_context")
 
-    s3_key_prefix = f"{settings.OBJECT_STORAGE_EXPORTS_FOLDER}/mp4/team-{asset.team_id}/task-{asset.id}"
+    # Map export_format to output_format
+    format_map = {"video/webm": "webm", "video/mp4": "mp4", "image/gif": "gif"}
+    output_format = format_map.get(asset.export_format, "mp4")
+
+    s3_key_prefix = f"{settings.OBJECT_STORAGE_EXPORTS_FOLDER}/{output_format}/team-{asset.team_id}/task-{asset.id}"
+
+    # Map offset fields: callers may pass "timestamp" (offset from start) + "duration"
+    # or the native "start_offset_s" / "end_offset_s" directly.
+    start_offset_s = ctx.get("start_offset_s") if ctx.get("start_offset_s") is not None else ctx.get("timestamp")
+    duration = ctx.get("duration")
+    end_offset_s = ctx.get("end_offset_s")
+    if end_offset_s is None and duration is not None:
+        end_offset_s = (start_offset_s or 0) + duration
 
     return RasterizationActivityInput(
         team_id=asset.team_id,
@@ -36,8 +48,9 @@ def build_rasterization_input(exported_asset_id: int) -> RasterizationActivityIn
         show_metadata_footer=ctx.get("show_metadata_footer", False),
         viewport_width=ctx.get("width"),
         viewport_height=ctx.get("height"),
-        start_timestamp=ctx.get("start_timestamp"),
-        end_timestamp=ctx.get("end_timestamp"),
+        start_offset_s=start_offset_s,
+        end_offset_s=end_offset_s,
+        output_format=output_format,
         skip_inactivity=ctx.get("skip_inactivity", True),
         mouse_tail=ctx.get("mouse_tail", True),
         max_virtual_time=ctx.get("max_virtual_time"),
@@ -53,7 +66,7 @@ def finalize_rasterization(inputs: FinalizeRasterizationInput) -> None:
     result = inputs.result
 
     # Extract the object path from the s3_uri (strip "s3://{bucket}/" prefix)
-    # e.g. "s3://posthog/exports/mp4/team-1/task-123/uuid.mp4" -> "exports/mp4/team-1/task-123/uuid.mp4"
+    # e.g. "s3://posthog/exports/webm/team-1/task-123/uuid.webm" -> "exports/webm/team-1/task-123/uuid.webm"
     prefix = f"s3://{settings.OBJECT_STORAGE_BUCKET}/"
     if not result.s3_uri.startswith(prefix):
         raise ValueError(f"Unexpected s3_uri prefix: {result.s3_uri} (expected {prefix}...)")

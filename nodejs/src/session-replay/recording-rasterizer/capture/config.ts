@@ -51,8 +51,14 @@ export function buildCaptureConfig(input: RasterizeRecordingInput): CaptureConfi
     const outputFps = input.recording_fps || DEFAULT_FPS
     // e.g. 3fps output × 8x speed = 24fps capture → setpts stretches 8x → 3fps
     const captureFps = outputFps * playbackSpeed
+    const outputFormat = input.output_format || 'mp4'
 
-    const ffmpegOutputOpts = ['-crf 23', '-pix_fmt yuv420p', '-movflags +faststart']
+    const ffmpegOutputOpts: string[] =
+        outputFormat === 'webm'
+            ? ['-f webm', '-c:v libvpx-vp9', '-crf 30', '-b:v 0']
+            : outputFormat === 'gif'
+              ? ['-f gif']
+              : ['-crf 23', '-pix_fmt yuv420p', '-movflags +faststart']
     if (input.trim) {
         ffmpegOutputOpts.push(`-t ${input.trim}`)
     }
@@ -64,6 +70,12 @@ export function buildCaptureConfig(input: RasterizeRecordingInput): CaptureConfi
         ffmpegVideoFilters.push(`setpts=${playbackSpeed}*PTS`)
         ffmpegVideoFilters.push(`fps=${outputFps}`)
     }
+    if (outputFormat === 'gif') {
+        // Scale down + palette generation for high-quality GIF with small file size.
+        // split+palettegen+paletteuse avoids the banding artifacts of ffmpeg's default dithering.
+        ffmpegVideoFilters.push('scale=640:-1:flags=lanczos')
+        ffmpegVideoFilters.push('split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse')
+    }
 
     return {
         captureFps,
@@ -72,6 +84,7 @@ export function buildCaptureConfig(input: RasterizeRecordingInput): CaptureConfi
         trim: input.trim,
         trimFrameLimit: input.trim ? input.trim * outputFps : Infinity,
         maxVirtualTimeMs: input.max_virtual_time ? input.max_virtual_time * 1000 : Infinity,
+        outputFormat,
         ffmpegOutputOpts,
         ffmpegVideoFilters,
         screenshotFormat: input.screenshot_format || 'jpeg',
@@ -92,8 +105,8 @@ export function buildPlayerConfig(
         skipInactivity: input.skip_inactivity !== false,
         mouseTail: input.mouse_tail !== false,
         showMetadataFooter: input.show_metadata_footer,
-        startTimestamp: input.start_timestamp,
-        endTimestamp: input.end_timestamp,
+        startOffsetS: input.start_offset_s,
+        endOffsetS: input.end_offset_s,
         viewportEvents: input.viewport_events || [],
     }
 }
