@@ -44,14 +44,36 @@ export type Insight = Omit<
 
 export const CreateInsightInputSchema = z.object({
     name: z.string(),
-    query: z.object({
-        kind: z.union([z.literal('InsightVizNode'), z.literal('DataVisualizationNode')]),
-        source: z
-            .any()
-            .describe(
-                'For new insights, use the query from your successful query-run tool call. For updates, the existing query can optionally be reused.'
-            ), // NOTE: This is intentionally z.any() to avoid populating the context with the complicated query schema, but we prompt the LLM to use 'query-run' to check queries, before creating insights.
-    }),
+    query: z
+        .object({
+            kind: z.union([z.literal('InsightVizNode'), z.literal('DataVisualizationNode')]),
+            source: z
+                .any()
+                .describe(
+                    'The inner query you validated with `query-run`. For InsightVizNode use a TrendsQuery/FunnelsQuery/PathsQuery; for DataVisualizationNode use a HogQLQuery.'
+                ), // NOTE: This is intentionally z.any() to avoid populating the context with the complicated query schema, but we prompt the LLM to use 'query-run' to check queries, before creating insights.
+            display: z
+                .string()
+                .optional()
+                .describe(
+                    'ONLY for DataVisualizationNode (HogQL-backed insights). Sets the visualization type. IMPORTANT: a DataVisualizationNode with no `display` renders as a table — you must set this (e.g. "ActionsLineGraph", "ActionsBar", "ActionsAreaGraph", "ActionsPie", "BoldNumber") whenever the user asks for a chart. Leave unset on InsightVizNode, which derives its display from the inner query.'
+                ),
+            chartSettings: z
+                .record(z.string(), z.any())
+                .optional()
+                .describe(
+                    'ONLY for DataVisualizationNode when `display` is a chart (line/bar/area/etc.). Maps HogQL columns to chart axes: `{ xAxis: { column: "day" }, yAxis: [{ column: "signups" }] }`. Without this, line/bar charts will not know which columns to plot.'
+                ),
+            tableSettings: z
+                .record(z.string(), z.any())
+                .optional()
+                .describe(
+                    'ONLY for DataVisualizationNode when `display` is ActionsTable. Optional column pinning, transpose, etc.'
+                ),
+        })
+        .describe(
+            'The insight query. For HogQL queries wrapped in DataVisualizationNode, remember to set `display` (and `chartSettings.xAxis`/`yAxis` for line/bar/area charts) — otherwise the insight renders as a table even if the user asked for a chart.'
+        ),
     description: z.string().optional(),
     favorited: z.boolean(),
     tags: z.array(z.string()).optional(),
@@ -67,8 +89,24 @@ export const UpdateInsightInputSchema = z.object({
             source: z
                 .any()
                 .describe(
-                    'For new insights, use the query from your successful query-run tool call. For updates, the existing query can optionally be reused'
+                    'The inner query (TrendsQuery/FunnelsQuery/PathsQuery for InsightVizNode, HogQLQuery for DataVisualizationNode). On updates the existing query can optionally be reused.'
                 ), // NOTE: This is intentionally z.any() to avoid populating the context with the complicated query schema, and to allow the LLM to make a change to an existing insight whose schema we do not support in our simplified subset of the full insight schema.
+            display: z
+                .string()
+                .optional()
+                .describe(
+                    'ONLY for DataVisualizationNode. Set to e.g. "ActionsLineGraph", "ActionsBar", "ActionsAreaGraph", "ActionsPie", "BoldNumber" to render the HogQL result as a chart. Omit (or "ActionsTable") for a table. Leave unset on InsightVizNode.'
+                ),
+            chartSettings: z
+                .record(z.string(), z.any())
+                .optional()
+                .describe(
+                    'ONLY for DataVisualizationNode chart displays. Maps HogQL columns to axes, e.g. `{ xAxis: { column: "day" }, yAxis: [{ column: "count" }] }`.'
+                ),
+            tableSettings: z
+                .record(z.string(), z.any())
+                .optional()
+                .describe('ONLY for DataVisualizationNode table displays.'),
         })
         .optional(),
     favorited: z.boolean().optional(),

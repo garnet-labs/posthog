@@ -103,7 +103,7 @@
         }
     },
     "insight-create-from-query": {
-        "description": "Create an insight from a query that you have previously tested with 'query-run'. You should check the query runs, before creating an insight. Do not create an insight before running the query, unless you know already that it is correct (e.g. you are making a minor modification to an existing query you have seen).",
+        "description": "Create an insight from a query that you have previously tested with 'query-run'. You should check the query runs, before creating an insight. Do not create an insight before running the query, unless you know already that it is correct (e.g. you are making a minor modification to an existing query you have seen). IMPORTANT for HogQL insights (DataVisualizationNode): if the user wants a chart (line/bar/area/pie/big number), you MUST set `query.display` (e.g. \"ActionsLineGraph\", \"ActionsBar\", \"ActionsAreaGraph\", \"ActionsPie\", \"BoldNumber\") AND `query.chartSettings` mapping HogQL columns to axes — e.g. `{ xAxis: { column: \"day\" }, yAxis: [{ column: \"signups\" }] }`. Omitting `display` makes a DataVisualizationNode render as a table, which is almost never what the user asked for. InsightVizNode insights (trends/funnels/paths) derive their display from the inner query and do not need these fields.",
         "category": "Insights & analytics",
         "feature": "insights",
         "summary": "Save a query as an insight.",
@@ -191,7 +191,7 @@
         }
     },
     "query-run": {
-        "description": "You should use this to answer questions that a user has about their data and for when you want to create a new insight. You can use 'event-definitions-list' to get events to use in the query, and 'event-properties-list' to get properties for those events. It can run a trend, funnel, paths or HogQL query. Where possible, use a trend, funnel or paths query rather than a HogQL query, unless you know the HogQL is correct (e.g. it came from a previous insight.). Use PathsQuery to visualize user flows and navigation patterns — set includeEventTypes to ['hogql'] with a pathsHogQLExpression for custom path steps.",
+        "description": "You should use this to answer questions that a user has about their data and for when you want to create a new insight. You can use 'event-definitions-list' to get events to use in the query, and 'event-properties-list' to get properties for those events. It can run a trend, funnel, paths or HogQL query. Where possible, use a trend, funnel or paths query rather than a HogQL query, unless you know the HogQL is correct (e.g. it came from a previous insight.). Use PathsQuery to visualize user flows and navigation patterns — set includeEventTypes to ['hogql'] with a pathsHogQLExpression for custom path steps. For HogQL queries that should render as a chart when saved as an insight, wrap the HogQLQuery in a DataVisualizationNode and set `display` (e.g. \"ActionsLineGraph\") and `chartSettings` (e.g. `{ xAxis: { column: \"day\" }, yAxis: [{ column: \"value\" }] }`) — otherwise the resulting insight will render as a table.",
         "category": "Insights & analytics",
         "summary": "Run a trend, funnel, paths or HogQL query.",
         "feature": "insights",

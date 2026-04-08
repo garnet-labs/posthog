@@ -13,7 +13,20 @@
                     "type": "string"
                 },
                 "query": {
+                    "description": "The insight query. For HogQL queries wrapped in DataVisualizationNode, remember to set `display` (and `chartSettings.xAxis`/`yAxis` for line/bar/area charts) — otherwise the insight renders as a table even if the user asked for a chart.",
                     "properties": {
+                        "chartSettings": {
+                            "additionalProperties": {},
+                            "description": "ONLY for DataVisualizationNode when `display` is a chart (line/bar/area/etc.). Maps HogQL columns to chart axes: `{ xAxis: { column: \"day\" }, yAxis: [{ column: \"signups\" }] }`. Without this, line/bar charts will not know which columns to plot.",
+                            "propertyNames": {
+                                "type": "string"
+                            },
+                            "type": "object"
+                        },
+                        "display": {
+                            "description": "ONLY for DataVisualizationNode (HogQL-backed insights). Sets the visualization type. IMPORTANT: a DataVisualizationNode with no `display` renders as a table — you must set this (e.g. \"ActionsLineGraph\", \"ActionsBar\", \"ActionsAreaGraph\", \"ActionsPie\", \"BoldNumber\") whenever the user asks for a chart. Leave unset on InsightVizNode, which derives its display from the inner query.",
+                            "type": "string"
+                        },
                         "kind": {
                             "anyOf": [
                                 {
@@ -27,7 +40,15 @@
                             ]
                         },
                         "source": {
-                            "description": "For new insights, use the query from your successful query-run tool call. For updates, the existing query can optionally be reused."
+                            "description": "The inner query you validated with `query-run`. For InsightVizNode use a TrendsQuery/FunnelsQuery/PathsQuery; for DataVisualizationNode use a HogQLQuery."
+                        },
+                        "tableSettings": {
+                            "additionalProperties": {},
+                            "description": "ONLY for DataVisualizationNode when `display` is ActionsTable. Optional column pinning, transpose, etc.",
+                            "propertyNames": {
+                                "type": "string"
+                            },
+                            "type": "object"
                         }
                     },
                     "required": ["kind", "source"],

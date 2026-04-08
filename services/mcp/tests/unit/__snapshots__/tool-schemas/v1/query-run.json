@@ -525,12 +525,16 @@
                                                     "default": "ActionsLineGraph",
                                                     "enum": [
                                                         "ActionsLineGraph",
-                                                        "ActionsTable",
-                                                        "ActionsPie",
+                                                        "ActionsLineGraphCumulative",
+                                                        "ActionsAreaGraph",
                                                         "ActionsBar",
+                                                        "ActionsStackedBar",
+                                                        "ActionsUnstackedBar",
                                                         "ActionsBarValue",
-                                                        "WorldMap",
-                                                        "BoldNumber"
+                                                        "ActionsPie",
+                                                        "ActionsTable",
+                                                        "BoldNumber",
+                                                        "WorldMap"
                                                     ],
                                                     "type": "string"
                                                 },
@@ -1373,6 +1377,71 @@
                 },
                 {
                     "properties": {
+                        "chartSettings": {
+                            "description": "Chart settings for non-table displays. Required in practice for line/bar/area charts so we can map HogQL columns to the X and Y axes.",
+                            "properties": {
+                                "seriesBreakdownColumn": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "null"
+                                        }
+                                    ],
+                                    "description": "Optional column used to split the data into multiple series (breakdown)"
+                                },
+                                "showLegend": {
+                                    "type": "boolean"
+                                },
+                                "showTotalRow": {
+                                    "type": "boolean"
+                                },
+                                "stackBars100": {
+                                    "description": "Whether to fill stacked bars to 100% (only for stacked bar charts)",
+                                    "type": "boolean"
+                                },
+                                "xAxis": {
+                                    "description": "X axis column — for time-series line/area/bar charts, set this to the date/time column returned by the HogQL query",
+                                    "properties": {
+                                        "column": {
+                                            "description": "Name of the HogQL column (aliased in SELECT) to use for this axis or series",
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": ["column"],
+                                    "type": "object"
+                                },
+                                "yAxis": {
+                                    "description": "Y axis series — one entry per numeric column to plot",
+                                    "items": {
+                                        "properties": {
+                                            "column": {
+                                                "description": "Name of the HogQL column (aliased in SELECT) to use for this axis or series",
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": ["column"],
+                                        "type": "object"
+                                    },
+                                    "type": "array"
+                                }
+                            },
+                            "type": "object"
+                        },
+                        "display": {
+                            "description": "Visualization type for the HogQL result. Defaults to ActionsTable when omitted — ALWAYS set this when the user asks for a chart (e.g. ActionsLineGraph for a line chart, ActionsBar for a bar chart, ActionsPie for a pie chart, BoldNumber for a single-value big-number card). Pair with `chartSettings.xAxis` / `chartSettings.yAxis` for line/bar/area charts so PostHog knows which HogQL columns to plot.",
+                            "enum": [
+                                "ActionsLineGraph",
+                                "ActionsAreaGraph",
+                                "ActionsBar",
+                                "ActionsStackedBar",
+                                "ActionsPie",
+                                "ActionsTable",
+                                "BoldNumber"
+                            ],
+                            "type": "string"
+                        },
                         "kind": {
                             "const": "DataVisualizationNode",
                             "type": "string"
@@ -1532,6 +1601,33 @@
                                 }
                             },
                             "required": ["kind", "query"],
+                            "type": "object"
+                        },
+                        "tableSettings": {
+                            "properties": {
+                                "columns": {
+                                    "items": {
+                                        "properties": {
+                                            "column": {
+                                                "description": "Name of the HogQL column (aliased in SELECT) to use for this axis or series",
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": ["column"],
+                                        "type": "object"
+                                    },
+                                    "type": "array"
+                                },
+                                "pinnedColumns": {
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "type": "array"
+                                },
+                                "transpose": {
+                                    "type": "boolean"
+                                }
+                            },
                             "type": "object"
                         }
                     },

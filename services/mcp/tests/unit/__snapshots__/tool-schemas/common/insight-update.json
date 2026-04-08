@@ -28,6 +28,18 @@
                 },
                 "query": {
                     "properties": {
+                        "chartSettings": {
+                            "additionalProperties": {},
+                            "description": "ONLY for DataVisualizationNode chart displays. Maps HogQL columns to axes, e.g. `{ xAxis: { column: \"day\" }, yAxis: [{ column: \"count\" }] }`.",
+                            "propertyNames": {
+                                "type": "string"
+                            },
+                            "type": "object"
+                        },
+                        "display": {
+                            "description": "ONLY for DataVisualizationNode. Set to e.g. \"ActionsLineGraph\", \"ActionsBar\", \"ActionsAreaGraph\", \"ActionsPie\", \"BoldNumber\" to render the HogQL result as a chart. Omit (or \"ActionsTable\") for a table. Leave unset on InsightVizNode.",
+                            "type": "string"
+                        },
                         "kind": {
                             "anyOf": [
                                 {
@@ -41,7 +53,15 @@
                             ]
                         },
                         "source": {
-                            "description": "For new insights, use the query from your successful query-run tool call. For updates, the existing query can optionally be reused"
+                            "description": "The inner query (TrendsQuery/FunnelsQuery/PathsQuery for InsightVizNode, HogQLQuery for DataVisualizationNode). On updates the existing query can optionally be reused."
+                        },
+                        "tableSettings": {
+                            "additionalProperties": {},
+                            "description": "ONLY for DataVisualizationNode table displays.",
+                            "propertyNames": {
+                                "type": "string"
+                            },
+                            "type": "object"
                         }
                     },
                     "required": ["kind", "source"],

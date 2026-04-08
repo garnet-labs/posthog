@@ -851,10 +851,31 @@
                                     ]
                                 },
                                 "source": {
-                                    "description": "For new insights, use the query from your successful query-run tool call. For updates, the existing query can optionally be reused."
+                                    "description": "The inner query you validated with `query-run`. For InsightVizNode use a TrendsQuery/FunnelsQuery/PathsQuery; for DataVisualizationNode use a HogQLQuery."
+                                },
+                                "display": {
+                                    "description": "ONLY for DataVisualizationNode (HogQL-backed insights). Sets the visualization type. IMPORTANT: a DataVisualizationNode with no `display` renders as a table — you must set this (e.g. \"ActionsLineGraph\", \"ActionsBar\", \"ActionsAreaGraph\", \"ActionsPie\", \"BoldNumber\") whenever the user asks for a chart. Leave unset on InsightVizNode, which derives its display from the inner query.",
+                                    "type": "string"
+                                },
+                                "chartSettings": {
+                                    "description": "ONLY for DataVisualizationNode when `display` is a chart (line/bar/area/etc.). Maps HogQL columns to chart axes: `{ xAxis: { column: \"day\" }, yAxis: [{ column: \"signups\" }] }`. Without this, line/bar charts will not know which columns to plot.",
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string"
+                                    },
+                                    "additionalProperties": {}
+                                },
+                                "tableSettings": {
+                                    "description": "ONLY for DataVisualizationNode when `display` is ActionsTable. Optional column pinning, transpose, etc.",
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string"
+                                    },
+                                    "additionalProperties": {}
                                 }
                             },
-                            "required": ["kind", "source"]
+                            "required": ["kind", "source"],
+                            "description": "The insight query. For HogQL queries wrapped in DataVisualizationNode, remember to set `display` (and `chartSettings.xAxis`/`yAxis` for line/bar/area charts) — otherwise the insight renders as a table even if the user asked for a chart."
                         },
                         "description": {
                             "type": "string"
@@ -972,7 +993,27 @@
                                     ]
                                 },
                                 "source": {
-                                    "description": "For new insights, use the query from your successful query-run tool call. For updates, the existing query can optionally be reused"
+                                    "description": "The inner query (TrendsQuery/FunnelsQuery/PathsQuery for InsightVizNode, HogQLQuery for DataVisualizationNode). On updates the existing query can optionally be reused."
+                                },
+                                "display": {
+                                    "description": "ONLY for DataVisualizationNode. Set to e.g. \"ActionsLineGraph\", \"ActionsBar\", \"ActionsAreaGraph\", \"ActionsPie\", \"BoldNumber\" to render the HogQL result as a chart. Omit (or \"ActionsTable\") for a table. Leave unset on InsightVizNode.",
+                                    "type": "string"
+                                },
+                                "chartSettings": {
+                                    "description": "ONLY for DataVisualizationNode chart displays. Maps HogQL columns to axes, e.g. `{ xAxis: { column: \"day\" }, yAxis: [{ column: \"count\" }] }`.",
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string"
+                                    },
+                                    "additionalProperties": {}
+                                },
+                                "tableSettings": {
+                                    "description": "ONLY for DataVisualizationNode table displays.",
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string"
+                                    },
+                                    "additionalProperties": {}
                                 }
                             },
                             "required": ["kind", "source"]
@@ -1724,12 +1765,16 @@
                                                             "type": "string",
                                                             "enum": [
                                                                 "ActionsLineGraph",
-                                                                "ActionsTable",
-                                                                "ActionsPie",
+                                                                "ActionsLineGraphCumulative",
+                                                                "ActionsAreaGraph",
                                                                 "ActionsBar",
+                                                                "ActionsStackedBar",
+                                                                "ActionsUnstackedBar",
                                                                 "ActionsBarValue",
-                                                                "WorldMap",
-                                                                "BoldNumber"
+                                                                "ActionsPie",
+                                                                "ActionsTable",
+                                                                "BoldNumber",
+                                                                "WorldMap"
                                                             ]
                                                         },
                                                         "showLegend": {
@@ -2804,6 +2849,98 @@
                                         }
                                     },
                                     "required": ["kind", "query"]
+                                },
+                                "display": {
+                                    "description": "Visualization type for the HogQL result. Defaults to ActionsTable when omitted — ALWAYS set this when the user asks for a chart (e.g. ActionsLineGraph for a line chart, ActionsBar for a bar chart, ActionsPie for a pie chart, BoldNumber for a single-value big-number card). Pair with `chartSettings.xAxis` / `chartSettings.yAxis` for line/bar/area charts so PostHog knows which HogQL columns to plot.",
+                                    "type": "string",
+                                    "enum": [
+                                        "ActionsLineGraph",
+                                        "ActionsAreaGraph",
+                                        "ActionsBar",
+                                        "ActionsStackedBar",
+                                        "ActionsPie",
+                                        "ActionsTable",
+                                        "BoldNumber"
+                                    ]
+                                },
+                                "chartSettings": {
+                                    "description": "Chart settings for non-table displays. Required in practice for line/bar/area charts so we can map HogQL columns to the X and Y axes.",
+                                    "type": "object",
+                                    "properties": {
+                                        "xAxis": {
+                                            "description": "X axis column — for time-series line/area/bar charts, set this to the date/time column returned by the HogQL query",
+                                            "type": "object",
+                                            "properties": {
+                                                "column": {
+                                                    "type": "string",
+                                                    "description": "Name of the HogQL column (aliased in SELECT) to use for this axis or series"
+                                                }
+                                            },
+                                            "required": ["column"]
+                                        },
+                                        "yAxis": {
+                                            "description": "Y axis series — one entry per numeric column to plot",
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "column": {
+                                                        "type": "string",
+                                                        "description": "Name of the HogQL column (aliased in SELECT) to use for this axis or series"
+                                                    }
+                                                },
+                                                "required": ["column"]
+                                            }
+                                        },
+                                        "seriesBreakdownColumn": {
+                                            "description": "Optional column used to split the data into multiple series (breakdown)",
+                                            "anyOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "null"
+                                                }
+                                            ]
+                                        },
+                                        "showLegend": {
+                                            "type": "boolean"
+                                        },
+                                        "showTotalRow": {
+                                            "type": "boolean"
+                                        },
+                                        "stackBars100": {
+                                            "description": "Whether to fill stacked bars to 100% (only for stacked bar charts)",
+                                            "type": "boolean"
+                                        }
+                                    }
+                                },
+                                "tableSettings": {
+                                    "type": "object",
+                                    "properties": {
+                                        "columns": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "column": {
+                                                        "type": "string",
+                                                        "description": "Name of the HogQL column (aliased in SELECT) to use for this axis or series"
+                                                    }
+                                                },
+                                                "required": ["column"]
+                                            }
+                                        },
+                                        "pinnedColumns": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "transpose": {
+                                            "type": "boolean"
+                                        }
+                                    }
                                 }
                             },
                             "required": ["kind", "source"]

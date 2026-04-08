@@ -7,11 +7,29 @@ const IntervalType = z.enum(['hour', 'day', 'week', 'month'])
 
 const ChartDisplayType = z.enum([
     'ActionsLineGraph',
-    'ActionsTable',
-    'ActionsPie',
+    'ActionsLineGraphCumulative',
+    'ActionsAreaGraph',
     'ActionsBar',
+    'ActionsStackedBar',
+    'ActionsUnstackedBar',
     'ActionsBarValue',
+    'ActionsPie',
+    'ActionsTable',
+    'BoldNumber',
     'WorldMap',
+])
+
+// Chart display type for DataVisualizationNode (HogQL-backed charts).
+// Mirrors the subset of ChartDisplayType that the DataVisualization renderer supports.
+// If omitted, the DataVisualizationNode renders as a table — always set this when
+// you want a HogQL insight to render as a chart.
+const DataVisualizationDisplayType = z.enum([
+    'ActionsLineGraph',
+    'ActionsAreaGraph',
+    'ActionsBar',
+    'ActionsStackedBar',
+    'ActionsPie',
+    'ActionsTable',
     'BoldNumber',
 ])
 
@@ -227,9 +245,46 @@ const InsightVizNodeSchema = z.object({
     source: z.discriminatedUnion('kind', [TrendsQuerySchema, FunnelsQuerySchema, PathsQuerySchema]),
 })
 
+// Axis/series configuration for HogQL-backed charts. `column` must reference a
+// column returned by the HogQL query (e.g. the alias used in SELECT).
+const ChartAxisSchema = z.object({
+    column: z.string().describe('Name of the HogQL column (aliased in SELECT) to use for this axis or series'),
+})
+
+// Chart settings for DataVisualizationNode. For line/bar/area charts, `xAxis`
+// should be a time/category column and `yAxis` should be the numeric series.
+const ChartSettingsSchema = z.object({
+    xAxis: ChartAxisSchema.optional().describe(
+        'X axis column — for time-series line/area/bar charts, set this to the date/time column returned by the HogQL query'
+    ),
+    yAxis: z.array(ChartAxisSchema).optional().describe('Y axis series — one entry per numeric column to plot'),
+    seriesBreakdownColumn: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('Optional column used to split the data into multiple series (breakdown)'),
+    showLegend: z.boolean().optional(),
+    showTotalRow: z.boolean().optional(),
+    stackBars100: z.boolean().optional().describe('Whether to fill stacked bars to 100% (only for stacked bar charts)'),
+})
+
+// Optional table-view settings (only applies when `display` is ActionsTable).
+const TableSettingsSchema = z.object({
+    columns: z.array(ChartAxisSchema).optional(),
+    pinnedColumns: z.array(z.string()).optional(),
+    transpose: z.boolean().optional(),
+})
+
 const DataVisualizationNodeSchema = z.object({
     kind: z.literal('DataVisualizationNode'),
     source: HogQLQuerySchema,
+    display: DataVisualizationDisplayType.optional().describe(
+        'Visualization type for the HogQL result. Defaults to ActionsTable when omitted — ALWAYS set this when the user asks for a chart (e.g. ActionsLineGraph for a line chart, ActionsBar for a bar chart, ActionsPie for a pie chart, BoldNumber for a single-value big-number card). Pair with `chartSettings.xAxis` / `chartSettings.yAxis` for line/bar/area charts so PostHog knows which HogQL columns to plot.'
+    ),
+    chartSettings: ChartSettingsSchema.optional().describe(
+        'Chart settings for non-table displays. Required in practice for line/bar/area charts so we can map HogQL columns to the X and Y axes.'
+    ),
+    tableSettings: TableSettingsSchema.optional(),
 })
 
 // Any insight query
@@ -241,6 +296,7 @@ export {
     NodeKind,
     IntervalType,
     ChartDisplayType,
+    DataVisualizationDisplayType,
     BreakdownType,
     FunnelVizType,
     FunnelOrderType,
@@ -266,6 +322,10 @@ export {
     TrendsFilter,
     FunnelsFilter,
     PathsFilter,
+    // Data visualization settings
+    ChartAxisSchema,
+    ChartSettingsSchema,
+    TableSettingsSchema,
     // HogQL types
     HogQLVariable,
     HogQLFilters,
