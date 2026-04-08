@@ -87,6 +87,10 @@ where
     };
 
     let mut ips = ips;
+    // Include our own IP so we can find our index even if DNS hasn't
+    // registered us yet (e.g. during a rolling deploy when the pod
+    // isn't ready and the headless service excludes not-ready pods).
+    ips.push(config.pod_ip.clone());
     ips.sort();
     ips.dedup();
 
@@ -95,25 +99,15 @@ where
         return None;
     }
 
-    match ips.iter().position(|ip| ip == &config.pod_ip) {
-        Some(index) => {
-            info!(
-                my_index = index,
-                num_peers = ips.len(),
-                pod_ip = %config.pod_ip,
-                "Resolved peer position for routing-aware warming"
-            );
-            Some((index as u32, ips.len() as u32))
-        }
-        None => {
-            warn!(
-                pod_ip = %config.pod_ip,
-                peers = ?ips,
-                "Pod IP not found in DNS results, warming all candidates"
-            );
-            None
-        }
-    }
+    // Safe to unwrap: we just ensured our IP is in the list above.
+    let index = ips.iter().position(|ip| ip == &config.pod_ip).unwrap();
+    info!(
+        my_index = index,
+        num_peers = ips.len(),
+        pod_ip = %config.pod_ip,
+        "Resolved peer position for routing-aware warming"
+    );
+    Some((index as u32, ips.len() as u32))
 }
 
 /// Queries for distinct team_ids with recent symbol sets, then filters to only those
@@ -558,13 +552,14 @@ mod test {
     }
 
     #[tokio::test]
-    async fn resolve_peer_index_returns_none_when_pod_ip_not_in_results() {
+    async fn resolve_peer_index_adds_own_ip_when_not_in_dns() {
         let config = peer_config("10.0.0.99", "cymbal-headless");
         let result = resolve_peer_index_with(&config, || async {
             Ok(vec!["10.0.0.1".to_string(), "10.0.0.2".to_string()])
         })
         .await;
-        assert!(result.is_none());
+        // Pod IP 10.0.0.99 added to list, sorted: [10.0.0.1, 10.0.0.2, 10.0.0.99] → index 2 of 3
+        assert_eq!(result, Some((2, 3)));
     }
 
     #[tokio::test]
