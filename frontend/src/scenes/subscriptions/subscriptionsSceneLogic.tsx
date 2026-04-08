@@ -311,18 +311,30 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
             },
         ],
     })),
-    selectors(({ actions }) => ({
+    selectors({
         subscriptions: [
             (s) => [s.subscriptionsResponse],
-            (subscriptionsResponse) => subscriptionsResponse?.results ?? [],
+            (subscriptionsResponse: PaginatedSubscriptionListApi | null) => subscriptionsResponse?.results ?? [],
         ],
         subscriptionsLoading: [
             (s) => [s.subscriptionsResponseLoading],
-            (subscriptionsResponseLoading) => Boolean(subscriptionsResponseLoading),
+            (subscriptionsResponseLoading: boolean) => Boolean(subscriptionsResponseLoading),
         ],
+        breadcrumbs: [
+            () => [],
+            (): Breadcrumb[] => [
+                {
+                    key: Scene.Subscriptions,
+                    name: sceneConfigurations[Scene.Subscriptions].name,
+                    iconType: sceneConfigurations[Scene.Subscriptions].iconType || 'default_icon_type',
+                },
+            ],
+        ],
+    }),
+    selectors(({ actions }) => ({
         pagination: [
             (s) => [s.page, s.subscriptionsResponse],
-            (page, subscriptionsResponse) => {
+            (page: number, subscriptionsResponse: PaginatedSubscriptionListApi | null) => {
                 const count = subscriptionsResponse?.count ?? 0
                 // usePagination uses `entryCount || null`; 0 is treated as missing and breaks pageCount / next button.
                 // LemonTable shows "No …" when the page is empty, so inflating 0→1 only satisfies the hook.
@@ -336,16 +348,6 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
                     onForward: () => actions.setPage(page + 1),
                 }
             },
-        ],
-        breadcrumbs: [
-            () => [],
-            (): Breadcrumb[] => [
-                {
-                    key: Scene.Subscriptions,
-                    name: sceneConfigurations[Scene.Subscriptions].name,
-                    iconType: sceneConfigurations[Scene.Subscriptions].iconType || 'default_icon_type',
-                },
-            ],
         ],
     })),
     listeners(({ actions }) => ({
