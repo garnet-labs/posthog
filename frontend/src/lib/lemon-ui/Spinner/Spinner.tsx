@@ -6,11 +6,11 @@ import { twJoin, twMerge } from 'tailwind-merge'
 
 import { IconPencil } from '@posthog/icons'
 
-function useTimingCapture(captureTime: boolean): void {
+function usePageLoadTimingCapture(enabled: boolean): void {
     const mountTimeRef = useRef<number>(performance.now())
 
     useEffect(() => {
-        if (!captureTime) {
+        if (!enabled) {
             return
         }
 
@@ -24,14 +24,13 @@ function useTimingCapture(captureTime: boolean): void {
                 visible_time_ms: visibleTimeMs,
             })
         }
-    }, [captureTime])
+    }, [enabled])
 }
 
 export interface SpinnerProps {
     textColored?: boolean
     className?: string
     speed?: `${number}s` // Seconds
-    captureTime?: boolean
     size?: 'small' | 'medium' | 'large'
 }
 
@@ -40,11 +39,8 @@ export function Spinner({
     textColored = false,
     className,
     speed = '1s',
-    captureTime = true,
     size = 'small',
 }: SpinnerProps): JSX.Element {
-    useTimingCapture(captureTime)
-
     return (
         <svg
             // eslint-disable-next-line react/forbid-dom-props
@@ -82,6 +78,9 @@ export function SpinnerOverlay({
     /** @default "spinning" */
     mode?: 'spinning' | 'editing'
 }): JSX.Element {
+    // Only capture timing for scene-level overlays (actual page loads)
+    usePageLoadTimingCapture(sceneLevel ?? false)
+
     return (
         <div
             className={twJoin(
