@@ -710,18 +710,10 @@ export const hogFunctionConfigurationLogic = kea<hogFunctionConfigurationLogicTy
 
                 // Auto-switch type based on whether the filter contains internal
                 // events, keeping backend routing correct without forcing a
-                // jarring UI change during editing.
-                const events = data.filters?.events ?? []
-                const hasInternalEvents = events.some((e) => isInternalEvent(String(e.id)))
-                const hasRegularEvents = events.some((e) => !isInternalEvent(String(e.id)))
-
-                if (hasInternalEvents && hasRegularEvents) {
-                    lemonToast.error(
-                        'A single destination cannot mix regular events with internal events. Please use separate destinations for each.'
-                    )
-                    return
-                }
-
+                // jarring UI change during editing. The UI prevents mixing
+                // regular and internal events, so we only need to handle the
+                // single-kind cases here.
+                const hasInternalEvents = data.filters?.events?.some((e) => isInternalEvent(String(e.id)))
                 if (hasInternalEvents && payload.type === 'destination') {
                     payload.type = 'internal_destination'
                 } else if (!hasInternalEvents && payload.type === 'internal_destination') {

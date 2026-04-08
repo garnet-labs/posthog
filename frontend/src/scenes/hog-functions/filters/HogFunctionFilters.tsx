@@ -18,7 +18,7 @@ import { groupsModel } from '~/models/groupsModel'
 import { AnyPropertyFilter, CyclotronJobFiltersType, EntityTypes, FilterType } from '~/types'
 
 import { hogFunctionConfigurationLogic } from '../configuration/hogFunctionConfigurationLogic'
-import { HogFunctionFiltersInternal } from './HogFunctionFiltersInternal'
+import { HogFunctionFiltersInternal, isInternalEvent } from './HogFunctionFiltersInternal'
 
 function sanitizeActionFilters(filters?: FilterType): Partial<CyclotronJobFiltersType> {
     if (!filters) {
@@ -272,17 +272,38 @@ export function HogFunctionFilters({
                                         hideRename
                                         hideDuplicate
                                         showNestedArrow={false}
-                                        actionsTaxonomicGroupTypes={
-                                            isTransformation
-                                                ? [TaxonomicFilterGroupType.Events]
-                                                : isDataWarehouse
-                                                  ? [TaxonomicFilterGroupType.DataWarehouse]
-                                                  : [
-                                                        TaxonomicFilterGroupType.Events,
-                                                        TaxonomicFilterGroupType.Actions,
-                                                        TaxonomicFilterGroupType.InternalEvents,
-                                                    ]
-                                        }
+                                        actionsTaxonomicGroupTypes={(() => {
+                                            if (isTransformation) {
+                                                return [TaxonomicFilterGroupType.Events]
+                                            }
+                                            if (isDataWarehouse) {
+                                                return [TaxonomicFilterGroupType.DataWarehouse]
+                                            }
+                                            const existingEvents = currentFilters?.events ?? []
+                                            const hasInternal = existingEvents.some((e) =>
+                                                isInternalEvent(String(e.id))
+                                            )
+                                            const hasRegular = existingEvents.some(
+                                                (e) => !isInternalEvent(String(e.id))
+                                            )
+                                            // Once events of one kind are selected, hide the
+                                            // other kind — they route through different
+                                            // consumers and can't coexist in one function.
+                                            if (hasInternal) {
+                                                return [TaxonomicFilterGroupType.InternalEvents]
+                                            }
+                                            if (hasRegular) {
+                                                return [
+                                                    TaxonomicFilterGroupType.Events,
+                                                    TaxonomicFilterGroupType.Actions,
+                                                ]
+                                            }
+                                            return [
+                                                TaxonomicFilterGroupType.Events,
+                                                TaxonomicFilterGroupType.Actions,
+                                                TaxonomicFilterGroupType.InternalEvents,
+                                            ]
+                                        })()}
                                         propertiesTaxonomicGroupTypes={taxonomicGroupTypes}
                                         propertyFiltersPopover
                                         addFilterDefaultOptions={
