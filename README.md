@@ -19,7 +19,7 @@
   </a>
 </p>
 
-## PostHog is an all-in-one, open source platform for building successful products
+## PostHog YOLO is an all-in-one, open source platform for building successful products
 
 [PostHog](https://posthog.com/) provides every tool you need to build a successful product including:
 
@@ -39,7 +39,7 @@ Best of all, all of this is free to use with a [generous monthly free tier](http
 
 ## Table of Contents
 
-- [PostHog is an all-in-one, open source platform for building successful products](#posthog-is-an-all-in-one-open-source-platform-for-building-successful-products)
+- [PostHog YOLO is an all-in-one, open source platform for building successful products](#posthog-yolo-is-an-all-in-one-open-source-platform-for-building-successful-products)
 - [Table of Contents](#table-of-contents)
 - [Getting started with PostHog](#getting-started-with-posthog)
   - [PostHog Cloud (Recommended)](#posthog-cloud-recommended)
