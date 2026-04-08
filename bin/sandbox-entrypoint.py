@@ -144,10 +144,8 @@ def copy_claude_auth(uid: int, gid: int) -> None:
             shutil.copy2(src, claude_dir / name)
 
     src = Path("/tmp/claude-auth.json")
-    if src.is_file():
+    if src.exists():
         shutil.copy2(src, SANDBOX_HOME / ".claude.json")
-    elif src.exists():
-        log("WARNING: /tmp/claude-auth.json is not a file (Docker created a directory mount) — skipping")
 
     run(["chown", "-R", f"{uid}:{gid}", str(SANDBOX_HOME)])
 
@@ -197,15 +195,12 @@ def root_phase() -> None:
     # points at /repo.git (where the main repo's .git is mounted).
     # This avoids setting GIT_DIR globally, which would poison every
     # subprocess that runs `git` (uv sync, cargo fetch, etc.).
-    # When .git is a directory (normal clone, not a worktree), skip patching.
-    gitfile = WORKSPACE / ".git"
-    if gitfile.is_file():
-        gitdir_line = gitfile.read_text().strip()
-        worktree_name = gitdir_line.rsplit("/", 1)[-1]
-        container_gitdir = f"/repo.git/worktrees/{worktree_name}"
-        patched_gitfile = Path("/tmp/sandbox-gitfile")
-        patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
-        run(["mount", "--bind", str(patched_gitfile), str(gitfile)])
+    gitdir_line = (WORKSPACE / ".git").read_text().strip()
+    worktree_name = gitdir_line.rsplit("/", 1)[-1]
+    container_gitdir = f"/repo.git/worktrees/{worktree_name}"
+    patched_gitfile = Path("/tmp/sandbox-gitfile")
+    patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
+    run(["mount", "--bind", str(patched_gitfile), str(WORKSPACE / ".git")])
 
     export_environment(uid, gid)
     start_sshd(uid, gid)
