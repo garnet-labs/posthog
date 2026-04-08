@@ -496,6 +496,7 @@ export function EditAlertModal({
                                                 <h4 className="m-0">Simulation</h4>
                                                 <LemonSelect
                                                     size="small"
+                                                    data-attr="alertForm-simulate-range"
                                                     value={
                                                         simulationDateFrom ??
                                                         getDefaultSimulationRange(alertForm.calculation_interval)
@@ -506,6 +507,7 @@ export function EditAlertModal({
                                                 <LemonButton
                                                     type="secondary"
                                                     size="small"
+                                                    data-attr="alertForm-simulate"
                                                     onClick={simulateAlert}
                                                     loading={simulationResultLoading}
                                                     tooltip="Run the detector on historical data to preview which points would be flagged as anomalies"

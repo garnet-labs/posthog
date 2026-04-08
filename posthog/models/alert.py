@@ -147,11 +147,32 @@ class AlertConfiguration(ModelActivityMixin, CreatedMetaFields, UUIDTModel):
         super().save(*args, **kwargs)
 
     def _get_event_properties(self) -> dict:
+        detector_config = self.detector_config or {}
+        detector_type = detector_config.get("type")
+        alert_mode = "detector" if detector_type else "threshold"
+
+        ensemble_operator = None
+        ensemble_detector_types: list[str] | None = None
+        has_preprocessing = False
+
+        if detector_type == "ensemble":
+            ensemble_operator = detector_config.get("operator")
+            sub_detectors = detector_config.get("detectors") or []
+            ensemble_detector_types = [sub.get("type") for sub in sub_detectors if sub.get("type")]
+            has_preprocessing = any(sub.get("preprocessing") for sub in sub_detectors)
+        elif detector_type:
+            has_preprocessing = bool(detector_config.get("preprocessing"))
+
         return {
             "alert_id": self.id,
             "alert_name": self.name,
             "condition_type": self.condition.get("type") if self.condition else None,
             "calculation_interval": self.calculation_interval,
+            "alert_mode": alert_mode,
+            "detector_type": detector_type,
+            "ensemble_operator": ensemble_operator,
+            "ensemble_detector_types": ensemble_detector_types,
+            "has_preprocessing": has_preprocessing,
         }
 
     def report_created(self, user: User, analytics_props: AnalyticsProps | None = None) -> None:

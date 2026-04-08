@@ -240,6 +240,11 @@ def trigger_alert_hog_functions(alert: AlertConfiguration, properties: dict) -> 
     )
 
     try:
+        detector_config = alert.detector_config or {}
+        detector_type = detector_config.get("type")
+        alert_mode = "detector" if detector_type else "threshold"
+        ensemble_operator = detector_config.get("operator") if detector_type == "ensemble" else None
+
         props = {
             "alert_id": str(alert.id),
             "alert_name": alert.name,
@@ -247,6 +252,9 @@ def trigger_alert_hog_functions(alert: AlertConfiguration, properties: dict) -> 
             "insight_id": alert.insight.short_id,
             "state": alert.state,
             "last_checked_at": alert.last_checked_at.isoformat() if alert.last_checked_at else None,
+            "alert_mode": alert_mode,
+            "detector_type": detector_type,
+            "ensemble_operator": ensemble_operator,
             **properties,
         }
 
