@@ -59,6 +59,12 @@ impl K8sAwareness {
         Ok(pod_info)
     }
 
+    /// Get the cluster intent for a controller, if known.
+    pub async fn get_intent(&self, controller: &ControllerRef) -> Option<ClusterIntent> {
+        let controllers = self.controllers.read().await;
+        controllers.get(controller).cloned()
+    }
+
     /// Classify why a member is departing based on its controller's current intent.
     ///
     /// Returns `DepartureReason::Unknown` if the controller isn't being watched.

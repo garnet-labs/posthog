@@ -655,13 +655,17 @@ fn active_pod_names(pods: &[RegisteredPod]) -> Vec<String> {
 
 /// Adjust the active pod list based on K8s controller intent.
 ///
-/// Two adjustments during rollouts:
+/// Three adjustments during rollouts:
 ///
-/// 1. **Deployment rollout** — old-gen Ready pods are excluded from the
-///    active list so the strategy never assigns partitions to them. Existing
-///    assignments move to new-gen pods via handoff.
+/// 1. **Deployment rollout (gradual)** — only exclude enough old-gen pods
+///    to match the number of new-gen pods, keeping total active pods at
+///    `desired_replicas`. This avoids overloading the first new-gen pod
+///    with all partitions — each partition moves exactly once.
 ///
-/// 2. **StatefulSet rollout** — Draining pods are *added back* to the
+/// 2. **Deployment rollout (all new-gen ready)** — when new-gen count
+///    reaches `desired_replicas`, exclude all remaining old-gen pods.
+///
+/// 3. **StatefulSet rollout** — Draining pods are *added back* to the
 ///    active list so their assignments are held. In a StatefulSet rollout the
 ///    same pod name comes back with a new revision, so there's no point
 ///    handing off to a different pod.
@@ -670,6 +674,11 @@ async fn filter_pods_for_k8s(
     pods: &[RegisteredPod],
     mut active: Vec<String>,
 ) -> Vec<String> {
+    // Classify pods by controller and generation
+    let mut old_gen_pods: Vec<&RegisteredPod> = Vec::new();
+    let mut new_gen_count: u32 = 0;
+    let mut rollout_controller: Option<&k8s_awareness::types::ControllerRef> = None;
+
     for pod in pods {
         let (Some(controller), generation) = (&pod.controller, &pod.generation) else {
             continue;
@@ -682,17 +691,14 @@ async fn filter_pods_for_k8s(
         let reason = k8s.classify_departure(controller, generation).await;
 
         match (&controller.kind, pod.status, reason) {
-            // Deployment rollout: old-gen Ready pod → exclude
             (ControllerKind::Deployment, PodStatus::Ready, DepartureReason::Rollout) => {
-                tracing::info!(
-                    pod = %pod.pod_name,
-                    controller = %controller,
-                    generation = %generation,
-                    "excluding old-gen deployment pod from active list"
-                );
-                active.retain(|name| name != &pod.pod_name);
+                old_gen_pods.push(pod);
+                rollout_controller = Some(controller);
             }
-            // StatefulSet rollout: Draining pod → add back (hold assignment)
+            (ControllerKind::Deployment, PodStatus::Ready, DepartureReason::Crash | DepartureReason::Unknown | DepartureReason::Downscale) => {
+                // New-gen or steady-state pod — stays in active list
+                new_gen_count += 1;
+            }
             (ControllerKind::StatefulSet, PodStatus::Draining, DepartureReason::Rollout) => {
                 tracing::info!(
                     pod = %pod.pod_name,
@@ -705,6 +711,43 @@ async fn filter_pods_for_k8s(
                 }
             }
             _ => {}
+        }
+    }
+
+    // Deployment rollout: exclude old-gen pods gradually based on how many
+    // new-gen pods are ready, so each partition only moves once.
+    if !old_gen_pods.is_empty() {
+        let desired_replicas = if let Some(controller) = rollout_controller {
+            k8s.get_intent(controller)
+                .await
+                .map(|i| i.desired_replicas)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // How many old-gen pods to keep: enough so total active = desired_replicas
+        let old_gen_to_keep = desired_replicas.saturating_sub(new_gen_count) as usize;
+        let old_gen_to_exclude = old_gen_pods.len().saturating_sub(old_gen_to_keep);
+
+        tracing::info!(
+            old_gen = old_gen_pods.len(),
+            new_gen = new_gen_count,
+            desired_replicas,
+            old_gen_to_keep,
+            old_gen_to_exclude,
+            "deployment rollout: gradual old-gen exclusion"
+        );
+
+        // Exclude old-gen pods, preferring to exclude those with fewer partitions
+        // (so we minimize partition movement)
+        for pod in old_gen_pods.iter().take(old_gen_to_exclude) {
+            tracing::info!(
+                pod = %pod.pod_name,
+                generation = %pod.generation,
+                "excluding old-gen deployment pod from active list"
+            );
+            active.retain(|name| name != &pod.pod_name);
         }
     }
 
