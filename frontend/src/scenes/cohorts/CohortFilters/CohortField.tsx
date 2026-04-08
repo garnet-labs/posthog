@@ -167,11 +167,12 @@ export function CohortPersonPropertiesValuesField({
 
     return (
         <PropertyValue
+            key={`${propertyKey}_${operator}`}
             operator={operator || PropertyOperator.Exact}
             propertyKey={propertyKey as string}
             type={PropertyFilterType.Person}
             value={value as PropertyFilterValue}
-            onSet={(newValue: PropertyOperator) => {
+            onSet={(newValue: PropertyFilterValue) => {
                 onChange({ [fieldKey]: newValue })
             }}
             placeholder="Enter value..."
