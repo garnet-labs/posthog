@@ -292,7 +292,7 @@ export function getSurveyResponse(question: SurveyQuestion, index: number): stri
     }
 
     return `COALESCE(
-        NULLIF(events.properties['${escapeSqlString(idBasedKey)}'], ''),
+        NULLIF(events.properties['${escapeSqlString(idBasedKey ?? indexBasedKey)}'], ''),
         NULLIF(events.properties['${escapeSqlString(indexBasedKey)}'], '')
     )`
 }
