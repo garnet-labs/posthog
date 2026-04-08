@@ -42,6 +42,26 @@ const schema = z
         model_configuration: ModelConfigurationSchema.optional().describe(
             'LLM model configuration (required for llm_judge evaluations).'
         ),
+        conditions: z
+            .array(
+                z.object({
+                    id: z.string().optional().describe('Unique condition ID. Auto-generated if omitted.'),
+                    rollout_percentage: z
+                        .number()
+                        .min(0)
+                        .max(100)
+                        .optional()
+                        .describe('Percentage of generations to evaluate (0-100). Defaults to 100.'),
+                    properties: z
+                        .array(z.record(z.unknown()))
+                        .optional()
+                        .describe('Property filters for matching generations. Empty means match all.'),
+                })
+            )
+            .optional()
+            .describe(
+                'Conditions controlling when this evaluation fires. If omitted, a default always-match condition is used.'
+            ),
     })
     .superRefine((data, ctx) => {
         if (data.evaluation_type === 'llm_judge') {

@@ -1,3 +1,5 @@
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.signals import post_save
@@ -73,6 +75,17 @@ class Evaluation(UUIDTModel):
                 self.evaluation_config["bytecode"] = bytecode
             except Exception as e:
                 raise ValidationError({"evaluation_config": f"Failed to compile Hog code: {e}"})
+
+        # Inject a default always-match condition when none are provided,
+        # so the evaluation scheduler doesn't silently skip this evaluation.
+        if not self.conditions:
+            self.conditions = [
+                {
+                    "id": f"cond-default-{uuid.uuid4().hex[:13]}",
+                    "properties": [],
+                    "rollout_percentage": 100,
+                }
+            ]
 
         # Compile bytecode for each condition
         compiled_conditions = []

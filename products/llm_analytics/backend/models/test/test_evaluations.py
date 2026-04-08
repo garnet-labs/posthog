@@ -247,6 +247,76 @@ class TestEvaluationModel(BaseTest):
         self.assertIn("bytecode", evaluation.evaluation_config)
         self.assertNotEqual(evaluation.evaluation_config["bytecode"], original_bytecode)
 
+    def test_empty_conditions_get_default_always_match_condition(self):
+        evaluation = Evaluation.objects.create(
+            team=self.team,
+            name="MCP-created Eval",
+            evaluation_type="llm_judge",
+            evaluation_config={"prompt": "Test prompt"},
+            output_type="boolean",
+            output_config={},
+            enabled=True,
+            created_by=self.user,
+            conditions=[],
+        )
+
+        evaluation.refresh_from_db()
+
+        self.assertEqual(len(evaluation.conditions), 1)
+        condition = evaluation.conditions[0]
+        self.assertTrue(condition["id"].startswith("cond-default-"))
+        self.assertEqual(condition["rollout_percentage"], 100)
+        self.assertEqual(condition["properties"], [])
+        # Should compile to the always-true bytecode
+        self.assertIn("bytecode", condition)
+        self.assertIsNotNone(condition["bytecode"])
+        self.assertEqual(condition["bytecode"], ["_H", 1, 29])
+
+    def test_omitted_conditions_get_default_always_match_condition(self):
+        evaluation = Evaluation.objects.create(
+            team=self.team,
+            name="No conditions provided",
+            evaluation_type="llm_judge",
+            evaluation_config={"prompt": "Test prompt"},
+            output_type="boolean",
+            output_config={},
+            enabled=True,
+            created_by=self.user,
+        )
+
+        evaluation.refresh_from_db()
+
+        self.assertEqual(len(evaluation.conditions), 1)
+        condition = evaluation.conditions[0]
+        self.assertTrue(condition["id"].startswith("cond-default-"))
+        self.assertEqual(condition["rollout_percentage"], 100)
+        self.assertEqual(condition["bytecode"], ["_H", 1, 29])
+
+    def test_explicit_conditions_not_overridden_by_default(self):
+        evaluation = Evaluation.objects.create(
+            team=self.team,
+            name="Explicit conditions",
+            evaluation_type="llm_judge",
+            evaluation_config={"prompt": "Test prompt"},
+            output_type="boolean",
+            output_config={},
+            enabled=True,
+            created_by=self.user,
+            conditions=[
+                {
+                    "id": "my-condition",
+                    "rollout_percentage": 50,
+                    "properties": [],
+                }
+            ],
+        )
+
+        evaluation.refresh_from_db()
+
+        self.assertEqual(len(evaluation.conditions), 1)
+        self.assertEqual(evaluation.conditions[0]["id"], "my-condition")
+        self.assertEqual(evaluation.conditions[0]["rollout_percentage"], 50)
+
     def test_preserves_other_condition_fields(self):
         """
         Other condition fields (id, rollout_percentage) should be preserved during save
