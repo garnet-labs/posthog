@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { LemonButton, LemonInput, Spinner } from '@posthog/lemon-ui'
 
-import { LemonRadio } from 'lib/lemon-ui/LemonRadio'
 import { cn } from 'lib/utils/css-classes'
 
 export interface Option {
@@ -14,7 +13,7 @@ export interface Option {
 
 interface OptionSelectorProps {
     options: Option[]
-    onSelect: (value: string) => void
+    onSelect: (value: string | null) => void
     allowCustom?: boolean
     customPlaceholder?: string
     onCustomSubmit?: (value: string) => void
@@ -49,6 +48,8 @@ export function OptionSelector({
     const [showCustomInput, setShowCustomInput] = useState(isInitialCustomAnswer)
     const [customInput, setCustomInput] = useState(initialCustomValue ?? '')
     const [selectedOption, setSelectedOption] = useState(selectedValue)
+    const selectedOptionRef = useRef(selectedOption)
+    selectedOptionRef.current = selectedOption
 
     useEffect(() => {
         if (disabled || loading) {
@@ -71,7 +72,14 @@ export function OptionSelector({
             for (const [index, option] of options.entries()) {
                 if (event.key === String(index + 1)) {
                     event.preventDefault()
-                    onSelect(option.value)
+                    if (selectedOptionRef.current === option.value) {
+                        setSelectedOption(undefined)
+                        onSelect(null)
+                    } else {
+                        setSelectedOption(option.value)
+                        setShowCustomInput(false)
+                        onSelect(option.value)
+                    }
                     return
                 }
             }
@@ -116,19 +124,38 @@ export function OptionSelector({
                 'gap-0.5': noDescriptions,
             })}
         >
-            <LemonRadio
-                value={selectedOption}
-                onChange={(value) => {
-                    setSelectedOption(String(value))
-                    setShowCustomInput(false)
-                    onSelect(String(value))
-                }}
-                options={options.map((o) => ({
-                    value: o.value,
-                    label: o.label,
-                    description: o.description,
-                }))}
-            />
+            <div className="flex flex-col gap-2 font-medium">
+                {options.map((o) => (
+                    <label
+                        key={o.value}
+                        className="grid items-center gap-x-2 grid-cols-[min-content_auto] text-sm cursor-pointer"
+                        onClick={(e) => {
+                            e.preventDefault()
+                            if (selectedOption === o.value) {
+                                setSelectedOption(undefined)
+                                onSelect(null)
+                            } else {
+                                setSelectedOption(o.value)
+                                setShowCustomInput(false)
+                                onSelect(o.value)
+                            }
+                        }}
+                    >
+                        <input
+                            type="radio"
+                            className="cursor-pointer"
+                            checked={selectedOption === o.value}
+                            onChange={() => {}}
+                        />
+                        <span>{o.label}</span>
+                        {o.description && (
+                            <div className="text-secondary font-normal row-start-2 col-start-2 text-pretty text-xs">
+                                {o.description}
+                            </div>
+                        )}
+                    </label>
+                ))}
+            </div>
 
             {allowCustom && (
                 <label className="grid items-center gap-x-2 grid-cols-[min-content_auto] text-sm font-medium cursor-pointer">

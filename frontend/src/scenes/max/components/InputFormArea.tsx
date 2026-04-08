@@ -150,12 +150,21 @@ export function MultiQuestionFormInput({ form, initialAnswers = {} }: MultiQuest
     )
 
     const handleSingleFieldAnswer = useCallback(
-        (value: string | string[]) => {
+        (value: string | string[] | null) => {
             const nextSkippedQuestions = removeQuestionFromSet(currentQuestion.id, skippedQuestionsRef.current)
             if (nextSkippedQuestions !== skippedQuestionsRef.current) {
                 setSkippedQuestions(nextSkippedQuestions)
                 skippedQuestionsRef.current = nextSkippedQuestions
             }
+
+            if (value === null) {
+                const updatedAnswers = { ...answersRef.current }
+                delete updatedAnswers[currentQuestion.id]
+                setAnswers(updatedAnswers)
+                answersRef.current = updatedAnswers
+                return
+            }
+
             const updatedAnswers = { ...answersRef.current, [currentQuestion.id]: value }
             setAnswers(updatedAnswers)
             advanceToNextQuestion(updatedAnswers, confirmedQuestionsRef.current, nextSkippedQuestions)
@@ -228,27 +237,24 @@ export function MultiQuestionFormInput({ form, initialAnswers = {} }: MultiQuest
 
     return (
         <div className="flex flex-col gap-2 p-3">
-            <div className="flex justify-end">
-                <LemonButton size="xsmall" type="tertiary" icon={<IconX />} onClick={handleDismissForm}>
-                    Dismiss form
-                </LemonButton>
-            </div>
             {questions.length > 1 && (
-                <div className="w-full">
-                    <LemonTabs
-                        size="xsmall"
-                        activeKey={currentQuestionIndex}
-                        onChange={handleTabClick}
-                        tabs={questions.map((question, index) => {
-                            return {
-                                key: index,
-                                label: question.title,
-                                completed: isQuestionComplete(question, answers, confirmedQuestions, skippedQuestions),
-                            }
-                        })}
-                        className="w-[calc(100%+var(--spacing-3))] -mx-3 [&>ul]:pl-3 -mt-2.5"
-                    />
-                </div>
+                <LemonTabs
+                    size="xsmall"
+                    activeKey={currentQuestionIndex}
+                    onChange={handleTabClick}
+                    tabs={questions.map((question, index) => {
+                        return {
+                            key: index,
+                            label: question.title,
+                            completed: isQuestionComplete(question, answers, confirmedQuestions, skippedQuestions),
+                        }
+                    })}
+                    className="w-[calc(100%+var(--spacing-3))] -mx-3 [&>ul]:pl-3 -mt-2.5"
+                    rightSlot={
+                        <LemonButton size="xsmall" type="tertiary" icon={<IconX />} onClick={handleDismissForm} />
+                    }
+                    rightSlotClassName="pr-1 bg-unset"
+                />
             )}
             <div
                 className="transition-[height] duration-150 motion-reduce:transition-none"
@@ -310,7 +316,7 @@ function DangerousOperationInput({ operation }: DangerousOperationInputProps): J
         { label: 'Reject this operation', value: 'reject', icon: <IconX /> },
     ]
 
-    const handleSelect = (value: string): void => {
+    const handleSelect = (value: string | null): void => {
         if (value === 'approve') {
             setStatus('approving')
             continueAfterApproval(operation.proposalId)

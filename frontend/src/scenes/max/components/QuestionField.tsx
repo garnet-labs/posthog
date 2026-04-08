@@ -11,7 +11,7 @@ import { OptionSelector, type Option } from './OptionSelector'
 interface QuestionFieldProps {
     question: MultiQuestionFormQuestion
     value: string | string[] | undefined
-    onAnswer: (value: string | string[]) => void
+    onAnswer: (value: string | string[] | null) => void
     onSkip?: () => void
     submitLabel?: string
 }
@@ -59,7 +59,7 @@ function SelectField({
 }: {
     question: MultiQuestionFormQuestion
     value: string | undefined
-    onAnswer: (value: string) => void
+    onAnswer: (value: string | null) => void
     onSkip?: () => void
     submitLabel: string
 }): JSX.Element {
@@ -72,7 +72,7 @@ function SelectField({
     const allowCustomAnswer = question.allow_custom_answer !== false
 
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
             <OptionSelector
                 options={options}
                 onSelect={onAnswer}
@@ -126,7 +126,7 @@ function MultiSelectField({
     }
 
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
             {(question.options ?? []).map((option) => (
                 <LemonCheckbox
                     key={option.value}

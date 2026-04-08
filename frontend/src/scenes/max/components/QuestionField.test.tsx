@@ -61,6 +61,23 @@ describe('QuestionField', () => {
         expect(onAnswer).not.toHaveBeenCalled()
     })
 
+    it('calls onAnswer with null when clicking an already-selected option to deselect', () => {
+        const onAnswer = jest.fn()
+        render(<QuestionField question={selectQuestion} value="Option A" onAnswer={onAnswer} />)
+
+        // Option A is already selected via value prop — clicking it again should deselect
+        fireEvent.click(screen.getByText('Option A'))
+        expect(onAnswer).toHaveBeenCalledWith(null)
+    })
+
+    it('calls onAnswer with the value when clicking a different option', () => {
+        const onAnswer = jest.fn()
+        render(<QuestionField question={selectQuestion} value="Option A" onAnswer={onAnswer} />)
+
+        fireEvent.click(screen.getByText('Option B'))
+        expect(onAnswer).toHaveBeenCalledWith('Option B')
+    })
+
     it('renders a skip button when onSkip is provided for select questions', () => {
         const onSkip = jest.fn()
         render(<QuestionField question={selectQuestion} value={undefined} onAnswer={jest.fn()} onSkip={onSkip} />)
