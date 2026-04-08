@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let coordination_handle = manager.register(
         "coordination",
-        ComponentOptions::new().with_graceful_shutdown(Duration::from_secs(5)),
+        ComponentOptions::new().with_graceful_shutdown(Duration::from_secs(25)),
     );
 
     let readiness = manager.readiness_handler();
