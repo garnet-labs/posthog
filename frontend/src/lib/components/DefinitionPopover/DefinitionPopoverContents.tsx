@@ -727,7 +727,11 @@ export function ControlledDefinitionPopover({
         group.type === TaxonomicFilterGroupType.DataWarehouse && !!definitionPopoverRenderer
 
     const defaultView = <DefinitionView group={group} />
-    const customView = definitionPopoverRenderer?.({ item, group, defaultView }) ?? defaultView
+    const customView = definitionPopoverRenderer ? definitionPopoverRenderer({ item, group, defaultView }) : defaultView
+
+    if (customView === null) {
+        return null
+    }
 
     return (
         <Popover

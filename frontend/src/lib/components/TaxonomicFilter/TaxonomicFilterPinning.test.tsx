@@ -112,10 +112,11 @@ describe('TaxonomicFilter pinning', () => {
         expect(pinnedTab.textContent).toContain('0')
     })
 
-    it('shows pin button in definition popover on hover', async () => {
+    it('shows inline pin button on row hover', async () => {
         renderFilter({
             taxonomicGroupTypes: [TaxonomicFilterGroupType.EventProperties],
             popoverEnabled: true,
+            inlinePinning: true,
         })
 
         await waitFor(() => {

@@ -49,6 +49,7 @@ export function TaxonomicFilter({
     hogQLGlobals,
     definitionPopoverRenderer,
     minSearchQueryLength,
+    inlinePinning = false,
 }: TaxonomicFilterProps): JSX.Element {
     // Generate a unique key for each unique TaxonomicFilter that's rendered
     const taxonomicFilterLogicKey = useMemo(
@@ -131,6 +132,7 @@ export function TaxonomicFilter({
                         taxonomicFilterLogicProps={taxonomicFilterLogicProps}
                         popupAnchorElement={taxonomicFilterRef.current}
                         definitionPopoverRenderer={definitionPopoverRenderer}
+                        inlinePinning={inlinePinning}
                     />
                 )}
             </div>

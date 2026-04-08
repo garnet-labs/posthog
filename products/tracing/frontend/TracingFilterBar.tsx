@@ -245,6 +245,8 @@ function TracingFilterSearch(): JSX.Element {
                             focusInput={() => searchInputRef.current?.focus()}
                             taxonomicFilterLogicProps={taxonomicFilterLogicProps}
                             popupAnchorElement={floatingRef.current}
+                            inlinePinning
+                            definitionPopoverRenderer={() => null}
                         />
                     </div>
                 }

@@ -49,6 +49,8 @@ export interface TaxonomicPopoverProps<ValueType extends TaxonomicFilterValue = 
     allowNonCapturedEvents?: boolean
     sideIcon?: React.ReactElement | null
     definitionPopoverRenderer?: DefinitionPopoverRenderer
+    /** Show inline pin/unpin buttons on hover for each row (default: false). */
+    inlinePinning?: boolean
 }
 
 /** Like TaxonomicPopover, but convenient when you know you will only use string values */
@@ -88,6 +90,7 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
         maxContextOptions,
         allowNonCapturedEvents,
         definitionPopoverRenderer,
+        inlinePinning,
         width,
         placement,
         sideIcon,
@@ -144,6 +147,7 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
                     maxContextOptions={maxContextOptions}
                     allowNonCapturedEvents={allowNonCapturedEvents}
                     definitionPopoverRenderer={definitionPopoverRenderer}
+                    inlinePinning={inlinePinning}
                     width={width}
                 />
             }

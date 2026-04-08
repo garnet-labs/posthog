@@ -76,7 +76,8 @@
             justify-content: center;
             width: 1rem;
             margin-left: 0.5rem;
-            pointer-events: none;
+            cursor: pointer;
+            transition: opacity 100ms ease;
         }
 
         &.hover,

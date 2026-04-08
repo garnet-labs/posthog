@@ -1,4 +1,3 @@
-import '../../lemon-ui/Popover/Popover.scss'
 import './InfiniteList.scss'
 
 import clsx from 'clsx'
@@ -16,16 +15,21 @@ import { formatPropertyLabel } from 'lib/components/PropertyFilters/utils'
 import { PropertyKeyInfo } from 'lib/components/PropertyKeyInfo'
 import { hasRecentContext } from 'lib/components/TaxonomicFilter/recentTaxonomicFiltersLogic'
 import { taxonomicFilterLogic } from 'lib/components/TaxonomicFilter/taxonomicFilterLogic'
-import { hasPinnedContext } from 'lib/components/TaxonomicFilter/taxonomicFilterPinnedPropertiesLogic'
+import {
+    hasPinnedContext,
+    taxonomicFilterPinnedPropertiesLogic,
+} from 'lib/components/TaxonomicFilter/taxonomicFilterPinnedPropertiesLogic'
 import {
     DataWarehousePopoverField,
     DefinitionPopoverRenderer,
     isSkeletonItem,
+    META_GROUP_TYPES,
     SkeletonItem,
     TaxonomicDefinitionTypes,
     TaxonomicFilterGroup,
     TaxonomicFilterGroupType,
     TaxonomicFilterGroupValueMap,
+    TaxonomicFilterValue,
 } from 'lib/components/TaxonomicFilter/types'
 import { dayjs } from 'lib/dayjs'
 import { LemonRow } from 'lib/lemon-ui/LemonRow'
@@ -44,6 +48,8 @@ import { NO_ITEM_SELECTED, infiniteListLogic } from './infiniteListLogic'
 export interface InfiniteListProps {
     popupAnchorElement: HTMLDivElement | null
     definitionPopoverRenderer?: DefinitionPopoverRenderer
+    /** Show inline pin/unpin buttons on hover for each row (default: false). */
+    inlinePinning?: boolean
 }
 
 function hasLocalListContext(item: unknown): boolean {
@@ -274,6 +280,14 @@ interface InfiniteListRowProps {
     setIndex: (index: number) => void
     pinnedRowIndex: number | null
     onToggleRowPin: (rowIndex: number) => void
+    isItemPinned: (groupType: TaxonomicFilterGroupType, value: TaxonomicFilterValue) => boolean
+    onToggleItemPin: (
+        groupType: TaxonomicFilterGroupType,
+        groupName: string,
+        value: TaxonomicFilterValue,
+        item: TaxonomicDefinitionTypes
+    ) => void
+    inlinePinning: boolean
     expand: () => void
     selectItem: (
         group: TaxonomicFilterGroup,
@@ -339,6 +353,9 @@ export const InfiniteListRow = ({
     setIndex,
     pinnedRowIndex,
     onToggleRowPin,
+    isItemPinned,
+    onToggleItemPin,
+    inlinePinning,
     expand,
     selectItem,
     setHighlightedItemElement,
@@ -449,18 +466,11 @@ export const InfiniteListRow = ({
 
     if (item && itemGroup) {
         const isDisabledItem = itemGroup?.getIsDisabled?.(item) ?? false
-        const isPinnable = !canSelectItem(listGroupType, dataWarehousePopoverFields) && !isDisabledItem
         const isCrossGroupItem = !!group.isLocalOnly && itemGroup.type !== listGroupType
         const localListLabel = getLocalListLabel(item)
         const localListGroup = hasLocalListContext(item)
             ? taxonomicGroups.find((g) => g.type === listGroupType)
             : undefined
-        const shouldShowPinIcon = isPinnable && (isHighlighted || isCurrentRowPinned)
-        const pinIcon = isCurrentRowPinned ? (
-            <IconPinFilled className="size-4 text-warning" />
-        ) : (
-            <IconPin className="size-4 text-secondary" />
-        )
 
         const { listGroupType: resolvedListGroupType, itemGroup: resolvedItemGroup } = resolveItemRendering({
             item,
@@ -471,10 +481,21 @@ export const InfiniteListRow = ({
             fallbackGroup: group,
         })
 
+        // Pin button: determine the source group for pinning
+        const pinGroupType = getSourceGroupType(item) ?? resolvedListGroupType
+        const pinGroupName = taxonomicGroups.find((g) => g.type === pinGroupType)?.name ?? resolvedItemGroup.name ?? ''
+        const pinValue = item.name ?? null
+        const canPin = inlinePinning && !isDisabledItem && !META_GROUP_TYPES.has(pinGroupType) && pinValue !== null
+        const pinned = canPin && isItemPinned(pinGroupType, pinValue)
+
         return (
             <div
                 {...commonDivProps}
-                className={clsx(commonDivProps.className, isDisabledItem && 'cursor-not-allowed opacity-60')}
+                className={clsx(
+                    commonDivProps.className,
+                    isDisabledItem && 'cursor-not-allowed opacity-60',
+                    'group/row'
+                )}
                 data-attr={`prop-filter-${listGroupType}-${rowIndex}`}
                 data-ph-capture-attribute-taxonomic-group={resolvedListGroupType}
                 data-ph-capture-attribute-taxonomic-group-name={resolvedItemGroup.name}
@@ -505,13 +526,22 @@ export const InfiniteListRow = ({
                         {localListLabel ? `${itemGroup.name} - ${localListLabel}` : itemGroup.name}
                     </LemonTag>
                 )}
-                {isPinnable && (
+                {canPin && (
                     <div
-                        className="taxonomic-list-row-pin"
+                        className={clsx('taxonomic-list-row-pin', !pinned && 'opacity-0 group-hover/row:opacity-100')}
                         data-attr={`pin-row-${listGroupType}-${rowIndex}`}
-                        aria-hidden="true"
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            onToggleItemPin(pinGroupType, pinGroupName, pinValue, item)
+                        }}
+                        role="button"
+                        aria-label={pinned ? 'Unpin' : 'Pin'}
                     >
-                        {shouldShowPinIcon ? pinIcon : null}
+                        {pinned ? (
+                            <IconPinFilled className="size-4 text-warning" />
+                        ) : (
+                            <IconPin className="size-4 text-secondary hover:text-primary" />
+                        )}
                     </div>
                 )}
             </div>
@@ -600,7 +630,11 @@ function InfiniteListEmptyState(): JSX.Element {
     )
 }
 
-export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: InfiniteListProps): JSX.Element {
+export function InfiniteList({
+    popupAnchorElement,
+    definitionPopoverRenderer,
+    inlinePinning = false,
+}: InfiniteListProps): JSX.Element {
     const {
         mouseInteractionsEnabled,
         eventNames,
@@ -637,6 +671,8 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
         showSuggestedFiltersEmptyState,
     } = useValues(infiniteListLogic)
     const { onRowsRendered, setIndex, togglePinnedRow, expand, updateRemoteItem } = useActions(infiniteListLogic)
+    const { isPinned: isItemPinned } = useValues(taxonomicFilterPinnedPropertiesLogic)
+    const { togglePin: onToggleItemPin } = useActions(taxonomicFilterPinnedPropertiesLogic)
     const [highlightedItemElement, setHighlightedItemElement] = useState<HTMLDivElement | null>(null)
     const listRef = useListRef(null)
 
@@ -702,6 +738,9 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
                                     setIndex,
                                     pinnedRowIndex,
                                     onToggleRowPin: togglePinnedRow,
+                                    isItemPinned,
+                                    onToggleItemPin,
+                                    inlinePinning,
                                     expand,
                                     selectItem,
                                     setHighlightedItemElement,
@@ -741,6 +780,9 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
                                       const recentRenderer = definitionPopoverRenderer
                                           ? definitionPopoverRenderer({ item, group, defaultView })
                                           : defaultView
+                                      if (recentRenderer === null) {
+                                          return null
+                                      }
                                       let label: string
                                       if (
                                           hasRecentContext(selectedItem) &&
@@ -752,11 +794,7 @@ export function InfiniteList({ popupAnchorElement, definitionPopoverRenderer }: 
                                               selectedItem.name,
                                               selectedItemGroup?.type
                                           )
-                                          label =
-                                              coreDef?.label ||
-                                              selectedItemGroup?.getName?.(selectedItem) ||
-                                              selectedItem.name ||
-                                              ''
+                                          label = coreDef?.label ?? selectedItem.name ?? 'Unknown'
                                       }
                                       return (
                                           <>

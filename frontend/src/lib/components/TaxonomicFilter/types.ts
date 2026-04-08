@@ -99,6 +99,8 @@ export interface TaxonomicFilterProps {
     definitionPopoverRenderer?: DefinitionPopoverRenderer
     /** Override the group-level minSearchQueryLength for all groups in this instance. */
     minSearchQueryLength?: number
+    /** Show inline pin/unpin buttons on hover for each row (default: false). */
+    inlinePinning?: boolean
 }
 
 export interface DataWarehousePopoverField {

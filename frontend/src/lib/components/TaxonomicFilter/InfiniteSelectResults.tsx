@@ -21,6 +21,8 @@ export interface InfiniteSelectResultsProps {
     taxonomicFilterLogicProps: TaxonomicFilterLogicProps
     popupAnchorElement: HTMLDivElement | null
     definitionPopoverRenderer?: DefinitionPopoverRenderer
+    /** Show inline pin/unpin buttons on hover for each row (default: false). */
+    inlinePinning?: boolean
 }
 
 // CategoryPillContent uses useValues(infiniteListLogic) without props, relying on BindLogic context
@@ -121,6 +123,7 @@ export function InfiniteSelectResults({
     taxonomicFilterLogicProps,
     popupAnchorElement,
     definitionPopoverRenderer,
+    inlinePinning = false,
 }: InfiniteSelectResultsProps): JSX.Element {
     const { activeTab, taxonomicGroups, taxonomicGroupTypes, activeTaxonomicGroup, value } =
         useValues(taxonomicFilterLogic)
@@ -155,6 +158,7 @@ export function InfiniteSelectResults({
             <InfiniteList
                 popupAnchorElement={popupAnchorElement}
                 definitionPopoverRenderer={definitionPopoverRenderer}
+                inlinePinning={inlinePinning}
             />
         </>
     )
