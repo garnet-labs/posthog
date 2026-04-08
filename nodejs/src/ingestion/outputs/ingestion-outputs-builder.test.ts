@@ -114,7 +114,8 @@ describe('IngestionOutputsBuilder', () => {
 
         const builderA = new IngestionOutputsBuilder().register('a', { topicKey: 'A_TOPIC', producerKey: 'A_PRODUCER' })
 
-        // Register 'b' on a fork — should not affect builderA
+        // Forking builderA with a new registration must not mutate builderA.
+        // The return value is intentionally discarded — we only care that builderA is unchanged.
         builderA.register('b', { topicKey: 'B_TOPIC', producerKey: 'B_PRODUCER' })
 
         const config = {
