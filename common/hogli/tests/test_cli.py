@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -174,21 +172,26 @@ class TestIsPosthogDev:
         yield
         _is_posthog_dev.cache_clear()
 
-    def test_posthog_email(self):
-        with patch("hogli.core.cli.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="dev@posthog.com\n")
-            assert _is_posthog_dev() is True
+    @pytest.fixture()
+    def _fake_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hogli.core.cli.Path.home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr("hogli.core.cli.REPO_ROOT", tmp_path)
+        return tmp_path
 
-    def test_non_posthog_email(self):
-        with patch("hogli.core.cli.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="user@example.com\n")
-            assert _is_posthog_dev() is False
+    def test_posthog_email(self, _fake_home):
+        (_fake_home / ".gitconfig").write_text("[user]\n\temail = dev@posthog.com\n")
+        assert _is_posthog_dev() is True
 
-    def test_git_config_fails(self):
-        with patch("hogli.core.cli.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stdout="")
-            assert _is_posthog_dev() is False
+    def test_non_posthog_email(self, _fake_home):
+        (_fake_home / ".gitconfig").write_text("[user]\n\temail = user@example.com\n")
+        assert _is_posthog_dev() is False
 
-    def test_subprocess_exception(self):
-        with patch("hogli.core.cli.subprocess.run", side_effect=OSError("no git")):
-            assert _is_posthog_dev() is False
+    def test_local_config_overrides_global(self, _fake_home):
+        (_fake_home / ".gitconfig").write_text("[user]\n\temail = user@example.com\n")
+        git_dir = _fake_home / ".git"
+        git_dir.mkdir()
+        (git_dir / "config").write_text("[user]\n\temail = dev@posthog.com\n")
+        assert _is_posthog_dev() is True
+
+    def test_no_config_files(self, _fake_home):
+        assert _is_posthog_dev() is False

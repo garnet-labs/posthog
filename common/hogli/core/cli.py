@@ -12,8 +12,9 @@ import time as _time
 import shutil
 import platform
 import functools
-import subprocess
+import configparser
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import click
@@ -328,16 +329,16 @@ def _infer_process_manager(command: str | None) -> str | None:
 
 @functools.lru_cache(maxsize=1)
 def _is_posthog_dev() -> bool:
-    """Check if git user.email ends with @posthog.com."""
+    """Check if git user.email ends with @posthog.com.
+
+    Reads git config files directly (local then global) to avoid spawning a subprocess.
+    """
+    parser = configparser.RawConfigParser()
     try:
-        result = subprocess.run(
-            ["git", "config", "user.email"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            cwd=REPO_ROOT,
-        )
-        return result.returncode == 0 and result.stdout.strip().endswith("@posthog.com")
+        # Local overrides global -- read global first, local second
+        parser.read([Path.home() / ".gitconfig", REPO_ROOT / ".git" / "config"])
+        email = parser.get("user", "email", fallback="")
+        return email.endswith("@posthog.com")
     except Exception:
         return False
 
