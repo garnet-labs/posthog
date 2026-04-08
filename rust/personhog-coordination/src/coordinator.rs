@@ -393,9 +393,12 @@ impl Coordinator {
         Ok(())
     }
 
-    /// Check all in-flight handoffs for completed ack quorum. Completes any
-    /// handoffs where all routers have already acked, which can happen when the
-    /// coordinator restarts or a new leader is elected after acks were written.
+    /// Reconcile all coordination state on leadership acquisition.
+    ///
+    /// The previous leader may have crashed at any point, leaving partial state:
+    /// - Ready handoffs with full ack quorum that were never completed
+    /// - Complete handoffs that were never cleaned up (acks + handoff key)
+    /// - Handoffs targeting pods that no longer exist
     async fn reconcile_pending_handoffs(&self) -> Result<()> {
         let handoffs = self.store.list_handoffs().await?;
         if handoffs.is_empty() {
@@ -407,11 +410,35 @@ impl Coordinator {
             "reconciling existing handoffs on startup"
         );
 
+        let pods = self.store.list_pods().await?;
+        let active = active_pod_names(&pods);
+
         for handoff in &handoffs {
-            if handoff.phase == HandoffPhase::Ready {
-                Self::check_ack_completion(&self.store, handoff.partition).await?;
+            match handoff.phase {
+                // Ready: check if acks already reached quorum
+                HandoffPhase::Ready => {
+                    Self::check_ack_completion(&self.store, handoff.partition).await?;
+                }
+                // Complete: old leader crashed before cleanup — finish it
+                HandoffPhase::Complete => {
+                    tracing::info!(
+                        partition = handoff.partition,
+                        "cleaning up orphaned Complete handoff from previous leader"
+                    );
+                    self.store
+                        .delete_router_acks(handoff.partition)
+                        .await?;
+                    self.store.delete_handoff(handoff.partition).await?;
+                    counter!("personhog_coordinator_handoffs_total", "outcome" => "completed")
+                        .increment(1);
+                }
+                // Warming: check if new_owner is still alive
+                HandoffPhase::Warming => {}
             }
         }
+
+        // Clean up handoffs targeting dead pods (covers all phases)
+        Self::cleanup_stale_handoffs(&self.store, &active).await?;
 
         Ok(())
     }
@@ -479,6 +506,7 @@ impl Coordinator {
         }
 
         let current_assignments = store.list_assignments().await?;
+        emit_assignment_gauges(&current_assignments);
 
         let current_map: HashMap<u32, String> = current_assignments
             .iter()
@@ -586,17 +614,28 @@ impl Coordinator {
         store: &PersonhogStore,
         handoff: &HandoffState,
     ) -> Result<()> {
-        if handoff.phase == HandoffPhase::Complete {
-            let duration = util::now_seconds() - handoff.started_at;
-            tracing::info!(
-                partition = handoff.partition,
-                duration_secs = duration,
-                "handoff complete, cleaning up"
-            );
-            store.delete_router_acks(handoff.partition).await?;
-            store.delete_handoff(handoff.partition).await?;
-            counter!("personhog_coordinator_handoffs_total", "outcome" => "completed").increment(1);
-            histogram!("personhog_coordinator_handoff_duration_seconds").record(duration as f64);
+        match handoff.phase {
+            // When a handoff reaches Ready, check if acks already arrived.
+            // This handles the race where routers ack before the coordinator
+            // processes the Ready event — without this, the handoff gets stuck.
+            HandoffPhase::Ready => {
+                Self::check_ack_completion(store, handoff.partition).await?;
+            }
+            HandoffPhase::Complete => {
+                let duration = util::now_seconds() - handoff.started_at;
+                tracing::info!(
+                    partition = handoff.partition,
+                    duration_secs = duration,
+                    "handoff complete, cleaning up"
+                );
+                store.delete_router_acks(handoff.partition).await?;
+                store.delete_handoff(handoff.partition).await?;
+                counter!("personhog_coordinator_handoffs_total", "outcome" => "completed")
+                    .increment(1);
+                histogram!("personhog_coordinator_handoff_duration_seconds")
+                    .record(duration as f64);
+            }
+            HandoffPhase::Warming => {}
         }
         Ok(())
     }
