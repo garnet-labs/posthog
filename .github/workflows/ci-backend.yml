@@ -65,6 +65,7 @@ jobs:
             openapi_types: ${{ steps.filter.outputs.openapi_types || 'true' }}
             products: ${{ steps.filter.outputs.products || 'true' }}
             legacy: ${{ steps.filter.outputs.legacy || 'true' }}
+            schema_yaml: ${{ steps.filter.outputs.schema_yaml || 'false' }}
         steps:
             # For pull requests it's not necessary to checkout the code, but we
             # also want this to run on master so we need to checkout
@@ -188,6 +189,8 @@ jobs:
                         - 'services/mcp/src/tools/generated/**/*'
                         - 'services/mcp/schema/generated-tool-definitions.json'
                         - 'services/mcp/schema/tool-definitions-all.json'
+                      schema_yaml:
+                        - 'posthog/clickhouse/schema/**/*.yaml'
 
     detect-snapshot-mode:
         name: Detect snapshot mode
@@ -842,6 +845,11 @@ jobs:
                   echo "Validating ClickHouse schema changes..."
                   python manage.py ch_migrate lint
                   python manage.py ch_migrate plan
+
+            - name: Lint ClickHouse schema YAML
+              if: needs.changes.outputs.schema_yaml == 'true'
+              timeout-minutes: 5
+              run: python manage.py ch_migrate lint --schema-dir posthog/clickhouse/schema
 
             - name: Install pnpm
               uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
