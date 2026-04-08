@@ -22,6 +22,7 @@ import yaml
 import click
 from hogli.core.manifest import load_manifest
 
+_MACOS_TAILSCALE_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 TEMPLATE_NAME = "posthog-linux"
 BREW_PACKAGE = "coder/coder/coder"
 RUNTIME_SETUP_HINT = "Run `hogli devbox:setup`."
@@ -150,12 +151,34 @@ def _run_with_rich_parameters(
         file_path.unlink(missing_ok=True)
 
 
+def _resolve_tailscale() -> str | None:
+    """Return path to the tailscale CLI, checking PATH then the macOS app bundle."""
+    if path := shutil.which("tailscale"):
+        return path
+    if sys.platform == "darwin" and os.path.isfile(_MACOS_TAILSCALE_CLI):
+        return _MACOS_TAILSCALE_CLI
+    return None
+
+
+def _tailscale_env(tailscale_path: str) -> dict[str, str] | None:
+    """Return extra env vars needed when invoking the macOS app bundle CLI."""
+    if tailscale_path == _MACOS_TAILSCALE_CLI:
+        return {**os.environ, "TAILSCALE_BE_CLI": "1"}
+    return None
+
+
 def _tailscale_status() -> dict[str, Any] | None:
     """Return parsed `tailscale status --json` output when available."""
-    if not shutil.which("tailscale"):
+    tailscale_path = _resolve_tailscale()
+    if not tailscale_path:
         return None
 
-    result = _run(["tailscale", "status", "--json"], capture_output=True)
+    result = subprocess.run(
+        [tailscale_path, "status", "--json"],
+        capture_output=True,
+        text=True,
+        env=_tailscale_env(tailscale_path),
+    )
     if result.returncode != 0:
         return None
 
@@ -176,10 +199,10 @@ def ensure_tailscale_connected(setup_hint: str = RUNTIME_SETUP_HINT) -> None:
     if tailscale_connected():
         return
 
-    if shutil.which("tailscale"):
+    if _resolve_tailscale():
         _fail(f"Tailscale is not connected. Connect to the PostHog tailnet, then {setup_hint}")
 
-    _fail(f"`tailscale` is not available. Start or install Tailscale, then {setup_hint}")
+    _fail(f"Tailscale is not installed. Install it, then {setup_hint}")
 
 
 def _ssh_config_needs_update() -> bool:
@@ -260,26 +283,22 @@ def ensure_runtime_ready() -> None:
 
 
 def maybe_configure_ssh(*, configure_ssh: bool | None) -> None:
-    """Optionally install Coder SSH config in an explicit setup step."""
+    """Install Coder SSH config, skipping only when explicitly opted out."""
     if not _ssh_config_needs_update():
         click.echo("Coder SSH config is up to date.")
         return
 
-    if configure_ssh is None:
-        configure_ssh = click.confirm(
-            "Configure SSH access for editors and local SSH clients?",
-            default=True,
-        )
-
-    if not configure_ssh:
+    if configure_ssh is False:
         click.echo("Skipping SSH config.")
         click.echo("Run `coder config-ssh` later if you want local SSH host entries.")
         return
 
-    click.echo("Configuring SSH access...")
+    click.echo("Adding Coder workspace entries to ~/.ssh/config...")
     result = _run(["coder", "config-ssh", "--yes"])
     if result.returncode != 0:
         raise SystemExit(result.returncode)
+
+    click.echo("Run `coder config-ssh --remove` to revert.")
 
 
 def print_setup_summary() -> None:

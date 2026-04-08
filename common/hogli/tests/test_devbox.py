@@ -44,6 +44,71 @@ class TestDevboxConfig:
         }
 
 
+class TestResolveTailscale:
+    """Test Tailscale CLI resolution with macOS app bundle fallback."""
+
+    def test_prefers_path_binary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(coder.shutil, "which", lambda cmd: "/usr/local/bin/tailscale")
+        assert coder._resolve_tailscale() == "/usr/local/bin/tailscale"
+
+    def test_falls_back_to_macos_app_bundle(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(coder.shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(coder.sys, "platform", "darwin")
+        monkeypatch.setattr(coder.os.path, "isfile", lambda path: path == coder._MACOS_TAILSCALE_CLI)
+        assert coder._resolve_tailscale() == coder._MACOS_TAILSCALE_CLI
+
+    def test_returns_none_when_not_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(coder.shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(coder.sys, "platform", "darwin")
+        monkeypatch.setattr(coder.os.path, "isfile", lambda path: False)
+        assert coder._resolve_tailscale() is None
+
+    def test_skips_macos_path_on_linux(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(coder.shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(coder.sys, "platform", "linux")
+        assert coder._resolve_tailscale() is None
+
+    def test_tailscale_env_sets_cli_flag_for_app_bundle(self) -> None:
+        env = coder._tailscale_env(coder._MACOS_TAILSCALE_CLI)
+        assert env is not None
+        assert env["TAILSCALE_BE_CLI"] == "1"
+
+    def test_tailscale_env_returns_none_for_path_binary(self) -> None:
+        assert coder._tailscale_env("/usr/local/bin/tailscale") is None
+
+    def test_tailscale_status_uses_resolved_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(coder, "_resolve_tailscale", lambda: coder._MACOS_TAILSCALE_CLI)
+
+        captured_args: list[list[str]] = []
+        captured_env: list[dict[str, str] | None] = []
+
+        def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            captured_args.append(args)
+            captured_env.append(kwargs.get("env"))
+            return subprocess.CompletedProcess(args, 0, '{"BackendState": "Running"}', "")
+
+        monkeypatch.setattr(coder.subprocess, "run", fake_run)
+
+        status = coder._tailscale_status()
+
+        assert status == {"BackendState": "Running"}
+        assert captured_args[0][0] == coder._MACOS_TAILSCALE_CLI
+        assert captured_env[0]["TAILSCALE_BE_CLI"] == "1"
+
+    def test_ensure_tailscale_connected_says_not_installed_when_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(coder, "tailscale_connected", lambda: False)
+        monkeypatch.setattr(coder, "_resolve_tailscale", lambda: None)
+
+        with pytest.raises(SystemExit):
+            coder.ensure_tailscale_connected()
+
+        assert "not installed" in capsys.readouterr().out
+
+
 class TestCoderConfig:
     """Test config and runtime preflight helpers."""
 
