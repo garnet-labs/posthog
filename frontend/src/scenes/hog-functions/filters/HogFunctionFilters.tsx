@@ -255,73 +255,90 @@ export function HogFunctionFilters({
                                                   : 'Match events and actions'}
                                         </LemonLabel>
                                     </div>
-                                    <p className="mb-0 text-xs text-secondary">
-                                        If set, the {type} will only run if the <b>event matches any</b> of the below.
-                                    </p>
-                                    <ActionFilter
-                                        bordered
-                                        filters={currentFilters ?? {} /* TODO: this is any */}
-                                        setFilters={(payload) => {
-                                            onChange({
-                                                ...currentFilters,
-                                                ...sanitizeActionFilters(payload),
-                                            })
-                                        }}
-                                        typeKey="plugin-filters"
-                                        mathAvailability={MathAvailability.None}
-                                        hideRename
-                                        hideDuplicate
-                                        showNestedArrow={false}
-                                        actionsTaxonomicGroupTypes={(() => {
-                                            if (isTransformation) {
-                                                return [TaxonomicFilterGroupType.Events]
-                                            }
-                                            if (isDataWarehouse) {
-                                                return [TaxonomicFilterGroupType.DataWarehouse]
-                                            }
-                                            const existingEvents = currentFilters?.events ?? []
-                                            const hasInternal = existingEvents.some((e) =>
-                                                isInternalEvent(String(e.id))
-                                            )
-                                            const hasRegular = existingEvents.some(
-                                                (e) => !isInternalEvent(String(e.id))
-                                            )
-                                            // Once events of one kind are selected, hide the
-                                            // other kind — they route through different
-                                            // consumers and can't coexist in one function.
-                                            if (hasInternal) {
-                                                return [TaxonomicFilterGroupType.InternalEvents]
-                                            }
-                                            if (hasRegular) {
-                                                return [
-                                                    TaxonomicFilterGroupType.Events,
-                                                    TaxonomicFilterGroupType.Actions,
-                                                ]
-                                            }
-                                            return [
-                                                TaxonomicFilterGroupType.Events,
-                                                TaxonomicFilterGroupType.Actions,
-                                                TaxonomicFilterGroupType.InternalEvents,
-                                            ]
-                                        })()}
-                                        propertiesTaxonomicGroupTypes={taxonomicGroupTypes}
-                                        propertyFiltersPopover
-                                        addFilterDefaultOptions={
-                                            isDataWarehouse
-                                                ? {
-                                                      name: 'Select a table',
-                                                      type: EntityTypes.DATA_WAREHOUSE,
-                                                  }
-                                                : {
-                                                      id: '$pageview',
-                                                      name: '$pageview',
-                                                      type: EntityTypes.EVENTS,
-                                                  }
-                                        }
-                                        buttonCopy={isDataWarehouse ? 'Add table matcher' : 'Add event matcher'}
-                                        excludedProperties={excludedProperties}
-                                        allowNonCapturedEvents
-                                    />
+                                    {(() => {
+                                        const existingEvents = currentFilters?.events ?? []
+                                        const hasInternalEvents = existingEvents.some((e) =>
+                                            isInternalEvent(String(e.id))
+                                        )
+                                        const hasRegularEvents = existingEvents.some(
+                                            (e) => !isInternalEvent(String(e.id))
+                                        )
+                                        const isEventKindLocked = hasInternalEvents || hasRegularEvents
+                                        return (
+                                            <>
+                                                <p className="mb-0 text-xs text-secondary">
+                                                    If set, the {type} will only run if the <b>event matches any</b> of
+                                                    the below.
+                                                    {isEventKindLocked && (
+                                                        <>
+                                                            {' '}
+                                                            A single destination can only use{' '}
+                                                            {hasInternalEvents
+                                                                ? 'internal events'
+                                                                : 'regular events and actions'}
+                                                            . Remove all matchers to switch.
+                                                        </>
+                                                    )}
+                                                </p>
+                                                <ActionFilter
+                                                    bordered
+                                                    filters={currentFilters ?? {} /* TODO: this is any */}
+                                                    setFilters={(payload) => {
+                                                        onChange({
+                                                            ...currentFilters,
+                                                            ...sanitizeActionFilters(payload),
+                                                        })
+                                                    }}
+                                                    typeKey="plugin-filters"
+                                                    mathAvailability={MathAvailability.None}
+                                                    hideRename
+                                                    hideDuplicate
+                                                    showNestedArrow={false}
+                                                    actionsTaxonomicGroupTypes={(() => {
+                                                        if (isTransformation) {
+                                                            return [TaxonomicFilterGroupType.Events]
+                                                        }
+                                                        if (isDataWarehouse) {
+                                                            return [TaxonomicFilterGroupType.DataWarehouse]
+                                                        }
+                                                        if (hasInternalEvents) {
+                                                            return [TaxonomicFilterGroupType.InternalEvents]
+                                                        }
+                                                        if (hasRegularEvents) {
+                                                            return [
+                                                                TaxonomicFilterGroupType.Events,
+                                                                TaxonomicFilterGroupType.Actions,
+                                                            ]
+                                                        }
+                                                        return [
+                                                            TaxonomicFilterGroupType.Events,
+                                                            TaxonomicFilterGroupType.Actions,
+                                                            TaxonomicFilterGroupType.InternalEvents,
+                                                        ]
+                                                    })()}
+                                                    propertiesTaxonomicGroupTypes={taxonomicGroupTypes}
+                                                    propertyFiltersPopover
+                                                    addFilterDefaultOptions={
+                                                        isDataWarehouse
+                                                            ? {
+                                                                  name: 'Select a table',
+                                                                  type: EntityTypes.DATA_WAREHOUSE,
+                                                              }
+                                                            : {
+                                                                  id: '$pageview',
+                                                                  name: '$pageview',
+                                                                  type: EntityTypes.EVENTS,
+                                                              }
+                                                    }
+                                                    buttonCopy={
+                                                        isDataWarehouse ? 'Add table matcher' : 'Add event matcher'
+                                                    }
+                                                    excludedProperties={excludedProperties}
+                                                    allowNonCapturedEvents
+                                                />
+                                            </>
+                                        )
+                                    })()}
                                 </>
                             ) : null}
                             {oldFilters && newFilters && (
