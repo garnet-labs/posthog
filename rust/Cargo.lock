@@ -6570,6 +6570,7 @@ dependencies = [
  "k8s-awareness",
  "k8s-openapi",
  "kube",
+ "metrics",
  "serde",
  "serde_json",
  "serial_test",

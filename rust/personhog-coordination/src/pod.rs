@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use etcd_client::EventType;
+use metrics::{counter, gauge, histogram};
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
@@ -272,8 +273,13 @@ impl PodHandle {
                 partition = handoff.partition,
                 "warming cache for partition"
             );
+            let warm_start = Instant::now();
             self.handler.warm_partition(handoff.partition).await?;
+            histogram!("personhog_pod_warm_duration_seconds")
+                .record(warm_start.elapsed().as_secs_f64());
+
             self.owned_partitions.lock().await.insert(handoff.partition);
+            gauge!("personhog_pod_owned_partitions").set(self.owned_partitions.lock().await.len() as f64);
 
             // Signal ready — routers will now begin cutover
             let mut updated = handoff.clone();
@@ -291,6 +297,8 @@ impl PodHandle {
                 .lock()
                 .await
                 .remove(&handoff.partition);
+            gauge!("personhog_pod_owned_partitions").set(self.owned_partitions.lock().await.len() as f64);
+            counter!("personhog_pod_partitions_released_total").increment(1);
             self.drain_notify.notify_one();
         }
 
@@ -355,11 +363,16 @@ impl PodHandle {
             partition = assignment.partition,
             "warming partition from direct assignment"
         );
+        let warm_start = Instant::now();
         self.handler.warm_partition(assignment.partition).await?;
+        histogram!("personhog_pod_warm_duration_seconds")
+            .record(warm_start.elapsed().as_secs_f64());
+
         self.owned_partitions
             .lock()
             .await
             .insert(assignment.partition);
+        gauge!("personhog_pod_owned_partitions").set(self.owned_partitions.lock().await.len() as f64);
 
         Ok(())
     }

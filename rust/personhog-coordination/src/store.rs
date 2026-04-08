@@ -1,5 +1,6 @@
 use assignment_coordination::store::EtcdStore;
 use etcd_client::{Compare, CompareOp, PutOptions, Txn, TxnOp, WatchStream};
+use k8s_awareness::types::ControllerRef;
 
 use crate::error::{Error, Result};
 use crate::types::{
@@ -106,6 +107,34 @@ impl PersonhogStore {
             .ok_or_else(|| Error::NotFound(format!("pod {pod_name}")))?;
         pod.status = status;
         Ok(self.inner.put(&key, &pod, Some(lease_id)).await?)
+    }
+
+    /// Update a pod's K8s metadata (generation and controller) while preserving
+    /// its lease. Used by the coordinator to enrich pod registrations with
+    /// controller info discovered via the K8s API.
+    pub async fn enrich_pod_k8s(
+        &self,
+        pod_name: &str,
+        generation: &str,
+        controller: &ControllerRef,
+    ) -> Result<()> {
+        let key = self.key(StoreKey::Pod(pod_name));
+        let resp = self.inner.client().clone().get(key.clone(), None).await?;
+        let kv = resp
+            .kvs()
+            .first()
+            .ok_or_else(|| Error::NotFound(format!("pod {pod_name}")))?;
+        let lease_id = kv.lease();
+        let mut pod: RegisteredPod = serde_json::from_slice(kv.value())?;
+        pod.generation = generation.to_string();
+        pod.controller = Some(controller.clone());
+        let options = PutOptions::new().with_lease(lease_id);
+        self.inner
+            .client()
+            .clone()
+            .put(key, serde_json::to_string(&pod)?, Some(options))
+            .await?;
+        Ok(())
     }
 
     pub async fn watch_pods(&self) -> Result<WatchStream> {

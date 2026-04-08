@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use etcd_client::EventType;
+use metrics::{counter, gauge, histogram};
 use tokio_util::sync::CancellationToken;
 
 use assignment_coordination::store::parse_watch_value;
@@ -94,10 +95,13 @@ impl Coordinator {
 
         if !acquired {
             tracing::debug!(name = %self.config.name, "another coordinator is leader, standing by");
+            gauge!("personhog_coordinator_is_leader").set(0.0);
             return Ok(());
         }
 
         tracing::info!(name = %self.config.name, "acquired leadership");
+        gauge!("personhog_coordinator_is_leader").set(1.0);
+        counter!("personhog_coordinator_elections_total").increment(1);
 
         // Spawn lease keepalive
         let keepalive_cancel = cancel.child_token();
@@ -113,6 +117,8 @@ impl Coordinator {
         };
 
         let result = self.run_coordination_loop(cancel.clone()).await;
+
+        gauge!("personhog_coordinator_is_leader").set(0.0);
 
         // Clean up keepalive
         keepalive_cancel.cancel();
@@ -191,7 +197,7 @@ impl Coordinator {
                 _ = cancel.cancelled() => return Ok(()),
                 msg = stream.message() => {
                     let resp = msg?.ok_or_else(|| Error::invalid_state("pod watch stream ended".to_string()))?;
-                    Self::log_pod_events(&resp);
+                    Self::handle_pod_events(&resp, &store, k8s_awareness.as_deref()).await;
                 }
             }
 
@@ -203,7 +209,7 @@ impl Coordinator {
                     _ = tokio::time::sleep_until(deadline) => break,
                     msg = stream.message() => {
                         let resp = msg?.ok_or_else(|| Error::invalid_state("pod watch stream ended".to_string()))?;
-                        Self::log_pod_events(&resp);
+                        Self::handle_pod_events(&resp, &store, k8s_awareness.as_deref()).await;
                     }
                 }
             }
@@ -213,10 +219,69 @@ impl Coordinator {
         }
     }
 
-    fn log_pod_events(resp: &etcd_client::WatchResponse) {
+    /// Log pod watch events and enrich new registrations with K8s metadata.
+    ///
+    /// When a pod registers with empty generation (which is the normal case —
+    /// leader pods self-register without K8s context), the coordinator discovers
+    /// the pod's controller and generation via the K8s API and persists it back
+    /// to etcd. This is a one-time operation per pod registration.
+    async fn handle_pod_events(
+        resp: &etcd_client::WatchResponse,
+        store: &PersonhogStore,
+        k8s_awareness: Option<&K8sAwareness>,
+    ) {
         for event in resp.events() {
             match event.event_type() {
-                EventType::Put => tracing::info!("pod registered or updated"),
+                EventType::Put => {
+                    let pod: RegisteredPod = match parse_watch_value(event) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "failed to parse pod event");
+                            continue;
+                        }
+                    };
+                    tracing::info!(pod = %pod.pod_name, status = ?pod.status, "pod registered or updated");
+
+                    if pod.generation.is_empty() {
+                        if let Some(k8s) = k8s_awareness {
+                            match k8s.discover_controller(&pod.pod_name).await {
+                                Ok(info) => {
+                                    tracing::info!(
+                                        pod = %pod.pod_name,
+                                        controller = %info.controller,
+                                        generation = %info.generation,
+                                        "discovered K8s controller for pod"
+                                    );
+                                    if let Err(e) = store
+                                        .enrich_pod_k8s(
+                                            &pod.pod_name,
+                                            &info.generation,
+                                            &info.controller,
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            pod = %pod.pod_name,
+                                            error = %e,
+                                            "failed to persist K8s enrichment"
+                                        );
+                                        counter!("personhog_coordinator_k8s_enrichments_total", "outcome" => "persist_error").increment(1);
+                                    } else {
+                                        counter!("personhog_coordinator_k8s_enrichments_total", "outcome" => "success").increment(1);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        pod = %pod.pod_name,
+                                        error = %e,
+                                        "failed to discover K8s controller, proceeding without"
+                                    );
+                                    counter!("personhog_coordinator_k8s_enrichments_total", "outcome" => "discovery_error").increment(1);
+                                }
+                            }
+                        }
+                    }
+                }
                 EventType::Delete => tracing::warn!("pod lease expired or deleted"),
             }
         }
@@ -366,6 +431,8 @@ impl Coordinator {
         strategy: &dyn AssignmentStrategy,
         k8s_awareness: Option<&K8sAwareness>,
     ) -> Result<()> {
+        let rebalance_start = Instant::now();
+
         let pods = store.list_pods().await?;
         let total_partitions = match store.get_total_partitions().await {
             Ok(n) => n,
@@ -375,6 +442,16 @@ impl Coordinator {
             }
             Err(e) => return Err(e),
         };
+
+        // Emit pod gauges
+        let ready = pods.iter().filter(|p| p.status == PodStatus::Ready).count();
+        let draining = pods.iter().filter(|p| p.status == PodStatus::Draining).count();
+        gauge!("personhog_coordinator_pods_registered", "status" => "ready").set(ready as f64);
+        gauge!("personhog_coordinator_pods_registered", "status" => "draining").set(draining as f64);
+
+        // Emit router gauge
+        let routers = store.list_routers().await.unwrap_or_default();
+        gauge!("personhog_coordinator_routers_registered").set(routers.len() as f64);
 
         let mut active_pods = active_pod_names(&pods);
 
@@ -392,6 +469,7 @@ impl Coordinator {
         // rebalances from overwriting each other. The watch_handoffs_loop will
         // re-trigger rebalancing once all handoffs complete.
         let remaining_handoffs = store.list_handoffs().await?;
+        emit_handoff_gauges(&remaining_handoffs);
         if !remaining_handoffs.is_empty() {
             tracing::info!(
                 in_flight = remaining_handoffs.len(),
@@ -434,6 +512,10 @@ impl Coordinator {
                 "writing initial assignments"
             );
             store.put_assignments(&assignment_objects).await?;
+            emit_assignment_gauges(&assignment_objects);
+            counter!("personhog_coordinator_rebalances_total").increment(1);
+            histogram!("personhog_coordinator_rebalance_duration_seconds")
+                .record(rebalance_start.elapsed().as_secs_f64());
             return Ok(());
         }
 
@@ -468,6 +550,12 @@ impl Coordinator {
             .create_assignments_and_handoffs(&stable_assignments, &handoff_objects)
             .await?;
 
+        counter!("personhog_coordinator_handoffs_total", "outcome" => "started")
+            .increment(handoff_objects.len() as u64);
+        counter!("personhog_coordinator_rebalances_total").increment(1);
+        histogram!("personhog_coordinator_rebalance_duration_seconds")
+            .record(rebalance_start.elapsed().as_secs_f64());
+
         Ok(())
     }
 
@@ -487,6 +575,7 @@ impl Coordinator {
                 );
                 store.delete_router_acks(handoff.partition).await?;
                 store.delete_handoff(handoff.partition).await?;
+                counter!("personhog_coordinator_handoffs_total", "outcome" => "stale_cleanup").increment(1);
             }
         }
 
@@ -498,12 +587,16 @@ impl Coordinator {
         handoff: &HandoffState,
     ) -> Result<()> {
         if handoff.phase == HandoffPhase::Complete {
+            let duration = util::now_seconds() - handoff.started_at;
             tracing::info!(
                 partition = handoff.partition,
+                duration_secs = duration,
                 "handoff complete, cleaning up"
             );
             store.delete_router_acks(handoff.partition).await?;
             store.delete_handoff(handoff.partition).await?;
+            counter!("personhog_coordinator_handoffs_total", "outcome" => "completed").increment(1);
+            histogram!("personhog_coordinator_handoff_duration_seconds").record(duration as f64);
         }
         Ok(())
     }
@@ -579,6 +672,27 @@ async fn filter_pods_for_k8s(
     active.sort();
     active.dedup();
     active
+}
+
+fn emit_handoff_gauges(handoffs: &[HandoffState]) {
+    let warming = handoffs.iter().filter(|h| h.phase == HandoffPhase::Warming).count();
+    let ready = handoffs.iter().filter(|h| h.phase == HandoffPhase::Ready).count();
+    let complete = handoffs.iter().filter(|h| h.phase == HandoffPhase::Complete).count();
+    gauge!("personhog_coordinator_handoffs_in_flight", "phase" => "warming").set(warming as f64);
+    gauge!("personhog_coordinator_handoffs_in_flight", "phase" => "ready").set(ready as f64);
+    gauge!("personhog_coordinator_handoffs_in_flight", "phase" => "complete").set(complete as f64);
+}
+
+fn emit_assignment_gauges(assignments: &[PartitionAssignment]) {
+    gauge!("personhog_coordinator_assigned_partitions").set(assignments.len() as f64);
+
+    let mut per_pod: HashMap<&str, u64> = HashMap::new();
+    for a in assignments {
+        *per_pod.entry(a.owner.as_str()).or_default() += 1;
+    }
+    for (pod, count) in per_pod {
+        gauge!("personhog_coordinator_partitions_per_pod", "pod" => pod.to_string()).set(count as f64);
+    }
 }
 
 #[cfg(test)]

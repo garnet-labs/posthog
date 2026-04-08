@@ -1154,6 +1154,75 @@ async fn graceful_drain_transfers_partitions(
     coord_cancel.cancel();
 }
 
+/// Verify that `enrich_pod_k8s` updates a pod's generation and controller
+/// while preserving its lease. After enrichment, the pod key should still
+/// expire when the lease is revoked.
+#[tokio::test]
+async fn enrich_pod_k8s_preserves_lease() {
+    use k8s_awareness::types::{ControllerKind, ControllerRef};
+
+    let store = test_store("enrich-pod-k8s").await;
+
+    // Grant a lease and register a pod with empty generation (like a real leader pod)
+    let lease_id = store.grant_lease(60).await.unwrap();
+    let pod = personhog_coordination::types::RegisteredPod {
+        pod_name: "writer-0".to_string(),
+        generation: String::new(),
+        status: personhog_coordination::types::PodStatus::Ready,
+        registered_at: 1000,
+        last_heartbeat: 1000,
+        controller: None,
+    };
+    store.register_pod(&pod, lease_id).await.unwrap();
+
+    // Verify the pod is registered with empty generation
+    let fetched = store.get_pod("writer-0").await.unwrap().unwrap();
+    assert!(fetched.generation.is_empty());
+    assert!(fetched.controller.is_none());
+
+    // Enrich the pod with K8s metadata
+    let controller = ControllerRef {
+        kind: ControllerKind::Deployment,
+        name: "personhog-leader".to_string(),
+    };
+    store
+        .enrich_pod_k8s("writer-0", "abc123", &controller)
+        .await
+        .unwrap();
+
+    // Verify enrichment persisted
+    let enriched = store.get_pod("writer-0").await.unwrap().unwrap();
+    assert_eq!(enriched.generation, "abc123");
+    assert_eq!(enriched.controller.as_ref().unwrap().name, "personhog-leader");
+    assert_eq!(enriched.controller.as_ref().unwrap().kind, ControllerKind::Deployment);
+    // Other fields should be unchanged
+    assert_eq!(enriched.pod_name, "writer-0");
+    assert_eq!(enriched.status, personhog_coordination::types::PodStatus::Ready);
+    assert_eq!(enriched.registered_at, 1000);
+
+    // Verify the lease is preserved: revoking it should delete the pod key
+    store.revoke_lease(lease_id).await.unwrap();
+    let gone = store.get_pod("writer-0").await.unwrap();
+    assert!(gone.is_none(), "pod key should be deleted after lease revocation");
+}
+
+/// Verify that `enrich_pod_k8s` returns NotFound for a nonexistent pod.
+#[tokio::test]
+async fn enrich_pod_k8s_not_found() {
+    use k8s_awareness::types::{ControllerKind, ControllerRef};
+
+    let store = test_store("enrich-pod-not-found").await;
+
+    let controller = ControllerRef {
+        kind: ControllerKind::Deployment,
+        name: "test".to_string(),
+    };
+    let result = store
+        .enrich_pod_k8s("nonexistent", "abc123", &controller)
+        .await;
+    assert!(result.is_err());
+}
+
 /// Verify that when the drain status write to etcd fails (e.g. pod key was
 /// already deleted), the pod exits cleanly without hanging or panicking.
 /// It falls back to lease-based cleanup.

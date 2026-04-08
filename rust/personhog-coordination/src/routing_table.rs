@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use etcd_client::EventType;
+use metrics::{counter, gauge, histogram};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -160,6 +161,7 @@ impl RoutingTable {
             table.insert(a.partition, a.owner);
         }
         tracing::info!(count = table.len(), "loaded initial routing table");
+        gauge!("personhog_router_routing_table_size").set(table.len() as f64);
         drop(table);
 
         // Catch up on any in-progress handoffs that reached Ready before we
@@ -208,14 +210,18 @@ impl RoutingTable {
                         match event.event_type() {
                             EventType::Put => {
                                 let assignment: PartitionAssignment = parse_watch_value(event)?;
-                                table.write().await.insert(assignment.partition, assignment.owner);
+                                let mut t = table.write().await;
+                                t.insert(assignment.partition, assignment.owner);
+                                gauge!("personhog_router_routing_table_size").set(t.len() as f64);
                             }
                             EventType::Delete => {
                                 if let Some(kv) = event.kv() {
                                     if let Some(partition) = store::extract_partition_from_key(
                                         std::str::from_utf8(kv.key()).unwrap_or(""),
                                     ) {
-                                        table.write().await.remove(&partition);
+                                        let mut t = table.write().await;
+                                        t.remove(&partition);
+                                        gauge!("personhog_router_routing_table_size").set(t.len() as f64);
                                     }
                                 }
                             }
@@ -251,6 +257,7 @@ impl RoutingTable {
                                         "executing cutover"
                                     );
 
+                                    let cutover_start = Instant::now();
                                     handler.execute_cutover(
                                         handoff.partition,
                                         &handoff.old_owner,
@@ -263,6 +270,10 @@ impl RoutingTable {
                                         acked_at: util::now_seconds(),
                                     };
                                     store.put_router_ack(&ack).await?;
+
+                                    counter!("personhog_router_cutovers_total").increment(1);
+                                    histogram!("personhog_router_cutover_duration_seconds")
+                                        .record(cutover_start.elapsed().as_secs_f64());
 
                                     tracing::info!(
                                         router = %router_name,
