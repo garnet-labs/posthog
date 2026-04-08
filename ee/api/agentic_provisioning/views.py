@@ -935,7 +935,7 @@ def provisioning_update_service(request: Request, resource_id: str) -> Response:
     if payment_credentials:
         spt = payment_credentials.get("stripe_payment_token")
         if spt:
-            _activate_billing_with_spt(team, spt)
+            _activate_billing_with_spt_simple(team, spt)
 
     cache.set(f"{RESOURCE_SERVICE_CACHE_PREFIX}{team_id}", service_id, timeout=None)
 
@@ -961,7 +961,7 @@ def provisioning_update_service(request: Request, resource_id: str) -> Response:
     )
 
 
-def _activate_billing_with_spt(team: Team, spt: str) -> None:
+def _activate_billing_with_spt_simple(team: Team, spt: str) -> None:
     """Forward a Stripe Payment Token to the billing service to activate a paid subscription."""
     try:
         res = requests.post(
