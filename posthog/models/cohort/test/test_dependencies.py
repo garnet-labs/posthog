@@ -531,29 +531,19 @@ class TestCohortBackfillOnConditionsChanged(BaseTest):
         cohort = self._create_cohort(name="Test Cohort")
         self.assertFalse(_has_person_property_filters(cohort))
 
-    @mock.patch("django.core.management.call_command")
-    def test_trigger_cohort_backfill_calls_management_command(self, mock_call_command):
-        """Test that _trigger_cohort_backfill calls the correct management command"""
+    @mock.patch("posthog.tasks.calculate_cohort.trigger_cohort_backfill_task")
+    def test_trigger_cohort_backfill_calls_celery_task(self, mock_task):
+        """Test that _trigger_cohort_backfill calls the correct Celery task"""
         cohort = self._create_cohort(name="Test Cohort", cohort_type=CohortType.REALTIME)
 
         _trigger_cohort_backfill(cohort)
 
-        mock_call_command.assert_called_once_with(
-            "backfill_precalculated_person_properties",
-            "--team-id",
-            str(cohort.team_id),
-            "--cohort-id",
-            str(cohort.id),
-            "--batch-size",
-            10_000,
-            "--concurrent-workflows",
-            100,
-        )
+        mock_task.delay.assert_called_once_with(cohort.team_id, cohort.pk)
 
-    @mock.patch("django.core.management.call_command")
-    def test_trigger_cohort_backfill_handles_exceptions(self, mock_call_command):
+    @mock.patch("posthog.tasks.calculate_cohort.trigger_cohort_backfill_task")
+    def test_trigger_cohort_backfill_handles_exceptions(self, mock_task):
         """Test that _trigger_cohort_backfill handles exceptions gracefully"""
-        mock_call_command.side_effect = Exception("Command failed")
+        mock_task.delay.side_effect = Exception("Task failed")
         cohort = self._create_cohort(name="Test Cohort", cohort_type=CohortType.REALTIME)
 
         # Should not raise an exception

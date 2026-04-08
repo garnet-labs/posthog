@@ -155,36 +155,7 @@ def _has_person_property_filters(cohort: Cohort) -> bool:
     Check if a cohort has person property filters in its filters.
     Used to determine if backfill should be triggered.
     """
-    if not cohort.filters:
-        return False
-
-    def traverse_filter_tree(node) -> bool:
-        """Recursively traverse the filter tree to find person property filters."""
-        if not isinstance(node, dict):
-            return False
-
-        # Check if this is a group node (AND/OR)
-        node_type = node.get("type")
-        if node_type in ("AND", "OR"):
-            # Check children recursively
-            for child in node.get("values", []):
-                if traverse_filter_tree(child):
-                    return True
-            return False
-
-        # This is a leaf node - check if it's a person property filter with required fields
-        return (
-            node_type == "person"
-            and node.get("conditionHash") is not None
-            and node.get("bytecode") is not None
-            and node.get("key") is not None
-        )
-
-    properties = cohort.filters.get("properties")
-    if not properties:
-        return False
-
-    return traverse_filter_tree(properties)
+    return bool(_extract_person_property_filters(cohort))
 
 
 def _person_property_filters_changed(cohort: Cohort) -> bool:
@@ -274,10 +245,10 @@ def _extract_person_property_filters(cohort: Cohort) -> str:
 def _trigger_cohort_backfill(cohort: Cohort) -> None:
     """
     Trigger backfill for a realtime cohort with person properties.
-    Uses the existing temporal workflow for consistency.
+    Uses Celery to avoid blocking the caller.
     """
     try:
-        from django.core.management import call_command
+        from posthog.tasks.calculate_cohort import trigger_cohort_backfill_task
 
         logger.info(
             "triggering_cohort_backfill_on_conditions_change",
@@ -286,19 +257,8 @@ def _trigger_cohort_backfill(cohort: Cohort) -> None:
             cohort_type=cohort.cohort_type,
         )
 
-        # Use the existing management command to trigger backfill
-        # This will use the Temporal workflow infrastructure
-        call_command(
-            "backfill_precalculated_person_properties",
-            "--team-id",
-            str(cohort.team_id),
-            "--cohort-id",
-            str(cohort.pk),
-            "--batch-size",
-            10_000,
-            "--concurrent-workflows",
-            100,
-        )
+        # Use Celery task to avoid blocking network I/O
+        trigger_cohort_backfill_task.delay(cohort.team_id, cohort.pk)
 
     except Exception as e:
         logger.exception(
@@ -317,14 +277,15 @@ def cohort_pre_save(sender, instance, **kwargs):
     This is needed to compare with the new state in post_save.
     """
     try:
-        if instance.pk:
-            # Get the previous version from database
-            previous_cohort = Cohort.objects.get(pk=instance.pk)
-            # Store the previous person property filters hash on the instance
-            instance._previous_person_property_filters = _extract_person_property_filters(previous_cohort)
-        else:
-            # New cohort, no previous state
+        # Skip non-realtime cohorts to avoid extra DB queries
+        if not instance.pk or instance.cohort_type != CohortType.REALTIME:
             instance._previous_person_property_filters = ""
+            return
+
+        # Get the previous version from database
+        previous_cohort = Cohort.objects.get(pk=instance.pk)
+        # Store the previous person property filters hash on the instance
+        instance._previous_person_property_filters = _extract_person_property_filters(previous_cohort)
     except Cohort.DoesNotExist:
         # Cohort doesn't exist yet (should not happen), treat as new
         instance._previous_person_property_filters = ""

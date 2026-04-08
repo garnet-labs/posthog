@@ -686,3 +686,43 @@ def collect_cohort_query_stats(
             error=str(e),
         )
         raise
+
+
+@shared_task(ignore_result=True, max_retries=3)
+def trigger_cohort_backfill_task(team_id: int, cohort_id: int):
+    """
+    Trigger backfill for a realtime cohort with person properties.
+    Uses the existing temporal workflow for consistency.
+    """
+    from django.core.management import call_command
+
+    logger = structlog.get_logger(__name__)
+
+    try:
+        logger.info(
+            "triggering_cohort_backfill_task",
+            cohort_id=cohort_id,
+            team_id=team_id,
+        )
+
+        # Use the existing management command to trigger backfill
+        call_command(
+            "backfill_precalculated_person_properties",
+            "--team-id",
+            str(team_id),
+            "--cohort-id",
+            str(cohort_id),
+            "--batch-size",
+            10_000,
+            "--concurrent-workflows",
+            100,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "failed_to_trigger_cohort_backfill_task",
+            cohort_id=cohort_id,
+            team_id=team_id,
+            error=str(e),
+        )
+        raise
