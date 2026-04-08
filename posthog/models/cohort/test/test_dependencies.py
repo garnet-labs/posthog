@@ -996,7 +996,7 @@ class TestCohortBackfillOnConditionsChanged(BaseTest):
 
         # Simulate pre_save capturing the original state hash
         original_hash = _extract_person_property_filters(original_cohort)
-        modified_cohort._previous_person_property_filters = original_hash  # type: ignore
+        modified_cohort._previous_person_property_filters = original_hash
 
         result = _person_property_filters_changed(modified_cohort)
         self.assertTrue(result)
@@ -1024,7 +1024,7 @@ class TestCohortBackfillOnConditionsChanged(BaseTest):
 
         # Simulate pre_save capturing the same state hash
         current_hash = _extract_person_property_filters(cohort)
-        cohort._previous_person_property_filters = current_hash  # type: ignore
+        cohort._previous_person_property_filters = current_hash
 
         result = _person_property_filters_changed(cohort)
         self.assertFalse(result)
@@ -1107,7 +1107,7 @@ class TestCohortBackfillOnConditionsChanged(BaseTest):
 
         # Simulate pre_save capturing the original structure hash
         original_hash = _extract_person_property_filters(original_cohort)
-        modified_cohort._previous_person_property_filters = original_hash  # type: ignore
+        modified_cohort._previous_person_property_filters = original_hash
 
         result = _person_property_filters_changed(modified_cohort)
         self.assertTrue(result)
@@ -1151,7 +1151,7 @@ class TestCohortBackfillOnConditionsChanged(BaseTest):
 
         # Simulate pre_save capturing the same structure hash
         current_hash = _extract_person_property_filters(cohort)
-        cohort._previous_person_property_filters = current_hash  # type: ignore
+        cohort._previous_person_property_filters = current_hash
 
         result = _person_property_filters_changed(cohort)
         self.assertFalse(result)

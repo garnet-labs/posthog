@@ -321,13 +321,13 @@ def cohort_pre_save(sender, instance, **kwargs):
             # Get the previous version from database
             previous_cohort = Cohort.objects.get(pk=instance.pk)
             # Store the previous person property filters hash on the instance
-            instance._previous_person_property_filters = _extract_person_property_filters(previous_cohort)  # type: ignore
+            instance._previous_person_property_filters = _extract_person_property_filters(previous_cohort)
         else:
             # New cohort, no previous state
-            instance._previous_person_property_filters = ""  # type: ignore
+            instance._previous_person_property_filters = ""
     except Cohort.DoesNotExist:
         # Cohort doesn't exist yet (should not happen), treat as new
-        instance._previous_person_property_filters = ""  # type: ignore
+        instance._previous_person_property_filters = ""
     except Exception as e:
         logger.warning(
             "error_capturing_previous_person_property_filters",
@@ -335,7 +335,7 @@ def cohort_pre_save(sender, instance, **kwargs):
             error=str(e),
         )
         # If we can't capture previous state, mark as None to be safe
-        instance._previous_person_property_filters = None  # type: ignore
+        instance._previous_person_property_filters = None
 
 
 @receiver(post_save, sender=Cohort)
