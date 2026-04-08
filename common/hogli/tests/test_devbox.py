@@ -325,19 +325,16 @@ class TestDevboxCommands:
         monkeypatch.setattr(
             devbox_cli,
             "create_workspace",
-            lambda name,
-            disk_size,
-            claude_oauth_token=None,
-            git_name=None,
-            git_email=None,
-            verbose=False: captured.update(
-                {
-                    "name": name,
-                    "disk_size": str(disk_size),
-                    "claude_oauth_token": claude_oauth_token,
-                    "git_name": git_name,
-                    "git_email": git_email,
-                }
+            lambda name, disk_size, claude_oauth_token=None, git_name=None, git_email=None, verbose=False: (
+                captured.update(
+                    {
+                        "name": name,
+                        "disk_size": str(disk_size),
+                        "claude_oauth_token": claude_oauth_token,
+                        "git_name": git_name,
+                        "git_email": git_email,
+                    }
+                )
             ),
         )
 
@@ -376,17 +373,14 @@ class TestDevboxCommands:
         monkeypatch.setattr(
             devbox_cli,
             "create_workspace",
-            lambda name,
-            disk_size,
-            claude_oauth_token=None,
-            git_name=None,
-            git_email=None,
-            verbose=False: captured.update(
-                {
-                    "name": name,
-                    "git_name": git_name,
-                    "git_email": git_email,
-                }
+            lambda name, disk_size, claude_oauth_token=None, git_name=None, git_email=None, verbose=False: (
+                captured.update(
+                    {
+                        "name": name,
+                        "git_name": git_name,
+                        "git_email": git_email,
+                    }
+                )
             ),
         )
 

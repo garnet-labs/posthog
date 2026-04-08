@@ -466,8 +466,8 @@ def DISTRIBUTED_EVENTS_TABLE_SQL(on_cluster=True):
     )
 
 
-INSERT_EVENT_SQL = (
-    lambda: f"""
+INSERT_EVENT_SQL = lambda: (
+    f"""
 INSERT INTO {EVENTS_DATA_TABLE()}
 (
     uuid,
@@ -525,8 +525,8 @@ VALUES
 """
 )
 
-BULK_INSERT_EVENT_SQL = (
-    lambda: f"""
+BULK_INSERT_EVENT_SQL = lambda: (
+    f"""
 INSERT INTO {EVENTS_DATA_TABLE()}
 (
     uuid,
