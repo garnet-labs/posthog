@@ -94,7 +94,8 @@ def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool
         )
         return (True, "")
 
-    # Atomic: INSERT only if no active lock from another host
+    # Atomic: INSERT only if no active lock from another host that hasn't released.
+    # A released lock has a success=0, direction='down' row — those hosts are excluded.
     atomic_sql = f"""
         INSERT INTO {table_ref}
         (migration_number, migration_name, step_index, host, node_role, direction, checksum, applied_at, success)
@@ -108,6 +109,13 @@ def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool
               AND success = 1
               AND applied_at > now() - INTERVAL {LOCK_TIMEOUT_MINUTES} MINUTE
               AND host != %(hostname)s
+              AND host NOT IN (
+                  SELECT host FROM {table_ref}
+                  WHERE migration_number = {LOCK_MIGRATION_NUMBER}
+                    AND step_index = {LOCK_STEP_INDEX}
+                    AND success = 0 AND direction = 'down'
+                    AND applied_at > now() - INTERVAL {LOCK_TIMEOUT_MINUTES} MINUTE
+              )
         )
     """
     client.execute(atomic_sql, {"hostname": hostname})

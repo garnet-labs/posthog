@@ -86,6 +86,29 @@ class TestAdvisoryLock(unittest.TestCase):
         # Should have inserted a row (via record_step which calls client.execute)
         client.execute.assert_called_once()
 
+    def test_after_release_another_host_can_acquire(self) -> None:
+        """After the lock holder releases, a different host must be able to acquire."""
+        # After host-A releases, the acquire query excludes host-A from the blocking check
+        # because host-A now has a success=0,direction='down' release row.
+        # Simulate: host-B acquires, finds NO active lock (verify SELECT returns host-B's own row).
+        client = MagicMock()
+        now = datetime.now(tz=UTC)
+        client.execute.side_effect = [
+            None,  # CREATE TABLE IF NOT EXISTS
+            None,  # INSERT...SELECT WHERE NOT EXISTS (row inserted — no active un-released lock)
+            [("host-b", now)],  # Verify SELECT — host-B holds the lock
+        ]
+
+        acquired, reason = acquire_apply_lock(client, "default", "host-b")
+
+        self.assertTrue(acquired)
+        self.assertEqual(reason, "")
+        # Verify the acquire SQL contains the NOT IN subquery that checks for releases
+        acquire_call = client.execute.call_args_list[1]
+        sql_arg = acquire_call[0][0]
+        self.assertIn("host NOT IN", sql_arg)
+        self.assertIn("direction = 'down'", sql_arg)
+
 
 if __name__ == "__main__":
     unittest.main()

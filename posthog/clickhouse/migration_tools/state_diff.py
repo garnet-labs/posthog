@@ -46,6 +46,12 @@ def _resolve_setting(key: str) -> str:
         val = getattr(django_settings, attr, None)
         if val:
             return ",".join(val) if isinstance(val, list) else str(val)
+        logger.warning(
+            "Django setting %s is not configured; falling back to kafka:9092. "
+            "Set %s in your environment to avoid this in production.",
+            attr,
+            attr,
+        )
     # Fallback for local dev
     return "kafka:9092"
 

@@ -855,7 +855,7 @@ class TestValidatorDesiredStates(unittest.TestCase):
     def test_valid_isolated_table_no_errors(self) -> None:
         from posthog.clickhouse.migration_tools.validator import validate_desired_states
 
-        ds = _make_desired_state({"lone_t": _make_desired_table("lone_t", engine="MergeTree")})
+        ds = _make_desired_state({"lone_t": _make_desired_table("lone_t", engine="MergeTree", order_by=["id"])})
         errors = validate_desired_states([ds])
         self.assertEqual(errors, [])
 
@@ -981,6 +981,122 @@ class TestTemplates(unittest.TestCase):
 
         result = generate_schema_yaml("nonexistent", "t", "main")
         self.assertIsNone(result)
+
+
+class TestMergeTreeOrderByLint(unittest.TestCase):
+    def test_mergetree_without_order_by_errors(self) -> None:
+        """MergeTree with no order_by must produce a lint error."""
+        from posthog.clickhouse.migration_tools.validator import validate_desired_states
+
+        ds = _make_desired_state(
+            {"t": _make_desired_table("t", engine="MergeTree", order_by=None)}
+        )
+        errors = validate_desired_states([ds])
+        self.assertTrue(any("ORDER BY" in e and "t" in e for e in errors))
+
+    def test_mergetree_with_order_by_no_error(self) -> None:
+        """MergeTree with order_by must not produce an ORDER BY lint error."""
+        from posthog.clickhouse.migration_tools.validator import validate_desired_states
+
+        ds = _make_desired_state(
+            {"t": _make_desired_table("t", engine="MergeTree", order_by=["id"])}
+        )
+        errors = validate_desired_states([ds])
+        order_by_errors = [e for e in errors if "ORDER BY" in e and "t" in e]
+        self.assertEqual(order_by_errors, [])
+
+    def test_replicated_mergetree_without_order_by_errors(self) -> None:
+        """ReplicatedMergeTree also requires ORDER BY."""
+        from posthog.clickhouse.migration_tools.validator import validate_desired_states
+
+        ds = _make_desired_state(
+            {"t": _make_desired_table("t", engine="ReplicatedMergeTree", order_by=None)}
+        )
+        errors = validate_desired_states([ds])
+        self.assertTrue(any("ORDER BY" in e for e in errors))
+
+
+class TestCircularColumnInheritance(unittest.TestCase):
+    def test_circular_inheritance_raises_value_error(self) -> None:
+        """A -> B -> A circular inheritance must raise ValueError, not RecursionError."""
+        p = _write_yaml("""\
+            ecosystem: test
+            cluster: main
+            tables:
+              a:
+                engine: MergeTree
+                on_nodes: DATA
+                columns: inherit b
+              b:
+                engine: MergeTree
+                on_nodes: DATA
+                columns: inherit a
+        """)
+        with self.assertRaises(ValueError) as ctx:
+            parse_desired_state(p)
+        self.assertIn("Circular", str(ctx.exception))
+
+    def test_non_circular_chain_works(self) -> None:
+        """A inherits B (no cycle) must succeed."""
+        p = _write_yaml("""\
+            ecosystem: test
+            cluster: main
+            tables:
+              b:
+                engine: MergeTree
+                on_nodes: DATA
+                columns:
+                  - name: id
+                    type: UUID
+              a:
+                engine: Distributed
+                on_nodes: ALL
+                columns: inherit b
+        """)
+        state = parse_desired_state(p)
+        self.assertEqual(len(state.tables["a"].columns), 1)
+
+
+class TestKafkaFallbackWarning(unittest.TestCase):
+    def test_resolve_setting_warns_when_unset(self) -> None:
+        """_resolve_setting must log a warning when Django setting is absent."""
+        import logging
+        from unittest.mock import patch
+
+        from posthog.clickhouse.migration_tools.state_diff import _resolve_setting
+
+        # Patch django_settings to have no KAFKA_HOSTS_FOR_CLICKHOUSE attribute
+        fake_settings = type("FakeSettings", (), {})()
+        with (
+            patch("posthog.clickhouse.migration_tools.state_diff.django_settings", fake_settings),
+            self.assertLogs("migrations", level=logging.WARNING) as log_ctx,
+        ):
+            result = _resolve_setting("kafka_broker_list")
+
+        self.assertEqual(result, "kafka:9092")
+        self.assertTrue(any("KAFKA_HOSTS_FOR_CLICKHOUSE" in msg for msg in log_ctx.output))
+
+    def test_resolve_setting_no_warning_when_configured(self) -> None:
+        """_resolve_setting must not warn when the Django setting is present."""
+        import logging
+        from unittest.mock import patch
+
+        from posthog.clickhouse.migration_tools.state_diff import _resolve_setting
+
+        fake_settings = type("FakeSettings", (), {"KAFKA_HOSTS_FOR_CLICKHOUSE": "broker:9092"})()
+        with patch("posthog.clickhouse.migration_tools.state_diff.django_settings", fake_settings):
+            # assertLogs would fail if nothing is logged — use assertNoLogs (Python 3.10+)
+            # Fall back to manual check for compatibility.
+            import io
+
+            handler = logging.StreamHandler(io.StringIO())
+            logging.getLogger("migrations").addHandler(handler)
+            try:
+                result = _resolve_setting("kafka_broker_list")
+            finally:
+                logging.getLogger("migrations").removeHandler(handler)
+
+        self.assertEqual(result, "broker:9092")
 
 
 class TestPlanSymbols(unittest.TestCase):

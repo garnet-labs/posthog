@@ -56,16 +56,19 @@ def _parse_column(raw: dict[str, Any]) -> ColumnDef:
     )
 
 
-def _parse_columns(raw: Any, all_tables: dict[str, Any]) -> list[ColumnDef]:
+def _parse_columns(raw: Any, all_tables: dict[str, Any], _visited: frozenset[str] = frozenset()) -> list[ColumnDef]:
     """Parse columns, handling 'inherit <table_name>' syntax."""
     if isinstance(raw, str) and raw.startswith("inherit "):
         source_table = raw.split(" ", 1)[1].strip()
+        if source_table in _visited:
+            chain = " -> ".join(sorted(_visited)) + " -> " + source_table
+            raise ValueError(f"Circular column inheritance detected: {chain}")
         source_raw = all_tables.get(source_table)
         if source_raw is None:
             raise ValueError(f"Cannot inherit columns from unknown table '{source_table}'")
         source_cols = source_raw.get("columns")
         if isinstance(source_cols, str) and source_cols.startswith("inherit "):
-            return _parse_columns(source_cols, all_tables)
+            return _parse_columns(source_cols, all_tables, _visited | {source_table})
         if not isinstance(source_cols, list):
             raise ValueError(f"Source table '{source_table}' has no column list to inherit from")
         return [_parse_column(c) for c in source_cols]

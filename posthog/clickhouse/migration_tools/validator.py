@@ -75,7 +75,20 @@ def validate_desired_states(desired_states: list[DesiredState]) -> list[str]:
     for state in desired_states:
         errors.extend(_check_ecosystem_completeness(state, dynamic_lookup))
         errors.extend(_check_cross_cluster_targeting(state))
+        errors.extend(_check_mergetree_order_by(state))
 
+    return errors
+
+
+def _check_mergetree_order_by(state: DesiredState) -> list[str]:
+    """MergeTree requires ORDER BY — ClickHouse will reject the CREATE without it."""
+    errors: list[str] = []
+    for table_name, table in state.tables.items():
+        if is_mergetree(table.engine) and not table.order_by:
+            errors.append(
+                f"[{state.ecosystem}] Table '{table_name}' (engine={table.engine}) "
+                f"requires ORDER BY but none is specified"
+            )
     return errors
 
 
