@@ -247,7 +247,7 @@ class TestEvaluationModel(BaseTest):
         self.assertIn("bytecode", evaluation.evaluation_config)
         self.assertNotEqual(evaluation.evaluation_config["bytecode"], original_bytecode)
 
-    def test_empty_conditions_get_default_always_match_condition(self):
+    def test_empty_conditions_get_default_condition(self):
         evaluation = Evaluation.objects.create(
             team=self.team,
             name="MCP-created Eval",
@@ -265,14 +265,13 @@ class TestEvaluationModel(BaseTest):
         self.assertEqual(len(evaluation.conditions), 1)
         condition = evaluation.conditions[0]
         self.assertTrue(condition["id"].startswith("cond-default-"))
-        self.assertEqual(condition["rollout_percentage"], 100)
+        self.assertEqual(condition["rollout_percentage"], 1)
         self.assertEqual(condition["properties"], [])
-        # Should compile to the always-true bytecode
         self.assertIn("bytecode", condition)
         self.assertIsNotNone(condition["bytecode"])
         self.assertEqual(condition["bytecode"], ["_H", 1, 29])
 
-    def test_omitted_conditions_get_default_always_match_condition(self):
+    def test_omitted_conditions_get_default_condition(self):
         evaluation = Evaluation.objects.create(
             team=self.team,
             name="No conditions provided",
@@ -289,7 +288,7 @@ class TestEvaluationModel(BaseTest):
         self.assertEqual(len(evaluation.conditions), 1)
         condition = evaluation.conditions[0]
         self.assertTrue(condition["id"].startswith("cond-default-"))
-        self.assertEqual(condition["rollout_percentage"], 100)
+        self.assertEqual(condition["rollout_percentage"], 1)
         self.assertEqual(condition["bytecode"], ["_H", 1, 29])
 
     def test_explicit_conditions_not_overridden_by_default(self):

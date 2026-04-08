@@ -51,7 +51,7 @@ const schema = z
                         .min(0)
                         .max(100)
                         .optional()
-                        .describe('Percentage of generations to evaluate (0-100). Defaults to 100.'),
+                        .describe('Percentage of generations to evaluate (0-100). Defaults to 1 when conditions are omitted.'),
                     properties: z
                         .array(z.record(z.unknown()))
                         .optional()
@@ -60,7 +60,7 @@ const schema = z
             )
             .optional()
             .describe(
-                'Conditions controlling when this evaluation fires. If omitted, a default always-match condition is used.'
+                'Conditions controlling when this evaluation fires. If omitted, a default condition with 1% rollout is used to avoid burning LLM credits. Set rollout_percentage to 100 for full coverage.'
             ),
     })
     .superRefine((data, ctx) => {

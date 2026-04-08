@@ -76,14 +76,15 @@ class Evaluation(UUIDTModel):
             except Exception as e:
                 raise ValidationError({"evaluation_config": f"Failed to compile Hog code: {e}"})
 
-        # Inject a default always-match condition when none are provided,
-        # so the evaluation scheduler doesn't silently skip this evaluation.
+        # Inject a default condition when none are provided so the evaluation
+        # scheduler doesn't silently skip this evaluation. Uses 1% rollout to
+        # avoid accidentally burning LLM credits on high-volume teams.
         if not self.conditions:
             self.conditions = [
                 {
                     "id": f"cond-default-{uuid.uuid4().hex[:13]}",
                     "properties": [],
-                    "rollout_percentage": 100,
+                    "rollout_percentage": 1,
                 }
             ]
 
