@@ -422,6 +422,15 @@ export const ThreadWithEmptyConversation: Story = {
 
         return <Template />
     },
+    parameters: {
+        testOptions: {
+            // This story intentionally exercises the "conversation loaded, but thread messages not ready yet" state.
+            // Waiting for all `.LemonSkeleton` elements to disappear is flaky here and can time out in CI.
+            waitForLoadersToDisappear: false,
+            // Still wait for a stable, always-present element before snapshotting.
+            waitForSelector: '[data-attr="max-chat-input"]',
+        },
+    },
 }
 
 export const SharedThread: Story = {
