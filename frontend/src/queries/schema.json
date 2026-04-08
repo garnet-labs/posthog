@@ -33791,6 +33791,9 @@
                     "$ref": "#/definitions/LinearIssueSignalInput"
                 },
                 {
+                    "$ref": "#/definitions/ConversationsTicketSignalInput"
+                },
+                {
                     "$ref": "#/definitions/ErrorTrackingSignalInput"
                 }
             ],

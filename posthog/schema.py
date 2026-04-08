@@ -7577,6 +7577,7 @@ class SignalInput(
         | ZendeskTicketSignalInput
         | GithubIssueSignalInput
         | LinearIssueSignalInput
+        | ConversationsTicketSignalInput
         | ErrorTrackingSignalInput
     ]
 ):
@@ -7586,6 +7587,7 @@ class SignalInput(
         | ZendeskTicketSignalInput
         | GithubIssueSignalInput
         | LinearIssueSignalInput
+        | ConversationsTicketSignalInput
         | ErrorTrackingSignalInput
     ) = Field(..., discriminator="source_product")
 
