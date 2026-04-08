@@ -37,7 +37,7 @@ import {
 } from '~/queries/schema/schema-general'
 import { InsightLogicProps, InsightShortId, QueryBasedInsightModel } from '~/types'
 
-import { alertFormLogic, canCheckOngoingInterval } from '../alertFormLogic'
+import { alertFormLogic, canCheckOngoingInterval, getDefaultSimulationRange } from '../alertFormLogic'
 import { alertLogic } from '../alertLogic'
 import { alertNotificationLogic } from '../alertNotificationLogic'
 import { isNextPlannedEvaluationStale } from '../alertSchedulingStale'
@@ -80,19 +80,6 @@ function getSimulationRangeOptions(interval: AlertCalculationInterval): { label:
                 { label: 'Last 12m', value: '-12m' },
                 { label: 'Last 24m', value: '-24m' },
             ]
-    }
-}
-
-function getDefaultSimulationRange(interval: AlertCalculationInterval): string {
-    switch (interval) {
-        case AlertCalculationInterval.HOURLY:
-            return '-48h'
-        case AlertCalculationInterval.DAILY:
-            return '-30d'
-        case AlertCalculationInterval.WEEKLY:
-            return '-12w'
-        case AlertCalculationInterval.MONTHLY:
-            return '-12m'
     }
 }
 

@@ -23,6 +23,7 @@ from posthog.cdp.internal_events import InternalEventEvent, produce_internal_eve
 from posthog.email import EmailMessage
 from posthog.exceptions_capture import capture_exception
 from posthog.models import AlertConfiguration
+from posthog.models.alert import derive_detector_event_fields
 from posthog.tasks.alerts.schedule_restriction import snap_candidate_utc_to_schedule_restriction
 from posthog.utils import get_from_dict_or_attr
 
@@ -240,11 +241,6 @@ def trigger_alert_hog_functions(alert: AlertConfiguration, properties: dict) -> 
     )
 
     try:
-        detector_config = alert.detector_config or {}
-        detector_type = detector_config.get("type")
-        alert_mode = "detector" if detector_type else "threshold"
-        ensemble_operator = detector_config.get("operator") if detector_type == "ensemble" else None
-
         props = {
             "alert_id": str(alert.id),
             "alert_name": alert.name,
@@ -252,9 +248,7 @@ def trigger_alert_hog_functions(alert: AlertConfiguration, properties: dict) -> 
             "insight_id": alert.insight.short_id,
             "state": alert.state,
             "last_checked_at": alert.last_checked_at.isoformat() if alert.last_checked_at else None,
-            "alert_mode": alert_mode,
-            "detector_type": detector_type,
-            "ensemble_operator": ensemble_operator,
+            **derive_detector_event_fields(alert.detector_config),
             **properties,
         }
 

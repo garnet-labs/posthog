@@ -52,6 +52,19 @@ export function canCheckOngoingInterval(alert?: AlertType | AlertFormType): bool
     )
 }
 
+export function getDefaultSimulationRange(interval: AlertCalculationInterval): string {
+    switch (interval) {
+        case AlertCalculationInterval.HOURLY:
+            return '-48h'
+        case AlertCalculationInterval.DAILY:
+            return '-30d'
+        case AlertCalculationInterval.WEEKLY:
+            return '-12w'
+        case AlertCalculationInterval.MONTHLY:
+            return '-12m'
+    }
+}
+
 export interface AlertFormLogicProps {
     alert: AlertType | null
     insightId: QueryBasedInsightModel['id']
@@ -124,19 +137,13 @@ export const alertFormLogic = kea<alertFormLogicType>([
                     if (!detectorConfig || !props.insightId) {
                         return null
                     }
-                    const defaultRange =
-                        values.alertForm.calculation_interval === AlertCalculationInterval.HOURLY
-                            ? '-48h'
-                            : values.alertForm.calculation_interval === AlertCalculationInterval.WEEKLY
-                              ? '-12w'
-                              : values.alertForm.calculation_interval === AlertCalculationInterval.MONTHLY
-                                ? '-12m'
-                                : '-30d'
                     return await api.alerts.simulate({
                         insight: props.insightId,
                         detector_config: detectorConfig,
                         series_index: values.alertForm.config?.series_index ?? 0,
-                        date_from: values.simulationDateFrom ?? defaultRange,
+                        date_from:
+                            values.simulationDateFrom ??
+                            getDefaultSimulationRange(values.alertForm.calculation_interval),
                     })
                 },
                 clearSimulation: () => null,
@@ -318,8 +325,10 @@ export const alertFormLogic = kea<alertFormLogicType>([
                 getParentLogic()?.actions.loadAlerts()
             },
             simulateAlertSuccess: ({ simulationResult }) => {
-                const detectorConfig = values.alertForm.detector_config
-                if (simulationResult && detectorConfig) {
+                // simulateAlert returns null early for threshold alerts (no API call),
+                // so null here means nothing actually ran — skip the event.
+                if (simulationResult) {
+                    const detectorConfig = values.alertForm.detector_config
                     const isBreakdown = Boolean(
                         simulationResult.breakdown_results && simulationResult.breakdown_results.length > 0
                     )
@@ -331,9 +340,11 @@ export const alertFormLogic = kea<alertFormLogicType>([
                         : simulationResult.anomaly_count
                     posthog.capture('alert simulation run', {
                         success: true,
-                        detector_type: detectorConfig.type,
-                        ensemble_operator: detectorConfig.type === 'ensemble' ? detectorConfig.operator : null,
-                        date_from: values.simulationDateFrom,
+                        detector_type: detectorConfig?.type ?? null,
+                        ensemble_operator: detectorConfig?.type === 'ensemble' ? detectorConfig.operator : null,
+                        date_from:
+                            values.simulationDateFrom ??
+                            getDefaultSimulationRange(values.alertForm.calculation_interval),
                         anomaly_count: anomalyCount,
                         total_points: totalPoints,
                         is_breakdown: isBreakdown,
@@ -376,7 +387,8 @@ export const alertFormLogic = kea<alertFormLogicType>([
                     success: false,
                     detector_type: detectorConfig?.type ?? null,
                     ensemble_operator: detectorConfig?.type === 'ensemble' ? detectorConfig.operator : null,
-                    date_from: values.simulationDateFrom,
+                    date_from:
+                        values.simulationDateFrom ?? getDefaultSimulationRange(values.alertForm.calculation_interval),
                     error: error ?? 'Unknown error',
                 })
                 lemonToast.error(`Simulation failed: ${error || 'Unknown error'}`)
