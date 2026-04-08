@@ -9,13 +9,12 @@ export const getAnthropicSteps = (ctx: OnboardingComponentsContext): StepDefinit
 
     return [
         {
-            title: 'Install the PostHog SDK',
+            title: 'Install dependencies',
             badge: 'required',
             content: (
                 <>
                     <Markdown>
-                        Setting up analytics starts with installing the PostHog SDK for your language. LLM analytics
-                        works best with our Python and Node SDKs.
+                        Install the OpenTelemetry SDK, the Anthropic instrumentation, and the Anthropic SDK.
                     </Markdown>
 
                     <CodeBlock
@@ -24,70 +23,36 @@ export const getAnthropicSteps = (ctx: OnboardingComponentsContext): StepDefinit
                                 language: 'bash',
                                 file: 'Python',
                                 code: dedent`
-                                    pip install posthog
+                                    pip install anthropic opentelemetry-sdk opentelemetry-exporter-otlp-proto-http opentelemetry-instrumentation-anthropic
                                 `,
                             },
                             {
                                 language: 'bash',
                                 file: 'Node',
                                 code: dedent`
-                                    npm install @posthog/ai posthog-node
-                                `,
-                            },
-                        ]}
-                    />
-                </>
-            ),
-        },
-        {
-            title: 'Install the Anthropic SDK',
-            badge: 'required',
-            content: (
-                <>
-                    <Markdown>
-                        Install the Anthropic SDK. The PostHog SDK instruments your LLM calls by wrapping the Anthropic
-                        client. The PostHog SDK **does not** proxy your calls.
-                    </Markdown>
-
-                    <CodeBlock
-                        blocks={[
-                            {
-                                language: 'bash',
-                                file: 'Python',
-                                code: dedent`
-                                    pip install anthropic
-                                `,
-                            },
-                            {
-                                language: 'bash',
-                                file: 'Node',
-                                code: dedent`
-                                    npm install @anthropic-ai/sdk
+                                    npm install @anthropic-ai/sdk @posthog/ai @opentelemetry/sdk-node @opentelemetry/resources @traceloop/instrumentation-anthropic
                                 `,
                             },
                         ]}
                     />
 
-                    <CalloutBox type="fyi" icon="IconInfo" title="Proxy note">
+                    <CalloutBox type="fyi" icon="IconInfo" title="No proxy">
                         <Markdown>
-                            These SDKs **do not** proxy your calls. They only fire off an async call to PostHog in the
-                            background to send the data. You can also use LLM analytics with other SDKs or our API, but
-                            you will need to capture the data in the right format. See the schema in the [manual capture
-                            section](https://posthog.com/docs/llm-analytics/installation/manual-capture) for more
-                            details.
+                            These SDKs **do not** proxy your calls. They only send analytics data to PostHog in the
+                            background.
                         </Markdown>
                     </CalloutBox>
                 </>
             ),
         },
         {
-            title: 'Initialize PostHog and the Anthropic wrapper',
+            title: 'Set up OpenTelemetry tracing',
             badge: 'required',
             content: (
                 <>
                     <Markdown>
-                        Initialize PostHog with your project token and host from [your project
-                        settings](https://app.posthog.com/settings/project), then pass it to our Anthropic wrapper.
+                        Configure OpenTelemetry to auto-instrument Anthropic SDK calls and export traces to PostHog.
+                        PostHog converts `gen_ai.*` spans into `$ai_generation` events automatically.
                     </Markdown>
 
                     <CodeBlock
@@ -96,36 +61,108 @@ export const getAnthropicSteps = (ctx: OnboardingComponentsContext): StepDefinit
                                 language: 'python',
                                 file: 'Python',
                                 code: dedent`
-                                    from posthog.ai.anthropic import Anthropic
-                                    from posthog import Posthog
+                                    from opentelemetry import trace
+                                    from opentelemetry.sdk.trace import TracerProvider
+                                    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+                                    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+                                    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+                                    from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 
-                                    posthog = Posthog(
-                                        "<ph_project_token>",
-                                        host="<ph_client_api_host>"
+                                    resource = Resource(attributes={
+                                        SERVICE_NAME: "my-app",
+                                        "user.id": "user_123", # optional: identifies the user in PostHog
+                                    })
+
+                                    exporter = OTLPSpanExporter(
+                                        endpoint="<ph_client_api_host>/i/v0/ai/otel",
+                                        headers={"Authorization": "Bearer <ph_project_token>"},
                                     )
 
-                                    client = Anthropic(
-                                        api_key="sk-ant-api...", # Replace with your Anthropic API key
-                                        posthog_client=posthog # This is an optional parameter. If it is not provided, a default client will be used.
-                                    )
+                                    provider = TracerProvider(resource=resource)
+                                    provider.add_span_processor(SimpleSpanProcessor(exporter))
+                                    trace.set_tracer_provider(provider)
+
+                                    AnthropicInstrumentor().instrument()
                                 `,
                             },
                             {
                                 language: 'typescript',
                                 file: 'Node',
                                 code: dedent`
-                                    import { Anthropic } from '@posthog/ai'
-                                    import { PostHog } from 'posthog-node'
+                                    import { NodeSDK, tracing } from '@opentelemetry/sdk-node'
+                                    import { resourceFromAttributes } from '@opentelemetry/resources'
+                                    import { PostHogTraceExporter } from '@posthog/ai/otel'
+                                    import { AnthropicInstrumentation } from '@traceloop/instrumentation-anthropic'
 
-                                    const phClient = new PostHog(
-                                      '<ph_project_token>',
-                                      { host: '<ph_client_api_host>' }
+                                    const sdk = new NodeSDK({
+                                      resource: resourceFromAttributes({
+                                        'service.name': 'my-app',
+                                        'user.id': 'user_123', // optional: identifies the user in PostHog
+                                      }),
+                                      spanProcessors: [
+                                        new tracing.SimpleSpanProcessor(
+                                          new PostHogTraceExporter({
+                                            apiKey: '<ph_project_token>',
+                                            host: '<ph_client_api_host>',
+                                          })
+                                        ),
+                                      ],
+                                      instrumentations: [new AnthropicInstrumentation()],
+                                    })
+                                    sdk.start()
+                                `,
+                            },
+                        ]}
+                    />
+                </>
+            ),
+        },
+        {
+            title: 'Call Anthropic',
+            badge: 'required',
+            content: (
+                <>
+                    <Markdown>
+                        Now, when you use the Anthropic SDK to call LLMs, PostHog automatically captures
+                        `$ai_generation` events via the OpenTelemetry instrumentation.
+                    </Markdown>
+
+                    <CodeBlock
+                        blocks={[
+                            {
+                                language: 'python',
+                                file: 'Python',
+                                code: dedent`
+                                    import anthropic
+
+                                    client = anthropic.Anthropic(api_key="sk-ant-api...")
+
+                                    response = client.messages.create(
+                                        model="claude-sonnet-4-20250514",
+                                        max_tokens=1024,
+                                        messages=[
+                                            {"role": "user", "content": "Tell me a fun fact about hedgehogs"}
+                                        ],
                                     )
 
-                                    const client = new Anthropic({
-                                      apiKey: 'sk-ant-api...', // Replace with your Anthropic API key
-                                      posthog: phClient
+                                    print(response.content[0].text)
+                                `,
+                            },
+                            {
+                                language: 'typescript',
+                                file: 'Node',
+                                code: dedent`
+                                    import Anthropic from '@anthropic-ai/sdk'
+
+                                    const client = new Anthropic({ apiKey: 'sk-ant-api...' })
+
+                                    const response = await client.messages.create({
+                                      model: 'claude-sonnet-4-20250514',
+                                      max_tokens: 1024,
+                                      messages: [{ role: 'user', content: 'Tell me a fun fact about hedgehogs' }],
                                     })
+
+                                    console.log(response.content[0].text)
                                 `,
                             },
                         ]}
@@ -137,79 +174,12 @@ export const getAnthropicSteps = (ctx: OnboardingComponentsContext): StepDefinit
                             `AnthropicVertex`, and the async versions of those.
                         </Markdown>
                     </Blockquote>
-                </>
-            ),
-        },
-        {
-            title: 'Call Anthropic LLMs',
-            badge: 'required',
-            content: (
-                <>
-                    <Markdown>
-                        Now, when you use the Anthropic SDK to call LLMs, PostHog automatically captures an
-                        `$ai_generation` event. You can enrich the event with additional data such as the trace ID,
-                        distinct ID, custom properties, groups, and privacy mode options.
-                    </Markdown>
-
-                    <CodeBlock
-                        blocks={[
-                            {
-                                language: 'python',
-                                file: 'Python',
-                                code: dedent`
-                                    response = client.messages.create(
-                                        model="claude-3-opus-20240229",
-                                        messages=[
-                                            {
-                                                "role": "user",
-                                                "content": "Tell me a fun fact about hedgehogs"
-                                            }
-                                        ],
-                                        posthog_distinct_id="user_123", # optional
-                                        posthog_trace_id="trace_123", # optional
-                                        posthog_properties={"conversation_id": "abc123", "paid": True}, # optional
-                                        posthog_groups={"company": "company_id_in_your_db"},  # optional
-                                        posthog_privacy_mode=False # optional
-                                    )
-
-                                    print(response.content[0].text)
-                                `,
-                            },
-                            {
-                                language: 'typescript',
-                                file: 'Node',
-                                code: dedent`
-                                    const response = await client.messages.create({
-                                      model: "claude-3-5-sonnet-latest",
-                                      messages: [
-                                        {
-                                          role: "user",
-                                          content: "Tell me a fun fact about hedgehogs"
-                                        }
-                                      ],
-                                      posthogDistinctId: "user_123", // optional
-                                      posthogTraceId: "trace_123", // optional
-                                      posthogProperties: { conversationId: "abc123", paid: true }, // optional
-                                      posthogGroups: { company: "company_id_in_your_db" }, // optional
-                                      posthogPrivacyMode: false // optional
-                                    })
-
-                                    console.log(response.content[0].text)
-                                    phClient.shutdown()
-                                `,
-                            },
-                        ]}
-                    />
 
                     <Blockquote>
                         <Markdown>
-                            {dedent`
-                            **Notes:**
-                            - This also works when message streams are used (e.g. \`stream=True\` or \`client.messages.stream(...)\`).
-                            - If you want to capture LLM events anonymously, **don't** pass a distinct ID to the request.
-
-                            See our docs on [anonymous vs identified events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
-                            `}
+                            **Note:** If you want to capture LLM events anonymously, omit the `user.id` resource
+                            attribute. See our docs on [anonymous vs identified
+                            events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
                         </Markdown>
                     </Blockquote>
 
