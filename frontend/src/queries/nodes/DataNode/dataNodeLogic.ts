@@ -870,7 +870,7 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
                                 ...query,
                                 offset: typedResults?.length || 0,
                                 limit: Math.max(
-                                    100,
+                                    Math.min(100, effectivePaginationLimit),
                                     Math.min(2 * (typedResults?.length || 100), effectivePaginationLimit)
                                 ),
                             } as

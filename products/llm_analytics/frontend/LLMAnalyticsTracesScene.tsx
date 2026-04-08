@@ -68,6 +68,7 @@ export const useTracesQueryContext = (): QueryContext<DataTableNode> => {
     return {
         emptyStateHeading: 'There were no traces in this period',
         emptyStateDetail: 'Try changing the date range or filters.',
+        dataTableMaxPaginationLimit: 50,
         columns: {
             id: {
                 title: 'ID',
