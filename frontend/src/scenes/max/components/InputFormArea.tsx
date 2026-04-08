@@ -33,6 +33,15 @@ function isQuestionComplete(
         }
         return q.fields.every((field) => isFieldValid(field, answers[field.id]))
     }
+    if (q.type === 'multi_select') {
+        // Multi_select questions accumulate selections before submission.
+        // Require explicit confirmation like multi_field questions.
+        if (!confirmedQuestions?.has(q.id)) {
+            return false
+        }
+        const val = answers[q.id]
+        return Array.isArray(val) && val.length > 0
+    }
     return answers[q.id] !== undefined
 }
 
@@ -184,6 +193,25 @@ export function MultiQuestionFormInput({ form, initialAnswers = {} }: MultiQuest
         [currentQuestion.id]
     )
 
+    const handleMultiSelectChange = useCallback(
+        (value: string[]) => {
+            const nextSkippedQuestions = removeQuestionFromSet(currentQuestion.id, skippedQuestionsRef.current)
+            if (nextSkippedQuestions !== skippedQuestionsRef.current) {
+                setSkippedQuestions(nextSkippedQuestions)
+                skippedQuestionsRef.current = nextSkippedQuestions
+            }
+            const nextConfirmedQuestions = removeQuestionFromSet(currentQuestion.id, confirmedQuestionsRef.current)
+            if (nextConfirmedQuestions !== confirmedQuestionsRef.current) {
+                setConfirmedQuestions(nextConfirmedQuestions)
+                confirmedQuestionsRef.current = nextConfirmedQuestions
+            }
+            const updatedAnswers = { ...answersRef.current, [currentQuestion.id]: value }
+            setAnswers(updatedAnswers)
+            answersRef.current = updatedAnswers
+        },
+        [currentQuestion.id]
+    )
+
     const handleMultiFieldSubmit = useCallback(() => {
         const nextConfirmedQuestions = new Set(confirmedQuestionsRef.current)
         nextConfirmedQuestions.add(currentQuestion.id)
@@ -296,6 +324,8 @@ export function MultiQuestionFormInput({ form, initialAnswers = {} }: MultiQuest
                                         question={q}
                                         value={answers[q.id]}
                                         onAnswer={handleSingleFieldAnswer}
+                                        onChange={handleMultiSelectChange}
+                                        onSubmit={handleMultiFieldSubmit}
                                         onSkip={handleSkipQuestion}
                                         submitLabel={allQuestionsCompleted ? 'Submit' : 'Next'}
                                     />

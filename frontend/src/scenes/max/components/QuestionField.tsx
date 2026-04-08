@@ -13,6 +13,10 @@ interface QuestionFieldProps {
     question: MultiQuestionFormQuestion
     value: string | string[] | undefined
     onAnswer: (value: string | string[] | null) => void
+    /** Called on each intermediate state change for multi_select (checkbox toggle, custom value add) */
+    onChange?: (value: string[]) => void
+    /** Called when the user confirms a multi_select answer by clicking "Next" */
+    onSubmit?: () => void
     onSkip?: () => void
     submitLabel?: string
 }
@@ -21,6 +25,8 @@ export function QuestionField({
     question,
     value,
     onAnswer,
+    onChange,
+    onSubmit,
     onSkip,
     submitLabel = 'Next',
 }: QuestionFieldProps): JSX.Element {
@@ -32,7 +38,8 @@ export function QuestionField({
                 <MultiSelectField
                     question={question}
                     value={value as string[] | undefined}
-                    onAnswer={onAnswer}
+                    onChange={onChange!}
+                    onSubmit={onSubmit!}
                     onSkip={onSkip}
                     submitLabel={submitLabel}
                 />
@@ -89,37 +96,32 @@ function SelectField({
 function MultiSelectField({
     question,
     value,
-    onAnswer,
+    onChange,
+    onSubmit,
     onSkip,
     submitLabel,
 }: {
     question: MultiQuestionFormQuestion
     value: string[] | undefined
-    onAnswer: (value: string[]) => void
+    onChange: (value: string[]) => void
+    onSubmit: () => void
     onSkip?: () => void
     submitLabel: string
 }): JSX.Element {
     const predefinedValues = useMemo(() => new Set((question.options ?? []).map((o) => o.value)), [question.options])
+    const customValues = useMemo(() => (value ?? []).filter((v) => !predefinedValues.has(v)), [value, predefinedValues])
 
-    const [selected, setSelected] = useState<string[]>(value ?? [])
-    const [customValues, setCustomValues] = useState<string[]>(() => {
-        if (!value) {
-            return []
-        }
-        return value.filter((v) => !predefinedValues.has(v))
-    })
     const [customInput, setCustomInput] = useState('')
     const [showError, setShowError] = useState(false)
 
+    const selected = value ?? []
     const allowCustomAnswer = question.allow_custom_answer !== false
 
     const handleToggle = (optionValue: string): void => {
-        setSelected((prev) => {
-            if (prev.includes(optionValue)) {
-                return prev.filter((v) => v !== optionValue)
-            }
-            return [...prev, optionValue]
-        })
+        const next = selected.includes(optionValue)
+            ? selected.filter((v) => v !== optionValue)
+            : [...selected, optionValue]
+        onChange(next)
         setShowError(false)
     }
 
@@ -133,7 +135,7 @@ function MultiSelectField({
         const matchingPredefined = (question.options ?? []).find((o) => o.value.toLowerCase() === trimmed.toLowerCase())
         if (matchingPredefined) {
             if (!selected.includes(matchingPredefined.value)) {
-                setSelected((prev) => [...prev, matchingPredefined.value])
+                onChange([...selected, matchingPredefined.value])
             }
             setCustomInput('')
             setShowError(false)
@@ -144,15 +146,14 @@ function MultiSelectField({
         const matchingCustom = customValues.find((v) => v.toLowerCase() === trimmed.toLowerCase())
         if (matchingCustom) {
             if (!selected.includes(matchingCustom)) {
-                setSelected((prev) => [...prev, matchingCustom])
+                onChange([...selected, matchingCustom])
             }
             setCustomInput('')
             setShowError(false)
             return
         }
 
-        setCustomValues((prev) => [...prev, trimmed])
-        setSelected((prev) => [...prev, trimmed])
+        onChange([...selected, trimmed])
         setCustomInput('')
         setShowError(false)
     }
@@ -162,7 +163,7 @@ function MultiSelectField({
             setShowError(true)
             return
         }
-        onAnswer(selected)
+        onSubmit()
     }
 
     return (

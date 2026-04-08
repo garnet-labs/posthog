@@ -86,17 +86,40 @@ describe('QuestionField', () => {
     })
 
     it('multi_select adds custom value and includes it in submission', () => {
-        const onAnswer = jest.fn()
+        const onChange = jest.fn()
+        const onSubmit = jest.fn()
         const question: MultiQuestionFormQuestion = {
             ...baseQuestion,
             type: 'multi_select',
             options: [{ value: 'Alpha' }, { value: 'Beta' }],
         }
-        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+        const { rerender } = render(
+            <QuestionField
+                question={question}
+                value={undefined}
+                onAnswer={jest.fn()}
+                onChange={onChange}
+                onSubmit={onSubmit}
+            />
+        )
 
         const input = screen.getByPlaceholderText('Add your own option...')
         fireEvent.change(input, { target: { value: 'Custom value' } })
         fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+
+        // onChange should be called with the new selection
+        expect(onChange).toHaveBeenCalledWith(['Custom value'])
+
+        // Simulate parent updating the controlled value
+        rerender(
+            <QuestionField
+                question={question}
+                value={['Custom value']}
+                onAnswer={jest.fn()}
+                onChange={onChange}
+                onSubmit={onSubmit}
+            />
+        )
 
         // Custom value should appear as a checked checkbox
         expect(screen.getByText('Custom value')).toBeInTheDocument()
@@ -105,7 +128,7 @@ describe('QuestionField', () => {
         // Submit with only the custom value selected
         const submitButton = screen.getAllByRole('button').find((b) => b.textContent?.includes('Next'))
         fireEvent.click(submitButton!)
-        expect(onAnswer).toHaveBeenCalledWith(['Custom value'])
+        expect(onSubmit).toHaveBeenCalled()
     })
 
     it('multi_select does not add empty or whitespace-only custom values', () => {
@@ -126,18 +149,28 @@ describe('QuestionField', () => {
     })
 
     it('multi_select auto-checks predefined option when duplicate custom value is entered', () => {
-        const onAnswer = jest.fn()
+        const onChange = jest.fn()
         const question: MultiQuestionFormQuestion = {
             ...baseQuestion,
             type: 'multi_select',
             options: [{ value: 'Alpha' }, { value: 'Beta' }],
         }
-        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+        render(
+            <QuestionField
+                question={question}
+                value={undefined}
+                onAnswer={jest.fn()}
+                onChange={onChange}
+                onSubmit={jest.fn()}
+            />
+        )
 
         const input = screen.getByPlaceholderText('Add your own option...')
         fireEvent.change(input, { target: { value: 'alpha' } })
         fireEvent.click(screen.getByRole('button', { name: /Add/ }))
 
+        // Should call onChange with the matched predefined option
+        expect(onChange).toHaveBeenCalledWith(['Alpha'])
         // Should still only have 2 checkboxes (no duplicate added)
         expect(screen.getAllByRole('checkbox')).toHaveLength(2)
         // Input should be cleared

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { LemonButton, LemonInput, Spinner } from '@posthog/lemon-ui'
 
@@ -44,15 +44,12 @@ export function OptionSelector({
     submitLabel = 'Next',
     onSkip,
 }: OptionSelectorProps): JSX.Element {
-    const isInitialCustomAnswer = useMemo(() => {
-        const valueToCheck = selectedValue ?? initialCustomValue
-        return valueToCheck !== undefined && !options.some((o) => o.value === valueToCheck)
-    }, [selectedValue, initialCustomValue, options])
-    const [showCustomInput, setShowCustomInput] = useState(isInitialCustomAnswer)
+    const isCustomValue = selectedValue !== undefined && !options.some((o) => o.value === selectedValue)
+    const [userWantsCustomMode, setUserWantsCustomMode] = useState(isCustomValue)
+    const showCustomInput = userWantsCustomMode || isCustomValue
     const [customInput, setCustomInput] = useState(initialCustomValue ?? '')
-    const [selectedOption, setSelectedOption] = useState(selectedValue)
-    const selectedOptionRef = useRef(selectedOption)
-    selectedOptionRef.current = selectedOption
+    const selectedValueRef = useRef(selectedValue)
+    selectedValueRef.current = selectedValue
 
     useEffect(() => {
         if (disabled || loading) {
@@ -62,7 +59,7 @@ export function OptionSelector({
         function handleKeyDown(event: KeyboardEvent): void {
             if (showCustomInput && event.key === 'Escape') {
                 event.preventDefault()
-                setShowCustomInput(false)
+                setUserWantsCustomMode(false)
                 setCustomInput('')
                 return
             }
@@ -75,12 +72,10 @@ export function OptionSelector({
             for (const [index, option] of options.entries()) {
                 if (event.key === String(index + 1)) {
                     event.preventDefault()
-                    if (selectedOptionRef.current === option.value) {
-                        setSelectedOption(undefined)
+                    if (selectedValueRef.current === option.value) {
                         onSelect(null)
                     } else {
-                        setSelectedOption(option.value)
-                        setShowCustomInput(false)
+                        setUserWantsCustomMode(false)
                         onSelect(option.value)
                     }
                     return
@@ -89,7 +84,7 @@ export function OptionSelector({
 
             if (allowCustom && event.key === String(options.length + 1)) {
                 event.preventDefault()
-                setShowCustomInput(true)
+                setUserWantsCustomMode(true)
             }
         }
 
@@ -104,10 +99,11 @@ export function OptionSelector({
     const handleCustomSubmit = (): void => {
         if (!customInput.trim()) {
             // When not choosing a custom input, hide the input and show button again
-            setShowCustomInput(false)
+            setUserWantsCustomMode(false)
 
             return
         }
+        setUserWantsCustomMode(false)
         onCustomSubmit?.(customInput.trim())
     }
 
@@ -134,12 +130,10 @@ export function OptionSelector({
                         className="grid items-center gap-x-2 grid-cols-[min-content_auto] text-sm cursor-pointer"
                         onClick={(e) => {
                             e.preventDefault()
-                            if (selectedOption === o.value) {
-                                setSelectedOption(undefined)
+                            if (selectedValue === o.value) {
                                 onSelect(null)
                             } else {
-                                setSelectedOption(o.value)
-                                setShowCustomInput(false)
+                                setUserWantsCustomMode(false)
                                 onSelect(o.value)
                             }
                         }}
@@ -147,7 +141,7 @@ export function OptionSelector({
                         <input
                             type="radio"
                             className="cursor-pointer"
-                            checked={selectedOption === o.value}
+                            checked={selectedValue === o.value && !showCustomInput}
                             onChange={() => {}}
                         />
                         <span>{o.label}</span>
@@ -167,8 +161,7 @@ export function OptionSelector({
                         className="cursor-pointer"
                         checked={showCustomInput}
                         onChange={() => {
-                            setShowCustomInput(true)
-                            setSelectedOption('custom')
+                            setUserWantsCustomMode(true)
                         }}
                         value="custom"
                     />
@@ -178,10 +171,7 @@ export function OptionSelector({
                             fullWidth
                             size="small"
                             value={customInput}
-                            onChange={(newValue) => {
-                                setCustomInput(newValue)
-                                setSelectedOption('custom')
-                            }}
+                            onChange={setCustomInput}
                             onPressEnter={handleCustomSubmit}
                             autoFocus={true}
                         />
