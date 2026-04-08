@@ -15,6 +15,17 @@ interface QueryInfo {
     innerQuery?: Record<string, unknown>
 }
 
+/** Display types that map to a trends-style (line/bar/area) chart. */
+const CHART_DISPLAY_TYPES = new Set([
+    'ActionsLineGraph',
+    'ActionsBar',
+    'ActionsAreaGraph',
+    'ActionsLineGraphCumulative',
+    'BoldNumber',
+    'ActionsPie',
+    'ActionsBarValue',
+])
+
 /**
  * Analyze the query to determine visualization type and extract inner query info.
  */
@@ -55,6 +66,10 @@ export function analyzeQuery(query: unknown): QueryInfo {
 
     // DataVisualizationNode wraps HogQL queries for custom visualizations
     if (q.kind === 'DataVisualizationNode' && q.source && typeof q.source === 'object') {
+        // When a chart display type is set, treat as trends-style visualization
+        if (typeof q.display === 'string' && CHART_DISPLAY_TYPES.has(q.display)) {
+            return { visualization: 'trends', innerKind: 'HogQLQuery' }
+        }
         return { visualization: 'table', innerKind: 'HogQLQuery' }
     }
 

@@ -1373,6 +1373,84 @@
                 },
                 {
                     "properties": {
+                        "chartSettings": {
+                            "description": "Chart axis and series settings. Required when display is not \"ActionsTable\" — at minimum set xAxis.column and one yAxis entry.",
+                            "properties": {
+                                "seriesBreakdownColumn": {
+                                    "description": "Column to break down the series by (creates one line/bar per unique value)",
+                                    "type": "string"
+                                },
+                                "xAxis": {
+                                    "description": "X axis configuration — set this to the time or category column",
+                                    "properties": {
+                                        "column": {
+                                            "description": "The column name to use for the X axis",
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": ["column"],
+                                    "type": "object"
+                                },
+                                "yAxis": {
+                                    "description": "Y axis series — one entry per numeric column to plot",
+                                    "items": {
+                                        "properties": {
+                                            "column": {
+                                                "description": "The column name to use for a Y axis series",
+                                                "type": "string"
+                                            },
+                                            "settings": {
+                                                "properties": {
+                                                    "display": {
+                                                        "properties": {
+                                                            "displayType": {
+                                                                "enum": ["auto", "line", "bar"],
+                                                                "type": "string"
+                                                            },
+                                                            "label": {
+                                                                "type": "string"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "formatting": {
+                                                        "properties": {
+                                                            "prefix": {
+                                                                "type": "string"
+                                                            },
+                                                            "style": {
+                                                                "enum": ["none", "number", "short", "percent"],
+                                                                "type": "string"
+                                                            },
+                                                            "suffix": {
+                                                                "type": "string"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        },
+                                        "required": ["column"],
+                                        "type": "object"
+                                    },
+                                    "type": "array"
+                                }
+                            },
+                            "type": "object"
+                        },
+                        "display": {
+                            "description": "Controls how the HogQL query results are visualized. Use \"ActionsLineGraph\" for time-series data, \"ActionsBar\" for categorical comparisons, \"ActionsAreaGraph\" for cumulative trends, \"BoldNumber\" for single-value KPIs, and \"ActionsTable\" (default) for raw tabular data.",
+                            "enum": [
+                                "ActionsLineGraph",
+                                "ActionsBar",
+                                "ActionsAreaGraph",
+                                "ActionsTable",
+                                "BoldNumber"
+                            ],
+                            "type": "string"
+                        },
                         "kind": {
                             "const": "DataVisualizationNode",
                             "type": "string"

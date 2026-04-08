@@ -227,9 +227,59 @@ const InsightVizNodeSchema = z.object({
     source: z.discriminatedUnion('kind', [TrendsQuerySchema, FunnelsQuerySchema, PathsQuerySchema]),
 })
 
+const DataVisualizationNodeDisplay = z
+    .enum(['ActionsLineGraph', 'ActionsBar', 'ActionsAreaGraph', 'ActionsTable', 'BoldNumber'])
+    .optional()
+    .describe(
+        'Controls how the HogQL query results are visualized. Use "ActionsLineGraph" for time-series data, "ActionsBar" for categorical comparisons, "ActionsAreaGraph" for cumulative trends, "BoldNumber" for single-value KPIs, and "ActionsTable" (default) for raw tabular data.'
+    )
+
+const DataVisualizationNodeChartSettings = z
+    .object({
+        xAxis: z
+            .object({ column: z.string().describe('The column name to use for the X axis') })
+            .optional()
+            .describe('X axis configuration — set this to the time or category column'),
+        yAxis: z
+            .array(
+                z.object({
+                    column: z.string().describe('The column name to use for a Y axis series'),
+                    settings: z
+                        .object({
+                            display: z
+                                .object({
+                                    displayType: z.enum(['auto', 'line', 'bar']).optional(),
+                                    label: z.string().optional(),
+                                })
+                                .optional(),
+                            formatting: z
+                                .object({
+                                    style: z.enum(['none', 'number', 'short', 'percent']).optional(),
+                                    prefix: z.string().optional(),
+                                    suffix: z.string().optional(),
+                                })
+                                .optional(),
+                        })
+                        .optional(),
+                })
+            )
+            .optional()
+            .describe('Y axis series — one entry per numeric column to plot'),
+        seriesBreakdownColumn: z
+            .string()
+            .optional()
+            .describe('Column to break down the series by (creates one line/bar per unique value)'),
+    })
+    .optional()
+    .describe(
+        'Chart axis and series settings. Required when display is not "ActionsTable" — at minimum set xAxis.column and one yAxis entry.'
+    )
+
 const DataVisualizationNodeSchema = z.object({
     kind: z.literal('DataVisualizationNode'),
     source: HogQLQuerySchema,
+    display: DataVisualizationNodeDisplay,
+    chartSettings: DataVisualizationNodeChartSettings,
 })
 
 // Any insight query
