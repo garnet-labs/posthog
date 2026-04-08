@@ -251,8 +251,8 @@ describe('schema-utils', () => {
     })
 
     describe('TOKEN_CHAR_LIMIT', () => {
-        it('is 96000 (16k tokens × 6 chars/token)', () => {
-            expect(TOKEN_CHAR_LIMIT).toBe(96_000)
+        it('is 48000 (8k tokens × 6 chars/token)', () => {
+            expect(TOKEN_CHAR_LIMIT).toBe(48_000)
         })
     })
 })

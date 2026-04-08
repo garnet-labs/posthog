@@ -5,7 +5,7 @@ tools                                    — list available tool names
 search <regex_pattern>                   — search tools by JavaScript regex (matches name, title, description)
 info <tool_name>                         — show tool name, description, and input schema (summarized if too large)
 schema <tool_name> [field_path]          — drill into a specific field schema (supports dot-notation, e.g. series, breakdownFilter.breakdowns)
-call <tool_name> <json_input>            — call a tool with JSON input
+call [--json] <tool_name> <json_input>   — call a tool with JSON input (--json returns raw JSON instead of formatted text. Use raw JSON for scripts.)
 ```
 
 **SCHEMA DRILL-DOWN RULE — HARD REQUIREMENT**

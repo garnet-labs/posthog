@@ -123,7 +123,7 @@ export function createExecTool(
 
                     const resolved = resolveSchemaPath(fullJsonSchema, fieldPath)
                     if (!resolved) {
-                        const available = listAvailablePaths(fullJsonSchema, fieldPath)
+                        const available = listAvailablePaths(fullJsonSchema)
                         throw new Error(`Unknown path "${fieldPath}". Available: ${available.join(', ')}`)
                     }
 
@@ -145,9 +145,14 @@ export function createExecTool(
 
                 case 'call': {
                     if (!rest) {
-                        throw new Error('Usage: call <tool_name> <json_input>')
+                        throw new Error('Usage: call [--json] <tool_name> <json_input>')
                     }
-                    const { verb: toolName, rest: jsonBody } = parseCommand(rest)
+                    const forceJson = rest.startsWith('--json ') || rest === '--json'
+                    const callArgs = forceJson ? rest.slice('--json'.length).trim() : rest
+                    if (!callArgs) {
+                        throw new Error('Usage: call [--json] <tool_name> <json_input>')
+                    }
+                    const { verb: toolName, rest: jsonBody } = parseCommand(callArgs)
                     const tool = findTool(allTools, toolName)
 
                     let input: Record<string, unknown>
@@ -162,7 +167,7 @@ export function createExecTool(
                     }
 
                     const result = await tool.handler(context, input)
-                    const useJson = tool._meta?.responseFormat === 'json'
+                    const useJson = forceJson || tool._meta?.responseFormat === 'json'
                     return useJson ? JSON.stringify(result) : formatResponse(result)
                 }
 
