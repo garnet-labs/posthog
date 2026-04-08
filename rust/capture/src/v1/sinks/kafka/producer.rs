@@ -109,7 +109,6 @@ impl Future for SendHandle {
 
 pub struct KafkaProducer {
     inner: FutureProducer<KafkaContext>,
-    #[allow(dead_code)]
     handle: lifecycle::Handle,
     sink: SinkName,
 }

@@ -105,7 +105,6 @@ pub struct KafkaResult {
 }
 
 impl KafkaResult {
-    #[allow(dead_code)]
     pub(crate) fn ok(uuid_key: String, enqueued_at: DateTime<Utc>) -> Self {
         Self {
             uuid_key,
@@ -115,7 +114,6 @@ impl KafkaResult {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn err(uuid_key: String, error: KafkaSinkError, enqueued_at: DateTime<Utc>) -> Self {
         Self {
             uuid_key,
@@ -125,13 +123,11 @@ impl KafkaResult {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn with_completed_at(mut self, t: DateTime<Utc>) -> Self {
         self.completed_at = Some(t);
         self
     }
 
-    #[allow(dead_code)]
     pub fn error(&self) -> Option<&KafkaSinkError> {
         self.error.as_ref()
     }
