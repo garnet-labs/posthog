@@ -907,7 +907,7 @@ export function normalizeMessage(rawMessage: unknown, defaultRole: string): Comp
         return [
             {
                 role: normalizeRole('assistant (thinking)', roleToUse),
-                content: rawMessage.thinking,
+                content: rawMessage.thinking || JSON.stringify(rawMessage),
             },
         ]
     }
@@ -976,7 +976,7 @@ export function normalizeMessage(rawMessage: unknown, defaultRole: string): Comp
         return [
             {
                 role: normalizeRole('assistant (thinking)', roleToUse),
-                content: summaryText,
+                content: summaryText || JSON.stringify(rawMessage),
             },
         ]
     }

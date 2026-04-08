@@ -411,7 +411,7 @@ describe('LLM Analytics utils', () => {
             ])
         })
 
-        it('handles reasoning with no summary', () => {
+        it('handles reasoning with no summary by falling back to raw JSON', () => {
             const message = {
                 type: 'reasoning',
                 id: 'rs_456',
@@ -420,7 +420,7 @@ describe('LLM Analytics utils', () => {
             expect(normalizeMessage(message, 'user')).toEqual([
                 {
                     role: 'assistant (thinking)',
-                    content: '',
+                    content: JSON.stringify(message),
                 },
             ])
         })
