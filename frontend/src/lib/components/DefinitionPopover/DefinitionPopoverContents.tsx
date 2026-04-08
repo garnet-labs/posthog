@@ -466,6 +466,10 @@ function DefinitionView({ group }: { group: TaxonomicFilterGroup }): JSX.Element
     }
     if (isDataWarehouse && dataWarehousePopoverFields.length > 0) {
         const _definition = definition as DataWarehouseTableForInsight
+        // early return for pinned/recent meta-items that only have lightweight data, and not the full definition
+        if (!_definition?.fields) {
+            return <></>
+        }
         const columnOptions = Object.values(_definition.fields).map((column) => ({
             label: column.name + ' (' + column.type + ')',
             value: column.name,
