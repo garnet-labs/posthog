@@ -215,18 +215,15 @@ export class MCP extends McpAgent<Env> {
 
             const clientName = await this.cache.get('clientName')
 
+            const sessionUuid = this.requestProperties.sessionId
+                ? await this.sessionManager.getSessionUuid(this.requestProperties.sessionId)
+                : undefined
+
             client.capture({
                 distinctId,
                 event,
                 properties: {
-                    ...(this.requestProperties.sessionId
-                        ? {
-                              $session_id: await this.sessionManager.getSessionUuid(this.requestProperties.sessionId),
-                              $ai_session_id: await this.sessionManager.getSessionUuid(
-                                  this.requestProperties.sessionId
-                              ),
-                          }
-                        : {}),
+                    ...(sessionUuid ? { $session_id: sessionUuid, $ai_session_id: sessionUuid } : {}),
                     ...(clientName ? { mcp_oauth_client_name: clientName } : {}),
                     ...(this._mcpClientName ? { mcp_client_name: this._mcpClientName } : {}),
                     ...(this._mcpClientVersion ? { mcp_client_version: this._mcpClientVersion } : {}),
