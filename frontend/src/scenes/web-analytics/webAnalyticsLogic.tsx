@@ -211,6 +211,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
         setIsPathCleaningEnabled: (isPathCleaningEnabled: boolean) => ({ isPathCleaningEnabled }),
         setShouldFilterTestAccounts: (shouldFilterTestAccounts: boolean) => ({ shouldFilterTestAccounts }),
         setBotTrafficFilter: (botTrafficFilter: BotTrafficFilter) => ({ botTrafficFilter }),
+        setBotTrendsTab: (tab: string) => ({ tab }),
         setShouldStripQueryParams: (shouldStripQueryParams: boolean) => ({ shouldStripQueryParams }),
         setIncludeHostPath: (includeHostPath: boolean) => ({ includeHostPath }),
         setConversionGoal: (conversionGoal: WebAnalyticsConversionGoal | null) => ({ conversionGoal }),
@@ -430,6 +431,13 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
             {
                 setBotTrafficFilter: (_, { botTrafficFilter }) => botTrafficFilter,
                 clearFilters: () => 'regular' as BotTrafficFilter,
+            },
+        ],
+        _botTrendsTab: [
+            null as string | null,
+            persistConfig,
+            {
+                setBotTrendsTab: (_, { tab }) => tab,
             },
         ],
         shouldStripQueryParams: [
@@ -720,6 +728,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                 return filters
             },
         ],
+        botTrendsTab: [(s) => [s._botTrendsTab], (botTrendsTab: string | null) => botTrendsTab || 'crawler'],
         tabs: [
             (s) => [
                 s.graphsTab,
@@ -919,6 +928,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                 s.tileVisualizations,
                 s.preAggregatedEnabled,
                 s.hiddenTiles,
+                s.botTrendsTab,
             ],
             (
                 productTab,
@@ -938,7 +948,8 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                 isGreaterThanMd,
                 tileVisualizations,
                 preAggregatedEnabled,
-                hiddenTiles
+                hiddenTiles,
+                botTrendsTab
             ): WebAnalyticsTile[] => {
                 const dateRange = { date_from: dateFrom, date_to: dateTo }
                 const sampling = { enabled: false, forceSamplingRate: { numerator: 1, denominator: 10 } }
@@ -2277,46 +2288,65 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                             insightProps: createInsightProps(TileId.BOT_OVERVIEW),
                             canOpenInsight: false,
                         },
-                        {
-                            kind: 'query',
-                            tileId: TileId.BOT_TRENDS,
-                            title: 'Bot requests over time',
-                            layout: {
-                                colSpanClassName: 'md:col-span-full',
-                            },
-                            query: {
-                                kind: NodeKind.InsightVizNode,
-                                source: {
-                                    kind: NodeKind.TrendsQuery,
-                                    dateRange,
-                                    interval,
-                                    series: [
-                                        {
-                                            event: '$pageview',
-                                            kind: NodeKind.EventsNode,
-                                            math: BaseMathType.TotalCount,
-                                            name: 'Pageview',
-                                            custom_name: 'Requests',
-                                        },
-                                    ],
-                                    trendsFilter: {
-                                        display: ChartDisplayType.ActionsLineGraph,
-                                    },
-                                    breakdownFilter: {
-                                        breakdown: '$virt_bot_name',
-                                        breakdown_type: 'event',
-                                    },
-                                    properties: webAnalyticsFilters,
-                                    filterTestAccounts,
-                                    compareFilter,
-                                    tags: WEB_ANALYTICS_DEFAULT_QUERY_TAGS,
+                        (() => {
+                            const botTrendsSeries = [
+                                {
+                                    event: '$pageview',
+                                    kind: NodeKind.EventsNode,
+                                    math: BaseMathType.TotalCount,
+                                    name: 'Pageview',
+                                    custom_name: 'Requests',
                                 },
-                                hidePersonsModal: true,
-                                embedded: true,
-                            },
-                            insightProps: createInsightProps(TileId.BOT_TRENDS),
-                            canOpenInsight: true,
-                        },
+                            ]
+                            const createBotTrendsTab = (
+                                id: string,
+                                title: string,
+                                breakdown: string,
+                                breakdownType: string
+                            ): TabsTileTab => ({
+                                id,
+                                title,
+                                linkText: title,
+                                query: {
+                                    kind: NodeKind.InsightVizNode,
+                                    source: {
+                                        kind: NodeKind.TrendsQuery,
+                                        dateRange,
+                                        interval,
+                                        series: botTrendsSeries,
+                                        trendsFilter: {
+                                            display: ChartDisplayType.ActionsLineGraph,
+                                        },
+                                        breakdownFilter: {
+                                            breakdown,
+                                            breakdown_type: breakdownType,
+                                        },
+                                        properties: webAnalyticsFilters,
+                                        filterTestAccounts,
+                                        compareFilter,
+                                        tags: WEB_ANALYTICS_DEFAULT_QUERY_TAGS,
+                                    },
+                                    hidePersonsModal: true,
+                                    embedded: true,
+                                },
+                                insightProps: createInsightProps(TileId.BOT_TRENDS, id),
+                                canOpenInsight: true,
+                            })
+                            return {
+                                kind: 'tabs' as const,
+                                tileId: TileId.BOT_TRENDS,
+                                layout: {
+                                    colSpanClassName: 'md:col-span-full' as const,
+                                },
+                                activeTabId: botTrendsTab,
+                                setTabId: actions.setBotTrendsTab,
+                                tabs: [
+                                    createBotTrendsTab('crawler', 'Crawler', '$virt_bot_name', 'event'),
+                                    createBotTrendsTab('category', 'Category', '$virt_traffic_category', 'event'),
+                                    createBotTrendsTab('host', 'Host', '$host', 'event'),
+                                ],
+                            }
+                        })(),
                         {
                             kind: 'query',
                             tileId: TileId.BOT_PATHS,
