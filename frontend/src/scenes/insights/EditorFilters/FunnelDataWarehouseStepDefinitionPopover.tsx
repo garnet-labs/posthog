@@ -30,6 +30,11 @@ export function FunnelDataWarehouseStepDefinitionPopover({
         return defaultView
     }
 
+    const table = item as DataWarehouseTableForInsight
+    if (!table?.fields) {
+        return defaultView
+    }
+
     return <FunnelDataWarehouseStepDefinitionPopoverContent item={item} group={group} />
 }
 

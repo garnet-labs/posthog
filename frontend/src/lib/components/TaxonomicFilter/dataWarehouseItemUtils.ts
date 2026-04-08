@@ -21,6 +21,9 @@ function findFieldByNameCandidates(
     warehouseItem: DataWarehouseTableForInsight,
     candidates: string[]
 ): DataWarehouseTableForInsight['fields'][string] | undefined {
+    if (!warehouseItem.fields) {
+        return undefined
+    }
     const fields = Object.values(warehouseItem.fields)
 
     for (const candidate of candidates) {
@@ -38,6 +41,9 @@ function findFieldByNameCandidates(
 function findDateOrDatetimeField(
     warehouseItem: DataWarehouseTableForInsight
 ): DataWarehouseTableForInsight['fields'][string] | undefined {
+    if (!warehouseItem.fields) {
+        return undefined
+    }
     return Object.values(warehouseItem.fields).find((field) => field.type === 'datetime' || field.type === 'date')
 }
 
@@ -46,6 +52,10 @@ function findJoinedFieldExpression(
     tableName: string,
     fieldName: string
 ): string | undefined {
+    if (!warehouseItem.fields) {
+        return undefined
+    }
+
     const normalizedTableName = normalizeFieldName(tableName)
     const normalizedFieldName = normalizeFieldName(fieldName)
 

@@ -71,19 +71,27 @@ export const funnelDataWarehouseStepDefinitionPopoverLogic = kea<funnelDataWareh
     selectors({
         columnOptions: [
             (_, p) => [p.table],
-            (table) =>
-                Object.values(table.fields).map((column) => ({
+            (table) => {
+                if (!table.fields) {
+                    return []
+                }
+                return Object.values(table.fields).map((column) => ({
                     label: `${column.name} (${column.type})`,
                     value: column.name,
                     type: column.type,
-                })),
+                }))
+            },
         ],
         linkedTables: [
             (_, p) => [p.table],
-            (table) =>
-                Object.values(table.fields)
+            (table) => {
+                if (!table.fields) {
+                    return []
+                }
+                return Object.values(table.fields)
                     .filter((field) => LINKED_TABLE_TYPES.includes(field.type))
-                    .map((field) => field.name),
+                    .map((field) => field.name)
+            },
         ],
         activeFieldKeyOptions: [
             (s) => [s.dataWarehousePopoverFields],
@@ -112,16 +120,24 @@ export const funnelDataWarehouseStepDefinitionPopoverLogic = kea<funnelDataWareh
         ],
         previewTable: [
             (_, p) => [p.table],
-            (table) => ({
-                ...table,
-                fields: Object.fromEntries(
-                    Object.entries(table.fields).filter(([_, field]) => !HIDDEN_FIELD_TYPES.includes(field.type))
-                ),
-            }),
+            (table) => {
+                if (!table.fields) {
+                    return table
+                }
+                return {
+                    ...table,
+                    fields: Object.fromEntries(
+                        Object.entries(table.fields).filter(([_, field]) => !HIDDEN_FIELD_TYPES.includes(field.type))
+                    ),
+                }
+            },
         ],
         previewExpressionColumns: [
             (s, p) => [p.table, s.dataWarehousePopoverFields, s.scopedLocalDefinition],
             (table, dataWarehousePopoverFields, scopedLocalDefinition): TablePreviewExpressionColumn[] => {
+                if (!table.fields) {
+                    return []
+                }
                 const tableFieldNames = new Set(Object.values(table.fields).map((field) => field.name))
                 const usedKeys = new Set(tableFieldNames)
                 return EDITABLE_FIELD_ORDER.flatMap((fieldKey) => {
@@ -183,7 +199,12 @@ export const funnelDataWarehouseStepDefinitionPopoverLogic = kea<funnelDataWareh
         ],
         activeFieldIsHogQL: [
             (s, p) => [s.activeFieldValue, p.table],
-            (activeFieldValue, table) => !Object.values(table.fields).some((field) => field.name === activeFieldValue),
+            (activeFieldValue, table) => {
+                if (!table.fields) {
+                    return false
+                }
+                return !Object.values(table.fields).some((field) => field.name === activeFieldValue)
+            },
         ],
         isAggregatingByGroup: [
             (s) => [s.querySource],
