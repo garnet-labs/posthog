@@ -49,6 +49,7 @@ export type RequestProperties = {
     clientUserAgent?: string
     readOnly?: boolean
     transport?: 'streamable-http' | 'sse'
+    requestStartTime?: number
 }
 
 export class MCP extends McpAgent<Env> {
@@ -497,6 +498,21 @@ export class MCP extends McpAgent<Env> {
                 this.registerTool(typedTool, async (params) => typedTool.handler(context, params))
             }
         }
+
+        const initDurationMs = this.requestProperties.requestStartTime
+            ? Date.now() - this.requestProperties.requestStartTime
+            : undefined
+
+        this.ctx.waitUntil(
+            this.trackEvent(AnalyticsEvent.MCP_INIT, {
+                tool_count: allTools.length,
+                mcp_version: version,
+                has_organization_id: !!organizationId,
+                has_project_id: !!projectId,
+                read_only: !!readOnly,
+                ...(initDurationMs !== undefined ? { init_duration_ms: initDurationMs } : {}),
+            })
+        )
     }
 
     private async resolveVersionFlag(): Promise<number | undefined> {
