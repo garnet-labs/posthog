@@ -82,22 +82,20 @@ export function HowToReadTooltip(): JSX.Element {
                             className="rounded border object-contain mb-2"
                             alt="How to read metrics"
                         />
-                        <p className="mb-3">
-                            A wide interval means more data is needed for precision — it doesn't mean the result is
-                            wrong or that the direction is uncertain.
-                        </p>
-                        <p className="mb-3">
-                            PostHog uses its own statistical methods — results may differ from other tools.
-                        </p>
-                        <p className="text-sm mb-0">
-                            <Link to="https://posthog.com/docs/experiments/analyzing-results">
-                                Learn more about analyzing results
-                            </Link>
+                        <p className="mb-0">
+                            PostHog uses its own statistical methods. Results may differ from other tools.
                         </p>
                     </div>
                 }
             >
-                <span className="text-xs text-secondary cursor-help">How to read</span>
+                <Link
+                    to="https://posthog.com/docs/experiments/analyzing-results"
+                    target="_blank"
+                    className="text-xs text-secondary cursor-help"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    How to read
+                </Link>
             </Tooltip>
         </>
     )

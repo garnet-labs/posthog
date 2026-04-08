@@ -1,6 +1,6 @@
 import { match } from 'ts-pattern'
 
-import { IconArrowRight, IconInfo } from '@posthog/icons'
+import { IconArrowRight } from '@posthog/icons'
 
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 
@@ -75,15 +75,7 @@ export const MetricEventDetails = ({ metric }: MetricEventDetailsProps): JSX.Ele
             return (
                 <div className="text-xs text-muted">
                     <span className="truncate">{sourceName}</span>
-                    <span className="text-muted">
-                        {' '}
-                        ({mathLabel})
-                        {mathLabel === 'Sum' && (
-                            <Tooltip title="In results, this shows the average sum per user, not the raw total across all events.">
-                                <IconInfo className="text-secondary text-base ml-0.5 inline" />
-                            </Tooltip>
-                        )}
-                    </span>
+                    <span className="text-muted"> ({mathLabel})</span>
                 </div>
             )
         })
