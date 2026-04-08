@@ -21,7 +21,8 @@ tools:
         title: Query logs
         description_file: ./prompts/query-logs.md
         response:
-            include: [results]
+            include:
+                - results
     logs-list-attributes:
         operation: logs_attributes_retrieve
         enabled: true
@@ -117,4 +118,19 @@ tools:
         enabled: false
     tasks-runs-logs-retrieve:
         operation: tasks_runs_logs_retrieve
+        enabled: false
+    logs-alerts-simulate-create:
+        operation: logs_alerts_simulate_create
+        enabled: false
+    logs-export-create:
+        operation: logs_export_create
+        enabled: false
+    logs-has-logs-retrieve:
+        operation: logs_has_logs_retrieve
+        enabled: false
+    logs-services-create:
+        operation: logs_services_create
+        enabled: false
+    logs-sparkline-create:
+        operation: logs_sparkline_create
         enabled: false

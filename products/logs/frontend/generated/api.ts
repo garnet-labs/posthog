@@ -340,6 +340,28 @@ export const logsAttributesRetrieve = async (
     })
 }
 
+export const getLogsExportCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/logs/export/`
+}
+
+export const logsExportCreate = async (projectId: string, options?: RequestInit): Promise<void> => {
+    return apiMutator<void>(getLogsExportCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+    })
+}
+
+export const getLogsHasLogsRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/logs/has_logs/`
+}
+
+export const logsHasLogsRetrieve = async (projectId: string, options?: RequestInit): Promise<void> => {
+    return apiMutator<void>(getLogsHasLogsRetrieveUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
 export const getLogsQueryCreateUrl = (projectId: string) => {
     return `/api/projects/${projectId}/logs/query/`
 }
@@ -354,6 +376,28 @@ export const logsQueryCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(_logsQueryRequestApi),
+    })
+}
+
+export const getLogsServicesCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/logs/services/`
+}
+
+export const logsServicesCreate = async (projectId: string, options?: RequestInit): Promise<void> => {
+    return apiMutator<void>(getLogsServicesCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+    })
+}
+
+export const getLogsSparklineCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/logs/sparkline/`
+}
+
+export const logsSparklineCreate = async (projectId: string, options?: RequestInit): Promise<void> => {
+    return apiMutator<void>(getLogsSparklineCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
     })
 }
 
