@@ -227,7 +227,7 @@ export function InsightsTable({
     })
 
     if (breakdownFilter?.breakdown) {
-        if (!isSingleSeriesWithBreakdown) {
+        if (!isSingleSeriesWithBreakdown && formatItemBreakdownLabel) {
             columns.push({
                 title: (
                     <BreakdownColumnTitle
@@ -240,7 +240,7 @@ export function InsightsTable({
                     return (
                         <BreakdownColumnItem
                             item={item}
-                            formatItemBreakdownLabel={formatItemBreakdownLabel!}
+                            formatItemBreakdownLabel={formatItemBreakdownLabel}
                             breakdownFilter={breakdownFilter}
                         />
                     )
@@ -250,7 +250,7 @@ export function InsightsTable({
                     if (typeof a.breakdown_value === 'number' && typeof b.breakdown_value === 'number') {
                         return a.breakdown_value - b.breakdown_value
                     }
-                    return compareFn()(formatItemBreakdownLabel!(a), formatItemBreakdownLabel!(b))
+                    return compareFn()(formatItemBreakdownLabel(a), formatItemBreakdownLabel(b))
                 },
             })
         }
