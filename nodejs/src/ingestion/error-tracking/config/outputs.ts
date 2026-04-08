@@ -13,7 +13,7 @@ import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder
 export function registerErrorTrackingOutputs() {
     return new IngestionOutputsBuilder()
         .register(EVENTS_OUTPUT, {
-            topicKey: 'ERROR_TRACKING_OUTPUT_EVENTS_TOPIC',
+            topicKey: 'ERROR_TRACKING_CONSUMER_OUTPUT_TOPIC',
             producerKey: 'ERROR_TRACKING_OUTPUT_EVENTS_PRODUCER',
         })
         .register(INGESTION_WARNINGS_OUTPUT, {
@@ -21,11 +21,11 @@ export function registerErrorTrackingOutputs() {
             producerKey: 'ERROR_TRACKING_OUTPUT_INGESTION_WARNINGS_PRODUCER',
         })
         .register(DLQ_OUTPUT, {
-            topicKey: 'ERROR_TRACKING_OUTPUT_DLQ_TOPIC',
+            topicKey: 'ERROR_TRACKING_CONSUMER_DLQ_TOPIC',
             producerKey: 'ERROR_TRACKING_OUTPUT_DLQ_PRODUCER',
         })
         .register(OVERFLOW_OUTPUT, {
-            topicKey: 'ERROR_TRACKING_OUTPUT_OVERFLOW_TOPIC',
+            topicKey: 'ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC',
             producerKey: 'ERROR_TRACKING_OUTPUT_OVERFLOW_PRODUCER',
         })
         .register(APP_METRICS_OUTPUT, {

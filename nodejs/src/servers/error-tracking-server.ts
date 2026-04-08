@@ -182,13 +182,14 @@ export class ErrorTrackingServer implements NodeServer {
                 {
                     groupId: this.config.ERROR_TRACKING_CONSUMER_GROUP_ID,
                     topic: this.config.ERROR_TRACKING_CONSUMER_CONSUME_TOPIC,
-                    dlqTopic: this.config.ERROR_TRACKING_CONSUMER_DLQ_TOPIC,
-                    overflowTopic: this.config.ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC,
-                    outputTopic: this.config.ERROR_TRACKING_CONSUMER_OUTPUT_TOPIC,
                     cymbalBaseUrl: this.config.ERROR_TRACKING_CYMBAL_BASE_URL,
                     cymbalTimeoutMs: this.config.ERROR_TRACKING_CYMBAL_TIMEOUT_MS,
                     cymbalMaxBodyBytes: this.config.ERROR_TRACKING_CYMBAL_MAX_BODY_BYTES,
                     lane: this.config.INGESTION_LANE ?? 'main',
+                    overflowEnabled:
+                        !!this.config.ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC &&
+                        this.config.ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC !==
+                            this.config.ERROR_TRACKING_CONSUMER_CONSUME_TOPIC,
                     overflowBucketCapacity: this.config.ERROR_TRACKING_OVERFLOW_BUCKET_CAPACITY,
                     overflowBucketReplenishRate: this.config.ERROR_TRACKING_OVERFLOW_BUCKET_REPLENISH_RATE,
                     statefulOverflowEnabled: this.config.ERROR_TRACKING_STATEFUL_OVERFLOW_ENABLED,
