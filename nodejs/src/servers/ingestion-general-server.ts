@@ -17,7 +17,7 @@ import {
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
 import { registerIngestionOutputs } from '../ingestion/analytics/config/outputs'
-import { ProducerName, registerProducers } from '../ingestion/common/producers'
+import { ProducerName, registerProducers } from '../ingestion/common/outputs'
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,

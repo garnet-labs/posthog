@@ -11,7 +11,7 @@ import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig } from '../common/config'
 import { defaultConfig, overrideConfigWithEnv } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { ProducerName, registerProducers } from '../ingestion/common/producers'
+import { ProducerName, registerProducers } from '../ingestion/common/outputs'
 import {
     DatabaseConnectionConfig,
     KafkaBrokerConfig,

@@ -17,7 +17,7 @@ import {
 } from '../config/kafka-topics'
 import type { PostgresRouterConfig } from '../utils/db/postgres'
 import { isDevEnv, isProdEnv } from '../utils/env-utils'
-import { DEFAULT_PRODUCER, type ProducerName } from './common/producers'
+import { DEFAULT_PRODUCER, type ProducerName } from './common/outputs/producers'
 
 // =============================================================================
 // Infrastructure sub-config types

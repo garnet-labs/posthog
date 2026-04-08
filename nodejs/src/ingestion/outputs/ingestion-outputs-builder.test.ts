@@ -127,4 +127,95 @@ describe('IngestionOutputsBuilder', () => {
         await outputs.queueMessages('a', [{ value: Buffer.from('a') }])
         expect(registry.getProducer('PRIMARY').queueMessages).toHaveBeenCalledTimes(1)
     })
+
+    it('dual write fans out to both producers when secondary config is non-empty', async () => {
+        const registry = createRegistry()
+        const config = {
+            EVENTS_TOPIC: 'events_v1',
+            EVENTS_PRODUCER: 'PRIMARY' as TestProducer,
+            EVENTS_SECONDARY_TOPIC: 'events_v2',
+            EVENTS_SECONDARY_PRODUCER: 'SECONDARY' as TestProducer,
+        }
+
+        const outputs = new IngestionOutputsBuilder()
+            .registerDualWrite('events', {
+                topicKey: 'EVENTS_TOPIC',
+                producerKey: 'EVENTS_PRODUCER',
+                secondaryTopicKey: 'EVENTS_SECONDARY_TOPIC',
+                secondaryProducerKey: 'EVENTS_SECONDARY_PRODUCER',
+            })
+            .build(registry, config)
+
+        await outputs.produce('events', { key: Buffer.from('k'), value: Buffer.from('v') })
+
+        expect(registry.getProducer('PRIMARY').produce).toHaveBeenCalledWith(
+            expect.objectContaining({ topic: 'events_v1' })
+        )
+        expect(registry.getProducer('SECONDARY').produce).toHaveBeenCalledWith(
+            expect.objectContaining({ topic: 'events_v2' })
+        )
+    })
+
+    it('dual write falls back to single output when secondary topic is empty', async () => {
+        const registry = createRegistry()
+        const config = {
+            EVENTS_TOPIC: 'events_v1',
+            EVENTS_PRODUCER: 'PRIMARY' as TestProducer,
+            EVENTS_SECONDARY_TOPIC: '',
+            EVENTS_SECONDARY_PRODUCER: 'SECONDARY' as TestProducer,
+        }
+
+        const outputs = new IngestionOutputsBuilder()
+            .registerDualWrite('events', {
+                topicKey: 'EVENTS_TOPIC',
+                producerKey: 'EVENTS_PRODUCER',
+                secondaryTopicKey: 'EVENTS_SECONDARY_TOPIC',
+                secondaryProducerKey: 'EVENTS_SECONDARY_PRODUCER',
+            })
+            .build(registry, config)
+
+        await outputs.produce('events', { key: Buffer.from('k'), value: Buffer.from('v') })
+
+        expect(registry.getProducer('PRIMARY').produce).toHaveBeenCalledWith(
+            expect.objectContaining({ topic: 'events_v1' })
+        )
+        expect(registry.getProducer('SECONDARY').produce).not.toHaveBeenCalled()
+    })
+
+    it('mixes register and registerDualWrite', async () => {
+        const registry = createRegistry()
+        const config = {
+            EVENTS_TOPIC: 'events_v1',
+            EVENTS_PRODUCER: 'PRIMARY' as TestProducer,
+            EVENTS_SECONDARY_TOPIC: 'events_v2',
+            EVENTS_SECONDARY_PRODUCER: 'SECONDARY' as TestProducer,
+            DLQ_TOPIC: 'dlq_topic',
+            DLQ_PRODUCER: 'PRIMARY' as TestProducer,
+        }
+
+        const outputs = new IngestionOutputsBuilder()
+            .registerDualWrite('events', {
+                topicKey: 'EVENTS_TOPIC',
+                producerKey: 'EVENTS_PRODUCER',
+                secondaryTopicKey: 'EVENTS_SECONDARY_TOPIC',
+                secondaryProducerKey: 'EVENTS_SECONDARY_PRODUCER',
+            })
+            .register('dlq', { topicKey: 'DLQ_TOPIC', producerKey: 'DLQ_PRODUCER' })
+            .build(registry, config)
+
+        await outputs.produce('events', { key: Buffer.from('k'), value: Buffer.from('v') })
+        await outputs.queueMessages('dlq', [{ value: Buffer.from('dead') }])
+
+        // events fans out to both
+        expect(registry.getProducer('PRIMARY').produce).toHaveBeenCalledWith(
+            expect.objectContaining({ topic: 'events_v1' })
+        )
+        expect(registry.getProducer('SECONDARY').produce).toHaveBeenCalledWith(
+            expect.objectContaining({ topic: 'events_v2' })
+        )
+        // dlq goes to primary only
+        expect(registry.getProducer('PRIMARY').queueMessages).toHaveBeenCalledWith(
+            expect.objectContaining({ topic: 'dlq_topic' })
+        )
+    })
 })

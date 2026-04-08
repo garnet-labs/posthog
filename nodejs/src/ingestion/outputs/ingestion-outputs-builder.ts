@@ -15,16 +15,10 @@ interface PrimaryDef<TK extends string, PK extends string> {
     producerKey: PK
 }
 
-interface SecondaryDef<TK extends string, PK extends string, STK extends string, SPK extends string>
+interface DualWriteDef<TK extends string, PK extends string, STK extends string, SPK extends string>
     extends PrimaryDef<TK, PK> {
     secondaryTopicKey: STK
     secondaryProducerKey: SPK
-}
-
-function hasSecondary<TK extends string, PK extends string>(
-    def: PrimaryDef<TK, PK>
-): def is SecondaryDef<TK, PK, TK, PK> {
-    return 'secondaryTopicKey' in def && 'secondaryProducerKey' in def
 }
 
 /**
@@ -47,7 +41,10 @@ function hasSecondary<TK extends string, PK extends string>(
  * ```
  */
 export class IngestionOutputsBuilder<O extends string = never, TK extends string = never, PK extends string = never> {
-    constructor(private readonly definitions: Map<string, PrimaryDef<TK, PK>> = new Map()) {}
+    constructor(
+        private readonly primaryDefs: Map<string, PrimaryDef<TK, PK>> = new Map(),
+        private readonly dualWriteDefs: Map<string, DualWriteDef<TK, PK, TK, PK>> = new Map()
+    ) {}
 
     /**
      * Register an output with its config key pair.
@@ -56,12 +53,12 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
      * and checked against the config object when `build()` is called.
      */
     register<Name extends string, NewTK extends string, NewPK extends string>(
-        name: Name,
+        name: Name & (Name extends O ? never : Name),
         definition: PrimaryDef<NewTK, NewPK>
     ): IngestionOutputsBuilder<O | Name, TK | NewTK, PK | NewPK> {
-        const defs = new Map<string, PrimaryDef<TK | NewTK, PK | NewPK>>(this.definitions)
-        defs.set(name, definition)
-        return new IngestionOutputsBuilder(defs)
+        const primaries = new Map<string, PrimaryDef<TK | NewTK, PK | NewPK>>(this.primaryDefs)
+        primaries.set(name, definition)
+        return new IngestionOutputsBuilder(primaries, this.dualWriteDefs)
     }
 
     /**
@@ -77,12 +74,15 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
         NewSTK extends string,
         NewSPK extends string,
     >(
-        name: Name,
-        definition: SecondaryDef<NewTK, NewPK, NewSTK, NewSPK>
+        name: Name & (Name extends O ? never : Name),
+        definition: DualWriteDef<NewTK, NewPK, NewSTK, NewSPK>
     ): IngestionOutputsBuilder<O | Name, TK | NewTK | NewSTK, PK | NewPK | NewSPK> {
-        const defs = new Map<string, PrimaryDef<TK | NewTK | NewSTK, PK | NewPK | NewSPK>>(this.definitions)
-        defs.set(name, definition)
-        return new IngestionOutputsBuilder(defs)
+        const duals = new Map<
+            string,
+            DualWriteDef<TK | NewTK | NewSTK, PK | NewPK | NewSPK, TK | NewTK | NewSTK, PK | NewPK | NewSPK>
+        >(this.dualWriteDefs)
+        duals.set(name, definition)
+        return new IngestionOutputsBuilder(this.primaryDefs, duals)
     }
 
     /**
@@ -97,7 +97,17 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
     ): IngestionOutputs<O> {
         const record: Record<string, IngestionOutput> = {}
 
-        for (const [name, def] of this.definitions) {
+        for (const [name, def] of this.primaryDefs) {
+            const producerName = config[def.producerKey]
+            record[name] = new SingleIngestionOutput(
+                name,
+                config[def.topicKey],
+                registry.getProducer(producerName),
+                producerName
+            )
+        }
+
+        for (const [name, def] of this.dualWriteDefs) {
             const producerName = config[def.producerKey]
             const primary = new SingleIngestionOutput(
                 name,
@@ -106,22 +116,18 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
                 producerName
             )
 
-            if (hasSecondary(def)) {
-                const secondaryTopic = config[def.secondaryTopicKey]
-                const secondaryProducerName = config[def.secondaryProducerKey]
-                if (secondaryTopic && secondaryProducerName) {
-                    record[name] = new DualWriteIngestionOutput(
-                        primary,
-                        new SingleIngestionOutput(
-                            name,
-                            secondaryTopic,
-                            registry.getProducer(secondaryProducerName),
-                            secondaryProducerName
-                        )
+            const secondaryTopic = config[def.secondaryTopicKey]
+            const secondaryProducerName = config[def.secondaryProducerKey]
+            if (secondaryTopic && secondaryProducerName) {
+                record[name] = new DualWriteIngestionOutput(
+                    primary,
+                    new SingleIngestionOutput(
+                        name,
+                        secondaryTopic,
+                        registry.getProducer(secondaryProducerName),
+                        secondaryProducerName
                     )
-                } else {
-                    record[name] = primary
-                }
+                )
             } else {
                 record[name] = primary
             }
