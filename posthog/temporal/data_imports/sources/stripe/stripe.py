@@ -39,6 +39,7 @@ from posthog.temporal.data_imports.sources.stripe.constants import (
     PRODUCT_RESOURCE_NAME,
     REFUND_RESOURCE_NAME,
     RESOURCE_TO_STRIPE_WEBHOOK_EVENT,
+    STRIPE_VERSIONS_WITH_EXTERNAL_TABLE_DEFINITIONS,
     SUBSCRIPTION_RESOURCE_NAME,
 )
 from posthog.temporal.data_imports.sources.stripe.custom import InvoiceListWithAllLines
@@ -252,8 +253,14 @@ def stripe_source(
     should_use_incremental_field: bool = False,
     stripe_api_version: Optional[str] = None,
 ):
-    column_mapping = get_dlt_mapping_for_external_table(f"stripe_{endpoint.lower()}")
-    column_hints = {key: value.get("data_type") for key, value in column_mapping.items()}
+    # External table definitions were built for the legacy acacia API versions.
+    # For newer versions, skip column hints and let the schema be auto-inferred from the data.
+    version = stripe_api_version or LEGACY_STRIPE_API_VERSION
+    if version in STRIPE_VERSIONS_WITH_EXTERNAL_TABLE_DEFINITIONS:
+        column_mapping = get_dlt_mapping_for_external_table(f"stripe_{endpoint.lower()}")
+        column_hints: dict[str, Any] | None = {key: value.get("data_type") for key, value in column_mapping.items()}
+    else:
+        column_hints = None
 
     # Get the incremental field name for partition keys
     incremental_field_config = APPEND_ONLY_INCREMENTAL_FIELDS.get(endpoint, [])

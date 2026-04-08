@@ -23,6 +23,13 @@ STRIPE_API_VERSIONS: dict[str, str] = {
 DEFAULT_STRIPE_API_VERSION = "2026-02-25.clover"
 LEGACY_STRIPE_API_VERSION = "2024-09-30.acacia"
 
+# The external table definitions in external_table_definitions.py were built for these versions.
+# For other versions, schema is auto-inferred from the data.
+STRIPE_VERSIONS_WITH_EXTERNAL_TABLE_DEFINITIONS: set[str] = {
+    LEGACY_STRIPE_API_VERSION,
+    "2025-02-24.acacia",
+}
+
 # Maps PostHog resource name -> Stripe API object type (as it appears in webhook data.object.object)
 RESOURCE_TO_STRIPE_OBJECT_TYPE: dict[str, str] = {
     ACCOUNT_RESOURCE_NAME: "account",
