@@ -14,6 +14,15 @@ CREDIT_NOTE_RESOURCE_NAME = "CreditNote"
 CUSTOMER_BALANCE_TRANSACTION_RESOURCE_NAME = "CustomerBalanceTransaction"
 CUSTOMER_PAYMENT_METHOD_RESOURCE_NAME = "CustomerPaymentMethod"
 
+STRIPE_API_VERSIONS: dict[str, str] = {
+    "2025-02-24.acacia": "Acacia (2025-02-24)",
+    "2025-08-27.basil": "Basil (2025-08-27)",
+    "2026-02-25.clover": "Clover (2026-02-25)",
+}
+
+DEFAULT_STRIPE_API_VERSION = "2026-02-25.clover"
+LEGACY_STRIPE_API_VERSION = "2024-09-30.acacia"
+
 # Maps PostHog resource name -> Stripe API object type (as it appears in webhook data.object.object)
 RESOURCE_TO_STRIPE_OBJECT_TYPE: dict[str, str] = {
     ACCOUNT_RESOURCE_NAME: "account",

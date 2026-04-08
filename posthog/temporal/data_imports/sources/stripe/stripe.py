@@ -1,14 +1,14 @@
 import os
 import dataclasses
 from collections.abc import Callable
-from typing import Any, Optional, Union, get_args, get_type_hints
+from typing import Any, Optional, Union, get_args
 
 import orjson
 import pyarrow as pa
 from asgiref.sync import async_to_sync
 from stripe import ListObject, StripeClient
 from stripe._base_address import BaseAddresses
-from stripe._webhook_endpoint_service import WebhookEndpointService
+from stripe.params._webhook_endpoint_create_params import WebhookEndpointCreateParams
 from structlog.types import FilteringBoundLogger
 
 from posthog.temporal.common.logger import get_logger
@@ -33,6 +33,7 @@ from posthog.temporal.data_imports.sources.stripe.constants import (
     DISPUTE_RESOURCE_NAME,
     INVOICE_ITEM_RESOURCE_NAME,
     INVOICE_RESOURCE_NAME,
+    LEGACY_STRIPE_API_VERSION,
     PAYOUT_RESOURCE_NAME,
     PRICE_RESOURCE_NAME,
     PRODUCT_RESOURCE_NAME,
@@ -85,42 +86,45 @@ def get_rows(
     logger: FilteringBoundLogger,
     resumable_source_manager: ResumableSourceManager[StripeResumeConfig],
     should_use_incremental_field: bool = False,
+    stripe_api_version: Optional[str] = None,
 ):
+    version = stripe_api_version or LEGACY_STRIPE_API_VERSION
     client = StripeClient(
         api_key,
         stripe_account=account_id,
-        stripe_version="2024-09-30.acacia",
+        stripe_version=version,
         max_network_retries=2,
         base_addresses=_stripe_base_addresses(),
     )
+
     default_params = {"limit": DEFAULT_LIMIT}
     resources: dict[str, Union[StripeResource, StripeNestedResource]] = {
-        ACCOUNT_RESOURCE_NAME: StripeResource(method=client.accounts.list),
-        BALANCE_TRANSACTION_RESOURCE_NAME: StripeResource(method=client.balance_transactions.list),
-        CHARGE_RESOURCE_NAME: StripeResource(method=client.charges.list),
-        CUSTOMER_RESOURCE_NAME: StripeResource(method=client.customers.list),
-        DISPUTE_RESOURCE_NAME: StripeResource(method=client.disputes.list),
-        INVOICE_ITEM_RESOURCE_NAME: StripeResource(method=client.invoice_items.list),
+        ACCOUNT_RESOURCE_NAME: StripeResource(method=client.v1.accounts.list),
+        BALANCE_TRANSACTION_RESOURCE_NAME: StripeResource(method=client.v1.balance_transactions.list),
+        CHARGE_RESOURCE_NAME: StripeResource(method=client.v1.charges.list),
+        CUSTOMER_RESOURCE_NAME: StripeResource(method=client.v1.customers.list),
+        DISPUTE_RESOURCE_NAME: StripeResource(method=client.v1.disputes.list),
+        INVOICE_ITEM_RESOURCE_NAME: StripeResource(method=client.v1.invoice_items.list),
         INVOICE_RESOURCE_NAME: StripeResource(
             method=lambda params: InvoiceListWithAllLines(client, params, logger)  # type: ignore
         ),
-        PAYOUT_RESOURCE_NAME: StripeResource(method=client.payouts.list),
-        PRICE_RESOURCE_NAME: StripeResource(method=client.prices.list, params={"expand[]": "data.tiers"}),
-        PRODUCT_RESOURCE_NAME: StripeResource(method=client.products.list),
-        REFUND_RESOURCE_NAME: StripeResource(method=client.refunds.list),
-        SUBSCRIPTION_RESOURCE_NAME: StripeResource(method=client.subscriptions.list, params={"status": "all"}),
-        CREDIT_NOTE_RESOURCE_NAME: StripeResource(method=client.credit_notes.list),
+        PAYOUT_RESOURCE_NAME: StripeResource(method=client.v1.payouts.list),
+        PRICE_RESOURCE_NAME: StripeResource(method=client.v1.prices.list, params={"expand[]": "data.tiers"}),
+        PRODUCT_RESOURCE_NAME: StripeResource(method=client.v1.products.list),
+        REFUND_RESOURCE_NAME: StripeResource(method=client.v1.refunds.list),
+        SUBSCRIPTION_RESOURCE_NAME: StripeResource(method=client.v1.subscriptions.list, params={"status": "all"}),
+        CREDIT_NOTE_RESOURCE_NAME: StripeResource(method=client.v1.credit_notes.list),
         CUSTOMER_BALANCE_TRANSACTION_RESOURCE_NAME: StripeNestedResource(
-            method=client.customers.balance_transactions.list,
+            method=client.v1.customers.balance_transactions.list,
             nested_parent_param="customer",
             parent_id="id",
-            parent=StripeResource(method=client.customers.list),
+            parent=StripeResource(method=client.v1.customers.list),
         ),
         CUSTOMER_PAYMENT_METHOD_RESOURCE_NAME: StripeNestedResource(
-            method=client.customers.payment_methods.list,
+            method=client.v1.customers.payment_methods.list,
             nested_parent_param="customer",
             parent_id="id",
-            parent=StripeResource(method=client.customers.list),
+            parent=StripeResource(method=client.v1.customers.list),
         ),
     }
 
@@ -246,6 +250,7 @@ def stripe_source(
     resumable_source_manager: ResumableSourceManager[StripeResumeConfig],
     webhook_source_manager: WebhookSourceManager,
     should_use_incremental_field: bool = False,
+    stripe_api_version: Optional[str] = None,
 ):
     column_mapping = get_dlt_mapping_for_external_table(f"stripe_{endpoint.lower()}")
     column_hints = {key: value.get("data_type") for key, value in column_mapping.items()}
@@ -269,6 +274,7 @@ def stripe_source(
             logger=logger,
             should_use_incremental_field=should_use_incremental_field,
             resumable_source_manager=resumable_source_manager,
+            stripe_api_version=stripe_api_version,
         )
 
     return SourceResponse(
@@ -295,7 +301,9 @@ class StripePermissionError(Exception):
         super().__init__(message)
 
 
-def validate_credentials(api_key: str, table_name: Optional[str] = None) -> bool:
+def validate_credentials(
+    api_key: str, table_name: Optional[str] = None, stripe_api_version: Optional[str] = None
+) -> bool:
     """
     Validates Stripe API credentials and checks permissions for all required resources.
     This function will:
@@ -303,23 +311,29 @@ def validate_credentials(api_key: str, table_name: Optional[str] = None) -> bool
     - Raise StripePermissionError if the API key is valid but lacks permissions for specific resources
     - Raise Exception if the API key is invalid or there's any other error
     """
-    client = StripeClient(api_key, base_addresses=_stripe_base_addresses())
+
+    version = stripe_api_version or LEGACY_STRIPE_API_VERSION
+    client = StripeClient(api_key, stripe_version=version, base_addresses=_stripe_base_addresses())
 
     # Test access to all resources we're pulling
     resources_to_check = [
-        {"name": ACCOUNT_RESOURCE_NAME, "method": client.accounts.list, "params": {"limit": 1}},
-        {"name": BALANCE_TRANSACTION_RESOURCE_NAME, "method": client.balance_transactions.list, "params": {"limit": 1}},
-        {"name": CHARGE_RESOURCE_NAME, "method": client.charges.list, "params": {"limit": 1}},
-        {"name": CUSTOMER_RESOURCE_NAME, "method": client.customers.list, "params": {"limit": 1}},
-        {"name": DISPUTE_RESOURCE_NAME, "method": client.disputes.list, "params": {"limit": 1}},
-        {"name": INVOICE_ITEM_RESOURCE_NAME, "method": client.invoice_items.list, "params": {"limit": 1}},
-        {"name": INVOICE_RESOURCE_NAME, "method": client.invoices.list, "params": {"limit": 1}},
-        {"name": PAYOUT_RESOURCE_NAME, "method": client.payouts.list, "params": {"limit": 1}},
-        {"name": PRICE_RESOURCE_NAME, "method": client.prices.list, "params": {"limit": 1}},
-        {"name": PRODUCT_RESOURCE_NAME, "method": client.products.list, "params": {"limit": 1}},
-        {"name": SUBSCRIPTION_RESOURCE_NAME, "method": client.subscriptions.list, "params": {"limit": 1}},
-        {"name": REFUND_RESOURCE_NAME, "method": client.refunds.list, "params": {"limit": 1}},
-        {"name": CREDIT_NOTE_RESOURCE_NAME, "method": client.credit_notes.list, "params": {"limit": 1}},
+        {"name": ACCOUNT_RESOURCE_NAME, "method": client.v1.accounts.list, "params": {"limit": 1}},
+        {
+            "name": BALANCE_TRANSACTION_RESOURCE_NAME,
+            "method": client.v1.balance_transactions.list,
+            "params": {"limit": 1},
+        },
+        {"name": CHARGE_RESOURCE_NAME, "method": client.v1.charges.list, "params": {"limit": 1}},
+        {"name": CUSTOMER_RESOURCE_NAME, "method": client.v1.customers.list, "params": {"limit": 1}},
+        {"name": DISPUTE_RESOURCE_NAME, "method": client.v1.disputes.list, "params": {"limit": 1}},
+        {"name": INVOICE_ITEM_RESOURCE_NAME, "method": client.v1.invoice_items.list, "params": {"limit": 1}},
+        {"name": INVOICE_RESOURCE_NAME, "method": client.v1.invoices.list, "params": {"limit": 1}},
+        {"name": PAYOUT_RESOURCE_NAME, "method": client.v1.payouts.list, "params": {"limit": 1}},
+        {"name": PRICE_RESOURCE_NAME, "method": client.v1.prices.list, "params": {"limit": 1}},
+        {"name": PRODUCT_RESOURCE_NAME, "method": client.v1.products.list, "params": {"limit": 1}},
+        {"name": SUBSCRIPTION_RESOURCE_NAME, "method": client.v1.subscriptions.list, "params": {"limit": 1}},
+        {"name": REFUND_RESOURCE_NAME, "method": client.v1.refunds.list, "params": {"limit": 1}},
+        {"name": CREDIT_NOTE_RESOURCE_NAME, "method": client.v1.credit_notes.list, "params": {"limit": 1}},
     ]
 
     missing_permissions = {}
@@ -344,11 +358,12 @@ def validate_credentials(api_key: str, table_name: Optional[str] = None) -> bool
     return True
 
 
-def create_webhook(api_key: str, stripe_account_id: str | None, webhook_url: str) -> WebhookCreationResult:
+def create_webhook(
+    api_key: str, stripe_account_id: str | None, stripe_api_version: str | None, webhook_url: str
+) -> WebhookCreationResult:
     logger = LOGGER.bind()
 
-    hints = get_type_hints(WebhookEndpointService.CreateParams, include_extras=True)
-    enabled_events_type = hints["enabled_events"]
+    enabled_events_type = WebhookEndpointCreateParams.__annotations__["enabled_events"]
     list_inner = get_args(enabled_events_type)[0]
     possible_event_values: tuple[str] = get_args(list_inner)
 
@@ -362,15 +377,16 @@ def create_webhook(api_key: str, stripe_account_id: str | None, webhook_url: str
         )
 
     try:
+        version = stripe_api_version or LEGACY_STRIPE_API_VERSION
         client = StripeClient(
             api_key,
             stripe_account=stripe_account_id,
-            stripe_version="2024-09-30.acacia",
+            stripe_version=version,
             max_network_retries=2,
             base_addresses=_stripe_base_addresses(),
         )
 
-        endpoint = client.webhook_endpoints.create(
+        endpoint = client.v1.webhook_endpoints.create(
             params={
                 "url": webhook_url,
                 "enabled_events": filtered_events,  # type: ignore
@@ -399,23 +415,26 @@ def create_webhook(api_key: str, stripe_account_id: str | None, webhook_url: str
         return WebhookCreationResult(success=False, error=f"Failed to create webhook automatically: {error_str}")
 
 
-def delete_webhook(api_key: str, stripe_account_id: str | None, webhook_url: str) -> WebhookDeletionResult:
+def delete_webhook(
+    api_key: str, stripe_account_id: str | None, stripe_api_version: str | None, webhook_url: str
+) -> WebhookDeletionResult:
     logger = LOGGER.bind()
 
     try:
+        version = stripe_api_version or LEGACY_STRIPE_API_VERSION
         client = StripeClient(
             api_key,
             stripe_account=stripe_account_id,
-            stripe_version="2024-09-30.acacia",
+            stripe_version=version,
             max_network_retries=2,
             base_addresses=_stripe_base_addresses(),
         )
 
-        endpoints = client.webhook_endpoints.list(params={"limit": 100})
+        endpoints = client.v1.webhook_endpoints.list(params={"limit": 100})
 
         for endpoint in endpoints.auto_paging_iter():
             if endpoint.url == webhook_url:
-                client.webhook_endpoints.delete(endpoint.id)
+                client.v1.webhook_endpoints.delete(endpoint.id)
                 return WebhookDeletionResult(success=True)
 
         return WebhookDeletionResult(success=True)
@@ -435,17 +454,20 @@ def delete_webhook(api_key: str, stripe_account_id: str | None, webhook_url: str
         return WebhookDeletionResult(success=False, error=f"Failed to delete webhook: {error_str}")
 
 
-def get_external_webhook_info(api_key: str, stripe_account_id: str | None, webhook_url: str) -> ExternalWebhookInfo:
+def get_external_webhook_info(
+    api_key: str, stripe_account_id: str | None, stripe_api_version: str | None, webhook_url: str
+) -> ExternalWebhookInfo:
     try:
+        version = stripe_api_version or LEGACY_STRIPE_API_VERSION
         client = StripeClient(
             api_key,
             stripe_account=stripe_account_id,
-            stripe_version="2024-09-30.acacia",
+            stripe_version=version,
             max_network_retries=2,
             base_addresses=_stripe_base_addresses(),
         )
 
-        endpoints = client.webhook_endpoints.list(params={"limit": 100})
+        endpoints = client.v1.webhook_endpoints.list(params={"limit": 100})
 
         for endpoint in endpoints.auto_paging_iter():
             if endpoint.url == webhook_url:

@@ -50,6 +50,18 @@ class GoogleAdsIsMccAccountConfig(config.Config):
 
 
 @config.config
+class HubspotCustomPropertiesConfig(config.Config):
+    enabled: bool = config.value(converter=config.str_to_bool, default=False)
+    contacts_properties: str | None = None
+    companies_properties: str | None = None
+    deals_properties: str | None = None
+    tickets_properties: str | None = None
+    quotes_properties: str | None = None
+    emails_properties: str | None = None
+    meetings_properties: str | None = None
+
+
+@config.config
 class SnowflakeAuthTypeConfig(config.Config):
     user: str
     selection: Literal["password", "keypair"] = "password"
@@ -376,18 +388,6 @@ class GreenhouseSourceConfig(config.Config):
 @config.config
 class HelpScoutSourceConfig(config.Config):
     pass
-
-
-@config.config
-class HubspotCustomPropertiesConfig(config.Config):
-    contacts_properties: str | None = None
-    companies_properties: str | None = None
-    deals_properties: str | None = None
-    tickets_properties: str | None = None
-    quotes_properties: str | None = None
-    emails_properties: str | None = None
-    meetings_properties: str | None = None
-    enabled: bool = config.value(converter=config.str_to_bool, default=False)
 
 
 @config.config
@@ -749,6 +749,9 @@ class SquareSourceConfig(config.Config):
 class StripeSourceConfig(config.Config):
     auth_method: StripeAuthMethodConfig
     stripe_account_id: str | None = None
+    stripe_api_version: Literal["2025-02-24.acacia", "2025-08-27.basil", "2026-02-25.clover"] | None = config.value(
+        default="2026-02-25.clover"
+    )
 
 
 @config.config
