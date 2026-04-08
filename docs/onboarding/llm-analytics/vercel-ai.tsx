@@ -44,8 +44,7 @@ export const getVercelAISteps = (ctx: OnboardingComponentsContext): StepDefiniti
 
                             const sdk = new NodeSDK({
                               resource: resourceFromAttributes({
-                                'service.name': 'my-ai-app',
-                                'user.id': 'user_123', // optional: identifies the user in PostHog
+                                'service.name': 'my-app',
                               }),
                               spanProcessors: [
                                 new tracing.SimpleSpanProcessor(

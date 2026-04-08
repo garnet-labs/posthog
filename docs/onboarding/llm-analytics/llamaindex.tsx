@@ -3,7 +3,7 @@ import { OnboardingComponentsContext, createInstallation } from 'scenes/onboardi
 import { StepDefinition } from '../steps'
 
 export const getLlamaIndexSteps = (ctx: OnboardingComponentsContext): StepDefinition[] => {
-    const { CodeBlock, Markdown, dedent, snippets } = ctx
+    const { CodeBlock, Markdown, Blockquote, dedent, snippets } = ctx
 
     const NotableGenerationProperties = snippets?.NotableGenerationProperties
 
@@ -97,6 +97,14 @@ export const getLlamaIndexSteps = (ctx: OnboardingComponentsContext): StepDefini
                             print(response)
                         `}
                     />
+
+                    <Blockquote>
+                        <Markdown>
+                            **Note:** If you want to capture LLM events anonymously, omit the `user.id` resource
+                            attribute. See our docs on [anonymous vs identified
+                            events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
+                        </Markdown>
+                    </Blockquote>
 
                     <Markdown>
                         {dedent`

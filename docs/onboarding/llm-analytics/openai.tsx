@@ -190,13 +190,28 @@ export const getOpenAISteps = (ctx: OnboardingComponentsContext): StepDefinition
                     </Markdown>
 
                     <CodeBlock
-                        language="python"
-                        code={dedent`
-                            response = client.embeddings.create(
-                                input="The quick brown fox",
-                                model="text-embedding-3-small",
-                            )
-                        `}
+                        blocks={[
+                            {
+                                language: 'python',
+                                file: 'Python',
+                                code: dedent`
+                                    response = client.embeddings.create(
+                                        input="The quick brown fox",
+                                        model="text-embedding-3-small",
+                                    )
+                                `,
+                            },
+                            {
+                                language: 'typescript',
+                                file: 'Node',
+                                code: dedent`
+                                    const response = await client.embeddings.create({
+                                      input: 'The quick brown fox',
+                                      model: 'text-embedding-3-small',
+                                    })
+                                `,
+                            },
+                        ]}
                     />
                 </>
             ),
