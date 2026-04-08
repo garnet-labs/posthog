@@ -5,20 +5,13 @@ import { formatResponse } from '@/lib/response'
 import { TOKEN_CHAR_LIMIT, listAvailablePaths, resolveSchemaPath, summarizeSchema } from './schema-utils'
 import type { Context, Tool, ZodObjectAny } from './types'
 
-const ExecSchema = z.object({
-    command: z
-        .string()
-        .describe(
-            'CLI-style command string. Supported commands:\n' +
-                '  tools                                    — list available tool names\n' +
-                '  search <regex_pattern>                   — search tools by JavaScript regex (matches name, title, description)\n' +
-                '  info <tool_name>                         — show tool name, description, and input schema (summarized if too large)\n' +
-                '  schema <tool_name> [field_path]          — drill into a specific field schema (supports dot-notation, e.g. series, breakdownFilter.breakdowns)\n' +
-                '  call <tool_name> <json_input>            — call a tool with JSON input'
-        ),
-})
+type ExecSchema = ReturnType<typeof makeExecSchema>
 
-type ExecSchema = typeof ExecSchema
+function makeExecSchema(commandReference: string): z.ZodObject<{ command: z.ZodString }> {
+    return z.object({
+        command: z.string().describe(commandReference),
+    })
+}
 
 function parseCommand(input: string): { verb: string; rest: string } {
     const trimmed = input.trim()
@@ -41,14 +34,15 @@ function findTool(tools: Tool<ZodObjectAny>[], name: string): Tool<ZodObjectAny>
 export function createExecTool(
     allTools: Tool<ZodObjectAny>[],
     context: Context,
-    instructions: string
+    toolDescription: string,
+    commandReference: string
 ): Tool<ExecSchema> {
-    const description = instructions
+    const ExecSchema = makeExecSchema(commandReference)
 
     return {
         name: 'exec',
         title: 'Execute PostHog command',
-        description,
+        description: toolDescription,
         schema: ExecSchema,
         scopes: [],
         annotations: {
