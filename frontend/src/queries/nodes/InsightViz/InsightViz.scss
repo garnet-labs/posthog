@@ -46,10 +46,31 @@
                     min-width: 0;
                 }
 
+                // Default: vertical stack (when panel is beside chart)
+                .EditorFilterGroups {
+                    flex-direction: column;
+                }
+
                 @container insight-viz (min-width: 900px) {
                     width: var(--editor-panel-width, max(min(30%, 600px), 420px));
                     min-width: 320px;
                     max-width: 600px;
+                }
+
+                // When chart wraps below the panel (< 900px), compact collapsed tiles into a row
+                @container insight-viz (max-width: 899px) {
+                    .EditorFilterGroups {
+                        flex-flow: row wrap;
+
+                        .EditorFilterGroupTile--expanded {
+                            width: 100%;
+                        }
+
+                        .EditorFilterGroupTile--collapsed {
+                            flex: 1;
+                            min-width: 10rem;
+                        }
+                    }
                 }
 
                 @container editor-panel (max-width: 500px) {

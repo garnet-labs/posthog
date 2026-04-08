@@ -27,7 +27,12 @@ export function EditorFilterGroupTile({
     const [isRowExpanded, setIsRowExpanded, isExpandable] = useEditorGroupExpansion(defaultExpanded, hasContent)
 
     return (
-        <div className="border rounded bg-surface-primary min-w-0">
+        <div
+            className={clsx(
+                'border rounded bg-surface-primary',
+                isRowExpanded ? 'EditorFilterGroupTile--expanded min-w-0' : 'EditorFilterGroupTile--collapsed'
+            )}
+        >
             {isExpandable ? (
                 <LemonButton
                     fullWidth

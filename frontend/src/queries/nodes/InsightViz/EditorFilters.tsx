@@ -382,7 +382,7 @@ export function EditorFilters({ query, showing, embedded }: EditorFiltersProps):
         },
         // Hide advanced options for calendar heatmap
         {
-            title: 'Advanced options',
+            title: editorPanelsEnabled ? 'Advanced' : 'Advanced options',
             defaultExpanded: false,
             show: display !== ChartDisplayType.CalendarHeatmap,
             editorFilters: visibleFilters([
@@ -443,7 +443,7 @@ export function EditorFilters({ query, showing, embedded }: EditorFiltersProps):
 
     return (
         <EditorFiltersShell query={query} showing={showing} embedded={embedded} asPanels>
-            <div className="flex flex-col gap-3">
+            <div className="EditorFilterGroups flex gap-2">
                 {filterGroupsGroups[0].editorFilterGroups.map((editorFilterGroup) => (
                     <EditorFilterGroup
                         key={editorFilterGroup.title}
