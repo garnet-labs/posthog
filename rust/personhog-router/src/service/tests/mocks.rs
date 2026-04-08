@@ -165,6 +165,14 @@ impl PersonHogBackend for MockBackend {
         Ok(DeletePersonsResponse { deleted_count: 0 })
     }
 
+    async fn delete_persons_batch_for_team(
+        &self,
+        _request: DeletePersonsBatchForTeamRequest,
+    ) -> Result<DeletePersonsBatchForTeamResponse, Status> {
+        self.check_error()?;
+        Ok(DeletePersonsBatchForTeamResponse { deleted_count: 0 })
+    }
+
     async fn check_cohort_membership(
         &self,
         _request: CheckCohortMembershipRequest,
