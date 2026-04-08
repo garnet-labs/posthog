@@ -61,7 +61,8 @@ export const getHuggingFaceSteps = (ctx: OnboardingComponentsContext): StepDefin
 
                                     resource = Resource(attributes={
                                         SERVICE_NAME: "my-app",
-                                        "user.id": "user_123", # optional: identifies the user in PostHog
+                                        "posthog.distinct_id": "user_123", # optional: identifies the user in PostHog
+                                        "foo": "bar", # custom properties are passed through
                                     })
 
                                     exporter = OTLPSpanExporter(
@@ -88,7 +89,8 @@ export const getHuggingFaceSteps = (ctx: OnboardingComponentsContext): StepDefin
                                     const sdk = new NodeSDK({
                                       resource: resourceFromAttributes({
                                         'service.name': 'my-app',
-                                        'user.id': 'user_123', // optional: identifies the user in PostHog
+                                        'posthog.distinct_id': 'user_123', // optional: identifies the user in PostHog
+                                        foo: 'bar', // custom properties are passed through
                                       }),
                                       spanProcessors: [
                                         new tracing.SimpleSpanProcessor(
@@ -168,7 +170,7 @@ export const getHuggingFaceSteps = (ctx: OnboardingComponentsContext): StepDefin
                     <Blockquote>
                         <Markdown>
                             {dedent`
-                            **Note:** If you want to capture LLM events anonymously, omit the \`user.id\` resource attribute. See our docs on [anonymous vs identified events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
+                            **Note:** If you want to capture LLM events anonymously, omit the \`posthog.distinct_id\` resource attribute. See our docs on [anonymous vs identified events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
                             `}
                         </Markdown>
                     </Blockquote>

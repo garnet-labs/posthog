@@ -69,7 +69,8 @@ export const getHeliconeSteps = (ctx: OnboardingComponentsContext): StepDefiniti
 
                                     resource = Resource(attributes={
                                         SERVICE_NAME: "my-app",
-                                        "user.id": "user_123", # optional: identifies the user in PostHog
+                                        "posthog.distinct_id": "user_123", # optional: identifies the user in PostHog
+                                        "foo": "bar", # custom properties are passed through
                                     })
 
                                     exporter = OTLPSpanExporter(
@@ -96,7 +97,8 @@ export const getHeliconeSteps = (ctx: OnboardingComponentsContext): StepDefiniti
                                     const sdk = new NodeSDK({
                                       resource: resourceFromAttributes({
                                         'service.name': 'my-app',
-                                        'user.id': 'user_123', // optional: identifies the user in PostHog
+                                        'posthog.distinct_id': 'user_123', // optional: identifies the user in PostHog
+                                        foo: 'bar', // custom properties are passed through
                                       }),
                                       spanProcessors: [
                                         new tracing.SimpleSpanProcessor(
@@ -173,8 +175,8 @@ export const getHeliconeSteps = (ctx: OnboardingComponentsContext): StepDefiniti
 
                     <Blockquote>
                         <Markdown>
-                            **Note:** If you want to capture LLM events anonymously, omit the `user.id` resource
-                            attribute. See our docs on [anonymous vs identified
+                            **Note:** If you want to capture LLM events anonymously, omit the `posthog.distinct_id`
+                            resource attribute. See our docs on [anonymous vs identified
                             events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
                         </Markdown>
                     </Blockquote>
