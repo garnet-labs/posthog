@@ -315,6 +315,13 @@ export const maxLogic = kea<maxLogicType>([
             },
         ],
 
+        messagesLoading: [
+            (s) => [s.conversation, s.conversationId],
+            (conversation, conversationId) => {
+                return !!conversationId && !!conversation && conversation.messages === undefined
+            },
+        ],
+
         threadVisible: [(s) => [s.conversationId], (conversationId) => !!conversationId],
 
         backButtonDisabled: [
@@ -963,6 +970,6 @@ export function mergeConversations(
     return {
         ...oldObj,
         ...newObj,
-        messages: oldObj?.messages ?? [],
+        messages: oldObj?.messages,
     }
 }

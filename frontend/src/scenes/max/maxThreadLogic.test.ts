@@ -1186,7 +1186,6 @@ describe('maxThreadLogic', () => {
                 user: MOCK_DEFAULT_BASIC_USER,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-                messages: [],
                 type: ConversationType.Assistant,
             }
 

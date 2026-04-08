@@ -124,7 +124,11 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
         }
 
         // New messages have been added since we last updated the thread
-        if (!values.streamingActive && props.conversation.messages.length > values.threadMessageCount) {
+        if (
+            !values.streamingActive &&
+            props.conversation.messages &&
+            props.conversation.messages.length > values.threadMessageCount
+        ) {
             actions.setThread(updateMessagesWithCompletedStatus(props.conversation.messages))
         }
 
@@ -1793,7 +1797,7 @@ export const maxThreadLogic = kea<maxThreadLogicType>([
             actions.askMax(values.question)
             actions.setAutoRun(false)
         } else {
-            if (props.conversation?.messages.length === 0 && logic.values.threadRaw.length === 0) {
+            if (props.conversation && !props.conversation.messages && logic.values.threadRaw.length === 0) {
                 actions.loadConversation(props.conversation.id)
             }
 
