@@ -336,6 +336,9 @@ select = [
 # descriptors into the pool before AddSerializedFile() — ruff must not strip them.
 "posthog/personhog_client/proto/generated/**/*.pyi" = ["F401"]
 "posthog/personhog_client/proto/generated/**/*_pb2.py" = ["F401", "E402"]
+# CLI scripts — print() is the primary output mechanism, list concat is fine
+"bin/_sandbox_lib.py" = ["T201"]
+"bin/sandbox_cloud.py" = ["T201", "RUF005"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
