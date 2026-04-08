@@ -1481,8 +1481,14 @@ def _cloud_render_user_data(
     claude_json: str,
     s3_archive_url: str,
 ) -> str:
-    """Render the cloud-init script with sandbox-specific values."""
+    """Render the cloud-init script with sandbox-specific values.
+
+    Returns base64-encoded gzip data — cloud-init auto-detects the gzip
+    magic bytes and decompresses before executing.  This keeps us well
+    under the 16 KB AWS user-data limit.
+    """
     import base64
+    import gzip
 
     template = CLOUD_INIT_TEMPLATE.read_text()
 
@@ -1502,7 +1508,8 @@ def _cloud_render_user_data(
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)
 
-    return base64.b64encode(template.encode()).decode()
+    compressed = gzip.compress(template.encode(), compresslevel=9)
+    return base64.b64encode(compressed).decode()
 
 
 def _cloud_get_tailscale_key(config: dict) -> str:
@@ -1674,9 +1681,10 @@ def cmd_cloud_create(branch: str) -> None:
         s3_archive_url=s3_archive_url,
     )
 
-    # AWS user data limit is 16KB (decoded size).
+    # AWS user data limit is 16KB (decoded size, i.e. the gzip blob).
     import base64 as _b64
     user_data_bytes = len(_b64.b64decode(user_data))
+    info(f"  User data size: {user_data_bytes} bytes (gzip compressed, limit 16384)")
     if user_data_bytes > 16384:
         fatal(
             f"User data is {user_data_bytes} bytes, exceeding AWS 16KB limit.\n"
