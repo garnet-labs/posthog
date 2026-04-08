@@ -219,8 +219,9 @@ if [ -n "$S3_DL_PID" ]; then
 
     log "Extracting Docker cache..."
     mkdir -p /var/lib/docker
+    extract_start=$SECONDS
     tar -C /var/lib/docker -I 'zstd -T0' -xf "$ARCHIVE_DL_PATH"
-    log "Extracted $(du -sh /var/lib/docker | cut -f1) to Docker data dir"
+    log "Extracted $(du -shL /var/lib/docker | cut -f1) to Docker data dir in $((SECONDS - extract_start))s"
     rm -f "$ARCHIVE_DL_PATH"
 else
     log "WARNING: No S3 archive URL provided, Docker starts with no cached images"
