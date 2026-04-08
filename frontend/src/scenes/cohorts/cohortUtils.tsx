@@ -479,7 +479,14 @@ export function resolveCohortFieldValue(
     if (fieldKey === 'value') {
         return criteriaToBehavioralFilterType(criteria)
     }
-    return (criteria as Record<string, any>)[fieldKey] ?? null
+    return (
+        (
+            criteria as Record<
+                string,
+                string | number | boolean | null | undefined | AnyPropertyFilter[] | PropertyFilterValue
+            >
+        )[fieldKey] ?? null
+    )
 }
 
 export function applyAllCriteriaGroup(
