@@ -1,8 +1,6 @@
-import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
 
 from django.conf import settings as django_settings
 
@@ -42,8 +40,8 @@ class DeletionRequestContext:
 # ---------------------------------------------------------------------------
 
 
-def _temp_table_name(request_id: str) -> str:
-    return f"tmp_prop_rm_{request_id[:8]}"
+def _temp_table_name(team_id: int, request_id: str) -> str:
+    return f"tmp_dag_team_{team_id}_prop_rm_{request_id[:8]}"
 
 
 def _property_filter_clause(properties: list[str]) -> str:
@@ -86,28 +84,8 @@ def _create_local_staging_table(client: Client, source_table: str, staging_table
     if not rows:
         raise dagster.Failure(description=f"Source table {database}.{source_table} not found")
 
-    engine_full = rows[0][0]
-
-    def _strip_replication(m: re.Match) -> str:
-        base_engine = m.group(1)
-        extra_args = m.group(2)
-        if base_engine == "MergeTree" or not extra_args:
-            return f"{base_engine}()"
-        return f"{base_engine}({extra_args})"
-
-    engine_clause, count = re.subn(
-        r"Replicated(\w+)\('[^']*',\s*'\{replica\}'(?:,\s*(.+?))?\)",
-        _strip_replication,
-        engine_full,
-        count=1,
-    )
-    if count == 0:
-        raise dagster.Failure(
-            description=f"Source table {source_table} does not use a Replicated engine: {engine_full}"
-        )
-
     client.execute(
-        f"CREATE TABLE IF NOT EXISTS {database}.{staging_table} AS {database}.{source_table} ENGINE = {engine_clause}"
+        f"CREATE TABLE IF NOT EXISTS {database}.{staging_table} AS {database}.{source_table} ENGINE = MergeTree()"
     )
 
 
@@ -280,143 +258,86 @@ def load_property_removal_request(
     )
 
 
-@dagster.op(tags=OWNER_TAG)
-def create_temp_tables(
+@dagster.op(tags=OWNER_TAG, retry_policy=dagster.RetryPolicy(max_retries=0))
+def prepare_and_insert_modified_events(
     context: dagster.OpExecutionContext,
     cluster: dagster.ResourceParam[ClickhouseCluster],
     deletion_request: DeletionRequestContext,
 ) -> DeletionRequestContext:
-    """Create a non-replicated local temp table on each shard."""
+    """Create temp table, copy events, drop properties, verify, and insert back — all on the same node per shard.
+
+    The temp table is local MergeTree (non-replicated), so every step that
+    touches it must execute on the same ClickHouse node. This op runs all
+    temp-table work within a single callable per shard to guarantee that.
+
+    After this op, sharded_events temporarily has both the original events
+    (with the target properties) and the modified events (without them).
+    The next op deletes the originals via a lightweight delete.
+    """
     source = EVENTS_DATA_TABLE()
-    temp = _temp_table_name(deletion_request.request_id)
-
-    for shard_num in sorted(cluster.shards):
-        context.log.info(f"Creating temp table {temp} on shard {shard_num}")
-        cluster.map_any_host_in_shards(
-            {shard_num: partial(_create_local_staging_table, source_table=source, staging_table=temp)}
-        ).result()
-
-    return deletion_request
-
-
-@dagster.op(tags=OWNER_TAG)
-def copy_events_to_temp(
-    context: dagster.OpExecutionContext,
-    cluster: dagster.ResourceParam[ClickhouseCluster],
-    deletion_request: DeletionRequestContext,
-) -> DeletionRequestContext:
-    """Copy matching events into the temp table on each shard (truncate first for idempotency)."""
-    source = EVENTS_DATA_TABLE()
-    temp = _temp_table_name(deletion_request.request_id)
+    temp = _temp_table_name(deletion_request.team_id, deletion_request.request_id)
     db = django_settings.CLICKHOUSE_DATABASE
     prop_filter = _property_filter_clause(deletion_request.properties)
     params = _base_params(deletion_request)
+    keys = deletion_request.properties
 
-    for shard_num in sorted(cluster.shards):
-        context.log.info(f"Copying events to temp on shard {shard_num}")
+    def process_shard(client: Client) -> dict:
+        # 1. Create temp table
+        _create_local_staging_table(client, source_table=source, staging_table=temp)
 
-        def truncate_and_copy(client: Client) -> int:
-            client.execute(f"TRUNCATE TABLE IF EXISTS {db}.{temp}")
-            client.execute(
-                f"""
-                INSERT INTO {db}.{temp}
-                SELECT * FROM {db}.{source}
-                WHERE team_id = %(team_id)s
-                  AND timestamp >= %(start_time)s
-                  AND timestamp < %(end_time)s
-                  AND event IN %(events)s
-                  AND {prop_filter}
-                """,
-                params,
-                settings={"max_execution_time": 1800},
-            )
-            result = client.execute(f"SELECT count() FROM {db}.{temp}")
-            return result[0][0]
+        # 2. Copy matching events (truncate first for idempotency)
+        client.execute(f"TRUNCATE TABLE IF EXISTS {db}.{temp}")
+        client.execute(
+            f"""
+            INSERT INTO {db}.{temp}
+            SELECT * FROM {db}.{source}
+            WHERE team_id = %(team_id)s
+              AND timestamp >= %(start_time)s
+              AND timestamp < %(end_time)s
+              AND event IN %(events)s
+              AND {prop_filter}
+            """,
+            params,
+            settings={"max_execution_time": 1800},
+        )
+        copied = client.execute(f"SELECT count() FROM {db}.{temp}")[0][0]
 
-        count = cluster.map_any_host_in_shards({shard_num: truncate_and_copy}).result()
-        _host, row_count = next(iter(count.items()))
-        context.log.info(f"Shard {shard_num}: copied {row_count} events")
-
-    return deletion_request
-
-
-@dagster.op(tags=OWNER_TAG)
-def mutate_temp_properties(
-    context: dagster.OpExecutionContext,
-    cluster: dagster.ResourceParam[ClickhouseCluster],
-    deletion_request: DeletionRequestContext,
-) -> DeletionRequestContext:
-    """Run ALTER TABLE UPDATE on each temp table to drop the target properties."""
-    temp = _temp_table_name(deletion_request.request_id)
-
-    for shard_num in sorted(cluster.shards):
-        context.log.info(f"Mutating properties on shard {shard_num}")
-        shard_start = time.monotonic()
-
+        # 3. Mutate properties
         runner = AlterTableMutationRunner(
             table=temp,
             commands={"UPDATE properties = JSONDropKeys(%(keys)s)(properties), inserted_at = now() WHERE 1=1"},
-            parameters={"keys": deletion_request.properties},
+            parameters={"keys": keys},
+        )
+        waiter = runner(client)
+        waiter.wait(client)
+
+        # 4. Verify no target properties remain
+        verify_params = _property_filter_params(keys)
+        remaining = client.execute(
+            f"SELECT count() FROM {db}.{temp} WHERE {prop_filter}",
+            verify_params,
+        )[0][0]
+        if remaining > 0:
+            raise Exception(f"{remaining} events still have target properties after mutation")
+
+        # 5. Insert modified events back into sharded_events
+        client.execute(
+            f"INSERT INTO {db}.{source} SELECT * FROM {db}.{temp}",
+            settings={"max_execution_time": 1800},
         )
 
-        shard_result = cluster.map_any_host_in_shards({shard_num: runner}).result()
-        _host, waiter = next(iter(shard_result.items()))
-        # Temp table is local (not replicated), so wait on the same host
-        cluster.map_any_host_in_shards({shard_num: waiter.wait}).result()
+        return {"copied": copied, "remaining_after_verify": remaining}
+
+    shards = sorted(cluster.shards)
+    for idx, shard_num in enumerate(shards, 1):
+        context.log.info(f"Processing shard {shard_num} ({idx}/{len(shards)})")
+        shard_start = time.monotonic()
+
+        result = cluster.map_any_host_in_shards({shard_num: process_shard}).result()
+        _host, stats = next(iter(result.items()))
 
         elapsed = time.monotonic() - shard_start
-        context.log.info(f"Shard {shard_num}: mutation complete in {elapsed:.1f}s")
-
-    return deletion_request
-
-
-@dagster.op(tags=OWNER_TAG)
-def verify_temp_mutations(
-    context: dagster.OpExecutionContext,
-    cluster: dagster.ResourceParam[ClickhouseCluster],
-    deletion_request: DeletionRequestContext,
-) -> DeletionRequestContext:
-    """Verify that no target properties remain in the temp tables."""
-    temp = _temp_table_name(deletion_request.request_id)
-    db = django_settings.CLICKHOUSE_DATABASE
-    prop_filter = _property_filter_clause(deletion_request.properties)
-    params = _property_filter_params(deletion_request.properties)
-
-    for shard_num in sorted(cluster.shards):
-        result = cluster.map_any_host_in_shards(
-            {shard_num: Query(f"SELECT count() FROM {db}.{temp} WHERE {prop_filter}", params)}
-        ).result()
-        _host, rows = next(iter(result.items()))
-        remaining = rows[0][0]
-        if remaining > 0:
-            raise dagster.Failure(f"Shard {shard_num}: {remaining} events still have target properties after mutation.")
-        context.log.info(f"Shard {shard_num}: verified, 0 events with target properties")
-
-    return deletion_request
-
-
-@dagster.op(tags=OWNER_TAG)
-def insert_modified_events(
-    context: dagster.OpExecutionContext,
-    cluster: dagster.ResourceParam[ClickhouseCluster],
-    deletion_request: DeletionRequestContext,
-) -> DeletionRequestContext:
-    """Insert modified events from temp tables back into sharded_events (before deleting originals)."""
-    source = EVENTS_DATA_TABLE()
-    temp = _temp_table_name(deletion_request.request_id)
-    db = django_settings.CLICKHOUSE_DATABASE
-
-    for shard_num in sorted(cluster.shards):
-        context.log.info(f"Inserting modified events on shard {shard_num}")
-        cluster.map_any_host_in_shards(
-            {
-                shard_num: Query(
-                    f"INSERT INTO {db}.{source} SELECT * FROM {db}.{temp}",
-                    settings={"max_execution_time": "1800"},
-                )
-            }
-        ).result()
-        context.log.info(f"Shard {shard_num}: insert complete")
+        context.log.info(f"Shard {shard_num}: copied {stats['copied']} events, insert complete in {elapsed:.1f}s")
 
     return deletion_request
 
@@ -465,7 +386,7 @@ def cleanup_temp_tables(
     deletion_request: DeletionRequestContext,
 ) -> DeletionRequestContext:
     """Drop the temp tables on all shards."""
-    temp = _temp_table_name(deletion_request.request_id)
+    temp = _temp_table_name(deletion_request.team_id, deletion_request.request_id)
     db = django_settings.CLICKHOUSE_DATABASE
 
     for shard_num in sorted(cluster.shards):
@@ -524,6 +445,19 @@ def mark_deletion_failed(context: dagster.HookContext) -> None:
 
     context.log.error(f"Deletion request {request_id} marked as failed.")
 
+    # Clean up temp tables for property removal jobs
+    if ops_config.get("load_property_removal_request"):
+        try:
+            from posthog.clickhouse.cluster import Query, get_cluster
+
+            temp = _temp_table_name(request_id)
+            db = django_settings.CLICKHOUSE_DATABASE
+            cluster = get_cluster()
+            cluster.map_one_host_per_shard(Query(f"DROP TABLE IF EXISTS {db}.{temp}")).result()
+            context.log.info(f"Cleaned up temp table {temp}")
+        except Exception as e:
+            context.log.warning(f"Failed to clean up temp table: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -542,11 +476,7 @@ def data_deletion_request_event_removal():
 def data_deletion_request_property_removal():
     """Execute an approved property removal request: copy events, drop properties, swap back."""
     request = load_property_removal_request()
-    request = create_temp_tables(request)
-    request = copy_events_to_temp(request)
-    request = mutate_temp_properties(request)
-    request = verify_temp_mutations(request)
-    request = insert_modified_events(request)
+    request = prepare_and_insert_modified_events(request)
     request = delete_original_events(request)
     request = cleanup_temp_tables(request)
     mark_deletion_complete(request)
