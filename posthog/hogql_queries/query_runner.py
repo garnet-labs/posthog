@@ -62,6 +62,7 @@ from posthog.schema import (
     UsageMetricsQuery,
     VectorSearchQuery,
     WebGoalsQuery,
+    WebNotableChangesQuery,
     WebOverviewQuery,
     WebStatsTableQuery,
     WebTrendsQuery,
@@ -192,6 +193,7 @@ RunnableQueryNode = Union[
     WebOverviewQuery,
     WebStatsTableQuery,
     WebGoalsQuery,
+    WebNotableChangesQuery,
     WebTrendsQuery,
     SessionAttributionExplorerQuery,
     MarketingAnalyticsTableQuery,
@@ -366,7 +368,13 @@ def get_query_runner(
             limit_context=limit_context,
         )
 
-    if kind in ("InsightActorsQuery", "FunnelsActorsQuery", "FunnelCorrelationActorsQuery", "StickinessActorsQuery"):
+    if kind in (
+        "InsightActorsQuery",
+        "FunnelsActorsQuery",
+        "FunnelCorrelationActorsQuery",
+        "ExperimentActorsQuery",
+        "StickinessActorsQuery",
+    ):
         from .insights.insight_actors_query_runner import InsightActorsQueryRunner
 
         return InsightActorsQueryRunner(
@@ -442,6 +450,17 @@ def get_query_runner(
         from .web_analytics.web_goals import WebGoalsQueryRunner
 
         return WebGoalsQueryRunner(
+            query=query,
+            team=team,
+            timings=timings,
+            modifiers=modifiers,
+            limit_context=limit_context,
+        )
+
+    if kind == "WebNotableChangesQuery":
+        from .web_analytics.notable_changes import WebNotableChangesQueryRunner
+
+        return WebNotableChangesQueryRunner(
             query=query,
             team=team,
             timings=timings,
@@ -874,6 +893,17 @@ def get_query_runner(
             limit_context=limit_context,
         )
 
+    if kind == "TraceSpansQuery":
+        from products.tracing.backend.logic import TraceSpansQueryRunner
+
+        return TraceSpansQueryRunner(
+            query=query,
+            team=team,
+            timings=timings,
+            modifiers=modifiers,
+            limit_context=limit_context,
+        )
+
     if kind == "PropertyValuesQuery":
         from posthog.hogql_queries.property_values_query_runner import PropertyValuesQueryRunner
 
@@ -1226,6 +1256,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                     tag_queries(scene=tags.scene)
 
             tag_queries(execution_mode=execution_mode.value)
+            tag_queries(cache_key=cache_key)
 
             # Abort early if the user doesn't have access to the query runner
             # We'll proceed as usual if there's no user connected to this request

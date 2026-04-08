@@ -5,6 +5,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { IconInfo, IconThumbsDown, IconThumbsUp } from '@posthog/icons'
 import { lemonToast } from '@posthog/lemon-ui'
 
+import { areAlertsSupportedForInsight, insightAlertsLogic } from 'lib/components/Alerts/insightAlertsLogic'
+import { ManageAlertsModal } from 'lib/components/Alerts/views/ManageAlertsModal'
 import { CardMeta } from 'lib/components/Cards/CardMeta'
 import { TopHeading } from 'lib/components/Cards/InsightCard/TopHeading'
 import { EditableField } from 'lib/components/EditableField/EditableField'
@@ -27,7 +29,7 @@ import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { capitalizeFirstLetter } from 'lib/utils'
 import { accessLevelSatisfied } from 'lib/utils/accessControlUtils'
-import { DashboardEventSource, eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
 import { insightDataLogic } from 'scenes/insights/insightDataLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
@@ -50,13 +52,15 @@ import {
     ExporterFormat,
     InsightColor,
     InsightLogicProps,
+    InsightShortId,
     QueryBasedInsightModel,
 } from '~/types'
 
-import { getDisplayLabelsToggleText, toggleDisplayLabelsInInsightQuery } from './displayLabelsToggle'
+import { DashboardInsightActions } from './DashboardInsightActions'
+import { dashboardWidgetMenusLogic } from './dashboardWidgetMenusLogic'
+import { DashboardWidgetPlacementMenus } from './DashboardWidgetPlacementMenus'
 import { InsightCardProps } from './InsightCard'
 import { InsightDetails } from './InsightDetails'
-import { InsightMoveToDashboardMenu } from './InsightMoveToDashboardMenu'
 
 interface InsightMetaProps extends Pick<
     InsightCardProps,
@@ -74,6 +78,7 @@ interface InsightMetaProps extends Pick<
     | 'duplicate'
     | 'dashboardId'
     | 'moveToDashboard'
+    | 'copyToDashboard'
     | 'showEditingControls'
     | 'showDetailsControls'
     | 'moreButtons'
@@ -109,6 +114,7 @@ export function InsightMeta({
     duplicate,
     setOverride,
     moveToDashboard,
+    copyToDashboard,
     areDetailsShown,
     setAreDetailsShown,
     showEditingControls = true,
@@ -118,7 +124,7 @@ export function InsightMeta({
     surveyOpportunity,
     onDragHandleMouseDown,
 }: InsightMetaProps): JSX.Element {
-    const { short_id, name, dashboards, next_allowed_client_refresh: nextAllowedClientRefresh } = insight
+    const { short_id, name, next_allowed_client_refresh: nextAllowedClientRefresh } = insight
     const insightLogicProps: InsightLogicProps = {
         dashboardItemId: insight.short_id,
         dashboardId,
@@ -127,27 +133,42 @@ export function InsightMeta({
         variablesOverride: variablesOverride ?? null,
         tileFiltersOverride: tile?.filters_overrides ?? null,
     }
-    const { insightFeedback, canToggleDisplayLabelsForInsight } = useValues(insightLogic(insightLogicProps))
+    const { insightFeedback, canToggleDisplayLabelsForInsight, canToggleLegendForInsight } = useValues(
+        insightLogic(insightLogicProps)
+    )
     const { setInsightFeedback } = useActions(insightLogic(insightLogicProps))
-    const { exportContext, insightData } = useValues(insightDataLogic(insightLogicProps))
+    const { exportContext, insightData, query } = useValues(insightDataLogic(insightLogicProps))
+    const [isManageAlertsModalOpen, setIsManageAlertsModalOpen] = useState(false)
+    const { loadAlerts: loadDeferredInsightAlerts } = useActions(
+        insightAlertsLogic({
+            insightId: insight.id ?? 0,
+            insightLogicProps,
+            deferInitialAlertsLoad: true,
+        })
+    )
     const { samplingFactor } = useValues(insightVizDataLogic(insightLogicProps))
     const { nameSortedDashboards } = useValues(dashboardsModel)
+    const { copyToDestinations } = useValues(
+        dashboardWidgetMenusLogic({
+            instanceKey: insight.short_id,
+            dashboardId,
+            dashboards: insight.dashboards,
+            dashboard_tiles: insight.dashboard_tiles,
+        })
+    )
     const { updateInsightDirect } = useActions(insightsModel)
-    const { reportDashboardInsightMetaUpdated, reportDashboardInsightValuesOnSeriesToggled } =
-        useActions(eventUsageLogic)
+    const { reportDashboardInsightMetaUpdated } = useActions(eventUsageLogic)
     const { featureFlags } = useValues(featureFlagLogic)
 
     const showCompactTile =
         placement === DashboardPlacement.Dashboard ||
         placement === DashboardPlacement.ProjectHomepage ||
         placement === DashboardPlacement.Public
-    const isDashboardCardPlacement =
+    const isUsedAsDashboardTile =
         placement === DashboardPlacement.Dashboard ||
         placement === DashboardPlacement.Public ||
         placement === DashboardPlacement.Builtin
-
     const isSqlInsight = isDataVisualizationNode(insight.query)
-    const displayLabelsToggleText = getDisplayLabelsToggleText(insight.query)
     const showCompactHeading = !showCompactTile || (!filtersOverride?.date_from && !isSqlInsight)
 
     const topHeadingProps = {
@@ -158,8 +179,6 @@ export function InsightMeta({
     }
 
     const summary = useSummarizeInsight()(insight.query)
-
-    const otherDashboards = nameSortedDashboards.filter((d) => !dashboards?.includes(d.id))
 
     const canViewInsight = insight.user_access_level
         ? accessLevelSatisfied(AccessControlResourceType.Insight, insight.user_access_level, AccessControlLevel.Viewer)
@@ -172,7 +191,16 @@ export function InsightMeta({
                   AccessControlLevel.Editor
               )
             : true
-    const canToggleDisplayLabels = isDashboardCardPlacement && canEditInsight && canToggleDisplayLabelsForInsight
+
+    const showDashboardAlertsMenuItem = isUsedAsDashboardTile && !!dashboardId && !!insight.id && canViewInsight
+    const canCreateAlertForInsight = areAlertsSupportedForInsight(query)
+
+    const canToggleDisplayLabels = isUsedAsDashboardTile && canEditInsight && canToggleDisplayLabelsForInsight
+    const canToggleLegend = isUsedAsDashboardTile && canEditInsight && canToggleLegendForInsight
+
+    const hasTileStyleActions = !!(showCompactTile && toggleShowDescription && insight.description) || !!updateColor
+    const canShowCopyToDashboardTile = showCompactTile && !!copyToDashboard && canViewInsight
+    const hasDashboardPlacementActions = canShowCopyToDashboardTile || !!moveToDashboard || !!removeFromDashboard
 
     // For dashboard-specific actions (remove from dashboard, change tile color), check dashboard permissions
     const currentDashboard = dashboardId ? nameSortedDashboards.find((d) => d.id === dashboardId) : null
@@ -281,283 +309,317 @@ export function InsightMeta({
         : undefined
 
     return (
-        <CardMeta
-            compact={showCompactTile}
-            ribbonColor={ribbonColor}
-            showEditingControls={showEditingControls}
-            showDetailsControls={showDetailsControls}
-            setAreDetailsShown={setAreDetailsShown}
-            areDetailsShown={areDetailsShown}
-            detailsTooltip="Show insight details, such as creator, last edit, and applied filters."
-            onMouseDown={onDragHandleMouseDown}
-            topHeading={topHeadingEl}
-            popoverTopHeading={popoverTopHeadingEl}
-            content={
-                <InsightMetaContent
-                    link={urls.insightView(
-                        short_id,
-                        dashboardId,
-                        variablesOverride,
-                        filtersOverride,
-                        tile?.filters_overrides
-                    )}
-                    title={name}
-                    fallbackTitle={summary}
-                    description={insight.description}
-                    loading={loading}
-                    loadingQueued={loadingQueued}
-                    tags={insight.tags}
-                    compact={showCompactTile}
-                    showDescription={tile?.show_description !== false}
-                    infoPopover={
-                        showCompactTile ? (
-                            <CompactInfoPopover
-                                popoverTopHeading={popoverTopHeadingEl ?? topHeadingEl}
-                                metaTitle={name}
-                                metaDescription={metaDescriptionEl}
-                                metaDescriptionText={insight.description || ''}
-                                onMetaSave={onMetaSave}
-                                metaDetails={metaDetailsEl}
-                            />
-                        ) : null
-                    }
-                />
-            }
-            metaTitle={name}
-            metaDescription={metaDescriptionEl}
-            metaDescriptionText={insight.description || ''}
-            onMetaSave={onMetaSave}
-            metaDetails={metaDetailsEl}
-            samplingFactor={samplingFactor}
-            moreButtons={
-                <>
-                    {/* Insight related */}
-                    {canViewInsight && (
-                        <LemonButton
-                            to={urls.insightView(
-                                short_id,
-                                dashboardId,
-                                variablesOverride,
-                                filtersOverride,
-                                tile?.filters_overrides
-                            )}
-                            fullWidth
-                        >
-                            View
-                        </LemonButton>
-                    )}
-                    {canEditInsight && (
-                        <>
-                            <LemonButton
-                                to={
-                                    isDataVisualizationNode(insight.query)
-                                        ? urls.sqlEditor({ insightShortId: short_id })
-                                        : urls.insightEdit(short_id, dashboardId)
-                                }
-                                fullWidth
-                                {...getOverrideWarningPropsForButton(filtersOverride, variablesOverride)}
-                            >
-                                Edit
-                            </LemonButton>
-                            <LemonButton onClick={rename} fullWidth>
-                                Rename
-                            </LemonButton>
-                            {tile && (
-                                <LemonButton onClick={setOverride} fullWidth>
-                                    Set override
-                                </LemonButton>
-                            )}
-                        </>
-                    )}
-                    <LemonButton
-                        onClick={duplicate}
-                        fullWidth
-                        data-attr={
-                            dashboardId ? 'duplicate-insight-from-dashboard' : 'duplicate-insight-from-card-list-view'
-                        }
-                    >
-                        Duplicate
-                    </LemonButton>
-                    {canToggleDisplayLabels && (
-                        <>
-                            <LemonDivider />
-                            <LemonButton
-                                onClick={() => {
-                                    const query = toggleDisplayLabelsInInsightQuery(insight.query)
-                                    if (query !== insight.query) {
-                                        updateInsightDirect(insight, { query })
-                                        reportDashboardInsightValuesOnSeriesToggled(
-                                            dashboardId,
-                                            insight.id,
-                                            DashboardEventSource.MoreDropdown
-                                        )
-                                    }
-                                }}
-                                fullWidth
-                            >
-                                {displayLabelsToggleText}
-                            </LemonButton>
-                            <LemonDivider />
-                        </>
-                    )}
-
-                    {/* Dashboard related */}
-                    {canEditDashboard && (
-                        <>
-                            {!canToggleDisplayLabels && <LemonDivider />}
-                            {showCompactTile && toggleShowDescription && !!insight.description && (
-                                <LemonButton onClick={toggleShowDescription} fullWidth>
-                                    {tile?.show_description === false ? 'Show description' : 'Hide description'}
-                                </LemonButton>
-                            )}
-                            {updateColor && (
-                                <LemonMenu
-                                    items={Object.values(InsightColor).map((availableColor) => ({
-                                        label: (
-                                            <span className="flex items-center gap-2">
-                                                {availableColor !== InsightColor.White ? (
-                                                    <Splotch color={availableColor as string as SplotchColor} />
-                                                ) : null}
-                                                <span>
-                                                    {availableColor !== InsightColor.White
-                                                        ? capitalizeFirstLetter(availableColor)
-                                                        : 'No color'}
-                                                </span>
-                                            </span>
-                                        ),
-                                        key: availableColor,
-                                        active: availableColor === (ribbonColor || InsightColor.White),
-                                        onClick: () => {
-                                            updateColor?.(availableColor)
-                                        },
-                                    }))}
-                                    placement="right-start"
-                                    fallbackPlacements={['left-start']}
-                                    closeParentPopoverOnClickInside
-                                >
-                                    <LemonButton fullWidth>Set color</LemonButton>
-                                </LemonMenu>
-                            )}
-                            {moveToDashboard && otherDashboards.length > 0 && (
-                                <InsightMoveToDashboardMenu
-                                    otherDashboards={otherDashboards}
-                                    onMoveToDashboard={moveToDashboard}
+        <>
+            <CardMeta
+                compact={showCompactTile}
+                ribbonColor={ribbonColor}
+                showEditingControls={showEditingControls}
+                showDetailsControls={showDetailsControls}
+                setAreDetailsShown={setAreDetailsShown}
+                areDetailsShown={areDetailsShown}
+                detailsTooltip="Show insight details, such as creator, last edit, and applied filters."
+                onMouseDown={onDragHandleMouseDown}
+                topHeading={topHeadingEl}
+                popoverTopHeading={popoverTopHeadingEl}
+                content={
+                    <InsightMetaContent
+                        link={urls.insightView(
+                            short_id,
+                            dashboardId,
+                            variablesOverride,
+                            filtersOverride,
+                            tile?.filters_overrides
+                        )}
+                        title={name}
+                        fallbackTitle={summary}
+                        description={insight.description}
+                        loading={loading}
+                        loadingQueued={loadingQueued}
+                        tags={insight.tags}
+                        compact={showCompactTile}
+                        showDescription={tile?.show_description !== false}
+                        infoPopover={
+                            showCompactTile ? (
+                                <CompactInfoPopover
+                                    popoverTopHeading={popoverTopHeadingEl ?? topHeadingEl}
+                                    metaTitle={name}
+                                    metaDescription={metaDescriptionEl}
+                                    metaDescriptionText={insight.description || ''}
+                                    onMetaSave={onMetaSave}
+                                    metaDetails={metaDetailsEl}
                                 />
-                            )}
-                            {removeFromDashboard && (
-                                <LemonButton
-                                    status="danger"
-                                    onClick={() =>
-                                        LemonDialog.open({
-                                            title: 'Remove from dashboard',
-                                            description:
-                                                'Are you sure you want to remove this insight from the dashboard?',
-                                            primaryButton: {
-                                                children: 'Remove from dashboard',
-                                                status: 'danger',
-                                                onClick: removeFromDashboard,
-                                            },
-                                            secondaryButton: {
-                                                children: 'Cancel',
-                                            },
-                                        })
-                                    }
-                                    fullWidth
-                                >
-                                    Remove from dashboard
-                                </LemonButton>
-                            )}
-                        </>
-                    )}
-
-                    {/* Insight deletion - separate from dashboard actions */}
-                    {canEditInsight && !removeFromDashboard && deleteWithUndo && (
-                        <>
-                            <LemonDivider />
-                            <LemonButton
-                                status="danger"
-                                onClick={() => {
-                                    void (async () => {
-                                        try {
-                                            await deleteWithUndo?.()
-                                        } catch (error: any) {
-                                            lemonToast.error(`Failed to delete insight meta: ${error.detail}`)
-                                        }
-                                    })()
-                                }}
-                                fullWidth
-                            >
-                                Delete insight
-                            </LemonButton>
-                        </>
-                    )}
-
-                    {/* Data related */}
-                    {exportContext ? (
-                        <>
-                            <LemonDivider />
-                            <ExportButton
-                                fullWidth
-                                items={[
-                                    {
-                                        export_format: ExporterFormat.PNG,
-                                        insight: insight.id,
-                                        dashboard: insightLogicProps.dashboardId,
-                                    },
-                                    {
-                                        export_format: ExporterFormat.CSV,
-                                        export_context: exportContext,
-                                    },
-                                    {
-                                        export_format: ExporterFormat.XLSX,
-                                        export_context: exportContext,
-                                    },
-                                ]}
-                            />
-                        </>
-                    ) : null}
+                            ) : null
+                        }
+                    />
+                }
+                metaTitle={name}
+                metaDescription={metaDescriptionEl}
+                metaDescriptionText={insight.description || ''}
+                onMetaSave={onMetaSave}
+                metaDetails={metaDetailsEl}
+                samplingFactor={samplingFactor}
+                moreButtons={
                     <>
-                        {refresh && (
+                        {/* Insight related */}
+                        {canViewInsight && (
                             <LemonButton
-                                onClick={() => {
-                                    refresh()
-                                }}
-                                disabledReason={refreshDisabledReason}
+                                to={urls.insightView(
+                                    short_id,
+                                    dashboardId,
+                                    variablesOverride,
+                                    filtersOverride,
+                                    tile?.filters_overrides
+                                )}
                                 fullWidth
                             >
-                                {insight.last_refresh ? (
-                                    <div className="block my-1">
-                                        Refresh data
-                                        <p className="text-xs text-muted mt-0.5">
-                                            Last computed{' '}
-                                            <TZLabel
-                                                time={insight.last_refresh}
-                                                noStyles
-                                                className="whitespace-nowrap border-dotted border-b"
-                                            />
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <>Refresh data</>
-                                )}
+                                View
                             </LemonButton>
                         )}
-                    </>
+                        {canEditInsight && (
+                            <>
+                                <LemonButton
+                                    to={
+                                        isDataVisualizationNode(insight.query)
+                                            ? urls.sqlEditor({
+                                                  insightShortId: short_id,
+                                                  dashboard: dashboardId ?? undefined,
+                                              })
+                                            : urls.insightEdit(short_id, dashboardId)
+                                    }
+                                    fullWidth
+                                    {...getOverrideWarningPropsForButton(filtersOverride, variablesOverride)}
+                                >
+                                    Edit
+                                </LemonButton>
+                                <LemonButton onClick={rename} fullWidth>
+                                    Rename
+                                </LemonButton>
+                                {tile && (
+                                    <LemonButton onClick={setOverride} fullWidth>
+                                        Set override
+                                    </LemonButton>
+                                )}
+                            </>
+                        )}
+                        <LemonButton
+                            onClick={duplicate}
+                            fullWidth
+                            data-attr={
+                                dashboardId
+                                    ? 'duplicate-insight-from-dashboard'
+                                    : 'duplicate-insight-from-card-list-view'
+                            }
+                        >
+                            Duplicate
+                        </LemonButton>
+                        {showDashboardAlertsMenuItem && insight.id ? (
+                            <LemonButton
+                                onClick={() => {
+                                    void loadDeferredInsightAlerts()
+                                    setIsManageAlertsModalOpen(true)
+                                }}
+                                fullWidth
+                                data-attr="dashboard-insight-manage-alerts"
+                            >
+                                Alerts
+                            </LemonButton>
+                        ) : null}
+                        <DashboardInsightActions
+                            insight={insight}
+                            insightLogicProps={insightLogicProps}
+                            dashboardId={dashboardId}
+                            canToggleDisplayLabels={canToggleDisplayLabels}
+                            canToggleLegend={canToggleLegend}
+                        />
 
-                    {/* More */}
-                    {moreButtons && (
+                        {canShowCopyToDashboardTile && !canEditDashboard && (
+                            <>
+                                {!canToggleDisplayLabels && <LemonDivider />}
+                                <h5 className="mx-2 my-1">Dashboard</h5>
+                                <DashboardWidgetPlacementMenus
+                                    placementDestinations={copyToDestinations}
+                                    onCopyToDashboard={copyToDashboard}
+                                />
+                            </>
+                        )}
+
+                        {/* Dashboard related */}
+                        {canEditDashboard && (
+                            <>
+                                {!canToggleDisplayLabels && !canToggleLegend && <LemonDivider />}
+                                {showCompactTile && toggleShowDescription && !!insight.description && (
+                                    <LemonButton onClick={toggleShowDescription} fullWidth>
+                                        {tile?.show_description === false ? 'Show description' : 'Hide description'}
+                                    </LemonButton>
+                                )}
+                                {updateColor && (
+                                    <LemonMenu
+                                        items={Object.values(InsightColor).map((availableColor) => ({
+                                            label: (
+                                                <span className="flex items-center gap-2">
+                                                    {availableColor !== InsightColor.White ? (
+                                                        <Splotch color={availableColor as string as SplotchColor} />
+                                                    ) : null}
+                                                    <span>
+                                                        {availableColor !== InsightColor.White
+                                                            ? capitalizeFirstLetter(availableColor)
+                                                            : 'No color'}
+                                                    </span>
+                                                </span>
+                                            ),
+                                            key: availableColor,
+                                            active: availableColor === (ribbonColor || InsightColor.White),
+                                            onClick: () => {
+                                                updateColor?.(availableColor)
+                                            },
+                                        }))}
+                                        placement="right-start"
+                                        fallbackPlacements={['left-start']}
+                                        closeParentPopoverOnClickInside
+                                    >
+                                        <LemonButton fullWidth>Set color</LemonButton>
+                                    </LemonMenu>
+                                )}
+                                {hasDashboardPlacementActions && (
+                                    <>
+                                        {hasTileStyleActions && <LemonDivider />}
+                                        <h5 className="mx-2 my-1">Dashboard</h5>
+                                        <DashboardWidgetPlacementMenus
+                                            placementDestinations={copyToDestinations}
+                                            onMoveToDashboard={moveToDashboard}
+                                            onCopyToDashboard={canShowCopyToDashboardTile ? copyToDashboard : undefined}
+                                        />
+                                        {removeFromDashboard && (
+                                            <LemonButton
+                                                status="danger"
+                                                onClick={() =>
+                                                    LemonDialog.open({
+                                                        title: 'Remove from dashboard',
+                                                        description:
+                                                            'Are you sure you want to remove this insight from the dashboard?',
+                                                        primaryButton: {
+                                                            children: 'Remove from dashboard',
+                                                            status: 'danger',
+                                                            onClick: removeFromDashboard,
+                                                        },
+                                                        secondaryButton: {
+                                                            children: 'Cancel',
+                                                        },
+                                                    })
+                                                }
+                                                fullWidth
+                                            >
+                                                Remove from dashboard
+                                            </LemonButton>
+                                        )}
+                                    </>
+                                )}
+                            </>
+                        )}
+
+                        {/* Insight deletion - separate from dashboard actions */}
+                        {canEditInsight && !removeFromDashboard && deleteWithUndo && (
+                            <>
+                                <LemonDivider />
+                                <LemonButton
+                                    status="danger"
+                                    onClick={() => {
+                                        void (async () => {
+                                            try {
+                                                await deleteWithUndo?.()
+                                            } catch (error: any) {
+                                                lemonToast.error(`Failed to delete insight meta: ${error.detail}`)
+                                            }
+                                        })()
+                                    }}
+                                    fullWidth
+                                >
+                                    Delete insight
+                                </LemonButton>
+                            </>
+                        )}
+
+                        {/* Data related */}
+                        {exportContext ? (
+                            <>
+                                <LemonDivider />
+                                <ExportButton
+                                    fullWidth
+                                    items={[
+                                        {
+                                            export_format: ExporterFormat.PNG,
+                                            insight: insight.id,
+                                            dashboard: insightLogicProps.dashboardId,
+                                            export_context: exportContext,
+                                        },
+                                        {
+                                            export_format: ExporterFormat.CSV,
+                                            export_context: exportContext,
+                                        },
+                                        {
+                                            export_format: ExporterFormat.XLSX,
+                                            export_context: exportContext,
+                                        },
+                                    ]}
+                                />
+                            </>
+                        ) : null}
                         <>
-                            <LemonDivider />
-                            {moreButtons}
+                            {refresh && (
+                                <LemonButton
+                                    onClick={() => {
+                                        refresh()
+                                    }}
+                                    disabledReason={refreshDisabledReason}
+                                    fullWidth
+                                >
+                                    {insight.last_refresh ? (
+                                        <div className="block my-1">
+                                            Refresh data
+                                            <p className="text-xs text-muted mt-0.5">
+                                                Last computed{' '}
+                                                <TZLabel
+                                                    time={insight.last_refresh}
+                                                    noStyles
+                                                    className="whitespace-nowrap border-dotted border-b"
+                                                />
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <>Refresh data</>
+                                    )}
+                                </LemonButton>
+                            )}
                         </>
-                    )}
-                </>
-            }
-            moreTooltip={
-                canEditInsight ? 'Rename, duplicate, export, refresh and more…' : 'Duplicate, export, refresh and more…'
-            }
-            extraControls={surveyOpportunityButton ?? feedbackButtons}
-        />
+
+                        {/* More */}
+                        {moreButtons && (
+                            <>
+                                <LemonDivider />
+                                {moreButtons}
+                            </>
+                        )}
+                    </>
+                }
+                moreTooltip={
+                    canEditInsight
+                        ? 'Rename, duplicate, export, refresh and more…'
+                        : 'Duplicate, export, refresh and more…'
+                }
+                extraControls={surveyOpportunityButton ?? feedbackButtons}
+            />
+            {showDashboardAlertsMenuItem && insight.id ? (
+                <ManageAlertsModal
+                    isOpen={isManageAlertsModalOpen}
+                    onClose={() => setIsManageAlertsModalOpen(false)}
+                    insightLogicProps={insightLogicProps}
+                    insightId={insight.id}
+                    insightShortId={short_id as InsightShortId}
+                    canCreateAlertForInsight={canCreateAlertForInsight}
+                    deferInitialAlertsLoad
+                />
+            ) : null}
+        </>
     )
 }
 

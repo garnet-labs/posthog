@@ -106,6 +106,14 @@ class DataWarehouseSavedQuery(CreatedMetaFields, UUIDTModel, UpdatedMetaFields, 
         blank=True,
         related_name="saved_queries",
     )
+    folder = models.ForeignKey(
+        "data_warehouse.DataWarehouseSavedQueryFolder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="saved_queries",
+        help_text="Optional folder used to organize this saved query in the SQL editor sidebar.",
+    )
 
     origin = models.CharField(
         choices=Origin.choices, help_text="Where this SavedQuery is created.", default=None, null=True, blank=True
@@ -123,6 +131,8 @@ class DataWarehouseSavedQuery(CreatedMetaFields, UUIDTModel, UpdatedMetaFields, 
             from django.utils import timezone
 
             self.expires_at = timezone.now() + TEST_VIEW_EXPIRY_INTERVAL
+        elif not self.is_test and self.expires_at:
+            self.expires_at = None
         super().save(*args, **kwargs)
 
     class Meta:

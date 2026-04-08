@@ -15,7 +15,7 @@ from posthog.hogql.database.models import FunctionCallTable, LazyTable, SavedQue
 from posthog.hogql.database.s3_table import S3Table
 from posthog.hogql.database.schema.events import EventsTable
 from posthog.hogql.database.schema.persons import PersonsTable
-from posthog.hogql.errors import ImpossibleASTError, QueryError, ResolutionError
+from posthog.hogql.errors import ImpossibleASTError, NotImplementedError, QueryError, ResolutionError
 from posthog.hogql.escape_sql import safe_identifier
 from posthog.hogql.functions import find_hogql_posthog_function
 from posthog.hogql.functions.action import matches_action
@@ -47,6 +47,16 @@ from posthog.models.utils import UUIDT
 USE_GLOBAL_JOINS = False
 
 EMPTY_SCOPE = ast.SelectQueryType()
+
+type PostgresKeywordType = type[ast.DateType] | type[ast.DateTimeType]
+
+POSTGRES_KEYWORD_TYPES: dict[str, PostgresKeywordType] = {
+    "current_date": ast.DateType,
+    "current_time": ast.DateTimeType,
+    "current_timestamp": ast.DateTimeType,
+    "localtime": ast.DateTimeType,
+    "localtimestamp": ast.DateTimeType,
+}
 
 
 def resolve_constant_data_type(constant: Any) -> ConstantType:
@@ -409,6 +419,80 @@ class Resolver(CloningVisitor):
         finally:
             self.scopes.pop()
 
+    def visit_pivot_expr(self, node: ast.PivotExpr):
+        if self.dialect != "postgres":
+            raise QueryError(f"PIVOT is not allowed in {self.dialect} dialect")
+
+        node = cast(ast.PivotExpr, clone_expr(node))
+
+        # Resolve the source table in an isolated scope so we can use its columns.
+        temp_scope = ast.SelectQueryType()
+        self.scopes.append(temp_scope)
+        try:
+            if isinstance(node.table, ast.JoinExpr):
+                temp_join = self.visit_join_expr(node.table)
+                node.table = temp_join
+            else:
+                temp_join = self.visit_join_expr(ast.JoinExpr(table=cast(ast.Field, node.table)))
+                node.table = cast(ast.Expr, temp_join.table)
+            base_type = temp_join.type
+
+            node.aggregates = [self.visit(expr) for expr in node.aggregates]
+            node.columns = [self.visit(col) for col in node.columns]
+            if node.group_by:
+                node.group_by = [self.visit(expr) for expr in node.group_by]
+
+            columns: dict[str, ast.Type] = {}
+            base_field_names: set[str] = set()
+            if isinstance(base_type, ast.SelectQueryAliasType):
+                base_type = base_type.select_query_type
+            if isinstance(base_type, ast.SelectSetQueryType):
+                base_type = base_type.types[0]
+
+            if isinstance(base_type, ast.SelectQueryType):
+                columns = dict(base_type.columns)
+                base_field_names = set(base_type.columns.keys())
+            elif isinstance(base_type, ast.BaseTableType):
+                base_field_names = set(base_type.resolve_database_table(self.context).get_asterisk().keys())
+                for name in base_field_names:
+                    columns[name] = ast.UnknownType()
+            allowed_prefixes: set[str] = set()
+            if isinstance(temp_join, ast.JoinExpr):
+                if temp_join.alias is not None:
+                    allowed_prefixes.add(temp_join.alias)
+                if isinstance(temp_join.table, ast.Field) and temp_join.table.chain:
+                    allowed_prefixes.add(str(temp_join.table.chain[0]))
+
+            def ensure_pivot_column_valid(expr: ast.Expr) -> None:
+                collector = FieldCollector()
+                collector.visit(expr)
+                for field in collector.fields:
+                    if not field.chain:
+                        raise QueryError("PIVOT columns must be identifiers")
+                    if field.chain == ["*"]:
+                        continue
+                    if len(field.chain) == 1:
+                        column_name = str(field.chain[0])
+                    elif len(field.chain) == 2 and str(field.chain[0]) in allowed_prefixes:
+                        column_name = str(field.chain[1])
+                    else:
+                        raise QueryError("PIVOT columns must be identifiers")
+                    if base_field_names and column_name not in base_field_names:
+                        raise QueryError(f'PIVOT column "{column_name}" was not found in the source table')
+
+            for col in node.columns:
+                ensure_pivot_column_valid(col.column)
+            for agg in node.aggregates:
+                ensure_pivot_column_valid(agg)
+            if node.group_by:
+                for expr in node.group_by:
+                    ensure_pivot_column_valid(expr)
+
+            node.type = ast.SelectQueryType(columns=columns)
+            return node
+        finally:
+            self.scopes.pop()
+
     def visit_cte(self, node: ast.CTE):
         self.cte_counter += 1
 
@@ -669,6 +753,8 @@ class Resolver(CloningVisitor):
 
         If we have a chain prefix (for example, in the case of a table alias), we prepend it to the chain of the new fields.
         """
+        if isinstance(asterisk.table_type, ast.ColumnAliasedTableType):
+            return [ast.Field(chain=[*chain_prefix, key]) for key in asterisk.table_type.alias_to_original]
         if isinstance(asterisk.table_type, ast.BaseTableType):
             table = asterisk.table_type.resolve_database_table(self.context)
             database_fields = table.get_asterisk()
@@ -709,10 +795,13 @@ class Resolver(CloningVisitor):
                     raw_fields = self._asterisk_columns(asterisk_type, chain_prefix=[])
                 except QueryError:
                     continue
-                column_aliases = table_column_aliases.get(alias)
                 resolved_fields: list[ast.Expr] = list(raw_fields)
-                if column_aliases:
-                    resolved_fields = self._apply_column_aliases(resolved_fields, column_aliases)
+                # For ColumnAliasedTableType, _asterisk_columns already returns
+                # aliased names. Only apply manual remapping for other types.
+                if not isinstance(table_type, ast.ColumnAliasedTableType):
+                    column_aliases = table_column_aliases.get(alias)
+                    if column_aliases:
+                        resolved_fields = self._apply_column_aliases(resolved_fields, column_aliases)
                 for field in resolved_fields:
                     table_fields.append((alias, field))
 
@@ -967,7 +1056,33 @@ class Resolver(CloningVisitor):
 
             # Always add an alias for function call tables. This way `select table.* from table` is replaced with
             # `select table.* from something() as table`, and not with `select something().* from something()`.
-            if table_alias != table_name_alias or isinstance(database_table, FunctionCallTable):
+            if node.column_aliases:
+                # Build alias→original mapping from the table's visible columns
+                asterisk_fields = list(database_table.get_asterisk().keys())
+                if len(node.column_aliases) > len(asterisk_fields):
+                    raise QueryError(
+                        f"Table has {len(asterisk_fields)} column(s) available for aliasing "
+                        f"but {len(node.column_aliases)} alias(es) were provided"
+                    )
+                seen_aliases: set[str] = set()
+                for alias_name in node.column_aliases:
+                    if alias_name in seen_aliases:
+                        raise QueryError(f"Duplicate column alias '{alias_name}' in table alias '{table_alias}'")
+                    seen_aliases.add(alias_name)
+                alias_to_original: dict[str, str] = {}
+                aliased_originals = set()
+                for alias_name, orig_name in zip(node.column_aliases, asterisk_fields):
+                    alias_to_original[alias_name] = orig_name
+                    aliased_originals.add(orig_name)
+                # Remaining columns keep their original names, unless
+                # their name collides with an already-defined alias.
+                for orig_name in asterisk_fields:
+                    if orig_name not in aliased_originals and orig_name not in alias_to_original:
+                        alias_to_original[orig_name] = orig_name
+                node_type = ast.ColumnAliasedTableType(
+                    alias=table_alias, table_type=node_table_type, alias_to_original=alias_to_original
+                )
+            elif table_alias != table_name_alias or isinstance(database_table, FunctionCallTable):
                 node_type = ast.TableAliasType(alias=table_alias, table_type=node_table_type)
             else:
                 node_type = node_table_type
@@ -980,7 +1095,7 @@ class Resolver(CloningVisitor):
             scope.tables[table_alias] = node_type
             scope_table_names = self._get_scope_table_names(scope)
             scope_table_names[table_alias] = ".".join(table_name_chain)
-            if node.column_aliases:
+            if node.column_aliases and not isinstance(node_type, ast.ColumnAliasedTableType):
                 scope_table_column_aliases = self._get_scope_table_column_aliases(scope)
                 scope_table_column_aliases[table_alias] = node.column_aliases
 
@@ -998,7 +1113,9 @@ class Resolver(CloningVisitor):
             if USE_GLOBAL_JOINS:
                 global_table: ast.TableType | None = None
 
-                if isinstance(node.type, ast.TableAliasType) and isinstance(node.type.table_type, ast.TableType):
+                if isinstance(node.type, (ast.TableAliasType, ast.ColumnAliasedTableType)) and isinstance(
+                    node.type.table_type, ast.TableType
+                ):
                     global_table = node.type.table_type
                 elif isinstance(node.type, ast.TableType):
                     global_table = node.type
@@ -1031,7 +1148,7 @@ class Resolver(CloningVisitor):
             node.sample = self.visit(node.sample)
 
             # In case we had a function call table, and had to add an alias where none was present, mark it here
-            if isinstance(node_type, ast.TableAliasType) and node.alias is None:
+            if isinstance(node_type, (ast.TableAliasType, ast.ColumnAliasedTableType)) and node.alias is None:
                 node.alias = node_type.alias
 
             return node
@@ -1074,6 +1191,25 @@ class Resolver(CloningVisitor):
                     new_name: (expr.type if expr.type is not None else ast.UnknownType())
                     for new_name, expr in zip(node.column_aliases, select_list)
                 }
+
+                # For non-postgres dialects, bake column aliases into the inner
+                # SELECT as AS aliases so ClickHouse/HogQL (which don't support
+                # the ``AS t(col1, col2)`` syntax) get correct column names.
+                if self.dialect != "postgres":
+                    inner_query = cast(ast.SelectQuery, inner_select)
+                    new_select: list[ast.Expr] = []
+                    for i, expr in enumerate(inner_query.select):
+                        if i < len(node.column_aliases):
+                            alias_name = node.column_aliases[i]
+                            # Avoid wrapping if the expression is already aliased with the same name
+                            if isinstance(expr, ast.Alias) and expr.alias == alias_name:
+                                new_select.append(expr)
+                            else:
+                                new_select.append(ast.Alias(alias=alias_name, expr=expr, type=expr.type))
+                        else:
+                            new_select.append(expr)
+                    inner_query.select = new_select
+                    node.column_aliases = None
 
             if isinstance(node.table, ast.SelectQuery) and node.table.view_name is not None and node.alias is not None:
                 if node.alias in scope.tables:
@@ -1157,6 +1293,32 @@ class Resolver(CloningVisitor):
                 node.constraint = self.visit_join_constraint(node.constraint)
 
             node.table = cast(ast.UnpivotExpr, self.visit(node.table))
+
+            if node.alias is not None:
+                if node.alias in scope.tables:
+                    raise QueryError(
+                        f'Already have joined a table called "{node.alias}". Can\'t join another one with the same name.'
+                    )
+                node.type = ast.SelectQueryAliasType(
+                    alias=node.alias, select_query_type=cast(ast.SelectQueryType, node.table.type)
+                )
+                scope.tables[node.alias] = node.type
+            else:
+                node.type = cast(ast.TableOrSelectType, node.table.type)
+                scope.anonymous_tables.append(cast(ast.SelectQueryType, node.type))
+
+            node.next_join = self.visit(node.next_join)
+            if node.constraint and node.constraint.constraint_type == "ON":
+                node.constraint = self.visit_join_constraint(node.constraint)
+            node.sample = self.visit(node.sample)
+
+            return node
+        elif isinstance(node.table, ast.PivotExpr):
+            node = cast(ast.JoinExpr, clone_expr(node))
+            if node.constraint and node.constraint.constraint_type == "USING":
+                node.constraint = self.visit_join_constraint(node.constraint)
+
+            node.table = cast(ast.PivotExpr, self.visit(node.table))
 
             if node.alias is not None:
                 if node.alias in scope.tables:
@@ -1323,8 +1485,10 @@ class Resolver(CloningVisitor):
         elif not isinstance(return_type, ast.UnknownType):  # why cannot we set nullability here?
             return_type.nullable = any(arg_type.nullable for arg_type in arg_types)
 
-        if node.name.lower() in ("nullif", "toNullable") or node.name.lower().endswith("OrNull"):
+        if node.name.lower() in ("nullif", "tonullable") or node.name.lower().endswith("ornull"):
             return_type.nullable = True
+        elif node.name.lower() == "assumenotnull":
+            return_type.nullable = False
 
         node.type = ast.CallType(
             name=node.name,
@@ -1389,20 +1553,32 @@ class Resolver(CloningVisitor):
         if len(node.chain) == 0:
             raise ResolutionError("Invalid field access with empty chain")
 
+        scope = self._get_scope()
+        name = str(node.chain[0])
+
+        if self.dialect == "postgres" and len(node.chain) == 1:
+            keyword = name.lower()
+            if keyword in POSTGRES_KEYWORD_TYPES and name not in scope.columns and name not in scope.aliases:
+                keyword_type = POSTGRES_KEYWORD_TYPES[keyword]
+                return ast.Keyword(
+                    name=keyword,
+                    type=keyword_type(nullable=False),
+                    start=node.start,
+                    end=node.end,
+                )
+
         # Apply virtual property mapping before field resolution
         node = map_virtual_properties(node)
 
         node = super().visit_field(node)
+        name = str(node.chain[0])
 
         # Only look for fields in the last SELECT scope, instead of all previous select queries.
         # That's because ClickHouse does not support subqueries accessing "x.event". This is forbidden:
         # - "SELECT event, (select count() from events where event = x.event) as c FROM events x where event = '$pageview'",
         # But this is supported:
         # - "SELECT t.big_count FROM (select count() + 100 as big_count from events) as t JOIN events e ON (e.event = t.event)",
-        scope = self._get_scope()
-
         type: Optional[ast.Type] = None
-        name = str(node.chain[0])
 
         # If the field contains at least two parts, the first might be a table.
         type = lookup_table_by_name(scope, self.ctes, node)
@@ -1420,6 +1596,15 @@ class Resolver(CloningVisitor):
             type = ast.AsteriskType(table_type=table_type)
 
         # Field in scope
+        if (
+            not type
+            and len(node.chain) == 1
+            and self.dialect == "postgres"
+            and name.lower() in POSTGRES_KEYWORD_TYPES
+            and name in scope.columns
+        ):
+            type = scope.get_child(name, self.context)
+
         if not type:
             type = lookup_field_by_name(scope, name, self.context)
 
@@ -1507,6 +1692,7 @@ class Resolver(CloningVisitor):
         loop_type = type
         chain_to_parse = node.chain[1:]
         previous_types = []
+        resolved_chain: list[str] = [str(node.chain[0])]
         while True:
             if isinstance(loop_type, FieldTraverserType):
                 chain_to_parse = loop_type.chain + chain_to_parse
@@ -1522,10 +1708,16 @@ class Resolver(CloningVisitor):
                 loop_type = previous_types[-1]
                 next_chain = chain_to_parse.pop(0)
 
-            # TODO: This will never return None, it always raises an exception
-            # once it finds the unsupported field/type
-            # There's no reason to have the `if loop_type is None` check here
-            loop_type = loop_type.get_child(str(next_chain), self.context)
+            try:
+                loop_type = loop_type.get_child(str(next_chain), self.context)
+            except NotImplementedError:
+                raise QueryError(
+                    f"Cannot access property '{next_chain}' on '{'.'.join(resolved_chain)}'. "
+                    f"This can happen when a column alias shadows a table field. Try renaming the alias."
+                )
+            resolved_chain.append(str(next_chain))
+            # Note: get_child currently always raises rather than returning None,
+            # but this guard is kept for safety in case that contract changes.
             if loop_type is None:
                 raise ResolutionError(f"Cannot resolve type {'.'.join(node.chain)}. Unable to resolve {next_chain}.")
         node.type = loop_type
@@ -1725,7 +1917,7 @@ class Resolver(CloningVisitor):
             if isinstance(table_type, ast.TableType) and isinstance(table_type.table, EventsTable):
                 return alias, table_type.table
 
-            if isinstance(table_type, ast.TableAliasType):
+            if isinstance(table_type, (ast.TableAliasType, ast.ColumnAliasedTableType)):
                 if isinstance(table_type.table_type, ast.TableType) and isinstance(
                     table_type.table_type.table, EventsTable
                 ):
@@ -1737,12 +1929,12 @@ class Resolver(CloningVisitor):
         while isinstance(node, ast.Alias):
             node = node.expr
         if isinstance(node, ast.Field) and isinstance(node.type, ast.FieldType):
-            if isinstance(node.type.table_type, ast.TableAliasType):
+            if isinstance(node.type.table_type, (ast.TableAliasType, ast.ColumnAliasedTableType)):
                 return isinstance(node.type.table_type.table_type.table, EventsTable)
             if isinstance(node.type.table_type, ast.TableType):
                 return isinstance(node.type.table_type.table, EventsTable)
         elif isinstance(node, ast.Field) and isinstance(node.type, ast.PropertyType):
-            if isinstance(node.type.field_type.table_type, ast.TableAliasType):
+            if isinstance(node.type.field_type.table_type, (ast.TableAliasType, ast.ColumnAliasedTableType)):
                 return isinstance(node.type.field_type.table_type.table_type.table, EventsTable)
             if isinstance(node.type.field_type.table_type, ast.TableType):
                 return isinstance(node.type.field_type.table_type.table, EventsTable)
@@ -1756,14 +1948,14 @@ class Resolver(CloningVisitor):
             and node.select_from
             and isinstance(node.select_from.type, ast.BaseTableType)
         ):
-            if isinstance(node.select_from.type, ast.TableAliasType):
+            if isinstance(node.select_from.type, (ast.TableAliasType, ast.ColumnAliasedTableType)):
                 return isinstance(node.select_from.type.table_type.table, S3Table)
             elif isinstance(node.select_from.type, ast.TableType):
                 return isinstance(node.select_from.type.table, S3Table)
         return False
 
     def _is_s3_table(self, table: ast.TableOrSelectType) -> bool:
-        if isinstance(table, ast.TableAliasType):
+        if isinstance(table, (ast.TableAliasType, ast.ColumnAliasedTableType)):
             return self._is_s3_table(table.table_type)
 
         if isinstance(table, ast.CTETableAliasType):
@@ -1781,7 +1973,10 @@ class Resolver(CloningVisitor):
     def _is_next_s3(self, node: Optional[ast.JoinExpr]):
         if node is None:
             return False
-        if isinstance(node.type, (ast.TableAliasType, ast.CTETableAliasType, ast.CTETableType, ast.TableType)):
+        if isinstance(
+            node.type,
+            (ast.TableAliasType, ast.ColumnAliasedTableType, ast.CTETableAliasType, ast.CTETableType, ast.TableType),
+        ):
             return self._is_s3_table(node.type)
         return False
 
