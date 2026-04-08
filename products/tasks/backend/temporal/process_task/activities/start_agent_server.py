@@ -146,10 +146,11 @@ def start_agent_server(input: StartAgentServerInput) -> StartAgentServerOutput:
 
         user_mcp_configs = fetch_user_mcp_server_configs(
             token=access_token,
-            project_id=ctx.team_id,
+            team_id=ctx.team_id,
+            user_id=task.created_by_id,
         )
         if user_mcp_configs:
-            mcp_configs = (mcp_configs or []) + user_mcp_configs
+            mcp_configs = mcp_configs + user_mcp_configs
 
         if ctx.allowed_domains:
             environment_name = ctx.sandbox_environment_name or ctx.sandbox_environment_id or "selected environment"

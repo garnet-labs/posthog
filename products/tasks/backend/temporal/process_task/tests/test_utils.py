@@ -1,9 +1,13 @@
+from posthog.test.base import BaseTest
 from unittest.mock import patch
 
 from django.test import TestCase
 
 from parameterized import parameterized
 
+from posthog.models import Organization, Team, User
+
+from products.mcp_store.backend.models import MCPServer, MCPServerInstallation
 from products.tasks.backend.temporal.process_task.utils import (
     McpServerConfig,
     fetch_user_mcp_server_configs,
@@ -148,57 +152,41 @@ class TestMcpServerConfigToDict(TestCase):
         }
 
 
-class TestFetchUserMcpServerConfigs(TestCase):
+class TestFetchUserMcpServerConfigs(BaseTest):
     TOKEN = "phx_test_token"
-    PROJECT_ID = 42
     API_BASE = "https://us.posthog.com"
 
-    def _mock_response(
-        self,
-        *,
-        results: list[dict] | None = None,
-        status_code: int = 200,
-        ok: bool = True,
-        text: str = "",
-    ):
-        from unittest.mock import MagicMock
-
-        resp = MagicMock()
-        resp.ok = ok
-        resp.status_code = status_code
-        resp.text = text or '{"results": []}'
-        resp.json.return_value = {"results": results or []}
-        return resp
-
-    def _make_installation_data(
-        self,
-        *,
-        installation_id: str = "inst-1",
-        name: str = "Linear",
-        url: str = "https://mcp.linear.app/mcp",
-        is_enabled: bool = True,
-        needs_reauth: bool = False,
-        pending_oauth: bool = False,
-    ) -> dict:
-        return {
-            "id": installation_id,
-            "name": name,
-            "url": url,
-            "is_enabled": is_enabled,
-            "needs_reauth": needs_reauth,
-            "pending_oauth": pending_oauth,
+    def _create_installation(self, **kwargs) -> MCPServerInstallation:
+        defaults: dict = {
+            "team": self.team,
+            "user": self.user,
+            "display_name": "Linear",
+            "url": "https://mcp.linear.app/mcp",
+            "auth_type": "api_key",
+            "is_enabled": True,
         }
+        defaults.update(kwargs)
+        return MCPServerInstallation.objects.create(**defaults)
+
+    def _fetch(self, **kwargs) -> list[McpServerConfig]:
+        defaults: dict = {
+            "token": self.TOKEN,
+            "team_id": self.team.id,
+            "user_id": self.user.id,
+        }
+        defaults.update(kwargs)
+        return fetch_user_mcp_server_configs(**defaults)
 
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_returns_configs_for_enabled_installations(self, mock_get, mock_api_url) -> None:
+    def test_returns_configs_for_enabled_installations(self, mock_api_url) -> None:
         mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data()
-        mock_get.return_value = self._mock_response(results=[installation])
+        installation = self._create_installation()
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID)
+        configs = self._fetch()
 
-        expected_proxy = f"{self.API_BASE}/api/environments/{self.PROJECT_ID}/mcp_server_installations/inst-1/proxy/"
+        expected_proxy = (
+            f"{self.API_BASE}/api/environments/{self.team.id}/mcp_server_installations/{installation.id}/proxy/"
+        )
         assert configs == [
             McpServerConfig(
                 type="http",
@@ -207,132 +195,129 @@ class TestFetchUserMcpServerConfigs(TestCase):
                 headers=[{"name": "Authorization", "value": f"Bearer {self.TOKEN}"}],
             )
         ]
-        mock_get.assert_called_once_with(
-            f"{self.API_BASE}/api/environments/{self.PROJECT_ID}/mcp_server_installations/",
-            headers={
-                "Authorization": f"Bearer {self.TOKEN}",
-                "Content-Type": "application/json",
-            },
-            timeout=10,
+
+    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
+    def test_skips_disabled_installations(self, mock_api_url) -> None:
+        mock_api_url.return_value = self.API_BASE
+        self._create_installation(is_enabled=False)
+
+        assert self._fetch() == []
+
+    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
+    def test_skips_installations_needing_reauth(self, mock_api_url) -> None:
+        mock_api_url.return_value = self.API_BASE
+        self._create_installation(
+            auth_type="oauth",
+            sensitive_configuration={"needs_reauth": True, "access_token": "tok"},
         )
 
-    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_skips_disabled_installations(self, mock_get, mock_api_url) -> None:
-        mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data(is_enabled=False)
-        mock_get.return_value = self._mock_response(results=[installation])
-
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
+        assert self._fetch() == []
 
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_skips_installations_needing_reauth(self, mock_get, mock_api_url) -> None:
+    def test_skips_installations_with_pending_oauth(self, mock_api_url) -> None:
         mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data(needs_reauth=True)
-        mock_get.return_value = self._mock_response(results=[installation])
+        self._create_installation(auth_type="oauth", sensitive_configuration={})
 
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
+        assert self._fetch() == []
 
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_skips_installations_with_pending_oauth(self, mock_get, mock_api_url) -> None:
+    def test_returns_empty_when_no_installations(self, mock_api_url) -> None:
         mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data(pending_oauth=True)
-        mock_get.return_value = self._mock_response(results=[installation])
 
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
+        assert self._fetch() == []
 
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_returns_empty_on_api_error(self, mock_get, mock_api_url) -> None:
+    def test_uses_display_name(self, mock_api_url) -> None:
         mock_api_url.return_value = self.API_BASE
-        mock_get.return_value = self._mock_response(status_code=500, ok=False)
+        self._create_installation(display_name="My Custom Server")
 
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
-
-    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_returns_empty_on_request_exception(self, mock_get, mock_api_url) -> None:
-        import requests
-
-        mock_api_url.return_value = self.API_BASE
-        mock_get.side_effect = requests.ConnectionError("connection refused")
-
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
-
-    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_returns_empty_on_json_decode_error(self, mock_get, mock_api_url) -> None:
-        mock_api_url.return_value = self.API_BASE
-        resp = self._mock_response(text="<html>ngrok warning page</html>")
-        resp.json.side_effect = ValueError("No JSON object could be decoded")
-        mock_get.return_value = resp
-
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
-
-    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_returns_empty_when_no_installations(self, mock_get, mock_api_url) -> None:
-        mock_api_url.return_value = self.API_BASE
-        mock_get.return_value = self._mock_response(results=[])
-
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID) == []
-
-    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_uses_name_from_response(self, mock_get, mock_api_url) -> None:
-        mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data(name="My Custom Server")
-        mock_get.return_value = self._mock_response(results=[installation])
-
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID)
+        configs = self._fetch()
 
         assert configs[0].name == "My Custom Server"
 
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_falls_back_to_url_when_name_empty(self, mock_get, mock_api_url) -> None:
+    def test_name_falls_back_to_server_name(self, mock_api_url) -> None:
         mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data(name="", url="https://mcp.notion.com/mcp")
-        mock_get.return_value = self._mock_response(results=[installation])
+        server = MCPServer.objects.create(
+            name="Linear", url="https://linear.app/.well-known/oauth", created_by=self.user
+        )
+        self._create_installation(display_name="", server=server)
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID)
+        configs = self._fetch()
+
+        assert configs[0].name == "Linear"
+
+    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
+    def test_name_falls_back_to_url(self, mock_api_url) -> None:
+        mock_api_url.return_value = self.API_BASE
+        self._create_installation(display_name="", url="https://mcp.notion.com/mcp")
+
+        configs = self._fetch()
 
         assert configs[0].name == "https://mcp.notion.com/mcp"
 
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
-    def test_strips_trailing_slash_from_api_url(self, mock_get, mock_api_url) -> None:
+    def test_strips_trailing_slash_from_api_url(self, mock_api_url) -> None:
         mock_api_url.return_value = "https://us.posthog.com/"
-        installation = self._make_installation_data(installation_id="inst-1")
-        mock_get.return_value = self._mock_response(results=[installation])
+        self._create_installation()
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID)
+        configs = self._fetch()
 
         assert configs[0].url.startswith("https://us.posthog.com/api/")
 
+    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
+    def test_api_key_not_filtered_by_oauth_checks(self, mock_api_url) -> None:
+        mock_api_url.return_value = self.API_BASE
+        self._create_installation(auth_type="api_key", sensitive_configuration={})
+
+        configs = self._fetch()
+
+        assert len(configs) == 1
+
+    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
+    def test_only_returns_for_given_user(self, mock_api_url) -> None:
+        mock_api_url.return_value = self.API_BASE
+        other_user = User.objects.create_and_join(self.organization, "other@posthog.com", "password")
+        self._create_installation(user=other_user)
+        self._create_installation(url="https://mcp.other.com/mcp")
+
+        configs = self._fetch()
+
+        assert len(configs) == 1
+        assert configs[0].name == "Linear"
+
+    @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
+    def test_only_returns_for_given_team(self, mock_api_url) -> None:
+        mock_api_url.return_value = self.API_BASE
+        other_org = Organization.objects.create(name="Other Org")
+        other_team = Team.objects.create(organization=other_org, name="Other Team")
+        self._create_installation(team=other_team)
+        self._create_installation(url="https://mcp.other.com/mcp")
+
+        configs = self._fetch()
+
+        assert len(configs) == 1
+
     @parameterized.expand(
         [
-            (True, False, False, True),
-            (False, False, False, False),
-            (True, True, False, False),
-            (True, False, True, False),
+            ("enabled_api_key", True, "api_key", {}, True),
+            ("disabled_api_key", False, "api_key", {}, False),
+            ("oauth_with_token", True, "oauth", {"access_token": "tok"}, True),
+            ("oauth_needs_reauth", True, "oauth", {"needs_reauth": True, "access_token": "tok"}, False),
+            ("oauth_pending", True, "oauth", {}, False),
         ]
     )
     @patch("products.tasks.backend.temporal.process_task.utils.get_sandbox_api_url")
-    @patch("products.tasks.backend.temporal.process_task.utils.http_requests.get")
     def test_filtering_matrix(
-        self, is_enabled, needs_reauth, pending_oauth, expected_included, mock_get, mock_api_url
+        self, _name, is_enabled, auth_type, sensitive_configuration, expected_included, mock_api_url
     ) -> None:
         mock_api_url.return_value = self.API_BASE
-        installation = self._make_installation_data(
+        self._create_installation(
             is_enabled=is_enabled,
-            needs_reauth=needs_reauth,
-            pending_oauth=pending_oauth,
+            auth_type=auth_type,
+            sensitive_configuration=sensitive_configuration,
         )
-        mock_get.return_value = self._mock_response(results=[installation])
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.PROJECT_ID)
+        configs = self._fetch()
 
         assert (len(configs) == 1) == expected_included

@@ -4,11 +4,12 @@ from urllib.parse import urlparse
 
 from django.conf import settings
 
-import requests as http_requests
 import structlog
 
 from posthog.models.integration import GitHubIntegration, Integration
 from posthog.temporal.oauth import PosthogMcpScopes, has_write_scopes
+
+from products.mcp_store.backend.models import MCPServerInstallation
 
 logger = structlog.get_logger(__name__)
 
@@ -44,68 +45,46 @@ def get_sandbox_api_url() -> str:
 
 def fetch_user_mcp_server_configs(
     token: str,
-    project_id: int,
+    team_id: int,
+    user_id: int,
 ) -> list[McpServerConfig]:
-    """Fetch the user's MCP Store installations via the PostHog API and return configs.
+    """Fetch the user's MCP Store installations via ORM and return configs.
 
-    Calls GET /api/environments/{project_id}/mcp_server_installations/ to discover
-    installations, then builds McpServerConfig entries using each installation's
-    proxy URL. The proxy handles upstream auth (OAuth token refresh, API key injection).
+    Queries MCPServerInstallation directly, then builds McpServerConfig entries
+    using each installation's proxy URL. The proxy handles upstream auth
+    (OAuth token refresh, API key injection).
 
-    Returns an empty list on API errors (non-fatal).
+    Returns an empty list on errors (non-fatal).
     """
+    try:
+        installations = MCPServerInstallation.objects.filter(
+            team_id=team_id, user_id=user_id, is_enabled=True
+        ).select_related("server")
+    except Exception as e:
+        logger.warning("Error fetching MCP installations", error=str(e), team_id=team_id)
+        return []
+
     api_base = get_sandbox_api_url().rstrip("/")
-    url = f"{api_base}/api/environments/{project_id}/mcp_server_installations/"
-
-    try:
-        response = http_requests.get(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            timeout=10,
-        )
-    except Exception as e:
-        logger.warning("Error fetching MCP installations", error=str(e), project_id=project_id)
-        return []
-
-    if not response.ok:
-        logger.warning(
-            "Failed to fetch MCP installations",
-            status_code=response.status_code,
-            response_body=response.text[:500],
-            project_id=project_id,
-        )
-        return []
-
-    try:
-        data = response.json()
-    except Exception as e:
-        logger.warning(
-            "Failed to parse MCP installations response",
-            error=str(e),
-            response_body=response.text[:500],
-            project_id=project_id,
-        )
-        return []
-
-    installations = data.get("results", [])
-
     configs: list[McpServerConfig] = []
-    for installation in installations:
-        if not installation.get("is_enabled", True):
-            logger.debug("Skipping disabled MCP installation", name=installation.get("name"))
-            continue
-        if installation.get("needs_reauth"):
-            logger.debug("Skipping MCP installation needing reauth", name=installation.get("name"))
-            continue
-        if installation.get("pending_oauth"):
-            logger.debug("Skipping MCP installation with pending OAuth", name=installation.get("name"))
-            continue
 
-        name = installation.get("name") or installation.get("url", "")
-        proxy_url = f"{api_base}/api/environments/{project_id}/mcp_server_installations/{installation['id']}/proxy/"
+    for installation in installations:
+        sensitive = installation.sensitive_configuration or {}
+
+        if installation.auth_type == "oauth":
+            if sensitive.get("needs_reauth"):
+                logger.debug("Skipping MCP installation needing reauth", installation_id=str(installation.id))
+                continue
+            if not sensitive.get("access_token"):
+                logger.debug("Skipping MCP installation with pending OAuth", installation_id=str(installation.id))
+                continue
+
+        name = installation.display_name
+        if not name and installation.server:
+            name = installation.server.name
+        if not name:
+            name = installation.url
+
+        proxy_url = f"{api_base}/api/environments/{team_id}/mcp_server_installations/{installation.id}/proxy/"
 
         configs.append(
             McpServerConfig(
@@ -116,7 +95,7 @@ def fetch_user_mcp_server_configs(
             )
         )
 
-    logger.info("Built user MCP server configs", count=len(configs), project_id=project_id)
+    logger.info("Built user MCP server configs", count=len(configs), team_id=team_id)
     return configs
 
 
