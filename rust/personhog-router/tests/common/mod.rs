@@ -297,6 +297,15 @@ impl PersonHogReplica for TestReplicaService {
     ) -> Result<Response<DeletePersonsResponse>, Status> {
         Ok(Response::new(DeletePersonsResponse { deleted_count: 0 }))
     }
+
+    async fn delete_persons_batch_for_team(
+        &self,
+        _request: Request<DeletePersonsBatchForTeamRequest>,
+    ) -> Result<Response<DeletePersonsBatchForTeamResponse>, Status> {
+        Ok(Response::new(DeletePersonsBatchForTeamResponse {
+            deleted_count: 0,
+        }))
+    }
 }
 
 /// Start a test replica server on a random port and return its address

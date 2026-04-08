@@ -14,6 +14,8 @@ from posthog.personhog_client.interceptor import ClientNameInterceptor, MetricsI
 from posthog.personhog_client.proto import (
     CheckCohortMembershipRequest,
     CohortMembershipResponse,
+    DeletePersonsBatchForTeamRequest,
+    DeletePersonsBatchForTeamResponse,
     DeletePersonsRequest,
     DeletePersonsResponse,
     GetDistinctIdsForPersonRequest,
@@ -154,6 +156,11 @@ class PersonHogClient:
 
     def delete_persons(self, request: DeletePersonsRequest, timeout: float | None = None) -> DeletePersonsResponse:
         return self._stub.DeletePersons(request, timeout=timeout or self._timeout)
+
+    def delete_persons_batch_for_team(
+        self, request: DeletePersonsBatchForTeamRequest, timeout: float | None = None
+    ) -> DeletePersonsBatchForTeamResponse:
+        return self._stub.DeletePersonsBatchForTeam(request, timeout=timeout or self._timeout)
 
     # -- Person lookups --
 

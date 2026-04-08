@@ -7,8 +7,10 @@ pub use replica::ReplicaBackend;
 
 use async_trait::async_trait;
 use personhog_proto::personhog::types::v1::{
-    CheckCohortMembershipRequest, CohortMembershipResponse, DeleteHashKeyOverridesByTeamsRequest,
-    DeleteHashKeyOverridesByTeamsResponse, DeletePersonsRequest, DeletePersonsResponse,
+    CheckCohortMembershipRequest, CohortMembershipResponse,
+    DeleteHashKeyOverridesByTeamsRequest, DeleteHashKeyOverridesByTeamsResponse,
+    DeletePersonsBatchForTeamRequest, DeletePersonsBatchForTeamResponse, DeletePersonsRequest,
+    DeletePersonsResponse,
     GetDistinctIdsForPersonRequest, GetDistinctIdsForPersonResponse,
     GetDistinctIdsForPersonsRequest, GetDistinctIdsForPersonsResponse, GetGroupRequest,
     GetGroupResponse, GetGroupTypeMappingsByProjectIdRequest,
@@ -94,6 +96,10 @@ pub trait PersonHogBackend: Send + Sync {
         &self,
         request: DeletePersonsRequest,
     ) -> Result<DeletePersonsResponse, Status>;
+    async fn delete_persons_batch_for_team(
+        &self,
+        request: DeletePersonsBatchForTeamRequest,
+    ) -> Result<DeletePersonsBatchForTeamResponse, Status>;
 
     // Cohort membership
     async fn check_cohort_membership(
