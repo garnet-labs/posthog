@@ -144,8 +144,10 @@ def copy_claude_auth(uid: int, gid: int) -> None:
             shutil.copy2(src, claude_dir / name)
 
     src = Path("/tmp/claude-auth.json")
-    if src.exists():
+    if src.is_file():
         shutil.copy2(src, SANDBOX_HOME / ".claude.json")
+    elif src.exists():
+        log("WARNING: /tmp/claude-auth.json is not a file (Docker created a directory mount) — skipping")
 
     run(["chown", "-R", f"{uid}:{gid}", str(SANDBOX_HOME)])
 
@@ -195,12 +197,15 @@ def root_phase() -> None:
     # points at /repo.git (where the main repo's .git is mounted).
     # This avoids setting GIT_DIR globally, which would poison every
     # subprocess that runs `git` (uv sync, cargo fetch, etc.).
-    gitdir_line = (WORKSPACE / ".git").read_text().strip()
-    worktree_name = gitdir_line.rsplit("/", 1)[-1]
-    container_gitdir = f"/repo.git/worktrees/{worktree_name}"
-    patched_gitfile = Path("/tmp/sandbox-gitfile")
-    patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
-    run(["mount", "--bind", str(patched_gitfile), str(WORKSPACE / ".git")])
+    # When .git is a directory (normal clone, not a worktree), skip patching.
+    gitfile = WORKSPACE / ".git"
+    if gitfile.is_file():
+        gitdir_line = gitfile.read_text().strip()
+        worktree_name = gitdir_line.rsplit("/", 1)[-1]
+        container_gitdir = f"/repo.git/worktrees/{worktree_name}"
+        patched_gitfile = Path("/tmp/sandbox-gitfile")
+        patched_gitfile.write_text(f"gitdir: {container_gitdir}\n")
+        run(["mount", "--bind", str(patched_gitfile), str(gitfile)])
 
     export_environment(uid, gid)
     start_sshd(uid, gid)
@@ -252,28 +257,6 @@ def fetch_rust_crates() -> None:
     info("Started: cargo fetch...")
     run(["cargo", "fetch"], cwd=str(WORKSPACE / "rust"))
     info("Finished: cargo fetch.")
-
-
-def ensure_demo_data() -> None:
-    """Generate demo data on first boot; skip if already present."""
-    result = run_quiet(
-        [
-            "psql",
-            "-h",
-            "db",
-            "-U",
-            "posthog",
-            "-d",
-            "posthog",
-            "-tAc",
-            "SELECT 1 FROM posthog_user WHERE email='test@posthog.com' LIMIT 1",
-        ]
-    )
-    if result.stdout.strip() == b"1":
-        info("Demo data already present, skipping generation.")
-    else:
-        info("Generating demo data (first boot)...")
-        run(["python", "manage.py", "generate_demo_data"])
 
 
 def install_geoip() -> None:
@@ -451,21 +434,10 @@ def user_phase() -> None:
     create_kafka_topics()
 
     # Run dependency installs in parallel.
-    # Migrations and demo data are chained after Python deps (uv ~1.5s)
-    # so they overlap with the slower pnpm/cargo installs.
-    # On subsequent boots phrocs migration processes handle any new
-    # migrations (usually a fast no-op).
-    def install_python_and_migrate() -> None:
-        install_python_deps()
-        info("Running postgres migrations...")
-        run(["bin/migrate", "--scope=postgres"])
-        info("Running clickhouse migrations...")
-        run(["bin/migrate", "--scope=clickhouse"])
-        ensure_demo_data()
-
+    # Migrations run later via phrocs (same as the normal dev stack).
     with ThreadPoolExecutor() as pool:
         futures = {
-            pool.submit(install_python_and_migrate): "python deps + migrations",
+            pool.submit(install_python_deps): "python deps",
             pool.submit(install_node_deps): "node deps",
             pool.submit(fetch_rust_crates): "rust crates",
         }
