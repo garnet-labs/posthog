@@ -4,6 +4,7 @@ import { router } from 'kea-router'
 
 import { PaginationManual, Sorting } from '@posthog/lemon-ui'
 
+import { runSubscriptionTestDelivery } from 'lib/components/Subscriptions/runSubscriptionTestDelivery'
 import { tabAwareActionToUrl } from 'lib/logic/scenes/tabAwareActionToUrl'
 import { tabAwareScene } from 'lib/logic/scenes/tabAwareScene'
 import { tabAwareUrlToAction } from 'lib/logic/scenes/tabAwareUrlToAction'
@@ -13,7 +14,7 @@ import { Scene } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
 import { userLogic } from 'scenes/userLogic'
 
-import { subscriptionsList } from '~/generated/core/api'
+import { subscriptionsList, subscriptionsTestDeliveryCreate } from '~/generated/core/api'
 import {
     SubscriptionsListResourceType,
     TargetTypeEnumApi,
@@ -204,6 +205,9 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
         setTargetTypeFilter: (targetType: SubscriptionsListTargetType | null) => ({ targetType }),
         applySubscriptionsQueryFromUrl: (query: SubscriptionsQueryFromUrl) => ({ query }),
         deleteSubscriptionSuccess: true,
+        deliverSubscription: (id: number) => ({ id }),
+        deliverSubscriptionSuccess: true,
+        deliverSubscriptionFailure: true,
     }),
     reducers({
         search: [
@@ -267,6 +271,14 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
                 loadSubscriptionsFailure: () => false,
             },
         ],
+        deliveringSubscriptionId: [
+            null as number | null,
+            {
+                deliverSubscription: (_, { id }) => id,
+                deliverSubscriptionSuccess: () => null,
+                deliverSubscriptionFailure: () => null,
+            },
+        ],
     }),
     loaders(({ values }) => ({
         subscriptionsResponse: [
@@ -310,6 +322,16 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
         setTargetTypeFilter: () => actions.loadSubscriptions(),
         applySubscriptionsQueryFromUrl: () => actions.loadSubscriptions(),
         deleteSubscriptionSuccess: () => actions.loadSubscriptions(),
+        deliverSubscription: async ({ id }) => {
+            const result = await runSubscriptionTestDelivery(() =>
+                subscriptionsTestDeliveryCreate(String(getCurrentTeamId()), id)
+            )
+            if (result === 'success') {
+                actions.deliverSubscriptionSuccess()
+            } else {
+                actions.deliverSubscriptionFailure()
+            }
+        },
     })),
     tabAwareActionToUrl(({ values }) => {
         const syncUrl = (

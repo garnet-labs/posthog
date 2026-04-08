@@ -3,6 +3,7 @@ import { LemonMenu, LemonTag } from '@posthog/lemon-ui'
 
 import { CopyToClipboardInline } from 'lib/components/CopyToClipboard'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
+import { parseCommaSeparatedSlackTargetDisplayLabels } from 'lib/utils/slackChannelValue'
 
 import { TargetTypeEnumApi, type SubscriptionApi } from '~/generated/core/api.schemas'
 
@@ -11,21 +12,6 @@ function parseEmailRecipients(targetValue: string): string[] {
         .split(',')
         .map((e) => e.trim())
         .filter(Boolean)
-}
-
-/** Slack stores `channelId|#channel-name` — one display string per comma-separated part. */
-function parseSlackDestinationParts(targetValue: string): string[] {
-    return targetValue
-        .split(',')
-        .map((part) => {
-            const trimmed = part.trim()
-            if (!trimmed) {
-                return null
-            }
-            const pipe = trimmed.indexOf('|')
-            return pipe !== -1 ? trimmed.slice(pipe + 1).trim() : trimmed
-        })
-        .filter((x): x is string => Boolean(x))
 }
 
 function truncateWebhookUrl(url: string): string {
@@ -89,7 +75,7 @@ export function SubscriptionDestinationCell({ sub }: { sub: SubscriptionApi }): 
     }
 
     if (sub.target_type === TargetTypeEnumApi.Slack) {
-        const parts = parseSlackDestinationParts(sub.target_value)
+        const parts = parseCommaSeparatedSlackTargetDisplayLabels(sub.target_value)
         return <DestinationListCell parts={parts} copyDescription="Slack destination" />
     }
 

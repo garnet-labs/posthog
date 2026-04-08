@@ -7,9 +7,15 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, JsonResponse
 
 import jwt
-from rest_framework import filters,serializers, status, viewsets
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_field,
+    extend_schema_view,
+)
+from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
-from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_field, extend_schema_view
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from temporalio.exceptions import WorkflowAlreadyStartedError
@@ -317,10 +323,9 @@ class SubscriptionViewSet(TeamAndOrgViewSetMixin, ForbidDestroyModel, viewsets.M
         if self.action == "list":
             queryset = queryset.select_related("insight", "dashboard", "created_by")
 
-        if self.action == "list" and "deleted" not in request_params:
-            queryset = queryset.filter(deleted=False)
+            if "deleted" not in request_params:
+                queryset = queryset.filter(deleted=False)
 
-        if self.action == "list":
             created_by = request_params.get("created_by")
             if created_by:
                 try:

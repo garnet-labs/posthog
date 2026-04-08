@@ -659,10 +659,17 @@ class TestSubscriptionTemporal(APILicensedTest):
         assert len(results) == 1
         assert results[0]["title"] == "Mine"
 
-    def test_list_subscriptions_invalid_created_by_returns_400(self):
-        res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"created_by": "not-a-uuid"})
+    @parameterized.expand(
+        [
+            ("invalid_created_by", "created_by", "not-a-uuid", "created_by"),
+            ("invalid_target_type", "target_type", "not_a_channel", "target_type"),
+        ],
+        name_func=lambda f, _n, p: f"{f.__name__}__{p.args[0]}",
+    )
+    def test_list_subscriptions_invalid_list_query_param_returns_400(self, _case_label, param, value, expected_attr):
+        res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {param: value})
         assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert res.json().get("attr") == "created_by"
+        assert res.json().get("attr") == expected_attr
 
     def test_list_subscriptions_search_matches_insight_name(self):
         named_insight = Insight.objects.create(
@@ -683,42 +690,34 @@ class TestSubscriptionTemporal(APILicensedTest):
         assert len(results) == 1
         assert results[0]["title"] == "DifferentTitle"
 
-    def test_list_subscriptions_filter_by_target_type(self):
-        self._create_subscription(title="Email sub")
-        slack_integration = Integration.objects.create(team=self.team, kind="slack", config={})
-        slack_res = self._create_subscription(
-            title="Slack sub",
-            target_type="slack",
-            target_value="C1234|#general",
-            integration_id=slack_integration.id,
-        )
-        assert slack_res.status_code == status.HTTP_201_CREATED
-        slack_id = slack_res.json()["id"]
+    @parameterized.expand(
+        [("slack",), ("webhook",), ("email",)],
+        name_func=lambda f, _n, p: f"{f.__name__}__{p.args[0]}",
+    )
+    def test_list_subscriptions_filter_by_target_type(self, target_type):
+        if target_type == "slack":
+            self._create_subscription(title="Email sub")
+            slack_integration = Integration.objects.create(team=self.team, kind="slack", config={})
+            create_res = self._create_subscription(
+                title="Slack sub",
+                target_type="slack",
+                target_value="C1234|#general",
+                integration_id=slack_integration.id,
+            )
+        elif target_type == "webhook":
+            create_res = self._create_subscription(
+                title="Webhook sub",
+                target_type="webhook",
+                target_value="https://example.com/hook",
+            )
+        else:
+            create_res = self._create_subscription(title="Email only sub")
+        assert create_res.status_code == status.HTTP_201_CREATED
+        sub_id = create_res.json()["id"]
 
-        only_slack = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": "slack"})
-        assert only_slack.status_code == status.HTTP_200_OK
-        slack_results = only_slack.json()["results"]
-        assert len(slack_results) == 1
-        assert slack_results[0]["id"] == slack_id
-        assert slack_results[0]["target_type"] == "slack"
-
-    def test_list_subscriptions_invalid_target_type_returns_400(self):
-        res = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": "not_a_channel"})
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert res.json().get("attr") == "target_type"
-
-    def test_list_subscriptions_filter_by_target_type_webhook(self):
-        webhook_res = self._create_subscription(
-            title="Webhook sub",
-            target_type="webhook",
-            target_value="https://example.com/hook",
-        )
-        assert webhook_res.status_code == status.HTTP_201_CREATED
-        webhook_id = webhook_res.json()["id"]
-
-        only_webhook = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": "webhook"})
-        assert only_webhook.status_code == status.HTTP_200_OK
-        webhook_results = only_webhook.json()["results"]
-        assert len(webhook_results) == 1
-        assert webhook_results[0]["id"] == webhook_id
-        assert webhook_results[0]["target_type"] == "webhook"
+        filtered = self.client.get(f"/api/projects/{self.team.id}/subscriptions/", {"target_type": target_type})
+        assert filtered.status_code == status.HTTP_200_OK
+        results = filtered.json()["results"]
+        assert len(results) == 1
+        assert results[0]["id"] == sub_id
+        assert results[0]["target_type"] == target_type

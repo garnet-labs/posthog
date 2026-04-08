@@ -8,6 +8,7 @@ import { DetectiveHog } from 'lib/components/hedgehogs'
 import { PayGateMini } from 'lib/components/PayGateMini/PayGateMini'
 import { ProductIntroduction } from 'lib/components/ProductIntroduction/ProductIntroduction'
 import { LemonTab, LemonTabs } from 'lib/lemon-ui/LemonTabs'
+import { Spinner } from 'lib/lemon-ui/Spinner'
 import { deleteWithUndo } from 'lib/utils/deleteWithUndo'
 import { getCurrentTeamId } from 'lib/utils/getAppContext'
 import { sceneConfigurations } from 'scenes/scenes'
@@ -38,8 +39,10 @@ function editHref(sub: SubscriptionApi): string | null {
 
 function SubscriptionsRowActions({ sub }: { sub: SubscriptionApi }): JSX.Element {
     const { push } = useActions(router)
-    const { deleteSubscriptionSuccess } = useActions(subscriptionsSceneLogic)
+    const { deleteSubscriptionSuccess, deliverSubscription } = useActions(subscriptionsSceneLogic)
+    const { deliveringSubscriptionId } = useValues(subscriptionsSceneLogic)
     const href = editHref(sub)
+    const isDelivering = deliveringSubscriptionId === sub.id
 
     return (
         <LemonMenu
@@ -52,6 +55,12 @@ function SubscriptionsRowActions({ sub }: { sub: SubscriptionApi }): JSX.Element
                           },
                       ]
                     : []),
+                {
+                    label: 'Test delivery',
+                    'data-attr': 'subscription-list-item-manual-deliver',
+                    disabled: isDelivering,
+                    onClick: () => deliverSubscription(sub.id),
+                },
                 {
                     label: 'Delete',
                     status: 'danger' as const,
@@ -67,7 +76,12 @@ function SubscriptionsRowActions({ sub }: { sub: SubscriptionApi }): JSX.Element
                 },
             ]}
         >
-            <LemonButton icon={<IconEllipsis />} size="small" aria-label="Subscription actions" />
+            <LemonButton
+                icon={isDelivering ? <Spinner /> : <IconEllipsis />}
+                size="small"
+                aria-label="Subscription actions"
+                disabled={isDelivering}
+            />
         </LemonMenu>
     )
 }
