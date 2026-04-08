@@ -2,7 +2,7 @@ import { actions, afterMount, connect, kea, listeners, path, reducers, selectors
 import { loaders } from 'kea-loaders'
 import { router } from 'kea-router'
 
-import { PaginationManual, Sorting } from '@posthog/lemon-ui'
+import { Sorting } from '@posthog/lemon-ui'
 
 import { runSubscriptionTestDelivery } from 'lib/components/Subscriptions/runSubscriptionTestDelivery'
 import { tabAwareActionToUrl } from 'lib/logic/scenes/tabAwareActionToUrl'
@@ -19,7 +19,6 @@ import {
     SubscriptionsListResourceType,
     TargetTypeEnumApi,
     type PaginatedSubscriptionListApi,
-    type SubscriptionApi,
     type SubscriptionsListTargetType,
 } from '~/generated/core/api.schemas'
 import { Breadcrumb } from '~/types'
@@ -34,9 +33,6 @@ export enum SubscriptionsTab {
     Dashboard = 'dashboard',
     Insight = 'insight',
 }
-
-/** Widen initial tab so `currentTab` reducer state is `SubscriptionsTab`, not the literal `SubscriptionsTab.All`. */
-const DEFAULT_SUBSCRIPTIONS_TAB: SubscriptionsTab = SubscriptionsTab.All
 
 /** Query keys owned by the subscriptions list scene (merged into the router; other params are preserved). */
 const SUBSCRIPTIONS_URL_KEYS = ['tab', 'search', 'created_by', 'target_type', 'page'] as const
@@ -227,7 +223,7 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
             },
         ],
         currentTab: [
-            DEFAULT_SUBSCRIPTIONS_TAB,
+            SubscriptionsTab.All,
             {
                 setCurrentTab: (_, { tab }) => tab,
                 applySubscriptionsQueryFromUrl: (_, { query }) => query.tab,
@@ -310,6 +306,43 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
             },
         ],
     })),
+    selectors(({ actions }) => ({
+        subscriptions: [
+            (s) => [s.subscriptionsResponse],
+            (subscriptionsResponse) => subscriptionsResponse?.results ?? [],
+        ],
+        subscriptionsLoading: [
+            (s) => [s.subscriptionsResponseLoading],
+            (subscriptionsResponseLoading) => Boolean(subscriptionsResponseLoading),
+        ],
+        pagination: [
+            (s) => [s.page, s.subscriptionsResponse],
+            (page, subscriptionsResponse) => {
+                const count = subscriptionsResponse?.count ?? 0
+                // usePagination uses `entryCount || null`; 0 is treated as missing and breaks pageCount / next button.
+                // LemonTable shows "No …" when the page is empty, so inflating 0→1 only satisfies the hook.
+                const entryCount = Math.max(count, 1)
+                return {
+                    controlled: true,
+                    pageSize: PAGE_SIZE,
+                    currentPage: page,
+                    entryCount,
+                    onBackward: () => actions.setPage(page - 1),
+                    onForward: () => actions.setPage(page + 1),
+                }
+            },
+        ],
+        breadcrumbs: [
+            () => [],
+            (): Breadcrumb[] => [
+                {
+                    key: Scene.Subscriptions,
+                    name: sceneConfigurations[Scene.Subscriptions].name,
+                    iconType: sceneConfigurations[Scene.Subscriptions].iconType || 'default_icon_type',
+                },
+            ],
+        ],
+    })),
     listeners(({ actions }) => ({
         setSearch: async (_, breakpoint) => {
             await breakpoint(300)
@@ -377,44 +410,6 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
             }
             actions.applySubscriptionsQueryFromUrl(parsed)
         },
-    })),
-    selectors(({ actions }) => ({
-        subscriptions: [
-            (s) => [s.subscriptionsResponse],
-            (subscriptionsResponse: PaginatedSubscriptionListApi | null): SubscriptionApi[] =>
-                subscriptionsResponse?.results ?? [],
-        ],
-        subscriptionsLoading: [
-            (s) => [s.subscriptionsResponseLoading],
-            (subscriptionsResponseLoading: boolean | undefined): boolean => Boolean(subscriptionsResponseLoading),
-        ],
-        pagination: [
-            (s) => [s.page, s.subscriptionsResponse],
-            (page: number, subscriptionsResponse: PaginatedSubscriptionListApi | null): PaginationManual => {
-                const count = subscriptionsResponse?.count ?? 0
-                // usePagination uses `entryCount || null`; 0 is treated as missing and breaks pageCount / next button.
-                // LemonTable shows "No …" when the page is empty, so inflating 0→1 only satisfies the hook.
-                const entryCount = Math.max(count, 1)
-                return {
-                    controlled: true,
-                    pageSize: PAGE_SIZE,
-                    currentPage: page,
-                    entryCount,
-                    onBackward: () => actions.setPage(page - 1),
-                    onForward: () => actions.setPage(page + 1),
-                }
-            },
-        ],
-        breadcrumbs: [
-            () => [],
-            (): Breadcrumb[] => [
-                {
-                    key: Scene.Subscriptions,
-                    name: sceneConfigurations[Scene.Subscriptions].name,
-                    iconType: sceneConfigurations[Scene.Subscriptions].iconType || 'default_icon_type',
-                },
-            ],
-        ],
     })),
     afterMount(({ actions }) => {
         actions.loadSubscriptions()

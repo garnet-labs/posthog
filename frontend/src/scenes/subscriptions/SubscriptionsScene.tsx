@@ -58,7 +58,7 @@ function SubscriptionsRowActions({ sub }: { sub: SubscriptionApi }): JSX.Element
                 {
                     label: 'Test delivery',
                     'data-attr': 'subscription-list-item-manual-deliver',
-                    disabled: isDelivering,
+                    disabledReason: isDelivering ? 'Sending test delivery…' : null,
                     onClick: () => deliverSubscription(sub.id),
                 },
                 {
