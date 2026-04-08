@@ -26,6 +26,8 @@ interface OptionSelectorProps {
     selectedValue?: string
     /** Label for the submit button (default: "Next") */
     submitLabel?: string
+    /** Called when the user clicks "Skip question" */
+    onSkip?: () => void
 }
 
 export function OptionSelector({
@@ -40,6 +42,7 @@ export function OptionSelector({
     initialCustomValue,
     selectedValue,
     submitLabel = 'Next',
+    onSkip,
 }: OptionSelectorProps): JSX.Element {
     const isInitialCustomAnswer = useMemo(() => {
         const valueToCheck = selectedValue ?? initialCustomValue
@@ -170,33 +173,42 @@ export function OptionSelector({
                         value="custom"
                     />
                     {showCustomInput ? (
-                        <div className="flex gap-2 items-center">
-                            <LemonInput
-                                placeholder={customPlaceholder}
-                                fullWidth
-                                size="small"
-                                value={customInput}
-                                onChange={(newValue) => {
-                                    setCustomInput(newValue)
-                                    setSelectedOption('custom')
-                                }}
-                                onPressEnter={handleCustomSubmit}
-                                autoFocus={true}
-                                className="flex-grow"
-                            />
-                            <LemonButton
-                                type="primary"
-                                size="small"
-                                disabledReason={!customInput.trim() ? 'Please type a response' : undefined}
-                                onClick={handleCustomSubmit}
-                            >
-                                {submitLabel}
-                            </LemonButton>
-                        </div>
+                        <LemonInput
+                            placeholder={customPlaceholder}
+                            fullWidth
+                            size="small"
+                            value={customInput}
+                            onChange={(newValue) => {
+                                setCustomInput(newValue)
+                                setSelectedOption('custom')
+                            }}
+                            onPressEnter={handleCustomSubmit}
+                            autoFocus={true}
+                        />
                     ) : (
                         <span className="my-1.5">Explain what you'd like instead..</span>
                     )}
                 </label>
+            )}
+            {(onSkip || showCustomInput) && (
+                <div className="flex items-center justify-between gap-2 pt-2">
+                    {onSkip && (
+                        <LemonButton type="secondary" size="small" onClick={onSkip}>
+                            Skip question
+                        </LemonButton>
+                    )}
+                    {showCustomInput && (
+                        <LemonButton
+                            type="primary"
+                            size="small"
+                            disabledReason={!customInput.trim() ? 'Please type a response' : undefined}
+                            onClick={handleCustomSubmit}
+                            className="ml-auto"
+                        >
+                            {submitLabel}
+                        </LemonButton>
+                    )}
+                </div>
             )}
         </div>
     )

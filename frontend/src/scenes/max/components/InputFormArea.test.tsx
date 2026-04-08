@@ -91,4 +91,48 @@ describe('MultiQuestionFormInput', () => {
         expect(continueAfterFormDismissal).toHaveBeenCalledTimes(1)
         expect(screen.getByText('Dismissing form...')).toBeInTheDocument()
     })
+
+    it('submits multi_select answers including custom entries', () => {
+        const multiSelectForm: MultiQuestionForm = {
+            questions: [
+                {
+                    id: 'goal',
+                    title: 'Goal',
+                    question: 'Pick a goal',
+                    type: 'select',
+                    options: [{ value: 'Growth' }, { value: 'Retention' }],
+                },
+                {
+                    id: 'features',
+                    title: 'Features',
+                    question: 'Which features do you want?',
+                    type: 'multi_select',
+                    options: [{ value: 'Funnels' }, { value: 'Paths' }],
+                },
+            ],
+        }
+
+        render(<MultiQuestionFormInput form={multiSelectForm} />)
+
+        // Answer first question to advance
+        fireEvent.click(screen.getByText('Growth'))
+
+        // Now on multi_select question: check a predefined option
+        fireEvent.click(screen.getByText('Funnels'))
+
+        // Add a custom entry
+        const input = screen.getByPlaceholderText('Add your own option...')
+        fireEvent.change(input, { target: { value: 'Custom insight' } })
+        fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+
+        // Click Next to submit the multi_select answer (button says "Next" because
+        // the parent answers state hasn't been updated with this question's value yet)
+        const nextButton = screen.getAllByRole('button').find((b) => b.textContent === 'Next')
+        fireEvent.click(nextButton!)
+
+        expect(continueAfterForm).toHaveBeenCalledWith({
+            goal: 'Growth',
+            features: ['Funnels', 'Custom insight'],
+        })
+    })
 })

@@ -61,6 +61,103 @@ describe('QuestionField', () => {
         expect(onAnswer).not.toHaveBeenCalled()
     })
 
+    it('multi_select renders custom entry input by default', () => {
+        const onAnswer = jest.fn()
+        const question: MultiQuestionFormQuestion = {
+            ...baseQuestion,
+            type: 'multi_select',
+            options: [{ value: 'Alpha' }, { value: 'Beta' }],
+        }
+        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+        expect(screen.getByPlaceholderText('Add your own option...')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Add/ })).toBeInTheDocument()
+    })
+
+    it('multi_select hides custom entry input when allow_custom_answer is false', () => {
+        const onAnswer = jest.fn()
+        const question: MultiQuestionFormQuestion = {
+            ...baseQuestion,
+            type: 'multi_select',
+            options: [{ value: 'Alpha' }, { value: 'Beta' }],
+            allow_custom_answer: false,
+        }
+        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+        expect(screen.queryByPlaceholderText('Add your own option...')).not.toBeInTheDocument()
+    })
+
+    it('multi_select adds custom value and includes it in submission', () => {
+        const onAnswer = jest.fn()
+        const question: MultiQuestionFormQuestion = {
+            ...baseQuestion,
+            type: 'multi_select',
+            options: [{ value: 'Alpha' }, { value: 'Beta' }],
+        }
+        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+
+        const input = screen.getByPlaceholderText('Add your own option...')
+        fireEvent.change(input, { target: { value: 'Custom value' } })
+        fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+
+        // Custom value should appear as a checked checkbox
+        expect(screen.getByText('Custom value')).toBeInTheDocument()
+        expect(screen.getAllByRole('checkbox')).toHaveLength(3)
+
+        // Submit with only the custom value selected
+        const submitButton = screen.getAllByRole('button').find((b) => b.textContent?.includes('Next'))
+        fireEvent.click(submitButton!)
+        expect(onAnswer).toHaveBeenCalledWith(['Custom value'])
+    })
+
+    it('multi_select does not add empty or whitespace-only custom values', () => {
+        const onAnswer = jest.fn()
+        const question: MultiQuestionFormQuestion = {
+            ...baseQuestion,
+            type: 'multi_select',
+            options: [{ value: 'Alpha' }, { value: 'Beta' }],
+        }
+        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+
+        const input = screen.getByPlaceholderText('Add your own option...')
+        fireEvent.change(input, { target: { value: '   ' } })
+        fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+
+        // Should still only have the 2 predefined checkboxes
+        expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+    })
+
+    it('multi_select auto-checks predefined option when duplicate custom value is entered', () => {
+        const onAnswer = jest.fn()
+        const question: MultiQuestionFormQuestion = {
+            ...baseQuestion,
+            type: 'multi_select',
+            options: [{ value: 'Alpha' }, { value: 'Beta' }],
+        }
+        render(<QuestionField question={question} value={undefined} onAnswer={onAnswer} />)
+
+        const input = screen.getByPlaceholderText('Add your own option...')
+        fireEvent.change(input, { target: { value: 'alpha' } })
+        fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+
+        // Should still only have 2 checkboxes (no duplicate added)
+        expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+        // Input should be cleared
+        expect(input).toHaveValue('')
+    })
+
+    it('multi_select restores custom values from previous answer', () => {
+        const onAnswer = jest.fn()
+        const question: MultiQuestionFormQuestion = {
+            ...baseQuestion,
+            type: 'multi_select',
+            options: [{ value: 'Alpha' }, { value: 'Beta' }],
+        }
+        render(<QuestionField question={question} value={['Alpha', 'My custom entry']} onAnswer={onAnswer} />)
+
+        // Should have 3 checkboxes: 2 predefined + 1 custom
+        expect(screen.getAllByRole('checkbox')).toHaveLength(3)
+        expect(screen.getByText('My custom entry')).toBeInTheDocument()
+    })
+
     it('calls onAnswer with null when clicking an already-selected option to deselect', () => {
         const onAnswer = jest.fn()
         render(<QuestionField question={selectQuestion} value="Option A" onAnswer={onAnswer} />)

@@ -251,7 +251,13 @@ export function MultiQuestionFormInput({ form, initialAnswers = {} }: MultiQuest
                     })}
                     className="w-[calc(100%+var(--spacing-3))] -mx-3 [&>ul]:pl-3 -mt-2.5"
                     rightSlot={
-                        <LemonButton size="xsmall" type="tertiary" icon={<IconX />} onClick={handleDismissForm} />
+                        <LemonButton
+                            size="xsmall"
+                            type="tertiary"
+                            icon={<IconX />}
+                            onClick={handleDismissForm}
+                            aria-label="Dismiss form"
+                        />
                     }
                     rightSlotClassName="pr-1 bg-unset"
                 />

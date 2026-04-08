@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
+import { IconPlus } from '@posthog/icons'
 import { LemonButton, LemonCheckbox, LemonInput, LemonSelect, LemonSwitch } from '@posthog/lemon-ui'
 
 import { LemonSlider } from 'lib/lemon-ui/LemonSlider/LemonSlider'
@@ -72,22 +73,16 @@ function SelectField({
     const allowCustomAnswer = question.allow_custom_answer !== false
 
     return (
-        <div className="flex flex-col gap-3">
-            <OptionSelector
-                options={options}
-                onSelect={onAnswer}
-                allowCustom={allowCustomAnswer}
-                customPlaceholder="Type your answer..."
-                onCustomSubmit={onAnswer}
-                selectedValue={value}
-                submitLabel={submitLabel}
-            />
-            {onSkip && (
-                <LemonButton type="secondary" size="small" onClick={onSkip} className="self-start">
-                    Skip question
-                </LemonButton>
-            )}
-        </div>
+        <OptionSelector
+            options={options}
+            onSelect={onAnswer}
+            allowCustom={allowCustomAnswer}
+            customPlaceholder="Type your answer..."
+            onCustomSubmit={onAnswer}
+            selectedValue={value}
+            submitLabel={submitLabel}
+            onSkip={onSkip}
+        />
     )
 }
 
@@ -104,8 +99,19 @@ function MultiSelectField({
     onSkip?: () => void
     submitLabel: string
 }): JSX.Element {
+    const predefinedValues = useMemo(() => new Set((question.options ?? []).map((o) => o.value)), [question.options])
+
     const [selected, setSelected] = useState<string[]>(value ?? [])
+    const [customValues, setCustomValues] = useState<string[]>(() => {
+        if (!value) {
+            return []
+        }
+        return value.filter((v) => !predefinedValues.has(v))
+    })
+    const [customInput, setCustomInput] = useState('')
     const [showError, setShowError] = useState(false)
+
+    const allowCustomAnswer = question.allow_custom_answer !== false
 
     const handleToggle = (optionValue: string): void => {
         setSelected((prev) => {
@@ -114,6 +120,40 @@ function MultiSelectField({
             }
             return [...prev, optionValue]
         })
+        setShowError(false)
+    }
+
+    const handleAddCustom = (): void => {
+        const trimmed = customInput.trim()
+        if (!trimmed) {
+            return
+        }
+
+        // If it matches a predefined option (case-insensitive), auto-check that instead
+        const matchingPredefined = (question.options ?? []).find((o) => o.value.toLowerCase() === trimmed.toLowerCase())
+        if (matchingPredefined) {
+            if (!selected.includes(matchingPredefined.value)) {
+                setSelected((prev) => [...prev, matchingPredefined.value])
+            }
+            setCustomInput('')
+            setShowError(false)
+            return
+        }
+
+        // If it matches an existing custom value (case-insensitive), auto-check that instead
+        const matchingCustom = customValues.find((v) => v.toLowerCase() === trimmed.toLowerCase())
+        if (matchingCustom) {
+            if (!selected.includes(matchingCustom)) {
+                setSelected((prev) => [...prev, matchingCustom])
+            }
+            setCustomInput('')
+            setShowError(false)
+            return
+        }
+
+        setCustomValues((prev) => [...prev, trimmed])
+        setSelected((prev) => [...prev, trimmed])
+        setCustomInput('')
         setShowError(false)
     }
 
@@ -140,6 +180,36 @@ function MultiSelectField({
                     }
                 />
             ))}
+            {customValues.map((customValue) => (
+                <LemonCheckbox
+                    key={`custom-${customValue}`}
+                    checked={selected.includes(customValue)}
+                    onChange={() => handleToggle(customValue)}
+                    label={<span className="font-medium">{customValue}</span>}
+                />
+            ))}
+            {allowCustomAnswer && (
+                <div className="flex gap-2 items-center">
+                    <LemonInput
+                        placeholder="Add your own option..."
+                        fullWidth
+                        size="small"
+                        value={customInput}
+                        onChange={setCustomInput}
+                        onPressEnter={handleAddCustom}
+                        className="flex-grow"
+                    />
+                    <LemonButton
+                        type="secondary"
+                        size="small"
+                        icon={<IconPlus />}
+                        disabledReason={!customInput.trim() ? 'Type a value first' : undefined}
+                        onClick={handleAddCustom}
+                    >
+                        Add
+                    </LemonButton>
+                </div>
+            )}
             {showError && <p className="text-danger text-xs m-0">Select at least one option</p>}
             <div className="flex items-center justify-between gap-2">
                 {onSkip && (
