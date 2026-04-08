@@ -876,14 +876,44 @@ async fn test_delete_persons_batch_for_team() {
     assert_eq!(deleted, 0);
 
     // Verify all persons are gone
-    assert!(ctx.storage.get_person_by_id(ctx.team_id, p1.id).await.unwrap().is_none());
-    assert!(ctx.storage.get_person_by_id(ctx.team_id, p2.id).await.unwrap().is_none());
-    assert!(ctx.storage.get_person_by_id(ctx.team_id, p3.id).await.unwrap().is_none());
+    assert!(ctx
+        .storage
+        .get_person_by_id(ctx.team_id, p1.id)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(ctx
+        .storage
+        .get_person_by_id(ctx.team_id, p2.id)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(ctx
+        .storage
+        .get_person_by_id(ctx.team_id, p3.id)
+        .await
+        .unwrap()
+        .is_none());
 
     // Verify distinct IDs are gone too
-    assert!(ctx.storage.get_person_by_distinct_id(ctx.team_id, "batch_del_1").await.unwrap().is_none());
-    assert!(ctx.storage.get_person_by_distinct_id(ctx.team_id, "batch_del_2").await.unwrap().is_none());
-    assert!(ctx.storage.get_person_by_distinct_id(ctx.team_id, "batch_del_3").await.unwrap().is_none());
+    assert!(ctx
+        .storage
+        .get_person_by_distinct_id(ctx.team_id, "batch_del_1")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(ctx
+        .storage
+        .get_person_by_distinct_id(ctx.team_id, "batch_del_2")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(ctx
+        .storage
+        .get_person_by_distinct_id(ctx.team_id, "batch_del_3")
+        .await
+        .unwrap()
+        .is_none());
 
     ctx.cleanup().await.ok();
 }
