@@ -2,7 +2,6 @@ import { IconFilter, IconTrash, IconPencil } from '@posthog/icons'
 import { LemonButton, LemonTag, LemonSnack, Tooltip } from '@posthog/lemon-ui'
 
 import { IconSubArrowRight } from 'lib/lemon-ui/icons'
-import { LemonDialog } from 'lib/lemon-ui/LemonDialog'
 /** Short display labels for trigger property operators */
 const OPERATOR_DISPLAY: Record<string, string> = {
     exact: 'equals',

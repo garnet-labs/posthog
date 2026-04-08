@@ -1,7 +1,7 @@
 import { useValues, useActions } from 'kea'
 import { Form } from 'kea-forms'
 
-import { IconChevronDown, IconFilter, IconPlus, IconTrash } from '@posthog/icons'
+import { IconChevronDown, IconFilter, IconPlus } from '@posthog/icons'
 import {
     LemonBanner,
     LemonButton,
@@ -49,12 +49,15 @@ const SUPPORTED_OPERATORS: PropertyOperator[] = [
 
 /** Convert our trigger property filters to the AnyPropertyFilter format PropertyFilters component expects */
 function triggerFiltersToPropertyFilters(filters: TriggerPropertyFilter[]): AnyPropertyFilter[] {
-    return filters.map((f) => ({
-        key: f.key,
-        type: f.type === 'person' ? PropertyFilterType.Person : PropertyFilterType.Event,
-        operator: (f.operator as PropertyOperator) || PropertyOperator.Exact,
-        value: f.value ?? '',
-    }))
+    return filters.map(
+        (f) =>
+            ({
+                key: f.key,
+                type: f.type === 'person' ? PropertyFilterType.Person : PropertyFilterType.Event,
+                operator: (f.operator as PropertyOperator) || PropertyOperator.Exact,
+                value: f.value ?? '',
+            }) as AnyPropertyFilter
+    )
 }
 
 /** Convert PropertyFilters output back to our trigger property filter format */
