@@ -214,7 +214,7 @@ export function PersonsModal({
                         <div className="flex items-center gap-2">
                             {actorsResponseLoading ? (
                                 <>
-                                    <Spinner />
+                                    <Spinner captureTime={false} />
                                     <span>Loading {actorLabel.plural}...</span>
                                 </>
                             ) : (

@@ -47,7 +47,7 @@ export function FunnelStepMoreFlow({ stepIndex }: FunnelStepMoreFlowProps): JSX.
 
     if (isActiveOnThisStep) {
         return pathsLoading ? (
-            <Spinner textColored className="text-lg" />
+            <Spinner textColored className="text-lg" captureTime={false} />
         ) : (
             <LemonButton
                 size="xsmall"

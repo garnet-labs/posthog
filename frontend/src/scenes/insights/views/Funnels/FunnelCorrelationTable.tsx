@@ -144,7 +144,7 @@ export function FunnelCorrelationTable(): JSX.Element | null {
         if (eventWithPropertyCorrelationsLoading) {
             return (
                 <div className="flex flex-col items-center py-2">
-                    <Spinner className="text-2xl mb-2" />
+                    <Spinner className="text-2xl mb-2" captureTime={false} />
                     <h3 className="mb-1 font-semibold">Loading correlation results…</h3>
                     <p className="m-0 text-xs text-secondary">This process can take up to 20 seconds.</p>
                 </div>

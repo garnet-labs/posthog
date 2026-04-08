@@ -112,7 +112,7 @@ export function InsightAIAnalysis({ query }: InsightAIAnalysisProps): JSX.Elemen
                 </>
             ) : isAnalyzing ? (
                 <div className="flex items-center gap-2 text-muted">
-                    <Spinner className="text-xl" />
+                    <Spinner className="text-xl" captureTime={false} />
                     <span>Analyzing your insight...</span>
                 </div>
             ) : analysis ? (

@@ -159,7 +159,7 @@ export function RetentionModal(): JSX.Element | null {
                 )}
                 <div>
                     {peopleLoading ? (
-                        <SpinnerOverlay />
+                        <SpinnerOverlay captureTime={false} />
                     ) : isEmpty ? (
                         <span>No {aggregationTargetLabel.plural} during this period.</span>
                     ) : (

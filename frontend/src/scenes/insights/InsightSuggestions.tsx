@@ -102,7 +102,7 @@ export function InsightSuggestions({ insightId, query }: InsightSuggestionsProps
     if (suggestionsLoading) {
         return (
             <div className="mt-4 flex items-center gap-2 text-muted">
-                <Spinner className="text-xl" />
+                <Spinner className="text-xl" captureTime={false} />
                 <span>Generating suggestions...</span>
             </div>
         )

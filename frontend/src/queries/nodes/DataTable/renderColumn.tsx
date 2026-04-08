@@ -93,7 +93,7 @@ export function renderColumn(
         productColumnRenderers[key] ?? (key !== originalKey ? productColumnRenderers[originalKey] : undefined)
 
     if (value === loadingColumn) {
-        return <Spinner />
+        return <Spinner captureTime={false} />
     } else if (value === errorColumn) {
         return <LemonTag className="text-danger">Error</LemonTag>
     } else if (queryContextColumnName && queryContextColumn?.render) {

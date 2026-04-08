@@ -70,7 +70,7 @@ function StepHandle({
                 className={handleClassName}
                 onClick={collapsePath}
             >
-                {pathsLoading ? <Spinner textColored className="text-xs" /> : <IconCollapse className="text-xs" />}
+                {pathsLoading ? <Spinner textColored className="text-xs" captureTime={false} /> : <IconCollapse className="text-xs" />}
             </Handle>
         )
     }

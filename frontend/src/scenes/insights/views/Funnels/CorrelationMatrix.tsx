@@ -73,7 +73,7 @@ export function CorrelationMatrix(): JSX.Element {
             <div className="correlation-table-wrapper">
                 {correlationsLoading ? (
                     <div className="mt-4 text-center">
-                        <Spinner className="text-4xl" />
+                        <Spinner className="text-4xl" captureTime={false} />
                     </div>
                 ) : correlationDetails ? (
                     <>

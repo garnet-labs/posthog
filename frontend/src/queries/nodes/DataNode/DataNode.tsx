@@ -37,7 +37,7 @@ export function DataNode(props: DataNodeProps): JSX.Element {
             </div>
             {responseLoading ? (
                 <div className="text-2xl">
-                    <Spinner />
+                    <Spinner captureTime={false} />
                 </div>
             ) : (
                 <AutoSizer

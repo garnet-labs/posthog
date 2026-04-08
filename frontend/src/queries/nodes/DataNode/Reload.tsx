@@ -24,7 +24,7 @@ export function Reload(): JSX.Element {
                 }
             }}
             // Setting the loading icon manually to capture clicks while spinning.
-            icon={responseLoading ? <Spinner textColored /> : <IconRefresh />}
+            icon={responseLoading ? <Spinner textColored captureTime={false} /> : <IconRefresh />}
             size="small"
         >
             {responseLoading ? 'Cancel' : 'Reload'}
@@ -42,7 +42,7 @@ export function ReloadAll({ iconOnly }: { iconOnly?: boolean }): JSX.Element {
             size="small"
             onClick={reloadAll}
             // Setting the loading icon manually to capture clicks while spinning.
-            icon={areAnyLoading ? <Spinner textColored /> : <IconRefresh />}
+            icon={areAnyLoading ? <Spinner textColored captureTime={false} /> : <IconRefresh />}
             disabledReason={areAnyLoading ? 'Loading' : undefined}
         >
             {!iconOnly && 'Reload'}
