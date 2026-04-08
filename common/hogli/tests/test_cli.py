@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
+
+import pytest
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
-from hogli.core.cli import _infer_process_manager, cli
+from hogli.core.cli import _infer_process_manager, _is_posthog_dev, cli
 
 runner = CliRunner()
 
@@ -162,3 +165,30 @@ class TestProcessManagerInference:
         monkeypatch.setattr("sys.argv", ["hogli", "start", "--mprocs"])
 
         assert _infer_process_manager("start") == "phrocs"
+
+
+class TestIsPosthogDev:
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        _is_posthog_dev.cache_clear()
+        yield
+        _is_posthog_dev.cache_clear()
+
+    def test_posthog_email(self):
+        with patch("hogli.core.cli.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="dev@posthog.com\n")
+            assert _is_posthog_dev() is True
+
+    def test_non_posthog_email(self):
+        with patch("hogli.core.cli.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="user@example.com\n")
+            assert _is_posthog_dev() is False
+
+    def test_git_config_fails(self):
+        with patch("hogli.core.cli.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stdout="")
+            assert _is_posthog_dev() is False
+
+    def test_subprocess_exception(self):
+        with patch("hogli.core.cli.subprocess.run", side_effect=OSError("no git")):
+            assert _is_posthog_dev() is False

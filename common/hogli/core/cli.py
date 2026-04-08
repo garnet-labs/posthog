@@ -11,6 +11,8 @@ import sys
 import time as _time
 import shutil
 import platform
+import functools
+import subprocess
 from collections import defaultdict
 from typing import Any
 
@@ -324,6 +326,22 @@ def _infer_process_manager(command: str | None) -> str | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
+def _is_posthog_dev() -> bool:
+    """Check if git user.email ends with @posthog.com."""
+    try:
+        result = subprocess.run(
+            ["git", "config", "user.email"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            cwd=REPO_ROOT,
+        )
+        return result.returncode == 0 and result.stdout.strip().endswith("@posthog.com")
+    except Exception:
+        return False
+
+
 def _env_properties(command: str | None = None) -> dict[str, Any]:
     """Static environment properties shared across telemetry events."""
     ci_env_vars = ("CI", "GITHUB_ACTIONS", "JENKINS_URL", "GITLAB_CI", "CIRCLECI", "BUILDKITE")
@@ -336,6 +354,7 @@ def _env_properties(command: str | None = None) -> dict[str, Any]:
         "has_devenv_config": (REPO_ROOT / ".posthog" / ".generated" / "mprocs.yaml").exists(),
         "in_flox": os.environ.get("FLOX_ENV") is not None,
         "is_worktree": (REPO_ROOT / ".git").is_file(),
+        "is_posthog_dev": _is_posthog_dev(),
         "process_manager": _infer_process_manager(command),
     }
 
