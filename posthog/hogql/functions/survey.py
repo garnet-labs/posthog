@@ -78,13 +78,21 @@ def _build_index_based_key(question_index: int) -> str:
 def _build_property_access(key: str | ast.Expr) -> ast.Expr:
     """Build property access expression.
 
-    Always uses JSONExtractString to ensure consistent String return type.
-    This avoids type mismatches when PropertySwapper would wrap ast.Field
-    accesses with type conversion functions (e.g., toFloat for Numeric properties).
+    Uses ast.Field for string keys so the resolver can use materialized columns.
+    Falls back to JSONExtractString for dynamic (ast.Expr) keys since those
+    can't be resolved to a materialized column at query planning time.
+    We wrap the Field result in toString() to ensure a consistent String return
+    type, matching what JSONExtractString would return.
     """
+    if isinstance(key, str):
+        return ast.Call(
+            name="toString",
+            args=[ast.Field(chain=["properties", key])],
+        )
+    # Dynamic key — can't use property access syntax
     return ast.Call(
         name="JSONExtractString",
-        args=[ast.Field(chain=["properties"]), _key_as_expr(key)],
+        args=[ast.Field(chain=["properties"]), key],
     )
 
 
@@ -174,7 +182,8 @@ def unique_survey_submissions_filter(node: ast.Call, args: list[ast.Expr], team_
 
     # Build the subquery using parse_expr
     # uuid IN (SELECT argMax(uuid, timestamp) FROM events WHERE event = 'survey sent' AND ... GROUP BY ...)
-    submission_id_expr = "JSONExtractString(properties, '$survey_submission_id')"
+    # Use property access syntax (properties.$foo) so the resolver can use materialized columns
+    submission_id_expr = "properties.`$survey_submission_id`"
     grouping_key = f"if(coalesce({submission_id_expr}, '') = '', toString(uuid), {submission_id_expr})"
 
     team_filter = f" AND team_id = {team_id}" if team_id is not None else ""
@@ -183,7 +192,7 @@ def unique_survey_submissions_filter(node: ast.Call, args: list[ast.Expr], team_
         SELECT argMax(uuid, timestamp)
         FROM events
         WHERE event = 'survey sent'
-          AND JSONExtractString(properties, '$survey_id') = {{survey_id}}
+          AND properties.`$survey_id` = {{survey_id}}
           {team_filter}
         GROUP BY {grouping_key}
     )"""

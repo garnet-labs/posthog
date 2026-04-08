@@ -292,8 +292,8 @@ export function getSurveyResponse(question: SurveyQuestion, index: number): stri
     }
 
     return `COALESCE(
-        NULLIF(JSONExtractString(events.properties, '${idBasedKey}'), ''),
-        NULLIF(JSONExtractString(events.properties, '${indexBasedKey}'), '')
+        NULLIF(events.properties['${escapeSqlString(idBasedKey)}'], ''),
+        NULLIF(events.properties['${escapeSqlString(indexBasedKey)}'], '')
     )`
 }
 
@@ -496,7 +496,7 @@ export function buildPartialResponsesFilter(survey: Survey, dateRange?: SurveyDa
     if (!survey.enable_partial_responses) {
         return `AND (
         NOT JSONHas(properties, '${SurveyEventProperties.SURVEY_COMPLETED}')
-        OR JSONExtractBool(properties, '${SurveyEventProperties.SURVEY_COMPLETED}') = true
+        OR properties.${SurveyEventProperties.SURVEY_COMPLETED} = true
     )`
     }
 
@@ -508,14 +508,14 @@ export function buildPartialResponsesFilter(survey: Survey, dateRange?: SurveyDa
         FROM events
         WHERE and(
             equals(event, '${SurveyEventName.SENT}'),
-            equals(JSONExtractString(properties, '${SurveyEventProperties.SURVEY_ID}'), '${survey.id}'),
+            equals(properties.${SurveyEventProperties.SURVEY_ID}, '${survey.id}'),
             greaterOrEquals(timestamp, '${fromDate}'),
             lessOrEquals(timestamp, '${toDate}')
         )
         GROUP BY
             if(
                 JSONHas(properties, '${SurveyEventProperties.SURVEY_SUBMISSION_ID}'),
-                JSONExtractString(properties, '${SurveyEventProperties.SURVEY_SUBMISSION_ID}'),
+                properties.${SurveyEventProperties.SURVEY_SUBMISSION_ID},
                 toString(uuid)
             )
     ) --- Filter to ensure we only get one response per ${SurveyEventProperties.SURVEY_SUBMISSION_ID}`

@@ -2975,10 +2975,10 @@ class TestPrinter(BaseTest):
             query="SELECT getSurveyResponse(1, 'question123') FROM events",
         )
         assert result.clickhouse is not None
-        # Static key also uses JSONExtractString for type consistency
+        # Static key uses toString(property access) for materialized column support
         self.assertIn("coalesce", result.clickhouse)
         self.assertIn("nullIf", result.clickhouse)
-        self.assertIn("JSONExtractString", result.clickhouse)
+        self.assertIn("toString", result.clickhouse)
 
         # Test with multiple choice question
         result = execute_hogql_query(
@@ -3018,11 +3018,11 @@ class TestPrinter(BaseTest):
 
         # Query should execute successfully (even with no results)
         assert result.clickhouse is not None
-        # Both branches of coalesce should return String type (via JSONExtractString)
-        self.assertIn("JSONExtractString", result.clickhouse)
-        # Should NOT contain Float64 casting which would cause type mismatch
-        self.assertNotIn("accurateCastOrNull", result.clickhouse)
-        self.assertNotIn("Float64", result.clickhouse)
+        # Both branches of coalesce should return String type (via toString wrapping)
+        # PropertySwapper may wrap the field with toFloat for Numeric properties,
+        # but toString() ensures the final result is always String, preventing
+        # the type mismatch error in COALESCE
+        self.assertIn("toString", result.clickhouse)
 
     def test_unique_survey_submissions_filter(self):
         printed = self._print(
@@ -3036,7 +3036,6 @@ class TestPrinter(BaseTest):
         self.assertIn("SELECT argMax(events.uuid", printed)
         self.assertIn("FROM events WHERE", printed)
         self.assertIn("GROUP BY", printed)
-        self.assertIn("JSONExtractString", printed)
 
     def test_override_timezone(self):
         context = HogQLContext(

@@ -1839,9 +1839,9 @@ export const surveyLogic = kea<surveyLogicType>([
                     }),
                     'timestamp',
                     'person',
-                    `coalesce(JSONExtractString(properties, '$lib_version')) -- Library Version`,
-                    `coalesce(JSONExtractString(properties, '$lib')) -- Library`,
-                    `coalesce(JSONExtractString(properties, '$current_url')) -- URL`,
+                    `coalesce(properties.$lib_version, '') -- Library Version`,
+                    `coalesce(properties.$lib, '') -- Library`,
+                    `coalesce(properties.$current_url, '') -- URL`,
                 ]
 
                 return {
