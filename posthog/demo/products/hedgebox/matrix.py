@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import StringIO
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, TypedDict, cast
 from urllib.parse import urlparse, urlunparse
 
 from django.conf import settings
@@ -116,6 +116,33 @@ class DemoDataWarehouseTableSpec:
     columns: dict[str, str]
     source_events: tuple[str, ...]
     row_builder: Callable[[SimEvent, int], tuple[Any, ...]]
+
+
+class ErrorTrackingDemoFrame(TypedDict):
+    raw_id: str
+    mangled_name: str
+    source: str
+    in_app: bool
+    resolved_name: str
+    lang: str
+    resolved: bool
+    synthetic: bool
+    suspicious: bool
+    line: int
+    column: int
+    pre_context: list[str]
+    context_line: str
+    post_context: list[str]
+
+
+class ErrorTrackingDemoIssueSpec(TypedDict):
+    name: str
+    description: str
+    fingerprint: str
+    type: str
+    value: str
+    frames: list[ErrorTrackingDemoFrame]
+    days_ago: list[int]
 
 
 class HedgeboxCluster(Cluster):
@@ -1725,7 +1752,7 @@ class HedgeboxMatrix(Matrix):
                 pass
 
     def _set_up_error_tracking_demo_data(self, team: "Team") -> None:
-        issue_specs = [
+        issue_specs: list[ErrorTrackingDemoIssueSpec] = [
             {
                 "name": "Checkout API timeout",
                 "description": "Checkout requests occasionally time out while creating a payment session, preventing upgrades from completing.",
@@ -1900,6 +1927,11 @@ class HedgeboxMatrix(Matrix):
         self._upsert_error_tracking_stack_frames(team, issue_specs)
 
         for issue_spec in issue_specs:
+            if ErrorTrackingIssueFingerprintV2.objects.filter(
+                team=team, fingerprint=issue_spec["fingerprint"]
+            ).exists():
+                continue
+
             issue = ErrorTrackingIssue.objects.create(
                 team=team,
                 name=issue_spec["name"],
@@ -1921,7 +1953,7 @@ class HedgeboxMatrix(Matrix):
                 )
                 timestamp = self.now - dt.timedelta(days=days_ago, hours=index % 5)
                 frames = issue_spec["frames"]
-                event_frames = [self._event_stack_frame(frame) for frame in frames]
+                event_frames = [self._stack_frame_contents(frame) for frame in frames]
                 exception_type = issue_spec["type"]
                 exception_value = issue_spec["value"]
                 handled = False
@@ -1973,7 +2005,7 @@ class HedgeboxMatrix(Matrix):
                     person_created_at=person.first_seen_at or timestamp,
                 )
 
-    def _upsert_error_tracking_stack_frames(self, team: "Team", issue_specs: list[dict[str, Any]]) -> None:
+    def _upsert_error_tracking_stack_frames(self, team: "Team", issue_specs: list[ErrorTrackingDemoIssueSpec]) -> None:
         for issue_spec in issue_specs:
             for frame in issue_spec["frames"]:
                 raw_id, part = self._split_frame_raw_id(str(frame["raw_id"]))
@@ -1996,20 +2028,17 @@ class HedgeboxMatrix(Matrix):
         return hash_id, int(part)
 
     @staticmethod
-    def _stack_frame_contents(frame: dict[str, Any]) -> dict[str, Any]:
+    def _stack_frame_contents(frame: ErrorTrackingDemoFrame) -> dict[str, Any]:
         return {
             key: value for key, value in frame.items() if key not in {"pre_context", "context_line", "post_context"}
         }
 
     @staticmethod
-    def _stack_frame_context(frame: dict[str, Any]) -> dict[str, Any] | None:
-        context_line = frame.get("context_line")
-        line_number = frame.get("line")
-        if context_line is None or line_number is None:
-            return None
-
-        pre_context = cast(list[str], frame.get("pre_context", []))
-        post_context = cast(list[str], frame.get("post_context", []))
+    def _stack_frame_context(frame: ErrorTrackingDemoFrame) -> dict[str, Any]:
+        context_line = frame["context_line"]
+        line_number = frame["line"]
+        pre_context = frame["pre_context"]
+        post_context = frame["post_context"]
 
         return {
             "before": [
@@ -2018,12 +2047,6 @@ class HedgeboxMatrix(Matrix):
             ],
             "line": {"number": line_number, "line": context_line},
             "after": [{"number": line_number + index + 1, "line": line} for index, line in enumerate(post_context)],
-        }
-
-    @staticmethod
-    def _event_stack_frame(frame: dict[str, Any]) -> dict[str, Any]:
-        return {
-            key: value for key, value in frame.items() if key not in {"pre_context", "context_line", "post_context"}
         }
 
     def _set_up_demo_data_warehouse_tables(self, team: "Team", user: "User") -> None:

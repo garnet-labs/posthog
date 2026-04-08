@@ -19,12 +19,16 @@ export const exceptionIngestionLogic = kea<exceptionIngestionLogicType>([
                         event_type: EventDefinitionType.Event,
                         search: '$exception',
                     }),
-                    new ApiRequest().errorTrackingIssues().withQueryString({ limit: 1 }).get(),
+                    new ApiRequest()
+                        .errorTrackingIssues()
+                        .withQueryString({ limit: 1 })
+                        .get()
+                        .catch(() => null),
                 ])
 
                 const definition = exceptionDefinition.results.find((r) => r.name === '$exception')
                 const hasFreshExceptionDefinition = definition ? !isDefinitionStale(definition) : false
-                const hasIssues = Array.isArray(issues.results) && issues.results.length > 0
+                const hasIssues = Array.isArray(issues?.results) && issues.results.length > 0
 
                 return hasFreshExceptionDefinition || hasIssues
             },
