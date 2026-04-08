@@ -69,7 +69,7 @@ const SourceEditorAction = ({
     </AccessControlAction>
 )
 
-interface SchemasProps {
+export interface SchemasProps {
     id: string
 }
 
@@ -214,7 +214,7 @@ const StatusTagSetting: Record<ExternalDataSchemaStatus | ExternalDataJobStatus,
 
 export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaTableProps): JSX.Element => {
     const { currentTeam } = useValues(teamLogic)
-    const { updateSchema, reloadSchema, resyncSchema, deleteTable, setIsProjectTime } = useActions(
+    const { updateSchema, reloadSchema, resyncSchema, cancelSchema, deleteTable, setIsProjectTime } = useActions(
         dataWarehouseSourceSettingsLogic
     )
     const { isProjectTime, source } = useValues(dataWarehouseSourceSettingsLogic)
@@ -573,6 +573,18 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                                                     Sync now
                                                                 </LemonButton>
                                                             </Tooltip>
+                                                            {schema.status === 'Running' && (
+                                                                <LemonButton
+                                                                    type="tertiary"
+                                                                    size="xsmall"
+                                                                    fullWidth
+                                                                    status="danger"
+                                                                    onClick={() => cancelSchema(schema)}
+                                                                    disabledReason={disabledReason}
+                                                                >
+                                                                    Cancel sync
+                                                                </LemonButton>
+                                                            )}
                                                             {(schema.incremental || schema.sync_type === 'webhook') && (
                                                                 <Tooltip title="Completely resync data by deleting the existing table and re-importing. Only recommended if there is an issue with data quality in previously imported data.">
                                                                     <LemonButton
