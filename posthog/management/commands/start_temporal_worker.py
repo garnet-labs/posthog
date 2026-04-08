@@ -1,4 +1,5 @@
 import os
+import random
 import signal
 import typing
 import asyncio
@@ -439,6 +440,24 @@ class Command(BaseCommand):
             default=not settings.TEMPORAL_COMBINED_METRICS_SERVER_ENABLED,
             help="Disable the combined metrics server (useful for workers with GIL contention issues)",
         )
+        parser.add_argument(
+            "--pod-termination-enabled",
+            action="store_true",
+            default=settings.TEMPORAL_POD_TERMINATION_ENABLED,
+            help="Enable scheduled pod self-termination",
+        )
+        parser.add_argument(
+            "--pod-termination-base-timeout-minutes",
+            type=int,
+            default=settings.TEMPORAL_POD_TERMINATION_BASE_TIMEOUT_MINUTES,
+            help="Base timeout in minutes before pod self-terminates",
+        )
+        parser.add_argument(
+            "--pod-termination-jitter-minutes",
+            type=int,
+            default=settings.TEMPORAL_POD_TERMINATION_JITTER_MINUTES,
+            help="Maximum random jitter in minutes added to the base timeout",
+        )
 
     def handle(self, *args, **options):
         temporal_host = options["temporal_host"]
@@ -457,6 +476,9 @@ class Command(BaseCommand):
         health_port = options.get("health_port", None)
         health_max_idle_seconds = options.get("health_max_idle_seconds", None)
         disable_combined_metrics_server = options.get("disable_combined_metrics_server", False)
+        pod_termination_enabled = options.get("pod_termination_enabled", False)
+        pod_termination_base_timeout_minutes = options.get("pod_termination_base_timeout_minutes", 30)
+        pod_termination_jitter_minutes = options.get("pod_termination_jitter_minutes", 45)
 
         try:
             workflows = list(WORKFLOWS_DICT[task_queue])
@@ -476,22 +498,22 @@ class Command(BaseCommand):
 
         shutdown_task = None
         health_server: HealthCheckServer | None = None
+        pod_termination_handle: asyncio.TimerHandle | None = None
 
         tag_queries(kind="temporal")
 
-        async def shutdown_all(
-            worker: ManagedWorker, health_srv: HealthCheckServer | None, sig: signal.Signals
-        ) -> None:
+        async def shutdown_all(worker: ManagedWorker, health_srv: HealthCheckServer | None, reason: str) -> None:
             """Shutdown worker and health server."""
             nonlocal shutdown_task
 
-            logger.info("Signal %s received", sig)
-
             if worker.is_shutdown():
-                logger.info("Temporal worker already shut down")
+                logger.info("Temporal worker already shut down", shutdown_reason=reason)
                 return
 
-            logger.info("Initiating shutdown")
+            logger.info("Initiating shutdown", shutdown_reason=reason)
+
+            if pod_termination_handle is not None:
+                pod_termination_handle.cancel()
 
             # Shutdown health server first so k8s stops sending traffic
             if health_srv:
@@ -503,14 +525,14 @@ class Command(BaseCommand):
         def shutdown_on_signal(
             worker: ManagedWorker,
             health_srv: HealthCheckServer | None,
-            sig: signal.Signals,
+            reason: str,
             loop: asyncio.AbstractEventLoop,
         ):
             """Signal handler that initiates shutdown."""
             nonlocal shutdown_task
 
             if shutdown_task is None:
-                shutdown_task = loop.create_task(shutdown_all(worker, health_srv, sig))
+                shutdown_task = loop.create_task(shutdown_all(worker, health_srv, reason))
 
         with asyncio.Runner() as runner:
             loop = runner.get_loop()
@@ -575,7 +597,34 @@ class Command(BaseCommand):
             for sig in (signal.SIGTERM, signal.SIGINT):
                 loop.add_signal_handler(
                     sig,
-                    functools.partial(shutdown_on_signal, worker=worker, health_srv=health_server, sig=sig, loop=loop),
+                    functools.partial(
+                        shutdown_on_signal,
+                        worker=worker,
+                        health_srv=health_server,
+                        reason=f"signal:{sig.name}",
+                        loop=loop,
+                    ),
+                )
+
+            if pod_termination_enabled:
+                base_timeout_ms = pod_termination_base_timeout_minutes * 60 * 1000
+                jitter_ms = random.random() * pod_termination_jitter_minutes * 60 * 1000
+                total_timeout_s = (base_timeout_ms + jitter_ms) / 1000
+
+                logger.info(
+                    "Pod termination scheduled",
+                    timeout_minutes=round(total_timeout_s / 60),
+                )
+
+                pod_termination_handle = loop.call_later(
+                    total_timeout_s,
+                    functools.partial(
+                        shutdown_on_signal,
+                        worker=worker,
+                        health_srv=health_server,
+                        reason="pod_termination_timeout",
+                        loop=loop,
+                    ),
                 )
 
             runner.run(worker.run())
