@@ -663,8 +663,8 @@ def _init_cache_cleanup(port: int, worktree: str) -> None:
 
 
 def init_cache_from_master() -> None:
-    """Boot a temporary master stack, generate demo data, and snapshot both databases."""
-    info("No database cache found. Building from master (one-time setup, ~10 min)...")
+    """Boot a temporary stack, generate demo data, and snapshot both databases."""
+    info("No database cache found. Building cache (one-time setup, ~10 min)...")
 
     init_project = "sandbox-cache-init"
     init_port = 47999
@@ -674,7 +674,7 @@ def init_cache_from_master() -> None:
     _init_cache_cleanup(init_port, init_worktree)
 
     run(["git", "fetch", "origin", "--quiet"], capture=True)
-    cache_branch = "origin/master"
+    cache_branch = "HEAD"
     if (
         run(
             ["git", "worktree", "add", "--force", "--detach", init_worktree, cache_branch], check=False, capture=True
