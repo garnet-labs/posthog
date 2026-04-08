@@ -693,6 +693,16 @@ def init_cache_from_master() -> None:
              "--skip-flag-sync"],
         )
 
+        # Pre-build all Rust binaries so phrocs services start instantly.
+        # The compiled artifacts land in the cargo-target volume and persist
+        # across sandboxes. On branches that change Rust code, cargo only
+        # recompiles the delta.
+        info("Pre-building Rust workspace...")
+        run(
+            ["docker", "exec", "-w", "/workspace/rust", app,
+             "cargo", "build", "--workspace"],
+        )
+
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
         compose(init_project, init_port, init_worktree, "stop", "db", capture=True)
