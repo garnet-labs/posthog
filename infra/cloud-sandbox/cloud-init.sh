@@ -252,7 +252,8 @@ sudo -u ubuntu HOME=/home/ubuntu git fetch origin "$SANDBOX_BRANCH" --quiet \
 sudo -u ubuntu HOME=/home/ubuntu git checkout "$SANDBOX_BRANCH"
 
 log "Creating sandbox via bin/sandbox create..."
-sudo -u ubuntu HOME=/home/ubuntu sg docker -c "python3 bin/sandbox create '$SANDBOX_BRANCH' --no-attach"
+export SANDBOX_HOSTNAME
+sudo -u ubuntu HOME=/home/ubuntu sg docker -c "SANDBOX_HOSTNAME='$SANDBOX_HOSTNAME' python3 bin/sandbox create '$SANDBOX_BRANCH' --no-attach"
 
 log "Waiting for app to be healthy..."
 HEALTH_DEADLINE=$((SECONDS + 600))

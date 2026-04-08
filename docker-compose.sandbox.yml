@@ -163,7 +163,7 @@ services:
             # don't overwrite each other's login sessions.
             # (CSRF cookie is NOT varied — frontend hardcodes 'posthog_csrftoken'.)
             SESSION_COOKIE_NAME: 'sessionid_${SANDBOX_PORT:-48001}'
-            JS_URL: 'http://localhost:${SANDBOX_VITE_PORT:-49001}'
+            JS_URL: 'http://${SANDBOX_HOSTNAME:-localhost}:${SANDBOX_VITE_PORT:-49001}'
         depends_on:
             db:
                 condition: service_healthy
