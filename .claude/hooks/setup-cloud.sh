@@ -6,8 +6,19 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
-# hogli needs click, bin/ruff.sh needs ruff (no flox in sandbox)
-python3 -m pip install click ruff 2>/dev/null
+# Install correct tool versions (uv, Python, Node, pnpm) if needed
+if [ -x .claude/hooks/install-tool-versions.sh ]; then
+    .claude/hooks/install-tool-versions.sh
+fi
+
+# Pick up the correct Node version
+NODE_MAJOR=$(cat .nvmrc 2>/dev/null | tr -d 'v[:space:]' | cut -d. -f1)
+if [ -n "$NODE_MAJOR" ] && [ -d "/opt/node${NODE_MAJOR}/bin" ]; then
+    export PATH="/opt/node${NODE_MAJOR}/bin:$PATH"
+fi
+
+# Sync Python dependencies (installs click, ruff, etc. from pyproject.toml)
+uv sync 2>/dev/null
 # Root-only install: linting tools + husky, skips full workspace
 pnpm install --frozen-lockfile --filter=. 2>/dev/null
 
