@@ -23,9 +23,10 @@ import { sanitizeHeaderValue } from '@/lib/utils'
 import { registerPrompts } from '@/prompts'
 import { registerResources } from '@/resources'
 import { registerUiAppResources } from '@/resources/ui-apps'
+import CLI_PROXY_COMMAND from '@/templates/cli-proxy-command.md'
+import CLI_PROXY_TOOL from '@/templates/cli-proxy-tool.md'
 import INSTRUCTIONS_TEMPLATE_V1 from '@/templates/instructions-v1.md'
 import INSTRUCTIONS_TEMPLATE_V2 from '@/templates/instructions-v2.md'
-import INSTRUCTIONS_TEMPLATE_V3 from '@/templates/instructions-v3.md'
 import { createExecTool } from '@/tools/exec'
 import { getToolDefinition } from '@/tools/toolDefinitions'
 import type { CloudRegion, Context, State, Tool } from '@/tools/types'
@@ -486,8 +487,8 @@ export class MCP extends McpAgent<Env> {
                 name: t.name,
                 category: getToolDefinition(t.name, version).category,
             }))
-            const v3Instructions = buildInstructionsV2(INSTRUCTIONS_TEMPLATE_V3, guidelines, groupTypes, toolInfos)
-            const execTool = createExecTool(allTools, context, v3Instructions)
+            const commandReference = buildInstructionsV2(CLI_PROXY_COMMAND, guidelines, groupTypes, toolInfos)
+            const execTool = createExecTool(allTools, context, CLI_PROXY_TOOL, commandReference)
             const typedExecTool = execTool as Tool<z.ZodObject>
             this.registerTool(typedExecTool, async (params) => typedExecTool.handler(context, params))
         } else {
