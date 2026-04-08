@@ -9,7 +9,7 @@ import structlog
 from posthog.models.integration import GitHubIntegration, Integration
 from posthog.temporal.oauth import PosthogMcpScopes, has_write_scopes
 
-from products.mcp_store.backend.models import MCPServerInstallation
+from products.mcp_store.backend.facade.api import get_active_installations
 
 logger = structlog.get_logger(__name__)
 
@@ -48,49 +48,23 @@ def fetch_user_mcp_server_configs(
     team_id: int,
     user_id: int,
 ) -> list[McpServerConfig]:
-    """Fetch the user's MCP Store installations via ORM and return configs.
+    """Fetch the user's MCP Store installations and return sandbox configs.
 
-    Queries MCPServerInstallation directly, then builds McpServerConfig entries
-    using each installation's proxy URL. The proxy handles upstream auth
-    (OAuth token refresh, API key injection).
+    Uses the mcp_store facade to get active installations, then builds
+    McpServerConfig entries with full proxy URLs and auth headers.
 
     Returns an empty list on errors (non-fatal).
     """
-    try:
-        installations = MCPServerInstallation.objects.filter(
-            team_id=team_id, user_id=user_id, is_enabled=True
-        ).select_related("server")
-    except Exception as e:
-        logger.warning("Error fetching MCP installations", error=str(e), team_id=team_id)
-        return []
-
+    installations = get_active_installations(team_id, user_id)
     api_base = get_sandbox_api_url().rstrip("/")
+
     configs: list[McpServerConfig] = []
-
     for installation in installations:
-        sensitive = installation.sensitive_configuration or {}
-
-        if installation.auth_type == "oauth":
-            if sensitive.get("needs_reauth"):
-                logger.debug("Skipping MCP installation needing reauth", installation_id=str(installation.id))
-                continue
-            if not sensitive.get("access_token"):
-                logger.debug("Skipping MCP installation with pending OAuth", installation_id=str(installation.id))
-                continue
-
-        name = installation.display_name
-        if not name and installation.server:
-            name = installation.server.name
-        if not name:
-            name = installation.url
-
-        proxy_url = f"{api_base}/api/environments/{team_id}/mcp_server_installations/{installation.id}/proxy/"
-
         configs.append(
             McpServerConfig(
                 type="http",
-                name=name,
-                url=proxy_url,
+                name=installation.name,
+                url=f"{api_base}{installation.proxy_path}",
                 headers=[{"name": "Authorization", "value": f"Bearer {token}"}],
             )
         )

@@ -395,6 +395,7 @@ depends_on = [
     "products.error_tracking",
     "products.event_definitions",
     "products.llm_analytics",
+    "products.mcp_store",
     "products.signals",
     "products.slack_app",
 ]
