@@ -9,7 +9,7 @@ import useResizeObserver from 'use-resize-observer'
 import {
     IconAIText,
     IconClock,
-    IconClose,
+    IconX,
     IconCollapse,
     IconExpand,
     IconKeyboard,
@@ -549,7 +549,7 @@ function SessionSummaryFeedbackSurvey(): JSX.Element | null {
         <div className="border rounded p-3 mt-3">
             <div className="flex items-start justify-between">
                 <strong className="text-sm">{question?.question}</strong>
-                <LemonButton size="xsmall" icon={<IconClose />} onClick={() => setShowFeedbackSurvey(false)} />
+                <LemonButton size="xsmall" icon={<IconX />} onClick={() => setShowFeedbackSurvey(false)} />
             </div>
             {submitted ? (
                 <p className="text-sm text-muted mt-2">Thanks for your feedback!</p>
