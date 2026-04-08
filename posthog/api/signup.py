@@ -459,11 +459,14 @@ class InviteSignupSerializer(serializers.Serializer):
                     if passkey_credential and session_user_uuid:
                         extra_fields["uuid"] = uuid_module.UUID(session_user_uuid)
 
+                    # Trust that the user owns `target_email`: the invite link was emailed
+                    # to that address, so clicking it already proves ownership. Open share
+                    # links (no target_email) still require verification.
                     user = User.objects.create_user(
                         invite.target_email,
                         password,
                         first_name,
-                        is_email_verified=False,
+                        is_email_verified=bool(invite.target_email),
                         role_at_organization=role_at_organization,
                         **extra_fields,
                     )

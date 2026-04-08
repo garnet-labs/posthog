@@ -1782,7 +1782,7 @@ class TestInviteSignupAPI(APIBaseTest):
                 "first_name": "Alice",
                 "email": "test+99@posthog.com",
                 "redirect_url": "/",
-                "is_email_verified": False,
+                "is_email_verified": True,
                 "hedgehog_config": None,
                 "role_at_organization": "Engineering",
             },
@@ -1995,9 +1995,9 @@ class TestInviteSignupAPI(APIBaseTest):
 
         member_join_emails = [m for m in mail.outbox if "joined you on PostHog" in m.subject]
         self.assertEqual(len(member_join_emails), 0)
-        # Verify invite signup still sends verification email to the new user.
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertListEqual(mail.outbox[0].to, ['"Alice" <test+100@posthog.com>'])
+        # Invite signup does not send a verification email — clicking the invite link
+        # (emailed to target_email) already proves ownership of the address.
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_api_invite_sign_up_member_joined_email_is_sent_for_next_members(self):
         with override_instance_config("EMAIL_HOST", "localhost"):
@@ -2018,11 +2018,10 @@ class TestInviteSignupAPI(APIBaseTest):
 
             self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-            self.assertEqual(len(mail.outbox), 2)
-            # Someone joined email is sent to the initial user
+            # Only the "someone joined" email to the existing member is sent; the new
+            # user is not asked to re-verify the email they just clicked.
+            self.assertEqual(len(mail.outbox), 1)
             self.assertListEqual(mail.outbox[0].to, [initial_user.email])
-            # Verify email is sent to the new user (formatted with name)
-            self.assertListEqual(mail.outbox[1].to, ['"Alice" <test+100@posthog.com>'])
 
     def test_api_invite_sign_up_member_joined_email_is_not_sent_if_disabled(self):
         initial_user = User.objects.create_and_join(self.organization, "test+420@posthog.com", None)
@@ -2052,6 +2051,38 @@ class TestInviteSignupAPI(APIBaseTest):
 
         member_join_emails = [m for m in mail.outbox if "joined you on PostHog" in m.subject]
         self.assertEqual(len(member_join_emails), 0)
+
+    def test_api_invite_sign_up_marks_user_verified_and_logs_in(self):
+        # The invite link is emailed to target_email, so clicking it already proves
+        # ownership. The new user should be auto-verified, logged in, and sent to "/"
+        # rather than the verify-email page — even with email verification enabled.
+        invite: OrganizationInvite = OrganizationInvite.objects.create(
+            target_email="invited@posthog.com", organization=self.organization
+        )
+
+        with override_instance_config("EMAIL_HOST", "localhost"):
+            with self.settings(EMAIL_ENABLED=True, SITE_URL="http://test.posthog.com"):
+                response = self.client.post(
+                    f"/api/signup/{invite.id}/",
+                    {"first_name": "Alice", "password": VALID_TEST_PASSWORD},
+                )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        body = response.json()
+        self.assertTrue(body["is_email_verified"])
+        self.assertEqual(body["redirect_url"], "/")
+
+        user = cast(User, User.objects.get(email="invited@posthog.com"))
+        self.assertTrue(user.is_email_verified)
+
+        # User is logged in — the verify-email page is not in the way.
+        me_response = self.client.get("/api/users/@me/")
+        self.assertEqual(me_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(me_response.json()["email"], "invited@posthog.com")
+
+        # No verification email was sent.
+        verification_emails = [m for m in mail.outbox if "verify" in m.subject.lower()]
+        self.assertEqual(verification_emails, [])
 
     @patch("posthoganalytics.capture")
     @patch("ee.billing.billing_manager.BillingManager.update_billing_organization_users")
