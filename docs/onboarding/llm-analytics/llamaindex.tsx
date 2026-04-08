@@ -3,7 +3,7 @@ import { OnboardingComponentsContext, createInstallation } from 'scenes/onboardi
 import { StepDefinition } from '../steps'
 
 export const getLlamaIndexSteps = (ctx: OnboardingComponentsContext): StepDefinition[] => {
-    const { CodeBlock, Markdown, Blockquote, dedent, snippets } = ctx
+    const { CodeBlock, CalloutBox, Markdown, Blockquote, dedent, snippets } = ctx
 
     const NotableGenerationProperties = snippets?.NotableGenerationProperties
 
@@ -13,6 +13,14 @@ export const getLlamaIndexSteps = (ctx: OnboardingComponentsContext): StepDefini
             badge: 'required',
             content: (
                 <>
+                    <CalloutBox type="info" icon="IconInfo" title="Migrating from the SDK wrapper?">
+                        <Markdown>
+                            These docs now use OpenTelemetry auto-instrumentation, which is the recommended approach.
+                            The previous PostHog SDK wrapper is still available — see the [Python wrapper
+                            example](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-llamaindex).
+                        </Markdown>
+                    </CalloutBox>
+
                     <Markdown>
                         Install LlamaIndex, OpenAI, and the OpenTelemetry SDK with the LlamaIndex instrumentation.
                     </Markdown>

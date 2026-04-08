@@ -3,7 +3,7 @@ import { OnboardingComponentsContext, createInstallation } from 'scenes/onboardi
 import { StepDefinition } from '../steps'
 
 export const getOllamaSteps = (ctx: OnboardingComponentsContext): StepDefinition[] => {
-    const { CodeBlock, Markdown, Blockquote, dedent, snippets } = ctx
+    const { CodeBlock, CalloutBox, Markdown, Blockquote, dedent, snippets } = ctx
 
     const NotableGenerationProperties = snippets?.NotableGenerationProperties
 
@@ -13,6 +13,17 @@ export const getOllamaSteps = (ctx: OnboardingComponentsContext): StepDefinition
             badge: 'required',
             content: (
                 <>
+                    <CalloutBox type="info" icon="IconInfo" title="Migrating from the SDK wrapper?">
+                        <Markdown>
+                            These docs now use OpenTelemetry auto-instrumentation, which is the recommended approach.
+                            The previous PostHog SDK wrapper is still available — see the
+                            [Node.js](https://github.com/PostHog/posthog-js/tree/e08ff1be/examples/example-ai-ollama)
+                            and
+                            [Python](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-ollama)
+                            wrapper examples.
+                        </Markdown>
+                    </CalloutBox>
+
                     <Markdown>Install the OpenTelemetry SDK, the OpenAI instrumentation, and the OpenAI SDK.</Markdown>
 
                     <CodeBlock

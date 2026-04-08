@@ -13,6 +13,17 @@ export const getPortkeySteps = (ctx: OnboardingComponentsContext): StepDefinitio
             badge: 'required',
             content: (
                 <>
+                    <CalloutBox type="info" icon="IconInfo" title="Migrating from the SDK wrapper?">
+                        <Markdown>
+                            These docs now use OpenTelemetry auto-instrumentation, which is the recommended approach.
+                            The previous PostHog SDK wrapper is still available — see the
+                            [Node.js](https://github.com/PostHog/posthog-js/tree/e08ff1be/examples/example-ai-portkey)
+                            and
+                            [Python](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-portkey)
+                            wrapper examples.
+                        </Markdown>
+                    </CalloutBox>
+
                     <CalloutBox type="fyi" icon="IconInfo" title="About Portkey">
                         <Markdown>
                             Portkey acts as an AI gateway that routes requests to 250+ LLM providers. The model string

@@ -13,6 +13,17 @@ export const getHeliconeSteps = (ctx: OnboardingComponentsContext): StepDefiniti
             badge: 'required',
             content: (
                 <>
+                    <CalloutBox type="info" icon="IconInfo" title="Migrating from the SDK wrapper?">
+                        <Markdown>
+                            These docs now use OpenTelemetry auto-instrumentation, which is the recommended approach.
+                            The previous PostHog SDK wrapper is still available — see the
+                            [Node.js](https://github.com/PostHog/posthog-js/tree/e08ff1be/examples/example-ai-helicone)
+                            and
+                            [Python](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-helicone)
+                            wrapper examples.
+                        </Markdown>
+                    </CalloutBox>
+
                     <CalloutBox type="fyi" icon="IconInfo" title="About Helicone">
                         <Markdown>
                             Helicone is an open-source AI gateway that provides access to 100+ LLM providers through an
