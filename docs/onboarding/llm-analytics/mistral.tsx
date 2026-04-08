@@ -3,7 +3,7 @@ import { OnboardingComponentsContext, createInstallation } from 'scenes/onboardi
 import { StepDefinition } from '../steps'
 
 export const getMistralSteps = (ctx: OnboardingComponentsContext): StepDefinition[] => {
-    const { CodeBlock, CalloutBox, Markdown, Blockquote, dedent, snippets } = ctx
+    const { CodeBlock, Markdown, Blockquote, dedent, snippets } = ctx
 
     const NotableGenerationProperties = snippets?.NotableGenerationProperties
 
@@ -33,13 +33,6 @@ export const getMistralSteps = (ctx: OnboardingComponentsContext): StepDefinitio
                             },
                         ]}
                     />
-
-                    <CalloutBox type="fyi" icon="IconInfo" title="No proxy">
-                        <Markdown>
-                            These SDKs **do not** proxy your calls. They only send analytics data to PostHog in the
-                            background.
-                        </Markdown>
-                    </CalloutBox>
                 </>
             ),
         },

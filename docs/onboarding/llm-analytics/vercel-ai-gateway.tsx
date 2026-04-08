@@ -40,13 +40,6 @@ export const getVercelAIGatewaySteps = (ctx: OnboardingComponentsContext): StepD
                             },
                         ]}
                     />
-
-                    <CalloutBox type="fyi" icon="IconInfo" title="No proxy">
-                        <Markdown>
-                            These SDKs **do not** proxy your calls. They only send analytics data to PostHog in the
-                            background.
-                        </Markdown>
-                    </CalloutBox>
                 </>
             ),
         },
