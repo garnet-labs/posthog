@@ -1,13 +1,12 @@
 # custom functions for stripe sources
-from stripe import StripeClient
-from stripe.params._invoice_list_params import InvoiceListParams
+from stripe import InvoiceService, StripeClient
 from structlog.types import FilteringBoundLogger
 
 
 class InvoiceListWithAllLines:
     # Invoices have a line field that is a paginated list. This list needs to be expanded for all lines to be included
 
-    def __init__(self, client: StripeClient, params: InvoiceListParams, logger: FilteringBoundLogger):
+    def __init__(self, client: StripeClient, params: InvoiceService.ListParams, logger: FilteringBoundLogger):
         self.client = client
         self.params = params
         self.logger = logger

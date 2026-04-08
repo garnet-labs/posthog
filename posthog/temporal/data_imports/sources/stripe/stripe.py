@@ -8,7 +8,7 @@ import pyarrow as pa
 from asgiref.sync import async_to_sync
 from stripe import ListObject, StripeClient
 from stripe._base_address import BaseAddresses
-from stripe.params._webhook_endpoint_create_params import WebhookEndpointCreateParams
+from stripe._webhook_endpoint_service import WebhookEndpointService
 from structlog.types import FilteringBoundLogger
 
 from posthog.temporal.common.logger import get_logger
@@ -347,7 +347,7 @@ def validate_credentials(api_key: str, table_name: Optional[str] = None) -> bool
 def create_webhook(api_key: str, stripe_account_id: str | None, webhook_url: str) -> WebhookCreationResult:
     logger = LOGGER.bind()
 
-    hints = get_type_hints(WebhookEndpointCreateParams, include_extras=True)
+    hints = get_type_hints(WebhookEndpointService.CreateParams, include_extras=True)
     enabled_events_type = hints["enabled_events"]
     list_inner = get_args(enabled_events_type)[0]
     possible_event_values: tuple[str] = get_args(list_inner)
