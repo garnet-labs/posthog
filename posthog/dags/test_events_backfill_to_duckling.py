@@ -743,7 +743,7 @@ class TestFullBackfillSensorEarliestDate:
         ]
     )
     @patch("posthog.dags.events_backfill_to_duckling.get_earliest_event_date_for_team")
-    @patch("posthog.dags.events_backfill_to_duckling.DuckLakeCatalog")
+    @patch("posthog.dags.events_backfill_to_duckling.DuckLakeBackfill")
     @patch("posthog.dags.events_backfill_to_duckling.timezone")
     def test_earliest_date_clamped(
         self,
@@ -751,7 +751,7 @@ class TestFullBackfillSensorEarliestDate:
         earliest_dt,
         expected_first_month,
         mock_tz,
-        mock_catalog_cls,
+        mock_backfill_cls,
         mock_get_earliest,
     ):
         from dagster import DagsterInstance, SensorResult, build_sensor_context
@@ -759,9 +759,9 @@ class TestFullBackfillSensorEarliestDate:
         mock_tz.now.return_value = datetime(2025, 2, 10, 12, 0, 0)
         mock_get_earliest.return_value = earliest_dt
 
-        catalog = MagicMock()
-        catalog.team_id = 1
-        mock_catalog_cls.objects.filter.return_value.order_by.return_value = [catalog]
+        backfill = MagicMock()
+        backfill.team_id = 1
+        mock_backfill_cls.objects.filter.return_value.order_by.return_value = [backfill]
 
         instance = DagsterInstance.ephemeral()
         context = build_sensor_context(instance=instance)
@@ -774,17 +774,17 @@ class TestFullBackfillSensorEarliestDate:
         assert first_key == f"1_{expected_first_month}"
 
     @patch("posthog.dags.events_backfill_to_duckling.get_earliest_event_date_for_team")
-    @patch("posthog.dags.events_backfill_to_duckling.DuckLakeCatalog")
+    @patch("posthog.dags.events_backfill_to_duckling.DuckLakeBackfill")
     @patch("posthog.dags.events_backfill_to_duckling.timezone")
-    def test_no_events_returns_empty(self, mock_tz, mock_catalog_cls, mock_get_earliest):
+    def test_no_events_returns_empty(self, mock_tz, mock_backfill_cls, mock_get_earliest):
         from dagster import DagsterInstance, SensorResult, build_sensor_context
 
         mock_tz.now.return_value = datetime(2025, 2, 10, 12, 0, 0)
         mock_get_earliest.return_value = None
 
-        catalog = MagicMock()
-        catalog.team_id = 1
-        mock_catalog_cls.objects.filter.return_value.order_by.return_value = [catalog]
+        backfill = MagicMock()
+        backfill.team_id = 1
+        mock_backfill_cls.objects.filter.return_value.order_by.return_value = [backfill]
 
         instance = DagsterInstance.ephemeral()
         context = build_sensor_context(instance=instance)
