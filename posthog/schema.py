@@ -74,6 +74,14 @@ class AlertConditionType(StrEnum):
     RELATIVE_DECREASE = "relative_decrease"
 
 
+class AlertScheduleRestrictionWindow(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    end: str
+    start: str
+
+
 class AlertState(StrEnum):
     FIRING = "Firing"
     NOT_FIRING = "Not firing"
@@ -613,6 +621,9 @@ class AssistantUpdateEvent(BaseModel):
 class AttributionMode(StrEnum):
     FIRST_TOUCH = "first_touch"
     LAST_TOUCH = "last_touch"
+    LINEAR = "linear"
+    TIME_DECAY = "time_decay"
+    POSITION_BASED = "position_based"
 
 
 class AutocompleteCompletionItemKind(StrEnum):
@@ -3207,6 +3218,7 @@ class NodeKind(StrEnum):
     EXPERIMENT_QUERY = "ExperimentQuery"
     EXPERIMENT_EXPOSURE_QUERY = "ExperimentExposureQuery"
     EXPERIMENT_EVENT_EXPOSURE_CONFIG = "ExperimentEventExposureConfig"
+    EXPERIMENT_ACTORS_QUERY = "ExperimentActorsQuery"
     EXPERIMENT_TRENDS_QUERY = "ExperimentTrendsQuery"
     EXPERIMENT_FUNNELS_QUERY = "ExperimentFunnelsQuery"
     EXPERIMENT_DATA_WAREHOUSE_NODE = "ExperimentDataWarehouseNode"
@@ -4784,6 +4796,13 @@ class AlertCondition(BaseModel):
         extra="forbid",
     )
     type: AlertConditionType
+
+
+class AlertScheduleRestriction(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    blocked_windows: list[AlertScheduleRestrictionWindow]
 
 
 class ApprovalCardUIStatus(RootModel[ApprovalDecisionStatus | str]):
@@ -20602,6 +20621,34 @@ class DatabaseSchemaQueryResponse(BaseModel):
     ]
 
 
+class ExperimentActorsQuery(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    funnelStep: int | None = Field(
+        default=None,
+        description=(
+            "Index of the step for which we want to get actors for, per experiment"
+            " variant. Positive for converted persons, negative for dropped off"
+            " persons."
+        ),
+    )
+    funnelStepBreakdown: int | str | float | list[int | str | float] | None = Field(
+        default=None,
+        description=(
+            "The variant key for filtering actors. For experiments, this filters by"
+            " feature flag variant (e.g., 'control', 'test')."
+        ),
+    )
+    includeRecordings: bool | None = None
+    kind: Literal["ExperimentActorsQuery"] = "ExperimentActorsQuery"
+    modifiers: HogQLQueryModifiers | None = Field(default=None, description="Modifiers used when performing the query")
+    response: ActorsQueryResponse | None = None
+    source: ExperimentQuery
+    tags: QueryLogTags | None = None
+    version: float | None = Field(default=None, description="version of the node, used for schema migrations")
+
+
 class ExperimentFunnelsQueryResponse(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -20956,6 +21003,21 @@ class WebVitalsQuery(BaseModel):
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
 
+class NamedArgs1(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    query: ExperimentTrendsQuery | ExperimentFunnelsQuery
+
+
+class IsExperimentFunnelsQuery(BaseModel):
+    namedArgs: NamedArgs1 | None = None
+
+
+class IsExperimentTrendsQuery(BaseModel):
+    namedArgs: NamedArgs1 | None = None
+
+
 class EndpointRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -21075,7 +21137,13 @@ class InsightActorsQueryOptions(BaseModel):
     )
     kind: Literal["InsightActorsQueryOptions"] = "InsightActorsQueryOptions"
     response: InsightActorsQueryOptionsResponse | None = None
-    source: InsightActorsQuery | FunnelsActorsQuery | FunnelCorrelationActorsQuery | StickinessActorsQuery
+    source: (
+        InsightActorsQuery
+        | FunnelsActorsQuery
+        | FunnelCorrelationActorsQuery
+        | StickinessActorsQuery
+        | ExperimentActorsQuery
+    )
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")
 
 
@@ -21210,6 +21278,7 @@ class ActorsQuery(BaseModel):
         InsightActorsQuery
         | FunnelsActorsQuery
         | FunnelCorrelationActorsQuery
+        | ExperimentActorsQuery
         | StickinessActorsQuery
         | HogQLQuery
         | None

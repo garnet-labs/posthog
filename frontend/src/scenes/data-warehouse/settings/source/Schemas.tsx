@@ -794,7 +794,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         description: currentSyncMethodModalSchema.description,
                         should_sync_default: currentSyncMethodModalSchema.should_sync_default ?? true,
                         sync_type: currentSyncMethodModalSchema.sync_type,
-                        sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
+                        sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? null,
                         incremental_field: currentSyncMethodModalSchema.incremental_field ?? null,
                         incremental_field_type: currentSyncMethodModalSchema.incremental_field_type ?? null,
                         incremental_available: schemaIncrementalFields.incremental_available,
@@ -816,7 +816,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                             sync_type: syncType,
                             incremental_field: noIncrementalField ? null : incrementalField,
                             incremental_field_type: noIncrementalField ? null : incrementalFieldType,
-                            sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
+                            sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? null,
                             ...(syncType === 'cdc' && cdcTableMode ? { cdc_table_mode: cdcTableMode } : {}),
                         })
                     }}
