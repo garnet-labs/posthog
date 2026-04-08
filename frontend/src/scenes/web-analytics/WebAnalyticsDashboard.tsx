@@ -505,7 +505,7 @@ const botAnalyticsTab = (
                     </LemonTag>
                 </div>
             ),
-            link: '/web/bot-analytics',
+            link: urls.webAnalyticsBotAnalytics(),
         },
     ]
 }

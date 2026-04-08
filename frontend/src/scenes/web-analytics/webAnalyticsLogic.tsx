@@ -2268,6 +2268,28 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
 
                 // Bot analytics tab — dedicated tiles for bot traffic analysis
                 if (productTab === ProductTab.BOT_ANALYTICS) {
+                    // Force bot traffic filter regardless of the global toggle
+                    const botFilters: WebAnalyticsPropertyFilters = [
+                        ...webAnalyticsFilters.filter((f) => 'key' in f && f.key !== '$virt_is_bot'),
+                        {
+                            key: '$virt_is_bot',
+                            value: ['true'],
+                            operator: PropertyOperator.Exact,
+                            type: PropertyFilterType.Event,
+                        },
+                    ]
+
+                    const AI_REFERRER_DOMAINS = [
+                        'chatgpt.com',
+                        'openai.com',
+                        'perplexity.ai',
+                        'claude.ai',
+                        'anthropic.com',
+                        'you.com',
+                        'phind.com',
+                        'gemini.google.com',
+                    ]
+
                     const botTiles: (WebAnalyticsTile | null)[] = [
                         {
                             kind: 'query',
@@ -2278,7 +2300,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                             },
                             query: {
                                 kind: NodeKind.WebOverviewQuery,
-                                properties: webAnalyticsFilters,
+                                properties: botFilters,
                                 dateRange,
                                 compareFilter,
                                 sampling,
@@ -2321,7 +2343,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                                             breakdown,
                                             breakdown_type: breakdownType,
                                         },
-                                        properties: webAnalyticsFilters,
+                                        properties: botFilters,
                                         filterTestAccounts,
                                         compareFilter,
                                         tags: WEB_ANALYTICS_DEFAULT_QUERY_TAGS,
@@ -2360,7 +2382,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                                 source: {
                                     kind: NodeKind.WebStatsTableQuery,
                                     breakdownBy: WebStatsBreakdown.Page,
-                                    properties: webAnalyticsFilters,
+                                    properties: botFilters,
                                     dateRange,
                                     compareFilter,
                                     sampling,
@@ -2390,7 +2412,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                                 source: {
                                     kind: NodeKind.WebStatsTableQuery,
                                     breakdownBy: WebStatsBreakdown.InitialReferringDomain,
-                                    properties: webAnalyticsFilters,
+                                    properties: botFilters,
                                     dateRange,
                                     compareFilter,
                                     sampling,
@@ -2422,16 +2444,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                                     properties: [
                                         {
                                             key: '$initial_referring_domain',
-                                            value: [
-                                                'chatgpt.com',
-                                                'openai.com',
-                                                'perplexity.ai',
-                                                'claude.ai',
-                                                'anthropic.com',
-                                                'you.com',
-                                                'phind.com',
-                                                'gemini.google.com',
-                                            ],
+                                            value: AI_REFERRER_DOMAINS,
                                             operator: PropertyOperator.Exact,
                                             type: PropertyFilterType.Session,
                                         },
@@ -2482,16 +2495,7 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                                     properties: [
                                         {
                                             key: '$initial_referring_domain',
-                                            value: [
-                                                'chatgpt.com',
-                                                'openai.com',
-                                                'perplexity.ai',
-                                                'claude.ai',
-                                                'anthropic.com',
-                                                'you.com',
-                                                'phind.com',
-                                                'gemini.google.com',
-                                            ],
+                                            value: AI_REFERRER_DOMAINS,
                                             operator: PropertyOperator.Exact,
                                             type: PropertyFilterType.Session,
                                         },
@@ -2555,8 +2559,6 @@ export const webAnalyticsLogic = kea<webAnalyticsLogicType>([
                 return urls.webAnalyticsHealth()
             } else if (productTab === ProductTab.LIVE) {
                 return '/web/live'
-            } else if (productTab === ProductTab.BOT_ANALYTICS) {
-                return '/web/bot-analytics'
             }
 
             // Make sure we're storing the raw filters only, or else we'll have issues with the domain/device type filters
