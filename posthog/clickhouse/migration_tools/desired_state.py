@@ -8,6 +8,9 @@ from typing import Any
 
 import yaml
 
+# Sentinel value in schema YAML indicating the value should come from Django settings at apply time.
+_FROM_SETTINGS_SENTINEL = "__from_settings__"
+
 
 @dataclass
 class ColumnDef:

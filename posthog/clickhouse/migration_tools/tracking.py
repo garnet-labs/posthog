@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 TRACKING_TABLE_NAME = "clickhouse_schema_migrations"
 
@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS {database}.clickhouse_schema_migrations (
 ORDER BY (migration_number, step_index, host, direction, applied_at)
 """
 
-# Advisory lock constants.
 LOCK_MIGRATION_NUMBER = 0
 # Must not collide with VERSION_STEP_INDEX (-2) or any real step index (>= 0)
 LOCK_STEP_INDEX = -999
@@ -136,6 +135,12 @@ def acquire_apply_lock(client: Any, database: str, hostname: str, *, force: bool
     return (True, "")
 
 
+class SchemaVersion(NamedTuple):
+    commit_hash: str
+    host: str
+    applied_at: str
+
+
 # Schema version sentinel: records which git commit was last applied.
 VERSION_STEP_INDEX = -2
 
@@ -157,7 +162,7 @@ def record_schema_version(client: Any, database: str, commit_hash: str, hostname
     )
 
 
-def get_latest_schema_version(client: Any, database: str) -> tuple[str, str, str] | None:
+def get_latest_schema_version(client: Any, database: str) -> SchemaVersion | None:
     table_ref = f"{database}.{TRACKING_TABLE_NAME}"
     sql = f"""
         SELECT migration_name, host, applied_at
@@ -170,7 +175,7 @@ def get_latest_schema_version(client: Any, database: str) -> tuple[str, str, str
     """
     rows = client.execute(sql)
     if rows:
-        return (rows[0][0], rows[0][1], str(rows[0][2]))
+        return SchemaVersion(commit_hash=rows[0][0], host=rows[0][1], applied_at=str(rows[0][2]))
     return None
 
 

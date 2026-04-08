@@ -136,6 +136,18 @@ def compare_schemas(
                 )
             )
 
+        # Partition key mismatch
+        if exp_table.partition_key != act_table.partition_key:
+            diffs.append(
+                SchemaDiff(
+                    table=table,
+                    column=None,
+                    diff_type="key_mismatch",
+                    expected=f"partition_key={exp_table.partition_key}",
+                    actual=f"partition_key={act_table.partition_key}",
+                )
+            )
+
         # Column comparison
         exp_cols = {c.name: c for c in exp_table.columns}
         act_cols = {c.name: c for c in act_table.columns}

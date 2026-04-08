@@ -748,5 +748,292 @@ class TestClusterRegistry(unittest.TestCase):
         self.assertIn("not in the cluster registry", msg)
 
 
+class TestNormalizeType(unittest.TestCase):
+    def test_datetime64_strips_timezone(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _normalize_type
+
+        self.assertEqual(_normalize_type("DateTime64(6, 'UTC')"), "DateTime64(6)")
+
+    def test_datetime64_other_timezone(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _normalize_type
+
+        self.assertEqual(_normalize_type("DateTime64(3, 'Europe/London')"), "DateTime64(3)")
+
+    def test_datetime64_no_timezone_unchanged(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _normalize_type
+
+        self.assertEqual(_normalize_type("DateTime64(6)"), "DateTime64(6)")
+
+    def test_strips_trailing_whitespace(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _normalize_type
+
+        self.assertEqual(_normalize_type("String   "), "String")
+
+    def test_non_datetime_unchanged(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _normalize_type
+
+        self.assertEqual(_normalize_type("UUID"), "UUID")
+        self.assertEqual(_normalize_type("Int64"), "Int64")
+
+
+class TestGenerateCreateSql(unittest.TestCase):
+    def _desired(self, engine: str, **kwargs: object) -> DesiredTable:
+        return _make_desired_table("t", engine=engine, columns=[ColumnDef(name="id", type="UUID")], **kwargs)
+
+    def test_mergetree(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _generate_create_sql
+
+        table = self._desired("MergeTree", order_by=["id"])
+        sql = _generate_create_sql(table, "posthog", "main")
+        self.assertIn("CREATE TABLE IF NOT EXISTS posthog.t", sql)
+        self.assertIn("ENGINE = MergeTree()", sql)
+        self.assertIn("ORDER BY (id)", sql)
+
+    def test_replicated_mergetree_has_zk_path(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _generate_create_sql
+
+        table = self._desired("ReplicatedMergeTree", order_by=["id"])
+        sql = _generate_create_sql(table, "posthog", "main")
+        self.assertIn("ReplicatedMergeTree(", sql)
+        self.assertIn("/clickhouse/tables/", sql)
+        self.assertIn("{replica}", sql)
+
+    def test_distributed(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _generate_create_sql
+
+        table = DesiredTable(
+            name="dist_t",
+            engine="Distributed",
+            columns=[ColumnDef(name="id", type="UUID")],
+            on_nodes=["ALL"],
+            source="sharded_t",
+            sharding_key="rand()",
+        )
+        sql = _generate_create_sql(table, "posthog", "main")
+        self.assertIn("ENGINE = Distributed('main', 'posthog', 'sharded_t', rand())", sql)
+
+    def test_kafka(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _generate_create_sql
+
+        table = DesiredTable(
+            name="kafka_t",
+            engine="Kafka",
+            columns=[ColumnDef(name="id", type="UUID")],
+            on_nodes=["INGESTION_EVENTS"],
+            settings={"kafka_broker_list": "broker:9092", "kafka_topic_list": "t"},
+        )
+        sql = _generate_create_sql(table, "posthog", "main")
+        self.assertIn("ENGINE = Kafka()", sql)
+        self.assertIn("SETTINGS", sql)
+        self.assertIn("kafka_broker_list", sql)
+
+    def test_materialized_view(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _generate_create_sql
+
+        table = DesiredTable(
+            name="my_mv",
+            engine="MaterializedView",
+            columns=[],
+            on_nodes=["ALL"],
+            target="writable_t",
+            select="SELECT * FROM posthog.kafka_t",
+        )
+        sql = _generate_create_sql(table, "posthog", "main")
+        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS posthog.my_mv", sql)
+        self.assertIn("TO posthog.writable_t", sql)
+        self.assertIn("SELECT * FROM posthog.kafka_t", sql)
+
+    def test_partition_by_included(self) -> None:
+        from posthog.clickhouse.migration_tools.state_diff import _generate_create_sql
+
+        table = self._desired("MergeTree", order_by=["id"], partition_by="toYYYYMM(ts)")
+        sql = _generate_create_sql(table, "posthog", "main")
+        self.assertIn("PARTITION BY toYYYYMM(ts)", sql)
+
+
+class TestValidatorDesiredStates(unittest.TestCase):
+    def test_valid_isolated_table_no_errors(self) -> None:
+        from posthog.clickhouse.migration_tools.validator import validate_desired_states
+
+        ds = _make_desired_state({"lone_t": _make_desired_table("lone_t", engine="MergeTree")})
+        errors = validate_desired_states([ds])
+        self.assertEqual(errors, [])
+
+    def test_cross_cluster_targeting_kafka_on_data_errors(self) -> None:
+        from posthog.clickhouse.migration_tools.validator import validate_desired_states
+
+        ds = _make_desired_state(
+            {
+                "kafka_t": DesiredTable(
+                    name="kafka_t",
+                    engine="Kafka",
+                    columns=[],
+                    on_nodes=["DATA"],
+                )
+            }
+        )
+        errors = validate_desired_states([ds])
+        self.assertTrue(any("kafka_t" in e for e in errors))
+
+    def test_cross_cluster_targeting_kafka_on_ingestion_no_error(self) -> None:
+        from posthog.clickhouse.migration_tools.validator import validate_desired_states
+
+        ds = _make_desired_state(
+            {
+                "kafka_t": DesiredTable(
+                    name="kafka_t",
+                    engine="Kafka",
+                    columns=[],
+                    on_nodes=["INGESTION_EVENTS"],
+                )
+            }
+        )
+        errors = validate_desired_states([ds])
+        kafka_errors = [e for e in errors if "kafka_t" in e]
+        self.assertEqual(kafka_errors, [])
+
+    def test_build_ecosystems_from_yaml_finds_pipeline(self) -> None:
+        from posthog.clickhouse.migration_tools.validator import build_ecosystems_from_yaml
+
+        ds = DesiredState(
+            ecosystem="test",
+            cluster="main",
+            tables={
+                "sharded_t": _make_desired_table("sharded_t", engine="ReplicatedMergeTree"),
+                "writable_t": DesiredTable(
+                    name="writable_t",
+                    engine="Distributed",
+                    columns=[],
+                    on_nodes=["COORDINATOR"],
+                    source="sharded_t",
+                ),
+                "t": DesiredTable(
+                    name="t",
+                    engine="Distributed",
+                    columns=[],
+                    on_nodes=["ALL"],
+                    source="sharded_t",
+                ),
+            },
+        )
+        ecosystems = build_ecosystems_from_yaml([ds])
+        self.assertEqual(len(ecosystems), 1)
+        eco = ecosystems[0]
+        self.assertEqual(eco.sharded_table, "sharded_t")
+        self.assertEqual(eco.distributed_writable, "writable_t")
+        self.assertEqual(eco.distributed_readable, "t")
+
+
+class TestTemplates(unittest.TestCase):
+    def test_ingestion_pipeline_has_all_tables(self) -> None:
+        from posthog.clickhouse.migration_tools.templates import generate_schema_yaml
+
+        result = generate_schema_yaml("ingestion_pipeline", "my_events", "main")
+        assert result is not None
+        tables = result["tables"]
+        self.assertIn("kafka_my_events", tables)
+        self.assertIn("sharded_my_events", tables)
+        self.assertIn("writable_my_events", tables)
+        self.assertIn("my_events", tables)
+        self.assertIn("my_events_mv", tables)
+
+    def test_ingestion_pipeline_kafka_broker_uses_sentinel(self) -> None:
+        from posthog.clickhouse.migration_tools.templates import generate_schema_yaml
+
+        result = generate_schema_yaml("ingestion_pipeline", "my_events", "main")
+        assert result is not None
+        kafka_settings = result["tables"]["kafka_my_events"]["settings"]
+        self.assertEqual(kafka_settings["kafka_broker_list"], "__from_settings__")
+
+    def test_sharded_table_has_three_tables_no_kafka(self) -> None:
+        from posthog.clickhouse.migration_tools.templates import generate_schema_yaml
+
+        result = generate_schema_yaml("sharded_table", "metrics", "main")
+        assert result is not None
+        tables = result["tables"]
+        self.assertIn("sharded_metrics", tables)
+        self.assertIn("writable_metrics", tables)
+        self.assertIn("metrics", tables)
+        self.assertNotIn("kafka_metrics", tables)
+
+    def test_cross_cluster_readable_one_distributed_table(self) -> None:
+        from posthog.clickhouse.migration_tools.templates import generate_schema_yaml
+
+        result = generate_schema_yaml("cross_cluster_readable", "events", "sessions")
+        assert result is not None
+        tables = result["tables"]
+        self.assertEqual(len(tables), 1)
+        self.assertIn("events", tables)
+        self.assertEqual(tables["events"]["engine"], "Distributed")
+
+    def test_materialized_view_single_mv(self) -> None:
+        from posthog.clickhouse.migration_tools.templates import generate_schema_yaml
+
+        result = generate_schema_yaml("materialized_view", "events", "main")
+        assert result is not None
+        tables = result["tables"]
+        self.assertEqual(len(tables), 1)
+        self.assertIn("events_mv", tables)
+        self.assertEqual(tables["events_mv"]["engine"], "MaterializedView")
+
+    def test_unknown_template_returns_none(self) -> None:
+        from posthog.clickhouse.migration_tools.templates import generate_schema_yaml
+
+        result = generate_schema_yaml("nonexistent", "t", "main")
+        self.assertIsNone(result)
+
+
+class TestPlanSymbols(unittest.TestCase):
+    def test_alter_drop_column_uses_minus_symbol(self) -> None:
+        diffs = [
+            StateDiff(
+                action="alter_drop_column",
+                table="t",
+                detail="Drop column old_col from t",
+                sql="ALTER TABLE posthog.t DROP COLUMN IF EXISTS old_col",
+                node_roles=["DATA"],
+            ),
+        ]
+        plan = generate_plan_text(diffs)
+        lines = [line for line in plan.splitlines() if "t" in line and "old_col" in line]
+        self.assertTrue(lines, "Expected a plan line for old_col")
+        self.assertTrue(lines[0].strip().startswith("-"), f"Expected '-' prefix, got: {lines[0]!r}")
+
+    def test_alter_add_column_uses_tilde_symbol(self) -> None:
+        diffs = [
+            StateDiff(
+                action="alter_add_column",
+                table="t",
+                detail="Add column new_col String to t",
+                sql="ALTER TABLE posthog.t ADD COLUMN IF NOT EXISTS new_col String",
+                node_roles=["DATA"],
+            ),
+        ]
+        plan = generate_plan_text(diffs)
+        lines = [line for line in plan.splitlines() if "t" in line and "new_col" in line]
+        self.assertTrue(lines)
+        self.assertTrue(lines[0].strip().startswith("~"), f"Expected '~' prefix, got: {lines[0]!r}")
+
+
+class TestCompareSchemaPartitionKey(unittest.TestCase):
+    def test_partition_key_mismatch_detected(self) -> None:
+        from posthog.clickhouse.migration_tools.schema_introspect import TableSchema, compare_schemas
+
+        expected = {"t": TableSchema(name="t", engine="MergeTree", partition_key="toYYYYMM(ts)")}
+        actual = {"t": TableSchema(name="t", engine="MergeTree", partition_key="toYYYYMMDD(ts)")}
+        diffs = compare_schemas(expected, actual)
+        key_diffs = [d for d in diffs if d.diff_type == "key_mismatch" and "partition_key" in (d.expected or "")]
+        self.assertEqual(len(key_diffs), 1)
+        self.assertIn("toYYYYMM(ts)", key_diffs[0].expected)
+        self.assertIn("toYYYYMMDD(ts)", key_diffs[0].actual)
+
+    def test_matching_partition_key_no_diff(self) -> None:
+        from posthog.clickhouse.migration_tools.schema_introspect import TableSchema, compare_schemas
+
+        schema = {"t": TableSchema(name="t", engine="MergeTree", partition_key="toYYYYMM(ts)")}
+        diffs = compare_schemas(schema, schema)
+        self.assertEqual(diffs, [])
+
+
 if __name__ == "__main__":
     unittest.main()

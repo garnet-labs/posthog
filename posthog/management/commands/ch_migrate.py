@@ -2,6 +2,7 @@
 """ClickHouse schema management: plan, apply, generate, drift, schema, status, bootstrap, check, lint, down."""
 
 import sys
+from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
@@ -102,6 +103,12 @@ class Command(BaseCommand):
             nargs="*",
             default=[],
             help="Additional table names to exclude",
+        )
+        orphans_parser.add_argument(
+            "--cluster",
+            type=str,
+            default="main",
+            help="Cluster to inspect for orphan tables (default: main)",
         )
 
         # down (legacy)
@@ -261,17 +268,15 @@ class Command(BaseCommand):
 
             for i, (step, rendered_sql) in enumerate(steps):
                 checksum = hashlib.sha256(rendered_sql.encode()).hexdigest()
-                success = _execute_step_with_retry(
-                    cluster_obj,
-                    step,
-                    rendered_sql,
-                    i,
-                    hostname,
-                    database,
-                    client,
-                    record_step,
-                    checksum,
+                ctx = StepContext(
+                    step_index=i,
+                    hostname=hostname,
+                    database=database,
+                    client=client,
+                    record_step_fn=record_step,
+                    checksum=checksum,
                 )
+                success = _execute_step_with_retry(cluster_obj, step, rendered_sql, ctx)
                 if not success:
                     return
         finally:
@@ -396,8 +401,7 @@ class Command(BaseCommand):
         # Show schema version at top
         version = get_latest_schema_version(client, database)
         if version:
-            commit_hash, host, applied_at = version
-            print(f"Schema version: {commit_hash[:12]} (applied by {host} at {applied_at})\n")
+            print(f"Schema version: {version.commit_hash[:12]} (applied by {version.host} at {version.applied_at})\n")
 
         node_filter = options.get("node")
 
@@ -498,7 +502,8 @@ class Command(BaseCommand):
             print(f"No YAML files found in {schema_dir}")
             return
 
-        cluster = get_cluster_by_name("main")
+        cluster_name = options.get("cluster", "main")
+        cluster = get_cluster_by_name(cluster_name)
         client = _any_client(cluster)
         current = dump_schema(client, database)
         exclude = options.get("exclude") or []
@@ -524,16 +529,21 @@ class Command(BaseCommand):
         print("Done.")
 
 
+@dataclass
+class StepContext:
+    step_index: int
+    hostname: str
+    database: str
+    client: Any
+    record_step_fn: Any
+    checksum: str
+
+
 def _execute_step_with_retry(
     cluster: Any,
     step: Any,
     rendered_sql: str,
-    step_index: int,
-    hostname: str,
-    database: str,
-    client: Any,
-    record_step_fn: Any,
-    checksum: str,
+    ctx: StepContext,
     max_retries: int = 3,
 ) -> bool:
     """Execute a single migration step with retry and tracking. Returns True on success."""
@@ -543,22 +553,22 @@ def _execute_step_with_retry(
     from posthog.clickhouse.migration_tools.tracking import StepRecord
 
     def _record(success: bool) -> None:
-        record_step_fn(
-            client=client,
+        ctx.record_step_fn(
+            client=ctx.client,
             record=StepRecord(
                 migration_number=0,
                 migration_name=step.comment or "reconcile",
-                step_index=step_index,
-                host=hostname,
+                step_index=ctx.step_index,
+                host=ctx.hostname,
                 node_role="*",
                 direction="up",
-                checksum=checksum,
+                checksum=ctx.checksum,
                 success=success,
             ),
-            database=database,
+            database=ctx.database,
         )
 
-    print(f"  Step {step_index}: {step.comment}...", end=" ", flush=True)
+    print(f"  Step {ctx.step_index}: {step.comment}...", end=" ", flush=True)
 
     for attempt in range(max_retries):
         try:

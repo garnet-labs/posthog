@@ -10,7 +10,7 @@ _ACTION_SYMBOL: dict[str, str] = {
     "create": "+",
     "drop": "-",
     "alter_add_column": "~",
-    "alter_drop_column": "~",
+    "alter_drop_column": "-",
     "alter_modify_column": "~",
     "recreate_mv": "-/+",
     "recreate": "-/+",

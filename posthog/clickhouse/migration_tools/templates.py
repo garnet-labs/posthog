@@ -43,7 +43,7 @@ def _ingestion_pipeline(table: str, cluster: str) -> dict[str, Any]:
                 "engine": "Kafka",
                 "on_nodes": "INGESTION_EVENTS",
                 "settings": {
-                    "kafka_broker_list": "kafka:9092",
+                    "kafka_broker_list": "__from_settings__",
                     "kafka_topic_list": table,
                     "kafka_group_name": f"{table}_consumer",
                     "kafka_format": "JSONEachRow",

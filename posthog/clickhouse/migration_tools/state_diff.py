@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import re
 import logging
 from dataclasses import dataclass, field
 
 from django.conf import settings as django_settings
 
-from posthog.clickhouse.migration_tools.desired_state import ColumnDef, DesiredState, DesiredTable
+from posthog.clickhouse.migration_tools.desired_state import (
+    _FROM_SETTINGS_SENTINEL,
+    ColumnDef,
+    DesiredState,
+    DesiredTable,
+)
 from posthog.clickhouse.migration_tools.manifest import engine_tier, is_distributed, is_kafka, is_mergetree, is_mv
 from posthog.clickhouse.migration_tools.schema_introspect import TableSchema
+from posthog.clickhouse.migration_tools.tracking import TRACKING_TABLE_NAME
 
 logger = logging.getLogger("migrations")
 
@@ -21,15 +28,10 @@ def _normalize_type(t: str) -> str:
     'DateTime64(6, 'UTC')' in YAML → 'DateTime64(6)' in system.columns.
     Also strips trailing whitespace and normalizes case for Nullable/LowCardinality wrappers.
     """
-    import re
-
     # Strip timezone from DateTime64(N, 'TZ') → DateTime64(N)
     t = re.sub(r"DateTime64\((\d+),\s*'[^']+'\)", r"DateTime64(\1)", t)
     return t.strip()
 
-
-# Sentinel value used in schema YAML to indicate the value should come from Django settings
-_FROM_SETTINGS_SENTINEL = "__from_settings__"
 
 # Map of YAML setting keys to Django settings attributes
 _SETTINGS_RESOLUTION: dict[str, str] = {
@@ -172,13 +174,173 @@ def _collect_creates(
     return creates
 
 
+def _handle_engine_mismatch(
+    table_name: str,
+    desired_table: DesiredTable,
+    current_table: TableSchema,
+    database: str,
+    cluster: str,
+) -> StateDiff | None:
+    if desired_table.engine.lower() == current_table.engine.lower():
+        return None
+    action = "recreate_mv" if is_mv(desired_table.engine) or is_mv(current_table.engine) else "recreate"
+    return StateDiff(
+        action=action,
+        table=table_name,
+        detail=f"Recreate {table_name} (engine changed: {current_table.engine} -> {desired_table.engine})",
+        sql=f"DROP TABLE IF EXISTS {database}.{table_name};\n{_generate_create_sql(desired_table, database, cluster)}",
+        node_roles=desired_table.on_nodes,
+        sharded=desired_table.sharded,
+        depends_on=[desired_table.target] if action == "recreate_mv" and desired_table.target else [],
+    )
+
+
+def _handle_mv_select_diff(
+    table_name: str,
+    desired_table: DesiredTable,
+    current_table: TableSchema,
+    database: str,
+    cluster: str,
+) -> tuple[list[StateDiff], list[StateDiff]]:
+    drops: list[StateDiff] = []
+    alters: list[StateDiff] = []
+    if not (is_mv(desired_table.engine) and desired_table.select):
+        return drops, alters
+    current_select = current_table.as_select if hasattr(current_table, "as_select") else ""
+    if current_select and current_select.strip() != desired_table.select.strip():
+        drops.append(
+            StateDiff(
+                action="drop",
+                table=table_name,
+                detail=f"Drop MV {table_name} (SELECT changed — will recreate)",
+                sql=f"DROP TABLE IF EXISTS {database}.{table_name}",
+                node_roles=desired_table.on_nodes,
+            )
+        )
+        alters.append(
+            StateDiff(
+                action="create",
+                table=table_name,
+                detail=f"Recreate MV {table_name} with updated SELECT",
+                sql=_generate_create_sql(desired_table, database, cluster),
+                node_roles=desired_table.on_nodes,
+            )
+        )
+    elif not current_select:
+        logger.warning(
+            "MV %s: SELECT comparison not possible (as_select not available from host). "
+            "Verify manually with 'ch_migrate schema'.",
+            table_name,
+        )
+    return drops, alters
+
+
+def _handle_kafka_dict_recreation(
+    table_name: str,
+    desired_table: DesiredTable,
+    current_table: TableSchema,
+    database: str,
+    cluster: str,
+) -> tuple[list[StateDiff], list[StateDiff]] | None:
+    """Returns (drops, creates) if the table needs recreation, None if not applicable."""
+    if desired_table.engine.lower() not in ("kafka", "dictionary"):
+        return None
+    desired_cols = {c.name: c for c in desired_table.columns}
+    current_cols = {c.name: c for c in current_table.columns}
+    desired_col_types = {n: _normalize_type(c.type) for n, c in desired_cols.items()}
+    current_col_types = {n: _normalize_type(c.type) for n, c in current_cols.items()}
+    if set(desired_cols.keys()) == set(current_cols.keys()) and desired_col_types == current_col_types:
+        return None
+    return (
+        [
+            StateDiff(
+                action="drop",
+                table=table_name,
+                detail=f"Drop {desired_table.engine} table {table_name} (recreate for column change)",
+                sql=f"DROP TABLE IF EXISTS {database}.{table_name}",
+                node_roles=desired_table.on_nodes,
+            )
+        ],
+        [
+            StateDiff(
+                action="create",
+                table=table_name,
+                detail=f"Recreate {desired_table.engine} table {table_name} with updated columns",
+                sql=_generate_create_sql(desired_table, database, cluster),
+                node_roles=desired_table.on_nodes,
+            )
+        ],
+    )
+
+
+def _handle_column_alters(
+    table_name: str,
+    desired_table: DesiredTable,
+    current_table: TableSchema,
+    database: str,
+) -> list[StateDiff]:
+    alters: list[StateDiff] = []
+    desired_cols = {c.name: c for c in desired_table.columns}
+    current_cols = {c.name: c for c in current_table.columns}
+    is_replicated = is_mergetree(desired_table.engine) and "replicated" in desired_table.engine.lower()
+
+    for col_name in sorted(set(desired_cols.keys()) - set(current_cols.keys())):
+        col = desired_cols[col_name]
+        default_clause = ""
+        if col.default_expression:
+            kind = col.default_kind or "DEFAULT"
+            default_clause = f" {kind} {col.default_expression}"
+        alters.append(
+            StateDiff(
+                action="alter_add_column",
+                table=table_name,
+                detail=f"Add column {col_name} {col.type} to {table_name}",
+                sql=f"ALTER TABLE {database}.{table_name} ADD COLUMN IF NOT EXISTS {col_name} {col.type}{default_clause}",
+                node_roles=desired_table.on_nodes,
+                sharded=desired_table.sharded,
+                is_alter_on_replicated_table=is_replicated,
+            )
+        )
+
+    for col_name in sorted(set(current_cols.keys()) - set(desired_cols.keys())):
+        alters.append(
+            StateDiff(
+                action="alter_drop_column",
+                table=table_name,
+                detail=f"Drop column {col_name} from {table_name}",
+                sql=f"ALTER TABLE {database}.{table_name} DROP COLUMN IF EXISTS {col_name}",
+                node_roles=desired_table.on_nodes,
+                sharded=desired_table.sharded,
+                is_alter_on_replicated_table=is_replicated,
+            )
+        )
+
+    for col_name in sorted(set(desired_cols.keys()) & set(current_cols.keys())):
+        desired_col = desired_cols[col_name]
+        current_col = current_cols[col_name]
+        if _normalize_type(desired_col.type) != _normalize_type(current_col.type):
+            alters.append(
+                StateDiff(
+                    action="alter_modify_column",
+                    table=table_name,
+                    detail=f"Modify column {col_name} from {current_col.type} to {desired_col.type} on {table_name}",
+                    sql=f"ALTER TABLE {database}.{table_name} MODIFY COLUMN {col_name} {desired_col.type}",
+                    node_roles=desired_table.on_nodes,
+                    sharded=desired_table.sharded,
+                    is_alter_on_replicated_table=is_replicated,
+                )
+            )
+
+    return alters
+
+
 def _collect_changes(
     desired: DesiredState,
     current: dict[str, TableSchema],
     database: str,
     cluster: str,
 ) -> tuple[list[StateDiff], list[StateDiff], list[StateDiff]]:
-    """Handles tables present in both desired and current: engine mismatches, MV SELECT changes, column diffs."""
+    """Tables present in both desired and current: engine mismatches, MV SELECT changes, column diffs."""
     drops: list[StateDiff] = []
     alters: list[StateDiff] = []
     recreates: list[StateDiff] = []
@@ -187,135 +349,26 @@ def _collect_changes(
         desired_table = desired.tables[table_name]
         current_table = current[table_name]
 
-        # Engine mismatch → recreate
-        if desired_table.engine.lower() != current_table.engine.lower():
-            action = "recreate_mv" if is_mv(desired_table.engine) or is_mv(current_table.engine) else "recreate"
-            recreates.append(
-                StateDiff(
-                    action=action,
-                    table=table_name,
-                    detail=f"Recreate {table_name} (engine changed: {current_table.engine} -> {desired_table.engine})",
-                    sql=f"DROP TABLE IF EXISTS {database}.{table_name};\n{_generate_create_sql(desired_table, database, cluster)}",
-                    node_roles=desired_table.on_nodes,
-                    sharded=desired_table.sharded,
-                    depends_on=[desired_table.target] if action == "recreate_mv" and desired_table.target else [],
-                )
-            )
+        recreate = _handle_engine_mismatch(table_name, desired_table, current_table, database, cluster)
+        if recreate is not None:
+            recreates.append(recreate)
             continue
 
-        # For MVs, compare SELECT if both sides have it
-        if is_mv(desired_table.engine) and desired_table.select:
-            current_select = current_table.as_select if hasattr(current_table, "as_select") else ""
-            if current_select and current_select.strip() != desired_table.select.strip():
-                drops.append(
-                    StateDiff(
-                        action="drop",
-                        table=table_name,
-                        detail=f"Drop MV {table_name} (SELECT changed — will recreate)",
-                        sql=f"DROP TABLE IF EXISTS {database}.{table_name}",
-                        node_roles=desired_table.on_nodes,
-                    )
-                )
-                alters.append(
-                    StateDiff(
-                        action="create",
-                        table=table_name,
-                        detail=f"Recreate MV {table_name} with updated SELECT",
-                        sql=_generate_create_sql(desired_table, database, cluster),
-                        node_roles=desired_table.on_nodes,
-                    )
-                )
-            elif not current_select:
-                logger.warning(
-                    "MV %s: SELECT comparison not possible (as_select not available from host). "
-                    "Verify manually with 'ch_migrate schema'.",
-                    table_name,
-                )
+        mv_drops, mv_creates = _handle_mv_select_diff(table_name, desired_table, current_table, database, cluster)
+        drops.extend(mv_drops)
+        alters.extend(mv_creates)
 
-        # Kafka/Dictionary engines don't support ALTER — recreate instead
-        desired_cols = {c.name: c for c in desired_table.columns}
-        current_cols = {c.name: c for c in current_table.columns}
-
-        desired_col_types = {n: _normalize_type(c.type) for n, c in desired_cols.items()}
-        current_col_types = {n: _normalize_type(c.type) for n, c in current_cols.items()}
-        if desired_table.engine.lower() in ("kafka", "dictionary") and (
-            set(desired_cols.keys()) != set(current_cols.keys()) or desired_col_types != current_col_types
-        ):
-            drops.append(
-                StateDiff(
-                    action="drop",
-                    table=table_name,
-                    detail=f"Drop {desired_table.engine} table {table_name} (recreate for column change)",
-                    sql=f"DROP TABLE IF EXISTS {database}.{table_name}",
-                    node_roles=desired_table.on_nodes,
-                )
-            )
-            alters.append(
-                StateDiff(
-                    action="create",
-                    table=table_name,
-                    detail=f"Recreate {desired_table.engine} table {table_name} with updated columns",
-                    sql=_generate_create_sql(desired_table, database, cluster),
-                    node_roles=desired_table.on_nodes,
-                )
-            )
+        kafka_result = _handle_kafka_dict_recreation(table_name, desired_table, current_table, database, cluster)
+        if kafka_result is not None:
+            kdrop, kcreate = kafka_result
+            drops.extend(kdrop)
+            alters.extend(kcreate)
             continue
 
-        # Skip column diffing for MVs (columns are derived from SELECT)
         if is_mv(desired_table.engine):
             continue
 
-        is_replicated = is_mergetree(desired_table.engine) and "replicated" in desired_table.engine.lower()
-
-        # Missing columns → ADD COLUMN
-        for col_name in sorted(set(desired_cols.keys()) - set(current_cols.keys())):
-            col = desired_cols[col_name]
-            default_clause = ""
-            if col.default_expression:
-                kind = col.default_kind or "DEFAULT"
-                default_clause = f" {kind} {col.default_expression}"
-            alters.append(
-                StateDiff(
-                    action="alter_add_column",
-                    table=table_name,
-                    detail=f"Add column {col_name} {col.type} to {table_name}",
-                    sql=f"ALTER TABLE {database}.{table_name} ADD COLUMN IF NOT EXISTS {col_name} {col.type}{default_clause}",
-                    node_roles=desired_table.on_nodes,
-                    sharded=desired_table.sharded,
-                    is_alter_on_replicated_table=is_replicated,
-                )
-            )
-
-        # Extra columns → DROP COLUMN
-        for col_name in sorted(set(current_cols.keys()) - set(desired_cols.keys())):
-            alters.append(
-                StateDiff(
-                    action="alter_drop_column",
-                    table=table_name,
-                    detail=f"Drop column {col_name} from {table_name}",
-                    sql=f"ALTER TABLE {database}.{table_name} DROP COLUMN IF EXISTS {col_name}",
-                    node_roles=desired_table.on_nodes,
-                    sharded=desired_table.sharded,
-                    is_alter_on_replicated_table=is_replicated,
-                )
-            )
-
-        # Type mismatches → MODIFY COLUMN
-        for col_name in sorted(set(desired_cols.keys()) & set(current_cols.keys())):
-            desired_col = desired_cols[col_name]
-            current_col = current_cols[col_name]
-            if _normalize_type(desired_col.type) != _normalize_type(current_col.type):
-                alters.append(
-                    StateDiff(
-                        action="alter_modify_column",
-                        table=table_name,
-                        detail=f"Modify column {col_name} from {current_col.type} to {desired_col.type} on {table_name}",
-                        sql=f"ALTER TABLE {database}.{table_name} MODIFY COLUMN {col_name} {desired_col.type}",
-                        node_roles=desired_table.on_nodes,
-                        sharded=desired_table.sharded,
-                        is_alter_on_replicated_table=is_replicated,
-                    )
-                )
+        alters.extend(_handle_column_alters(table_name, desired_table, current_table, database))
 
     return drops, alters, recreates
 
@@ -372,7 +425,7 @@ def detect_orphans(
     for ds in desired_states:
         declared.update(ds.tables.keys())
 
-    default_exclude = {"infi_clickhouse_orm_migrations", "clickhouse_schema_migrations"}
+    default_exclude = {"infi_clickhouse_orm_migrations", TRACKING_TABLE_NAME}
     exclude = default_exclude | set(exclude_patterns or [])
 
     orphans = []

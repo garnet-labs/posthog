@@ -132,10 +132,7 @@ KNOWN_ECOSYSTEMS: list[TableEcosystem] = [
 ]
 
 # Reverse lookup: table_name -> TableEcosystem
-_TABLE_TO_ECOSYSTEM: dict[str, TableEcosystem] = {}
-for _eco in KNOWN_ECOSYSTEMS:
-    for _tbl in _eco.all_tables():
-        _TABLE_TO_ECOSYSTEM[_tbl] = _eco
+_TABLE_TO_ECOSYSTEM: dict[str, TableEcosystem] = {tbl: eco for eco in KNOWN_ECOSYSTEMS for tbl in eco.all_tables()}
 
 
 def lookup_ecosystem(table_name: str) -> TableEcosystem | None:
