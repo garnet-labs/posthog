@@ -215,9 +215,7 @@ async fn test_delete_persons_batch_for_team_storage_error(
 #[case::negative(-1)]
 #[case::exceeds_max(50001)]
 #[tokio::test]
-async fn test_delete_persons_batch_for_team_invalid_batch_size(
-    #[case] batch_size: i64,
-) {
+async fn test_delete_persons_batch_for_team_invalid_batch_size(#[case] batch_size: i64) {
     let service = PersonHogReplicaService::new(Arc::new(mocks::SuccessStorage));
 
     let status = service
