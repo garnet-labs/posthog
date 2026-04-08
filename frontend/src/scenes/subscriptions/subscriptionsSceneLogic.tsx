@@ -34,6 +34,9 @@ export enum SubscriptionsTab {
     Insight = 'insight',
 }
 
+/** Widen for Kea / typegen; plain `SubscriptionsTab.All` is inferred as that literal and breaks reducers + selectors. */
+const DEFAULT_SUBSCRIPTIONS_TAB: SubscriptionsTab = SubscriptionsTab.All
+
 /** Query keys owned by the subscriptions list scene (merged into the router; other params are preserved). */
 const SUBSCRIPTIONS_URL_KEYS = ['tab', 'search', 'created_by', 'target_type', 'page'] as const
 
@@ -223,7 +226,7 @@ export const subscriptionsSceneLogic = kea<subscriptionsSceneLogicType>([
             },
         ],
         currentTab: [
-            SubscriptionsTab.All,
+            DEFAULT_SUBSCRIPTIONS_TAB,
             {
                 setCurrentTab: (_, { tab }) => tab,
                 applySubscriptionsQueryFromUrl: (_, { query }) => query.tab,
