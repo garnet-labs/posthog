@@ -206,15 +206,6 @@ def _person_property_filters_changed(cohort: Cohort) -> bool:
         # Extract current person property filters
         current_filters = _extract_person_property_filters(cohort)
 
-        # Debug logging
-        logger.info(
-            "checking_person_property_filter_changes",
-            cohort_id=cohort.pk,
-            previous_filters=previous_filters,
-            current_filters=current_filters,
-            changed=current_filters != previous_filters,
-        )
-
         # Compare the filters - they changed if they're not equal
         return current_filters != previous_filters
 
