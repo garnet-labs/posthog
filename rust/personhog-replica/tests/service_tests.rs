@@ -1178,31 +1178,25 @@ async fn test_delete_persons_batch_for_team() {
     ctx.cleanup().await.ok();
 }
 
+#[rstest]
+#[case::zero(0)]
+#[case::negative(-1)]
+#[case::exceeds_max(50001)]
 #[tokio::test]
-async fn test_delete_persons_batch_for_team_invalid_batch_size() {
+async fn test_delete_persons_batch_for_team_invalid_batch_size(#[case] batch_size: i64) {
     let ctx = ServiceTestContext::new().await;
 
-    // batch_size = 0 should fail
     let result = ctx
         .service
         .delete_persons_batch_for_team(Request::new(DeletePersonsBatchForTeamRequest {
             team_id: ctx.team_id,
-            batch_size: 0,
+            batch_size,
         }))
         .await;
 
-    assert!(result.is_err());
-
-    // batch_size > 50000 should fail
-    let result = ctx
-        .service
-        .delete_persons_batch_for_team(Request::new(DeletePersonsBatchForTeamRequest {
-            team_id: ctx.team_id,
-            batch_size: 50001,
-        }))
-        .await;
-
-    assert!(result.is_err());
+    let status = result.unwrap_err();
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    assert!(status.message().contains("batch_size"));
 
     ctx.cleanup().await.ok();
 }

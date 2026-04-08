@@ -394,6 +394,7 @@ impl PersonLookup for PostgresStorage {
             SELECT id::bigint as "id!" FROM posthog_person
             WHERE team_id = $1
             LIMIT $2
+            FOR UPDATE SKIP LOCKED
             "#,
             team_id as i32,
             batch_size
