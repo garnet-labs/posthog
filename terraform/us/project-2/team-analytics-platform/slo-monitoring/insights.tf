@@ -20,9 +20,9 @@ locals {
       slo     = 99.95 # error budget = 0.05%
       regions = ["US"] # EU not captured yet: ph_scoped_capture hardcodes US client
     }
-    query = {
-      name    = "Queries"
-      slo     = 99.999 # error budget = 0.001%
+    query_service = {
+      name    = "Query service"
+      slo     = 99.95 # error budget = 0.05%
       regions = ["US", "EU"]
     }
   }

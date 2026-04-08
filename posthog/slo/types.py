@@ -11,7 +11,7 @@ class SloOperation(StrEnum):
     EXPORT = "export"
     SUBSCRIPTION_DELIVERY = "subscription_delivery"
     ALERT_CHECK = "alert_check"
-    QUERY = "query"
+    QUERY_SERVICE = "query_service"
 
 
 class SloOutcome(StrEnum):

@@ -1251,7 +1251,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                 spec=SloSpec(
                     distinct_id=distinct_id,
                     area=SloArea.ANALYTIC_PLATFORM,
-                    operation=SloOperation.QUERY,
+                    operation=SloOperation.QUERY_SERVICE,
                     team_id=self.team.id,
                     resource_id=self.query_id,
                 ),
