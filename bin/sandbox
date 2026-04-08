@@ -684,24 +684,28 @@ def init_cache_from_master() -> None:
 
         app = f"{init_project}-app-1"
 
-        # Generate demo data (org/team/user + ClickHouse events). Neither
-        # setup_dev nor generate_demo_data is a mprocs process, so they never
-        # run during normal boot — we must call them explicitly.
-        info("Generating demo data (this takes a few minutes)...")
-        run(
-            ["docker", "exec", app, "python", "manage.py", "generate_demo_data",
-             "--skip-flag-sync"],
-        )
+        # Generate demo data and pre-build Rust in parallel — they're
+        # independent and both take several minutes.
+        import concurrent.futures
 
-        # Pre-build all Rust binaries so phrocs services start instantly.
-        # The compiled artifacts land in the cargo-target volume and persist
-        # across sandboxes. On branches that change Rust code, cargo only
-        # recompiles the delta.
-        info("Pre-building Rust workspace...")
-        run(
-            ["docker", "exec", "-w", "/workspace/rust", app,
-             "cargo", "build", "--workspace"],
-        )
+        def _generate_demo_data():
+            info("Generating demo data (this takes a few minutes)...")
+            run(
+                ["docker", "exec", app, "python", "manage.py", "generate_demo_data",
+                 "--skip-flag-sync"],
+            )
+
+        def _build_rust():
+            info("Pre-building Rust workspace...")
+            run(
+                ["docker", "exec", "-w", "/workspace/rust", app,
+                 "cargo", "build", "--workspace"],
+            )
+
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            futures = [pool.submit(_generate_demo_data), pool.submit(_build_rust)]
+            for f in concurrent.futures.as_completed(futures):
+                f.result()  # raises if either failed
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
