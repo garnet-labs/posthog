@@ -32,4 +32,4 @@ No codegen step needed (tonic regenerates on `cargo build`), but you must:
 
 - Implement the RPC in `rust/personhog-replica/` (storage layer + service handler)
 - Wire it through `rust/personhog-router/` (backend, router, and service layers)
-- Add tests (see Rust test conventions in `rust/personhog-replica/CLAUDE.md`)
+- Add tests (see Rust test conventions in `rust/personhog-replica/AGENTS.md`)
