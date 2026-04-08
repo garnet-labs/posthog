@@ -31,6 +31,7 @@ from .coder import (
     list_user_workspaces,
     logs_replace,
     maybe_configure_ssh,
+    open_cursor,
     open_in_browser,
     open_vscode,
     open_web_ide,
@@ -116,6 +117,7 @@ def _print_connection_info(name: str) -> None:
         ("SSH", "devbox:ssh"),
         ("Open", "devbox:open"),
         ("VS Code", "devbox:open --vscode"),
+        ("Cursor", "devbox:open --cursor"),
         ("Web IDE", "devbox:open --web"),
         ("Forward", "devbox:forward"),
         ("Logs", "devbox:logs -f"),
@@ -394,14 +396,16 @@ def devbox_ssh(workspace_label: str | None) -> None:
     ssh_replace(name)
 
 
-@cli.command(name="devbox:open", help="Open devbox in browser or VS Code")
+@cli.command(name="devbox:open", help="Open devbox in browser, VS Code, or Cursor")
 @workspace_name_option
 @click.option("--vscode", is_flag=True, help="Open in VS Code Desktop via SSH")
+@click.option("--cursor", is_flag=True, help="Open in Cursor via SSH")
 @click.option("--web", is_flag=True, help="Open code-server (VS Code in browser)")
-def devbox_open(workspace_label: str | None, vscode: bool, web: bool) -> None:
+def devbox_open(workspace_label: str | None, vscode: bool, cursor: bool, web: bool) -> None:
     """Open the devbox in a browser or editor."""
-    if vscode and web:
-        raise click.UsageError("Choose either `--vscode` or `--web`.")
+    chosen = sum([vscode, cursor, web])
+    if chosen > 1:
+        raise click.UsageError("Choose one of `--vscode`, `--cursor`, or `--web`.")
 
     ensure_runtime_ready()
     name = resolve_workspace_name(workspace_label)
@@ -409,6 +413,9 @@ def devbox_open(workspace_label: str | None, vscode: bool, web: bool) -> None:
     if vscode:
         click.echo(f"Opening '{name}' in VS Code...")
         open_vscode(name)
+    elif cursor:
+        click.echo(f"Opening '{name}' in Cursor...")
+        open_cursor(name)
     elif web:
         click.echo(f"Opening code-server for '{name}'...")
         open_web_ide(name)

@@ -558,6 +558,15 @@ def open_vscode(name: str) -> None:
     _run_or_exit(["coder", "open", "vscode", name])
 
 
+def open_cursor(name: str) -> None:
+    """Open the workspace in Cursor via SSH remote."""
+    cursor = shutil.which("cursor")
+    if not cursor:
+        _fail("`cursor` CLI is not on PATH. Open Cursor and enable Shell Integration from the Command Palette.")
+    ssh_host = f"coder.{name}"
+    os.execvp(cursor, ["cursor", "--remote", f"ssh-remote+{ssh_host}", "/home/coder/posthog"])
+
+
 def open_web_ide(name: str) -> None:
     """Open code-server for the workspace."""
     username = get_username()
