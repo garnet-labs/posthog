@@ -6,16 +6,16 @@
 # It's templated by bin/sandbox — placeholders like __SANDBOX_BRANCH__
 # are replaced at launch time.
 #
-# Boot flow:
+# Boot flow (optimised for parallelism):
 #   1. Install Tailscale + join network (enables SSH for debugging)
 #   2. Write SSH keys + Claude auth
-#   3. Install Docker, zstd, git, python3-yaml
-#   4. Detect + format + mount NVMe instance store
-#   5. Download docker-data.tar.zst from S3 (pre-signed URL)
-#   6. Extract to NVMe, symlink /var/lib/docker
-#   7. Start Docker
-#   8. git clone PostHog repo to NVMe
-#   9. git fetch + checkout branch, detach HEAD
+#   3. Detect + format + mount NVMe instance store
+#   4. Install Docker, aria2, zstd, git, python3-yaml (single apt batch)
+#   5. Background: S3 download (aria2c, 16 connections) + git clone
+#   6. Foreground: Docker repo + install
+#   7. Wait for S3 download, extract to NVMe, symlink /var/lib/docker
+#   8. Start Docker
+#   9. Wait for git clone, checkout branch
 #  10. bin/sandbox create <branch> --no-attach
 #
 set -euo pipefail
@@ -104,34 +104,7 @@ fi
 
 chown -R ubuntu:ubuntu "$CLAUDE_AUTH_DIR"
 
-# --- Install Docker, zstd, git ---
-log "Installing Docker and dependencies..."
-# Pin overlay2 storage driver to match the build-cache archive.
-mkdir -p /etc/docker
-cat > /etc/docker/daemon.json <<'DAEMONJSON'
-{
-  "features": {
-    "containerd-snapshotter": false
-  },
-  "storage-driver": "overlay2"
-}
-DAEMONJSON
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg zstd git python3-yaml
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-apt-get update -qq
-apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
-usermod -aG docker ubuntu
-
-# Stop Docker immediately — we need to set up storage before it runs.
-# apt auto-starts Docker, but we'll restart it after NVMe + S3 extract.
-systemctl stop docker.socket docker
-log "Docker installed (stopped for storage setup)"
-
-# --- Set up NVMe instance store ---
+# --- Set up NVMe instance store (before Docker, so Docker data lands on NVMe) ---
 log "Setting up NVMe instance store..."
 
 ROOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" | head -1)
@@ -165,7 +138,53 @@ else
     log "Symlinked /var/lib/docker -> /mnt/nvme/docker"
 fi
 
-# --- Clone PostHog repo (background, overlaps with S3 download) ---
+# --- Install base dependencies (single apt batch) ---
+log "Installing base dependencies..."
+# Pin overlay2 storage driver to match the build-cache archive.
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'DAEMONJSON'
+{
+  "features": {
+    "containerd-snapshotter": false
+  },
+  "storage-driver": "overlay2"
+}
+DAEMONJSON
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl gnupg zstd git python3-yaml aria2
+
+# --- Background: S3 download + git clone (overlap with Docker install) ---
+# Download to NVMe (or /tmp on EBS) so extraction is NVMe→NVMe.
+if [ -n "$NVME_DEV" ]; then
+    ARCHIVE_DL_PATH="/mnt/nvme/docker-data.tar.zst"
+else
+    ARCHIVE_DL_PATH="/tmp/docker-data.tar.zst"
+fi
+
+S3_DL_PID=""
+if [ -n "$S3_ARCHIVE_URL" ]; then
+    log "Starting S3 download (background, 16 parallel connections)..."
+    s3_download() {
+        local dl_dir dl_name
+        dl_dir=$(dirname "$ARCHIVE_DL_PATH")
+        dl_name=$(basename "$ARCHIVE_DL_PATH")
+        for attempt in 1 2 3; do
+            if aria2c -x 16 -s 16 -j 1 --max-connection-per-server=16 \
+                    --file-allocation=none --auto-file-renaming=false \
+                    --console-log-level=warn --summary-interval=10 \
+                    -d "$dl_dir" -o "$dl_name" "$S3_ARCHIVE_URL"; then
+                return 0
+            fi
+            log "S3 download attempt $attempt failed, retrying in 5s..."
+            rm -f "$ARCHIVE_DL_PATH"
+            sleep 5
+        done
+        return 1
+    }
+    s3_download &
+    S3_DL_PID=$!
+fi
+
 log "Cloning PostHog repo (background)..."
 clone_repo() {
     if [ -n "$NVME_DEV" ]; then
@@ -178,29 +197,31 @@ clone_repo() {
 clone_repo &
 CLONE_PID=$!
 
-# --- Download and extract Docker cache from S3 ---
-if [ -n "$S3_ARCHIVE_URL" ]; then
-    log "Downloading Docker cache from S3..."
-    DOWNLOAD_OK=false
-    for attempt in 1 2 3; do
-        if curl -fSL -o /tmp/docker-data.tar.zst "$S3_ARCHIVE_URL"; then
-            DOWNLOAD_OK=true
-            break
-        fi
-        log "Download attempt $attempt failed, retrying in 10s..."
-        sleep 10
-    done
-    if [ "$DOWNLOAD_OK" = false ]; then
-        log "ERROR: All download attempts failed"
-        exit 1
-    fi
-    log "Downloaded $(du -h /tmp/docker-data.tar.zst | cut -f1)"
+# --- Install Docker (foreground, while S3 + clone run in background) ---
+log "Installing Docker..."
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update -qq
+apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+usermod -aG docker ubuntu
+
+# Stop Docker immediately — we need to populate /var/lib/docker from S3 first.
+systemctl stop docker.socket docker
+log "Docker installed (stopped for cache extraction)"
+
+# --- Wait for S3 download + extract ---
+if [ -n "$S3_DL_PID" ]; then
+    log "Waiting for S3 download..."
+    wait "$S3_DL_PID" || { log "ERROR: All S3 download attempts failed"; exit 1; }
+    log "Downloaded $(du -h "$ARCHIVE_DL_PATH" | cut -f1)"
 
     log "Extracting Docker cache..."
     mkdir -p /var/lib/docker
-    tar -C /var/lib/docker -I 'zstd -T0' -xf /tmp/docker-data.tar.zst
+    tar -C /var/lib/docker -I 'zstd -T0' -xf "$ARCHIVE_DL_PATH"
     log "Extracted $(du -sh /var/lib/docker | cut -f1) to Docker data dir"
-    rm -f /tmp/docker-data.tar.zst
+    rm -f "$ARCHIVE_DL_PATH"
 else
     log "WARNING: No S3 archive URL provided, Docker starts with no cached images"
 fi
