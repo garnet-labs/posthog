@@ -4,14 +4,10 @@ from urllib.parse import urlparse
 
 from django.conf import settings
 
-import structlog
-
 from posthog.models.integration import GitHubIntegration, Integration
 from posthog.temporal.oauth import PosthogMcpScopes, has_write_scopes
 
 from products.mcp_store.backend.facade.api import get_active_installations
-
-logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -69,7 +65,6 @@ def fetch_user_mcp_server_configs(
             )
         )
 
-    logger.info("Built user MCP server configs", count=len(configs), team_id=team_id)
     return configs
 
 
