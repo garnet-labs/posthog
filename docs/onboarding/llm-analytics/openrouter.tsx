@@ -13,14 +13,18 @@ export const getOpenRouterSteps = (ctx: OnboardingComponentsContext): StepDefini
             badge: 'required',
             content: (
                 <>
-                    <CalloutBox type="info" icon="IconInfo" title="Migrating from the SDK wrapper?">
+                    <CalloutBox type="info" icon="IconInfo" title="Full working examples">
                         <Markdown>
-                            These docs now use OpenTelemetry auto-instrumentation, which is the recommended approach.
-                            The previous PostHog SDK wrapper is still available — see the
-                            [Node.js](https://github.com/PostHog/posthog-js/tree/e08ff1be/examples/example-ai-openrouter)
+                            See the complete
+                            [Node.js](https://github.com/PostHog/posthog-js/tree/main/examples/example-ai-openrouter)
                             and
-                            [Python](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-openrouter)
-                            wrapper examples.
+                            [Python](https://github.com/PostHog/posthog-python/tree/master/examples/example-ai-openrouter)
+                            examples on GitHub. If you're using the PostHog SDK wrapper instead of OpenTelemetry, see
+                            the [Node.js
+                            wrapper](https://github.com/PostHog/posthog-js/tree/e08ff1be/examples/example-ai-openrouter)
+                            and [Python
+                            wrapper](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-openrouter)
+                            examples.
                         </Markdown>
                     </CalloutBox>
 

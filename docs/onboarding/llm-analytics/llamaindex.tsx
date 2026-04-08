@@ -13,10 +13,12 @@ export const getLlamaIndexSteps = (ctx: OnboardingComponentsContext): StepDefini
             badge: 'required',
             content: (
                 <>
-                    <CalloutBox type="info" icon="IconInfo" title="Migrating from the SDK wrapper?">
+                    <CalloutBox type="info" icon="IconInfo" title="Full working examples">
                         <Markdown>
-                            These docs now use OpenTelemetry auto-instrumentation, which is the recommended approach.
-                            The previous PostHog SDK wrapper is still available — see the [Python wrapper
+                            See the complete [Python
+                            example](https://github.com/PostHog/posthog-python/tree/master/examples/example-ai-llamaindex)
+                            on GitHub. If you're using the PostHog SDK wrapper instead of OpenTelemetry, see the [Python
+                            wrapper
                             example](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-llamaindex).
                         </Markdown>
                     </CalloutBox>
