@@ -794,7 +794,11 @@ export function InfiniteList({
                                               selectedItem.name,
                                               selectedItemGroup?.type
                                           )
-                                          label = coreDef?.label ?? selectedItem.name ?? 'Unknown'
+                                          label =
+                                              coreDef?.label ||
+                                              selectedItemGroup?.getName?.(selectedItem) ||
+                                              selectedItem.name ||
+                                              ''
                                       }
                                       return (
                                           <>
