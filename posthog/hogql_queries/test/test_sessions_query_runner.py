@@ -1115,7 +1115,7 @@ class TestSessionsQueryRunner(ClickhouseTestMixin, APIBaseTest):
                 after="2024-01-01",
                 kind="SessionsQuery",
                 select=["session_id", "$session_duration"],
-                properties=[SessionPropertyFilter(key="$session_duration", value=0, operator="gt", type="session")],
+                properties=[SessionPropertyFilter(key="$session_duration", value=0, operator="gte", type="session")],
             )
 
             runner = SessionsQueryRunner(query=query, team=self.team)

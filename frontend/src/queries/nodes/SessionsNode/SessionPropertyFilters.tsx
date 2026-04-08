@@ -32,10 +32,13 @@ export function SessionPropertyFilters({ query, setQuery }: SessionPropertyFilte
             taxonomicGroupTypes={taxonomicGroupTypes}
             onChange={(value: AnyPropertyFilter[]) => {
                 const eventProps = value.filter(
-                    (prop) => 'type' in prop && (prop.type === 'event' || prop.type === 'feature')
+                    (prop) =>
+                        'type' in prop && (prop.type === 'event' || prop.type === 'feature' || prop.type === 'cohort')
                 )
                 const otherProps = value.filter(
-                    (prop) => !('type' in prop) || (prop.type !== 'event' && prop.type !== 'feature')
+                    (prop) =>
+                        !('type' in prop) ||
+                        (prop.type !== 'event' && prop.type !== 'feature' && prop.type !== 'cohort')
                 )
                 setQuery?.({
                     ...query,
