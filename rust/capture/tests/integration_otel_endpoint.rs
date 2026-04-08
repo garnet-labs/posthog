@@ -753,12 +753,16 @@ async fn test_too_many_raw_spans_returns_400() {
     let spans: Vec<Span> = (0..1001u16)
         .map(|i| {
             let id_bytes: Vec<u8> = i.to_be_bytes().iter().chain(&[0u8; 6]).copied().collect();
-            make_span(vec![0; 16], id_bytes, vec![], 0, vec![
-                make_kv(
+            make_span(
+                vec![0; 16],
+                id_bytes,
+                vec![],
+                0,
+                vec![make_kv(
                     "http.request.method",
                     any_value::Value::StringValue("GET".to_string()),
-                ),
-            ])
+                )],
+            )
         })
         .collect();
 
