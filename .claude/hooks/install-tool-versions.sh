@@ -13,14 +13,47 @@ ARCH="$(uname -m)"
 CACHE_DIR="/opt/.tool-version-cache"
 mkdir -p "$CACHE_DIR"
 
-# --- Helper ---
-version_from_file() {
-    local file="$1" pattern="$2"
-    grep -oP "$pattern" "$file" 2>/dev/null | head -1
-}
+# --- Parse versions from config files using Python for reliable TOML/JSON parsing ---
+read -r REQUIRED_UV REQUIRED_PYTHON REQUIRED_PNPM < <(python3 -c "
+import json, re, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
+
+uv_ver = python_ver = pnpm_ver = ''
+
+# Parse pyproject.toml
+if tomllib:
+    try:
+        with open('$PROJECT_DIR/pyproject.toml', 'rb') as f:
+            data = tomllib.load(f)
+        # uv required-version: strip specifier prefix (~=, >=, ==, etc.)
+        raw = data.get('tool', {}).get('uv', {}).get('required-version', '')
+        uv_ver = re.sub(r'^[~><=!]+', '', raw)
+        # requires-python: strip specifier prefix
+        raw = data.get('project', {}).get('requires-python', '')
+        python_ver = re.sub(r'^[~><=!]+', '', raw)
+    except Exception:
+        pass
+
+# Parse package.json
+try:
+    with open('$PROJECT_DIR/package.json') as f:
+        pkg = json.load(f)
+    pm = pkg.get('packageManager', '')
+    if '@' in pm:
+        pnpm_ver = pm.split('@', 1)[1]
+except Exception:
+    pass
+
+print(uv_ver, python_ver, pnpm_ver)
+" 2>/dev/null || echo "")
 
 # --- 1. Upgrade uv ---
-REQUIRED_UV=$(version_from_file "$PROJECT_DIR/pyproject.toml" '(?<=required-version = "~=)[0-9.]+')
 CURRENT_UV=$(uv --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
 
 if [ -n "$REQUIRED_UV" ]; then
@@ -57,8 +90,6 @@ if [ -n "$REQUIRED_UV" ]; then
 fi
 
 # --- 2. Install Python via uv ---
-REQUIRED_PYTHON=$(version_from_file "$PROJECT_DIR/pyproject.toml" '(?<=requires-python = "==)[0-9.]+')
-
 if [ -n "$REQUIRED_PYTHON" ]; then
     if ! uv python find "$REQUIRED_PYTHON" >/dev/null 2>&1; then
         echo "Installing Python $REQUIRED_PYTHON via uv..."
@@ -107,8 +138,6 @@ if [ -n "$NODE_VERSION" ]; then
     fi
 
     # --- 4. Install pnpm via npm ---
-    REQUIRED_PNPM=$(version_from_file "$PROJECT_DIR/package.json" '(?<="packageManager": "pnpm@)[0-9.]+')
-
     if [ -n "$REQUIRED_PNPM" ] && [ -x "$NODE_DIR/bin/npm" ]; then
         CURRENT_PNPM=$("$NODE_DIR/bin/pnpm" --version 2>/dev/null || echo "")
         if [ "$CURRENT_PNPM" != "$REQUIRED_PNPM" ]; then
