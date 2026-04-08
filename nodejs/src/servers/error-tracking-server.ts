@@ -11,7 +11,7 @@ import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig } from '../common/config'
 import { defaultConfig, overrideConfigWithEnv } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { ProducerName, registerProducers } from '../ingestion/common/outputs'
+import { ProducerName, createRegistry } from '../ingestion/common/outputs'
 import {
     DatabaseConnectionConfig,
     KafkaBrokerConfig,
@@ -121,7 +121,7 @@ export class ErrorTrackingServer implements NodeServer {
         logger.info('👍', 'Postgres Router ready')
 
         logger.info('🤔', 'Connecting to Kafka...')
-        this.producerRegistry = await registerProducers(this.config.KAFKA_CLIENT_RACK).build(this.config)
+        this.producerRegistry = await createRegistry(this.config.KAFKA_CLIENT_RACK).build(this.config)
         const outputs = registerErrorTrackingOutputs().build(this.producerRegistry, this.config)
         logger.info('👍', 'Kafka ready')
 
