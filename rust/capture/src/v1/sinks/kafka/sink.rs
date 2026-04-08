@@ -46,25 +46,23 @@ impl<P: KafkaProducerTrait> KafkaSink<P> {
     }
 }
 
-/// Reject every publishable event in `events` with the same error,
+/// Reject every publishable event in `events` as `SinkUnavailable`,
 /// incrementing a single counter for the batch. Used for pre-flight
 /// failures (producer not ready).
 fn reject_publishable(
     events: &[&(dyn Event + Send + Sync)],
-    error_fn: fn() -> KafkaSinkError,
     sink_str: &'static str,
     mode: &'static str,
     path: &str,
     attempt: &str,
 ) -> Vec<Box<dyn SinkResult>> {
     let enqueued_at = Utc::now();
-    let outcome = error_fn().outcome();
     let publishable: Vec<_> = events.iter().filter(|e| e.should_publish()).collect();
     counter!(
         "capture_v1_kafka_publish_total",
         "mode" => mode,
         "cluster" => sink_str,
-        "outcome" => outcome.as_tag(),
+        "outcome" => Outcome::RetriableError.as_tag(),
         "path" => path.to_owned(),
         "attempt" => attempt.to_owned(),
     )
@@ -74,7 +72,7 @@ fn reject_publishable(
         .map(|e| -> Box<dyn SinkResult> {
             Box::new(KafkaResult::err(
                 e.uuid_key().to_string(),
-                error_fn(),
+                KafkaSinkError::SinkUnavailable,
                 enqueued_at,
             ))
         })
@@ -109,14 +107,7 @@ impl<P: KafkaProducerTrait + 'static> Sink for KafkaSink<P> {
                 mode = mode,
                 "producer not ready — rejecting batch"
             );
-            return reject_publishable(
-                events,
-                || KafkaSinkError::SinkUnavailable,
-                sink_str,
-                mode,
-                &path,
-                &attempt,
-            );
+            return reject_publishable(events, sink_str, mode, &path, &attempt);
         }
 
         // Pre-compute context-level headers once for the batch.
