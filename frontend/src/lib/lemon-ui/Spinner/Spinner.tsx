@@ -40,7 +40,7 @@ export function Spinner({
     textColored = false,
     className,
     speed = '1s',
-    captureTime = true,
+    captureTime = false,
     size = 'small',
 }: SpinnerProps): JSX.Element {
     useTimingCapture(captureTime)
@@ -94,7 +94,7 @@ export function SpinnerOverlay({
             {mode === 'editing' ? (
                 <IconPencil className="text-5xl text-accent z-10 drop-shadow-xl" />
             ) : (
-                <Spinner className={twMerge('text-5xl', className)} {...spinnerProps} />
+                <Spinner className={twMerge('text-5xl', className)} captureTime {...spinnerProps} />
             )}
         </div>
     )
