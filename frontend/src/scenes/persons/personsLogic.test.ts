@@ -7,6 +7,8 @@ import api from 'lib/api'
 
 import { useMocks } from '~/mocks/jest'
 import { MockSignature } from '~/mocks/utils'
+import { defaultDataTableColumns } from '~/queries/nodes/DataTable/utils'
+import { NodeKind } from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
 import { PersonsTabType, PersonType, PropertyFilterType, PropertyOperator } from '~/types'
 
@@ -421,6 +423,79 @@ describe('personsLogic', () => {
             await expectLogic(logic).toMatchValues({
                 primaryDistinctId: null,
             })
+        })
+    })
+
+    describe('events query URL persistence', () => {
+        it('persists events query filters to URL when setEventsQuery is called', async () => {
+            router.actions.push('/person/test%40test.com')
+
+            await expectLogic(logic)
+                .toDispatchActions(['loadPerson', 'loadPersonSuccess'])
+                .toMatchValues({ person: expect.objectContaining({ id: 1 }) })
+
+            await expectLogic(logic, () => {
+                logic.actions.setEventsQuery({
+                    kind: NodeKind.DataTableNode,
+                    source: {
+                        kind: NodeKind.EventsQuery,
+                        select: [
+                            '*',
+                            'event',
+                            'person',
+                            'coalesce(properties.$current_url, properties.$screen_name) -- Url / Screen',
+                            'properties.$lib',
+                            'timestamp',
+                        ],
+                        personId: '1',
+                        after: '-7d',
+                        events: ['$pageview', '$autocapture'],
+                    },
+                })
+            }).toDispatchActions(router, ['replace', 'locationChanged'])
+
+            const searchParams = router.values.searchParams
+            expect(searchParams.eventsQuery).toBeTruthy()
+            const parsed = JSON.parse(searchParams.eventsQuery)
+            expect(parsed.after).toBe('-7d')
+            expect(parsed.events).toEqual(['$pageview', '$autocapture'])
+        })
+
+        it('removes eventsQuery from URL when query matches defaults', async () => {
+            router.actions.push('/person/test%40test.com', { eventsQuery: '{"after":"-7d"}' })
+
+            await expectLogic(logic).toDispatchActions(['loadPerson', 'loadPersonSuccess'])
+
+            // Set the query back to defaults (after: '-24h' is the default)
+            await expectLogic(logic, () => {
+                logic.actions.setEventsQuery({
+                    kind: NodeKind.DataTableNode,
+                    source: {
+                        kind: NodeKind.EventsQuery,
+                        select: defaultDataTableColumns(NodeKind.EventsQuery),
+                        personId: '1',
+                        after: '-24h',
+                    },
+                })
+            }).toDispatchActions(router, ['replace', 'locationChanged'])
+
+            expect(router.values.searchParams.eventsQuery).toBeUndefined()
+        })
+
+        it('restores events query from URL on person load', async () => {
+            const sourceOverrides = { after: '-30d', events: ['$pageview'] }
+            router.actions.push('/person/test%40test.com', { eventsQuery: JSON.stringify(sourceOverrides) })
+
+            await expectLogic(logic)
+                .toDispatchActions(['loadPerson', 'setEventsQuery', 'loadPersonSuccess'])
+                .toMatchValues({
+                    eventsQuery: expect.objectContaining({
+                        source: expect.objectContaining({
+                            after: '-30d',
+                            events: ['$pageview'],
+                        }),
+                    }),
+                })
         })
     })
 

@@ -49,6 +49,63 @@ export interface PersonsLogicProps {
 
 export const PERSON_EVENTS_CONTEXT_KEY = 'person-profile-events'
 
+/** Fields from EventsQuery source that are user-modifiable and worth persisting in the URL */
+const EVENTS_SOURCE_URL_FIELDS = [
+    'after',
+    'before',
+    'event',
+    'events',
+    'properties',
+    'where',
+    'filterTestAccounts',
+    'orderBy',
+    'select',
+] as const
+
+/** Extract user-modified source fields from an events query, compared to defaults */
+function getEventsSourceOverrides(
+    query: DataTableNode,
+    defaultSource: DataTableNode['source']
+): Record<string, unknown> | null {
+    const source = query.source as Record<string, unknown>
+    const overrides: Record<string, unknown> = {}
+    for (const field of EVENTS_SOURCE_URL_FIELDS) {
+        const current = source[field]
+        const initial = (defaultSource as Record<string, unknown>)[field]
+        if (JSON.stringify(current) !== JSON.stringify(initial)) {
+            overrides[field] = current
+        }
+    }
+    return Object.keys(overrides).length > 0 ? overrides : null
+}
+
+/** Apply source overrides from URL to an events query */
+function applyEventsSourceOverrides(query: DataTableNode, overrides: Record<string, unknown>): DataTableNode {
+    return {
+        ...query,
+        source: {
+            ...query.source,
+            ...overrides,
+        },
+    }
+}
+
+/** Safely parse events query overrides from a URL search param */
+function parseEventsQueryParam(param: unknown): Record<string, unknown> | null {
+    if (typeof param !== 'string') {
+        return null
+    }
+    try {
+        const parsed = JSON.parse(param)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed as Record<string, unknown>
+        }
+    } catch {
+        // Invalid JSON, ignore
+    }
+    return null
+}
+
 function createInitialEventsPayload(personId: string): DataTableNode {
     return {
         kind: NodeKind.DataTableNode,
@@ -182,7 +239,11 @@ export const personsLogic = kea<personsLogicType>([
                     if (person) {
                         actions.reportPersonDetailViewed(person)
                         if (person.id != null) {
-                            const eventsQuery = createInitialEventsPayload(person.id)
+                            let eventsQuery = createInitialEventsPayload(person.id)
+                            const sourceOverrides = parseEventsQueryParam(router.values.searchParams.eventsQuery)
+                            if (sourceOverrides) {
+                                eventsQuery = applyEventsSourceOverrides(eventsQuery, sourceOverrides)
+                            }
                             actions.setEventsQuery(eventsQuery)
                             const exceptionsQuery = createInitialExceptionsPayload(person.id)
                             actions.setExceptionsQuery(exceptionsQuery)
@@ -200,7 +261,11 @@ export const personsLogic = kea<personsLogicType>([
                         const person = parsePersonFromHogQLRow(row)
                         actions.reportPersonDetailViewed(person)
                         if (person.id != null) {
-                            const eventsQuery = createInitialEventsPayload(person.id)
+                            let eventsQuery = createInitialEventsPayload(person.id)
+                            const sourceOverrides = parseEventsQueryParam(router.values.searchParams.eventsQuery)
+                            if (sourceOverrides) {
+                                eventsQuery = applyEventsSourceOverrides(eventsQuery, sourceOverrides)
+                            }
                             actions.setEventsQuery(eventsQuery)
                             const exceptionsQuery = createInitialExceptionsPayload(person.id)
                             actions.setExceptionsQuery(exceptionsQuery)
@@ -478,6 +543,24 @@ export const personsLogic = kea<personsLogicType>([
                         activeTab: values.activeTab,
                     },
                 ]
+            }
+        },
+        setEventsQuery: () => {
+            if (
+                props.syncWithUrl &&
+                router.values.location.pathname.indexOf('/person') > -1 &&
+                values.person?.id &&
+                values.eventsQuery
+            ) {
+                const defaultSource = createInitialEventsPayload(values.person.id).source
+                const overrides = getEventsSourceOverrides(values.eventsQuery, defaultSource)
+                const searchParams = { ...router.values.searchParams }
+                if (overrides) {
+                    searchParams.eventsQuery = JSON.stringify(overrides)
+                } else {
+                    delete searchParams.eventsQuery
+                }
+                return [router.values.location.pathname, searchParams, router.values.hashParams, { replace: true }]
             }
         },
     })),
