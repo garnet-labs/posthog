@@ -731,6 +731,7 @@ class Cohort(FileSystemSyncMixin, RootTeamMixin, models.Model):
                     LEFT JOIN "{cohort_people_table}" AS cp
                         ON cp."person_id" = p."id" AND cp."cohort_id" = {self.pk}
                     WHERE cp."person_id" IS NULL
+                    ON CONFLICT DO NOTHING
                 """
                 cursor.execute(query, params)
 
