@@ -691,21 +691,11 @@ def init_cache_from_master() -> None:
         if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
             fatal("Cache init failed. See logs above.")
 
-        app = f"{init_project}-app-1"
-
-        # Generate demo data (org/team/user + ClickHouse events). Neither
-        # setup_dev nor generate_demo_data is a mprocs process, so they never
-        # run during normal boot — we must call them explicitly.
-        info("Generating demo data (this takes a few minutes)...")
-        run(
-            ["docker", "exec", app, "python", "manage.py", "generate_demo_data",
-             "--skip-flag-sync"],
-        )
-
         # Pre-compile all Rust binaries so the cargo-target volume is warm.
         # mprocs starts Rust services via `cargo run` which compiles on demand,
         # but the health check passes (Django) before Rust finishes. Build them
         # explicitly so subsequent sandboxes get cached dependency artifacts.
+        app = f"{init_project}-app-1"
         info("Pre-compiling Rust services (populating cargo-target cache)...")
         run(
             ["docker", "exec", "-e", "CARGO_TARGET_DIR=/cache/cargo-target", app,

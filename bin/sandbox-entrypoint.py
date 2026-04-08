@@ -259,6 +259,28 @@ def fetch_rust_crates() -> None:
     info("Finished: cargo fetch.")
 
 
+def ensure_demo_data() -> None:
+    """Generate demo data on first boot; skip if already present."""
+    result = run_quiet(
+        [
+            "psql",
+            "-h",
+            "db",
+            "-U",
+            "posthog",
+            "-d",
+            "posthog",
+            "-tAc",
+            "SELECT 1 FROM posthog_user WHERE email='test@posthog.com' LIMIT 1",
+        ]
+    )
+    if result.stdout.strip() == b"1":
+        info("Demo data already present, skipping generation.")
+    else:
+        info("Generating demo data (first boot)...")
+        run(["python", "manage.py", "generate_demo_data"])
+
+
 def install_geoip() -> None:
     """Symlink the GeoIP database from the Docker image into the worktree."""
     mmdb = WORKSPACE / "share/GeoLite2-City.mmdb"
@@ -434,10 +456,21 @@ def user_phase() -> None:
     create_kafka_topics()
 
     # Run dependency installs in parallel.
-    # Migrations run later via phrocs (same as the normal dev stack).
+    # Migrations and demo data are chained after Python deps (uv ~1.5s)
+    # so they overlap with the slower pnpm/cargo installs.
+    # On subsequent boots phrocs migration processes handle any new
+    # migrations (usually a fast no-op).
+    def install_python_and_migrate() -> None:
+        install_python_deps()
+        info("Running postgres migrations...")
+        run(["bin/migrate", "--scope=postgres"])
+        info("Running clickhouse migrations...")
+        run(["bin/migrate", "--scope=clickhouse"])
+        ensure_demo_data()
+
     with ThreadPoolExecutor() as pool:
         futures = {
-            pool.submit(install_python_deps): "python deps",
+            pool.submit(install_python_and_migrate): "python deps + migrations",
             pool.submit(install_node_deps): "node deps",
             pool.submit(fetch_rust_crates): "rust crates",
         }
