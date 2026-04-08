@@ -1,6 +1,5 @@
 *
 !Dockerfile.recording-rasterizer
-!.devcontainer
 !.kearc
 !bin
 !common/hogvm
