@@ -418,7 +418,7 @@ export type Item = {
 }
 
 /**
- * Configuration object containing variant definitions (feature_flag_variants) and minimum detectable effect.
+ * Variant definitions and statistical configuration. Set feature_flag_variants to customize the split (default: 50/50 control/test). Each variant needs a key and rollout_percentage; percentages must sum to 100. Set minimum_detectable_effect (percentage, suggest 20-30) to control statistical power.
  * @nullable
  */
 export type ExperimentApiParameters = {
@@ -435,13 +435,29 @@ export type ExperimentApiParameters = {
 export type ExperimentApiExposureCriteria = {
     /** Whether to filter out internal test accounts. */
     filterTestAccounts?: boolean
-    /** Custom exposure event configuration. */
+    /** Custom exposure event configuration. Requires kind, event, and properties (can be empty array). */
     exposure_config?: {
-        kind?: 'ExperimentEventExposureConfig'
+        kind: 'ExperimentEventExposureConfig'
         /** Custom exposure event name. */
-        event?: string
+        event: string
+        /** Event property filters for the exposure event. Pass an empty array if no filters are needed. */
+        properties: Item[]
     }
 } | null | null
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsItemSourcePropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
 
 /**
  * For mean metrics: EventsNode with 'kind' and 'event' fields.
@@ -450,11 +466,44 @@ export type ExperimentApiMetricsItemSource = {
     kind?: ExperimentApiMetricsItemSourceKind
     /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsItemSourcePropertiesItem[]
+}
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsItemSeriesItemPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
 }
 
 export type ExperimentApiMetricsItemSeriesItem = {
     kind?: ExperimentApiMetricsItemSeriesItemKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsItemSeriesItemPropertiesItem[]
+}
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsItemNumeratorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
 }
 
 /**
@@ -462,7 +511,24 @@ export type ExperimentApiMetricsItemSeriesItem = {
  */
 export type ExperimentApiMetricsItemNumerator = {
     kind?: ExperimentApiMetricsItemNumeratorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsItemNumeratorPropertiesItem[]
+}
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsItemDenominatorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
 }
 
 /**
@@ -470,7 +536,10 @@ export type ExperimentApiMetricsItemNumerator = {
  */
 export type ExperimentApiMetricsItemDenominator = {
     kind?: ExperimentApiMetricsItemDenominatorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsItemDenominatorPropertiesItem[]
 }
 
 /**
@@ -500,17 +569,64 @@ export type ExperimentApiMetricsItem = {
 }
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsSecondaryItemSourcePropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For mean metrics: EventsNode with 'kind' and 'event' fields.
  */
 export type ExperimentApiMetricsSecondaryItemSource = {
     kind?: ExperimentApiMetricsSecondaryItemSourceKind
     /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsSecondaryItemSourcePropertiesItem[]
+}
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsSecondaryItemSeriesItemPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
 }
 
 export type ExperimentApiMetricsSecondaryItemSeriesItem = {
     kind?: ExperimentApiMetricsSecondaryItemSeriesItemKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsSecondaryItemSeriesItemPropertiesItem[]
+}
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsSecondaryItemNumeratorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
 }
 
 /**
@@ -518,7 +634,24 @@ export type ExperimentApiMetricsSecondaryItemSeriesItem = {
  */
 export type ExperimentApiMetricsSecondaryItemNumerator = {
     kind?: ExperimentApiMetricsSecondaryItemNumeratorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsSecondaryItemNumeratorPropertiesItem[]
+}
+
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type ExperimentApiMetricsSecondaryItemDenominatorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
 }
 
 /**
@@ -526,7 +659,10 @@ export type ExperimentApiMetricsSecondaryItemNumerator = {
  */
 export type ExperimentApiMetricsSecondaryItemDenominator = {
     kind?: ExperimentApiMetricsSecondaryItemDenominatorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: ExperimentApiMetricsSecondaryItemDenominatorPropertiesItem[]
 }
 
 /**
@@ -575,7 +711,7 @@ export interface ExperimentApi {
     start_date?: string | null
     /** @nullable */
     end_date?: string | null
-    /** Unique key for the experiment's feature flag. Letters, numbers, hyphens, and underscores only. */
+    /** Unique key for the experiment's feature flag. Letters, numbers, hyphens, and underscores only. Search existing flags with the feature-flags-get-all tool first — reuse an existing flag when possible. */
     feature_flag_key: string
     readonly feature_flag: MinimalFeatureFlagApi
     readonly holdout: ExperimentHoldoutApi
@@ -587,7 +723,7 @@ export interface ExperimentApi {
     /** @nullable */
     readonly exposure_cohort: number | null
     /**
-     * Configuration object containing variant definitions (feature_flag_variants) and minimum detectable effect.
+     * Variant definitions and statistical configuration. Set feature_flag_variants to customize the split (default: 50/50 control/test). Each variant needs a key and rollout_percentage; percentages must sum to 100. Set minimum_detectable_effect (percentage, suggest 20-30) to control statistical power.
      * @nullable
      */
     parameters?: ExperimentApiParameters
@@ -617,12 +753,12 @@ export interface ExperimentApi {
      */
     exposure_criteria?: ExperimentApiExposureCriteria
     /**
-     * Primary experiment metrics array. Each metric defines what to measure (e.g., mean, funnel, ratio).
+     * Primary experiment metrics. Each metric must have kind='ExperimentMetric' and a metric_type: 'mean' (set source to an EventsNode with an event name), 'funnel' (set series to an array of EventsNode steps), 'ratio' (set numerator and denominator EventsNode entries), or 'retention' (set start_event and completion_event). Use the event-definitions-list tool to find available events in the project.
      * @nullable
      */
     metrics?: ExperimentApiMetricsItem[] | null
     /**
-     * Secondary experiment metrics array for additional measurements.
+     * Secondary metrics for additional measurements. Same format as primary metrics.
      * @nullable
      */
     metrics_secondary?: ExperimentApiMetricsSecondaryItem[] | null
@@ -664,7 +800,7 @@ export interface PaginatedExperimentListApi {
 }
 
 /**
- * Configuration object containing variant definitions (feature_flag_variants) and minimum detectable effect.
+ * Variant definitions and statistical configuration. Set feature_flag_variants to customize the split (default: 50/50 control/test). Each variant needs a key and rollout_percentage; percentages must sum to 100. Set minimum_detectable_effect (percentage, suggest 20-30) to control statistical power.
  * @nullable
  */
 export type PatchedExperimentApiParameters = {
@@ -681,11 +817,13 @@ export type PatchedExperimentApiParameters = {
 export type PatchedExperimentApiExposureCriteria = {
     /** Whether to filter out internal test accounts. */
     filterTestAccounts?: boolean
-    /** Custom exposure event configuration. */
+    /** Custom exposure event configuration. Requires kind, event, and properties (can be empty array). */
     exposure_config?: {
-        kind?: 'ExperimentEventExposureConfig'
+        kind: 'ExperimentEventExposureConfig'
         /** Custom exposure event name. */
-        event?: string
+        event: string
+        /** Event property filters for the exposure event. Pass an empty array if no filters are needed. */
+        properties: Item[]
     }
 } | null | null
 
@@ -721,12 +859,28 @@ export const PatchedExperimentApiMetricsItemSourceKind = {
 } as const
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsItemSourcePropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For mean metrics: EventsNode with 'kind' and 'event' fields.
  */
 export type PatchedExperimentApiMetricsItemSource = {
     kind?: PatchedExperimentApiMetricsItemSourceKind
     /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsItemSourcePropertiesItem[]
 }
 
 export type PatchedExperimentApiMetricsItemSeriesItemKind =
@@ -737,9 +891,26 @@ export const PatchedExperimentApiMetricsItemSeriesItemKind = {
     ActionsNode: 'ActionsNode',
 } as const
 
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsItemSeriesItemPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
 export type PatchedExperimentApiMetricsItemSeriesItem = {
     kind?: PatchedExperimentApiMetricsItemSeriesItemKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsItemSeriesItemPropertiesItem[]
 }
 
 export type PatchedExperimentApiMetricsItemNumeratorKind =
@@ -751,11 +922,28 @@ export const PatchedExperimentApiMetricsItemNumeratorKind = {
 } as const
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsItemNumeratorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For ratio metrics: the numerator EventsNode.
  */
 export type PatchedExperimentApiMetricsItemNumerator = {
     kind?: PatchedExperimentApiMetricsItemNumeratorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsItemNumeratorPropertiesItem[]
 }
 
 export type PatchedExperimentApiMetricsItemDenominatorKind =
@@ -767,11 +955,28 @@ export const PatchedExperimentApiMetricsItemDenominatorKind = {
 } as const
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsItemDenominatorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For ratio metrics: the denominator EventsNode.
  */
 export type PatchedExperimentApiMetricsItemDenominator = {
     kind?: PatchedExperimentApiMetricsItemDenominatorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsItemDenominatorPropertiesItem[]
 }
 
 /**
@@ -843,12 +1048,28 @@ export const PatchedExperimentApiMetricsSecondaryItemSourceKind = {
 } as const
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsSecondaryItemSourcePropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For mean metrics: EventsNode with 'kind' and 'event' fields.
  */
 export type PatchedExperimentApiMetricsSecondaryItemSource = {
     kind?: PatchedExperimentApiMetricsSecondaryItemSourceKind
     /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsSecondaryItemSourcePropertiesItem[]
 }
 
 export type PatchedExperimentApiMetricsSecondaryItemSeriesItemKind =
@@ -859,9 +1080,26 @@ export const PatchedExperimentApiMetricsSecondaryItemSeriesItemKind = {
     ActionsNode: 'ActionsNode',
 } as const
 
+/**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsSecondaryItemSeriesItemPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
 export type PatchedExperimentApiMetricsSecondaryItemSeriesItem = {
     kind?: PatchedExperimentApiMetricsSecondaryItemSeriesItemKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsSecondaryItemSeriesItemPropertiesItem[]
 }
 
 export type PatchedExperimentApiMetricsSecondaryItemNumeratorKind =
@@ -873,11 +1111,28 @@ export const PatchedExperimentApiMetricsSecondaryItemNumeratorKind = {
 } as const
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsSecondaryItemNumeratorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For ratio metrics: the numerator EventsNode.
  */
 export type PatchedExperimentApiMetricsSecondaryItemNumerator = {
     kind?: PatchedExperimentApiMetricsSecondaryItemNumeratorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsSecondaryItemNumeratorPropertiesItem[]
 }
 
 export type PatchedExperimentApiMetricsSecondaryItemDenominatorKind =
@@ -889,11 +1144,28 @@ export const PatchedExperimentApiMetricsSecondaryItemDenominatorKind = {
 } as const
 
 /**
+ * Event property filter, e.g. {key: '$browser', value: 'Chrome', operator: 'exact', type: 'event'}.
+ */
+export type PatchedExperimentApiMetricsSecondaryItemDenominatorPropertiesItem = {
+    /** Property key to filter on. */
+    key: string
+    /** Value to match against. */
+    value?: string | number | string[] | number[] | null
+    /** Comparison operator (e.g. 'exact', 'is_not', 'icontains', 'gt', 'lt'). */
+    operator?: string
+    /** Filter type, usually 'event'. */
+    type?: string
+}
+
+/**
  * For ratio metrics: the denominator EventsNode.
  */
 export type PatchedExperimentApiMetricsSecondaryItemDenominator = {
     kind?: PatchedExperimentApiMetricsSecondaryItemDenominatorKind
+    /** Event name, e.g. '$pageview'. */
     event?: string
+    /** Event property filters to narrow which events are counted. */
+    properties?: PatchedExperimentApiMetricsSecondaryItemDenominatorPropertiesItem[]
 }
 
 /**
@@ -953,7 +1225,7 @@ export interface PatchedExperimentApi {
     start_date?: string | null
     /** @nullable */
     end_date?: string | null
-    /** Unique key for the experiment's feature flag. Letters, numbers, hyphens, and underscores only. */
+    /** Unique key for the experiment's feature flag. Letters, numbers, hyphens, and underscores only. Search existing flags with the feature-flags-get-all tool first — reuse an existing flag when possible. */
     feature_flag_key?: string
     readonly feature_flag?: MinimalFeatureFlagApi
     readonly holdout?: ExperimentHoldoutApi
@@ -965,7 +1237,7 @@ export interface PatchedExperimentApi {
     /** @nullable */
     readonly exposure_cohort?: number | null
     /**
-     * Configuration object containing variant definitions (feature_flag_variants) and minimum detectable effect.
+     * Variant definitions and statistical configuration. Set feature_flag_variants to customize the split (default: 50/50 control/test). Each variant needs a key and rollout_percentage; percentages must sum to 100. Set minimum_detectable_effect (percentage, suggest 20-30) to control statistical power.
      * @nullable
      */
     parameters?: PatchedExperimentApiParameters
@@ -995,12 +1267,12 @@ export interface PatchedExperimentApi {
      */
     exposure_criteria?: PatchedExperimentApiExposureCriteria
     /**
-     * Primary experiment metrics array. Each metric defines what to measure (e.g., mean, funnel, ratio).
+     * Primary experiment metrics. Each metric must have kind='ExperimentMetric' and a metric_type: 'mean' (set source to an EventsNode with an event name), 'funnel' (set series to an array of EventsNode steps), 'ratio' (set numerator and denominator EventsNode entries), or 'retention' (set start_event and completion_event). Use the event-definitions-list tool to find available events in the project.
      * @nullable
      */
     metrics?: PatchedExperimentApiMetricsItem[] | null
     /**
-     * Secondary experiment metrics array for additional measurements.
+     * Secondary metrics for additional measurements. Same format as primary metrics.
      * @nullable
      */
     metrics_secondary?: PatchedExperimentApiMetricsSecondaryItem[] | null
