@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -139,6 +139,13 @@ class SignalReportReingestionWorkflowInputs:
 
 
 @dataclass
+class TeamSignalReingestionWorkflowInputs:
+    """Inputs for the team-wide signal reingestion workflow."""
+
+    team_id: int
+
+
+@dataclass
 class SignalReportDeletionWorkflowInputs:
     """Inputs for the signal report deletion workflow."""
 
@@ -169,6 +176,7 @@ class SignalData:
     weight: float
     timestamp: datetime
     extra: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def render_signal_to_text(

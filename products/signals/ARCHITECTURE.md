@@ -197,6 +197,34 @@ Defined in `backend/temporal/reingestion.py`. Workflow ID: `signal-report-reinge
 
 `emit_signal()` now starts the **buffer + emitter + grouping v2** pipeline, so reingestion flows through the same active path as fresh Signals traffic.
 
+### `TeamSignalReingestionWorkflow` (`team-signal-reingestion`)
+
+Soft-deletes every non-deleted signal for a team and queues all of them for re-ingestion through the active pipeline.
+
+Defined in `backend/temporal/reingestion.py`. Workflow ID: `team-signal-reingestion-{team_id}`.
+
+This workflow is intended for full-team regrouping after changes to matching / prompting / grouping behavior.
+
+**Flow:**
+
+1. **Capture existing grouping pause state** → `get_grouping_paused_state_activity`
+2. **Pause grouping v2** for the team, extending the pause to at least `now + 10 minutes` → `pause_grouping_until_activity`
+3. **Fetch the next batch** of non-deleted signals from ClickHouse → `fetch_team_signals_batch_activity`
+   - Uses `ORDER BY timestamp DESC, document_id DESC`
+   - Uses `LIMIT 50`
+   - Always fetches from `OFFSET 0`
+4. **Soft-delete + queue re-ingestion** for that batch → `delete_and_reingest_signals_activity`
+   - Emits a deleted replacement row for each existing signal using the original `document_id`, timestamp, and metadata plus `deleted=true`
+   - Calls `emit_signal()` for each signal while grouping is paused, so the new signals are buffered but not grouped yet
+5. **Wait for ClickHouse** → `wait_for_signal_in_clickhouse_activity`, ensuring the deleted rows land before the next batch is fetched
+6. **Refresh the pause window if needed** so grouping stays paused throughout long runs
+7. **Repeat** until no non-deleted signals remain
+8. **Restore the prior grouping pause state** → `restore_grouping_pause_activity`
+
+Important detail: the workflow intentionally does **not** paginate across iterations with offsets. Each batch mutates the underlying non-deleted result set by emitting delete rows, so once those rows land in ClickHouse the result set shrinks. Re-fetching from `OFFSET 0` after each batch avoids skipping signals.
+
+This workflow is currently started via the Django management command `reingest_team_signals`, not via a REST endpoint.
+
 ### `SignalReportDeletionWorkflow` (`signal-report-deletion`)
 
 Soft-deletes a report and all its signals. Triggered by `DELETE /signal_reports/{id}/`.
@@ -680,6 +708,7 @@ products/signals/
 │   │       ├── ingest_video_segments.py
 │   │       ├── list_signal_reports.py
 │   │       ├── parse_sandbox_log.py
+│   │       ├── reingest_team_signals.py   # Starts TeamSignalReingestionWorkflow for a team
 │   │       ├── select_repo.py
 │   │       ├── signal_pipeline_status.py
 │   │       └── summarize_single_session.py
@@ -723,7 +752,7 @@ products/signals/
 │       ├── grouping.py              # Legacy v1 workflow + active shared grouping implementation
 │       ├── grouping_v2.py           # Active grouping v2 workflow + pause/unpause support
 │       ├── llm.py                   # Shared Anthropic helper + token limits / thinking config
-│       ├── reingestion.py           # SignalReportReingestionWorkflow
+│       ├── reingestion.py           # SignalReportReingestionWorkflow + TeamSignalReingestionWorkflow
 │       ├── report_safety_judge.py   # Report-level safety judge activity
 │       ├── safety_filter.py         # Per-signal safety classifier activity
 │       ├── signal_queries.py        # Canonical HogQL helpers for fetch/search/soft-delete/wait

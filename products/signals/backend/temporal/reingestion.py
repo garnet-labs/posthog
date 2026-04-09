@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 import temporalio
@@ -8,23 +8,41 @@ from asgiref.sync import sync_to_async
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
+from posthog.schema import EmbeddingModelName
+
+from posthog.hogql import ast
+
+from posthog.api.embedding_worker import emit_embedding_request
 from posthog.models import Team
 from posthog.sync import database_sync_to_async
 
 from products.signals.backend.api import emit_signal
 from products.signals.backend.models import SignalReport
+from products.signals.backend.temporal.clickhouse import execute_hogql_query_with_retry
+from products.signals.backend.temporal.grouping_v2 import TeamSignalGroupingV2Workflow
 from products.signals.backend.temporal.signal_queries import (
+    _DEDUPED_SIGNALS_SUBQUERY,
+    EMBEDDING_MODEL,
     FetchSignalsForReportInput,
     FetchSignalsForReportOutput,
     WaitForClickHouseInput,
     WaitForClickHouseSignal,
+    _ensure_tz_aware,
     fetch_signals_for_report_activity,
     soft_delete_report_signals,
     wait_for_signal_in_clickhouse_activity,
 )
-from products.signals.backend.temporal.types import SignalData, SignalReportReingestionWorkflowInputs
+from products.signals.backend.temporal.types import (
+    SignalData,
+    SignalReportReingestionWorkflowInputs,
+    TeamSignalReingestionWorkflowInputs,
+)
 
 logger = structlog.get_logger(__name__)
+
+TEAM_SIGNAL_REINGESTION_BATCH_SIZE = 50
+GROUPING_PAUSE_EXTENSION = timedelta(minutes=10)
+GROUPING_PAUSE_REFRESH_THRESHOLD = timedelta(minutes=2)
 
 
 @dataclass
@@ -101,6 +119,156 @@ async def reingest_signals_activity(input: ReingestSignalsInput) -> None:
         team_id=input.team_id,
         signal_count=len(input.signals),
     )
+
+
+@dataclass
+class FetchTeamSignalsBatchInput:
+    team_id: int
+    offset: int = 0
+    limit: int = TEAM_SIGNAL_REINGESTION_BATCH_SIZE
+
+
+@dataclass
+class FetchTeamSignalsBatchOutput:
+    signals: list[SignalData]
+
+
+@dataclass
+class PauseGroupingUntilInput:
+    team_id: int
+    timestamp: datetime
+
+
+@dataclass
+class GetGroupingPausedStateInput:
+    team_id: int
+
+
+@dataclass
+class RestoreGroupingPauseInput:
+    team_id: int
+    paused_until: datetime | None
+
+
+@temporalio.activity.defn
+async def fetch_team_signals_batch_activity(input: FetchTeamSignalsBatchInput) -> FetchTeamSignalsBatchOutput:
+    team = await Team.objects.aget(pk=input.team_id)
+
+    result = await execute_hogql_query_with_retry(
+        query_type="SignalsFetchTeamBatchForReingestion",
+        query=f"""
+            SELECT
+                document_id,
+                content,
+                metadata,
+                timestamp
+            FROM ({_DEDUPED_SIGNALS_SUBQUERY})
+            WHERE NOT JSONExtractBool(metadata, 'deleted')
+            ORDER BY timestamp DESC, document_id DESC
+            LIMIT {{limit}}
+            OFFSET {{offset}}
+        """,
+        team=team,
+        placeholders={
+            "model_name": ast.Constant(value=EMBEDDING_MODEL.value),
+            "limit": ast.Constant(value=input.limit),
+            "offset": ast.Constant(value=input.offset),
+        },
+    )
+
+    signals: list[SignalData] = []
+    for row in result.results or []:
+        document_id, content, metadata_str, timestamp_raw = row
+        metadata = json.loads(metadata_str)
+        signals.append(
+            SignalData(
+                signal_id=document_id,
+                content=content,
+                source_product=metadata.get("source_product", ""),
+                source_type=metadata.get("source_type", ""),
+                source_id=metadata.get("source_id", ""),
+                weight=metadata.get("weight", 0.0),
+                timestamp=_ensure_tz_aware(timestamp_raw),
+                extra=metadata.get("extra", {}),
+                metadata=dict(metadata),
+            )
+        )
+
+    logger.info(
+        "Fetched team signals batch for reingestion",
+        team_id=input.team_id,
+        offset=input.offset,
+        limit=input.limit,
+        signal_count=len(signals),
+    )
+    return FetchTeamSignalsBatchOutput(signals=signals)
+
+
+@temporalio.activity.defn
+async def delete_and_reingest_signals_activity(input: ReingestSignalsInput) -> None:
+    team = await Team.objects.aget(pk=input.team_id)
+
+    for signal in input.signals:
+        metadata = dict(signal.metadata)
+        metadata["deleted"] = True
+
+        emit_embedding_request(
+            content=signal.content,
+            team_id=input.team_id,
+            product="signals",
+            document_type="signal",
+            rendering="plain",
+            document_id=signal.signal_id,
+            models=[m.value for m in EmbeddingModelName],
+            timestamp=signal.timestamp,
+            metadata=metadata,
+        )
+
+        await emit_signal(
+            team=team,
+            source_product=signal.source_product,
+            source_type=signal.source_type,
+            source_id=signal.source_id,
+            description=signal.content,
+            weight=signal.weight,
+            extra=signal.extra,
+        )
+
+    logger.info(
+        "Deleted and queued signals for team reingestion",
+        team_id=input.team_id,
+        signal_count=len(input.signals),
+    )
+
+
+@temporalio.activity.defn
+async def pause_grouping_until_activity(input: PauseGroupingUntilInput) -> None:
+    await TeamSignalGroupingV2Workflow.pause_until(input.team_id, input.timestamp)
+    logger.info(
+        "Paused grouping workflow",
+        team_id=input.team_id,
+        paused_until=input.timestamp.isoformat(),
+    )
+
+
+@temporalio.activity.defn
+async def get_grouping_paused_state_activity(input: GetGroupingPausedStateInput) -> datetime | None:
+    return await TeamSignalGroupingV2Workflow.paused_state(input.team_id)
+
+
+@temporalio.activity.defn
+async def restore_grouping_pause_activity(input: RestoreGroupingPauseInput) -> None:
+    if input.paused_until is not None and input.paused_until > datetime.now(tz=UTC):
+        await TeamSignalGroupingV2Workflow.pause_until(input.team_id, input.paused_until)
+        logger.info(
+            "Restored grouping pause",
+            team_id=input.team_id,
+            paused_until=input.paused_until.isoformat(),
+        )
+        return
+
+    await TeamSignalGroupingV2Workflow.unpause(input.team_id)
+    logger.info("Cleared grouping pause", team_id=input.team_id)
 
 
 @temporalio.workflow.defn(name="signal-report-reingestion")
@@ -187,3 +355,122 @@ class SignalReportReingestionWorkflow:
             f"Reingestion complete for report {inputs.report_id}: "
             f"{len(fetch_result.signals)} signals re-submitted to grouping"
         )
+
+
+@temporalio.workflow.defn(name="team-signal-reingestion")
+class TeamSignalReingestionWorkflow:
+    """Soft-delete every non-deleted signal for a team, queue it for re-ingestion, then restore grouping state."""
+
+    @staticmethod
+    def parse_inputs(inputs: list[str]) -> TeamSignalReingestionWorkflowInputs:
+        loaded = json.loads(inputs[0])
+        return TeamSignalReingestionWorkflowInputs(**loaded)
+
+    @staticmethod
+    def workflow_id_for(team_id: int) -> str:
+        return f"team-signal-reingestion-{team_id}"
+
+    async def _ensure_grouping_paused(
+        self,
+        team_id: int,
+        original_paused_until: datetime | None,
+    ) -> None:
+        target_paused_until = workflow.now() + GROUPING_PAUSE_EXTENSION
+        if original_paused_until is not None and original_paused_until > target_paused_until:
+            target_paused_until = original_paused_until
+
+        await workflow.execute_activity(
+            pause_grouping_until_activity,
+            PauseGroupingUntilInput(team_id=team_id, timestamp=target_paused_until),
+            start_to_close_timeout=timedelta(minutes=1),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+    async def _refresh_grouping_pause_if_needed(
+        self,
+        team_id: int,
+        original_paused_until: datetime | None,
+    ) -> None:
+        refreshed_paused_until: datetime | None = await workflow.execute_activity(
+            get_grouping_paused_state_activity,
+            GetGroupingPausedStateInput(team_id=team_id),
+            start_to_close_timeout=timedelta(minutes=1),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+        if refreshed_paused_until is None or refreshed_paused_until <= (
+            workflow.now() + GROUPING_PAUSE_REFRESH_THRESHOLD
+        ):
+            await self._ensure_grouping_paused(team_id, original_paused_until)
+
+    @temporalio.workflow.run
+    async def run(self, inputs: TeamSignalReingestionWorkflowInputs) -> None:
+        original_paused_until: datetime | None = await workflow.execute_activity(
+            get_grouping_paused_state_activity,
+            GetGroupingPausedStateInput(team_id=inputs.team_id),
+            start_to_close_timeout=timedelta(minutes=1),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        await self._ensure_grouping_paused(inputs.team_id, original_paused_until)
+
+        wait_signals: list[WaitForClickHouseSignal] = []
+
+        try:
+            while True:
+                await self._refresh_grouping_pause_if_needed(inputs.team_id, original_paused_until)
+
+                fetch_result: FetchTeamSignalsBatchOutput = await workflow.execute_activity(
+                    fetch_team_signals_batch_activity,
+                    FetchTeamSignalsBatchInput(
+                        team_id=inputs.team_id,
+                        offset=0,
+                        limit=TEAM_SIGNAL_REINGESTION_BATCH_SIZE,
+                    ),
+                    start_to_close_timeout=timedelta(minutes=5),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+
+                if not fetch_result.signals:
+                    workflow.logger.info(
+                        "Team-wide signal reingestion complete",
+                        team_id=inputs.team_id,
+                    )
+                    break
+
+                await workflow.execute_activity(
+                    delete_and_reingest_signals_activity,
+                    ReingestSignalsInput(team_id=inputs.team_id, signals=fetch_result.signals),
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+
+                wait_signals = [
+                    WaitForClickHouseSignal(signal_id=signal.signal_id, timestamp=signal.timestamp)
+                    for signal in fetch_result.signals
+                ]
+
+                # Always fetch from offset 0 on the next iteration. We intentionally do not
+                # paginate with offsets across iterations because each batch emits deletion
+                # rows, shrinking the non-deleted result set underneath us once those rows
+                # land in ClickHouse.
+                await self._refresh_grouping_pause_if_needed(inputs.team_id, original_paused_until)
+
+                await workflow.execute_activity(
+                    wait_for_signal_in_clickhouse_activity,
+                    WaitForClickHouseInput(
+                        team_id=inputs.team_id,
+                        signals=wait_signals,
+                        max_wait_time_seconds=3600,
+                    ),
+                    start_to_close_timeout=timedelta(hours=1, minutes=5),
+                    heartbeat_timeout=timedelta(minutes=2),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+                wait_signals = []
+        finally:
+            await workflow.execute_activity(
+                restore_grouping_pause_activity,
+                RestoreGroupingPauseInput(team_id=inputs.team_id, paused_until=original_paused_until),
+                start_to_close_timeout=timedelta(minutes=1),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
