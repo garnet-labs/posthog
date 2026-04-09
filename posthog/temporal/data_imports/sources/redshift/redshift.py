@@ -281,6 +281,7 @@ def get_primary_keys_for_schemas(
                     JOIN information_schema.key_column_usage kcu
                     ON tc.constraint_name = kcu.constraint_name
                     AND tc.table_schema = kcu.table_schema
+                    AND tc.table_name = kcu.table_name
                     WHERE tc.table_schema = {schema}
                     AND tc.table_name = ANY({names})
                     AND tc.constraint_type = 'PRIMARY KEY'
