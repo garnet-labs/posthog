@@ -14,6 +14,18 @@ from products.signals.backend.temporal.reingestion import TeamSignalReingestionW
 from products.signals.backend.temporal.types import TeamSignalReingestionWorkflowInputs
 
 
+async def _start_team_signal_reingestion_workflow(team_id: int) -> None:
+    client = await async_connect()
+    await client.start_workflow(
+        TeamSignalReingestionWorkflow.run,
+        TeamSignalReingestionWorkflowInputs(team_id=team_id),
+        id=TeamSignalReingestionWorkflow.workflow_id_for(team_id),
+        task_queue=settings.VIDEO_EXPORT_TASK_QUEUE,
+        execution_timeout=timedelta(hours=24),
+        retry_policy=RetryPolicy(maximum_attempts=1),
+    )
+
+
 class Command(BaseCommand):
     help = "Start the team-wide signal reingestion workflow for a team."
 
@@ -31,20 +43,11 @@ class Command(BaseCommand):
         workflow_id = TeamSignalReingestionWorkflow.workflow_id_for(team_id)
 
         try:
-            client = async_to_sync(async_connect)()
-            async_to_sync(client.start_workflow)(
-                "team-signal-reingestion",
-                TeamSignalReingestionWorkflowInputs(team_id=team_id),
-                id=workflow_id,
-                task_queue=settings.VIDEO_EXPORT_TASK_QUEUE,
-                execution_timeout=timedelta(hours=24),
-                retry_policy=RetryPolicy(maximum_attempts=1),
-            )
+            async_to_sync(_start_team_signal_reingestion_workflow)(team_id)
         except WorkflowAlreadyStartedError:
             self.stdout.write(
                 self.style.WARNING(
-                    f"Team signal reingestion workflow already running for team {team_id} ({team.name}) "
-                    f"[workflow_id={workflow_id}]"
+                    f"Team signal reingestion workflow already running for team {team_id} ({team.name}) [workflow_id={workflow_id}]"
                 )
             )
             return

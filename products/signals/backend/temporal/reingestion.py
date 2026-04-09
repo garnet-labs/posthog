@@ -124,7 +124,6 @@ async def reingest_signals_activity(input: ReingestSignalsInput) -> None:
 @dataclass
 class FetchTeamSignalsBatchInput:
     team_id: int
-    offset: int = 0
     limit: int = TEAM_SIGNAL_REINGESTION_BATCH_SIZE
 
 
@@ -171,13 +170,11 @@ async def fetch_team_signals_batch_activity(input: FetchTeamSignalsBatchInput) -
             WHERE NOT JSONExtractBool(metadata, 'deleted')
             ORDER BY timestamp DESC, document_id DESC
             LIMIT {{limit}}
-            OFFSET {{offset}}
         """,
         team=team,
         placeholders={
             "model_name": ast.Constant(value=EMBEDDING_MODEL.value),
             "limit": ast.Constant(value=input.limit),
-            "offset": ast.Constant(value=input.offset),
         },
     )
 
@@ -202,7 +199,6 @@ async def fetch_team_signals_batch_activity(input: FetchTeamSignalsBatchInput) -
     logger.info(
         "Fetched team signals batch for reingestion",
         team_id=input.team_id,
-        offset=input.offset,
         limit=input.limit,
         signal_count=len(signals),
     )
@@ -217,7 +213,7 @@ async def delete_and_reingest_signals_activity(input: ReingestSignalsInput) -> N
         metadata = dict(signal.metadata)
         metadata["deleted"] = True
 
-        emit_embedding_request(
+        await sync_to_async(emit_embedding_request, thread_sensitive=False)(
             content=signal.content,
             team_id=input.team_id,
             product="signals",
@@ -448,7 +444,6 @@ class TeamSignalReingestionWorkflow:
                     fetch_team_signals_batch_activity,
                     FetchTeamSignalsBatchInput(
                         team_id=inputs.team_id,
-                        offset=0,
                         limit=TEAM_SIGNAL_REINGESTION_BATCH_SIZE,
                     ),
                     start_to_close_timeout=timedelta(minutes=5),
@@ -497,7 +492,6 @@ class TeamSignalReingestionWorkflow:
                     heartbeat_timeout=timedelta(minutes=2),
                     retry_policy=RetryPolicy(maximum_attempts=2),
                 )
-                wait_signals = []
         finally:
             await workflow.execute_activity(
                 restore_grouping_pause_activity,

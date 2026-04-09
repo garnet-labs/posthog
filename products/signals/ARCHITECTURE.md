@@ -212,7 +212,7 @@ This workflow is intended for full-team regrouping after changes to matching / p
 3. **Fetch the next batch** of non-deleted signals from ClickHouse → `fetch_team_signals_batch_activity`
    - Uses `ORDER BY timestamp DESC, document_id DESC`
    - Uses `LIMIT 50`
-   - Always fetches from `OFFSET 0`
+   - Re-fetches the current first 50 undeleted rows each iteration
 4. **Soft-delete + queue re-ingestion** for that batch → `delete_and_reingest_signals_activity`
    - Emits a deleted replacement row for each existing signal using the original `document_id`, timestamp, and metadata plus `deleted=true`
    - Calls `emit_signal()` for each signal while grouping is paused, so the new signals are buffered but not grouped yet
@@ -225,7 +225,7 @@ This workflow is intended for full-team regrouping after changes to matching / p
    - Runs after all signals have been re-queued, but while grouping is still paused, so the re-emitted signals regroup into a clean ORM state when processing resumes
 9. **Restore the prior grouping pause state** → `restore_grouping_pause_activity`
 
-Important detail: the workflow intentionally does **not** paginate across iterations with offsets. Each batch mutates the underlying non-deleted result set by emitting delete rows, so once those rows land in ClickHouse the result set shrinks. Re-fetching from `OFFSET 0` after each batch avoids skipping signals.
+Important detail: the workflow intentionally does **not** paginate across iterations with offsets. Each batch mutates the underlying non-deleted result set by emitting delete rows, so once those rows land in ClickHouse the result set shrinks. Re-fetching the current first batch each time avoids skipping signals.
 
 This workflow is currently started via the Django management command `reingest_team_signals`, not via a REST endpoint.
 
