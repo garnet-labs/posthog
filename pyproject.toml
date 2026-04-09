@@ -271,6 +271,9 @@ sentiment = [
 required-version = "~=0.10.2"
 exclude-newer = "7 days"
 exclude-newer-package = { hogql-parser = false, posthoganalytics = false }
+constraint-dependencies = [
+    "langgraph-checkpoint<3",
+]
 
 [tool.uv.sources]
 infi-clickhouse-orm = { git = "https://github.com/PostHog/infi.clickhouse_orm", rev = "4e3996becf66bf5c26580aff12a80425d9d56fe5" }
