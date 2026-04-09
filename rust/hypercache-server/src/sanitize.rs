@@ -104,7 +104,15 @@ fn hostname_in_allowed_url_list(allowed: &[String], hostname: Option<&str>) -> b
         .collect();
 
     for permitted_domain in permitted_domains {
-        if permitted_domain.contains('*') {
+        if let Some(suffix) = permitted_domain.strip_prefix("*.") {
+            // Fast path: `*.example.com` → check if hostname ends with `.example.com`
+            // and has at least one character before the dot (bare `example.com` shouldn't match)
+            let dot_suffix = format!(".{suffix}");
+            if hostname.ends_with(&dot_suffix) || hostname_stripped.ends_with(&dot_suffix) {
+                return true;
+            }
+        } else if permitted_domain.contains('*') {
+            // Rare: non-prefix wildcards like `app-*.example.com` — fall back to regex
             let pattern = format!(
                 "^{}$",
                 regex::escape(&permitted_domain).replace("\\*", ".*")
