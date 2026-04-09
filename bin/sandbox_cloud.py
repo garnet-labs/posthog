@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import sys
+import gzip
 import json
 import time
+import base64
 import shutil
 import subprocess
-import webbrowser
 from pathlib import Path
 
 from _sandbox_lib import (
@@ -27,11 +28,12 @@ from _sandbox_lib import (
 
 
 def _load_cloud_config() -> dict:
-    """Load cloud sandbox config from ~/.posthog-sandboxes/cloud-config.json."""
     try:
         return json.loads(CLOUD_CONFIG_FILE.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {}
+    except json.JSONDecodeError as e:
+        fatal(f"Corrupt cloud config {CLOUD_CONFIG_FILE}: {e}")
 
 
 def _save_cloud_config(config: dict) -> None:
@@ -40,15 +42,8 @@ def _save_cloud_config(config: dict) -> None:
 
 
 def _ensure_cloud_config() -> dict:
-    """Ensure cloud config exists with required fields. Prompt if missing."""
     config = _load_cloud_config()
     changed = False
-
-    # Migrate from old AMI-based config
-    if "ami_id" in config:
-        info("Migrating cloud config: removing ami_id (no longer needed)")
-        del config["ami_id"]
-        changed = True
 
     if "s3_bucket" not in config:
         val = input("S3 bucket for Docker cache [posthog-sandbox-cache]: ").strip() or "posthog-sandbox-cache"
@@ -84,24 +79,19 @@ def _ensure_cloud_config() -> dict:
 
 
 def _cloud_hostname(owner: str, branch: str) -> str:
-    """Generate a unique Tailscale hostname for a cloud sandbox.
-
-    Includes a random suffix so recreating a sandbox for the same branch
-    doesn't collide with stale Tailscale nodes from previous instances.
-    """
+    """Random suffix prevents collisions with stale Tailscale nodes."""
     import secrets
 
     slug = slugify(branch)
-    suffix = secrets.token_hex(3)  # 6 hex chars
+    suffix = secrets.token_hex(3)
     hostname = f"sandbox-{owner}-{slug}-{suffix}"
-    # Tailscale hostnames max 63 chars
+    # Tailscale hostnames max 63 chars, must not end with '-'
     if len(hostname) > 63:
-        hostname = hostname[:63]
+        hostname = hostname[:63].rstrip("-")
     return hostname
 
 
 def _aws(config: dict, *args: str, capture: bool = True) -> subprocess.CompletedProcess:
-    """Run an aws CLI command with the configured profile and region."""
     cmd = [
         "aws",
         "--region",
@@ -113,43 +103,26 @@ def _aws(config: dict, *args: str, capture: bool = True) -> subprocess.Completed
         *args,
     ]
     try:
-        return subprocess.run(
-            cmd,
-            check=True,
-            capture_output=capture,
-            text=capture,
-        )
+        return subprocess.run(cmd, check=True, capture_output=capture, text=capture)
     except FileNotFoundError:
         fatal(
             "AWS CLI not found. Install it: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
         )
     except subprocess.CalledProcessError as e:
-        # Re-raise with a cleaner message — the generic handler in main()
-        # would show the full command including --profile and --region.
-        aws_args = " ".join(args)
-        error(f"aws {aws_args} failed (exit {e.returncode})")
+        error(f"aws {' '.join(args)} failed (exit {e.returncode})")
         for line in (e.stderr or "").strip().splitlines():
             print(f"  {line}", file=sys.stderr)
         sys.exit(1)
 
 
 def _cloud_get_owner() -> str:
-    """Get the current user's identity for sandbox ownership."""
-    result = subprocess.run(
-        ["git", "config", "user.email"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run(["git", "config", "user.email"], capture=True, check=False)
     if result.returncode == 0 and result.stdout.strip():
-        # Use the part before @ as the owner
-        email = result.stdout.strip()
-        return email.split("@")[0].replace(".", "-")
+        return result.stdout.strip().split("@")[0].replace(".", "-")
     return os.environ.get("USER", "unknown")
 
 
 def _cloud_find_instance(config: dict, branch: str) -> dict | None:
-    """Find a cloud sandbox instance by branch tag."""
     owner = _cloud_get_owner()
     result = _aws(
         config,
@@ -168,7 +141,6 @@ def _cloud_find_instance(config: dict, branch: str) -> dict | None:
 
 
 def _cloud_list_instances(config: dict) -> list[dict]:
-    """List all cloud sandbox instances for the current user."""
     owner = _cloud_get_owner()
     result = _aws(
         config,
@@ -187,11 +159,51 @@ def _cloud_list_instances(config: dict) -> list[dict]:
 
 
 def _cloud_get_tag(instance: dict, key: str) -> str:
-    """Get a tag value from an EC2 instance."""
     for tag in instance.get("Tags", []):
         if tag["Key"] == key:
             return tag["Value"]
     return ""
+
+
+def _require_instance(branch: str, *, require_running: bool = True) -> tuple[dict, dict, str]:
+    config = _ensure_cloud_config()
+    instance = _cloud_find_instance(config, branch)
+    if not instance:
+        fatal(f"No cloud sandbox found for branch '{branch}'")
+    if require_running and instance["State"]["Name"] != "running":
+        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    if require_running and not hostname:
+        fatal("No Tailscale hostname found for this sandbox")
+    return config, instance, hostname
+
+
+def _ssh_cmd(
+    hostname: str,
+    *,
+    agent_forward: bool = False,
+    tty: bool = False,
+    connect_timeout: int | None = None,
+) -> list[str]:
+    cmd = ["ssh"]
+    if agent_forward:
+        cmd.append("-A")
+    if tty:
+        cmd.append("-t")
+    cmd.extend(
+        [
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "LogLevel=ERROR",
+        ]
+    )
+    if connect_timeout is not None:
+        cmd.extend(["-o", f"ConnectTimeout={connect_timeout}"])
+    cmd.append(f"ubuntu@{hostname}")
+    return cmd
 
 
 def _cloud_render_user_data(
@@ -205,31 +217,22 @@ def _cloud_render_user_data(
     claude_json: str,
     s3_archive_url: str,
 ) -> str:
-    """Render the cloud-init script with sandbox-specific values.
+    """Returns base64-encoded gzip data for AWS user-data."""
 
-    Returns base64-encoded gzip data — cloud-init auto-detects the gzip
-    magic bytes and decompresses before executing.  This keeps us well
-    under the 16 KB AWS user-data limit.
-    """
-    import gzip
-    import base64
+    def b64(val: str) -> str:
+        return base64.b64encode(val.encode()).decode() if val else ""
 
     template = CLOUD_INIT_TEMPLATE.read_text()
-
-    # Base64-encode values that may contain quotes or special chars
-    # to avoid breaking the bash script. Cloud-init decodes them.
     replacements = {
         "__SANDBOX_BRANCH__": branch,
         "__SANDBOX_OWNER__": owner,
         "__SANDBOX_HOSTNAME__": hostname,
-        "__TAILSCALE_AUTH_KEY_B64__": base64.b64encode(tailscale_key.encode()).decode() if tailscale_key else "",
-        "__SSH_AUTHORIZED_KEYS_B64__": base64.b64encode(ssh_keys.encode()).decode() if ssh_keys else "",
-        "__CLAUDE_CREDENTIALS_B64__": base64.b64encode(claude_credentials.encode()).decode()
-        if claude_credentials
-        else "",
-        "__CLAUDE_SETTINGS_B64__": base64.b64encode(claude_settings.encode()).decode() if claude_settings else "",
-        "__CLAUDE_JSON_B64__": base64.b64encode(claude_json.encode()).decode() if claude_json else "",
-        "__S3_ARCHIVE_URL_B64__": base64.b64encode(s3_archive_url.encode()).decode() if s3_archive_url else "",
+        "__TAILSCALE_AUTH_KEY_B64__": b64(tailscale_key),
+        "__SSH_AUTHORIZED_KEYS_B64__": b64(ssh_keys),
+        "__CLAUDE_CREDENTIALS_B64__": b64(claude_credentials),
+        "__CLAUDE_SETTINGS_B64__": b64(claude_settings),
+        "__CLAUDE_JSON_B64__": b64(claude_json),
+        "__S3_ARCHIVE_URL_B64__": b64(s3_archive_url),
     }
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)
@@ -239,19 +242,15 @@ def _cloud_render_user_data(
 
 
 def _cloud_get_tailscale_key(config: dict) -> str:
-    """Get the Tailscale auth key from config or Secrets Manager."""
-    # Check local config first
     if "tailscale_auth_key" in config:
         return config["tailscale_auth_key"]
 
-    # Try Secrets Manager
     secret_arn = config.get("tailscale_secret_arn")
     if secret_arn:
         result = _aws(config, "secretsmanager", "get-secret-value", "--secret-id", secret_arn)
         data = json.loads(result.stdout)
         return data["SecretString"]
 
-    # Prompt and save
     key = input("Tailscale auth key (reusable + ephemeral): ").strip()
     if not key:
         fatal(
@@ -263,14 +262,8 @@ def _cloud_get_tailscale_key(config: dict) -> str:
 
 
 def _cloud_gather_auth() -> tuple[str, str, str, str]:
-    """Gather SSH keys and Claude auth for the cloud sandbox."""
-    # SSH keys
     ssh_dir = Path.home() / ".ssh"
-    ssh_keys = []
-    if ssh_dir.is_dir():
-        for pub in ssh_dir.glob("*.pub"):
-            ssh_keys.append(pub.read_text().strip())
-    ssh_keys_str = "\n".join(ssh_keys)
+    ssh_keys = [pub.read_text().strip() for pub in ssh_dir.glob("*.pub")] if ssh_dir.is_dir() else []
 
     if not ssh_keys:
         fatal(
@@ -279,7 +272,6 @@ def _cloud_gather_auth() -> tuple[str, str, str, str]:
             "  Generate one with: ssh-keygen -t ed25519"
         )
 
-    # Claude auth
     claude_dir = Path.home() / ".claude"
     claude_credentials = ""
     claude_settings = ""
@@ -313,11 +305,10 @@ def _cloud_gather_auth() -> tuple[str, str, str, str]:
         full = json.loads(claude_json_file.read_text())
         claude_json = json.dumps({k: v for k, v in full.items() if k in CLAUDE_JSON_KEEP})
 
-    return ssh_keys_str, claude_credentials, claude_settings, claude_json
+    return "\n".join(ssh_keys), claude_credentials, claude_settings, claude_json
 
 
 def _cloud_discover_ubuntu_ami(config: dict) -> str:
-    """Find the latest Ubuntu 24.04 x86_64 AMI from Canonical."""
     info("Discovering latest Ubuntu 24.04 AMI...")
     result = _aws(
         config,
@@ -341,12 +332,10 @@ def _cloud_discover_ubuntu_ami(config: dict) -> str:
 
 
 def _cloud_generate_presigned_url(config: dict) -> str:
-    """Generate a pre-signed S3 URL for the Docker cache archive."""
     bucket = config["s3_bucket"]
     key = config["s3_key"]
     s3_uri = f"s3://{bucket}/{key}"
 
-    # Verify the object exists
     result = _aws(config, "s3", "ls", s3_uri)
     if not result.stdout.strip():
         fatal(f"Docker cache archive not found at {s3_uri}\n  Upload it first: bin/sandbox cloud upload-cache")
@@ -371,7 +360,6 @@ def cmd_cloud_create(branch: str) -> None:
     owner = _cloud_get_owner()
     hostname = _cloud_hostname(owner, branch)
 
-    # Check if sandbox already exists
     existing = _cloud_find_instance(config, branch)
     if existing:
         state = existing["State"]["Name"]
@@ -382,9 +370,6 @@ def cmd_cloud_create(branch: str) -> None:
         print(f"  Destroy it: sandbox cloud destroy {branch}")
         sys.exit(1)
 
-    # Check if the branch needs to be pushed to the remote.
-    # cloud-init.sh can create a new branch from origin/master, but if the
-    # user has local commits they probably want those on the sandbox.
     remote_ref = run(
         ["git", "ls-remote", "--heads", "origin", branch],
         capture=True,
@@ -414,10 +399,7 @@ def cmd_cloud_create(branch: str) -> None:
     info(f"Creating cloud sandbox for '{branch}'...")
     info(f"  Tailscale hostname: {hostname}")
 
-    # Auto-discover Ubuntu AMI (no custom AMI needed)
     ami_id = _cloud_discover_ubuntu_ami(config)
-
-    # Generate pre-signed S3 URL for Docker cache
     s3_archive_url = _cloud_generate_presigned_url(config)
 
     tailscale_key = _cloud_get_tailscale_key(config)
@@ -435,10 +417,7 @@ def cmd_cloud_create(branch: str) -> None:
         s3_archive_url=s3_archive_url,
     )
 
-    # AWS user data limit is 16KB (decoded size, i.e. the gzip blob).
-    import base64 as _b64
-
-    user_data_bytes = len(_b64.b64decode(user_data))
+    user_data_bytes = len(base64.b64decode(user_data))
     info(f"  User data size: {user_data_bytes} bytes (gzip compressed, limit 16384)")
     if user_data_bytes > 16384:
         fatal(
@@ -492,19 +471,7 @@ def cmd_cloud_create(branch: str) -> None:
 
     info(f"Instance {instance_id} running. Waiting for Tailscale SSH...")
 
-    # Poll until we can SSH in via Tailscale
-    ssh_base = [
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=5",
-        "-o",
-        "LogLevel=ERROR",
-        f"ubuntu@{hostname}",
-    ]
+    ssh_base = _ssh_cmd(hostname, connect_timeout=5)
     deadline = time.monotonic() + 180  # 3 min for Tailscale to join
     while time.monotonic() < deadline:
         result = run(ssh_base + ["true"], check=False, capture=True)
@@ -522,8 +489,6 @@ def cmd_cloud_create(branch: str) -> None:
     info("Tailing boot log (Ctrl-C to detach, sandbox keeps booting)...")
     print()
 
-    # Tail the boot log until sandbox creation finishes, then attach.
-    # We use tail -f and watch for the completion marker.
     boot_done = False
     try:
         proc = subprocess.Popen(
@@ -554,7 +519,6 @@ def cmd_cloud_create(branch: str) -> None:
     print()
     success(f"Cloud sandbox ready for '{branch}'")
 
-    # Open browser in background, then attach to mprocs (like local flow)
     url = f"http://{hostname}:{PORT_BASE}"
     subprocess.Popen(
         [sys.executable, "-c", f"import webbrowser; webbrowser.open({url!r})"],
@@ -565,30 +529,13 @@ def cmd_cloud_create(branch: str) -> None:
     )
 
     info("Attaching to mprocs... (detach with Ctrl-b d)")
-    os.execvp(
-        "ssh",
-        [
-            "ssh",
-            "-A",
-            "-t",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            f"ubuntu@{hostname}",
-            f"cd /home/ubuntu/posthog && python3 bin/sandbox shell {branch}",
-        ],
-    )
+    ssh = _ssh_cmd(hostname, agent_forward=True, tty=True)
+    os.execvp("ssh", ssh + [f"cd /home/ubuntu/posthog && python3 bin/sandbox shell {branch}"])
 
 
 def cmd_cloud_destroy(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-
+    config, instance, hostname = _require_instance(branch, require_running=False)
     instance_id = instance["InstanceId"]
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
 
     warn(f"Destroying cloud sandbox for '{branch}' (instance {instance_id})...")
 
@@ -619,76 +566,31 @@ def cmd_cloud_list() -> None:
 
 
 def cmd_cloud_shell(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-    if instance["State"]["Name"] != "running":
-        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
-
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
-    if not hostname:
-        fatal("No Tailscale hostname found for this sandbox")
-
-    # SSH to the host, then use bin/sandbox shell (same as local).
-    # UserKnownHostsFile=/dev/null avoids polluting known_hosts — Tailscale
-    # handles host identity, and the host key changes on every EC2 instance.
-    os.execvp(
-        "ssh",
-        [
-            "ssh",
-            "-A",  # Forward SSH agent for git auth
-            "-t",  # Force TTY allocation
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            f"ubuntu@{hostname}",
-            f"cd /home/ubuntu/posthog && python3 bin/sandbox shell {branch}",
-        ],
-    )
+    _config, _instance, hostname = _require_instance(branch)
+    ssh = _ssh_cmd(hostname, agent_forward=True, tty=True)
+    os.execvp("ssh", ssh + [f"cd /home/ubuntu/posthog && python3 bin/sandbox shell {branch}"])
 
 
 def cmd_cloud_open(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-    if instance["State"]["Name"] != "running":
-        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
+    import webbrowser
 
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    _config, _instance, hostname = _require_instance(branch)
     url = f"http://{hostname}:{PORT_BASE}"
     info(f"Opening {url}...")
     webbrowser.open(url)
 
 
 def cmd_cloud_logs(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
-    if not hostname:
-        fatal("No Tailscale hostname found for this sandbox")
+    _config, _instance, hostname = _require_instance(branch)
 
     slug = slugify(branch)
     container = f"sandbox-{slug}-app-1"
 
-    # Show the boot log (one-shot), then follow the app container logs.
-    # We use `docker logs` directly rather than `docker compose logs` because
-    # the compose file requires env vars that aren't set in the SSH session.
+    ssh = _ssh_cmd(hostname, tty=True)
     os.execvp(
         "ssh",
-        [
-            "ssh",
-            "-t",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            f"ubuntu@{hostname}",
+        ssh
+        + [
             f"echo '=== Boot log ===' && cat /var/log/sandbox-boot.log 2>/dev/null; "
             f"echo '\\n=== App container logs ===' && docker logs -f {container}",
         ],
@@ -696,14 +598,7 @@ def cmd_cloud_logs(branch: str) -> None:
 
 
 def cmd_cloud_code(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-    if instance["State"]["Name"] != "running":
-        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
-
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    _config, _instance, hostname = _require_instance(branch)
 
     code_cmd = shutil.which("code")
     if not code_cmd:
@@ -716,14 +611,7 @@ def cmd_cloud_code(branch: str) -> None:
 
 
 def cmd_cloud_idea(branch: str) -> None:
-    config = _ensure_cloud_config()
-    instance = _cloud_find_instance(config, branch)
-    if not instance:
-        fatal(f"No cloud sandbox found for branch '{branch}'")
-    if instance["State"]["Name"] != "running":
-        fatal(f"Sandbox is not running (state: {instance['State']['Name']})")
-
-    hostname = _cloud_get_tag(instance, "sandbox:hostname")
+    _config, _instance, hostname = _require_instance(branch)
 
     from urllib.parse import quote
 
@@ -748,29 +636,20 @@ def cmd_cloud_idea(branch: str) -> None:
 
 
 def cmd_cloud_upload_cache() -> None:
-    """Archive local Docker data and upload to S3 for cloud sandbox boot."""
     config = _ensure_cloud_config()
-    bucket = config["s3_bucket"]
-    key = config["s3_key"]
-    s3_uri = f"s3://{bucket}/{key}"
+    s3_uri = f"s3://{config['s3_bucket']}/{config['s3_key']}"
     archive_path = "/tmp/docker-data.tar.zst"
 
     info("Archiving Docker data for cloud sandbox cache...")
 
-    # Check Docker is running and has images
     result = run(["docker", "info", "--format", "{{.Images}}"], capture=True, check=False)
     if result.returncode != 0:
         fatal("Docker is not running. Start Docker first.")
-    image_count = result.stdout.strip()
-    info(f"  Docker has {image_count} images")
+    info(f"  Docker has {result.stdout.strip()} images")
 
-    # Stop all sandbox containers first for a cleaner snapshot
     info("Stopping sandbox containers...")
     run(["docker", "compose", "-p", "sandbox-cache-init", "down", "-t", "0"], check=False, capture=True)
 
-    # Archive Docker data from inside a container. This works on both Linux
-    # (direct access) and macOS (OrbStack/Docker Desktop — the container sees
-    # the real /var/lib/docker inside the Linux VM).
     info("Creating archive (this may take a few minutes)...")
     run(
         [
@@ -786,11 +665,10 @@ def cmd_cloud_upload_cache() -> None:
             "-c",
             "apk add --no-cache zstd > /dev/null 2>&1 && "
             "tar cf - -C /docker . | zstd -T0 -3 > /output/docker-data.tar.zst",
-        ],
+        ]
     )
 
-    # The archive is in /tmp inside the Docker VM. On Linux, that's the host /tmp.
-    # On macOS (OrbStack/Docker Desktop), we need to copy it out.
+    # On macOS the archive is inside the Docker VM — copy it to the host.
     if sys.platform == "darwin":
         info("Copying archive from Docker VM to host...")
         run(
@@ -806,7 +684,7 @@ def cmd_cloud_upload_cache() -> None:
                 "cp",
                 "/input/docker-data.tar.zst",
                 "/output/docker-data.tar.zst",
-            ],
+            ]
         )
 
     archive_size = Path(archive_path).stat().st_size
@@ -815,26 +693,14 @@ def cmd_cloud_upload_cache() -> None:
     info(f"Uploading to {s3_uri}...")
     _aws(config, "s3", "cp", archive_path, s3_uri, capture=False)
 
-    info("Cleaning up temp file...")
     Path(archive_path).unlink(missing_ok=True)
 
-    success(f"Docker cache uploaded to {s3_uri}")
-    info(f"  Archive size: {archive_size / (1024 * 1024):.0f} MB")
-    info("  Cloud sandboxes will download this at boot time.")
+    success(f"Docker cache uploaded to {s3_uri} ({archive_size / (1024 * 1024):.0f} MB)")
 
 
 def _cloud_export_credentials(config: dict) -> str:
-    """Export current AWS credentials as shell env vars for embedding in user data."""
     result = subprocess.run(
-        [
-            "aws",
-            "configure",
-            "export-credentials",
-            "--profile",
-            config["aws_profile"],
-            "--format",
-            "process",
-        ],
+        ["aws", "configure", "export-credentials", "--profile", config["aws_profile"], "--format", "process"],
         capture_output=True,
         text=True,
         check=False,
@@ -845,7 +711,6 @@ def _cloud_export_credentials(config: dict) -> str:
             f"  aws sso login --profile {config['aws_profile']}"
         )
     creds = json.loads(result.stdout)
-    # Build shell export lines
     lines = [
         f'export AWS_ACCESS_KEY_ID="{creds["AccessKeyId"]}"',
         f'export AWS_SECRET_ACCESS_KEY="{creds["SecretAccessKey"]}"',
@@ -856,25 +721,14 @@ def _cloud_export_credentials(config: dict) -> str:
 
 
 def cmd_cloud_build_cache() -> None:
-    """Launch an EC2 instance to build the sandbox cache and upload to S3."""
-    import base64
-
     config = _ensure_cloud_config()
     ami_id = _cloud_discover_ubuntu_ami(config)
 
-    # Export current AWS credentials for the build instance to upload to S3
     info("Exporting AWS credentials for build instance...")
     aws_creds_env = _cloud_export_credentials(config)
 
-    # Render the build-cache user data template
     template = BUILD_CACHE_TEMPLATE.read_text()
-    # Use the current branch so the build instance has local fixes
-    current_branch = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
+    current_branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture=True).stdout.strip()
     if current_branch == "HEAD":
         current_branch = ""  # detached HEAD, use master
 
@@ -939,7 +793,6 @@ def cmd_cloud_build_cache() -> None:
     )
     info(f"  Logs: sudo tail -f /var/log/sandbox-build-cache.log")
 
-    # Poll instance state — it stops itself on completion or failure
     timeout = 3600
     elapsed = 0
     interval = 30
@@ -961,7 +814,6 @@ def cmd_cloud_build_cache() -> None:
         if state in ("stopped", "stopping", "terminated", "shutting-down"):
             if state == "stopping":
                 time.sleep(30)
-            # Check if the build succeeded by verifying S3 object
             info("Build instance stopped. Verifying S3 upload...")
             verify = _aws(config, "s3", "ls", s3_uri)
             if verify.stdout.strip():
@@ -972,14 +824,15 @@ def cmd_cloud_build_cache() -> None:
                     size_bytes = int(parts[2])
                     info(f"  Size: {size_bytes / (1024 * 1024):.0f} MB")
             else:
-                error("Build failed — S3 object not found.")
-                info(f"  Start instance to debug:")
-                info(
+                if state != "terminated":
+                    _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)
+                fatal(
+                    f"Build failed — S3 object not found at {s3_uri}.\n"
+                    f"  Start instance to debug:\n"
                     f"    aws ec2 start-instances --instance-ids {instance_id} "
-                    f"--profile {config['aws_profile']} --region {config['region']}"
+                    f"--profile {config['aws_profile']} --region {config['region']}\n"
+                    f"  Then: sudo cat /var/log/sandbox-build-cache.log"
                 )
-                info(f"  Then: sudo cat /var/log/sandbox-build-cache.log")
-            # Clean up
             if state != "terminated":
                 info(f"Terminating build instance...")
                 _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)
@@ -992,7 +845,6 @@ def cmd_cloud_build_cache() -> None:
         time.sleep(interval)
         elapsed += interval
 
-    # Timeout — terminate the instance
     error(f"Build timed out after {timeout // 60} minutes.")
     info(f"Terminating instance {instance_id}...")
     _aws(config, "ec2", "terminate-instances", "--instance-ids", instance_id)

@@ -29,7 +29,6 @@ trap cleanup EXIT
 
 log "Cache build starting at $(date)"
 
-# --- Decode AWS credentials ---
 AWS_CREDENTIALS_B64="__AWS_CREDENTIALS_B64__"
 S3_BUCKET="__S3_BUCKET__"
 S3_KEY="__S3_KEY__"
@@ -39,7 +38,6 @@ if [ -n "$AWS_CREDENTIALS_B64" ]; then
     eval "$(echo "$AWS_CREDENTIALS_B64" | base64 -d)"
 fi
 
-# --- Set up NVMe instance store (if available) ---
 log "Setting up NVMe instance store..."
 
 ROOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" | head -1)
@@ -64,7 +62,6 @@ else
     log "No NVMe instance store found, building on EBS"
 fi
 
-# --- Install Docker ---
 log "Installing Docker..."
 # Pin overlay2 storage driver. Docker CE 29+ defaults to containerd snapshotters
 # ("overlayfs"), which stores image layers outside /var/lib/docker/. We archive
@@ -89,7 +86,6 @@ apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plug
 usermod -aG docker ubuntu
 log "Docker installed"
 
-# Point Docker at NVMe if available
 if [ "$USE_NVME" = true ]; then
     systemctl stop docker.socket docker
     mkdir -p /mnt/nvme/docker
@@ -99,7 +95,6 @@ if [ "$USE_NVME" = true ]; then
     log "Docker redirected to NVMe"
 fi
 
-# --- Install AWS CLI v2 ---
 log "Installing AWS CLI..."
 curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
 unzip -q /tmp/awscliv2.zip -d /tmp
@@ -107,7 +102,6 @@ unzip -q /tmp/awscliv2.zip -d /tmp
 rm -rf /tmp/awscliv2.zip /tmp/aws
 log "AWS CLI installed: $(aws --version)"
 
-# --- Clone PostHog repo ---
 BUILD_BRANCH="__BUILD_BRANCH__"
 log "Cloning PostHog repo..."
 cd /home/ubuntu
@@ -125,12 +119,10 @@ if [ -n "$BUILD_BRANCH" ]; then
 fi
 log "Repo at $(sudo -u ubuntu git rev-parse --short HEAD) ($(sudo -u ubuntu git rev-parse --abbrev-ref HEAD))"
 
-# --- Build database cache ---
 log "Building database cache (this takes ~10-15 min)..."
 sudo -u ubuntu sg docker -c "python3 bin/sandbox rebuild-cache"
 log "Database cache built"
 
-# --- Archive Docker data ---
 log "Archiving Docker data..."
 log "Docker data size: $(du -sh /var/lib/docker | cut -f1)"
 systemctl stop docker.socket docker
@@ -144,7 +136,6 @@ fi
 tar cf - -C /var/lib/docker . | zstd -T0 -3 > "$ARCHIVE_PATH"
 log "Archive created: $(du -h "$ARCHIVE_PATH" | cut -f1)"
 
-# --- Upload to S3 ---
 log "Uploading to s3://$S3_BUCKET/$S3_KEY..."
 aws s3 cp "$ARCHIVE_PATH" "s3://$S3_BUCKET/$S3_KEY" --region "$AWS_REGION"
 log "Upload complete"

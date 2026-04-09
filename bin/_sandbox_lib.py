@@ -10,10 +10,6 @@ import subprocess
 from pathlib import Path
 from typing import NoReturn
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_DIR = Path.home() / ".posthog-sandboxes"
 REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
@@ -22,10 +18,6 @@ PORT_BASE = 48001
 CLOUD_CONFIG_FILE = REGISTRY_DIR / "cloud-config.json"
 CLOUD_INIT_TEMPLATE = REPO_ROOT / "infra" / "cloud-sandbox" / "cloud-init.sh"
 BUILD_CACHE_TEMPLATE = REPO_ROOT / "infra" / "cloud-sandbox" / "build-cache.sh"
-
-# ---------------------------------------------------------------------------
-# Output helpers
-# ---------------------------------------------------------------------------
 
 _COLORS = {"red": "31", "green": "32", "yellow": "33", "blue": "34"}
 
@@ -62,11 +54,6 @@ def fatal(msg: str) -> NoReturn:
     sys.exit(1)
 
 
-# ---------------------------------------------------------------------------
-# Shell helpers
-# ---------------------------------------------------------------------------
-
-
 def run(
     cmd: list[str],
     *,
@@ -74,7 +61,6 @@ def run(
     capture: bool = False,
     env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run a subprocess, optionally merging extra env vars."""
     full_env = {**os.environ, **(env_extra or {})} if env_extra else None
     return subprocess.run(
         cmd,
