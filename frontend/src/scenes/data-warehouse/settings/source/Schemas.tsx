@@ -214,7 +214,7 @@ const StatusTagSetting: Record<ExternalDataSchemaStatus | ExternalDataJobStatus,
 
 export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaTableProps): JSX.Element => {
     const { currentTeam } = useValues(teamLogic)
-    const { updateSchema, reloadSchema, resyncSchema, deleteTable, setIsProjectTime } = useActions(
+    const { updateSchema, reloadSchema, resyncSchema, cancelSchema, deleteTable, setIsProjectTime } = useActions(
         dataWarehouseSourceSettingsLogic
     )
     const { isProjectTime, source } = useValues(dataWarehouseSourceSettingsLogic)
@@ -553,6 +553,18 @@ export const SchemaTable = ({ schemas, isLoading, isDirectQuerySource }: SchemaT
                                                                     Sync now
                                                                 </LemonButton>
                                                             </Tooltip>
+                                                            {schema.status === 'Running' && (
+                                                                <LemonButton
+                                                                    type="tertiary"
+                                                                    size="xsmall"
+                                                                    fullWidth
+                                                                    status="danger"
+                                                                    onClick={() => cancelSchema(schema)}
+                                                                    disabledReason={disabledReason}
+                                                                >
+                                                                    Cancel sync
+                                                                </LemonButton>
+                                                            )}
                                                             {schema.incremental && (
                                                                 <Tooltip title="Completely resync incrementally loaded data. Only recommended if there is an issue with data quality in previously imported data.">
                                                                     <LemonButton
@@ -677,7 +689,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         description: currentSyncMethodModalSchema.description,
                         should_sync_default: currentSyncMethodModalSchema.should_sync_default ?? true,
                         sync_type: currentSyncMethodModalSchema.sync_type,
-                        sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
+                        sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? null,
                         incremental_field: currentSyncMethodModalSchema.incremental_field ?? null,
                         incremental_field_type: currentSyncMethodModalSchema.incremental_field_type ?? null,
                         incremental_available: schemaIncrementalFields.incremental_available,
@@ -701,7 +713,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                             sync_type: syncType,
                             incremental_field: syncType === 'full_refresh' ? null : incrementalField,
                             incremental_field_type: syncType === 'full_refresh' ? null : incrementalFieldType,
-                            sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? '00:00:00',
+                            sync_time_of_day: currentSyncMethodModalSchema.sync_time_of_day ?? null,
                             primary_key_columns: syncType === 'incremental' ? (primaryKeyColumns ?? null) : null,
                         })
                     }}

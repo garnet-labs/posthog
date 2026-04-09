@@ -215,6 +215,40 @@ class TestTaskAPI(BaseTaskAPITest):
         self.assertEqual(data["description"], "New Description")
         self.assertEqual(data["repository"], "posthog/posthog")
 
+    def test_create_task_with_signal_report_same_team(self):
+        from products.signals.backend.models import SignalReport
+
+        report = SignalReport.objects.create(team=self.team)
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Signal Task",
+                "description": "From a signal report",
+                "origin_product": "signal_report",
+                "signal_report": str(report.id),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["signal_report"], str(report.id))
+
+    def test_create_task_with_signal_report_different_team_rejected(self):
+        from products.signals.backend.models import SignalReport
+
+        other_team = Team.objects.create(organization=self.organization, name="Other Team")
+        report = SignalReport.objects.create(team=other_team)
+        response = self.client.post(
+            "/api/projects/@current/tasks/",
+            {
+                "title": "Cross-team Task",
+                "description": "Should be rejected",
+                "origin_product": "signal_report",
+                "signal_report": str(report.id),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_update_task(self):
         task = self.create_task("Original Task")
 
@@ -284,6 +318,25 @@ class TestTaskAPI(BaseTaskAPITest):
         run_id = response.json()["latest_run"]["id"]
         task_run = TaskRun.objects.get(id=run_id)
         self.assertEqual(task_run.state["sandbox_environment_id"], str(sandbox_environment.id))
+        mock_workflow.assert_called_once()
+
+    @patch("products.tasks.backend.api.execute_task_processing_workflow")
+    def test_run_endpoint_persists_pending_user_message(self, mock_workflow):
+        task = self.create_task()
+
+        response = self.client.post(
+            f"/api/projects/@current/tasks/{task.id}/run/",
+            {"pending_user_message": "Read the attached file first"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        run_id = response.json()["latest_run"]["id"]
+        task_run = TaskRun.objects.get(id=run_id)
+        self.assertEqual(
+            task_run.state["pending_user_message"],
+            "Read the attached file first",
+        )
         mock_workflow.assert_called_once()
 
     def test_run_endpoint_rejects_invalid_sandbox_environment_id(self):

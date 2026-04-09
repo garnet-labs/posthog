@@ -5,12 +5,12 @@ from sshtunnel import BaseSSHTunnelForwarderError
 
 from posthog.schema import (
     ExternalDataSourceType as SchemaExternalDataSourceType,
-    Option,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
     SourceFieldSelectConfig,
     SourceFieldSelectConfigConverter,
+    SourceFieldSelectConfigOption,
     SourceFieldSSHTunnelConfig,
 )
 
@@ -95,7 +95,10 @@ class MySQLSource(SimpleSource[MySQLSourceConfig], SSHTunnelMixin, ValidateDatab
                         required=True,
                         defaultValue="true",
                         converter=SourceFieldSelectConfigConverter.STR_TO_BOOL,
-                        options=[Option(label="Yes", value="true"), Option(label="No", value="false")],
+                        options=[
+                            SourceFieldSelectConfigOption(label="Yes", value="true"),
+                            SourceFieldSelectConfigOption(label="No", value="false"),
+                        ],
                     ),
                     SourceFieldSSHTunnelConfig(name="ssh_tunnel", label="Use SSH tunnel?"),
                 ],
