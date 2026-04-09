@@ -17,9 +17,10 @@ from claude_agent_sdk.types import AssistantMessage, ToolUseBlock
 from github import PRData
 
 try:
+    import posthoganalytics
     from posthoganalytics.ai.claude_agent_sdk import query
 
-    _POSTHOG_AI_AVAILABLE = True
+    _POSTHOG_AI_AVAILABLE = bool(posthoganalytics.api_key)
 except ImportError:
     from claude_agent_sdk import query  # type: ignore[no-redef]
 
