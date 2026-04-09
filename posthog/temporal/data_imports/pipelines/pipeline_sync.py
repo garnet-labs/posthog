@@ -35,14 +35,14 @@ def merge_columns(
     db_columns: dict[str, str],
     table_schema_dict: dict[str, str],
     existing_columns: dict[str, Any],
-) -> dict[str, dict[str, str]]:
+) -> dict[str, Any]:
     """Build column metadata, preserving StringJSONDatabaseField from prior runs.
 
     Columns present in existing_columns but absent from db_columns are preserved
     to avoid losing schema information when get_columns() returns incomplete
     results during a sync (e.g., transient S3/ClickHouse introspection failures).
     """
-    columns: dict[str, dict[str, str]] = {}
+    columns: dict[str, Any] = {}
     for column_name, db_column_type in db_columns.items():
         hogql_type = table_schema_dict.get(column_name)
 
@@ -63,8 +63,16 @@ def merge_columns(
     # Preserve columns from prior syncs that are missing from the current introspection.
     # This prevents column loss when get_columns() returns partial results mid-sync.
     for column_name, column_meta in existing_columns.items():
-        if column_name not in columns and isinstance(column_meta, dict):
+        if column_name in columns:
+            continue
+
+        if isinstance(column_meta, dict):
             columns[column_name] = column_meta
+        elif isinstance(column_meta, str):
+            columns[column_name] = {
+                "clickhouse": column_meta,
+                "hogql": table_schema_dict.get(column_name, "StringDatabaseField"),
+            }
 
     return columns
 
@@ -214,16 +222,16 @@ async def validate_schema_and_update_table(
                 raw_db_columns = table_created.get_columns()
                 db_columns = {key: str(column.get("clickhouse", "")) for key, column in raw_db_columns.items()}
 
-                # Use select_for_update to prevent concurrent reads from seeing
-                # a partially-written columns state during the update.
-                with transaction.atomic():
-                    table_for_update = DataWarehouseTable.objects.select_for_update().get(id=table_created.id)
-                    existing_columns = table_for_update.columns or {}
-                    columns = merge_columns(db_columns, table_schema_dict or {}, existing_columns)
-                    table_for_update.columns = columns
-                    table_for_update.save(update_fields=["columns"])
-                    # Keep local reference in sync
-                    table_created.columns = columns
+                # select_for_update prevents two concurrent sync operations from
+                # causing a lost-update: both would read the current columns,
+                # merge independently, and one write would overwrite the other.
+                table_for_update = DataWarehouseTable.objects.select_for_update().get(id=table_created.id)
+                existing_columns = table_for_update.columns or {}
+                columns = merge_columns(db_columns, table_schema_dict or {}, existing_columns)
+                table_for_update.columns = columns
+                table_for_update.save(update_fields=["columns"])
+                # Keep local reference in sync
+                table_created.columns = columns
 
                 # schema could have been deleted by this point
                 schema_model = (

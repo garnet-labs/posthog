@@ -31,6 +31,7 @@ from posthog.schema import (
     TrendsQuery,
 )
 
+from posthog.hogql.errors import ExposedHogQLError
 from posthog.hogql.modifiers import create_default_modifiers_for_team
 from posthog.hogql.query import execute_hogql_query
 from posthog.hogql.timings import HogQLTimings
@@ -792,9 +793,6 @@ class TestTrendsDataWarehouseQuery(ClickhouseTestMixin, BaseTest):
         assert response.results[0]["count"] == expected_count
 
     def test_trends_breakdown_by_warehouse_person_property_with_empty_columns(self):
-        """When a warehouse table has empty columns (mid-sync), a trends query
-        with a data_warehouse_person_property breakdown should raise a clear error
-        rather than producing an opaque timeout or crash."""
         credential = DataWarehouseCredential.objects.create(team=self.team, access_key="key", access_secret="secret")
         DataWarehouseTable.objects.create(
             team=self.team,
@@ -826,15 +824,11 @@ class TestTrendsDataWarehouseQuery(ClickhouseTestMixin, BaseTest):
             ),
         )
 
-        from posthog.hogql.errors import ExposedHogQLError
-
         with freeze_time("2023-01-07"):
             with self.assertRaises(ExposedHogQLError):
                 TrendsQueryRunner(team=self.team, query=trends_query).calculate()
 
     def test_trends_breakdown_by_warehouse_person_property_with_missing_column(self):
-        """When a warehouse table exists but is missing the breakdown column
-        (e.g., column dropped during sync), the query should raise a clear error."""
         credential = DataWarehouseCredential.objects.create(team=self.team, access_key="key", access_secret="secret")
         DataWarehouseTable.objects.create(
             team=self.team,
@@ -867,8 +861,6 @@ class TestTrendsDataWarehouseQuery(ClickhouseTestMixin, BaseTest):
                 breakdown_type=BreakdownType.DATA_WAREHOUSE_PERSON_PROPERTY,
             ),
         )
-
-        from posthog.hogql.errors import ExposedHogQLError
 
         with freeze_time("2023-01-07"):
             with self.assertRaises(ExposedHogQLError):

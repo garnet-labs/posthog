@@ -2292,8 +2292,6 @@ class TestDatabase(BaseTest, QueryMatchingTest):
         assert get_data_warehouse_table_name(source, table_name) == expected
 
     def test_warehouse_join_on_persons_with_empty_columns_mid_sync(self):
-        """When a warehouse table has empty columns (simulating mid-sync state),
-        the join to persons should still be added but the table has no usable fields."""
         credential = DataWarehouseCredential.objects.create(team=self.team, access_key="key", access_secret="secret")
         DataWarehouseTable.objects.create(
             team=self.team,
@@ -2326,8 +2324,6 @@ class TestDatabase(BaseTest, QueryMatchingTest):
             )
 
     def test_warehouse_join_on_persons_with_partial_columns_mid_sync(self):
-        """When a warehouse table loses columns during sync, querying a missing
-        column through the person join should fail with a clear error."""
         credential = DataWarehouseCredential.objects.create(team=self.team, access_key="key", access_secret="secret")
         DataWarehouseTable.objects.create(
             team=self.team,
@@ -2364,8 +2360,6 @@ class TestDatabase(BaseTest, QueryMatchingTest):
             )
 
     def test_warehouse_join_skipped_when_joining_table_missing(self):
-        """When the warehouse table referenced by a join doesn't exist,
-        the join should be silently skipped."""
         DataWarehouseJoin.objects.create(
             team=self.team,
             source_table_name="persons",

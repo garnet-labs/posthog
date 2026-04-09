@@ -62,8 +62,6 @@ class TestMergeColumnsJsonPreservation:
 
 class TestMergeColumnsRaceCondition:
     def test_merge_columns_preserves_existing_when_db_columns_incomplete(self):
-        """When get_columns() returns incomplete results mid-sync,
-        existing columns not in db_columns are preserved."""
         existing_columns = {
             "size_range": {"clickhouse": "String", "hogql": "StringDatabaseField"},
             "user_id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
@@ -78,8 +76,6 @@ class TestMergeColumnsRaceCondition:
         assert result["size_range"] == {"clickhouse": "String", "hogql": "StringDatabaseField"}
 
     def test_merge_columns_preserves_all_when_db_columns_empty(self):
-        """When get_columns() returns empty results mid-sync,
-        all existing columns are preserved."""
         existing_columns = {
             "size_range": {"clickhouse": "String", "hogql": "StringDatabaseField"},
             "user_id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
@@ -92,7 +88,6 @@ class TestMergeColumnsRaceCondition:
         assert result == existing_columns
 
     def test_merge_columns_updates_existing_column_types(self):
-        """When db_columns has a column with a new type, the type is updated."""
         existing_columns = {
             "user_id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
         }
@@ -104,8 +99,6 @@ class TestMergeColumnsRaceCondition:
         assert result["user_id"] == {"clickhouse": "Int64", "hogql": "IntegerDatabaseField"}
 
     def test_merge_columns_skips_column_when_hogql_type_missing_from_schema(self):
-        """When table_schema_dict is missing a type for a column present in db_columns,
-        that column is skipped (with a captured exception)."""
         existing_columns = {
             "user_id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
         }
