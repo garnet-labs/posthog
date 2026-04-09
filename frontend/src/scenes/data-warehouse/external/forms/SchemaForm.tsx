@@ -174,7 +174,11 @@ export default function SchemaForm(): JSX.Element {
                                     !databaseSchema.some((schema) => schema.sync_type === 'incremental'),
                                 render: function RenderPrimaryKey(_, schema) {
                                     if (schema.sync_type !== 'incremental') {
-                                        return null
+                                        return (
+                                            <span className="text-xs text-muted-foreground">
+                                                No primary key selected
+                                            </span>
+                                        )
                                     }
 
                                     if (!schema.primary_key_columns || schema.primary_key_columns.length === 0) {
