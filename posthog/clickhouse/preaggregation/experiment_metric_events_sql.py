@@ -5,11 +5,15 @@
 # and store it here. Subsequent queries read from this table instead of
 # scanning events.
 #
-# Designed to support all metric types:
+# One row per entity per job, deduplicated by ReplacingMergeTree.
+#
+# Supported metric types:
 # - Funnel: uses `steps` array for step indicators
 # - Mean: uses `numeric_value` for the computed metric value
 # - Ratio: two separate jobs (numerator + denominator), both use `numeric_value`
-# - Retention: two separate jobs (start + completion), uses entity_id + timestamp
+#
+# Retention is not supported — it uses a different query structure
+# (separate start/completion CTEs) and will need its own approach.
 
 from django.conf import settings
 
