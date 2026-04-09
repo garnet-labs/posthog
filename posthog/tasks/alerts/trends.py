@@ -1,5 +1,7 @@
 from typing import NotRequired, Optional, TypedDict, cast
 
+import numpy as np
+
 from posthog.schema import (
     AlertCondition,
     AlertConditionType,
@@ -14,6 +16,7 @@ from posthog.schema import (
 from posthog.api.services.query import ExecutionMode
 from posthog.caching.calculate_results import calculate_for_query_based_insight
 from posthog.caching.fetch_from_cache import InsightResult
+from posthog.event_usage import EventSource
 from posthog.models import AlertConfiguration, Insight
 from posthog.tasks.alerts.utils import NON_TIME_SERIES_DISPLAY_TYPES, AlertEvaluationResult
 
@@ -72,7 +75,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
     So then we check current interval value first and alert if threshold breached, otherwise fallback and process previous interval.
     """
 
-    if "type" in alert.config and alert.config["type"] == "TrendsAlertConfig":
+    if alert.config and "type" in alert.config and alert.config["type"] == "TrendsAlertConfig":
         config = TrendsAlertConfig.model_validate(alert.config)
     else:
         raise ValueError(f"Unsupported alert config type: {alert.config}")
@@ -83,9 +86,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
     if not threshold or not threshold.bounds:
         return AlertEvaluationResult(value=0, breaches=[])
 
-    has_breakdown = query.breakdownFilter and (
-        (query.breakdownFilter.breakdown and query.breakdownFilter.breakdown_type) or query.breakdownFilter.breakdowns
-    )
+    has_breakdown = _has_breakdown(query)
     is_non_time_series = _is_non_time_series_trend(query)
     check_current_interval = config.check_ongoing_interval
 
@@ -116,6 +117,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
                 execution_mode=execution_mode,
                 user=None,
                 filters_override=filters_override,
+                analytics_props={"source": EventSource.ALERT},
             )
 
             interval = query.interval if not is_non_time_series else None
@@ -209,6 +211,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
                 execution_mode=execution_mode,
                 user=None,
                 filters_override=filters_overrides,
+                analytics_props={"source": EventSource.ALERT},
             )
 
             if no_result_evaluation := _is_empty_query_result(
@@ -318,6 +321,7 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
                 execution_mode=execution_mode,
                 user=None,
                 filters_override=filters_overrides,
+                analytics_props={"source": EventSource.ALERT},
             )
 
             if no_result_evaluation := _is_empty_query_result(
@@ -379,6 +383,32 @@ def check_trends_alert(alert: AlertConfiguration, insight: Insight, query: Trend
 
 def _is_non_time_series_trend(query: TrendsQuery) -> bool:
     return bool(query.trendsFilter and query.trendsFilter.display in NON_TIME_SERIES_DISPLAY_TYPES)
+
+
+def _drop_incomplete_current_interval(
+    data: np.ndarray, dates: list[str], is_non_time_series: bool
+) -> tuple[np.ndarray, list[str]]:
+    """Drop the current (incomplete) interval — always the last element.
+
+    The query does not set date_to, so the result includes the ongoing
+    interval whose value is still accumulating.  Comparing this partial
+    value against complete historical intervals causes systematic false
+    positives.
+    """
+    if not is_non_time_series and len(data) > 1:
+        data = data[:-1]
+        dates = dates[:-1] if dates else dates
+    return data, dates
+
+
+def _has_breakdown(query: TrendsQuery) -> bool:
+    return bool(
+        query.breakdownFilter
+        and (
+            (query.breakdownFilter.breakdown and query.breakdownFilter.breakdown_type)
+            or query.breakdownFilter.breakdowns
+        )
+    )
 
 
 def _date_range_override_for_intervals(query: TrendsQuery, last_x_intervals: int = 1) -> Optional[dict]:

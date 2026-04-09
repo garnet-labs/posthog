@@ -288,6 +288,14 @@ export interface PaginatedProjectBackwardCompatBasicListApi {
 
 export type ProjectBackwardCompatApiGroupTypesItem = { [key: string]: unknown }
 
+export type ProjectBackwardCompatApiProductIntentsItem = {
+    product_type?: string
+    created_at?: string
+    /** @nullable */
+    onboarding_completed_at?: string | null
+    updated_at?: string
+}
+
 export type EffectiveMembershipLevelEnumApi =
     (typeof EffectiveMembershipLevelEnumApi)[keyof typeof EffectiveMembershipLevelEnumApi]
 
@@ -295,6 +303,22 @@ export const EffectiveMembershipLevelEnumApi = {
     Number1: 1,
     Number8: 8,
     Number15: 15,
+} as const
+
+/**
+ * * `30d` - 30 Days
+ * `90d` - 90 Days
+ * `1y` - 1 Year
+ * `5y` - 5 Years
+ */
+export type SessionRecordingRetentionPeriodEnumApi =
+    (typeof SessionRecordingRetentionPeriodEnumApi)[keyof typeof SessionRecordingRetentionPeriodEnumApi]
+
+export const SessionRecordingRetentionPeriodEnumApi = {
+    '30d': '30d',
+    '90d': '90d',
+    '1y': '1y',
+    '5y': '5y',
 } as const
 
 /**
@@ -533,6 +557,20 @@ export interface ProjectBackwardCompatApi {
     session_recording_linked_flag?: unknown | null
     session_recording_network_payload_capture_config?: unknown | null
     session_recording_masking_config?: unknown | null
+    /** @nullable */
+    session_recording_url_trigger_config?: (unknown | null)[] | null
+    /** @nullable */
+    session_recording_url_blocklist_config?: (unknown | null)[] | null
+    /** @nullable */
+    session_recording_event_trigger_config?: (string | null)[] | null
+    /**
+     * @maxLength 24
+     * @nullable
+     */
+    session_recording_trigger_match_type_config?: string | null
+    /** V2 trigger groups configuration for session recording. If present, takes precedence over legacy trigger fields. */
+    session_recording_trigger_groups?: unknown | null
+    session_recording_retention_period?: SessionRecordingRetentionPeriodEnumApi
     session_replay_config?: unknown | null
     survey_config?: unknown | null
     access_control?: boolean
@@ -558,7 +596,7 @@ export interface ProjectBackwardCompatApi {
     surveys_opt_in?: boolean | null
     /** @nullable */
     heatmaps_opt_in?: boolean | null
-    readonly product_intents: string
+    readonly product_intents: readonly ProjectBackwardCompatApiProductIntentsItem[]
     /** @nullable */
     flags_persistence_default?: boolean | null
     /** @nullable */
@@ -583,6 +621,14 @@ export interface ProjectBackwardCompatApi {
 }
 
 export type PatchedProjectBackwardCompatApiGroupTypesItem = { [key: string]: unknown }
+
+export type PatchedProjectBackwardCompatApiProductIntentsItem = {
+    product_type?: string
+    created_at?: string
+    /** @nullable */
+    onboarding_completed_at?: string | null
+    updated_at?: string
+}
 
 /**
  * Like `ProjectBasicSerializer`, but also works as a drop-in replacement for `TeamBasicSerializer` by way of
@@ -658,6 +704,20 @@ export interface PatchedProjectBackwardCompatApi {
     session_recording_linked_flag?: unknown | null
     session_recording_network_payload_capture_config?: unknown | null
     session_recording_masking_config?: unknown | null
+    /** @nullable */
+    session_recording_url_trigger_config?: (unknown | null)[] | null
+    /** @nullable */
+    session_recording_url_blocklist_config?: (unknown | null)[] | null
+    /** @nullable */
+    session_recording_event_trigger_config?: (string | null)[] | null
+    /**
+     * @maxLength 24
+     * @nullable
+     */
+    session_recording_trigger_match_type_config?: string | null
+    /** V2 trigger groups configuration for session recording. If present, takes precedence over legacy trigger fields. */
+    session_recording_trigger_groups?: unknown | null
+    session_recording_retention_period?: SessionRecordingRetentionPeriodEnumApi
     session_replay_config?: unknown | null
     survey_config?: unknown | null
     access_control?: boolean
@@ -683,7 +743,7 @@ export interface PatchedProjectBackwardCompatApi {
     surveys_opt_in?: boolean | null
     /** @nullable */
     heatmaps_opt_in?: boolean | null
-    readonly product_intents?: string
+    readonly product_intents?: readonly PatchedProjectBackwardCompatApiProductIntentsItem[]
     /** @nullable */
     flags_persistence_default?: boolean | null
     /** @nullable */
@@ -707,14 +767,17 @@ export interface PatchedProjectBackwardCompatApi {
     readonly available_setup_task_ids?: readonly AvailableSetupTaskIdsEnumApi[]
 }
 
+export type RoleApiMembersItem = { [key: string]: unknown }
+
 export interface RoleApi {
     readonly id: string
     /** @maxLength 200 */
     name: string
     readonly created_at: string
     readonly created_by: UserBasicApi
-    readonly members: string
-    readonly is_default: string
+    /** Members assigned to this role */
+    readonly members: readonly RoleApiMembersItem[]
+    readonly is_default: boolean
 }
 
 export interface PaginatedRoleListApi {
@@ -726,111 +789,17 @@ export interface PaginatedRoleListApi {
     results: RoleApi[]
 }
 
+export type PatchedRoleApiMembersItem = { [key: string]: unknown }
+
 export interface PatchedRoleApi {
     readonly id?: string
     /** @maxLength 200 */
     name?: string
     readonly created_at?: string
     readonly created_by?: UserBasicApi
-    readonly members?: string
-    readonly is_default?: string
-}
-
-/**
- * * `USR` - user
- * `GIT` - GitHub
- */
-export type CreationTypeEnumApi = (typeof CreationTypeEnumApi)[keyof typeof CreationTypeEnumApi]
-
-export const CreationTypeEnumApi = {
-    Usr: 'USR',
-    Git: 'GIT',
-} as const
-
-/**
- * * `dashboard_item` - insight
- * `dashboard` - dashboard
- * `project` - project
- * `organization` - organization
- * `recording` - recording
- */
-export type AnnotationScopeEnumApi = (typeof AnnotationScopeEnumApi)[keyof typeof AnnotationScopeEnumApi]
-
-export const AnnotationScopeEnumApi = {
-    DashboardItem: 'dashboard_item',
-    Dashboard: 'dashboard',
-    Project: 'project',
-    Organization: 'organization',
-    Recording: 'recording',
-} as const
-
-export interface AnnotationApi {
-    readonly id: number
-    /**
-     * @maxLength 8192
-     * @nullable
-     */
-    content?: string | null
-    /** @nullable */
-    date_marker?: string | null
-    creation_type?: CreationTypeEnumApi
-    /** @nullable */
-    dashboard_item?: number | null
-    /** @nullable */
-    dashboard_id?: number | null
-    /** @nullable */
-    readonly dashboard_name: string | null
-    /** @nullable */
-    readonly insight_short_id: string | null
-    /** @nullable */
-    readonly insight_name: string | null
-    /** @nullable */
-    readonly insight_derived_name: string | null
-    readonly created_by: UserBasicApi
-    /** @nullable */
-    readonly created_at: string | null
-    readonly updated_at: string
-    deleted?: boolean
-    scope?: AnnotationScopeEnumApi
-}
-
-export interface PaginatedAnnotationListApi {
-    count: number
-    /** @nullable */
-    next?: string | null
-    /** @nullable */
-    previous?: string | null
-    results: AnnotationApi[]
-}
-
-export interface PatchedAnnotationApi {
-    readonly id?: number
-    /**
-     * @maxLength 8192
-     * @nullable
-     */
-    content?: string | null
-    /** @nullable */
-    date_marker?: string | null
-    creation_type?: CreationTypeEnumApi
-    /** @nullable */
-    dashboard_item?: number | null
-    /** @nullable */
-    dashboard_id?: number | null
-    /** @nullable */
-    readonly dashboard_name?: string | null
-    /** @nullable */
-    readonly insight_short_id?: string | null
-    /** @nullable */
-    readonly insight_name?: string | null
-    /** @nullable */
-    readonly insight_derived_name?: string | null
-    readonly created_by?: UserBasicApi
-    /** @nullable */
-    readonly created_at?: string | null
-    readonly updated_at?: string
-    deleted?: boolean
-    scope?: AnnotationScopeEnumApi
+    /** Members assigned to this role */
+    readonly members?: readonly PatchedRoleApiMembersItem[]
+    readonly is_default?: boolean
 }
 
 export interface CommentApi {
@@ -936,15 +905,8 @@ export interface DashboardTemplateApi {
     scope?: DashboardTemplateScopeEnumApi | BlankEnumApi | NullEnumApi | null
     /** @nullable */
     availability_contexts?: string[] | null
-}
-
-export interface PaginatedDashboardTemplateListApi {
-    count: number
-    /** @nullable */
-    next?: string | null
-    /** @nullable */
-    previous?: string | null
-    results: DashboardTemplateApi[]
+    /** Manually curated; used to highlight templates in the UI. */
+    is_featured?: boolean
 }
 
 export interface PatchedDashboardTemplateApi {
@@ -980,6 +942,8 @@ export interface PatchedDashboardTemplateApi {
     scope?: DashboardTemplateScopeEnumApi | BlankEnumApi | NullEnumApi | null
     /** @nullable */
     availability_contexts?: string[] | null
+    /** Manually curated; used to highlight templates in the UI. */
+    is_featured?: boolean
 }
 
 /**
@@ -1017,7 +981,7 @@ export interface ExportedAssetApi {
     insight?: number | null
     export_format: ExportFormatEnumApi
     readonly created_at: string
-    readonly has_content: string
+    readonly has_content: boolean
     export_context?: unknown | null
     readonly filename: string
     /** @nullable */
@@ -1097,6 +1061,18 @@ export interface FlagValueResponseApi {
     refreshing: boolean
 }
 
+export interface SharePasswordApi {
+    readonly id: number
+    readonly created_at: string
+    /**
+     * @maxLength 100
+     * @nullable
+     */
+    note?: string | null
+    readonly created_by_email: string
+    readonly is_active: boolean
+}
+
 export interface SharingConfigurationApi {
     readonly created_at: string
     enabled?: boolean
@@ -1104,103 +1080,50 @@ export interface SharingConfigurationApi {
     readonly access_token: string | null
     settings?: unknown | null
     password_required?: boolean
-    readonly share_passwords: string
+    readonly share_passwords: readonly SharePasswordApi[]
 }
 
-/**
- * * `slack` - Slack
- * `slack-twig` - Slack Twig
- * `salesforce` - Salesforce
- * `hubspot` - Hubspot
- * `google-pubsub` - Google Pubsub
- * `google-cloud-storage` - Google Cloud Storage
- * `google-ads` - Google Ads
- * `google-sheets` - Google Sheets
- * `snapchat` - Snapchat
- * `linkedin-ads` - Linkedin Ads
- * `reddit-ads` - Reddit Ads
- * `tiktok-ads` - Tiktok Ads
- * `bing-ads` - Bing Ads
- * `intercom` - Intercom
- * `email` - Email
- * `linear` - Linear
- * `github` - Github
- * `gitlab` - Gitlab
- * `meta-ads` - Meta Ads
- * `twilio` - Twilio
- * `clickup` - Clickup
- * `vercel` - Vercel
- * `databricks` - Databricks
- * `azure-blob` - Azure Blob
- * `firebase` - Firebase
- * `jira` - Jira
- * `pinterest-ads` - Pinterest Ads
- */
-export type Kind439EnumApi = (typeof Kind439EnumApi)[keyof typeof Kind439EnumApi]
-
-export const Kind439EnumApi = {
-    Slack: 'slack',
-    SlackTwig: 'slack-twig',
-    Salesforce: 'salesforce',
-    Hubspot: 'hubspot',
-    GooglePubsub: 'google-pubsub',
-    GoogleCloudStorage: 'google-cloud-storage',
-    GoogleAds: 'google-ads',
-    GoogleSheets: 'google-sheets',
-    Snapchat: 'snapchat',
-    LinkedinAds: 'linkedin-ads',
-    RedditAds: 'reddit-ads',
-    TiktokAds: 'tiktok-ads',
-    BingAds: 'bing-ads',
-    Intercom: 'intercom',
-    Email: 'email',
-    Linear: 'linear',
-    Github: 'github',
-    Gitlab: 'gitlab',
-    MetaAds: 'meta-ads',
-    Twilio: 'twilio',
-    Clickup: 'clickup',
-    Vercel: 'vercel',
-    Databricks: 'databricks',
-    AzureBlob: 'azure-blob',
-    Firebase: 'firebase',
-    Jira: 'jira',
-    PinterestAds: 'pinterest-ads',
-} as const
-
-/**
- * Standard Integration serializer.
- */
-export interface IntegrationApi {
-    readonly id: number
-    kind: Kind439EnumApi
-    config?: unknown
+export interface ProjectSecretAPIKeyApi {
+    readonly id: string
+    /** @maxLength 40 */
+    label: string
+    readonly value: string
+    /** @nullable */
+    readonly mask_value: string | null
     readonly created_at: string
-    readonly created_by: UserBasicApi
-    readonly errors: string
-    readonly display_name: string
+    /** @nullable */
+    readonly created_by: number | null
+    /** @nullable */
+    readonly last_used_at: string | null
+    /** @nullable */
+    readonly last_rolled_at: string | null
+    scopes: string[]
 }
 
-export interface PaginatedIntegrationListApi {
+export interface PaginatedProjectSecretAPIKeyListApi {
     count: number
     /** @nullable */
     next?: string | null
     /** @nullable */
     previous?: string | null
-    results: IntegrationApi[]
+    results: ProjectSecretAPIKeyApi[]
 }
 
-/**
- * Standard Integration serializer.
- */
-export interface PatchedIntegrationApi {
-    readonly id?: number
-    kind?: Kind439EnumApi
-    config?: unknown
+export interface PatchedProjectSecretAPIKeyApi {
+    readonly id?: string
+    /** @maxLength 40 */
+    label?: string
+    readonly value?: string
+    /** @nullable */
+    readonly mask_value?: string | null
     readonly created_at?: string
-    readonly created_by?: UserBasicApi
-    readonly errors?: string
-    readonly display_name?: string
+    /** @nullable */
+    readonly created_by?: number | null
+    /** @nullable */
+    readonly last_used_at?: string | null
+    /** @nullable */
+    readonly last_rolled_at?: string | null
+    scopes?: string[]
 }
 
 /**
@@ -1276,91 +1199,6 @@ export interface PatchedEnterprisePropertyDefinitionApi {
 }
 
 /**
- * * `FeatureFlag` - feature flag
- */
-export type ModelNameEnumApi = (typeof ModelNameEnumApi)[keyof typeof ModelNameEnumApi]
-
-export const ModelNameEnumApi = {
-    FeatureFlag: 'FeatureFlag',
-} as const
-
-/**
- * * `daily` - daily
- * `weekly` - weekly
- * `monthly` - monthly
- * `yearly` - yearly
- */
-export type RecurrenceIntervalEnumApi = (typeof RecurrenceIntervalEnumApi)[keyof typeof RecurrenceIntervalEnumApi]
-
-export const RecurrenceIntervalEnumApi = {
-    Daily: 'daily',
-    Weekly: 'weekly',
-    Monthly: 'monthly',
-    Yearly: 'yearly',
-} as const
-
-export interface ScheduledChangeApi {
-    readonly id: number
-    readonly team_id: number
-    /** @maxLength 200 */
-    record_id: string
-    model_name: ModelNameEnumApi
-    payload?: unknown
-    scheduled_at: string
-    /** @nullable */
-    executed_at?: string | null
-    /**
-     * Return the safely formatted failure reason instead of raw data.
-     * @nullable
-     */
-    readonly failure_reason: string | null
-    readonly created_at: string
-    readonly created_by: UserBasicApi
-    readonly updated_at: string
-    is_recurring?: boolean
-    recurrence_interval?: RecurrenceIntervalEnumApi | BlankEnumApi | NullEnumApi | null
-    /** @nullable */
-    readonly last_executed_at: string | null
-    /** @nullable */
-    end_date?: string | null
-}
-
-export interface PaginatedScheduledChangeListApi {
-    count: number
-    /** @nullable */
-    next?: string | null
-    /** @nullable */
-    previous?: string | null
-    results: ScheduledChangeApi[]
-}
-
-export interface PatchedScheduledChangeApi {
-    readonly id?: number
-    readonly team_id?: number
-    /** @maxLength 200 */
-    record_id?: string
-    model_name?: ModelNameEnumApi
-    payload?: unknown
-    scheduled_at?: string
-    /** @nullable */
-    executed_at?: string | null
-    /**
-     * Return the safely formatted failure reason instead of raw data.
-     * @nullable
-     */
-    readonly failure_reason?: string | null
-    readonly created_at?: string
-    readonly created_by?: UserBasicApi
-    readonly updated_at?: string
-    is_recurring?: boolean
-    recurrence_interval?: RecurrenceIntervalEnumApi | BlankEnumApi | NullEnumApi | null
-    /** @nullable */
-    readonly last_executed_at?: string | null
-    /** @nullable */
-    end_date?: string | null
-}
-
-/**
  * * `email` - Email
  * `slack` - Slack
  * `webhook` - Webhook
@@ -1418,6 +1256,7 @@ export interface SubscriptionApi {
     dashboard?: number | null
     /** @nullable */
     insight?: number | null
+    dashboard_export_insights?: number[]
     target_type: TargetTypeEnumApi
     target_value: string
     frequency: FrequencyEnumApi
@@ -1455,6 +1294,8 @@ export interface SubscriptionApi {
     /** @nullable */
     readonly next_delivery_date: string | null
     /** @nullable */
+    integration_id?: number | null
+    /** @nullable */
     invite_message?: string | null
 }
 
@@ -1476,6 +1317,7 @@ export interface PatchedSubscriptionApi {
     dashboard?: number | null
     /** @nullable */
     insight?: number | null
+    dashboard_export_insights?: number[]
     target_type?: TargetTypeEnumApi
     target_value?: string
     frequency?: FrequencyEnumApi
@@ -1512,6 +1354,8 @@ export interface PatchedSubscriptionApi {
     readonly summary?: string
     /** @nullable */
     readonly next_delivery_date?: string | null
+    /** @nullable */
+    integration_id?: number | null
     /** @nullable */
     invite_message?: string | null
 }
@@ -1589,6 +1433,8 @@ export type OrganizationApiTeamsItem = { [key: string]: unknown }
 
 export type OrganizationApiProjectsItem = { [key: string]: unknown }
 
+export type OrganizationApiMetadata = { [key: string]: string }
+
 export interface OrganizationApi {
     readonly id: string
     /** @maxLength 64 */
@@ -1605,8 +1451,9 @@ export interface OrganizationApi {
     readonly projects: readonly OrganizationApiProjectsItem[]
     /** @nullable */
     readonly available_product_features: readonly unknown[] | null
-    is_member_join_email_enabled?: boolean
-    readonly metadata: string
+    /** Legacy field; member-join emails are controlled per user in account notification settings. */
+    readonly is_member_join_email_enabled: boolean
+    readonly metadata: OrganizationApiMetadata
     /** @nullable */
     readonly customer_id: string | null
     /** @nullable */
@@ -1615,7 +1462,7 @@ export interface OrganizationApi {
     members_can_invite?: boolean | null
     members_can_use_personal_api_keys?: boolean
     allow_publicly_shared_resources?: boolean
-    readonly member_count: string
+    readonly member_count: number
     /** @nullable */
     is_ai_data_processing_approved?: boolean | null
     /** Default statistical method for new experiments in this organization.
@@ -1908,37 +1755,11 @@ export type RolesListParams = {
     offset?: number
 }
 
-export type AnnotationsListParams = {
-    /**
-     * Number of results to return per page.
-     */
-    limit?: number
-    /**
-     * The initial index from which to return the results.
-     */
-    offset?: number
-    /**
-     * A search term.
-     */
-    search?: string
-}
-
 export type CommentsListParams = {
     /**
      * The pagination cursor value.
      */
     cursor?: string
-}
-
-export type DashboardTemplatesListParams = {
-    /**
-     * Number of results to return per page.
-     */
-    limit?: number
-    /**
-     * The initial index from which to return the results.
-     */
-    offset?: number
 }
 
 export type ExportsListParams = {
@@ -1984,7 +1805,7 @@ export type FlagValueValuesRetrieve400 = { [key: string]: unknown }
  */
 export type FlagValueValuesRetrieve404 = { [key: string]: unknown }
 
-export type IntegrationsList2Params = {
+export type ProjectSecretApiKeysListParams = {
     /**
      * Number of results to return per page.
      */
@@ -2060,6 +1881,11 @@ export type PropertyDefinitionsListParams = {
  * @minLength 1
  */
     type?: PropertyDefinitionsListType
+    /**
+     * Filter by verified status. True returns only verified, false returns only unverified.
+     * @nullable
+     */
+    verified?: boolean | null
 }
 
 export type PropertyDefinitionsListType = (typeof PropertyDefinitionsListType)[keyof typeof PropertyDefinitionsListType]
@@ -2070,17 +1896,6 @@ export const PropertyDefinitionsListType = {
     Group: 'group',
     Session: 'session',
 } as const
-
-export type ScheduledChangesListParams = {
-    /**
-     * Number of results to return per page.
-     */
-    limit?: number
-    /**
-     * The initial index from which to return the results.
-     */
-    offset?: number
-}
 
 export type SubscriptionsListParams = {
     /**

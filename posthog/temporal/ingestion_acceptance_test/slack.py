@@ -5,8 +5,6 @@ from typing import Any
 import requests
 import structlog
 
-from posthog.security.outbound_proxy import external_requests
-
 from .config import Config
 from .results import TestSuiteResult
 
@@ -38,7 +36,7 @@ def send_slack_notification(config: Config, result: TestSuiteResult) -> bool:
     payload = {"blocks": blocks}
 
     try:
-        response = external_requests.post(
+        response = requests.post(
             config.slack_webhook_url,
             json=payload,
             timeout=10,
@@ -103,7 +101,7 @@ def _build_summary_block(result: TestSuiteResult) -> dict[str, Any]:
 def _build_context_block(config: Config, result: TestSuiteResult) -> dict[str, Any]:
     text = (
         f":globe_with_meridians: Env: {config.api_host} | "
-        f":file_folder: Project: {config.project_id} | "
+        f":file_folder: Team: {config.team_id} | "
         f":hourglass: Duration: {result.total_duration_seconds:.2f}s"
     )
     return {
@@ -146,7 +144,7 @@ def send_slack_timeout_notification(config: Config, running_tests: list[str] | N
                     "type": "mrkdwn",
                     "text": (
                         f":globe_with_meridians: Env: {config.api_host} | "
-                        f":file_folder: Project: {config.project_id} | "
+                        f":file_folder: Team: {config.team_id} | "
                         f":stopwatch: Timeout: {config.activity_timeout_seconds}s"
                     ),
                 },
@@ -167,7 +165,7 @@ def send_slack_timeout_notification(config: Config, running_tests: list[str] | N
         )
 
     try:
-        response = external_requests.post(
+        response = requests.post(
             config.slack_webhook_url,
             json={"blocks": blocks},
             timeout=10,

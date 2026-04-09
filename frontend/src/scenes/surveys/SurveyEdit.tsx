@@ -35,6 +35,7 @@ import { LemonRadio, LemonRadioOption } from 'lib/lemon-ui/LemonRadio'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { featureFlagLogic as enabledFeaturesLogic } from 'lib/logic/featureFlagLogic'
 import { formatDate } from 'lib/utils'
+import { ValueOf } from 'lib/utils/types'
 import { featureFlagLogic } from 'scenes/feature-flags/featureFlagLogic'
 import { FeatureFlagReleaseConditions } from 'scenes/feature-flags/FeatureFlagReleaseConditions'
 import { Customization } from 'scenes/surveys/survey-appearance/SurveyCustomization'
@@ -70,6 +71,8 @@ import { HTMLEditor, PresentationTypeCard } from './SurveyAppearanceUtils'
 import { SurveyEditQuestionGroup, SurveyEditQuestionHeader } from './SurveyEditQuestionRow'
 import { SurveyFormAppearance } from './SurveyFormAppearance'
 import { DataCollectionType, SurveyEditSection, surveyLogic } from './surveyLogic'
+import { surveysLogic } from './surveysLogic'
+import { canUseSurveyWizard } from './utils'
 
 function SurveyCompletionConditions(): JSX.Element {
     const { survey, dataCollectionType, isAdaptiveLimitFFEnabled } = useValues(surveyLogic)
@@ -255,6 +258,7 @@ export default function SurveyEdit({ id }: { id: string }): JSX.Element {
         editingSurvey,
         loadSurvey,
     } = useActions(surveyLogic)
+    const { setPreferredEditor } = useActions(surveysLogic)
     const { featureFlags } = useValues(enabledFeaturesLogic)
     const sortedItemIds = survey.questions.map((_, idx) => idx.toString())
     const { thankYouMessageDescriptionContentType = null } = survey.appearance ?? {}
@@ -308,12 +312,13 @@ export default function SurveyEdit({ id }: { id: string }): JSX.Element {
                     forceEdit
                     actions={
                         <>
-                            {survey.type === SurveyType.Popover && (
+                            {canUseSurveyWizard(survey) && (
                                 <LemonButton
                                     data-attr="switch-to-wizard"
                                     type="tertiary"
                                     size="small"
-                                    to={urls.surveyWizard(id)}
+                                    to={`${urls.surveyWizard(id)}#preserveLocalChanges=true`}
+                                    onClick={() => setPreferredEditor('guided')}
                                 >
                                     Guided editor
                                 </LemonButton>
@@ -991,8 +996,14 @@ export default function SurveyEdit({ id }: { id: string }): JSX.Element {
                                                                                       })
                                                                                   }}
                                                                                   data-attr="survey-url-matching-type"
-                                                                                  options={Object.keys(
-                                                                                      SurveyMatchTypeLabels
+                                                                                  options={(
+                                                                                      Object.keys(
+                                                                                          SurveyMatchTypeLabels
+                                                                                      ) as Array<
+                                                                                          ValueOf<
+                                                                                              typeof SurveyMatchType
+                                                                                          >
+                                                                                      >
                                                                                   ).map((key) => ({
                                                                                       label: SurveyMatchTypeLabels[key],
                                                                                       value: key,
@@ -1043,8 +1054,14 @@ export default function SurveyEdit({ id }: { id: string }): JSX.Element {
                                                                                       })
                                                                                   }}
                                                                                   data-attr="survey-device-types-matching-type"
-                                                                                  options={Object.keys(
-                                                                                      SurveyMatchTypeLabels
+                                                                                  options={(
+                                                                                      Object.keys(
+                                                                                          SurveyMatchTypeLabels
+                                                                                      ) as Array<
+                                                                                          ValueOf<
+                                                                                              typeof SurveyMatchType
+                                                                                          >
+                                                                                      >
                                                                                   ).map((key) => ({
                                                                                       label: SurveyMatchTypeLabels[key],
                                                                                       value: key,

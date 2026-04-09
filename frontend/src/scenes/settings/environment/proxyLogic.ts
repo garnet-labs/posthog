@@ -21,7 +21,7 @@ import type { proxyLogicType } from './proxyLogicType'
 export type ProxyRecord = {
     id: string
     domain: string
-    status: 'waiting' | 'issuing' | 'valid' | 'erroring' | 'deleting'
+    status: 'waiting' | 'issuing' | 'valid' | 'warning' | 'erroring' | 'deleting' | 'timed_out'
     message?: string
     target_cname: string
 }
@@ -75,7 +75,7 @@ function initialDomainFor(user: UserType | null): string {
 export const proxyLogic = kea<proxyLogicType>([
     path(['scenes', 'project', 'Settings', 'proxyLogic']),
     connect(() => ({
-        values: [organizationLogic, ['currentOrganization'], userLogic, ['user']],
+        values: [organizationLogic, ['currentOrganizationId'], userLogic, ['user']],
     })),
     actions(() => ({
         collapseForm: true,
@@ -116,12 +116,12 @@ export const proxyLogic = kea<proxyLogicType>([
         proxyRecords: {
             __default: [] as ProxyRecord[],
             loadRecords: async () => {
-                const response = await api.get(`api/organizations/${values.currentOrganization?.id}/proxy_records`)
+                const response = await api.get(`api/organizations/${values.currentOrganizationId}/proxy_records`)
                 actions.setMaxProxyRecords(response.max_proxy_records)
                 return response.results
             },
             createRecord: async ({ domain }: { domain: string }) => {
-                const response = await api.create(`api/organizations/${values.currentOrganization?.id}/proxy_records`, {
+                const response = await api.create(`api/organizations/${values.currentOrganizationId}/proxy_records`, {
                     domain,
                 })
                 lemonToast.success('Record created')
@@ -129,12 +129,21 @@ export const proxyLogic = kea<proxyLogicType>([
                 return [response, ...values.proxyRecords]
             },
             deleteRecord: async (id: ProxyRecord['id']) => {
-                void api.delete(`api/organizations/${values.currentOrganization?.id}/proxy_records/${id}`)
+                void api.delete(`api/organizations/${values.currentOrganizationId}/proxy_records/${id}`)
                 const newRecords = [...values.proxyRecords].map((r) => ({
                     ...r,
                     status: r.id === id ? 'deleting' : r.status,
                 }))
                 return newRecords
+            },
+            retryRecord: async (id: ProxyRecord['id']) => {
+                await api.create(`api/organizations/${values.currentOrganizationId}/proxy_records/${id}/retry`)
+                lemonToast.success('Retry initiated')
+                return values.proxyRecords.map((r) => ({
+                    ...r,
+                    status: r.id === id ? 'waiting' : r.status,
+                    message: r.id === id ? undefined : r.message,
+                })) as ProxyRecord[]
             },
         },
     })),
@@ -149,6 +158,7 @@ export const proxyLogic = kea<proxyLogicType>([
     listeners(({ actions, values }) => ({
         collapseForm: () => actions.loadRecords(),
         deleteRecordFailure: () => actions.loadRecords(),
+        retryRecordFailure: () => actions.loadRecords(),
         createRecordSuccess: () => actions.loadRecords(),
         loadRecordsSuccess: ({ proxyRecords }) => {
             // Mark the reverse proxy setup task as completed if any proxy is valid

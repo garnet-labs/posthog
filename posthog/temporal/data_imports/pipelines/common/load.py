@@ -10,7 +10,9 @@ from structlog.types import FilteringBoundLogger
 from posthog.exceptions_capture import capture_exception
 from posthog.sync import database_sync_to_async_pool
 from posthog.temporal.common.logger import get_logger
+from posthog.temporal.data_imports.pipelines.helpers import sync_revenue_analytics_views
 from posthog.temporal.data_imports.pipelines.pipeline.utils import normalize_column_name
+from posthog.temporal.data_imports.pipelines.pipeline_sync import set_initial_sync_complete
 from posthog.temporal.data_imports.util import prepare_s3_files_for_querying
 
 from products.data_warehouse.backend.models.external_data_job import ExternalDataJob
@@ -127,6 +129,7 @@ async def run_post_load_operations(
         4. Notify revenue analytics (if applicable)
         5. Finalize incremental field values
         6. Validate schema and update table
+        7. Sync revenue analytics views (if applicable)
     """
     from posthog.temporal.data_imports.pipelines.common.extract import finalize_desc_sort_incremental_value
     from posthog.temporal.data_imports.pipelines.pipeline_sync import (
@@ -168,6 +171,10 @@ async def run_post_load_operations(
     logger.debug("Notifying revenue analytics that sync has completed")
     await notify_revenue_analytics_that_sync_has_completed(schema, source, logger)
 
+    if not schema.initial_sync_complete:
+        await logger.adebug("Setting initial_sync_complete on schema")
+        await set_initial_sync_complete(schema_id=schema.id, team_id=job.team_id)
+
     if resource is not None:
         await finalize_desc_sort_incremental_value(resource, schema, last_incremental_field_value, logger)
 
@@ -183,3 +190,6 @@ async def run_post_load_operations(
             table_format=DataWarehouseTable.TableFormat.DeltaS3Wrapper,
         )
     logger.debug("Finished validating schema and updating table")
+
+    logger.debug("Syncing revenue analytics views if needed")
+    await database_sync_to_async_pool(sync_revenue_analytics_views)(schema, source)

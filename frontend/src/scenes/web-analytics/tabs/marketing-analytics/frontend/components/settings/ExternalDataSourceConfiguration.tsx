@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { IconGear, IconPencil, IconTrash } from '@posthog/icons'
 import { LemonBanner, LemonButton, LemonTag, Link } from '@posthog/lemon-ui'
 
+import { RestrictionScope, useRestrictedArea } from 'lib/components/RestrictedArea'
+import { TeamMembershipLevel } from 'lib/constants'
 import { LemonTable } from 'lib/lemon-ui/LemonTable'
 import { DataWarehouseSourceIcon } from 'scenes/data-warehouse/settings/DataWarehouseSourceIcon'
 import { urls } from 'scenes/urls'
@@ -60,6 +62,10 @@ export function ExternalDataSourceConfiguration(): JSX.Element {
     const { allExternalTablesWithStatus, loading, hasNoConfiguredSources } = useValues(marketingAnalyticsLogic)
     const { updateSourceMapping } = useActions(marketingAnalyticsSettingsLogic)
     const [editingTable, setEditingTable] = useState<ExternalTable | null>(null)
+    const restrictedReason = useRestrictedArea({
+        scope: RestrictionScope.Project,
+        minimumAccessLevel: TeamMembershipLevel.Admin,
+    })
 
     // Helper to get sync info for native sources
     const getSourceSyncInfo = (source: ExternalDataSource): { syncingTables: string[]; tablesToSync: string[] } => {
@@ -204,6 +210,7 @@ export function ExternalDataSourceConfiguration(): JSX.Element {
                         render: (_, item: UnifiedSource): JSX.Element => (
                             <DataWarehouseSourceIcon
                                 type={item.nativeSource?.source_type || item.table?.source_type || ''}
+                                engine={item.nativeSource?.engine}
                             />
                         ),
                     },
@@ -305,6 +312,7 @@ export function ExternalDataSourceConfiguration(): JSX.Element {
                                         size="small"
                                         to={item.sourceUrl}
                                         tooltip="Configure source schemas"
+                                        disabledReason={restrictedReason}
                                     />
                                 )
                             }
@@ -317,6 +325,7 @@ export function ExternalDataSourceConfiguration(): JSX.Element {
                                             size="small"
                                             onClick={() => setEditingTable(item.table!)}
                                             tooltip="Map columns"
+                                            disabledReason={restrictedReason}
                                         />
                                         {tableHasMapping && (
                                             <LemonButton
@@ -325,6 +334,7 @@ export function ExternalDataSourceConfiguration(): JSX.Element {
                                                 status="danger"
                                                 onClick={() => removeTableMapping(item.table!)}
                                                 tooltip="Remove all mappings"
+                                                disabledReason={restrictedReason}
                                             />
                                         )}
                                     </div>

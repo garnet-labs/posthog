@@ -7,6 +7,8 @@ import api from 'lib/api'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { billingLogic } from 'scenes/billing/billingLogic'
+import { organizationLogic } from 'scenes/organizationLogic'
 import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
 import { organizationIntegrationsLogic } from 'scenes/settings/organization/organizationIntegrationsLogic'
 import { teamLogic } from 'scenes/teamLogic'
@@ -22,8 +24,10 @@ import { Setting, SettingId, SettingLevelId, SettingSection, SettingSectionId, S
 const FUSE_THRESHOLD = 0.2
 
 // Helping kea-typegen navigate the exported default class for Fuse
-export interface SettingsFuse extends FuseClass<Setting> {}
-export interface SectionsFuse extends FuseClass<SettingSection> {}
+export interface SettingsFuse extends FuseClass<Setting & { searchValue: string }> {}
+export interface SectionsFuse extends FuseClass<
+    SettingSection & { searchValue: string; settingsSearchValues: string }
+> {}
 
 export interface SearchIndexEntry {
     settingId: SettingId
@@ -86,8 +90,12 @@ export const settingsLogic = kea<settingsLogicType>([
             ['preflight', 'isCloudOrDev'],
             teamLogic,
             ['currentTeam'],
+            organizationLogic,
+            ['currentOrganization'],
             organizationIntegrationsLogic,
             ['organizationIntegrations'],
+            billingLogic,
+            ['canAccessBilling'],
         ],
     })),
 
@@ -238,8 +246,37 @@ export const settingsLogic = kea<settingsLogicType>([
             },
         ],
         sections: [
-            (s) => [s.doesMatchFlags, s.isCloudOrDev, s.currentTeam, s.organizationIntegrations],
-            (doesMatchFlags, isCloudOrDev, currentTeam, organizationIntegrations): SettingSection[] => {
+            (s) => [
+                s.doesMatchFlags,
+                s.isCloudOrDev,
+                s.currentTeam,
+                s.currentOrganization,
+                s.organizationIntegrations,
+                s.preflight,
+                s.canAccessBilling,
+            ],
+            (
+                doesMatchFlags,
+                isCloudOrDev,
+                currentTeam,
+                currentOrganization,
+                organizationIntegrations,
+                preflight,
+                canAccessBilling
+            ): SettingSection[] => {
+                const isSettingVisible = (setting: Setting): boolean => {
+                    if (!doesMatchFlags(setting)) {
+                        return false
+                    }
+                    if (setting.hideOn?.includes(Realm.Cloud) && preflight?.cloud) {
+                        return false
+                    }
+                    if (setting.allowForTeam && !setting.allowForTeam(currentTeam)) {
+                        return false
+                    }
+                    return true
+                }
+
                 const sections = SETTINGS_MAP.filter(doesMatchFlags).filter((section) => {
                     if (section.hideSelfHost && !isCloudOrDev) {
                         return false
@@ -250,9 +287,17 @@ export const settingsLogic = kea<settingsLogicType>([
                     ) {
                         return false
                     }
+                    if (section.id === 'organization-billing' && !canAccessBilling) {
+                        return false
+                    }
 
                     return true
                 })
+
+                // If there's no current organization, hide everything except user sections
+                if (!currentOrganization) {
+                    return sections.filter((section) => section.level === 'user')
+                }
 
                 // If there's no current team, hide project and environment sections entirely
                 if (!currentTeam) {
@@ -275,6 +320,10 @@ export const settingsLogic = kea<settingsLogicType>([
                             id: setting.id.replace('environment-', 'project-') as SettingId,
                         })),
                     }))
+                    .filter(
+                        (section) =>
+                            section.to || section.settings.length === 0 || section.settings.some(isSettingVisible)
+                    )
             },
         ],
         selectedLevel: [
@@ -439,7 +488,7 @@ export const settingsLogic = kea<settingsLogicType>([
             (sections, doesMatchFlags, preflight, currentTeam): GlobalSearchFuse => {
                 const entries: SearchIndexEntry[] = []
 
-                for (const section of sections) {
+                for (const section of sections.filter((s) => !s.hideFromNavigation)) {
                     const sectionTitle =
                         typeof section.title === 'string' ? section.title : section.id.replace(/[-]/g, ' ')
 
@@ -472,7 +521,7 @@ export const settingsLogic = kea<settingsLogicType>([
                 }
 
                 // Index sections that are top-level links with no settings (e.g. Billing)
-                for (const section of sections) {
+                for (const section of sections.filter((s) => !s.hideFromNavigation)) {
                     if (section.settings.length === 0) {
                         const sectionTitle =
                             typeof section.title === 'string' ? section.title : section.id.replace(/[-]/g, ' ')
@@ -542,12 +591,14 @@ export const settingsLogic = kea<settingsLogicType>([
         filteredSections: [
             (s) => [s.sections, s.searchResults, s.isSearching],
             (sections, searchResults, isSearching): SettingSection[] => {
+                const visibleSections = sections.filter((section) => !section.hideFromNavigation)
+
                 if (!isSearching) {
-                    return sections
+                    return visibleSections
                 }
 
                 const sectionIds = new Set(searchResults.map((g) => g.sectionId))
-                return sections.filter((section) => sectionIds.has(section.id))
+                return visibleSections.filter((section) => sectionIds.has(section.id))
             },
         ],
     }),

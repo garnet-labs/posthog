@@ -606,6 +606,7 @@ class ActivityLogTestHelper(APILicensedTest):
         data = {
             "name": name,
             "insight": insight["id"],
+            "condition": {"type": "absolute_value"},
             "config": {"type": "TrendsAlertConfig", "series_index": 0},
             "threshold": {"configuration": {"type": "absolute", "bounds": {"lower": 100, "upper": 1000}}},
             "enabled": True,
@@ -862,7 +863,7 @@ class ActivityLogTestHelper(APILicensedTest):
                 "source_type": source_type,
                 "payload": {
                     "stripe_account_id": "acct_test_placeholder",
-                    "stripe_secret_key": "test_key_placeholder_not_real",
+                    "auth_method": {"selection": "api_key", "stripe_secret_key": "test_key_placeholder_not_real"},
                     "schemas": [
                         {
                             "name": "Customer",

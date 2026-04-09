@@ -12,10 +12,13 @@ from pydantic import BaseModel
 
 from posthog.constants import AvailableFeature
 from posthog.management.commands.generate_demo_data import Command as GenerateDemoDataCommand
-from posthog.models import Dashboard, DashboardTile, Insight, PersonalAPIKey, Team, User
+from posthog.models import Insight, PersonalAPIKey, Team, User
 from posthog.models.insight_variable import InsightVariable
-from posthog.models.personal_api_key import hash_key_value
-from posthog.models.utils import mask_key_value
+from posthog.models.utils import hash_key_value, mask_key_value
+
+from products.dashboards.backend.models.dashboard import Dashboard
+from products.dashboards.backend.models.dashboard_tile import DashboardTile
+from products.experiments.backend.models.experiment import Experiment
 
 
 class PlaywrightSetupVariableType(StrEnum):
@@ -52,6 +55,19 @@ class PlaywrightSetupEvent(BaseModel):
     properties: dict[str, Any] | None = None
 
 
+class PlaywrightSetupPerson(BaseModel):
+    distinct_ids: list[str]
+    properties: dict[str, Any] | None = None
+
+
+class PlaywrightSetupExperiment(BaseModel):
+    name: str
+    feature_flag_key: str
+    start_date: str | None = None  # ISO 8601 — if set, experiment is created as RUNNING
+    metrics: list[dict[str, Any]] | None = None
+    metrics_secondary: list[dict[str, Any]] | None = None
+
+
 class PlaywrightWorkspaceSetupData(BaseModel):
     organization_name: str | None = None
     use_current_time: bool | None = None
@@ -61,6 +77,8 @@ class PlaywrightWorkspaceSetupData(BaseModel):
     insights: list[PlaywrightSetupInsight] | None = None
     dashboards: list[PlaywrightSetupDashboard] | None = None
     events: list[PlaywrightSetupEvent] | None = None
+    persons: list[PlaywrightSetupPerson] | None = None
+    experiments: list[PlaywrightSetupExperiment] | None = None
 
 
 class PlaywrightSetupCreatedVariable(BaseModel):
@@ -77,6 +95,11 @@ class PlaywrightSetupCreatedDashboard(BaseModel):
     id: int
 
 
+class PlaywrightSetupCreatedExperiment(BaseModel):
+    id: int
+    feature_flag_key: str
+
+
 class PlaywrightWorkspaceSetupResult(BaseModel):
     organization_id: str
     team_id: str
@@ -88,6 +111,7 @@ class PlaywrightWorkspaceSetupResult(BaseModel):
     created_variables: list[PlaywrightSetupCreatedVariable] | None = None
     created_insights: list[PlaywrightSetupCreatedInsight] | None = None
     created_dashboards: list[PlaywrightSetupCreatedDashboard] | None = None
+    created_experiments: list[PlaywrightSetupCreatedExperiment] | None = None
 
 
 @runtime_checkable
@@ -202,6 +226,8 @@ def create_organization_with_team(
             "explore_lifecycle_insight": "completed",
             "setup_session_recordings": "completed",
             "watch_session_recording": "completed",
+            "create_experiment": "completed",
+            "launch_experiment": "completed",
         }
         team.save()
 
@@ -209,6 +235,7 @@ def create_organization_with_team(
     created_insights = _create_insights(data, team, user, created_variables)
     created_dashboards = _create_dashboards(data, team, user, created_variables, created_insights)
     _create_events_and_persons(data, team)
+    created_experiments = _create_experiments(data, team, user)
 
     return PlaywrightWorkspaceSetupResult(
         organization_id=str(organization.id),
@@ -230,6 +257,14 @@ def create_organization_with_team(
         ),
         created_dashboards=(
             [PlaywrightSetupCreatedDashboard(id=d.id) for d in created_dashboards] if created_dashboards else None
+        ),
+        created_experiments=(
+            [
+                PlaywrightSetupCreatedExperiment(id=e.id, feature_flag_key=e.feature_flag.key)
+                for e in created_experiments
+            ]
+            if created_experiments
+            else None
         ),
     )
 
@@ -328,6 +363,34 @@ def _create_dashboards(
     return created
 
 
+def _create_experiments(
+    data: PlaywrightWorkspaceSetupData,
+    team: Team,
+    user: User,
+) -> list[Experiment]:
+    if not data.experiments:
+        return []
+
+    from products.experiments.backend.experiment_service import ExperimentService
+
+    service = ExperimentService(team=team, user=user)
+    created: list[Experiment] = []
+    for exp_spec in data.experiments:
+        start_date = None
+        if exp_spec.start_date:
+            start_date = datetime.fromisoformat(exp_spec.start_date.replace("Z", "+00:00"))
+
+        experiment = service.create_experiment(
+            name=exp_spec.name,
+            feature_flag_key=exp_spec.feature_flag_key,
+            metrics=exp_spec.metrics,
+            metrics_secondary=exp_spec.metrics_secondary,
+            start_date=start_date,
+        )
+        created.append(experiment)
+    return created
+
+
 def _count_events_in_clickhouse(team_id: int) -> int:
     from posthog.clickhouse.client import sync_execute
 
@@ -356,7 +419,7 @@ def _wait_for_events_in_clickhouse(team_id: int, expected_count: int, timeout_se
 
 
 def _create_events_and_persons(data: PlaywrightWorkspaceSetupData, team: Team) -> None:
-    if not data.events:
+    if not data.events and not data.persons:
         return
 
     import uuid as uuid_module
@@ -366,15 +429,40 @@ def _create_events_and_persons(data: PlaywrightWorkspaceSetupData, team: Team) -
     from posthog.models.person.util import create_person, create_person_distinct_id
     from posthog.models.utils import UUIDT
 
-    # Derive persons from distinct_ids in events
-    distinct_ids = {e.distinct_id for e in data.events}
     person_uuids: dict[str, str] = {}
+
+    # Create explicit persons (may have multiple distinct IDs)
+    if data.persons:
+        for person_spec in data.persons:
+            person_uuid = str(UUIDT())
+            props = person_spec.properties or {}
+            create_person(team_id=team.pk, version=0, uuid=person_uuid, properties=props)
+            pg_person = Person.objects.create(team=team, uuid=person_uuid, properties=props)
+            for distinct_id in person_spec.distinct_ids:
+                create_person_distinct_id(team_id=team.pk, distinct_id=distinct_id, person_id=person_uuid)
+                PersonDistinctId.objects.create(team=team, person=pg_person, distinct_id=distinct_id)
+                person_uuids[distinct_id] = person_uuid
+
+    if not data.events:
+        return
+
+    # Collect person properties from $set in event properties (last write wins)
+    person_props: dict[str, dict[str, Any]] = {}
+    for event_spec in data.events:
+        if event_spec.properties and "$set" in event_spec.properties:
+            person_props.setdefault(event_spec.distinct_id, {}).update(event_spec.properties["$set"])
+
+    # Create persons for distinct_ids not already created via explicit persons
+    distinct_ids = {e.distinct_id for e in data.events}
     for distinct_id in distinct_ids:
+        if distinct_id in person_uuids:
+            continue
         person_uuid = str(UUIDT())
         person_uuids[distinct_id] = person_uuid
-        create_person(team_id=team.pk, version=0, uuid=person_uuid)
+        props = person_props.get(distinct_id, {})
+        create_person(team_id=team.pk, version=0, uuid=person_uuid, properties=props)
         create_person_distinct_id(team_id=team.pk, distinct_id=distinct_id, person_id=person_uuid)
-        pg_person = Person.objects.create(team=team, uuid=person_uuid)
+        pg_person = Person.objects.create(team=team, uuid=person_uuid, properties=props)
         PersonDistinctId.objects.create(team=team, person=pg_person, distinct_id=distinct_id)
 
     baseline_count = _count_events_in_clickhouse(team.pk)

@@ -51,8 +51,6 @@ export const HogFlowSchema = z.object({
     variables: z.array(CyclotronJobInputSchemaTypeSchema).optional().nullable(),
     updated_at: z.string(),
     created_at: z.string(),
-    draft: z.record(z.any()).nullable().optional(),
-    draft_updated_at: z.string().nullable().optional(),
 })
 
 export const HogFlowTemplateSchema = HogFlowSchema.omit({ status: true }).extend({
@@ -95,4 +93,16 @@ export interface HogFlowTemplate extends z.infer<typeof HogFlowTemplateSchema> {
 
 export interface HogFlowBatchJob extends z.infer<typeof HogFlowBatchJobSchema> {
     created_by?: UserBasicType | null
+}
+
+export interface HogFlowSchedule {
+    id: string
+    rrule: string
+    starts_at: string
+    timezone?: string
+    variables?: Record<string, unknown>
+    status?: string
+    next_run_at?: string | null
+    created_at?: string
+    updated_at?: string
 }

@@ -1,4 +1,4 @@
-import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { DeepPartialMap, ValidationErrorType, forms } from 'kea-forms'
 import { lazyLoaders, loaders } from 'kea-loaders'
 import { router } from 'kea-router'
@@ -9,6 +9,7 @@ import { LemonDialog } from '@posthog/lemon-ui'
 import api from 'lib/api'
 import { CyclotronJobInputsValidation } from 'lib/components/CyclotronJob/CyclotronJobInputsValidation'
 import { SetupTaskId, globalSetupLogic } from 'lib/components/ProductSetup'
+import { dayjs } from 'lib/dayjs'
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
 import { publicWebhooksHostOrigin } from 'lib/utils/apiHost'
 import { LiquidRenderer } from 'lib/utils/liquid'
@@ -21,8 +22,22 @@ import { userLogic } from 'scenes/userLogic'
 import { HogFunctionTemplateType } from '~/types'
 
 import { getRegisteredTriggerTypes } from './hogflows/registry/triggers/triggerTypeRegistry'
+import {
+    DEFAULT_STATE,
+    isOneTimeSchedule,
+    ONE_TIME_RRULE,
+    parseRRuleToState,
+    stateToRRule,
+} from './hogflows/steps/components/rrule-helpers'
+import type { ScheduleState } from './hogflows/steps/components/rrule-helpers'
 import { HogFlowActionSchema, isFunctionAction, isTriggerFunction } from './hogflows/steps/types'
-import { type HogFlow, type HogFlowAction, HogFlowActionValidationResult, type HogFlowEdge } from './hogflows/types'
+import {
+    type HogFlow,
+    type HogFlowAction,
+    HogFlowActionValidationResult,
+    type HogFlowEdge,
+    type HogFlowSchedule,
+} from './hogflows/types'
 import type { workflowLogicType } from './workflowLogicType'
 import { workflowSceneLogic } from './workflowSceneLogic'
 import { workflowsLogic } from './workflowsLogic'
@@ -113,107 +128,13 @@ export function sanitizeWorkflow(
     return workflow
 }
 
-// Fields added by the server during validation (not part of user edits)
-const SERVER_ADDED_KEYS = new Set(['bytecode', 'order'])
-
-function isEmptyValue(v: unknown): boolean {
-    if (v === null || v === undefined || v === false || v === '') {
-        return true
-    }
-    if (Array.isArray(v) && v.length === 0) {
-        return true
-    }
-    return false
-}
-
-export function configsEqual(a: unknown, b: unknown): boolean {
-    if (a === b) {
-        return true
-    }
-    if (Array.isArray(a) && Array.isArray(b)) {
-        if (a.length !== b.length) {
-            return false
-        }
-        return a.every((item, i) => configsEqual(item, b[i]))
-    }
-    if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
-        const aObj = a as Record<string, unknown>
-        const bObj = b as Record<string, unknown>
-        const aKeys = Object.keys(aObj).filter((k) => !SERVER_ADDED_KEYS.has(k) && !isEmptyValue(aObj[k]))
-        const bKeys = Object.keys(bObj).filter((k) => !SERVER_ADDED_KEYS.has(k) && !isEmptyValue(bObj[k]))
-        if (aKeys.length !== bKeys.length) {
-            return false
-        }
-        return aKeys.every((key) => key in bObj && configsEqual(aObj[key], bObj[key]))
-    }
-    return false
-}
-
-const BRANCHING_ACTION_TYPES = ['conditional_branch', 'random_cohort_branch', 'wait_until_condition']
-
-/**
- * Strip soft-deleted actions from a workflow and reconnect edges.
- * Processes leaf nodes first, then branching parents, so that by the time
- * we remove a branching node its branch children are already gone and only
- * the continue edge remains for reconnection.
- */
-export function stripDeletedActions(
-    actions: HogFlowAction[],
-    edges: HogFlow['edges'],
-    deletedIds: Set<string>
-): { actions: HogFlowAction[]; edges: HogFlow['edges'] } {
-    let remainingActions = [...actions]
-    let remainingEdges = [...edges]
-
-    const sortedIds = [...deletedIds].sort((a, b) => {
-        const aIsBranching = BRANCHING_ACTION_TYPES.includes(remainingActions.find((act) => act.id === a)?.type ?? '')
-        const bIsBranching = BRANCHING_ACTION_TYPES.includes(remainingActions.find((act) => act.id === b)?.type ?? '')
-        return aIsBranching === bIsBranching ? 0 : aIsBranching ? 1 : -1
-    })
-
-    for (const id of sortedIds) {
-        const outgoing = remainingEdges.find((e) => e.from === id && e.type === 'continue')
-        if (outgoing) {
-            remainingEdges = remainingEdges.map((edge) => (edge.to === id ? { ...edge, to: outgoing.to } : edge))
-        }
-        remainingEdges = remainingEdges.filter((e) => e.from !== id && e.to !== id)
-        remainingActions = remainingActions.filter((a) => a.id !== id)
-    }
-
-    return { actions: remainingActions, edges: remainingEdges }
-}
-
-const DRAFT_CONTENT_FIELDS: (keyof HogFlow)[] = [
-    'name',
-    'description',
-    'trigger_masking',
-    'conversion',
-    'exit_condition',
-    'edges',
-    'actions',
-    'variables',
-]
-
-export function buildDraftData(workflow: HogFlow, deletedActionIds?: Set<string>): Partial<HogFlow> {
-    const data: Partial<HogFlow> = {}
-    for (const field of DRAFT_CONTENT_FIELDS) {
-        ;(data as any)[field] = workflow[field]
-    }
-    if (deletedActionIds && deletedActionIds.size > 0) {
-        ;(data as any).deleted_action_ids = [...deletedActionIds]
-    }
-    return data
-}
-
-export function hydrateDeletedActionIds(workflow: HogFlow | null): Set<string> {
-    const ids = (workflow?.draft as any)?.deleted_action_ids
-    return Array.isArray(ids) ? new Set<string>(ids) : new Set<string>()
-}
-
 export const workflowLogic = kea<workflowLogicType>([
-    path(['products', 'workflows', 'frontend', 'Workflows', 'workflowLogic']),
+    path((key) => ['products', 'workflows', 'frontend', 'Workflows', 'workflowLogic', key]),
     props({ id: 'new', tabId: 'default' } as WorkflowLogicProps),
-    key((props) => `workflow-${props.id || 'new'}-${props.tabId}`),
+    key(
+        (props) =>
+            `workflow-${props.id || 'new'}-${props.tabId || 'default'}-${props.templateId || 'default'}-${props.editTemplateId || 'default'}`
+    ),
     connect(() => ({
         values: [userLogic, ['user'], projectLogic, ['currentProjectId']],
         actions: [workflowsLogic, ['archiveWorkflow']],
@@ -228,7 +149,12 @@ export const workflowLogic = kea<workflowLogicType>([
         setWorkflowActionEdges: (actionId: string, edges: HogFlow['edges']) => ({ actionId, edges }),
         // NOTE: This is a wrapper for setWorkflowValues, to get around some weird typegen issues
         setWorkflowInfo: (workflow: Partial<HogFlow>) => ({ workflow }),
-        saveMetadataField: (field: 'name' | 'description', value: string) => ({ field, value }),
+        setScheduleState: (scheduleState: ScheduleState) => ({ scheduleState }),
+        setScheduleStartsAt: (startsAt: string | null) => ({ startsAt }),
+        setScheduleStartsAtFromPicker: (pickerDate: string | null) => ({ pickerDate }),
+        setScheduleTimezone: (timezone: string, previousTimezone?: string) => ({ timezone, previousTimezone }),
+        setScheduleRepeating: (repeating: boolean) => ({ repeating }),
+        setSchedules: (schedules: HogFlowSchedule[]) => ({ schedules }),
         saveWorkflowPartial: (workflow: Partial<HogFlow>) => ({ workflow }),
         triggerManualWorkflow: (variables: Record<string, any>, scheduledAt?: string | null) => ({
             variables,
@@ -243,14 +169,8 @@ export const workflowLogic = kea<workflowLogicType>([
             filters,
             scheduledAt,
         }),
-        softDeleteAction: (actionId: string) => ({ actionId }),
-        restoreAction: (actionId: string) => ({ actionId }),
         discardChanges: true,
         duplicate: true,
-        saveDraftNow: true,
-        publishWorkflow: true,
-        discardDraft: true,
-        metadataSaved: (updates: Partial<HogFlow>) => ({ updates }),
     }),
     loaders(({ props, values }) => ({
         originalWorkflow: [
@@ -291,15 +211,6 @@ export const workflowLogic = kea<workflowLogicType>([
                 saveWorkflow: async (updates: HogFlow) => {
                     updates = sanitizeWorkflow(updates, values.hogFunctionTemplatesById)
 
-                    if (values.draftDeletedActionIds.size > 0) {
-                        const stripped = stripDeletedActions(
-                            updates.actions,
-                            updates.edges,
-                            values.draftDeletedActionIds
-                        )
-                        updates = { ...updates, ...stripped }
-                    }
-
                     if (!props.id || props.id === 'new') {
                         const result = await api.hogFlows.createHogFlow(updates)
 
@@ -313,55 +224,6 @@ export const workflowLogic = kea<workflowLogicType>([
                     }
 
                     return api.hogFlows.updateHogFlow(props.id, updates)
-                },
-            },
-        ],
-        draftSaveResult: [
-            null as HogFlow | null,
-            {
-                saveDraftToServer: async () => {
-                    if (!props.id || props.id === 'new') {
-                        return null
-                    }
-                    const workflow = sanitizeWorkflow({ ...values.workflow }, values.hogFunctionTemplatesById)
-                    const draftData = buildDraftData(workflow, values.draftDeletedActionIds)
-                    return api.hogFlows.saveDraft(props.id, draftData)
-                },
-            },
-        ],
-        publishResult: [
-            null as HogFlow | null,
-            {
-                publishDraftToServer: async () => {
-                    if (!props.id || props.id === 'new') {
-                        return null
-                    }
-                    // Strip soft-deleted actions before publishing
-                    if (values.draftDeletedActionIds.size > 0) {
-                        const workflow = sanitizeWorkflow({ ...values.workflow }, values.hogFunctionTemplatesById)
-                        const draftData = buildDraftData(workflow)
-                        const stripped = stripDeletedActions(
-                            draftData.actions ?? [],
-                            draftData.edges ?? [],
-                            values.draftDeletedActionIds
-                        )
-                        draftData.actions = stripped.actions
-                        draftData.edges = stripped.edges
-                        ;(draftData as any).deleted_action_ids = []
-                        await api.hogFlows.saveDraft(props.id, draftData)
-                    }
-                    return api.hogFlows.publishDraft(props.id)
-                },
-            },
-        ],
-        discardDraftResult: [
-            null as HogFlow | null,
-            {
-                discardDraftOnServer: async () => {
-                    if (!props.id || props.id === 'new') {
-                        return null
-                    }
-                    return api.hogFlows.discardDraft(props.id)
                 },
             },
         ],
@@ -413,76 +275,92 @@ export const workflowLogic = kea<workflowLogicType>([
         },
     })),
     reducers({
-        originalWorkflow: {
-            metadataSaved: (state: HogFlow | null, { updates }: { updates: Partial<HogFlow> }) =>
-                state ? { ...state, ...updates } : state,
-        },
-        lastSavedAt: [
+        schedules: [
+            [] as HogFlowSchedule[],
+            {
+                setSchedules: (_, { schedules }) => schedules,
+            },
+        ],
+        scheduleState: [
+            { ...DEFAULT_STATE } as ScheduleState,
+            {
+                setScheduleState: (_, { scheduleState }) => scheduleState,
+                setSchedules: (_, { schedules }) => {
+                    const schedule = schedules[0]
+                    if (schedule && !isOneTimeSchedule(schedule.rrule)) {
+                        return parseRRuleToState(schedule.rrule)
+                    }
+                    return { ...DEFAULT_STATE }
+                },
+            },
+        ],
+        scheduleStartsAt: [
             null as string | null,
             {
-                loadWorkflowSuccess: (_, { originalWorkflow }) =>
-                    originalWorkflow?.draft_updated_at ?? originalWorkflow?.updated_at ?? null,
-                saveDraftToServerSuccess: (_, { draftSaveResult }) => draftSaveResult?.draft_updated_at ?? null,
-                saveWorkflowSuccess: (_, { originalWorkflow }) => originalWorkflow?.updated_at ?? null,
-                publishDraftToServerSuccess: () => null,
-                discardDraftOnServerSuccess: () => null,
+                setScheduleStartsAt: (_, { startsAt }) => startsAt,
+                setSchedules: (_, { schedules }) => schedules[0]?.starts_at ?? null,
             },
         ],
-        hydratedFromDraft: [
-            false,
+        scheduleTimezone: [
+            dayjs.tz.guess() as string,
             {
-                loadWorkflowSuccess: (_, { originalWorkflow }) => !!originalWorkflow?.draft,
-                saveWorkflowSuccess: () => false,
-                publishDraftToServerSuccess: () => false,
-                discardDraftOnServerSuccess: () => false,
+                setScheduleTimezone: (_, { timezone }) => timezone,
+                setSchedules: (_, { schedules }) => schedules[0]?.timezone ?? dayjs.tz.guess(),
             },
         ],
-        draftExistsOnServer: [
-            false,
+        isScheduleRepeating: [
+            false as boolean,
             {
-                loadWorkflowSuccess: (_, { originalWorkflow }) => !!originalWorkflow?.draft,
-                saveDraftToServerSuccess: () => true,
-                publishDraftToServerSuccess: () => false,
-                discardDraftOnServerSuccess: () => false,
-                saveWorkflowSuccess: () => false,
-            },
-        ],
-        draftDeletedActionIds: [
-            new Set<string>(),
-            {
-                softDeleteAction: (state: Set<string>, { actionId }: { actionId: string }) =>
-                    new Set([...state, actionId]),
-                restoreAction: (state: Set<string>, { actionId }: { actionId: string }) => {
-                    const next = new Set(state)
-                    next.delete(actionId)
-                    return next
+                setScheduleRepeating: (_, { repeating }) => repeating,
+                setSchedules: (_, { schedules }) => {
+                    const schedule = schedules[0]
+                    return !!schedule && !isOneTimeSchedule(schedule.rrule)
                 },
-                loadWorkflowSuccess: (_: Set<string>, { originalWorkflow }: { originalWorkflow: HogFlow }) =>
-                    hydrateDeletedActionIds(originalWorkflow),
-                saveWorkflowSuccess: () => new Set<string>(),
-                publishDraftToServerSuccess: () => new Set<string>(),
-                discardDraftOnServerSuccess: () => new Set<string>(),
-            },
-        ],
-        // True when the form has been edited since the last draft save.
-        // Drives the "Save draft" vs "Publish" button: if dirty, the server
-        // draft is stale and needs saving before we can publish.
-        dirtyAfterDraftSave: [
-            false,
-            {
-                setWorkflowValues: () => true,
-                softDeleteAction: () => true,
-                restoreAction: () => true,
-                saveDraftToServerSuccess: () => false,
-                loadWorkflowSuccess: () => false,
-                saveWorkflowSuccess: () => false,
-                publishDraftToServerSuccess: () => false,
-                discardDraftOnServerSuccess: () => false,
             },
         ],
     }),
     selectors({
         logicProps: [() => [(_, props: WorkflowLogicProps) => props], (props): WorkflowLogicProps => props],
+        currentSchedule: [(s) => [s.schedules], (schedules): HogFlowSchedule | null => schedules[0] ?? null],
+        pendingSchedule: [
+            (s) => [s.currentSchedule, s.scheduleState, s.scheduleStartsAt, s.scheduleTimezone, s.isScheduleRepeating],
+            (
+                currentSchedule,
+                scheduleState,
+                scheduleStartsAt,
+                scheduleTimezone,
+                isScheduleRepeating
+            ): { rrule: string; starts_at: string; timezone?: string } | null | false => {
+                // Build what the schedule would look like from current reducer state
+                if (!scheduleStartsAt) {
+                    // No start date set - if there was a saved schedule, this means delete it
+                    return currentSchedule ? null : false
+                }
+
+                const rrule = isScheduleRepeating ? stateToRRule(scheduleState, scheduleStartsAt) : ONE_TIME_RRULE
+                const newSchedule = { rrule, starts_at: scheduleStartsAt, timezone: scheduleTimezone }
+
+                // Compare with saved schedule to detect changes
+                if (!currentSchedule) {
+                    // No saved schedule exists, so any non-null value is a pending change
+                    return newSchedule
+                }
+
+                const savedRRule = currentSchedule.rrule
+                const savedStartsAt = currentSchedule.starts_at
+                const savedTimezone = currentSchedule.timezone ?? dayjs.tz.guess()
+
+                if (rrule === savedRRule && scheduleStartsAt === savedStartsAt && scheduleTimezone === savedTimezone) {
+                    return false // No changes
+                }
+
+                return newSchedule
+            },
+        ],
+        hasUnsavedChanges: [
+            (s) => [s.workflowChanged, s.pendingSchedule],
+            (formChanged, pendingSchedule): boolean => formChanged || pendingSchedule !== false,
+        ],
         workflowLoading: [(s) => [s.originalWorkflowLoading], (originalWorkflowLoading) => originalWorkflowLoading],
         edgesByActionId: [
             (s) => [s.workflow],
@@ -650,67 +528,32 @@ export const workflowLogic = kea<workflowLogicType>([
                 return sanitizeWorkflow(workflow, hogFunctionTemplatesById)
             },
         ],
-
-        workflowContentChanged: [
-            (s) => [s.workflow, s.originalWorkflow, s.draftDeletedActionIds],
-            (workflow, originalWorkflow, draftDeletedActionIds): boolean => {
-                if (!originalWorkflow) {
-                    return false
-                }
-                if (draftDeletedActionIds.size > 0) {
-                    return true
-                }
-                const contentFields: (keyof HogFlow)[] = [
-                    'trigger_masking',
-                    'conversion',
-                    'exit_condition',
-                    'edges',
-                    'actions',
-                    'variables',
-                ]
-                return contentFields.some((field) => !configsEqual(workflow[field], originalWorkflow[field]))
-            },
-        ],
-
-        hasPendingDraft: [(s) => [s.draftExistsOnServer], (draftExistsOnServer): boolean => draftExistsOnServer],
-
-        isDraftSaving: [(s) => [s.draftSaveResultLoading], (loading): boolean => loading],
-
-        isDraftPublishing: [(s) => [s.publishResultLoading], (loading): boolean => loading],
-
-        canPublish: [
-            (s) => [s.draftExistsOnServer, s.workflowHasActionErrors],
-            (draftExistsOnServer, hasErrors): boolean => draftExistsOnServer && !hasErrors,
-        ],
-
-        draftChangedActionIds: [
-            (s) => [s.workflow, s.originalWorkflow, s.draftDeletedActionIds],
-            (workflow, originalWorkflow, draftDeletedActionIds): Set<string> => {
-                if (!originalWorkflow) {
-                    return new Set()
-                }
-                const changed = new Set<string>(draftDeletedActionIds)
-                const liveActionsById = new Map(originalWorkflow.actions.map((a) => [a.id, a]))
-
-                for (const action of workflow.actions) {
-                    if (action.type === 'trigger' || action.type === 'exit') {
-                        continue
-                    }
-                    if (draftDeletedActionIds.has(action.id)) {
-                        continue
-                    }
-                    const liveAction = liveActionsById.get(action.id)
-                    if (!liveAction) {
-                        changed.add(action.id)
-                    } else if (!configsEqual(liveAction.config, action.config)) {
-                        changed.add(action.id)
-                    }
-                }
-                return changed
-            },
-        ],
     }),
-    listeners(({ actions, values, props, cache }) => ({
+    listeners(({ actions, values, props }) => ({
+        setScheduleStartsAtFromPicker: ({ pickerDate }) => {
+            if (!pickerDate) {
+                actions.setScheduleStartsAt(null)
+                return
+            }
+            // The picker returns browser-local time. Reinterpret as the schedule timezone.
+            const wallClock = dayjs(pickerDate).startOf('minute').format('YYYY-MM-DDTHH:mm:ss')
+            actions.setScheduleStartsAt(dayjs.tz(wallClock, values.scheduleTimezone).toISOString())
+        },
+        setScheduleTimezone: ({ timezone, previousTimezone }) => {
+            // When timezone changes, keep the wall-clock time the same by reinterpreting
+            // the current starts_at in the new timezone.
+            const oldTz = previousTimezone ?? dayjs.tz.guess()
+            if (values.scheduleStartsAt) {
+                const wallClock = dayjs(values.scheduleStartsAt).tz(oldTz).format('YYYY-MM-DDTHH:mm:ss')
+                actions.setScheduleStartsAt(dayjs.tz(wallClock, timezone).toISOString())
+            }
+        },
+        resetWorkflow: () => {
+            // Re-initialize schedule reducers from the saved schedule.
+            // Using setSchedules resets all reducers atomically without triggering
+            // the setScheduleTimezone listener's wall-clock reinterpretation.
+            actions.setSchedules(values.schedules)
+        },
         saveWorkflowPartial: async ({ workflow }) => {
             const merged = { ...values.workflow, ...workflow }
             if (merged.status === 'active' && values.workflowHasActionErrors) {
@@ -720,28 +563,43 @@ export const workflowLogic = kea<workflowLogicType>([
             actions.saveWorkflow(merged)
         },
         loadWorkflowSuccess: async ({ originalWorkflow }) => {
-            if (originalWorkflow?.draft) {
-                // Hydrate form with draft data, keeping identity fields from live record
-                const hydrated = {
-                    ...originalWorkflow,
-                    ...originalWorkflow.draft,
-                    id: originalWorkflow.id,
-                    status: originalWorkflow.status,
-                    version: originalWorkflow.version,
-                    team_id: originalWorkflow.team_id,
-                    created_at: originalWorkflow.created_at,
-                    updated_at: originalWorkflow.updated_at,
-                    created_by: originalWorkflow.created_by,
-                    draft: originalWorkflow.draft,
-                    draft_updated_at: originalWorkflow.draft_updated_at,
+            actions.resetWorkflow(originalWorkflow)
+            if (originalWorkflow.id && originalWorkflow.trigger?.type === 'batch') {
+                try {
+                    const schedules = await api.hogFlows.getHogFlowSchedules(originalWorkflow.id)
+                    actions.setSchedules(schedules)
+                } catch {
+                    // Schedules are non-critical, don't block workflow loading
                 }
-                actions.resetWorkflow(hydrated)
-            } else {
-                actions.resetWorkflow(originalWorkflow)
             }
         },
         saveWorkflowSuccess: async ({ originalWorkflow }) => {
+            // Save pending schedule changes
+            const workflowId = originalWorkflow.id
+            const pendingSchedule = values.pendingSchedule
+            const existingScheduleId = values.currentSchedule?.id
+            const hasScheduleChanges = pendingSchedule !== false && !!workflowId
+
+            if (hasScheduleChanges) {
+                try {
+                    if (pendingSchedule === null && existingScheduleId) {
+                        await api.hogFlows.deleteHogFlowSchedule(workflowId, existingScheduleId)
+                    } else if (pendingSchedule !== null && existingScheduleId) {
+                        await api.hogFlows.updateHogFlowSchedule(workflowId, existingScheduleId, pendingSchedule)
+                    } else if (pendingSchedule !== null) {
+                        await api.hogFlows.createHogFlowSchedule(workflowId, pendingSchedule)
+                    }
+
+                    const schedules = await api.hogFlows.getHogFlowSchedules(workflowId)
+                    actions.setSchedules(schedules)
+                } catch (e) {
+                    console.error('Failed to save schedule', e)
+                    lemonToast.error('Workflow saved, but schedule could not be updated')
+                }
+            }
+
             const tasksToMarkAsCompleted: SetupTaskId[] = []
+            lemonToast.success('Workflow saved')
             if (props.id === 'new' && originalWorkflow.id) {
                 router.actions.replace(
                     urls.workflow(
@@ -920,137 +778,7 @@ export const workflowLogic = kea<workflowLogicType>([
                 return
             }
         },
-        saveDraftNow: async () => {
-            if (props.id === 'new' || !props.id) {
-                // Auto-create workflow on server as draft
-                if (!values.workflow.name) {
-                    return
-                }
-                const toCreate = sanitizeWorkflow({ ...values.workflow }, values.hogFunctionTemplatesById)
-                toCreate.status = 'draft'
-                delete (toCreate as any).id
-                delete (toCreate as any).team_id
-                delete (toCreate as any).created_at
-                delete (toCreate as any).updated_at
-                try {
-                    const created = await api.hogFlows.createHogFlow(toCreate)
-                    router.actions.replace(
-                        urls.workflow(created.id, workflowSceneLogic.findMounted()?.values.currentTab || 'workflow')
-                    )
-                } catch (e) {
-                    // Silently fail - user can still manually save
-                    console.error('Auto-create workflow failed:', e)
-                }
-                return
-            }
-            if (values.workflowContentChanged) {
-                if (values.workflow.status === 'active') {
-                    actions.saveDraftToServer()
-                } else {
-                    // Draft-status workflows save directly - no live version to protect
-                    actions.saveWorkflow(sanitizeWorkflow({ ...values.workflow }, values.hogFunctionTemplatesById))
-                }
-            }
-        },
-        saveDraftToServerSuccess: () => {},
-        publishWorkflow: () => {
-            actions.publishDraftToServer()
-        },
-        publishDraftToServerSuccess: () => {
-            lemonToast.success('Workflow published')
-            actions.loadWorkflow()
-        },
-        discardDraft: () => {
-            LemonDialog.open({
-                title: 'Discard changes',
-                description: 'Are you sure you want to discard all changes? The live workflow will not be affected.',
-                primaryButton: {
-                    children: 'Discard',
-                    onClick: () => {
-                        if (values.draftExistsOnServer) {
-                            actions.discardDraftOnServer()
-                        } else {
-                            actions.loadWorkflow()
-                        }
-                    },
-                },
-                secondaryButton: {
-                    children: 'Cancel',
-                },
-            })
-        },
-        discardDraftOnServerSuccess: () => {
-            lemonToast.success('Draft discarded')
-            actions.loadWorkflow()
-        },
-        saveMetadataField: ({ field, value }) => {
-            if (!props.id || props.id === 'new') {
-                return
-            }
-            if (cache.metadataTimer) {
-                clearTimeout(cache.metadataTimer)
-            }
-            cache.metadataTimer = setTimeout(async () => {
-                try {
-                    const updates = { [field]: value } as Partial<HogFlow>
-                    await api.hogFlows.updateHogFlow(props.id!, updates)
-                    actions.metadataSaved(updates)
-                    lemonToast.success('Saved')
-                } catch (e) {
-                    console.error('Metadata save failed:', e)
-                }
-            }, 2000)
-        },
-        softDeleteAction: () => {
-            if (!props.id || props.id === 'new') {
-                return
-            }
-            if (cache.autosaveTimer) {
-                clearTimeout(cache.autosaveTimer)
-            }
-            cache.autosaveTimer = setTimeout(() => {
-                actions.saveDraftNow()
-            }, 10000)
-        },
-        restoreAction: () => {
-            if (!props.id || props.id === 'new') {
-                return
-            }
-            if (cache.autosaveTimer) {
-                clearTimeout(cache.autosaveTimer)
-            }
-            cache.autosaveTimer = setTimeout(() => {
-                actions.saveDraftNow()
-            }, 5000)
-        },
-        // Autosave: debounce 5s after changes
-        setWorkflowValues: () => {
-            if (!props.id || props.id === 'new') {
-                return
-            }
-            if (cache.autosaveTimer) {
-                clearTimeout(cache.autosaveTimer)
-            }
-            cache.autosaveTimer = setTimeout(() => {
-                actions.saveDraftNow()
-            }, 5000)
-        },
-        // Cancel autosave when the user explicitly saves/submits
-        submitWorkflow: () => {
-            if (cache.autosaveTimer) {
-                clearTimeout(cache.autosaveTimer)
-            }
-        },
     })),
-    // Clean up debounce timers to prevent saves firing after navigation
-    beforeUnmount(({ cache }) => {
-        if (cache.autosaveTimer) {
-            clearTimeout(cache.autosaveTimer)
-        }
-        if (cache.metadataTimer) {
-            clearTimeout(cache.metadataTimer)
-        }
-    }),
     afterMount(({ actions }) => {
         actions.loadWorkflow()
         actions.loadHogFunctionTemplatesById()

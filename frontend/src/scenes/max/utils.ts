@@ -40,6 +40,7 @@ import { Scene } from '../sceneTypes'
 import { MODE_DEFINITIONS } from './max-constants'
 import { SuggestionGroup } from './maxLogic'
 import {
+    InsightWithQuery,
     MaxActionContext,
     MaxContextType,
     MaxDashboardContext,
@@ -47,6 +48,7 @@ import {
     MaxEvaluationContext,
     MaxEventContext,
     MaxInsightContext,
+    MaxNotebookContext,
     MaxUIContext,
 } from './maxTypes'
 import { EnhancedToolCall } from './Thread'
@@ -161,13 +163,12 @@ export const insightToMaxContext = (
         name: insight.name || insight.derived_name,
         description: insight.description,
         query: source,
-        result: insight.result ?? undefined,
         filtersOverride,
         variablesOverride,
     }
 }
 
-export const dashboardToMaxContext = (dashboard: DashboardType<QueryBasedInsightModel>): MaxDashboardContext => {
+export const dashboardToMaxContext = (dashboard: DashboardType<InsightWithQuery>): MaxDashboardContext => {
     return {
         type: MaxContextType.DASHBOARD,
         id: dashboard.id,
@@ -206,6 +207,15 @@ export const errorTrackingIssueToMaxContextPayload = (issue: {
         name: issue.name,
     }
 }
+
+export const notebookToMaxContextPayload = (notebook: {
+    short_id: string
+    title?: string | null
+}): MaxNotebookContext => ({
+    type: MaxContextType.NOTEBOOK,
+    id: notebook.short_id,
+    name: notebook.title,
+})
 
 export const evaluationToMaxContextPayload = (evaluation: {
     id: string
@@ -315,6 +325,9 @@ export function getAgentModeForScene(
 export const visualizationTypeToQuery = (
     visualization: VisualizationItem | VisualizationArtifactContent | VisualizationBlock
 ): QuerySchema | null => {
+    if (!visualization) {
+        return null
+    }
     const source = castAssistantQuery('answer' in visualization ? visualization.answer : visualization.query)
     if (isHogQLQuery(source)) {
         return { kind: NodeKind.DataVisualizationNode, source: source } satisfies DataVisualizationNode

@@ -26,7 +26,8 @@ from posthog.models import AlertConfiguration, User
 from posthog.models.alert import AlertCheck, AlertSubscription
 from posthog.models.instance_setting import set_instance_setting
 from posthog.models.organization import Organization, OrganizationMembership
-from posthog.tasks.alerts.checks import check_alert
+from posthog.slo.types import SloArea, SloCompletedProperties, SloOperation, SloOutcome, SloStartedProperties
+from posthog.tasks.alerts.checks import check_alert, check_alert_task
 from posthog.tasks.alerts.utils import send_notifications_for_breaches
 from posthog.tasks.test.utils_email_tests import mock_email_messages
 
@@ -921,6 +922,70 @@ class TestAlertChecks(APIBaseTest, ClickhouseDestroyTablesMixin):
         alert = AlertConfiguration.objects.get(pk=self.alert["id"])
         assert alert.is_calculating is False
 
+    @parameterized.expand(
+        [
+            ("invalid_condition", {"condition": {}}, "invalid condition"),
+            ("missing_config_type", {"config": {"series_index": 0}}, "Unsupported alert config type"),
+            ("relative_on_non_time_series", {"condition": {"type": "relative_increase"}}, "not compatible"),
+        ]
+    )
+    @patch("posthog.tasks.alerts.checks.send_notifications_for_disabled")
+    def test_invalid_config_auto_disables_alert(
+        self,
+        _name: str,
+        field_overrides: dict,
+        expected_error_fragment: str,
+        mock_send_disabled: MagicMock,
+        mock_send_notifications_for_breaches: MagicMock,
+        mock_send_errors: MagicMock,
+    ) -> None:
+        alert = AlertConfiguration.objects.get(pk=self.alert["id"])
+        assert alert.enabled is True
+        assert alert.state != AlertState.ERRORED
+
+        for field, value in field_overrides.items():
+            setattr(alert, field, value)
+        alert.save()
+
+        check_alert(self.alert["id"])
+
+        alert.refresh_from_db()
+        assert alert.enabled is False
+        assert alert.state == AlertState.ERRORED  # type: ignore[unreachable]
+        assert mock_send_disabled.call_count == 1
+        assert mock_send_notifications_for_breaches.call_count == 0
+
+        alert_check = AlertCheck.objects.filter(alert_configuration=self.alert["id"]).latest("created_at")
+        assert alert_check.state == AlertState.ERRORED
+        assert alert_check.calculated_value is None
+        assert alert_check.condition == alert.condition
+        assert alert_check.targets_notified == {"users": ["user1@posthog.com"]}
+        assert expected_error_fragment in alert_check.error["message"]
+
+    @patch("posthog.tasks.alerts.checks.send_notifications_for_disabled")
+    def test_auto_disable_with_no_subscribers_sets_targets_notified_to_none(
+        self,
+        mock_send_disabled: MagicMock,
+        mock_send_notifications_for_breaches: MagicMock,
+        mock_send_errors: MagicMock,
+    ) -> None:
+        alert = AlertConfiguration.objects.get(pk=self.alert["id"])
+        alert.condition = {}
+        alert.save()
+        AlertSubscription.objects.filter(alert_configuration=alert).delete()
+
+        check_alert(self.alert["id"])
+
+        alert.refresh_from_db()
+        assert alert.enabled is False
+        assert alert.state == AlertState.ERRORED
+        assert mock_send_disabled.call_count == 0
+        assert mock_send_notifications_for_breaches.call_count == 0
+
+        alert_check = AlertCheck.objects.filter(alert_configuration=self.alert["id"]).latest("created_at")
+        assert alert_check.state == AlertState.ERRORED
+        assert alert_check.targets_notified == {}
+
 
 @freeze_time("2024-06-02T08:55:00.000Z")
 class TestAlertSubscriptionOrgMembership(APIBaseTest):
@@ -1063,3 +1128,108 @@ class TestGetSubscribedUsersEmails(APIBaseTest):
 
         emails = self.alert.get_subscribed_users_emails()
         assert emails == []
+
+
+class TestAlertCheckSloInstrumentation(APIBaseTest, ClickhouseDestroyTablesMixin):
+    def setUp(self) -> None:
+        super().setUp()
+        dashboard_api = DashboardAPI(self.client, self.team, self.assertEqual)
+        query_dict = TrendsQuery(
+            series=[EventsNode(event="$pageview")],
+            trendsFilter=TrendsFilter(display=ChartDisplayType.BOLD_NUMBER),
+        ).model_dump()
+        insight = dashboard_api.create_insight(data={"name": "insight", "query": query_dict})[1]
+        alert_resp = self.client.post(
+            f"/api/projects/{self.team.id}/alerts",
+            data={
+                "name": "slo test alert",
+                "insight": insight["id"],
+                "subscribed_users": [self.user.id],
+                "calculation_interval": "hourly",
+                "config": {"type": "TrendsAlertConfig", "series_index": 0},
+                "condition": {"type": "absolute_value"},
+                "threshold": {"configuration": {"type": "absolute", "bounds": {}}},
+            },
+        ).json()
+        self.alert_id = alert_resp["id"]
+
+    @parameterized.expand(
+        [
+            (
+                "success",
+                None,
+                "hourly",
+                SloOutcome.SUCCESS,
+                None,
+            ),
+            (
+                "failure",
+                RuntimeError("CH failure"),
+                "daily",
+                SloOutcome.FAILURE,
+                {"error_type": "RuntimeError", "error_message": "CH failure"},
+            ),
+        ]
+    )
+    @patch("posthog.slo.context.emit_slo_completed")
+    @patch("posthog.slo.context.emit_slo_started")
+    @patch("posthog.tasks.alerts.checks.check_alert")
+    def test_slo_emits_correct_events(
+        self,
+        _name: str,
+        side_effect: Exception | None,
+        calculation_interval: str,
+        expected_outcome: SloOutcome,
+        expected_error_extra: dict | None,
+        mock_check_alert: MagicMock,
+        mock_slo_started: MagicMock,
+        mock_slo_completed: MagicMock,
+    ) -> None:
+        mock_check_alert.side_effect = side_effect
+        insight_id = 42
+
+        if side_effect is not None:
+            with pytest.raises(type(side_effect)):
+                check_alert_task(self.alert_id, self.team.id, calculation_interval, insight_id)
+        else:
+            check_alert_task(self.alert_id, self.team.id, calculation_interval, insight_id)
+
+        mock_slo_started.assert_called_once()
+        started_kwargs = mock_slo_started.call_args.kwargs
+        assert started_kwargs["distinct_id"] == self.alert_id
+        assert started_kwargs["properties"] == SloStartedProperties(
+            area=SloArea.ANALYTIC_PLATFORM,
+            operation=SloOperation.ALERT_CHECK,
+            team_id=self.team.id,
+            resource_id=self.alert_id,
+        )
+        assert started_kwargs["extra_properties"]["calculation_interval"] == calculation_interval
+        assert started_kwargs["extra_properties"]["insight_id"] == insight_id
+        assert "correlation_id" in started_kwargs["extra_properties"]
+        assert started_kwargs["capture"] is not None  # ph_scoped_capture callable
+
+        mock_slo_completed.assert_called_once()
+        completed_kwargs = mock_slo_completed.call_args.kwargs
+        assert started_kwargs["capture"] is completed_kwargs["capture"]  # same scoped client for both
+        assert completed_kwargs["distinct_id"] == self.alert_id
+        assert completed_kwargs["properties"] == SloCompletedProperties(
+            area=SloArea.ANALYTIC_PLATFORM,
+            operation=SloOperation.ALERT_CHECK,
+            team_id=self.team.id,
+            resource_id=self.alert_id,
+            outcome=expected_outcome,
+            duration_ms=completed_kwargs["properties"].duration_ms,
+        )
+        assert (
+            completed_kwargs["extra_properties"]["correlation_id"]
+            == started_kwargs["extra_properties"]["correlation_id"]
+        )
+        assert completed_kwargs["extra_properties"]["calculation_interval"] == calculation_interval
+        assert completed_kwargs["extra_properties"]["insight_id"] == insight_id
+        for key, value in (expected_error_extra or {}).items():
+            assert completed_kwargs["extra_properties"][key] == value
+        if side_effect is not None:
+            assert completed_kwargs["extra_properties"]["error_origin"]
+        else:
+            assert "error_origin" not in completed_kwargs["extra_properties"]
+        assert mock_slo_completed.call_args.kwargs["properties"].duration_ms >= 0

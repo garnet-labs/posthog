@@ -31,9 +31,10 @@ from posthog.hogql_queries.experiments.hogql_aggregation_utils import (
 )
 from posthog.hogql_queries.insights.trends.aggregation_operations import ALLOWED_SESSION_MATH_PROPERTIES
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
-from posthog.models import Experiment
 from posthog.models.action.action import Action
 from posthog.models.team.team import Team
+
+from products.experiments.backend.models.experiment import Experiment
 
 
 def is_session_property_metric(source: Union[EventsNode, ActionsNode]) -> bool:
@@ -357,6 +358,11 @@ def get_source_aggregation_expr(
                     agg_call = build_aggregation_call(
                         aggregation_function, inner_value_expr, params=params, distinct=distinct
                     )
+                    # Non-numeric aggregations (count, uniq, etc.) return UInt64, which is
+                    # incompatible with Float64 in ClickHouse greatest/least functions used
+                    # by winsorization. Wrap with toFloat to ensure consistent Float64 type.
+                    if not aggregation_needs_numeric_input(aggregation_function):
+                        agg_call = ast.Call(name="toFloat", args=[agg_call])
                     return ast.Call(name="coalesce", args=[agg_call, ast.Constant(value=0)])
             # Default to sum if no aggregation function is found
             return parse_expr(f"sum(coalesce(toFloat({table_alias}.value), 0))")

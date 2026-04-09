@@ -890,6 +890,22 @@ class TestProperty(BaseTest):
             self._parse_expr("session.$session_duration = 10"),
         )
 
+    def test_session_boolean_property(self):
+        self.assertEqual(
+            self._property_to_expr(
+                {"type": "session", "key": "$is_bounce", "value": "true", "operator": "exact"},
+                scope="event",
+            ),
+            self._parse_expr("session.$is_bounce = true"),
+        )
+        self.assertEqual(
+            self._property_to_expr(
+                {"type": "session", "key": "$is_bounce", "value": "false", "operator": "exact"},
+                scope="event",
+            ),
+            self._parse_expr("session.$is_bounce = false"),
+        )
+
     def test_data_warehouse_person_property(self):
         credential = DataWarehouseCredential.objects.create(
             team=self.team, access_key="_accesskey", access_secret="_secret"
@@ -1084,6 +1100,70 @@ class TestProperty(BaseTest):
             chain=["person", "properties", 42]
         )
         assert map_virtual_properties(ast.Field(chain=["properties", 42])) == ast.Field(chain=["properties", 42])
+
+    @parameterized.expand(
+        [
+            (
+                "traffic_type_bot",
+                {"type": "event", "key": "$virt_traffic_type", "value": "Bot"},
+                "$virt_traffic_type = 'Bot'",
+            ),
+            (
+                "traffic_type_ai_agent",
+                {"type": "event", "key": "$virt_traffic_type", "value": "AI Agent"},
+                "$virt_traffic_type = 'AI Agent'",
+            ),
+            (
+                "bot_name_googlebot",
+                {"type": "event", "key": "$virt_bot_name", "value": "Googlebot"},
+                "$virt_bot_name = 'Googlebot'",
+            ),
+        ]
+    )
+    def test_virtual_event_properties_on_event_scope(self, _name: str, prop_dict: dict, expected_expr: str):
+        assert self._property_to_expr(prop_dict, scope="event") == self._parse_expr(expected_expr)
+
+    @parameterized.expand(
+        [
+            (
+                "is_not_bot",
+                {"type": "event", "key": "$virt_traffic_type", "value": "Bot", "operator": "is_not"},
+                "$virt_traffic_type != 'Bot'",
+            ),
+            (
+                "icontains_google",
+                {"type": "event", "key": "$virt_bot_name", "value": "Google", "operator": "icontains"},
+                "toString($virt_bot_name) ilike '%Google%'",
+            ),
+            (
+                "is_set",
+                {"type": "event", "key": "$virt_traffic_type", "operator": "is_set"},
+                "$virt_traffic_type != NULL",
+            ),
+        ]
+    )
+    def test_virtual_event_properties_with_operators(self, _name: str, prop_dict: dict, expected_expr: str):
+        assert self._property_to_expr(prop_dict, scope="event") == self._parse_expr(expected_expr)
+
+    def test_virtual_event_properties_boolean_filter(self):
+        assert self._property_to_expr(
+            {"type": "event", "key": "$virt_is_bot", "value": "true"}, scope="event"
+        ) == self._parse_expr("$virt_is_bot = true")
+
+        assert self._property_to_expr(
+            {"type": "event", "key": "$virt_is_bot", "value": "false"}, scope="event"
+        ) == self._parse_expr("$virt_is_bot = false")
+
+    @parameterized.expand(
+        [
+            ("is_bot", "$virt_is_bot"),
+            ("traffic_type", "$virt_traffic_type"),
+            ("bot_name", "$virt_bot_name"),
+            ("traffic_category", "$virt_traffic_category"),
+        ]
+    )
+    def test_map_virtual_properties_for_event_properties(self, _name: str, virt_prop: str):
+        assert map_virtual_properties(ast.Field(chain=["properties", virt_prop])) == ast.Field(chain=[virt_prop])
 
     def test_property_to_expr_event_metadata_group_scope_basic(self):
         assert self._property_to_expr(

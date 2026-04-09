@@ -49,16 +49,18 @@ export interface TaxonomicPopoverProps<ValueType extends TaxonomicFilterValue = 
     allowNonCapturedEvents?: boolean
     sideIcon?: React.ReactElement | null
     definitionPopoverRenderer?: DefinitionPopoverRenderer
+    suggestedFiltersLabel?: string
 }
 
 /** Like TaxonomicPopover, but convenient when you know you will only use string values */
 export function TaxonomicStringPopover(props: TaxonomicPopoverProps<string>): JSX.Element {
+    const value = props.value != null ? String(props.value) : undefined
     return (
         <TaxonomicPopover
             {...props}
-            value={String(props.value)}
+            value={value}
             onChange={(value, groupType, item) => props.onChange?.(String(value), groupType, item)}
-            renderValue={(value) => props.renderValue?.(String(value)) ?? <>{String(props.value)}</>}
+            renderValue={(v) => props.renderValue?.(String(v)) ?? <>{value}</>}
         />
     )
 }
@@ -87,6 +89,7 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
         maxContextOptions,
         allowNonCapturedEvents,
         definitionPopoverRenderer,
+        suggestedFiltersLabel,
         width,
         placement,
         sideIcon,
@@ -143,6 +146,7 @@ export const TaxonomicPopover = forwardRef(function TaxonomicPopover_<
                     maxContextOptions={maxContextOptions}
                     allowNonCapturedEvents={allowNonCapturedEvents}
                     definitionPopoverRenderer={definitionPopoverRenderer}
+                    suggestedFiltersLabel={suggestedFiltersLabel}
                     width={width}
                 />
             }

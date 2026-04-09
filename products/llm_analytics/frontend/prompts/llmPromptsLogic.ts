@@ -17,6 +17,7 @@ import { cleanPagedSearchOrderParams } from '../utils'
 import type { llmPromptsLogicType } from './llmPromptsLogicType'
 
 export const PROMPTS_PER_PAGE = 30
+export const LLM_PROMPTS_FORCE_RELOAD_PARAM = 'llm_prompts_force_reload'
 
 export interface PromptFilters {
     page: number
@@ -48,7 +49,8 @@ export const llmPromptsLogic = kea<llmPromptsLogicType>([
             debounce,
         }),
         loadPrompts: (debounce: boolean = true) => ({ debounce }),
-        deletePrompt: (promptId: string) => ({ promptId }),
+        deletePrompt: (promptName: string) => ({ promptName }),
+        duplicatePrompt: (promptName: string, newName: string) => ({ promptName, newName }),
     }),
 
     reducers({
@@ -150,14 +152,23 @@ export const llmPromptsLogic = kea<llmPromptsLogicType>([
             }
         },
 
-        deletePrompt: async ({ promptId }) => {
+        deletePrompt: async ({ promptName }) => {
             try {
-                const promptName = values.prompts.results.find((prompt) => prompt.id === promptId)?.name
-                await api.llmPrompts.update(promptId, { deleted: true })
-                lemonToast.info(`${promptName || 'Prompt'} has been deleted.`)
+                await api.llmPrompts.archiveByName(promptName)
+                lemonToast.info(`${promptName || 'Prompt'} has been archived.`)
                 await asyncActions.loadPrompts(false)
             } catch {
-                lemonToast.error('Failed to delete prompt')
+                lemonToast.error('Failed to archive prompt')
+            }
+        },
+
+        duplicatePrompt: async ({ promptName, newName }) => {
+            try {
+                await api.llmPrompts.duplicateByName(promptName, newName)
+                lemonToast.success(`Prompt duplicated as "${newName}".`)
+                router.actions.push(urls.llmAnalyticsPrompt(newName))
+            } catch {
+                lemonToast.error('Failed to duplicate prompt')
             }
         },
     })),
@@ -178,10 +189,17 @@ export const llmPromptsLogic = kea<llmPromptsLogicType>([
     tabAwareUrlToAction(({ actions, values }) => ({
         [urls.llmAnalyticsPrompts()]: (_, searchParams, __, { method }) => {
             const newFilters = cleanFilters(searchParams)
+            const forceReload = typeof searchParams?.[LLM_PROMPTS_FORCE_RELOAD_PARAM] === 'string'
             if (!objectsEqual(values.filters, newFilters)) {
                 actions.setFilters(newFilters, false)
-            } else if (method !== 'REPLACE') {
+            } else if (forceReload || method !== 'REPLACE') {
                 actions.loadPrompts(false)
+            }
+
+            if (forceReload) {
+                const nextSearchParams = { ...searchParams }
+                delete nextSearchParams[LLM_PROMPTS_FORCE_RELOAD_PARAM]
+                router.actions.replace(urls.llmAnalyticsPrompts(), nextSearchParams)
             }
         },
     })),

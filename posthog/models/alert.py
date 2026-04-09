@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 if TYPE_CHECKING:
+    from posthog.event_usage import AnalyticsProps
     from posthog.models.organization import Organization
     from posthog.models.user import User
 
@@ -63,7 +64,7 @@ class Threshold(ModelActivityMixin, CreatedMetaFields, UUIDTModel):
 
 
 class AlertConfiguration(ModelActivityMixin, CreatedMetaFields, UUIDTModel):
-    ALERTS_ALLOWED_ON_FREE_TIER = 2
+    ALERTS_ALLOWED_ON_FREE_TIER = 5
 
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
     insight = models.ForeignKey("posthog.Insight", on_delete=models.CASCADE)
@@ -98,6 +99,9 @@ class AlertConfiguration(ModelActivityMixin, CreatedMetaFields, UUIDTModel):
     threshold = models.ForeignKey(Threshold, on_delete=models.CASCADE, null=True, blank=True)
     condition = models.JSONField(default=dict)
 
+    # Detector-based anomaly detection configuration (alternative to threshold)
+    detector_config = models.JSONField(null=True, blank=True)
+
     state = models.CharField(max_length=10, choices=ALERT_STATE_CHOICES, default=AlertState.NOT_FIRING)
     enabled = models.BooleanField(default=True)
     is_calculating = models.BooleanField(default=False, null=True, blank=True)
@@ -110,6 +114,8 @@ class AlertConfiguration(ModelActivityMixin, CreatedMetaFields, UUIDTModel):
     snoozed_until = models.DateTimeField(null=True, blank=True)
 
     skip_weekend = models.BooleanField(null=True, blank=True, default=False)
+
+    schedule_restriction = models.JSONField(null=True, blank=True, default=None)
 
     def __str__(self):
         return f"{self.name} (Team: {self.team})"
@@ -140,26 +146,23 @@ class AlertConfiguration(ModelActivityMixin, CreatedMetaFields, UUIDTModel):
 
         super().save(*args, **kwargs)
 
-    def _get_event_properties(self, additional_properties: dict | None = None) -> dict:
-        properties = {
+    def _get_event_properties(self) -> dict:
+        return {
             "alert_id": self.id,
             "alert_name": self.name,
             "condition_type": self.condition.get("type") if self.condition else None,
             "calculation_interval": self.calculation_interval,
         }
-        if additional_properties:
-            properties.update(additional_properties)
-        return properties
 
-    def report_created(self, user: User, additional_properties: dict | None = None) -> None:
+    def report_created(self, user: User, analytics_props: AnalyticsProps | None = None) -> None:
         from posthog.event_usage import report_user_action
 
-        report_user_action(user, "alert created", self._get_event_properties(additional_properties))
+        report_user_action(user, "alert created", self._get_event_properties(), analytics_props=analytics_props)
 
-    def report_updated(self, user: User, additional_properties: dict | None = None) -> None:
+    def report_updated(self, user: User, analytics_props: AnalyticsProps | None = None) -> None:
         from posthog.event_usage import report_user_action
 
-        report_user_action(user, "alert updated", self._get_event_properties(additional_properties))
+        report_user_action(user, "alert updated", self._get_event_properties(), analytics_props=analytics_props)
 
     @classmethod
     def check_alert_limit(cls, team_id: int, organization: Organization) -> str | None:
@@ -209,6 +212,15 @@ class AlertCheck(UUIDTModel):
     error = models.JSONField(null=True, blank=True)
 
     state = models.CharField(max_length=10, choices=ALERT_STATE_CHOICES, default=AlertState.NOT_FIRING)
+
+    # Detector-based anomaly detection results
+    anomaly_scores = models.JSONField(null=True, blank=True)  # Scores for each data point
+    triggered_points = models.JSONField(null=True, blank=True)  # Indices of detected anomalies
+    triggered_dates = models.JSONField(null=True, blank=True)  # Dates for chart alignment
+    interval = models.CharField(max_length=10, null=True, blank=True)  # Insight interval when check was created
+    triggered_metadata = models.JSONField(
+        null=True, blank=True
+    )  # Additional trigger context (e.g. series_index, breakdown_value)
 
     def __str__(self):
         return f"AlertCheck for {self.alert_configuration.name} at {self.created_at}"
