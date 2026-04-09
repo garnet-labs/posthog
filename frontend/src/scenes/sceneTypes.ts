@@ -105,6 +105,7 @@ export enum Scene {
     TwoFactorReset = 'TwoFactorReset',
     Person = 'Person',
     Persons = 'Persons',
+    AccountSocialConnected = 'AccountSocialConnected',
     Pipeline = 'Pipeline',
     PipelineStatus = 'PipelineStatus',
     PipelineNode = 'PipelineNode',
