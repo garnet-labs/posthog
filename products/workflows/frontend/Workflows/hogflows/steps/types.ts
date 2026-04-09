@@ -135,11 +135,6 @@ export const HogFlowTriggerSchema = z.discriminatedUnion('type', [
     }),
     z.object({
         type: z.literal('schedule'),
-        template_uuid: z.string().uuid().optional(), // May be used later to specify a specific template version
-        template_id: z.string(),
-        inputs: z.record(CyclotronInputSchema),
-        scheduled_at: z.string().optional(), // ISO 8601 datetime string for one-time scheduling
-        // Future: recurring schedule fields can be added here
     }),
     z.object({
         type: z.literal('batch'),
@@ -291,15 +286,12 @@ export const isFunctionAction = (
 
 export const isTriggerFunction = (
     action: HogFlowAction
-): action is Extract<
-    HogFlowAction,
-    { type: 'trigger'; config: { type: 'webhook' | 'tracking_pixel' | 'manual' | 'schedule' } }
-> => {
+): action is Extract<HogFlowAction, { type: 'trigger'; config: { type: 'webhook' | 'tracking_pixel' | 'manual' } }> => {
     if (action.type !== 'trigger') {
         return false
     }
     const trigger = action as Extract<HogFlowAction, { type: 'trigger' }>
-    return ['webhook', 'tracking_pixel', 'manual', 'schedule'].includes(trigger.config.type)
+    return ['webhook', 'tracking_pixel', 'manual'].includes(trigger.config.type)
 }
 
 export interface HogflowTestResult {

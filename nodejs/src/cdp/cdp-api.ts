@@ -31,6 +31,7 @@ import { BatchExportHogFunctionService, NotFoundError, ParseError } from './serv
 import { HogExecutorExecuteAsyncOptions, HogExecutorService, MAX_ASYNC_STEPS } from './services/hog-executor.service'
 import { HogFlowExecutorService, createHogFlowInvocation } from './services/hogflows/hogflow-executor.service'
 import { HogFlowManagerService } from './services/hogflows/hogflow-manager.service'
+import { serializeInvocation } from './services/job-queue/job-queue-kafka'
 import { GroupsManagerService } from './services/managers/groups-manager.service'
 import { HogFunctionManagerService } from './services/managers/hog-function-manager.service'
 import { EmailTrackingService } from './services/messaging/email-tracking.service'
@@ -516,6 +517,27 @@ export class CdpApi {
                       startedAtTimestamp: Date.now(),
                   }
                 : undefined
+
+            // Async mode: queue to Cyclotron instead of executing inline
+            if (req.body.async) {
+                const kafkaProducer = this.deps.kafkaProducer
+                if (!kafkaProducer) {
+                    return res.status(500).json({ error: 'Kafka producer not available' })
+                }
+
+                const serialized = JSON.stringify(serializeInvocation(invocation))
+                await kafkaProducer.produce({
+                    value: Buffer.from(serialized),
+                    key: Buffer.from(invocation.id),
+                    topic: 'cdp_cyclotron_hogflow',
+                    headers: {
+                        functionId: invocation.functionId,
+                        teamId: invocation.teamId.toString(),
+                    },
+                })
+
+                return res.json({ status: 'queued', invocation_id: invocation.id })
+            }
 
             const logs: MinimalLogEntry[] = []
             const options: HogExecutorExecuteAsyncOptions = buildHogExecutorAsyncOptions(mock_async_functions, logs)

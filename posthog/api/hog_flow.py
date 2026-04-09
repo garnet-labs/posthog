@@ -93,7 +93,7 @@ class HogFlowActionSerializer(serializers.Serializer):
 
         trigger_is_function = False
         if data.get("type") == "trigger":
-            if data.get("config", {}).get("type") in ["webhook", "manual", "tracking_pixel", "schedule"]:
+            if data.get("config", {}).get("type") in ["webhook", "manual", "tracking_pixel"]:
                 trigger_is_function = True
             elif data.get("config", {}).get("type") == "event":
                 filters = data.get("config", {}).get("filters", {})
@@ -118,6 +118,8 @@ class HogFlowActionSerializer(serializers.Serializer):
                     properties = filters.get("properties", None)
                     if properties is not None and not isinstance(properties, list):
                         raise serializers.ValidationError({"filters": {"properties": "Properties must be an array."}})
+            elif data.get("config", {}).get("type") == "schedule":
+                pass
             else:
                 if not is_draft:
                     raise serializers.ValidationError({"config": "Invalid trigger type"})
@@ -737,6 +739,7 @@ class InternalHogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMi
             for schedule_id in due_schedule_ids:
                 try:
                     batch_job_params = None
+                    schedule_invocation_params = None
                     with transaction.atomic():
                         # Per-schedule transaction: lock only one row at a time to minimize
                         # lock duration and allow concurrent replicas via skip_locked.
@@ -757,26 +760,52 @@ class InternalHogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMi
                         hog_flow = schedule.hog_flow
                         trigger_type = (hog_flow.trigger or {}).get("type")
 
-                        if hog_flow.status != "active" or trigger_type != "batch":
+                        if hog_flow.status != "active" or trigger_type not in ("batch", "schedule"):
                             schedule.next_run_at = None
                             schedule.save(update_fields=["next_run_at", "updated_at"])
                             continue
 
                         advance_next_run(schedule, after=schedule.next_run_at)
 
-                        batch_job_params = {
-                            "team_id": schedule.team_id,
-                            "hog_flow": hog_flow,
-                            "variables": resolve_variables(hog_flow, schedule),
-                            "filters": (hog_flow.trigger or {}).get("filters", {}),
-                        }
+                        if trigger_type == "batch":
+                            batch_job_params = {
+                                "team_id": schedule.team_id,
+                                "hog_flow": hog_flow,
+                                "variables": resolve_variables(hog_flow, schedule),
+                                "filters": (hog_flow.trigger or {}).get("filters", {}),
+                            }
+                        elif trigger_type == "schedule":
+                            schedule_invocation_params = {
+                                "team_id": schedule.team_id,
+                                "hog_flow_id": str(hog_flow.id),
+                                "variables": resolve_variables(hog_flow, schedule),
+                            }
 
-                    # Create the batch job outside the transaction so the
-                    # post_save signal's HTTP call doesn't hold the row lock.
+                    # Create jobs outside the transaction so HTTP calls don't hold the row lock.
                     if batch_job_params:
                         HogFlowBatchJob.objects.create(
                             **batch_job_params,
                             status=HogFlowBatchJob.State.QUEUED,
+                        )
+                        processed.append(str(schedule_id))
+                    elif schedule_invocation_params:
+                        create_hog_flow_invocation_test(
+                            team_id=schedule_invocation_params["team_id"],
+                            hog_flow_id=schedule_invocation_params["hog_flow_id"],
+                            payload={
+                                "globals": {
+                                    "event": {
+                                        "uuid": str(uuid_mod.uuid4()),
+                                        "event": "$workflow_scheduled",
+                                        "distinct_id": f"workflow-{schedule_invocation_params['hog_flow_id']}",
+                                        "timestamp": timezone.now().isoformat(),
+                                        "url": "",
+                                        "properties": {},
+                                        "elements_chain": "",
+                                    },
+                                    "variables": schedule_invocation_params["variables"],
+                                },
+                            },
                         )
                         processed.append(str(schedule_id))
                 except Exception:
@@ -790,7 +819,7 @@ class InternalHogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMi
                     status=HogFlowSchedule.Status.ACTIVE,
                     next_run_at__isnull=True,
                     hog_flow__status="active",
-                    hog_flow__trigger__type="batch",
+                    hog_flow__trigger__type__in=["batch", "schedule"],
                 ).values_list("id", flat=True)
             )
 

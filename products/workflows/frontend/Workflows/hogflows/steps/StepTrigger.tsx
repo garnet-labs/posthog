@@ -16,7 +16,6 @@ import {
 } from '@posthog/icons'
 import {
     LemonButton,
-    LemonCalendarSelectInput,
     LemonCollapse,
     LemonDivider,
     LemonDropdown,
@@ -33,7 +32,6 @@ import { CodeSnippet } from 'lib/components/CodeSnippet'
 import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { FEATURE_FLAGS } from 'lib/constants'
-import { dayjs } from 'lib/dayjs'
 import { IconAdsClick } from 'lib/lemon-ui/icons'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { LemonRadio } from 'lib/lemon-ui/LemonRadio'
@@ -239,16 +237,12 @@ export function StepTriggerConfiguration({ node }: { node: Node<TriggerAction> }
                       },
                   ]
                 : []),
-            ...(type === 'schedule'
-                ? [
-                      {
-                          label: 'Schedule',
-                          description: 'Schedule your workflow to run at a specific time in the future',
-                          value: 'schedule',
-                          icon: <IconClock />,
-                      },
-                  ]
-                : []),
+            {
+                label: 'Schedule',
+                description: 'Run your workflow on a recurring schedule',
+                value: 'schedule',
+                icon: <IconClock />,
+            },
             {
                 label: 'Tracking pixel',
                 description: 'Trigger your workflow using a 1x1 tracking pixel',
@@ -304,16 +298,7 @@ export function StepTriggerConfiguration({ node }: { node: Node<TriggerAction> }
                 },
             })
         } else if (value === 'schedule') {
-            setWorkflowActionConfig(node.id, {
-                type: 'schedule',
-                template_id: 'template-source-webhook',
-                inputs: {
-                    event: { order: 0, value: '$workflow_triggered' },
-                    distinct_id: { order: 1, value: '{request.body.user_id}' },
-                    method: { order: 2, value: 'POST' },
-                },
-                scheduled_at: undefined,
-            })
+            setWorkflowActionConfig(node.id, { type: 'schedule' })
         } else if (value === 'batch') {
             setWorkflowActionConfig(node.id, {
                 type: 'batch',
@@ -352,7 +337,7 @@ export function StepTriggerConfiguration({ node }: { node: Node<TriggerAction> }
             ) : node.data.config.type === 'manual' ? (
                 <StepTriggerConfigurationManual />
             ) : node.data.config.type === 'schedule' ? (
-                <StepTriggerConfigurationSchedule action={node.data} config={node.data.config} />
+                <RecurringSchedulePicker />
             ) : node.data.config.type === 'batch' ? (
                 <StepTriggerConfigurationBatch action={node.data} config={node.data.config} />
             ) : node.data.config.type === 'tracking_pixel' ? (
@@ -486,53 +471,6 @@ function StepTriggerConfigurationManual(): JSX.Element {
                     </Tooltip>
                     .
                 </p>
-            </div>
-        </>
-    )
-}
-
-function StepTriggerConfigurationSchedule({
-    action,
-    config,
-}: {
-    action: Extract<HogFlowAction, { type: 'trigger' }>
-    config: Extract<HogFlowAction['config'], { type: 'schedule' }>
-}): JSX.Element {
-    const { setWorkflowActionConfig } = useActions(workflowLogic)
-    const { actionValidationErrorsById } = useValues(workflowLogic)
-    const validationResult = actionValidationErrorsById[action.id]
-
-    const scheduledDateTime = config.scheduled_at ? dayjs(config.scheduled_at) : null
-
-    return (
-        <>
-            <div className="flex flex-col gap-2">
-                <p className="mb-0">Schedule this workflow to run at a specific time in the future.</p>
-                <LemonField.Pure label="Scheduled time" error={validationResult?.errors?.scheduled_at}>
-                    <div className="flex flex-col gap-2">
-                        <LemonCalendarSelectInput
-                            value={scheduledDateTime}
-                            onChange={(date) => {
-                                setWorkflowActionConfig(action.id, {
-                                    type: 'schedule',
-                                    template_id: config.template_id,
-                                    template_uuid: config.template_uuid,
-                                    inputs: config.inputs,
-                                    scheduled_at: date ? date.toISOString() : undefined,
-                                })
-                            }}
-                            granularity="minute"
-                            selectionPeriod="upcoming"
-                            showTimeToggle={false}
-                        />
-                        {scheduledDateTime && (
-                            <div className="text-xs text-muted">
-                                Timezone: {dayjs.tz.guess()} • Scheduled for:{' '}
-                                {scheduledDateTime.format('MMMM D, YYYY [at] h:mm A')}
-                            </div>
-                        )}
-                    </div>
-                </LemonField.Pure>
             </div>
         </>
     )

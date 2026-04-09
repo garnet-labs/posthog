@@ -492,13 +492,6 @@ export const workflowLogic = kea<workflowLogicType>([
                                         filters: 'At least one event or action is required',
                                     }
                                 }
-                            } else if (action.config.type === 'schedule') {
-                                if (!action.config.scheduled_at) {
-                                    result.valid = false
-                                    result.errors = {
-                                        scheduled_at: 'A scheduled time is required',
-                                    }
-                                }
                             } else if (action.config.type === 'batch') {
                                 if (!action.config.filters.properties?.length) {
                                     result.valid = false
@@ -576,7 +569,8 @@ export const workflowLogic = kea<workflowLogicType>([
         },
         loadWorkflowSuccess: async ({ originalWorkflow }) => {
             actions.resetWorkflow(originalWorkflow)
-            if (originalWorkflow.id && originalWorkflow.trigger?.type === 'batch') {
+            const triggerType = originalWorkflow.trigger?.type
+            if (originalWorkflow.id && (triggerType === 'batch' || triggerType === 'schedule')) {
                 try {
                     const schedules = await api.hogFlows.getHogFlowSchedules(originalWorkflow.id)
                     actions.setSchedules(schedules)
