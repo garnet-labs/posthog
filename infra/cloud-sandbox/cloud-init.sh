@@ -248,9 +248,13 @@ chown -R ubuntu:ubuntu "$SANDBOX_CONFIG_DIR"
 log "Fetching branch $SANDBOX_BRANCH..."
 cd "$REPO_DIR"
 sudo -u ubuntu HOME=/home/ubuntu git fetch origin --quiet
-sudo -u ubuntu HOME=/home/ubuntu git fetch origin "$SANDBOX_BRANCH" --quiet \
-    || log "WARNING: fetch of $SANDBOX_BRANCH failed, will try with available refs"
-sudo -u ubuntu HOME=/home/ubuntu git checkout "$SANDBOX_BRANCH"
+if sudo -u ubuntu HOME=/home/ubuntu git fetch origin "$SANDBOX_BRANCH" --quiet 2>/dev/null; then
+    log "Checking out existing branch $SANDBOX_BRANCH..."
+    sudo -u ubuntu HOME=/home/ubuntu git checkout "$SANDBOX_BRANCH"
+else
+    log "Branch $SANDBOX_BRANCH not found on remote, creating from origin/master..."
+    sudo -u ubuntu HOME=/home/ubuntu git checkout -b "$SANDBOX_BRANCH" origin/master
+fi
 
 log "Creating sandbox via bin/sandbox create..."
 export SANDBOX_HOSTNAME

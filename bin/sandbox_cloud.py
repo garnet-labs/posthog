@@ -382,6 +382,35 @@ def cmd_cloud_create(branch: str) -> None:
         print(f"  Destroy it: sandbox cloud destroy {branch}")
         sys.exit(1)
 
+    # Check if the branch needs to be pushed to the remote.
+    # cloud-init.sh can create a new branch from origin/master, but if the
+    # user has local commits they probably want those on the sandbox.
+    remote_ref = run(
+        ["git", "ls-remote", "--heads", "origin", branch],
+        capture=True,
+        check=False,
+    ).stdout.strip()
+    local_ref = run(
+        ["git", "rev-parse", "--verify", f"refs/heads/{branch}"],
+        capture=True,
+        check=False,
+    ).stdout.strip()
+
+    if local_ref and not remote_ref:
+        warn(f"Branch '{branch}' exists locally but not on the remote.")
+        answer = input("  Push to origin before creating sandbox? [Y/n] ").strip().lower()
+        if answer in ("", "y", "yes"):
+            run(["git", "push", "-u", "origin", branch], check=True)
+        else:
+            info(f"Continuing — sandbox will start from master.")
+    elif local_ref and remote_ref:
+        remote_sha = remote_ref.split()[0]
+        if local_ref != remote_sha:
+            warn(f"Local '{branch}' ({local_ref[:8]}) differs from remote ({remote_sha[:8]}).")
+            answer = input("  Push local to origin before creating sandbox? [Y/n] ").strip().lower()
+            if answer in ("", "y", "yes"):
+                run(["git", "push", "origin", branch], check=True)
+
     info(f"Creating cloud sandbox for '{branch}'...")
     info(f"  Tailscale hostname: {hostname}")
 
