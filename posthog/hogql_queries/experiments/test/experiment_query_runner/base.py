@@ -15,6 +15,7 @@ from products.analytics_platform.backend.models.preaggregation_job import Preagg
 from products.data_warehouse.backend.models.join import DataWarehouseJoin
 from products.data_warehouse.backend.test.utils import create_data_warehouse_table_from_csv
 from products.experiments.backend.models.experiment import Experiment
+from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
 
 TEST_BUCKET = "test_storage_bucket-posthog.hogql.experiments.queryrunner"
 
@@ -45,8 +46,6 @@ class ExperimentQueryRunnerBaseTest(ClickhouseTestMixin, APIBaseTest):
     def _save_experiment_with_precomputation(self, experiment, use_precomputation: bool):
         """Save experiment with precomputation enabled if needed"""
         if use_precomputation:
-            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
             config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
             config.experiment_precomputation_enabled = True
             config.save()

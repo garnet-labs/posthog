@@ -33,6 +33,7 @@ from products.analytics_platform.backend.lazy_computation.lazy_computation_execu
     _get_insert_settings,
     ensure_precomputed,
 )
+from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
 
 
 @override_settings(IN_UNIT_TESTING=True)
@@ -79,8 +80,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
     ) -> tuple[ExperimentQueryResponse, ExperimentQueryResponse]:
         """Run the same experiment through both paths and assert identical results."""
         # Path A: direct events scan
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = False
         config.save()
@@ -100,8 +99,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
         )
 
         # Path B: lazy-computed
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = True
         config.save()
@@ -255,8 +252,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
         )
 
         # Run through runner with lazy computation enabled
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = True
         config.save()
@@ -264,8 +259,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
         lazy_result = self._run_experiment(experiment, metric)
 
         # Run through runner without lazy computation
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = False
         config.save()
@@ -297,8 +290,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             start_date=datetime(2024, 1, 1),
             end_date=datetime(2024, 1, 5),
         )
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = True
         config.save()
@@ -384,8 +375,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             start_date=datetime(2024, 1, 1),
             end_date=datetime(2024, 1, 5),
         )
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = True
         config.save()
@@ -545,8 +534,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             table=LazyComputationTable.EXPERIMENT_EXPOSURES_PREAGGREGATED,
             placeholders=placeholders,
         )
-
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
 
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = True
@@ -716,8 +703,6 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             start_date=datetime(2024, 1, 1),
             end_date=datetime(2024, 1, 5),
         )
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
         config.experiment_precomputation_enabled = True
         config.save()
