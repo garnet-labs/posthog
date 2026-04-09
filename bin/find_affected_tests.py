@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""
+Find test files affected by a set of changed source files.
+
+Reads the pre-built .test_dependency_map.json (generated weekly by
+build_test_dependency_map.py) and outputs the set of test files that
+transitively depend on any of the changed files.
+
+Outputs JSON to stdout:
+  - mode: "selective" (only run affected tests) or "full" (run everything)
+  - affected_tests: list of test file paths (only when mode=selective)
+  - suggested_shards: recommended shard count based on estimated duration
+  - reason: why full mode was chosen (only when mode=full)
+
+Usage:
+    # From changed files list
+    python bin/find_affected_tests.py --changed-files "posthog/api/user.py posthog/models/team.py"
+
+    # From stdin (one file per line)
+    git diff --name-only origin/master...HEAD | python bin/find_affected_tests.py --stdin
+
+    # Force full mode
+    FORCE_FULL_TESTS=1 python bin/find_affected_tests.py --changed-files "posthog/api/user.py"
+"""
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).parent.parent.resolve()
+MAP_PATH = REPO_ROOT / ".test_dependency_map.json"
+DURATIONS_PATH = REPO_ROOT / ".test_durations"
+
+# Files/patterns that force a full test run when changed
+FULL_RUN_PATTERNS = (
+    "conftest.py",
+    "posthog/settings/",
+    "posthog/test/",
+    "manage.py",
+    "pyproject.toml",
+    "uv.lock",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "pytest.ini",
+    ".github/workflows/ci-backend.yml",
+    "docker-compose",
+    "docker/clickhouse/",
+)
+
+# Max changed files before we give up and run everything
+MAX_CHANGED_FILES = 50
+
+# Map staleness threshold in days
+MAX_MAP_AGE_DAYS = 14
+
+# Target duration per shard in seconds (matches turbo-discover.js)
+TARGET_SHARD_SECONDS = 10 * 60
+
+
+def output_full(reason: str) -> None:
+    sys.stdout.write(json.dumps({"mode": "full", "reason": reason}) + "\n")
+
+
+def output_selective(affected_tests: list[str], suggested_shards: int) -> None:
+    sys.stdout.write(
+        json.dumps({
+            "mode": "selective",
+            "affected_tests": affected_tests,
+            "affected_test_count": len(affected_tests),
+            "suggested_shards": max(1, suggested_shards),
+        })
+        + "\n"
+    )
+
+
+def load_map() -> dict | None:
+    if not MAP_PATH.exists():
+        return None
+    try:
+        return json.loads(MAP_PATH.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        sys.stderr.write(f"Warning: could not load {MAP_PATH.name}: {e}\n")
+        return None
+
+
+def check_map_staleness(data: dict) -> str | None:
+    meta = data.get("_meta", {})
+    generated_at = meta.get("generated_at")
+    if not generated_at:
+        return "map has no generation timestamp"
+    try:
+        gen_time = datetime.fromisoformat(generated_at)
+        age_days = (datetime.now(timezone.utc) - gen_time).days
+        if age_days > MAX_MAP_AGE_DAYS:
+            return f"map is {age_days} days old (max {MAX_MAP_AGE_DAYS})"
+    except (ValueError, TypeError):
+        return "map has invalid generation timestamp"
+    return None
+
+
+def requires_full_run(changed_file: str) -> bool:
+    for pattern in FULL_RUN_PATTERNS:
+        if pattern in changed_file:
+            return True
+    return False
+
+
+def estimate_duration(test_files: list[str]) -> float:
+    if not DURATIONS_PATH.exists():
+        return 0
+    try:
+        durations = json.loads(DURATIONS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+    test_file_set = set(test_files)
+    total = 0.0
+    for test_id, dur in durations.items():
+        # test_id is like "posthog/api/test/test_user.py::TestUser::test_create"
+        file_part = test_id.split("::")[0]
+        if file_part in test_file_set:
+            total += dur
+    return total
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Find test files affected by changed source files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "--changed-files",
+        help="Space-separated list of changed file paths",
+    )
+    parser.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read changed files from stdin (one per line)",
+    )
+    args = parser.parse_args()
+
+    # Force full mode via env var
+    if os.environ.get("FORCE_FULL_TESTS"):
+        output_full("FORCE_FULL_TESTS env var set")
+        return
+
+    # Parse changed files
+    if args.stdin:
+        changed_files = [line.strip() for line in sys.stdin if line.strip()]
+    elif args.changed_files:
+        changed_files = args.changed_files.split()
+    else:
+        sys.stderr.write("Error: provide --changed-files or --stdin\n")
+        sys.exit(1)
+
+    # Filter to Python files only
+    py_files = [f for f in changed_files if f.endswith(".py")]
+    non_py_files = [f for f in changed_files if not f.endswith(".py")]
+
+    sys.stderr.write(f"Changed files: {len(changed_files)} total, {len(py_files)} Python\n")
+
+    if not py_files:
+        # No Python files changed — no backend tests needed
+        # (but non-Python changes like YAML/Docker might still need full run)
+        for f in non_py_files:
+            if requires_full_run(f):
+                output_full(f"non-Python file requires full run: {f}")
+                return
+        output_selective([], 0)
+        return
+
+    # Check for too many changes
+    if len(py_files) > MAX_CHANGED_FILES:
+        output_full(f"too many changed files ({len(py_files)} > {MAX_CHANGED_FILES})")
+        return
+
+    # Check for files that force full run
+    for f in changed_files:
+        if requires_full_run(f):
+            output_full(f"changed file matches full-run pattern: {f}")
+            return
+
+    # Load the dependency map
+    data = load_map()
+    if data is None:
+        output_full("dependency map not found")
+        return
+
+    # Check staleness
+    staleness = check_map_staleness(data)
+    if staleness:
+        output_full(f"dependency map is stale: {staleness}")
+        return
+
+    # Look up affected tests
+    affected: set[str] = set()
+    unmapped_files: list[str] = []
+
+    for changed_file in py_files:
+        normalized = os.path.normpath(changed_file)
+        if normalized in data:
+            affected.update(data[normalized])
+        elif changed_file in data:
+            affected.update(data[changed_file])
+        else:
+            # Check if the changed file is itself a test file
+            basename = os.path.basename(changed_file)
+            if basename.startswith("test_") or basename.startswith("eval_"):
+                affected.add(changed_file)
+            else:
+                unmapped_files.append(changed_file)
+
+    if unmapped_files:
+        output_full(f"unmapped files (not in dependency map): {', '.join(unmapped_files[:5])}")
+        return
+
+    affected_sorted = sorted(affected)
+    sys.stderr.write(f"Affected test files: {len(affected_sorted)}\n")
+
+    # Estimate duration and suggest shard count
+    estimated_duration = estimate_duration(affected_sorted)
+    # Apply safety factor (durations underpredict by ~2x per turbo-discover.js)
+    suggested_shards = max(1, int((estimated_duration * 2) / TARGET_SHARD_SECONDS) + 1)
+
+    sys.stderr.write(f"Estimated duration: {estimated_duration:.0f}s, suggested shards: {suggested_shards}\n")
+
+    output_selective(affected_sorted, suggested_shards)
+
+
+if __name__ == "__main__":
+    main()
