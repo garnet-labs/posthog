@@ -8,7 +8,7 @@ import pytest
 from clickhouse_driver import Client
 from dagster import build_op_context
 
-from posthog.clickhouse.cluster import ClickhouseCluster, Query
+from posthog.clickhouse.cluster import ClickhouseCluster
 from posthog.dags.data_deletion_requests import (
     DataDeletionRequestConfig,
     DeletionRequestContext,
@@ -244,16 +244,6 @@ def test_full_job_event_deletion(cluster: ClickhouseCluster):
 PROP_TEAM_ID = 88888
 
 
-def _skip_without_json_drop_keys(cluster: ClickhouseCluster) -> None:
-    """Skip test if ClickHouse doesn't support JSONDropKeys (requires 25.3+)."""
-    try:
-        cluster.any_host(
-            Query("SELECT JSONDropKeys(%(keys)s)(%(json)s)", {"keys": ["a"], "json": '{"a": 1, "b": 2}'})
-        ).result()
-    except Exception:
-        pytest.skip("JSONDropKeys not available in this ClickHouse version")
-
-
 def _insert_events_with_properties(events: list[tuple], client: Client) -> None:
     """Insert events with (team_id, event, uuid, timestamp, properties_json)."""
     client.execute(
@@ -332,8 +322,6 @@ def test_load_property_removal_request_rejects_empty_properties():
 
 @pytest.mark.django_db
 def test_full_job_property_removal(cluster: ClickhouseCluster):
-    _skip_without_json_drop_keys(cluster)
-
     now = datetime.now()
     start_time = now - timedelta(days=7)
     end_time = now + timedelta(minutes=1)
@@ -410,8 +398,6 @@ def test_full_job_property_removal(cluster: ClickhouseCluster):
 
     @pytest.mark.django_db
     def test_full_job_property_removal_single_property(cluster: ClickhouseCluster):
-        _skip_without_json_drop_keys(cluster)
-
         now = datetime.now()
         start_time = now - timedelta(days=7)
         end_time = now + timedelta(minutes=1)
