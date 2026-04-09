@@ -164,7 +164,8 @@ class MySQLSource(SimpleSource[MySQLSourceConfig], SSHTunnelMixin, ValidateDatab
                     supports_append=len(incremental_fields) > 0,
                     incremental_fields=incremental_fields,
                     columns=columns,
-                    detected_primary_keys=detected_pks.get(table_name),
+                    detected_primary_keys=detected_pks.get(table_name)
+                    or (["id"] if any(col[0] == "id" for col in columns) else None),
                 )
             )
 

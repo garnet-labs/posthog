@@ -223,7 +223,8 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                     row_count=row_counts.get(table_name, None),
                     columns=columns,
                     foreign_keys=db_foreign_keys.get(table_name, []),
-                    detected_primary_keys=detected_pks.get(table_name),
+                    detected_primary_keys=detected_pks.get(table_name)
+                    or (["id"] if any(col[0] == "id" for col in columns) else None),
                 )
             )
 

@@ -149,15 +149,16 @@ def get_primary_keys_for_schemas(
         with connection.cursor(as_dict=False) as cursor:
             cursor.execute(
                 """
-                SELECT tc.TABLE_NAME, kcu.COLUMN_NAME
-                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-                ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-                AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
-                AND tc.TABLE_NAME = kcu.TABLE_NAME
-                WHERE tc.TABLE_SCHEMA = %(schema)s
-                AND tc.TABLE_NAME IN %(names)s
-                AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                SELECT t.name AS table_name, c.name AS column_name
+                FROM sys.indexes i
+                JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+                JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+                JOIN sys.tables t ON i.object_id = t.object_id
+                JOIN sys.schemas s ON t.schema_id = s.schema_id
+                WHERE i.is_primary_key = 1
+                AND s.name = %(schema)s
+                AND t.name IN %(names)s
+                ORDER BY t.name, ic.key_ordinal
                 """,
                 {"schema": schema, "names": tuple(table_names)},
             )

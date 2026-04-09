@@ -200,7 +200,8 @@ class RedshiftSource(SimpleSource[RedshiftSourceConfig], SSHTunnelMixin, Validat
                     incremental_fields=incremental_fields,
                     row_count=row_counts.get(table_name, None),
                     columns=columns,
-                    detected_primary_keys=detected_pks.get(table_name),
+                    detected_primary_keys=detected_pks.get(table_name)
+                    or (["id"] if any(col[0] == "id" for col in columns) else None),
                 )
             )
 
