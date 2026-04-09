@@ -320,7 +320,14 @@ async fn get_etag_from_redis(state: &AppState, team_key: &KeyType) -> Option<Str
     let cache_key = config.get_redis_cache_key(team_key);
     let etag_key = format!("{}:etag", cache_key);
 
-    match state.redis_client.get_raw_bytes(etag_key.clone()).await {
+    // Use the same Redis client as the HyperCache reader — ETags are stored
+    // alongside the cached data, which may be on a dedicated flags Redis instance.
+    match state
+        .flags_with_cohorts_hypercache_reader
+        .redis_client()
+        .get_raw_bytes(etag_key.clone())
+        .await
+    {
         Ok(raw_bytes) => match serde_pickle::from_slice::<String>(&raw_bytes, Default::default()) {
             Ok(etag) if !etag.is_empty() => Some(etag),
             Ok(_) => None,

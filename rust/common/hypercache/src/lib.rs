@@ -512,6 +512,11 @@ impl HyperCacheReader {
         &self.config
     }
 
+    /// Get access to the Redis client (for reading ETags stored alongside cached data)
+    pub fn redis_client(&self) -> &Arc<dyn RedisClient + Send + Sync> {
+        &self.redis_client
+    }
+
     async fn try_get_from_redis(&self, cache_key: &str) -> Result<Value, HyperCacheError> {
         // The Redis client's get_raw_bytes already handles zstd decompression,
         // so we receive Pickle(JSON) data directly.
