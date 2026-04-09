@@ -6,7 +6,7 @@ from parameterized import parameterized
 from products.error_tracking.backend.hogql_queries.test.test_error_tracking_query_runner import (
     ErrorTrackingQueryRunnerTestsMixin,
 )
-from products.error_tracking.backend.models import ErrorTrackingIssueAssignment, sync_issue_to_clickhouse
+from products.error_tracking.backend.models import ErrorTrackingIssueAssignment, sync_issues_to_clickhouse
 
 from ee.models.rbac.role import Role
 
@@ -22,16 +22,16 @@ class TestErrorTrackingQueryRunnerV3(
         from products.error_tracking.backend.models import ErrorTrackingIssue
 
         for issue in ErrorTrackingIssue.objects.filter(team=self.team):
-            sync_issue_to_clickhouse(issue_id=issue.id, team_id=self.team.pk)
+            sync_issues_to_clickhouse(issue_ids=[issue.id], team_id=self.team.pk)
 
     def create_events_and_issue(self, *args, **kwargs):
         super().create_events_and_issue(*args, **kwargs)
         issue_id = kwargs.get("issue_id") or args[0]
-        sync_issue_to_clickhouse(issue_id=issue_id, team_id=self.team.pk)
+        sync_issues_to_clickhouse(issue_ids=[issue_id], team_id=self.team.pk)
 
     def create_issue(self, *args, **kwargs):
         issue = super().create_issue(*args, **kwargs)
-        sync_issue_to_clickhouse(issue_id=issue.id, team_id=self.team.pk)
+        sync_issues_to_clickhouse(issue_ids=[issue.id], team_id=self.team.pk)
         return issue
 
     @parameterized.expand(
@@ -108,7 +108,7 @@ class TestErrorTrackingQueryRunnerV3(
         flush_persons_and_events()
         ErrorTrackingIssueAssignment.objects.create(issue_id=issue_id, user=self.user, team=self.team)
         # Re-sync after assignment change
-        sync_issue_to_clickhouse(issue_id=issue_id, team_id=self.team.pk)
+        sync_issues_to_clickhouse(issue_ids=[issue_id], team_id=self.team.pk)
         results = self._calculate(assignee={"type": "user", "id": self.user.pk})["results"]
         self.assertEqual([x["id"] for x in results], [issue_id])
 
@@ -122,7 +122,7 @@ class TestErrorTrackingQueryRunnerV3(
         role = Role.objects.create(name="Test Team", organization=self.organization)
         ErrorTrackingIssueAssignment.objects.create(issue_id=issue_id, role=role, team=self.team)
         # Re-sync after assignment change
-        sync_issue_to_clickhouse(issue_id=issue_id, team_id=self.team.pk)
+        sync_issues_to_clickhouse(issue_ids=[issue_id], team_id=self.team.pk)
         results = self._calculate(assignee={"type": "role", "id": str(role.id)})["results"]
         self.assertEqual([x["id"] for x in results], [issue_id])
 
@@ -134,7 +134,7 @@ class TestErrorTrackingQueryRunnerV3(
         resolved_issue.status = ErrorTrackingIssue.Status.RESOLVED
         resolved_issue.save()
         # Re-sync after status change
-        sync_issue_to_clickhouse(issue_id=self.issue_id_one, team_id=self.team.pk)
+        sync_issues_to_clickhouse(issue_ids=[self.issue_id_one], team_id=self.team.pk)
 
         results = self._calculate(status="active")["results"]
         self.assertEqual([r["id"] for r in results], [self.issue_id_three, self.issue_id_two])
