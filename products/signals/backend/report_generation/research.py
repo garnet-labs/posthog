@@ -123,10 +123,9 @@ If the report already has a title that is PR-specific and still accurate after y
     summary: str = Field(
         description="""
 An Axios-style summary in four brief paragraphs:
-- Start with a single-sentence tl;dr - this is the most important part.
-- '**What's happening:** …' - a brief description of the concrete facts. Reference specific signals, error types, metrics, or patterns from your research.
-- '**Why it matters:** …' - one or two sentences on the user/business impact.
-- '**The solution:** …' - a plan for the actionable code-level fix. If you can see two or more viable paths, propose up to two as subpoints "Option A" and "Option B".
+- '**Impact:** …' - a brief description of the concrete facts and user/business impact. Reference specific signals, error types, metrics, or patterns from your research.
+- '**Root cause:** …' - explain the root cause as if explaining to engineer owning this part of the product (or hypotheses, if not fully confident in the root cause).
+- '**How to resolve:** …' - a plan for the actionable code-level fix. If you can see two or more viable paths, propose up to two as subpoints "Option A" and "Option B".
 
 Principles:
 - Be direct and specific. Every sentence must carry information.
