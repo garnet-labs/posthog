@@ -166,6 +166,16 @@ function BatchExportLatestRuns({ id, context }: BatchExportRunsLogicProps): JSX.
                             if (run.records_completed == null) {
                                 return ''
                             }
+                            if (run.records_failed != null && run.records_failed > 0) {
+                                return (
+                                    <span>
+                                        {humanFriendlyNumber(run.records_completed)}
+                                        <span className="text-warning ml-1">
+                                            ({humanFriendlyNumber(run.records_failed)} failed)
+                                        </span>
+                                    </span>
+                                )
+                            }
                             return humanFriendlyNumber(run.records_completed)
                         },
                     },
@@ -282,6 +292,16 @@ export function BatchExportRunsGrouped({
                                         render: (_, run) => {
                                             if (run.records_completed == null) {
                                                 return ''
+                                            }
+                                            if (run.records_failed != null && run.records_failed > 0) {
+                                                return (
+                                                    <span>
+                                                        {humanFriendlyNumber(run.records_completed)}
+                                                        <span className="text-warning ml-1">
+                                                            ({humanFriendlyNumber(run.records_failed)} failed)
+                                                        </span>
+                                                    </span>
+                                                )
                                             }
                                             return humanFriendlyNumber(run.records_completed)
                                         },
@@ -466,7 +486,7 @@ export function BatchExportRunIcon({
     const latestRun = runs[0]
 
     const status = combineFailedStatuses(latestRun.status)
-    const color = colorForStatus(status)
+    const color = colorForStatus(status, latestRun.records_failed)
 
     return (
         <Tooltip
@@ -504,10 +524,13 @@ const combineFailedStatuses = (status: BatchExportRun['status']): BatchExportRun
     return status
 }
 
-const colorForStatus = (status: BatchExportRun['status']): 'success' | 'primary' | 'warning' | 'danger' | 'default' => {
+const colorForStatus = (
+    status: BatchExportRun['status'],
+    records_failed?: number
+): 'success' | 'primary' | 'warning' | 'danger' | 'default' => {
     switch (status) {
         case 'Completed':
-            return 'success'
+            return records_failed && records_failed > 0 ? 'warning' : 'success'
         case 'ContinuedAsNew':
         case 'Running':
         case 'Starting':
