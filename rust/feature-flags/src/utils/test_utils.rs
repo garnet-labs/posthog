@@ -328,6 +328,48 @@ pub async fn insert_config_in_hypercache(
     Ok(())
 }
 
+/// Create a HyperCacheReader for surveys (surveys/surveys.json).
+/// Uses token_based=true for token-based lookups (api_token).
+/// Returns Arc<HyperCacheReader> to match the production pattern.
+pub async fn setup_surveys_hypercache_reader(
+    redis_client: Arc<dyn RedisClientTrait + Send + Sync>,
+) -> Arc<HyperCacheReader> {
+    let mut config = HyperCacheConfig::new(
+        "surveys".to_string(),
+        "surveys.json".to_string(),
+        "us-east-1".to_string(),
+        "posthog".to_string(),
+    );
+    config.token_based = true;
+    Arc::new(
+        HyperCacheReader::new(redis_client, config)
+            .await
+            .expect("Failed to create surveys HyperCacheReader"),
+    )
+}
+
+/// Generate the HyperCache key for surveys.
+/// Format: posthog:1:cache/team_tokens/{api_token}/surveys/surveys.json
+pub fn surveys_hypercache_key(api_token: &str) -> String {
+    format!("posthog:1:cache/team_tokens/{api_token}/surveys/surveys.json")
+}
+
+/// Insert survey data in HyperCache for testing.
+/// Use this when testing the surveys cache reader.
+/// Format: Pickle(JSON string) to match Django's cache format.
+pub async fn insert_surveys_in_hypercache(
+    client: Arc<dyn RedisClientTrait + Send + Sync>,
+    api_token: &str,
+    surveys_json: serde_json::Value,
+) -> Result<(), Error> {
+    let json_string = serde_json::to_string(&surveys_json)?;
+    let pickled_bytes =
+        serde_pickle::to_vec(&json_string, Default::default()).expect("Failed to pickle surveys");
+    let cache_key = surveys_hypercache_key(api_token);
+    client.set_bytes(cache_key, pickled_bytes, None).await?;
+    Ok(())
+}
+
 pub fn create_flag_from_json(json_value: Option<String>) -> Vec<FeatureFlag> {
     let payload = match json_value {
         Some(value) => value,

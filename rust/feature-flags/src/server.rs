@@ -345,6 +345,37 @@ pub async fn serve<F>(
             }
         };
 
+    // Create HyperCacheReader for surveys (surveys/surveys.json)
+    // Reads pre-computed survey definitions from Python's surveys_hypercache
+    // Uses token-based lookup (api_token) to match Python's HyperCache key pattern
+    let surveys_redis_client = dedicated_redis_client
+        .clone()
+        .unwrap_or_else(|| redis_client.clone());
+
+    let mut surveys_hypercache_config = HyperCacheConfig::new(
+        "surveys".to_string(),
+        "surveys.json".to_string(),
+        config.object_storage_region.clone(),
+        config.object_storage_bucket.clone(),
+    );
+    surveys_hypercache_config.token_based = true;
+
+    if !config.object_storage_endpoint.is_empty() {
+        surveys_hypercache_config.s3_endpoint = Some(config.object_storage_endpoint.clone());
+    }
+
+    let surveys_hypercache_reader =
+        match HyperCacheReader::new(surveys_redis_client, surveys_hypercache_config).await {
+            Ok(reader) => {
+                tracing::info!("Created HyperCacheReader for surveys");
+                Arc::new(reader)
+            }
+            Err(e) => {
+                tracing::error!("Failed to create surveys HyperCacheReader: {:?}", e);
+                return;
+            }
+        };
+
     let team_negative_cache = NegativeCache::new(
         config.team_negative_cache_capacity,
         config.team_negative_cache_ttl_seconds,
@@ -417,6 +448,7 @@ pub async fn serve<F>(
         flags_with_cohorts_hypercache_reader,
         team_hypercache_reader,
         config_hypercache_reader,
+        surveys_hypercache_reader,
         rayon_dispatcher,
         team_negative_cache,
         auth_token_cache,

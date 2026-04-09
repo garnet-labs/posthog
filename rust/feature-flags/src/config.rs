@@ -45,6 +45,7 @@ pub enum ServiceMode {
     All,         // default — both fleets (current behavior)
     Flags,       // /flags and /decide only
     Definitions, // /flags/definitions only
+    Surveys,     // /surveys only
 }
 
 impl FromStr for ServiceMode {
@@ -55,8 +56,9 @@ impl FromStr for ServiceMode {
             "all" => Ok(ServiceMode::All),
             "flags" => Ok(ServiceMode::Flags),
             "definitions" => Ok(ServiceMode::Definitions),
+            "surveys" => Ok(ServiceMode::Surveys),
             _ => Err(format!(
-                "Invalid SERVICE_MODE: '{s}'. Expected 'all', 'flags', or 'definitions'"
+                "Invalid SERVICE_MODE: '{s}'. Expected 'all', 'flags', 'definitions', or 'surveys'"
             )),
         }
     }
@@ -1345,12 +1347,20 @@ mod service_mode_tests {
             "definitions".parse::<ServiceMode>().unwrap(),
             ServiceMode::Definitions
         );
+        assert_eq!(
+            "surveys".parse::<ServiceMode>().unwrap(),
+            ServiceMode::Surveys
+        );
         // case insensitive
         assert_eq!("ALL".parse::<ServiceMode>().unwrap(), ServiceMode::All);
         assert_eq!("Flags".parse::<ServiceMode>().unwrap(), ServiceMode::Flags);
         assert_eq!(
             "DEFINITIONS".parse::<ServiceMode>().unwrap(),
             ServiceMode::Definitions
+        );
+        assert_eq!(
+            "SURVEYS".parse::<ServiceMode>().unwrap(),
+            ServiceMode::Surveys
         );
     }
 

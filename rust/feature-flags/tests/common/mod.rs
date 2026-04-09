@@ -331,6 +331,25 @@ impl ServerHandle {
                     }
                 };
 
+            // Create surveys hypercache reader for surveys (surveys/surveys.json)
+            let mut surveys_hypercache_config = HyperCacheConfig::new(
+                "surveys".to_string(),
+                "surveys.json".to_string(),
+                config.object_storage_region.clone(),
+                config.object_storage_bucket.clone(),
+            );
+            surveys_hypercache_config.token_based = true;
+            let surveys_hypercache_reader =
+                match HyperCacheReader::new(redis_reader_client.clone(), surveys_hypercache_config)
+                    .await
+                {
+                    Ok(reader) => Arc::new(reader),
+                    Err(e) => {
+                        tracing::error!("Failed to create surveys HyperCacheReader: {:?}", e);
+                        return;
+                    }
+                };
+
             let group_type_cache = Arc::new(
                 feature_flags::flags::flag_group_type_mapping::GroupTypeCacheManager::new(
                     persons_reader.clone(),
@@ -354,6 +373,7 @@ impl ServerHandle {
                 flags_with_cohorts_hypercache_reader,
                 team_hypercache_reader,
                 config_hypercache_reader,
+                surveys_hypercache_reader,
                 RayonDispatcher::new(2, None),
                 NegativeCache::new(10_000, 300),
                 Arc::new(ReadThroughCacheWithMetrics::new(
