@@ -90,7 +90,7 @@ def _create_local_staging_table(client: Client, source_table: str, staging_table
 
 
 # ---------------------------------------------------------------------------
-# Event removal ops (unchanged)
+# Event removal ops
 # ---------------------------------------------------------------------------
 
 
