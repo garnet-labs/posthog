@@ -18,6 +18,7 @@ from posthog.schema import (
     ExperimentStatsBase,
     IntervalType,
     MultipleVariantHandling,
+    PrecomputationMode,
 )
 
 from posthog.hogql import ast
@@ -191,9 +192,9 @@ class ExperimentQueryRunner(QueryRunner):
 
     def _should_precompute(self) -> bool:
         """Resolve whether to use precomputation: query-level override > team-level default."""
-        if self.query.precomputation_mode == "precomputed":
+        if self.query.precomputation_mode == PrecomputationMode.PRECOMPUTED:
             return True
-        if self.query.precomputation_mode == "direct":
+        if self.query.precomputation_mode == PrecomputationMode.DIRECT:
             return False
 
         config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
