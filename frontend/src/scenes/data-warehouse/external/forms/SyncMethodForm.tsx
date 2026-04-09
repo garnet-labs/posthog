@@ -225,7 +225,7 @@ export const SyncMethodForm = ({
                                     <LemonInputSelect
                                         mode="multiple"
                                         value={primaryKeyColumns}
-                                        onChange={(newValue) => setPrimaryKeyColumns(newValue)}
+                                        onChange={(newValue) => !primaryKeyLocked && setPrimaryKeyColumns(newValue)}
                                         disabled={primaryKeyLocked}
                                         options={columns.map((col) => ({
                                             key: col.field,
