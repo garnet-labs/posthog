@@ -438,11 +438,79 @@ describe('personsModalLogic', () => {
             })
         })
 
+        it('includes a cohort membership filter for cohort breakdowns', () => {
+            logic = personsModalLogic({
+                query: {
+                    kind: NodeKind.FunnelsActorsQuery,
+                    source: {
+                        kind: NodeKind.FunnelsQuery,
+                        series: [{ kind: NodeKind.EventsNode, event: '$pageview' }],
+                        breakdownFilter: { breakdown: [1, 2], breakdown_type: 'cohort' },
+                    },
+                    funnelStep: 1,
+                    funnelStepBreakdown: 1,
+                    includeRecordings: true,
+                } as any,
+                url: '/api/environments/1/persons?',
+                additionalSelect: { matched_recordings: 'matched_recordings' },
+            })
+            logic.mount()
+
+            logic.actions.loadActorsSuccess({
+                results: [
+                    {
+                        count: 1,
+                        people: [
+                            {
+                                type: 'person',
+                                id: 'person-1',
+                                distinct_ids: ['user-1'],
+                                is_identified: true,
+                                properties: {},
+                                created_at: '2024-01-01',
+                                matched_recordings: [{ session_id: 'session-1', events: [] }],
+                                value_at_data_point: null,
+                            },
+                        ],
+                    },
+                ],
+                missing_persons: 0,
+            })
+
+            expectLogic(logic).toMatchValues({
+                recordingFilters: {
+                    session_ids: ['session-1'],
+                    filter_group: {
+                        type: FilterLogicalOperator.And,
+                        values: [
+                            {
+                                type: FilterLogicalOperator.And,
+                                values: [
+                                    {
+                                        key: 'id',
+                                        value: 1,
+                                        operator: PropertyOperator.In,
+                                        type: PropertyFilterType.Cohort,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    duration: [],
+                },
+            })
+        })
+
         it.each([
             {
-                scenario: 'cohort breakdown',
+                scenario: 'cohort breakdown with "all users" pseudo-cohort (0)',
                 breakdownFilter: { breakdown: [1, 2], breakdown_type: 'cohort' },
-                funnelStepBreakdown: 1,
+                funnelStepBreakdown: 0,
+            },
+            {
+                scenario: 'cohort breakdown with "all" pseudo-cohort',
+                breakdownFilter: { breakdown: [1, 2], breakdown_type: 'cohort' },
+                funnelStepBreakdown: 'all',
             },
             {
                 scenario: 'group breakdown without breakdown_group_type_index',

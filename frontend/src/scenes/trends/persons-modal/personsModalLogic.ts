@@ -51,8 +51,8 @@ import type { personsModalLogicType } from './personsModalLogicType'
 const RESULTS_PER_PAGE = 100
 
 // Build a property filter that scopes session recordings to a funnel's selected breakdown
-// value. Returns null for cohort or multi-key breakdowns (not expressible as a single Exact
-// filter). Single-element breakdown value arrays are unwrapped to their scalar value.
+// value. Returns null for multi-key breakdowns (not expressible as a single filter).
+// Single-element breakdown value arrays are unwrapped to their scalar value.
 function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): UniversalFilterValue | null {
     if (!source || source.kind !== NodeKind.FunnelsActorsQuery || source.funnelStepBreakdown == null) {
         return null
@@ -60,13 +60,10 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     const breakdownFilter = source.source.breakdownFilter
     const breakdown = breakdownFilter?.breakdown
     const breakdownType = breakdownFilter?.breakdown_type ?? 'event'
-    if (!breakdown || Array.isArray(breakdown) || breakdownType === 'cohort') {
-        return null
-    }
 
     // The backend canonicalizes single-value breakdowns as a one-element array (e.g. ["NL"]).
     // Unwrap that here; bail out only for genuine multi-value arrays which can't be a single
-    // Exact filter.
+    // filter.
     const rawBreakdownValue = source.funnelStepBreakdown
     let breakdownValue: string | number
     if (Array.isArray(rawBreakdownValue)) {
@@ -76,6 +73,28 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
         breakdownValue = rawBreakdownValue[0]
     } else {
         breakdownValue = rawBreakdownValue
+    }
+
+    // Cohort breakdowns resolve to a cohort membership filter rather than a property filter.
+    // Skip the "All users" pseudo-cohort (id 0 / 'all') since it's a no-op.
+    if (breakdownType === 'cohort') {
+        if (breakdownValue === 0 || breakdownValue === 'all') {
+            return null
+        }
+        const cohortId = typeof breakdownValue === 'number' ? breakdownValue : Number(breakdownValue)
+        if (!Number.isFinite(cohortId)) {
+            return null
+        }
+        return {
+            type: PropertyFilterType.Cohort,
+            key: 'id',
+            value: cohortId,
+            operator: PropertyOperator.In,
+        } as UniversalFilterValue
+    }
+
+    if (!breakdown || Array.isArray(breakdown)) {
+        return null
     }
 
     const base = {
