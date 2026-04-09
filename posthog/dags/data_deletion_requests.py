@@ -450,11 +450,13 @@ def mark_deletion_failed(context: dagster.HookContext) -> None:
         try:
             from posthog.clickhouse.cluster import Query, get_cluster
 
-            temp = _temp_table_name(request_id)
-            db = django_settings.CLICKHOUSE_DATABASE
-            cluster = get_cluster()
-            cluster.map_one_host_per_shard(Query(f"DROP TABLE IF EXISTS {db}.{temp}")).result()
-            context.log.info(f"Cleaned up temp table {temp}")
+            db_request = DataDeletionRequest.objects.filter(pk=request_id).values("team_id").first()
+            if db_request:
+                temp = _temp_table_name(db_request["team_id"], request_id)
+                db = django_settings.CLICKHOUSE_DATABASE
+                cluster = get_cluster()
+                cluster.map_one_host_per_shard(Query(f"DROP TABLE IF EXISTS {db}.{temp}")).result()
+                context.log.info(f"Cleaned up temp table {temp}")
         except Exception as e:
             context.log.warning(f"Failed to clean up temp table: {e}")
 
