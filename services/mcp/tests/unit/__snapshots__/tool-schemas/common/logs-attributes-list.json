@@ -8,10 +8,13 @@
         },
         "limit": {
             "description": "Max results (default: 100)",
+            "maximum": 100,
+            "minimum": 1,
             "type": "number"
         },
         "offset": {
             "description": "Pagination offset (default: 0)",
+            "minimum": 0,
             "type": "number"
         },
         "search": {

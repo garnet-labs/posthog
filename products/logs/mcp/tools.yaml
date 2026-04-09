@@ -9,7 +9,7 @@ feature: logs
 url_prefix: /logs
 ui_apps: {}
 tools:
-    logs-query:
+    query-logs:
         operation: logs_query_create
         enabled: true
         scopes:
@@ -23,7 +23,7 @@ tools:
         response:
             include:
                 - results
-    logs-list-attributes:
+    logs-attributes-list:
         operation: logs_attributes_retrieve
         enabled: true
         scopes:
@@ -40,7 +40,7 @@ tools:
             include:
                 - results
                 - count
-    logs-list-attribute-values:
+    logs-attribute-values-list:
         operation: logs_values_retrieve
         enabled: true
         scopes:

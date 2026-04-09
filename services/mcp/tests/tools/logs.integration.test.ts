@@ -36,8 +36,8 @@ describe('Logs', { concurrent: false }, () => {
         await cleanupResources(context.api, TEST_PROJECT_ID!, createdResources)
     })
 
-    describe('logs-query tool', () => {
-        const queryTool = GENERATED_TOOLS['logs-query']!()
+    describe('query-logs tool', () => {
+        const queryTool = GENERATED_TOOLS['query-logs']!()
 
         it('should query logs with date range', async () => {
             const dateFrom = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -156,8 +156,8 @@ describe('Logs', { concurrent: false }, () => {
         })
     })
 
-    describe('logs-list-attributes tool', () => {
-        const attributesTool = GENERATED_TOOLS['logs-list-attributes']!()
+    describe('logs-attributes-list tool', () => {
+        const attributesTool = GENERATED_TOOLS['logs-attributes-list']!()
 
         it('should list log attributes', async () => {
             const result = await attributesTool.handler(context, {})
@@ -202,8 +202,8 @@ describe('Logs', { concurrent: false }, () => {
         })
     })
 
-    describe('logs-list-attribute-values tool', () => {
-        const valuesTool = GENERATED_TOOLS['logs-list-attribute-values']!()
+    describe('logs-attribute-values-list tool', () => {
+        const valuesTool = GENERATED_TOOLS['logs-attribute-values-list']!()
 
         it('should list attribute values for a key', async () => {
             const result = await valuesTool.handler(context, {
@@ -237,8 +237,8 @@ describe('Logs', { concurrent: false }, () => {
 
     describe('Logs workflow', () => {
         it('should support attribute discovery and query workflow', async () => {
-            const attributesTool = GENERATED_TOOLS['logs-list-attributes']!()
-            const queryTool = GENERATED_TOOLS['logs-query']!()
+            const attributesTool = GENERATED_TOOLS['logs-attributes-list']!()
+            const queryTool = GENERATED_TOOLS['query-logs']!()
 
             const attributesResult = await attributesTool.handler(context, {})
             const attributesData = parseToolResponse(attributesResult)

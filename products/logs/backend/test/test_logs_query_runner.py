@@ -4,6 +4,7 @@ import json
 from freezegun import freeze_time
 from posthog.test.base import APIBaseTest, ClickhouseTestMixin
 
+from parameterized import parameterized
 from rest_framework import status
 
 from posthog.schema import (
@@ -827,34 +828,27 @@ class TestLogsQueryRunner(ClickhouseTestMixin, APIBaseTest):
 
     # ── _normalize_filter_group tests ──────────────────────────────────
 
-    def test_normalize_filter_group_empty_list(self):
-        from products.logs.backend.api import LogsViewSet
+    _FLAT_FILTERS = [
+        {"key": "message", "operator": "icontains", "type": "log", "value": "error"},
+        {"key": "http.status_code", "operator": "exact", "type": "log_attribute", "value": "500"},
+    ]
 
-        result = LogsViewSet._normalize_filter_group([])
-        self.assertEqual(result, {"type": "AND", "values": []})
-
-    def test_normalize_filter_group_flat_list(self):
-        from products.logs.backend.api import LogsViewSet
-
-        filters = [
-            {"key": "message", "operator": "icontains", "type": "log", "value": "error"},
-            {"key": "http.status_code", "operator": "exact", "type": "log_attribute", "value": "500"},
+    @parameterized.expand(
+        [
+            ("none", None, {"type": "AND", "values": []}),
+            ("empty_list", [], {"type": "AND", "values": []}),
+            ("flat_list", _FLAT_FILTERS, {"type": "AND", "values": [{"type": "AND", "values": _FLAT_FILTERS}]}),
+            (
+                "already_nested",
+                {"type": "AND", "values": [{"type": "AND", "values": []}]},
+                {"type": "AND", "values": [{"type": "AND", "values": []}]},
+            ),
         ]
-        result = LogsViewSet._normalize_filter_group(filters)
-        self.assertEqual(result, {"type": "AND", "values": [{"type": "AND", "values": filters}]})
-
-    def test_normalize_filter_group_already_nested(self):
+    )
+    def test_normalize_filter_group(self, _name, input_value, expected):
         from products.logs.backend.api import LogsViewSet
 
-        nested = {"type": "AND", "values": [{"type": "AND", "values": []}]}
-        result = LogsViewSet._normalize_filter_group(nested)
-        self.assertEqual(result, nested)
-
-    def test_normalize_filter_group_none(self):
-        from products.logs.backend.api import LogsViewSet
-
-        result = LogsViewSet._normalize_filter_group(None)
-        self.assertEqual(result, {"type": "AND", "values": []})
+        self.assertEqual(LogsViewSet._normalize_filter_group(input_value), expected)
 
     @freeze_time("2025-12-16T10:33:00Z")
     def test_query_with_flat_filter_group(self):

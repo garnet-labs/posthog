@@ -16,6 +16,10 @@ export const LogsAttributesRetrieveParams = /* @__PURE__ */ zod.object({
         ),
 })
 
+export const logsAttributesRetrieveQueryLimitMax = 100
+
+export const logsAttributesRetrieveQueryOffsetMin = 0
+
 export const LogsAttributesRetrieveQueryParams = /* @__PURE__ */ zod.object({
     attribute_type: zod
         .enum(['log', 'resource'])
@@ -23,8 +27,17 @@ export const LogsAttributesRetrieveQueryParams = /* @__PURE__ */ zod.object({
         .describe(
             'Type of attributes: "log" for log attributes, "resource" for resource attributes\n\n* `log` - log\n* `resource` - resource'
         ),
-    limit: zod.number().optional().describe('Max results (default: 100)'),
-    offset: zod.number().optional().describe('Pagination offset (default: 0)'),
+    limit: zod
+        .number()
+        .min(1)
+        .max(logsAttributesRetrieveQueryLimitMax)
+        .optional()
+        .describe('Max results (default: 100)'),
+    offset: zod
+        .number()
+        .min(logsAttributesRetrieveQueryOffsetMin)
+        .optional()
+        .describe('Pagination offset (default: 0)'),
     search: zod.string().min(1).optional().describe('Search filter for attribute names'),
 })
 

@@ -569,10 +569,13 @@ export type LogsAttributesRetrieveParams = {
     attribute_type?: LogsAttributesRetrieveAttributeType
     /**
      * Max results (default: 100)
+     * @minimum 1
+     * @maximum 100
      */
     limit?: number
     /**
      * Pagination offset (default: 0)
+     * @minimum 0
      */
     offset?: number
     /**

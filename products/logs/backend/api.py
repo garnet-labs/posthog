@@ -59,8 +59,8 @@ class _LogsAttributesQuerySerializer(serializers.Serializer):
         required=False,
         help_text='Type of attributes: "log" for log attributes, "resource" for resource attributes',
     )
-    limit = serializers.IntegerField(required=False, help_text="Max results (default: 100)")
-    offset = serializers.IntegerField(required=False, help_text="Pagination offset (default: 0)")
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=100, help_text="Max results (default: 100)")
+    offset = serializers.IntegerField(required=False, min_value=0, help_text="Pagination offset (default: 0)")
 
 
 class _LogsValuesQuerySerializer(serializers.Serializer):

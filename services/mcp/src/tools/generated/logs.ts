@@ -9,12 +9,12 @@ import {
 import { pickResponseFields } from '@/tools/tool-utils'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
 
-const LogsQuerySchema = LogsQueryCreateBody
+const QueryLogsSchema = LogsQueryCreateBody
 
-const logsQuery = (): ToolBase<typeof LogsQuerySchema, unknown> => ({
-    name: 'logs-query',
-    schema: LogsQuerySchema,
-    handler: async (context: Context, params: z.infer<typeof LogsQuerySchema>) => {
+const queryLogs = (): ToolBase<typeof QueryLogsSchema, unknown> => ({
+    name: 'query-logs',
+    schema: QueryLogsSchema,
+    handler: async (context: Context, params: z.infer<typeof QueryLogsSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
         if (params.query !== undefined) {
@@ -30,12 +30,12 @@ const logsQuery = (): ToolBase<typeof LogsQuerySchema, unknown> => ({
     },
 })
 
-const LogsListAttributesSchema = LogsAttributesRetrieveQueryParams
+const LogsAttributesListSchema = LogsAttributesRetrieveQueryParams
 
-const logsListAttributes = (): ToolBase<typeof LogsListAttributesSchema, unknown> => ({
-    name: 'logs-list-attributes',
-    schema: LogsListAttributesSchema,
-    handler: async (context: Context, params: z.infer<typeof LogsListAttributesSchema>) => {
+const logsAttributesList = (): ToolBase<typeof LogsAttributesListSchema, unknown> => ({
+    name: 'logs-attributes-list',
+    schema: LogsAttributesListSchema,
+    handler: async (context: Context, params: z.infer<typeof LogsAttributesListSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const result = await context.api.request<unknown>({
             method: 'GET',
@@ -52,12 +52,12 @@ const logsListAttributes = (): ToolBase<typeof LogsListAttributesSchema, unknown
     },
 })
 
-const LogsListAttributeValuesSchema = LogsValuesRetrieveQueryParams
+const LogsAttributeValuesListSchema = LogsValuesRetrieveQueryParams
 
-const logsListAttributeValues = (): ToolBase<typeof LogsListAttributeValuesSchema, unknown> => ({
-    name: 'logs-list-attribute-values',
-    schema: LogsListAttributeValuesSchema,
-    handler: async (context: Context, params: z.infer<typeof LogsListAttributeValuesSchema>) => {
+const logsAttributeValuesList = (): ToolBase<typeof LogsAttributeValuesListSchema, unknown> => ({
+    name: 'logs-attribute-values-list',
+    schema: LogsAttributeValuesListSchema,
+    handler: async (context: Context, params: z.infer<typeof LogsAttributeValuesListSchema>) => {
         const projectId = await context.stateManager.getProjectId()
         const result = await context.api.request<unknown>({
             method: 'GET',
@@ -74,7 +74,7 @@ const logsListAttributeValues = (): ToolBase<typeof LogsListAttributeValuesSchem
 })
 
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
-    'logs-query': logsQuery,
-    'logs-list-attributes': logsListAttributes,
-    'logs-list-attribute-values': logsListAttributeValues,
+    'query-logs': queryLogs,
+    'logs-attributes-list': logsAttributesList,
+    'logs-attribute-values-list': logsAttributeValuesList,
 }
