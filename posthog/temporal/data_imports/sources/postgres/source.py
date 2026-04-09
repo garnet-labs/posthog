@@ -270,8 +270,10 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
 
         schema = ExternalDataSchema.objects.select_related("source").get(id=inputs.schema_id)
 
-        # Require SSL for sources created after the cutoff date
-        require_ssl = schema.source.created_at >= SSL_REQUIRED_AFTER_DATE
+        # Require SSL for sources created after the cutoff date, but not when
+        # an SSH tunnel is in use — the tunnel already encrypts the connection.
+        has_ssh_tunnel = config.ssh_tunnel.enabled if config.ssh_tunnel else False
+        require_ssl = schema.source.created_at >= SSL_REQUIRED_AFTER_DATE and not has_ssh_tunnel
 
         return postgres_source(
             tunnel=ssh_tunnel,
