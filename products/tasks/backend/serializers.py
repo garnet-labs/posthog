@@ -35,6 +35,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "origin_product",
             "repository",
             "github_integration",
+            "signal_report",
             "json_schema",
             "internal",
             "latest_run",
@@ -75,6 +76,11 @@ class TaskSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Repository must be in the format organization/repository")
 
         return value.lower()
+
+    def validate_signal_report(self, value):
+        if value and value.team_id != self.context["team"].id:
+            raise serializers.ValidationError("Signal report must belong to the same team")
+        return value
 
     def create(self, validated_data):
         validated_data["team"] = self.context["team"]
@@ -373,7 +379,7 @@ class TaskRunCreateRequestSerializer(serializers.Serializer):
         required=False,
         default=None,
         allow_blank=False,
-        help_text="Follow-up user message to include in the resumed run's prompt.",
+        help_text="Initial or follow-up user message to include in the run prompt.",
     )
     sandbox_environment_id = serializers.UUIDField(
         required=False,
