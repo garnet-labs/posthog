@@ -117,12 +117,7 @@ class Consumer:
             f"from {self.total_record_batches_count:,} record batches. "
             f"Total file MiB: {self.total_file_bytes_count / 1024**2:.2f}"
         )
-        records_completed = self.total_records_count - self.records_failed_count
-        return BatchExportResult(
-            records_completed=records_completed,
-            bytes_exported=self.total_file_bytes_count,
-            records_failed=self.records_failed_count if self.records_failed_count > 0 else None,
-        )
+        return BatchExportResult(self.total_records_count, self.total_file_bytes_count)
 
     async def generate_record_batches_from_queue(
         self,
