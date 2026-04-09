@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from posthog.temporal.ingestion_acceptance_test.config import Config
 from posthog.temporal.ingestion_acceptance_test.results import TestResult, TestSuiteResult
+from posthog.temporal.ingestion_acceptance_test.runner import RunningTestInfo
 from posthog.temporal.ingestion_acceptance_test.slack import send_slack_notification, send_slack_timeout_notification
 
 
@@ -207,7 +208,7 @@ class TestSendSlackTimeoutNotification:
         assert "Timed Out" in header_text
 
     @patch("posthog.temporal.ingestion_acceptance_test.slack.requests.post")
-    def test_payload_contains_environment_and_timeout_info(self, mock_post: MagicMock, config: Config) -> None:
+    def test_payload_contains_environment_timeout_and_token_info(self, mock_post: MagicMock, config: Config) -> None:
         mock_post.return_value.raise_for_status = MagicMock()
 
         send_slack_timeout_notification(config)
@@ -217,6 +218,7 @@ class TestSendSlackTimeoutNotification:
         assert "test.posthog.com" in context_text
         assert "12345" in context_text
         assert "600s" in context_text
+        assert "phc_test_key" in context_text
 
     @patch("posthog.temporal.ingestion_acceptance_test.slack.requests.post")
     def test_does_nothing_when_no_webhook_url(self, mock_post: MagicMock) -> None:
@@ -232,3 +234,39 @@ class TestSendSlackTimeoutNotification:
 
         assert result is True
         mock_post.assert_not_called()
+
+    @patch("posthog.temporal.ingestion_acceptance_test.slack.requests.post")
+    def test_payload_renders_running_tests_with_poll_descriptions(self, mock_post: MagicMock, config: Config) -> None:
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        running = [
+            RunningTestInfo(name="TestAlias::test_alias", pending_poll="person with distinct_id 'abc-123'"),
+            RunningTestInfo(name="TestMerge::test_merge", pending_poll="events for person 'person-789'"),
+        ]
+        send_slack_timeout_notification(config, running_tests=running)
+
+        payload = mock_post.call_args[1]["json"]
+        blocks = payload["blocks"]
+
+        running_block = blocks[2]
+        assert running_block["type"] == "section"
+        running_text = running_block["text"]["text"]
+        assert "Still running (2)" in running_text
+        assert "TestAlias::test_alias" in running_text
+        assert "person with distinct_id 'abc-123'" in running_text
+        assert "TestMerge::test_merge" in running_text
+        assert "events for person 'person-789'" in running_text
+
+    @patch("posthog.temporal.ingestion_acceptance_test.slack.requests.post")
+    def test_payload_renders_running_test_without_poll_when_none(self, mock_post: MagicMock, config: Config) -> None:
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        running = [
+            RunningTestInfo(name="TestBasic::test_capture", pending_poll=None),
+        ]
+        send_slack_timeout_notification(config, running_tests=running)
+
+        payload = mock_post.call_args[1]["json"]
+        running_text = payload["blocks"][2]["text"]["text"]
+        assert "TestBasic::test_capture" in running_text
+        assert "waiting for" not in running_text

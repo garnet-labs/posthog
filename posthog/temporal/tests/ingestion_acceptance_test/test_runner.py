@@ -4,7 +4,13 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from posthog.temporal.ingestion_acceptance_test.config import Config
-from posthog.temporal.ingestion_acceptance_test.runner import AcceptanceTest, RunningTests, TestContext, run_tests
+from posthog.temporal.ingestion_acceptance_test.runner import (
+    AcceptanceTest,
+    RunningTestInfo,
+    RunningTests,
+    TestContext,
+    run_tests,
+)
 from posthog.temporal.ingestion_acceptance_test.test_cases_discovery import TestCase
 
 
@@ -188,3 +194,48 @@ class TestRunTests:
         run_tests(config, tests, mock_client, mock_executor, running_tests)
 
         assert mock_executor.submit.call_count == 3
+
+
+class TestSnapshotWithPolls:
+    def test_correlates_tests_with_pending_polls_by_thread_id(self) -> None:
+        rt = RunningTests()
+        rt._tests = {100: "TestA::test_one", 200: "TestB::test_two"}
+
+        mock_client = MagicMock()
+        mock_client.pending_polls_snapshot.return_value = {
+            100: "event UUID 'abc-123'",
+            200: "person with distinct_id 'xyz-456'",
+        }
+
+        result = rt.snapshot_with_polls(mock_client)
+
+        assert result == [
+            RunningTestInfo(name="TestA::test_one", pending_poll="event UUID 'abc-123'"),
+            RunningTestInfo(name="TestB::test_two", pending_poll="person with distinct_id 'xyz-456'"),
+        ]
+
+    def test_pending_poll_is_none_when_thread_has_no_active_poll(self) -> None:
+        rt = RunningTests()
+        rt._tests = {100: "TestA::test_one", 200: "TestB::test_two"}
+
+        mock_client = MagicMock()
+        mock_client.pending_polls_snapshot.return_value = {
+            100: "event UUID 'abc-123'",
+        }
+
+        result = rt.snapshot_with_polls(mock_client)
+
+        assert result == [
+            RunningTestInfo(name="TestA::test_one", pending_poll="event UUID 'abc-123'"),
+            RunningTestInfo(name="TestB::test_two", pending_poll=None),
+        ]
+
+    def test_returns_empty_list_when_no_tests_running(self) -> None:
+        rt = RunningTests()
+
+        mock_client = MagicMock()
+        mock_client.pending_polls_snapshot.return_value = {}
+
+        result = rt.snapshot_with_polls(mock_client)
+
+        assert result == []

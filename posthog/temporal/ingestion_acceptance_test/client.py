@@ -3,6 +3,7 @@
 import json
 import time
 import uuid
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -82,6 +83,8 @@ class PostHogClient:
         # ClickHouse ORDER BY uses toDate(timestamp) (day granularity), so filtering by date
         # is sufficient. We subtract 1 day to handle clock skew between test machine and server.
         self._test_start_date = (datetime.now(UTC) - timedelta(days=1)).date()
+        self._pending_polls: dict[int, str] = {}
+        self._pending_polls_lock = threading.Lock()
 
     def _create_http_session(self) -> requests.Session:
         """Create an HTTP session with urllib3 retry logic for transient failures."""
@@ -266,6 +269,11 @@ class PostHogClient:
         self._posthog.shutdown()
         self._session.close()
 
+    def pending_polls_snapshot(self) -> dict[int, str]:
+        """Return a snapshot of currently active polls, keyed by thread ID."""
+        with self._pending_polls_lock:
+            return dict(self._pending_polls)
+
     # Polling configuration
     POLL_BACKOFF_FACTOR = 1.5
     POLL_MAX_INTERVAL_SECONDS = 60.0
@@ -281,54 +289,61 @@ class PostHogClient:
         and increase likelihood of success on first call. Transient connection errors
         are caught and logged, allowing polling to continue.
         """
+        tid = threading.get_ident()
+        with self._pending_polls_lock:
+            self._pending_polls[tid] = description
         start_time = time.time()
         current_interval = self.config.poll_interval_seconds
         attempt = 0
 
-        while time.time() - start_time < self.config.event_timeout_seconds:
-            attempt += 1
-            time.sleep(current_interval)
-            if attempt > 1:
-                elapsed = time.time() - start_time
-                logger.info(
-                    "Polling attempt",
-                    attempt=attempt,
-                    description=description,
-                    elapsed_seconds=round(elapsed, 1),
-                    next_interval_seconds=round(current_interval, 1),
-                )
-            try:
-                result = fetch_fn()
-                if result is not None:
+        try:
+            while time.time() - start_time < self.config.event_timeout_seconds:
+                attempt += 1
+                time.sleep(current_interval)
+                if attempt > 1:
                     elapsed = time.time() - start_time
                     logger.info(
-                        "Polling succeeded",
+                        "Polling attempt",
+                        attempt=attempt,
+                        description=description,
+                        elapsed_seconds=round(elapsed, 1),
+                        next_interval_seconds=round(current_interval, 1),
+                    )
+                try:
+                    result = fetch_fn()
+                    if result is not None:
+                        elapsed = time.time() - start_time
+                        logger.info(
+                            "Polling succeeded",
+                            description=description,
+                            attempt=attempt,
+                            elapsed_seconds=round(elapsed, 1),
+                        )
+                        return result
+                except requests.exceptions.RequestException as e:
+                    logger.warning(
+                        "Transient error during polling, will retry",
+                        error=str(e),
+                        error_type=type(e).__name__,
                         description=description,
                         attempt=attempt,
-                        elapsed_seconds=round(elapsed, 1),
                     )
-                    return result
-            except requests.exceptions.RequestException as e:
-                logger.warning(
-                    "Transient error during polling, will retry",
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    description=description,
-                    attempt=attempt,
+                current_interval = min(
+                    current_interval * self.POLL_BACKOFF_FACTOR,
+                    self.POLL_MAX_INTERVAL_SECONDS,
+                    self.config.event_timeout_seconds - (time.time() - start_time),
                 )
-            current_interval = min(
-                current_interval * self.POLL_BACKOFF_FACTOR,
-                self.POLL_MAX_INTERVAL_SECONDS,
-                self.config.event_timeout_seconds - (time.time() - start_time),
-            )
 
-        logger.warning(
-            "Polling timed out",
-            description=description,
-            timeout_seconds=self.config.event_timeout_seconds,
-            attempts=attempt,
-        )
-        return None
+            logger.warning(
+                "Polling timed out",
+                description=description,
+                timeout_seconds=self.config.event_timeout_seconds,
+                attempts=attempt,
+            )
+            return None
+        finally:
+            with self._pending_polls_lock:
+                self._pending_polls.pop(tid, None)
 
     def _execute_hogql_query(self, query: str, values: dict[str, Any]) -> dict[str, Any] | None:
         """Execute a HogQL query and return the first row as a dict, or None if no results."""
