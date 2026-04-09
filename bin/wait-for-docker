@@ -66,11 +66,6 @@ get_service_state() {
     local svc="$1"
     local container_id status
 
-    if [ "$svc" = "temporal" ] && command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 7233 2>/dev/null; then
-        echo "running external-temporal"
-        return
-    fi
-
     container_id=$(get_container_id "$svc")
     if [ -z "$container_id" ]; then
         echo "missing"

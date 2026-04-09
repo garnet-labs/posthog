@@ -19,11 +19,20 @@ class Migration(migrations.Migration):
                 ("name", models.CharField(max_length=255)),
                 ("prompt", models.TextField()),
                 ("repository", models.CharField(max_length=255)),
-                ("schedule_hour", models.PositiveSmallIntegerField()),
-                ("schedule_minute", models.PositiveSmallIntegerField(default=0)),
+                ("cron_expression", models.CharField(max_length=100)),
                 ("timezone", models.CharField(default="UTC", max_length=128)),
                 ("template_id", models.CharField(blank=True, max_length=255, null=True)),
                 ("enabled", models.BooleanField(default=True)),
+                (
+                    "task",
+                    models.OneToOneField(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="automation",
+                        to="tasks.task",
+                    ),
+                ),
                 ("last_run_at", models.DateTimeField(blank=True, null=True)),
                 (
                     "last_run_status",
@@ -52,16 +61,6 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.SET_NULL,
                         to="posthog.integration",
-                    ),
-                ),
-                (
-                    "last_task",
-                    models.ForeignKey(
-                        blank=True,
-                        null=True,
-                        on_delete=django.db.models.deletion.SET_NULL,
-                        related_name="+",
-                        to="tasks.task",
                     ),
                 ),
                 (

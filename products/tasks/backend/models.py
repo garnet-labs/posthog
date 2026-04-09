@@ -320,11 +320,11 @@ class TaskAutomation(models.Model):
         limit_choices_to={"kind": "github"},
         help_text="GitHub integration for this automation",
     )
-    schedule_hour = models.PositiveSmallIntegerField()
-    schedule_minute = models.PositiveSmallIntegerField(default=0)
+    cron_expression = models.CharField(max_length=100)
     timezone = models.CharField(max_length=128, default="UTC")
     template_id = models.CharField(max_length=255, null=True, blank=True)
     enabled = models.BooleanField(default=True)
+    task = models.OneToOneField(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="automation")
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_run_status = models.CharField(
         max_length=20,
@@ -332,7 +332,6 @@ class TaskAutomation(models.Model):
         null=True,
         blank=True,
     )
-    last_task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     last_task_run = models.ForeignKey("TaskRun", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     last_error = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(default=django_timezone.now)
@@ -352,20 +351,11 @@ class TaskAutomation(models.Model):
                 raise ValidationError({"repository": "Format for repository is organization/repo"})
             self.repository = self.repository.lower()
 
-        if not 0 <= self.schedule_hour <= 23:
-            raise ValidationError({"schedule_hour": "Must be between 0 and 23"})
-        if not 0 <= self.schedule_minute <= 59:
-            raise ValidationError({"schedule_minute": "Must be between 0 and 59"})
-
         super().save(*args, **kwargs)
 
     @property
     def schedule_id(self) -> str:
         return f"task-automation-{self.id}"
-
-    @property
-    def cron_expression(self) -> str:
-        return f"{self.schedule_minute} {self.schedule_hour} * * *"
 
 
 class TaskRun(models.Model):

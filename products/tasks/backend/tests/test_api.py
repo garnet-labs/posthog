@@ -17,7 +17,14 @@ from posthog.models.personal_api_key import hash_key_value
 from posthog.models.utils import generate_random_token_personal
 from posthog.storage import object_storage
 
-from products.tasks.backend.models import CodeInvite, CodeInviteRedemption, SandboxEnvironment, Task, TaskAutomation, TaskRun
+from products.tasks.backend.models import (
+    CodeInvite,
+    CodeInviteRedemption,
+    SandboxEnvironment,
+    Task,
+    TaskAutomation,
+    TaskRun,
+)
 from products.tasks.backend.services.connection_token import get_sandbox_jwt_public_key
 
 # Test RSA private key for JWT tests (RS256)
@@ -548,8 +555,7 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
             name=name,
             prompt="Check my GitHub PRs",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -562,7 +568,7 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
                 "name": "Daily PRs",
                 "prompt": "Check my GitHub PRs",
                 "repository": "posthog/posthog",
-                "schedule_time": "09:00",
+                "cron_expression": "0 9 * * *",
                 "timezone": "Europe/London",
             },
             format="json",
@@ -572,13 +578,12 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
         payload = response.json()
         self.assertEqual(payload["name"], "Daily PRs")
         self.assertEqual(payload["repository"], "posthog/posthog")
-        self.assertEqual(payload["schedule_time"], "09:00")
+        self.assertEqual(payload["cron_expression"], "0 9 * * *")
         self.assertEqual(payload["timezone"], "Europe/London")
         self.assertTrue(payload["enabled"])
 
         automation = TaskAutomation.objects.get(id=payload["id"])
-        self.assertEqual(automation.schedule_hour, 9)
-        self.assertEqual(automation.schedule_minute, 0)
+        self.assertEqual(automation.cron_expression, "0 9 * * *")
         mock_sync_schedule.assert_called_once_with(automation)
 
     def test_list_automations(self):
@@ -590,7 +595,45 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
         payload = response.json()
         self.assertEqual(len(payload["results"]), 1)
         self.assertEqual(payload["results"][0]["id"], str(automation.id))
-        self.assertEqual(payload["results"][0]["schedule_time"], "09:00")
+        self.assertEqual(payload["results"][0]["cron_expression"], "0 9 * * *")
+
+    def test_create_automation_rejects_invalid_timezone(self):
+        response = self.client.post(
+            "/api/projects/@current/task_automations/",
+            {
+                "name": "Daily PRs",
+                "prompt": "Check my GitHub PRs",
+                "repository": "posthog/posthog",
+                "cron_expression": "0 9 * * *",
+                "timezone": "UTC+99",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["timezone"], ["'UTC+99' is not a valid IANA timezone."])
+
+    def test_create_automation_rejects_invalid_cron_expression(self):
+        response = self.client.post(
+            "/api/projects/@current/task_automations/",
+            {
+                "name": "Daily PRs",
+                "prompt": "Check my GitHub PRs",
+                "repository": "posthog/posthog",
+                "cron_expression": "not a cron",
+                "timezone": "Europe/London",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.json()["cron_expression"],
+            [
+                "Only standard 5-field cron expressions are supported "
+                "(minute hour day month weekday). Example: '0 9 * * 1-5'."
+            ],
+        )
 
     @patch("products.tasks.backend.api.sync_automation_schedule")
     def test_update_automation(self, mock_sync_schedule):
@@ -599,7 +642,7 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
         response = self.client.patch(
             f"/api/projects/@current/task_automations/{automation.id}/",
             {
-                "schedule_time": "14:30",
+                "cron_expression": "30 14 * * *",
                 "enabled": False,
             },
             format="json",
@@ -607,12 +650,11 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         payload = response.json()
-        self.assertEqual(payload["schedule_time"], "14:30")
+        self.assertEqual(payload["cron_expression"], "30 14 * * *")
         self.assertFalse(payload["enabled"])
 
         automation.refresh_from_db()
-        self.assertEqual(automation.schedule_hour, 14)
-        self.assertEqual(automation.schedule_minute, 30)
+        self.assertEqual(automation.cron_expression, "30 14 * * *")
         self.assertFalse(automation.enabled)
         mock_sync_schedule.assert_called_once_with(automation)
 
@@ -627,10 +669,10 @@ class TestTaskAutomationAPI(BaseTaskAPITest):
         self.assertFalse(TaskAutomation.objects.filter(id=automation.id).exists())
 
     @patch("products.tasks.backend.api.run_task_automation")
-    def test_run_now(self, mock_run_task_automation):
+    def test_run(self, mock_run_task_automation):
         automation = self.create_automation()
 
-        response = self.client.post(f"/api/projects/@current/task_automations/{automation.id}/run_now/")
+        response = self.client.post(f"/api/projects/@current/task_automations/{automation.id}/run/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_run_task_automation.assert_called_once_with(str(automation.id))
@@ -1515,8 +1557,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             name="Daily PRs",
             prompt="Check my PRs",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -1536,7 +1577,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             ("/api/projects/@current/task_automations/", "POST"),
             (f"/api/projects/@current/task_automations/{automation.id}/", "PATCH"),
             (f"/api/projects/@current/task_automations/{automation.id}/", "DELETE"),
-            (f"/api/projects/@current/task_automations/{automation.id}/run_now/", "POST"),
+            (f"/api/projects/@current/task_automations/{automation.id}/run/", "POST"),
             # TaskRunViewSet endpoints
             (f"/api/projects/@current/tasks/{task.id}/runs/", "GET"),
             (f"/api/projects/@current/tasks/{task.id}/runs/{run.id}/", "GET"),
@@ -1574,8 +1615,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             name="Daily PRs",
             prompt="Check my PRs",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -1587,7 +1627,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             (f"/api/projects/@current/tasks/{task.id}/", "GET"),
             ("/api/projects/@current/task_automations/", "GET"),
             (f"/api/projects/@current/task_automations/{automation.id}/", "GET"),
-            (f"/api/projects/@current/task_automations/{automation.id}/run_now/", "POST"),
+            (f"/api/projects/@current/task_automations/{automation.id}/run/", "POST"),
         ]
 
         for url, method in endpoints:
@@ -1624,8 +1664,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             name="Other Team Automation",
             prompt="Description",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -1653,8 +1692,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             name="My automation",
             prompt="Mine",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -1671,8 +1709,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             name="Other automation",
             prompt="Other",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -1715,7 +1752,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             ("task:write", "POST", "/api/projects/@current/task_automations/", True),
             ("task:write", "PATCH", "/api/projects/@current/task_automations/{automation_id}/", True),
             ("task:write", "DELETE", "/api/projects/@current/task_automations/{automation_id}/", True),
-            ("task:write", "POST", "/api/projects/@current/task_automations/{automation_id}/run_now/", True),
+            ("task:write", "POST", "/api/projects/@current/task_automations/{automation_id}/run/", True),
             ("other_scope:read", "GET", "/api/projects/@current/tasks/", False),
             ("other_scope:write", "POST", "/api/projects/@current/tasks/", False),
             ("*", "GET", "/api/projects/@current/tasks/", True),
@@ -1726,7 +1763,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             ("*", "GET", "/api/projects/@current/task_automations/", True),
             ("*", "GET", "/api/projects/@current/task_automations/{automation_id}/", True),
             ("*", "POST", "/api/projects/@current/task_automations/", True),
-            ("*", "POST", "/api/projects/@current/task_automations/{automation_id}/run_now/", True),
+            ("*", "POST", "/api/projects/@current/task_automations/{automation_id}/run/", True),
         ]
     )
     def test_scoped_api_key_permissions(self, scope, method, url_template, should_have_access):
@@ -1737,8 +1774,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
             name="Scoped automation",
             prompt="Check my PRs",
             repository="posthog/posthog",
-            schedule_hour=9,
-            schedule_minute=0,
+            cron_expression="0 9 * * *",
             timezone="Europe/London",
             enabled=True,
         )
@@ -1769,7 +1805,7 @@ class TestTasksAPIPermissions(BaseTaskAPITest):
                 "name": "New Automation",
                 "prompt": "Check my PRs",
                 "repository": "posthog/posthog",
-                "schedule_time": "09:00",
+                "cron_expression": "0 9 * * *",
                 "timezone": "Europe/London",
             }
         elif method == "PATCH" and "/task_automations/" in url:

@@ -48,9 +48,9 @@ from .serializers import (
     ErrorResponseSerializer,
     RepositoryReadinessQuerySerializer,
     RepositoryReadinessResponseSerializer,
-    TaskAutomationSerializer,
     SandboxEnvironmentListSerializer,
     SandboxEnvironmentSerializer,
+    TaskAutomationSerializer,
     TaskListQuerySerializer,
     TaskRunAppendLogRequestSerializer,
     TaskRunArtifactPresignRequestSerializer,
@@ -313,7 +313,7 @@ class TaskAutomationViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
     permission_classes = [IsAuthenticated, APIScopePermission, TasksAccessPermission]
     scope_object = "task"
-    queryset = TaskAutomation.objects.select_related("last_task", "last_task_run", "github_integration").all()
+    queryset = TaskAutomation.objects.select_related("last_task_run", "github_integration").all()
 
     def safely_get_queryset(self, queryset):
         return queryset.filter(team=self.team).order_by("name", "-created_at")
@@ -334,8 +334,8 @@ class TaskAutomationViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         delete_automation_schedule(automation)
         automation.delete()
 
-    @action(detail=True, methods=["post"], url_path="run_now", required_scopes=["task:write"])
-    def run_now(self, request, pk=None, **kwargs):
+    @action(detail=True, methods=["post"], url_path="run", required_scopes=["task:write"])
+    def run(self, request, pk=None, **kwargs):
         automation = cast(TaskAutomation, self.get_object())
         run_task_automation(str(automation.id))
         automation.refresh_from_db()

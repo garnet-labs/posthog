@@ -1,6 +1,9 @@
+from zoneinfo import available_timezones
+
 from django.core.cache import cache
 from django.utils import timezone
 
+from croniter import croniter
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -470,7 +473,6 @@ class TaskRunSessionLogsQuerySerializer(serializers.Serializer):
 
 class TaskAutomationSerializer(serializers.ModelSerializer):
     repository = serializers.CharField(max_length=255)
-    schedule_time = serializers.CharField(required=False)
     last_task_id = serializers.SerializerMethodField()
     last_task_run_id = serializers.SerializerMethodField()
 
@@ -482,7 +484,7 @@ class TaskAutomationSerializer(serializers.ModelSerializer):
             "prompt",
             "repository",
             "github_integration",
-            "schedule_time",
+            "cron_expression",
             "timezone",
             "template_id",
             "enabled",
@@ -506,7 +508,9 @@ class TaskAutomationSerializer(serializers.ModelSerializer):
         ]
 
     def get_last_task_id(self, instance: TaskAutomation) -> str | None:
-        return str(instance.last_task_id) if instance.last_task_id else None
+        if instance.task_id:
+            return str(instance.task_id)
+        return str(instance.last_task_run.task_id) if instance.last_task_run_id else None
 
     def get_last_task_run_id(self, instance: TaskAutomation) -> str | None:
         return str(instance.last_task_run_id) if instance.last_task_run_id else None
@@ -523,29 +527,26 @@ class TaskAutomationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Repository must be in the format organization/repository")
         return normalized
 
-    def validate_schedule_time(self, value: str) -> str:
-        parts = value.split(":")
-        if len(parts) != 2:
-            raise serializers.ValidationError("Schedule time must be in HH:MM format")
-        try:
-            hour = int(parts[0])
-            minute = int(parts[1])
-        except ValueError as err:
-            raise serializers.ValidationError("Schedule time must be in HH:MM format") from err
-        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
-            raise serializers.ValidationError("Schedule time must be a valid 24-hour time")
-        return f"{hour:02d}:{minute:02d}"
+    def validate_cron_expression(self, value: str) -> str:
+        normalized = value.strip()
+        parts = normalized.split()
+        if len(parts) != 5:
+            raise serializers.ValidationError(
+                "Only standard 5-field cron expressions are supported "
+                "(minute hour day month weekday). Example: '0 9 * * 1-5'."
+            )
+        if not croniter.is_valid(normalized):
+            raise serializers.ValidationError(
+                "Invalid cron expression. Use standard 5-field cron syntax (e.g., '0 9 * * 1-5')."
+            )
+        return normalized
 
-    def validate(self, attrs):
-        schedule_time = self.initial_data.get("schedule_time")
-        if schedule_time is None and self.instance is None:
-            raise serializers.ValidationError({"schedule_time": "This field is required."})
-        return super().validate(attrs)
+    def validate_timezone(self, value: str) -> str:
+        if value not in available_timezones():
+            raise serializers.ValidationError(f"'{value}' is not a valid IANA timezone.")
+        return value
 
     def create(self, validated_data):
-        schedule_time = validated_data.pop("schedule_time")
-        hour, minute = [int(part) for part in schedule_time.split(":")]
-
         if not validated_data.get("github_integration"):
             default_integration = Integration.objects.filter(team=self.context["team"], kind="github").first()
             if default_integration:
@@ -554,31 +555,8 @@ class TaskAutomationSerializer(serializers.ModelSerializer):
         return TaskAutomation.objects.create(
             team=self.context["team"],
             created_by=self.context["request"].user,
-            schedule_hour=hour,
-            schedule_minute=minute,
             **validated_data,
         )
-
-    def update(self, instance, validated_data):
-        schedule_time = validated_data.pop("schedule_time", None)
-        if schedule_time is not None:
-            hour, minute = [int(part) for part in schedule_time.split(":")]
-            instance.schedule_hour = hour
-            instance.schedule_minute = minute
-
-        return super().update(instance, validated_data)
-
-    def to_internal_value(self, data):
-        internal = super().to_internal_value(data)
-        schedule_time = data.get("schedule_time")
-        if schedule_time is not None:
-            internal["schedule_time"] = self.validate_schedule_time(schedule_time)
-        return internal
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data["schedule_time"] = f"{instance.schedule_hour:02d}:{instance.schedule_minute:02d}"
-        return data
 
 
 class SandboxEnvironmentSerializer(serializers.ModelSerializer):
