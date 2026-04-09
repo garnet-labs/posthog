@@ -535,13 +535,10 @@ def cache_init_phase() -> None:
 
     def build_rust() -> None:
         info("Pre-building Rust workspace...")
-        # CARGO_BUILD_JOBS=0 means "use all cores" — cache-init wants full
-        # parallelism on the one-time build since nothing else competes.
         try:
             run(
                 ["cargo", "build", "--workspace"],
                 cwd=str(WORKSPACE / "rust"),
-                env={**os.environ, "CARGO_BUILD_JOBS": "0"},
             )
             info("Finished: cargo build.")
         except subprocess.CalledProcessError as e:
