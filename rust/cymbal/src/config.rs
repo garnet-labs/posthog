@@ -198,7 +198,6 @@ pub struct Config {
 
     #[envconfig(default = "180")]
     pub cache_warming_timeout_seconds: u64,
-
 }
 
 impl Config {
