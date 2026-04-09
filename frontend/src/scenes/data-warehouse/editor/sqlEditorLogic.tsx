@@ -1107,6 +1107,14 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 // Saved queries are unique by team,name
                 const savedQuery = dataWarehouseViewsLogic.values.dataWarehouseSavedQueries.find((q) => q.name === name)
 
+                // Always update the originating tab with the new view. The global
+                // createDataWarehouseSavedQuerySuccess listener guards against
+                // overwriting *other* tabs, but cannot tell which tab initiated the
+                // save — so it may skip this tab when it already has a different view.
+                if (savedQuery && values.activeTab) {
+                    actions.updateTab({ ...values.activeTab, view: savedQuery })
+                }
+
                 if (materializeAfterSave && savedQuery) {
                     await dataWarehouseViewsLogic.asyncActions.materializeDataWarehouseSavedQuery(savedQuery.id)
                 }
