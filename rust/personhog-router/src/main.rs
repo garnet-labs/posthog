@@ -4,6 +4,7 @@ use std::time::Duration;
 use assignment_coordination::store::{EtcdStore, StoreConfig};
 use axum::{routing::get, Router};
 use envconfig::Envconfig;
+use k8s_awareness::K8sAwareness;
 use lifecycle::{ComponentOptions, Manager};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use personhog_common::grpc::{tracked_tcp_incoming, GrpcMetricsLayer};
@@ -17,6 +18,7 @@ use personhog_router::backend::{LeaderBackend, ReplicaBackend};
 use personhog_router::config::{Config, RouterMode};
 use personhog_router::router::PersonHogRouter;
 use personhog_router::service::PersonHogRouterService;
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::fmt;
@@ -58,6 +60,10 @@ impl CutoverHandler for RouterCutoverHandler {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let config = Config::init_from_env().expect("Invalid configuration");
 
     // Initialize tracing
@@ -168,6 +174,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.retry_config(),
         config.backend_keepalive_interval(),
         config.backend_keepalive_timeout(),
+        config.grpc_max_send_message_size,
+        config.grpc_max_recv_message_size,
     )
     .expect("Failed to create replica backend");
 
@@ -214,6 +222,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             num_partitions,
             config.backend_timeout(),
             config.retry_config(),
+            config.grpc_max_send_message_size,
+            config.grpc_max_recv_message_size,
         ));
 
         let cutover_handler: Arc<dyn CutoverHandler> = Arc::new(RouterCutoverHandler {
@@ -234,6 +244,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
 
+        // K8s awareness (optional)
+        let k8s_cancel = CancellationToken::new();
+        let k8s_awareness = if config.k8s_awareness_enabled {
+            let namespace = config
+                .resolve_k8s_namespace()
+                .expect("k8s awareness enabled but namespace resolution failed");
+            let client = kube::Client::try_default()
+                .await
+                .expect("failed to create K8s client");
+            tracing::info!(%namespace, "K8s awareness enabled");
+            Some(Arc::new(K8sAwareness::new(
+                client,
+                namespace,
+                k8s_cancel.child_token(),
+            )))
+        } else {
+            tracing::info!("K8s awareness disabled");
+            None
+        };
+
         // Start coordinator (leader election + partition assignment)
         let coordinator_handle =
             coordinator_handle.expect("coordinator handle must be registered in leader mode");
@@ -247,6 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rebalance_debounce_interval: config.coordinator_rebalance_debounce_interval(),
             },
             Arc::new(StickyBalancedStrategy),
+            k8s_awareness,
         );
 
         tokio::spawn(async move {
@@ -254,6 +285,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(e) = coordinator.run(coordinator_handle.shutdown_token()).await {
                 coordinator_handle.signal_failure(format!("Coordinator error: {e}"));
             }
+            k8s_cancel.cancel();
         });
 
         PersonHogRouter::new(Arc::new(replica_backend)).with_leader(leader_backend)
@@ -268,6 +300,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_addr = config.grpc_address;
     let keepalive_interval = config.grpc_keepalive_interval();
     let keepalive_timeout = config.grpc_keepalive_timeout();
+    let max_send = config.grpc_max_send_message_size;
+    let max_recv = config.grpc_max_recv_message_size;
     tracing::info!("Starting gRPC server on {}", grpc_addr);
 
     tokio::spawn(async move {
@@ -284,7 +318,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .http2_keepalive_interval(keepalive_interval)
             .http2_keepalive_timeout(keepalive_timeout)
             .layer(GrpcMetricsLayer)
-            .add_service(PersonHogServiceServer::new(service))
+            .add_service(
+                PersonHogServiceServer::new(service)
+                    .max_encoding_message_size(max_send)
+                    .max_decoding_message_size(max_recv),
+            )
             .serve_with_incoming_shutdown(incoming, grpc_handle.shutdown_signal())
             .await
         {

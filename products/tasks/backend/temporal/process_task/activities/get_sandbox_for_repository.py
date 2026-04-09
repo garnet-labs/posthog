@@ -8,7 +8,7 @@ from temporalio import activity
 
 from posthog.temporal.common.utils import asyncify
 
-from products.tasks.backend.models import SandboxSnapshot, Task, TaskRun
+from products.tasks.backend.models import SandboxEnvironment, SandboxSnapshot, Task, TaskRun
 from products.tasks.backend.services.connection_token import get_sandbox_jwt_public_key
 from products.tasks.backend.services.sandbox import Sandbox, SandboxConfig, SandboxTemplate
 from products.tasks.backend.temporal.exceptions import GitHubAuthenticationError, OAuthTokenError, TaskNotFoundError
@@ -24,6 +24,16 @@ from products.tasks.backend.temporal.process_task.utils import (
 from .get_task_processing_context import TaskProcessingContext
 
 logger = logging.getLogger(__name__)
+
+RESERVED_SANDBOX_ENVIRONMENT_VARIABLE_KEYS = {
+    "POSTHOG_PERSONAL_API_KEY",
+    "POSTHOG_API_URL",
+    "POSTHOG_PROJECT_ID",
+    "JWT_PUBLIC_KEY",
+    "GITHUB_TOKEN",
+    "LLM_GATEWAY_URL",
+    "POSTHOG_RESUME_RUN_ID",
+}
 
 
 @dataclass
@@ -71,6 +81,10 @@ def get_sandbox_for_repository(input: GetSandboxForRepositoryInput) -> GetSandbo
         except Task.DoesNotExist as e:
             raise TaskNotFoundError(f"Task {ctx.task_id} not found", {"task_id": ctx.task_id}, cause=e)
 
+        # Signal report research sandboxes need full history for git blame.
+        # All other sandboxes use shallow clone (--depth 1) for faster boot.
+        shallow = task.origin_product != Task.OriginProduct.SIGNAL_REPORT
+
         github_token = ""
         if has_repo:
             assert github_integration_id is not None
@@ -98,6 +112,33 @@ def get_sandbox_for_repository(input: GetSandboxForRepositoryInput) -> GetSandbo
             "POSTHOG_PROJECT_ID": str(ctx.team_id),
             "JWT_PUBLIC_KEY": get_sandbox_jwt_public_key(),
         }
+
+        sandbox_environment = None
+        if ctx.sandbox_environment_id:
+            sandbox_environment = SandboxEnvironment.objects.filter(
+                id=ctx.sandbox_environment_id, team=task.team
+            ).first()
+            if sandbox_environment and sandbox_environment.environment_variables:
+                skipped_keys: list[str] = []
+                added_keys = 0
+                for key, value in sandbox_environment.environment_variables.items():
+                    if key in RESERVED_SANDBOX_ENVIRONMENT_VARIABLE_KEYS:
+                        skipped_keys.append(key)
+                        continue
+                    environment_variables[key] = value
+                    added_keys += 1
+
+                emit_agent_log(
+                    ctx.run_id,
+                    "debug",
+                    f"Applied {added_keys} sandbox environment variable(s) from '{sandbox_environment.name}'",
+                )
+                if skipped_keys:
+                    emit_agent_log(
+                        ctx.run_id,
+                        "debug",
+                        f"Skipped reserved sandbox environment variable keys from '{sandbox_environment.name}': {', '.join(sorted(skipped_keys))}",
+                    )
 
         if github_token:
             environment_variables["GITHUB_TOKEN"] = github_token
@@ -132,14 +173,16 @@ def get_sandbox_for_repository(input: GetSandboxForRepositoryInput) -> GetSandbo
             metadata={"task_id": ctx.task_id},
         )
 
+        emit_agent_log(ctx.run_id, "debug", "Provisioning sandbox (image build may take a few minutes on first run)")
         with StepTimer("sandbox_creation", used_snapshot=used_snapshot):
             sandbox = Sandbox.create(config)
+        emit_agent_log(ctx.run_id, "debug", f"Sandbox provisioned: {sandbox.id}")
 
         if has_repo and not used_snapshot:
             assert repository is not None
             emit_agent_log(ctx.run_id, "info", f"Cloning {repository} into sandbox")
             with StepTimer("repository_clone", used_snapshot=used_snapshot):
-                clone_result = sandbox.clone_repository(repository, github_token=github_token)
+                clone_result = sandbox.clone_repository(repository, github_token=github_token, shallow=shallow)
             if clone_result.exit_code != 0:
                 sandbox.destroy()
                 raise RuntimeError(f"Failed to clone repository {repository}: {clone_result.stderr}")
@@ -164,9 +207,10 @@ def get_sandbox_for_repository(input: GetSandboxForRepositoryInput) -> GetSandbo
                         extra={"branch": ctx.branch, "stderr": update_result.stderr},
                     )
 
+            depth_flag = f" --depth {shlex.quote('1')}" if shallow else ""
             fetch_and_checkout = (
                 f"cd {shlex.quote(repo_path)} && "
-                f"git fetch --depth 1 origin -- {shlex.quote(ctx.branch)} && "
+                f"git fetch{depth_flag} origin -- {shlex.quote(ctx.branch)} && "
                 f"git checkout -B {shlex.quote(ctx.branch)} FETCH_HEAD"
             )
             try:
