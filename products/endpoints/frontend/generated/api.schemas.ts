@@ -958,7 +958,6 @@ export interface EndpointRunRequestApi {
      * @nullable
      */
     debug?: boolean | null
-    filters_override?: DashboardFilterApi | null
     /**
      * Maximum number of results to return. If not provided, returns all results.
      * @nullable
