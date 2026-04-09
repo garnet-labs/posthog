@@ -14072,6 +14072,16 @@ export namespace Schemas {
       readonly cohort: ErrorTrackingIssueFullCohort;
     }
 
+    export interface ErrorTrackingIssueMergeRequest {
+      /** IDs of the issues to merge into the current issue. */
+      ids: string[];
+    }
+
+    export interface ErrorTrackingIssueMergeResponse {
+      /** Whether the merge completed successfully. */
+      success: boolean;
+    }
+
     export interface ErrorTrackingRelease {
       readonly id: string;
       hash_id: string;
@@ -30656,7 +30666,7 @@ export namespace Schemas {
       branch?: string | null;
       /** ID of a previous run to resume from. Must belong to the same task. */
       resume_from_run_id?: string;
-      /** Follow-up user message to include in the resumed run's prompt. */
+      /** Initial or follow-up user message to include in the run prompt. */
       pending_user_message?: string;
       /** Optional sandbox environment to apply for this cloud run. */
       sandbox_environment_id?: string;
@@ -31402,6 +31412,13 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    };
+
+    export type EnvironmentsEndpointsOpenapiJsonRetrieveParams = {
+    /**
+     * Specific endpoint version to generate the spec for. Defaults to latest.
+     */
+    version?: number;
     };
 
     export type EnvironmentsEndpointsVersionsListParams = {
@@ -34160,6 +34177,13 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    };
+
+    export type EndpointsOpenapiJsonRetrieveParams = {
+    /**
+     * Specific endpoint version to generate the spec for. Defaults to latest.
+     */
+    version?: number;
     };
 
     export type EndpointsVersionsListParams = {
