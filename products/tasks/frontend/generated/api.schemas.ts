@@ -139,6 +139,62 @@ export interface SandboxEnvironmentApi {
 }
 
 /**
+ * * `success` - Success
+ * `failed` - Failed
+ * `running` - Running
+ */
+export type LastRunStatusEnumApi = (typeof LastRunStatusEnumApi)[keyof typeof LastRunStatusEnumApi]
+
+export const LastRunStatusEnumApi = {
+    Success: 'success',
+    Failed: 'failed',
+    Running: 'running',
+} as const
+
+export interface TaskAutomationApi {
+    readonly id: string
+    /** @maxLength 255 */
+    name: string
+    prompt: string
+    /** @maxLength 255 */
+    repository: string
+    /**
+     * GitHub integration for this automation
+     * @nullable
+     */
+    github_integration?: number | null
+    schedule_time?: string
+    /** @maxLength 128 */
+    timezone?: string
+    /**
+     * @maxLength 255
+     * @nullable
+     */
+    template_id?: string | null
+    enabled?: boolean
+    /** @nullable */
+    readonly last_run_at: string | null
+    readonly last_run_status: LastRunStatusEnumApi | NullEnumApi | null
+    /** @nullable */
+    readonly last_task_id: string | null
+    /** @nullable */
+    readonly last_task_run_id: string | null
+    /** @nullable */
+    readonly last_error: string | null
+    readonly created_at: string
+    readonly updated_at: string
+}
+
+export interface PaginatedTaskAutomationListApi {
+    count: number
+    /** @nullable */
+    next?: string | null
+    /** @nullable */
+    previous?: string | null
+    results: TaskAutomationApi[]
+}
+
+/**
  * Serializer for extracted tasks
  */
 export interface TaskApi {
@@ -167,6 +223,7 @@ export type PatchedTaskApiLatestRun = { [key: string]: unknown } | null | null
  * * `error_tracking` - Error Tracking
  * `eval_clusters` - Eval Clusters
  * `user_created` - User Created
+ * `automation` - Automation
  * `slack` - Slack
  * `support_queue` - Support Queue
  * `session_summaries` - Session Summaries
@@ -178,6 +235,7 @@ export const OriginProductEnumApi = {
     ErrorTracking: 'error_tracking',
     EvalClusters: 'eval_clusters',
     UserCreated: 'user_created',
+    Automation: 'automation',
     Slack: 'slack',
     SupportQueue: 'support_queue',
     SessionSummaries: 'session_summaries',
@@ -653,6 +711,17 @@ export interface RepositoryReadinessResponseApi {
 }
 
 export type SandboxListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number
+}
+
+export type TaskAutomationsListParams = {
     /**
      * Number of results to return per page.
      */
