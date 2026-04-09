@@ -61,3 +61,31 @@ Config options:
 - **`dry_run`**: Set to `true` to preview what would be materialized without making changes
 
 Note that backfilling adds extra load to the cluster, so it's best done on a weekend.
+
+### Dropping materialized columns via Dagster
+
+To drop unused materialized columns and reclaim storage, use the `drop_materialized_column` job in the `team-clickhouse` location.
+
+- **EU**: https://dagster.cloud/posthog/prod-eu/locations/team-clickhouse/jobs/drop_materialized_column/playground
+- **US**: https://dagster.cloud/posthog/prod-us/locations/team-clickhouse/jobs/drop_materialized_column/playground
+
+Go to the playground for the relevant region and configure the `drop_materialized_columns_op` with the columns you want to drop:
+
+```yaml
+ops:
+  drop_materialized_columns_op:
+    config:
+      table: events
+      column_names:
+        - mat_$browser_language_prefix
+        - mat_$app_namespace
+      dry_run: true
+```
+
+Config options:
+
+- **`table`** - The ClickHouse table to drop columns from (`events` or `person`, defaults to `events`)
+- **`column_names`** - List of materialized column names to drop
+- **`dry_run`** - Set to `true` (default) to preview what would be dropped without making changes
+
+> **Warning:** Dropping materialized columns is irreversible. Always run with `dry_run: true` first to verify the columns to be dropped.
