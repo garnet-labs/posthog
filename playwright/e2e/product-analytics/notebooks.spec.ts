@@ -138,6 +138,10 @@ test.describe('Notebooks', () => {
 
         await test.step('type text content in the notebook', async () => {
             const savePromise = notebook.waitForSave()
+            // Click the editor container to trigger trailing paragraph creation,
+            // then wait for the editable textbox to appear
+            await page.locator('.NotebookEditor').click()
+            await expect(notebook.editor).toBeVisible()
             await notebook.editor.click()
             await notebook.editor.press('End')
             await notebook.editor.press('Enter')
