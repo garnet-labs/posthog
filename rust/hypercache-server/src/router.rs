@@ -70,7 +70,7 @@ pub fn router(
         .layer(axum::middleware::from_fn(track_metrics))
         .with_state(state);
 
-    if config.enable_metrics {
+    if *config.enable_metrics {
         let recorder_handle = setup_metrics_recorder();
         router.route("/metrics", get(move || ready(recorder_handle.render())))
     } else {

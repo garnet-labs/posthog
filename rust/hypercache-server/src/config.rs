@@ -1,6 +1,29 @@
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 use envconfig::Envconfig;
+
+/// Bool that accepts "1", "0", "true", "false" from env vars.
+#[derive(Clone, Debug)]
+pub struct FlexBool(pub bool);
+
+impl FromStr for FlexBool {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(FlexBool(true)),
+            "0" | "false" | "no" | "off" | "" => Ok(FlexBool(false)),
+            _ => Err(format!("Invalid boolean value: '{s}'")),
+        }
+    }
+}
+
+impl std::ops::Deref for FlexBool {
+    type Target = bool;
+    fn deref(&self) -> &bool {
+        &self.0
+    }
+}
 
 #[derive(Envconfig, Clone, Debug)]
 pub struct Config {
@@ -28,10 +51,10 @@ pub struct Config {
     pub object_storage_endpoint: String,
 
     #[envconfig(from = "ENABLE_METRICS", default = "false")]
-    pub enable_metrics: bool,
+    pub enable_metrics: FlexBool,
 
     #[envconfig(from = "DEBUG", default = "false")]
-    pub debug: bool,
+    pub debug: FlexBool,
 
     #[envconfig(from = "MAX_CONCURRENCY", default = "1000")]
     pub max_concurrency: usize,

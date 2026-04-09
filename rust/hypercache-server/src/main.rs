@@ -36,7 +36,7 @@ async fn main() {
             .with_thread_ids(true)
             .with_level(true);
 
-        if config.debug {
+        if *config.debug {
             base_layer
                 .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                 .with_ansi(true)
