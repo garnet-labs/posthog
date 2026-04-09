@@ -88,6 +88,16 @@ def test_check_alert_workflow_replay_does_not_double_emit_slo():
     pass
 
 
+def test_schedule_is_registered_in_init_schedules():
+    # Smoke test: the cutover commit adds create_schedule_all_alert_checks_schedule
+    # to the `schedules` list so it's actually picked up by the
+    # schedule_temporal_workflows management command. Without this, schedule.py
+    # exists but the coordinator workflow never fires in production.
+    from posthog.temporal.schedule import schedules
+
+    assert create_schedule_all_alert_checks_schedule in schedules
+
+
 @pytest.mark.asyncio
 async def test_create_schedule_all_alert_checks_schedule_creates_when_absent():
     mock_client = AsyncMock()
