@@ -163,7 +163,8 @@ export interface TaskAutomationApi {
      * @nullable
      */
     github_integration?: number | null
-    schedule_time?: string
+    /** @maxLength 100 */
+    cron_expression: string
     /** @maxLength 128 */
     timezone?: string
     /**
