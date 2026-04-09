@@ -6,20 +6,12 @@ describe('alignResolvedDateRangeToInterval', () => {
         expect(alignResolvedDateRangeToInterval(null, 'month')).toBeUndefined()
     })
 
-    it('returns the range unchanged when grouping by day', () => {
+    it.each([['day' as const], [null], [undefined]])('returns the range unchanged when interval is %s', (interval) => {
         const range = {
             date_from: '2025-04-07T00:00:00+00:00',
             date_to: '2026-04-07T23:59:59+00:00',
         }
-        expect(alignResolvedDateRangeToInterval(range, 'day')).toBe(range)
-    })
-
-    it('returns the range unchanged when interval is missing', () => {
-        const range = {
-            date_from: '2025-04-07T00:00:00+00:00',
-            date_to: '2026-04-07T23:59:59+00:00',
-        }
-        expect(alignResolvedDateRangeToInterval(range, null)).toBe(range)
+        expect(alignResolvedDateRangeToInterval(range, interval)).toBe(range)
     })
 
     it('expands to full months when grouping by month', () => {

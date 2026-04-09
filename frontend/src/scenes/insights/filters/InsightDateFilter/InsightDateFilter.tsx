@@ -30,13 +30,22 @@ export function alignResolvedDateRangeToInterval(
         return resolvedDateRange
     }
     // Parse the wall-clock portion only, so manipulation stays in the original tz.
-    const stripTz = (iso: string): string => iso.replace(/([+-]\d{2}:\d{2}|Z)$/, '')
-    const tzSuffix = (iso: string): string => (iso.endsWith('Z') ? '+00:00' : iso.slice(-6))
-    const from = dayjs.utc(stripTz(resolvedDateRange.date_from)).startOf('month')
-    const to = dayjs.utc(stripTz(resolvedDateRange.date_to)).endOf('month')
+    const TZ_SUFFIX_RE = /([+-]\d{2}:\d{2}|Z)$/
+    const splitTz = (iso: string): [string, string] => {
+        const match = iso.match(TZ_SUFFIX_RE)
+        if (!match) {
+            return [iso, '']
+        }
+        const suffix = match[0] === 'Z' ? '+00:00' : match[0]
+        return [iso.slice(0, -match[0].length), suffix]
+    }
+    const [fromWall, fromTz] = splitTz(resolvedDateRange.date_from)
+    const [toWall, toTz] = splitTz(resolvedDateRange.date_to)
+    const from = dayjs.utc(fromWall).startOf('month')
+    const to = dayjs.utc(toWall).endOf('month')
     return {
-        date_from: from.format('YYYY-MM-DDTHH:mm:ss') + tzSuffix(resolvedDateRange.date_from),
-        date_to: to.format('YYYY-MM-DDTHH:mm:ss') + tzSuffix(resolvedDateRange.date_to),
+        date_from: from.format('YYYY-MM-DDTHH:mm:ss') + fromTz,
+        date_to: to.format('YYYY-MM-DDTHH:mm:ss') + toTz,
     }
 }
 
