@@ -82,10 +82,8 @@ export function FunnelBarHorizontal({
                     step.nested_breakdown?.length !== undefined &&
                     !(step.nested_breakdown.length === 1)
 
-                // When a breakdown filter resolves to a single visible value, use that series'
-                // counts and rates for display so the bar/labels match the tooltip instead of
-                // showing aggregate (cross-breakdown) values. Clicks also route through
-                // openPersonsModalForSeries so the persons modal is scoped to that value.
+                // For single-visible-breakdown steps, use the series' own counts / rates for
+                // display and scope clicks through openPersonsModalForSeries.
                 const stepBreakdownSeries = !isBreakdown ? getStepBreakdownSeries(step, breakdownFilter) : null
                 const displayStep = stepBreakdownSeries ?? step
                 const openStep = (converted: boolean): void => {
