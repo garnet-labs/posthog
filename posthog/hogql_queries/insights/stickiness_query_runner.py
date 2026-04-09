@@ -140,6 +140,7 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
         )
 
     def _events_query(self, series_with_extra: SeriesWithExtras) -> ast.SelectQuery:
+        # Produce one row per (aggregation_target, start_of_interval) pair.
         if isinstance(series_with_extra.series, DataWarehouseNode):
             inner_query = parse_select(
                 """
@@ -180,6 +181,8 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
                 },
             )
 
+        # Count how many distinct intervals each aggregation target appeared in.
+        # e.g. person A -> 3, person B -> 1, person C -> 3
         middle_query = parse_select(
             """
             SELECT
@@ -193,6 +196,8 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
             {"inner_query": inner_query},
         )
 
+        # Count how many aggregation targers had activity in exactly N intervals.
+        # e.g. num_intervals=1 -> num_actors=1, num_intervals=3 -> num_actors=2
         outer_query = parse_select(
             """
             SELECT
