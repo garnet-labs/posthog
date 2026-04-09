@@ -48,6 +48,7 @@ from posthog.hogql_queries.experiments.utils import (
 )
 from posthog.hogql_queries.query_runner import QueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
+from posthog.models.team.extensions import get_or_create_team_extension
 
 from products.analytics_platform.backend.lazy_computation.lazy_computation_executor import (
     LazyComputationResult,
@@ -56,6 +57,7 @@ from products.analytics_platform.backend.lazy_computation.lazy_computation_execu
 )
 from products.experiments.backend.metric_utils import get_default_metric_title
 from products.experiments.backend.models.experiment import Experiment
+from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -189,10 +191,6 @@ class ExperimentQueryRunner(QueryRunner):
 
     def _should_precompute(self) -> bool:
         """Resolve whether to use precomputation: query-level override > team-level default."""
-        from posthog.models.team.extensions import get_or_create_team_extension
-
-        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
-
         if self.query.precomputation_mode == "precomputed":
             return True
         if self.query.precomputation_mode == "direct":
