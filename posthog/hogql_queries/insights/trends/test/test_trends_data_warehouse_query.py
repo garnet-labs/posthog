@@ -39,7 +39,7 @@ from posthog.hogql_queries.insights.trends.trends_query_builder import TrendsQue
 from posthog.hogql_queries.insights.trends.trends_query_runner import TrendsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 
-from products.data_warehouse.backend.models import DataWarehouseJoin
+from products.data_warehouse.backend.models import DataWarehouseCredential, DataWarehouseJoin, DataWarehouseTable
 from products.data_warehouse.backend.test.utils import create_data_warehouse_table_from_csv
 
 TEST_BUCKET = "test_storage_bucket-posthog.hogql.datawarehouse.trendquery"
@@ -790,3 +790,86 @@ class TestTrendsDataWarehouseQuery(ClickhouseTestMixin, BaseTest):
 
         assert len(response.results) == 1
         assert response.results[0]["count"] == expected_count
+
+    def test_trends_breakdown_by_warehouse_person_property_with_empty_columns(self):
+        """When a warehouse table has empty columns (mid-sync), a trends query
+        with a data_warehouse_person_property breakdown should raise a clear error
+        rather than producing an opaque timeout or crash."""
+        credential = DataWarehouseCredential.objects.create(team=self.team, access_key="key", access_secret="secret")
+        DataWarehouseTable.objects.create(
+            team=self.team,
+            name="farm_size_table",
+            columns={},
+            credential=credential,
+            url_pattern="https://bucket.s3/data/*",
+        )
+        DataWarehouseJoin.objects.create(
+            team=self.team,
+            source_table_name="persons",
+            source_table_key="properties.email",
+            joining_table_name="farm_size_table",
+            joining_table_key="user_email",
+            field_name="farm_size",
+        )
+
+        _create_person(distinct_ids=["1"], team=self.team, properties={"email": "test@example.com"})
+        _create_event(distinct_id="1", event="$pageview", timestamp="2023-01-01 00:00:00", team=self.team)
+        flush_persons_and_events()
+
+        trends_query = TrendsQuery(
+            kind="TrendsQuery",
+            dateRange=DateRange(date_from="2023-01-01", date_to="2023-01-07"),
+            series=[EventsNode(event="$pageview", math="dau")],
+            breakdownFilter=BreakdownFilter(
+                breakdown="farm_size.size_range",
+                breakdown_type=BreakdownType.DATA_WAREHOUSE_PERSON_PROPERTY,
+            ),
+        )
+
+        from posthog.hogql.errors import ExposedHogQLError
+
+        with freeze_time("2023-01-07"):
+            with self.assertRaises(ExposedHogQLError):
+                TrendsQueryRunner(team=self.team, query=trends_query).calculate()
+
+    def test_trends_breakdown_by_warehouse_person_property_with_missing_column(self):
+        """When a warehouse table exists but is missing the breakdown column
+        (e.g., column dropped during sync), the query should raise a clear error."""
+        credential = DataWarehouseCredential.objects.create(team=self.team, access_key="key", access_secret="secret")
+        DataWarehouseTable.objects.create(
+            team=self.team,
+            name="farm_size_table",
+            columns={
+                "user_email": {"clickhouse": "String", "hogql": "StringDatabaseField"},
+            },
+            credential=credential,
+            url_pattern="https://bucket.s3/data/*",
+        )
+        DataWarehouseJoin.objects.create(
+            team=self.team,
+            source_table_name="persons",
+            source_table_key="properties.email",
+            joining_table_name="farm_size_table",
+            joining_table_key="user_email",
+            field_name="farm_size",
+        )
+
+        _create_person(distinct_ids=["1"], team=self.team, properties={"email": "test@example.com"})
+        _create_event(distinct_id="1", event="$pageview", timestamp="2023-01-01 00:00:00", team=self.team)
+        flush_persons_and_events()
+
+        trends_query = TrendsQuery(
+            kind="TrendsQuery",
+            dateRange=DateRange(date_from="2023-01-01", date_to="2023-01-07"),
+            series=[EventsNode(event="$pageview", math="dau")],
+            breakdownFilter=BreakdownFilter(
+                breakdown="farm_size.size_range",
+                breakdown_type=BreakdownType.DATA_WAREHOUSE_PERSON_PROPERTY,
+            ),
+        )
+
+        from posthog.hogql.errors import ExposedHogQLError
+
+        with freeze_time("2023-01-07"):
+            with self.assertRaises(ExposedHogQLError):
+                TrendsQueryRunner(team=self.team, query=trends_query).calculate()
