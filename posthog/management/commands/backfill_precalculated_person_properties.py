@@ -3,7 +3,7 @@ import asyncio
 from typing import Any
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 import structlog
 from temporalio.common import WorkflowIDReusePolicy
@@ -171,8 +171,7 @@ class Command(BaseCommand):
                 try:
                     cohorts = [Cohort.objects.get(id=cohort_id, team_id=current_team_id)]
                 except Cohort.DoesNotExist:
-                    self.stdout.write(self.style.ERROR(f"Cohort {cohort_id} not found for team {current_team_id}"))
-                    continue
+                    raise CommandError(f"Cohort {cohort_id} not found for team {current_team_id}")
             else:
                 # All realtime cohorts for team
                 cohorts = list(
@@ -186,9 +185,14 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING(f"No realtime cohorts found for team {current_team_id}"))
                     continue
 
-            self.stdout.write(
-                self.style.SUCCESS(f"Found {len(cohorts)} realtime cohort(s) to process for team {current_team_id}")
-            )
+            if cohort_id:
+                self.stdout.write(
+                    self.style.SUCCESS(f"Found {len(cohorts)} cohort(s) to evaluate for team {current_team_id}")
+                )
+            else:
+                self.stdout.write(
+                    self.style.SUCCESS(f"Found {len(cohorts)} realtime cohort(s) to process for team {current_team_id}")
+                )
 
             # Collect and deduplicate filters across all cohorts for this team
             condition_map: dict[str, tuple[list[Any], str | None, set[int]]] = {}
