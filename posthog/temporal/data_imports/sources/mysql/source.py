@@ -1,5 +1,6 @@
 from typing import Optional, cast
 
+import structlog
 from sshtunnel import BaseSSHTunnelForwarderError
 
 from posthog.schema import (
@@ -128,16 +129,20 @@ class MySQLSource(SimpleSource[MySQLSourceConfig], SSHTunnelMixin, ValidateDatab
                 schema=config.schema,
                 names=names,
             )
-            detected_pks = get_mysql_primary_keys_for_schemas(
-                host=host,
-                port=port,
-                user=config.user,
-                password=config.password,
-                database=config.database,
-                schema=config.schema,
-                table_names=list(db_schemas.keys()),
-                using_ssl=config.using_ssl,
-            )
+            try:
+                detected_pks = get_mysql_primary_keys_for_schemas(
+                    host=host,
+                    port=port,
+                    user=config.user,
+                    password=config.password,
+                    database=config.database,
+                    schema=config.schema,
+                    table_names=list(db_schemas.keys()),
+                    using_ssl=config.using_ssl,
+                )
+            except Exception as e:
+                structlog.get_logger().warning("Failed to detect primary keys for MySQL schemas", exc_info=e)
+                detected_pks = {}
 
         for table_name, columns in db_schemas.items():
             incremental_field_tuples = filter_mysql_incremental_fields(columns)

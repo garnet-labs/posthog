@@ -1,5 +1,6 @@
 from typing import Optional, cast
 
+import structlog
 from snowflake.connector.errors import DatabaseError, ForbiddenError, ProgrammingError
 
 from posthog.schema import (
@@ -169,10 +170,14 @@ class SnowflakeSource(SimpleSource[SnowflakeSourceConfig]):
         schemas = []
 
         db_schemas = get_snowflake_schemas(config, names=names)
-        detected_pks = get_snowflake_primary_keys_for_schemas(
-            config=config,
-            table_names=list(db_schemas.keys()),
-        )
+        try:
+            detected_pks = get_snowflake_primary_keys_for_schemas(
+                config=config,
+                table_names=list(db_schemas.keys()),
+            )
+        except Exception as e:
+            structlog.get_logger().warning("Failed to detect primary keys for Snowflake schemas", exc_info=e)
+            detected_pks = {}
 
         for table_name, columns in db_schemas.items():
             incremental_field_tuples = filter_snowflake_incremental_fields(columns)

@@ -1,5 +1,6 @@
 from typing import Optional, cast
 
+import structlog
 from psycopg import OperationalError
 from sshtunnel import BaseSSHTunnelForwarderError
 
@@ -173,15 +174,19 @@ class PostgresSource(SimpleSource[PostgresSourceConfig], SSHTunnelMixin, Validat
                 schema=config.schema,
                 names=names,
             )
-            detected_pks = get_postgres_primary_keys_for_schemas(
-                host=host,
-                port=port,
-                user=config.user,
-                password=config.password,
-                database=config.database,
-                schema=config.schema,
-                table_names=list(db_schemas.keys()),
-            )
+            try:
+                detected_pks = get_postgres_primary_keys_for_schemas(
+                    host=host,
+                    port=port,
+                    user=config.user,
+                    password=config.password,
+                    database=config.database,
+                    schema=config.schema,
+                    table_names=list(db_schemas.keys()),
+                )
+            except Exception as e:
+                structlog.get_logger().warning("Failed to detect primary keys for Postgres schemas", exc_info=e)
+                detected_pks = {}
 
             if with_counts:
                 row_counts = get_postgres_row_count(

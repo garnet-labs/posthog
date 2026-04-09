@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Optional, cast
 
+import structlog
+
 from posthog.schema import (
     ExternalDataSourceType as SchemaExternalDataSourceType,
     SourceConfig,
@@ -54,7 +56,11 @@ class BigQuerySource(SimpleSource[BigQuerySourceConfig]):
             names=names,
         )
 
-        detected_pks = get_bigquery_primary_keys_for_schemas(config, bq_schemas)
+        try:
+            detected_pks = get_bigquery_primary_keys_for_schemas(config, bq_schemas)
+        except Exception as e:
+            structlog.get_logger().warning("Failed to detect primary keys for BigQuery schemas", exc_info=e)
+            detected_pks = {}
 
         filtered_results = [
             (table_name, filter_bigquery_incremental_fields(columns)) for table_name, columns in bq_schemas.items()
