@@ -257,8 +257,6 @@ class ExperimentService:
             return event_names, action_ids
 
         for metric in metrics:
-            if not isinstance(metric, dict):
-                continue
             nodes: list[dict] = []
             metric_type = metric.get("metric_type")
             if metric_type == "mean":
@@ -278,8 +276,6 @@ class ExperimentService:
                     nodes.append(ce)
 
             for node in nodes:
-                if not isinstance(node, dict):
-                    continue
                 kind = node.get("kind")
                 if kind == "EventsNode":
                     event = node.get("event")

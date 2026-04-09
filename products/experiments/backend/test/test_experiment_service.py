@@ -2893,7 +2893,7 @@ class TestExperimentService(APIBaseTest):
                 },
             ],
         )
-        assert len(experiment.metrics) == 1
+        assert experiment.metrics is not None and len(experiment.metrics) == 1
 
     def test_funnel_metric_with_nonexistent_action_in_series_raises(self):
         action = Action.objects.create(team=self.team, name="real action")
@@ -2999,7 +2999,7 @@ class TestExperimentService(APIBaseTest):
                 },
             ],
         )
-        assert len(experiment.metrics) == 1
+        assert experiment.metrics is not None and len(experiment.metrics) == 1
 
     def test_unknown_event_in_secondary_metrics_raises(self):
         service = self._service()
@@ -3057,7 +3057,7 @@ class TestExperimentService(APIBaseTest):
                 },
             ],
         )
-        assert len(experiment.metrics) == 1
+        assert experiment.metrics is not None and len(experiment.metrics) == 1
 
     def test_no_metrics_passes_validation(self):
         service = self._service()
@@ -3081,7 +3081,7 @@ class TestExperimentService(APIBaseTest):
                 },
             ],
         )
-        assert len(experiment.metrics) == 1
+        assert experiment.metrics is not None and len(experiment.metrics) == 1
 
     # ------------------------------------------------------------------
     # allow_unknown_events opt-in
@@ -3101,7 +3101,7 @@ class TestExperimentService(APIBaseTest):
                 },
             ],
         )
-        assert len(experiment.metrics) == 1
+        assert experiment.metrics is not None and len(experiment.metrics) == 1
 
     def test_allow_unknown_events_still_validates_actions(self):
         service = self._service()
