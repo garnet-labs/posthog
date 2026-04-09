@@ -73,12 +73,22 @@ pub fn on_permitted_domain(recording_domains: &[String], headers: &HeaderMap) ->
 
 fn parse_domain(url: Option<&str>) -> Option<String> {
     url.and_then(|u| {
-        if let Ok(parsed) = url::Url::parse(u) {
-            parsed.host_str().map(|h| h.to_string())
+        // url::Url::parse rejects `*` in hostnames (WHATWG spec), but Django's
+        // urlparse accepts it. Replace `*` with a placeholder before parsing,
+        // then restore it — this lets wildcard domains like `https://*.example.com`
+        // parse correctly.
+        let sanitized = u.replace('*', "_wildcard_");
+        if let Ok(parsed) = url::Url::parse(&sanitized) {
+            parsed.host_str().map(|h| h.replace("_wildcard_", "*"))
         } else {
             None
         }
     })
+}
+
+/// Strip `www.` prefix for domain comparison, matching Django's `_strip_www`.
+fn strip_www(domain: &str) -> &str {
+    domain.strip_prefix("www.").unwrap_or(domain)
 }
 
 fn hostname_in_allowed_url_list(allowed: &[String], hostname: Option<&str>) -> bool {
@@ -86,6 +96,7 @@ fn hostname_in_allowed_url_list(allowed: &[String], hostname: Option<&str>) -> b
         Some(h) => h,
         None => return false,
     };
+    let hostname_stripped = strip_www(hostname);
 
     let permitted_domains: Vec<String> = allowed
         .iter()
@@ -98,10 +109,12 @@ fn hostname_in_allowed_url_list(allowed: &[String], hostname: Option<&str>) -> b
                 "^{}$",
                 regex::escape(&permitted_domain).replace("\\*", ".*")
             );
-            if regex::Regex::new(&pattern).is_ok_and(|re| re.is_match(hostname)) {
+            if regex::Regex::new(&pattern)
+                .is_ok_and(|re| re.is_match(hostname) || re.is_match(hostname_stripped))
+            {
                 return true;
             }
-        } else if permitted_domain == hostname {
+        } else if strip_www(&permitted_domain) == hostname_stripped {
             return true;
         }
     }
@@ -268,5 +281,20 @@ mod tests {
         let domains = vec!["https://example.com".to_string()];
         let headers = HeaderMap::new();
         assert!(!on_permitted_domain(&domains, &headers));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_www_equivalence() {
+        // Allowed domain without www, request with www
+        let domains = vec!["https://example.com".to_string()];
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://www.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
+        // Allowed domain with www, request without www
+        let domains = vec!["https://www.example.com".to_string()];
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
     }
 }

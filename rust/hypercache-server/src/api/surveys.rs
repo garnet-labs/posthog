@@ -30,7 +30,7 @@ fn empty_surveys_response() -> Response {
 /// that only requires a project API token (no secret key or personal API key).
 ///
 /// Mirrors Django's `POST /api/surveys` behavior:
-/// - Token passed as query param or form body
+/// - Token passed as query param (Django also accepts form body, not yet supported here)
 /// - No authentication beyond token validation
 /// - Returns cached `{"surveys": [...], "survey_config": {...}}`
 #[debug_handler]
