@@ -1,47 +1,11 @@
 {
   "_meta": {
-    "generated_at": "2026-04-09T14:30:40.990279+00:00",
-    "commit": "c6dd9dc39298",
-    "test_file_count": 1107,
-    "source_file_count": 2148,
-    "build_time_seconds": 1.4
+    "generated_at": "2026-04-09T15:05:42.374965+00:00",
+    "commit": "e335f514d0ef",
+    "test_file_count": 647,
+    "source_file_count": 1041,
+    "build_time_seconds": 1.7
   },
-  "common/hogli/test_runner.py": [
-    "common/hogli/test_runner.py"
-  ],
-  "common/hogli/tests/test_build.py": [
-    "common/hogli/tests/test_build.py"
-  ],
-  "common/hogli/tests/test_checks.py": [
-    "common/hogli/tests/test_checks.py"
-  ],
-  "common/hogli/tests/test_cli.py": [
-    "common/hogli/tests/test_cli.py"
-  ],
-  "common/hogli/tests/test_command_types.py": [
-    "common/hogli/tests/test_command_types.py"
-  ],
-  "common/hogli/tests/test_devbox.py": [
-    "common/hogli/tests/test_devbox.py"
-  ],
-  "common/hogli/tests/test_devenv.py": [
-    "common/hogli/tests/test_devenv.py"
-  ],
-  "common/hogli/tests/test_hints.py": [
-    "common/hogli/tests/test_hints.py"
-  ],
-  "common/hogli/tests/test_manifest.py": [
-    "common/hogli/tests/test_manifest.py"
-  ],
-  "common/hogli/tests/test_migrations.py": [
-    "common/hogli/tests/test_migrations.py"
-  ],
-  "common/hogli/tests/test_telemetry.py": [
-    "common/hogli/tests/test_telemetry.py"
-  ],
-  "common/hogli/tests/test_test_runner.py": [
-    "common/hogli/tests/test_test_runner.py"
-  ],
   "common/hogvm/python/execute.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -435,45 +399,6 @@
     "ee/api/agentic_provisioning/test/test_spt.py",
     "ee/api/agentic_provisioning/test/test_update_service.py"
   ],
-  "ee/api/agentic_provisioning/test/test_account_requests.py": [
-    "ee/api/agentic_provisioning/test/test_account_requests.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_authorize.py": [
-    "ee/api/agentic_provisioning/test/test_authorize.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_deep_links.py": [
-    "ee/api/agentic_provisioning/test/test_deep_links.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_e2e_flow.py": [
-    "ee/api/agentic_provisioning/test/test_e2e_flow.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_health.py": [
-    "ee/api/agentic_provisioning/test/test_health.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_oauth_token.py": [
-    "ee/api/agentic_provisioning/test/test_oauth_token.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_region_proxy.py": [
-    "ee/api/agentic_provisioning/test/test_region_proxy.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_resources.py": [
-    "ee/api/agentic_provisioning/test/test_resources.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_rotate_credentials.py": [
-    "ee/api/agentic_provisioning/test/test_rotate_credentials.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_services.py": [
-    "ee/api/agentic_provisioning/test/test_services.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_signature.py": [
-    "ee/api/agentic_provisioning/test/test_signature.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_spt.py": [
-    "ee/api/agentic_provisioning/test/test_spt.py"
-  ],
-  "ee/api/agentic_provisioning/test/test_update_service.py": [
-    "ee/api/agentic_provisioning/test/test_update_service.py"
-  ],
   "ee/api/agentic_provisioning/views.py": [
     "ee/api/agentic_provisioning/test/test_account_requests.py",
     "ee/api/agentic_provisioning/test/test_authorize.py",
@@ -508,21 +433,6 @@
   ],
   "ee/api/scim/group.py": [
     "ee/api/scim/test/test_groups_api.py",
-    "ee/api/scim/test/test_users_api.py"
-  ],
-  "ee/api/scim/test/test_groups_api.py": [
-    "ee/api/scim/test/test_groups_api.py"
-  ],
-  "ee/api/scim/test/test_scim_api.py": [
-    "ee/api/scim/test/test_scim_api.py"
-  ],
-  "ee/api/scim/test/test_scim_request_log.py": [
-    "ee/api/scim/test/test_scim_request_log.py"
-  ],
-  "ee/api/scim/test/test_scim_utils.py": [
-    "ee/api/scim/test/test_scim_utils.py"
-  ],
-  "ee/api/scim/test/test_users_api.py": [
     "ee/api/scim/test/test_users_api.py"
   ],
   "ee/api/scim/user.py": [
@@ -579,78 +489,6 @@
     "posthog/test/activity_logging/test_tag_activity_logging.py",
     "posthog/test/activity_logging/test_user_activity_logging.py"
   ],
-  "ee/api/test/test_action.py": [
-    "ee/api/test/test_action.py"
-  ],
-  "ee/api/test/test_admin_oauth2_middleware.py": [
-    "ee/api/test/test_admin_oauth2_middleware.py"
-  ],
-  "ee/api/test/test_authentication.py": [
-    "ee/api/test/test_authentication.py"
-  ],
-  "ee/api/test/test_billing.py": [
-    "ee/api/test/test_billing.py"
-  ],
-  "ee/api/test/test_conversation.py": [
-    "ee/api/test/test_conversation.py"
-  ],
-  "ee/api/test/test_conversation_queue.py": [
-    "ee/api/test/test_conversation_queue.py"
-  ],
-  "ee/api/test/test_core_memory.py": [
-    "ee/api/test/test_core_memory.py"
-  ],
-  "ee/api/test/test_dashboard_collaborators.py": [
-    "ee/api/test/test_dashboard_collaborators.py"
-  ],
-  "ee/api/test/test_event_definition.py": [
-    "ee/api/test/test_event_definition.py"
-  ],
-  "ee/api/test/test_hooks.py": [
-    "ee/api/test/test_hooks.py"
-  ],
-  "ee/api/test/test_insight.py": [
-    "ee/api/test/test_insight.py"
-  ],
-  "ee/api/test/test_instance_settings.py": [
-    "ee/api/test/test_instance_settings.py"
-  ],
-  "ee/api/test/test_integration.py": [
-    "ee/api/test/test_integration.py"
-  ],
-  "ee/api/test/test_license.py": [
-    "ee/api/test/test_license.py"
-  ],
-  "ee/api/test/test_max_tools.py": [
-    "ee/api/test/test_max_tools.py"
-  ],
-  "ee/api/test/test_organization.py": [
-    "ee/api/test/test_organization.py"
-  ],
-  "ee/api/test/test_project.py": [
-    "ee/api/test/test_project.py"
-  ],
-  "ee/api/test/test_property_definition.py": [
-    "ee/api/test/test_property_definition.py"
-  ],
-  "ee/api/test/test_role.py": [
-    "ee/api/test/test_role.py"
-  ],
-  "ee/api/test/test_role_membership.py": [
-    "ee/api/test/test_role_membership.py"
-  ],
-  "ee/api/test/test_session_summaries.py": [
-    "ee/api/test/test_session_summaries.py"
-  ],
-  "ee/api/test/test_subscription.py": [
-    "ee/api/test/test_subscription.py"
-  ],
-  "ee/api/test/test_tagged_item.py": [
-    "ee/api/test/test_tagged_item.py"
-  ],
-  "ee/api/test/test_team.py": [
-    "ee/api/test/test_team.py"
-  ],
   "ee/api/vercel/vercel_error_mixin.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -672,33 +510,6 @@
   "ee/api/vercel/vercel_resource.py": [
     "posthog/test/test_decorators.py"
   ],
-  "ee/clickhouse/materialized_columns/test/test_analyze.py": [
-    "ee/clickhouse/materialized_columns/test/test_analyze.py"
-  ],
-  "ee/clickhouse/materialized_columns/test/test_columns.py": [
-    "ee/clickhouse/materialized_columns/test/test_columns.py"
-  ],
-  "ee/clickhouse/materialized_columns/test/test_query.py": [
-    "ee/clickhouse/materialized_columns/test/test_query.py"
-  ],
-  "ee/clickhouse/models/test/test_action.py": [
-    "ee/clickhouse/models/test/test_action.py"
-  ],
-  "ee/clickhouse/models/test/test_cohort.py": [
-    "ee/clickhouse/models/test/test_cohort.py"
-  ],
-  "ee/clickhouse/models/test/test_dead_letter_queue.py": [
-    "ee/clickhouse/models/test/test_dead_letter_queue.py"
-  ],
-  "ee/clickhouse/models/test/test_filters.py": [
-    "ee/clickhouse/models/test/test_filters.py"
-  ],
-  "ee/clickhouse/models/test/test_property.py": [
-    "ee/clickhouse/models/test/test_property.py"
-  ],
-  "ee/clickhouse/queries/experiments/test_utils.py": [
-    "ee/clickhouse/queries/experiments/test_utils.py"
-  ],
   "ee/clickhouse/queries/experiments/utils.py": [
     "ee/clickhouse/queries/experiments/test_utils.py",
     "posthog/test/test_decorators.py"
@@ -706,57 +517,9 @@
   "ee/clickhouse/queries/funnels/test/breakdown_cases.py": [
     "ee/clickhouse/queries/funnels/test/test_funnel.py"
   ],
-  "ee/clickhouse/queries/funnels/test/test_funnel.py": [
-    "ee/clickhouse/queries/funnels/test/test_funnel.py"
-  ],
-  "ee/clickhouse/queries/funnels/test/test_funnel_correlation.py": [
-    "ee/clickhouse/queries/funnels/test/test_funnel_correlation.py"
-  ],
-  "ee/clickhouse/queries/funnels/test/test_funnel_correlations_persons.py": [
-    "ee/clickhouse/queries/funnels/test/test_funnel_correlations_persons.py"
-  ],
   "ee/clickhouse/queries/related_actors_query.py": [
     "ee/clickhouse/queries/test/test_related_actors_query.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/clickhouse/queries/test/test_breakdown_props.py": [
-    "ee/clickhouse/queries/test/test_breakdown_props.py"
-  ],
-  "ee/clickhouse/queries/test/test_cohort_query.py": [
-    "ee/clickhouse/queries/test/test_cohort_query.py"
-  ],
-  "ee/clickhouse/queries/test/test_column_optimizer.py": [
-    "ee/clickhouse/queries/test/test_column_optimizer.py"
-  ],
-  "ee/clickhouse/queries/test/test_event_query.py": [
-    "ee/clickhouse/queries/test/test_event_query.py"
-  ],
-  "ee/clickhouse/queries/test/test_groups_join_query.py": [
-    "ee/clickhouse/queries/test/test_groups_join_query.py"
-  ],
-  "ee/clickhouse/queries/test/test_lifecycle.py": [
-    "ee/clickhouse/queries/test/test_lifecycle.py"
-  ],
-  "ee/clickhouse/queries/test/test_person_distinct_id_query.py": [
-    "ee/clickhouse/queries/test/test_person_distinct_id_query.py"
-  ],
-  "ee/clickhouse/queries/test/test_person_query.py": [
-    "ee/clickhouse/queries/test/test_person_query.py"
-  ],
-  "ee/clickhouse/queries/test/test_property_optimizer.py": [
-    "ee/clickhouse/queries/test/test_property_optimizer.py"
-  ],
-  "ee/clickhouse/queries/test/test_related_actors_query.py": [
-    "ee/clickhouse/queries/test/test_related_actors_query.py"
-  ],
-  "ee/clickhouse/queries/test/test_util.py": [
-    "ee/clickhouse/queries/test/test_util.py"
-  ],
-  "ee/clickhouse/test/test_error.py": [
-    "ee/clickhouse/test/test_error.py"
-  ],
-  "ee/clickhouse/test/test_system_status.py": [
-    "ee/clickhouse/test/test_system_status.py"
   ],
   "ee/clickhouse/views/exceptions.py": [
     "posthog/test/test_decorators.py"
@@ -821,49 +584,13 @@
   "ee/clickhouse/views/person.py": [
     "posthog/test/test_decorators.py"
   ],
-  "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_correlation.py": [
-    "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_correlation.py"
-  ],
-  "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_person.py": [
-    "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_person.py"
-  ],
-  "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_trends_person.py": [
-    "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_trends_person.py"
-  ],
-  "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_unordered.py": [
-    "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_unordered.py"
-  ],
   "ee/clickhouse/views/test/funnel/util.py": [
     "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_correlation.py",
     "ee/clickhouse/views/test/funnel/test_clickhouse_funnel_unordered.py"
   ],
-  "ee/clickhouse/views/test/test_clickhouse_experiments.py": [
-    "ee/clickhouse/views/test/test_clickhouse_experiments.py"
-  ],
-  "ee/clickhouse/views/test/test_clickhouse_groups.py": [
-    "ee/clickhouse/views/test/test_clickhouse_groups.py"
-  ],
-  "ee/clickhouse/views/test/test_clickhouse_trends.py": [
-    "ee/clickhouse/views/test/test_clickhouse_trends.py"
-  ],
-  "ee/clickhouse/views/test/test_experiment_holdouts.py": [
-    "ee/clickhouse/views/test/test_experiment_holdouts.py"
-  ],
-  "ee/clickhouse/views/test/test_experiment_saved_metrics.py": [
-    "ee/clickhouse/views/test/test_experiment_saved_metrics.py"
-  ],
-  "ee/clickhouse/views/test/test_experiments_action_names.py": [
-    "ee/clickhouse/views/test/test_experiments_action_names.py"
-  ],
   "ee/hogai/api/serializers.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py"
-  ],
-  "ee/hogai/api/test/test_serializers.py": [
-    "ee/hogai/api/test/test_serializers.py"
-  ],
-  "ee/hogai/artifacts/test/test_manager.py": [
-    "ee/hogai/artifacts/test/test_manager.py"
   ],
   "ee/hogai/artifacts/utils.py": [
     "ee/api/test/test_conversation.py",
@@ -1073,12 +800,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/funnels/test/test_nodes.py": [
-    "ee/hogai/chat_agent/funnels/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/funnels/test/test_toolkit.py": [
-    "ee/hogai/chat_agent/funnels/test/test_toolkit.py"
-  ],
   "ee/hogai/chat_agent/funnels/toolkit.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -1166,9 +887,6 @@
     "ee/hogai/chat_agent/insights/test/test_nodes.py"
   ],
   "ee/hogai/chat_agent/insights/prompts.py": [
-    "ee/hogai/chat_agent/insights/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/insights/test/test_nodes.py": [
     "ee/hogai/chat_agent/insights/test/test_nodes.py"
   ],
   "ee/hogai/chat_agent/insights_graph/graph.py": [
@@ -1336,12 +1054,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/memory/test/test_nodes.py": [
-    "ee/hogai/chat_agent/memory/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/memory/test/test_parsers.py": [
-    "ee/hogai/chat_agent/memory/test/test_parsers.py"
-  ],
   "ee/hogai/chat_agent/mode_manager.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -1432,9 +1144,6 @@
     "ee/hogai/eval/ci/max_tools/eval_revenue_analytics_filter_generation.py",
     "ee/hogai/eval/ci/max_tools/eval_session_replay_filter_generation.py",
     "products/web_analytics/backend/test/test_max_tools.py"
-  ],
-  "ee/hogai/chat_agent/parallel_task_execution/test/test_nodes.py": [
-    "ee/hogai/chat_agent/parallel_task_execution/test/test_nodes.py"
   ],
   "ee/hogai/chat_agent/prompt_builder.py": [
     "ee/api/test/test_conversation.py",
@@ -1634,9 +1343,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/query_executor/test/test_nodes.py": [
-    "ee/hogai/chat_agent/query_executor/test/test_nodes.py"
-  ],
   "ee/hogai/chat_agent/query_planner/nodes.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -1720,12 +1426,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/chat_agent/query_planner/test/test_nodes.py": [
-    "ee/hogai/chat_agent/query_planner/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/query_planner/test/test_toolkit.py": [
-    "ee/hogai/chat_agent/query_planner/test/test_toolkit.py"
   ],
   "ee/hogai/chat_agent/query_planner/toolkit.py": [
     "ee/api/test/test_conversation.py",
@@ -1812,9 +1512,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/rag/test/test_nodes.py": [
-    "ee/hogai/chat_agent/rag/test/test_nodes.py"
-  ],
   "ee/hogai/chat_agent/retention/nodes.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -1898,12 +1595,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/chat_agent/retention/test/test_nodes.py": [
-    "ee/hogai/chat_agent/retention/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/retention/test/test_toolkit.py": [
-    "ee/hogai/chat_agent/retention/test/test_toolkit.py"
   ],
   "ee/hogai/chat_agent/retention/toolkit.py": [
     "ee/api/test/test_conversation.py",
@@ -2132,9 +1823,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/schema_generator/test/test_nodes.py": [
-    "ee/hogai/chat_agent/schema_generator/test/test_nodes.py"
-  ],
   "ee/hogai/chat_agent/schema_generator/utils.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -2354,9 +2042,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/slash_commands/commands/feedback/test/test_feedback.py": [
-    "ee/hogai/chat_agent/slash_commands/commands/feedback/test/test_feedback.py"
-  ],
   "ee/hogai/chat_agent/slash_commands/commands/remember/__init__.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -2438,9 +2123,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/chat_agent/slash_commands/commands/remember/test/test_remember.py": [
-    "ee/hogai/chat_agent/slash_commands/commands/remember/test/test_remember.py"
   ],
   "ee/hogai/chat_agent/slash_commands/commands/ticket/__init__.py": [
     "ee/api/test/test_conversation.py",
@@ -2566,9 +2248,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/slash_commands/commands/ticket/test/test_ticket.py": [
-    "ee/hogai/chat_agent/slash_commands/commands/ticket/test/test_ticket.py"
-  ],
   "ee/hogai/chat_agent/slash_commands/commands/usage/__init__.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -2690,9 +2369,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/slash_commands/commands/usage/test/test_usage.py": [
-    "ee/hogai/chat_agent/slash_commands/commands/usage/test/test_usage.py"
-  ],
   "ee/hogai/chat_agent/slash_commands/nodes.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -2732,9 +2408,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/chat_agent/slash_commands/test/test_slash_command_handler.py": [
-    "ee/hogai/chat_agent/slash_commands/test/test_slash_command_handler.py"
   ],
   "ee/hogai/chat_agent/sql/mixins.py": [
     "ee/api/test/test_conversation.py",
@@ -2868,12 +2541,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/sql/test/test_nodes.py": [
-    "ee/hogai/chat_agent/sql/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/sql/test/test_sql_mixins.py": [
-    "ee/hogai/chat_agent/sql/test/test_sql_mixins.py"
-  ],
   "ee/hogai/chat_agent/sql/toolkit.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -2988,27 +2655,6 @@
     "ee/hogai/eval/ci/max_tools/eval_revenue_analytics_filter_generation.py",
     "ee/hogai/eval/ci/max_tools/eval_session_replay_filter_generation.py",
     "products/web_analytics/backend/test/test_max_tools.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_agent.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_agent.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_entities.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_entities.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_events.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_events.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_groups.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_groups.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_nodes.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_toolkit.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_toolkit.py"
-  ],
-  "ee/hogai/chat_agent/taxonomy/test/test_tools.py": [
-    "ee/hogai/chat_agent/taxonomy/test/test_tools.py"
   ],
   "ee/hogai/chat_agent/taxonomy/toolkit.py": [
     "ee/hogai/chat_agent/taxonomy/test/test_agent.py",
@@ -3252,12 +2898,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/chat_agent/trends/test/test_nodes.py": [
-    "ee/hogai/chat_agent/trends/test/test_nodes.py"
-  ],
-  "ee/hogai/chat_agent/trends/test/test_toolkit.py": [
-    "ee/hogai/chat_agent/trends/test/test_toolkit.py"
-  ],
   "ee/hogai/chat_agent/trends/toolkit.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -3460,9 +3100,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/context/dashboard/test/test_context.py": [
-    "ee/hogai/context/dashboard/test/test_context.py"
-  ],
   "ee/hogai/context/entity_search/__init__.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -3547,9 +3184,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/context/entity_search/test/test_context.py": [
-    "ee/hogai/context/entity_search/test/test_context.py"
   ],
   "ee/hogai/context/error_tracking/__init__.py": [
     "ee/api/test/test_conversation.py",
@@ -3672,9 +3306,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/context/error_tracking/test/test_context.py": [
-    "ee/hogai/context/error_tracking/test/test_context.py"
   ],
   "ee/hogai/context/experiment/__init__.py": [
     "ee/api/test/test_conversation.py",
@@ -3920,45 +3551,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/context/insight/format/test/test_boxplot.py": [
-    "ee/hogai/context/insight/format/test/test_boxplot.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_format_query_results_for_llm.py": [
-    "ee/hogai/context/insight/format/test/test_format_query_results_for_llm.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_funnel.py": [
-    "ee/hogai/context/insight/format/test/test_funnel.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_lifecycle.py": [
-    "ee/hogai/context/insight/format/test/test_lifecycle.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_paths.py": [
-    "ee/hogai/context/insight/format/test/test_paths.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_retention.py": [
-    "ee/hogai/context/insight/format/test/test_retention.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_revenue_analytics.py": [
-    "ee/hogai/context/insight/format/test/test_revenue_analytics.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_sql.py": [
-    "ee/hogai/context/insight/format/test/test_sql.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_stickiness.py": [
-    "ee/hogai/context/insight/format/test/test_stickiness.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_trends.py": [
-    "ee/hogai/context/insight/format/test/test_trends.py"
-  ],
-  "ee/hogai/context/insight/format/test/test_utils.py": [
-    "ee/hogai/context/insight/format/test/test_utils.py"
-  ],
-  "ee/hogai/context/insight/test/test_context.py": [
-    "ee/hogai/context/insight/test/test_context.py"
-  ],
-  "ee/hogai/context/insight/test/test_query_executor.py": [
-    "ee/hogai/context/insight/test/test_query_executor.py"
-  ],
   "ee/hogai/context/survey/__init__.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -4080,12 +3672,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/context/survey/test/test_context.py": [
-    "ee/hogai/context/survey/test/test_context.py"
-  ],
-  "ee/hogai/context/test/test_context.py": [
-    "ee/hogai/context/test/test_context.py"
   ],
   "ee/hogai/core/agent_modes/__init__.py": [
     "ee/api/test/test_conversation.py",
@@ -4619,18 +4205,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/core/agent_modes/presets/test/test_flags_preset.py": [
-    "ee/hogai/core/agent_modes/presets/test/test_flags_preset.py"
-  ],
-  "ee/hogai/core/agent_modes/presets/test/test_llm_analytics_preset.py": [
-    "ee/hogai/core/agent_modes/presets/test/test_llm_analytics_preset.py"
-  ],
-  "ee/hogai/core/agent_modes/presets/test/test_product_analytics_preset.py": [
-    "ee/hogai/core/agent_modes/presets/test/test_product_analytics_preset.py"
-  ],
-  "ee/hogai/core/agent_modes/presets/test/test_sql_preset.py": [
-    "ee/hogai/core/agent_modes/presets/test/test_sql_preset.py"
-  ],
   "ee/hogai/core/agent_modes/prompt_builder.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -4720,15 +4294,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/core/agent_modes/test/test_compaction_manager.py": [
-    "ee/hogai/core/agent_modes/test/test_compaction_manager.py"
-  ],
-  "ee/hogai/core/agent_modes/test/test_executables.py": [
-    "ee/hogai/core/agent_modes/test/test_executables.py"
-  ],
-  "ee/hogai/core/agent_modes/test/test_toolkit.py": [
-    "ee/hogai/core/agent_modes/test/test_toolkit.py"
   ],
   "ee/hogai/core/agent_modes/toolkit.py": [
     "ee/api/test/test_conversation.py",
@@ -5196,9 +4761,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/core/plan_mode/test/test_executables.py": [
-    "ee/hogai/core/plan_mode/test/test_executables.py"
-  ],
   "ee/hogai/core/runner.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -5331,30 +4893,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/core/test/test_agent_executor.py": [
-    "ee/hogai/core/test/test_agent_executor.py"
-  ],
-  "ee/hogai/core/test/test_artifacts.py": [
-    "ee/hogai/core/test/test_artifacts.py"
-  ],
-  "ee/hogai/core/test/test_base_callback_handlers.py": [
-    "ee/hogai/core/test/test_base_callback_handlers.py"
-  ],
-  "ee/hogai/core/test/test_dispatcher_integration.py": [
-    "ee/hogai/core/test/test_dispatcher_integration.py"
-  ],
-  "ee/hogai/core/test/test_mixins.py": [
-    "ee/hogai/core/test/test_mixins.py"
-  ],
-  "ee/hogai/core/test/test_node_path.py": [
-    "ee/hogai/core/test/test_node_path.py"
-  ],
-  "ee/hogai/core/test/test_nodes.py": [
-    "ee/hogai/core/test/test_nodes.py"
-  ],
-  "ee/hogai/core/test/test_runner.py": [
-    "ee/hogai/core/test/test_runner.py"
-  ],
   "ee/hogai/core/title_generator/nodes.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -5435,9 +4973,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/core/title_generator/test/test_title_generator.py": [
-    "ee/hogai/core/title_generator/test/test_title_generator.py"
-  ],
   "ee/hogai/django_checkpoint/checkpointer.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -5511,74 +5046,11 @@
   "ee/hogai/eval/ci/conftest.py": [
     "ee/hogai/eval/ci/eval_root_style.py"
   ],
-  "ee/hogai/eval/ci/eval_funnel.py": [
-    "ee/hogai/eval/ci/eval_funnel.py"
-  ],
-  "ee/hogai/eval/ci/eval_insight_search.py": [
-    "ee/hogai/eval/ci/eval_insight_search.py"
-  ],
-  "ee/hogai/eval/ci/eval_memory.py": [
-    "ee/hogai/eval/ci/eval_memory.py"
-  ],
-  "ee/hogai/eval/ci/eval_memory_onboarding.py": [
-    "ee/hogai/eval/ci/eval_memory_onboarding.py"
-  ],
-  "ee/hogai/eval/ci/eval_retention.py": [
-    "ee/hogai/eval/ci/eval_retention.py"
-  ],
-  "ee/hogai/eval/ci/eval_root.py": [
-    "ee/hogai/eval/ci/eval_root.py"
-  ],
-  "ee/hogai/eval/ci/eval_root_documentation.py": [
-    "ee/hogai/eval/ci/eval_root_documentation.py"
-  ],
-  "ee/hogai/eval/ci/eval_root_entity_search.py": [
-    "ee/hogai/eval/ci/eval_root_entity_search.py"
-  ],
-  "ee/hogai/eval/ci/eval_root_style.py": [
-    "ee/hogai/eval/ci/eval_root_style.py"
-  ],
-  "ee/hogai/eval/ci/eval_sql.py": [
-    "ee/hogai/eval/ci/eval_sql.py"
-  ],
-  "ee/hogai/eval/ci/eval_survey_analysis.py": [
-    "ee/hogai/eval/ci/eval_survey_analysis.py"
-  ],
-  "ee/hogai/eval/ci/eval_surveys.py": [
-    "ee/hogai/eval/ci/eval_surveys.py"
-  ],
-  "ee/hogai/eval/ci/eval_ticket_summary.py": [
-    "ee/hogai/eval/ci/eval_ticket_summary.py"
-  ],
-  "ee/hogai/eval/ci/eval_trends.py": [
-    "ee/hogai/eval/ci/eval_trends.py"
-  ],
-  "ee/hogai/eval/ci/eval_ui_context.py": [
-    "ee/hogai/eval/ci/eval_ui_context.py"
-  ],
-  "ee/hogai/eval/ci/max_tools/eval_create_experiment_tool.py": [
-    "ee/hogai/eval/ci/max_tools/eval_create_experiment_tool.py"
-  ],
-  "ee/hogai/eval/ci/max_tools/eval_create_feature_flag_tool.py": [
-    "ee/hogai/eval/ci/max_tools/eval_create_feature_flag_tool.py"
-  ],
-  "ee/hogai/eval/ci/max_tools/eval_revenue_analytics_filter_generation.py": [
-    "ee/hogai/eval/ci/max_tools/eval_revenue_analytics_filter_generation.py"
-  ],
-  "ee/hogai/eval/ci/max_tools/eval_session_replay_filter_generation.py": [
-    "ee/hogai/eval/ci/max_tools/eval_session_replay_filter_generation.py"
-  ],
-  "ee/hogai/eval/ci/max_tools/eval_upsert_dashboard.py": [
-    "ee/hogai/eval/ci/max_tools/eval_upsert_dashboard.py"
-  ],
   "ee/hogai/eval/conftest.py": [
     "ee/hogai/eval/ci/eval_root_style.py",
     "ee/hogai/eval/offline/eval_sql.py"
   ],
   "ee/hogai/eval/offline/conftest.py": [
-    "ee/hogai/eval/offline/eval_sql.py"
-  ],
-  "ee/hogai/eval/offline/eval_sql.py": [
     "ee/hogai/eval/offline/eval_sql.py"
   ],
   "ee/hogai/eval/offline/query_patches.py": [
@@ -5889,18 +5361,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py"
   ],
-  "ee/hogai/research_agent/test/test_executables.py": [
-    "ee/hogai/research_agent/test/test_executables.py"
-  ],
-  "ee/hogai/research_agent/test/test_graph.py": [
-    "ee/hogai/research_agent/test/test_graph.py"
-  ],
-  "ee/hogai/research_agent/test/test_mode_manager.py": [
-    "ee/hogai/research_agent/test/test_mode_manager.py"
-  ],
-  "ee/hogai/research_agent/test/test_runner.py": [
-    "ee/hogai/research_agent/test/test_runner.py"
-  ],
   "ee/hogai/sandbox/__init__.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -6071,24 +5531,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py"
   ],
-  "ee/hogai/session_summaries/tests/test_input_data.py": [
-    "ee/hogai/session_summaries/tests/test_input_data.py"
-  ],
-  "ee/hogai/session_summaries/tests/test_output_data.py": [
-    "ee/hogai/session_summaries/tests/test_output_data.py"
-  ],
-  "ee/hogai/session_summaries/tests/test_prompt_data.py": [
-    "ee/hogai/session_summaries/tests/test_prompt_data.py"
-  ],
-  "ee/hogai/session_summaries/tests/test_stringify.py": [
-    "ee/hogai/session_summaries/tests/test_stringify.py"
-  ],
-  "ee/hogai/session_summaries/tests/test_summarize_session.py": [
-    "ee/hogai/session_summaries/tests/test_summarize_session.py"
-  ],
-  "ee/hogai/session_summaries/tests/test_utils.py": [
-    "ee/hogai/session_summaries/tests/test_utils.py"
-  ],
   "ee/hogai/stream/redis_stream.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -6129,9 +5571,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/stream/test/test_redis_stream.py": [
-    "ee/hogai/stream/test/test_redis_stream.py"
-  ],
   "ee/hogai/summarizers/actions.py": [
     "ee/hogai/summarizers/test/test_actions.py",
     "posthog/temporal/tests/ai/test_module_integrity.py",
@@ -6159,50 +5598,8 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py"
   ],
-  "ee/hogai/summarizers/test/test_actions.py": [
-    "ee/hogai/summarizers/test/test_actions.py"
-  ],
-  "ee/hogai/summarizers/test/test_property_filters.py": [
-    "ee/hogai/summarizers/test/test_property_filters.py"
-  ],
   "ee/hogai/test/base.py": [
     "ee/hogai/test/test_insights_assistant.py"
-  ],
-  "ee/hogai/test/test_base.py": [
-    "ee/hogai/test/test_base.py"
-  ],
-  "ee/hogai/test/test_eval_schema.py": [
-    "ee/hogai/test/test_eval_schema.py"
-  ],
-  "ee/hogai/test/test_insights_assistant.py": [
-    "ee/hogai/test/test_insights_assistant.py"
-  ],
-  "ee/hogai/test/test_llm.py": [
-    "ee/hogai/test/test_llm.py"
-  ],
-  "ee/hogai/test/test_query_patches.py": [
-    "ee/hogai/test/test_query_patches.py"
-  ],
-  "ee/hogai/test/test_queue.py": [
-    "ee/hogai/test/test_queue.py"
-  ],
-  "ee/hogai/test/test_registry.py": [
-    "ee/hogai/test/test_registry.py"
-  ],
-  "ee/hogai/test/test_schema.py": [
-    "ee/hogai/test/test_schema.py"
-  ],
-  "ee/hogai/test/test_session_moments.py": [
-    "ee/hogai/test/test_session_moments.py"
-  ],
-  "ee/hogai/test/test_snapshot_loader.py": [
-    "ee/hogai/test/test_snapshot_loader.py"
-  ],
-  "ee/hogai/test/test_tool.py": [
-    "ee/hogai/test/test_tool.py"
-  ],
-  "ee/hogai/test/test_utils.py": [
-    "ee/hogai/test/test_utils.py"
   ],
   "ee/hogai/tools/__init__.py": [
     "ee/api/test/test_conversation.py",
@@ -6322,9 +5719,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/tools/call_mcp_server/test/test_tool.py": [
-    "ee/hogai/tools/call_mcp_server/test/test_tool.py"
   ],
   "ee/hogai/tools/call_mcp_server/tool.py": [
     "ee/api/test/test_conversation.py",
@@ -6570,15 +5964,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/tools/create_notebook/test/test_parsing.py": [
-    "ee/hogai/tools/create_notebook/test/test_parsing.py"
-  ],
-  "ee/hogai/tools/create_notebook/test/test_tool.py": [
-    "ee/hogai/tools/create_notebook/test/test_tool.py"
-  ],
-  "ee/hogai/tools/create_notebook/test_tiptap.py": [
-    "ee/hogai/tools/create_notebook/test_tiptap.py"
-  ],
   "ee/hogai/tools/create_notebook/tool.py": [
     "ee/api/test/test_conversation.py",
     "ee/api/test/test_max_tools.py",
@@ -6699,12 +6084,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/tools/execute_sql/test/test_mcp_tool.py": [
-    "ee/hogai/tools/execute_sql/test/test_mcp_tool.py"
-  ],
-  "ee/hogai/tools/execute_sql/test/test_tool.py": [
-    "ee/hogai/tools/execute_sql/test/test_tool.py"
-  ],
   "ee/hogai/tools/execute_sql/tool.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -6824,9 +6203,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/tools/full_text_search/test/test_tool.py": [
-    "ee/hogai/tools/full_text_search/test/test_tool.py"
   ],
   "ee/hogai/tools/full_text_search/tool.py": [
     "ee/api/test/test_conversation.py",
@@ -6990,9 +6366,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/tools/read_billing_tool/test/test_nodes.py": [
-    "ee/hogai/tools/read_billing_tool/test/test_nodes.py"
-  ],
   "ee/hogai/tools/read_billing_tool/tool.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -7113,9 +6486,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/tools/read_data/test/test_tool.py": [
-    "ee/hogai/tools/read_data/test/test_tool.py"
-  ],
   "ee/hogai/tools/read_data/tool.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -7194,9 +6564,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/tools/read_data_warehouse_schema/test/test_mcp_tool.py": [
-    "ee/hogai/tools/read_data_warehouse_schema/test/test_mcp_tool.py"
   ],
   "ee/hogai/tools/read_taxonomy/core.py": [
     "ee/api/test/test_conversation.py",
@@ -7394,9 +6761,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/tools/replay/test/test_filter_session_recordings.py": [
-    "ee/hogai/tools/replay/test/test_filter_session_recordings.py"
-  ],
   "ee/hogai/tools/search.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -7560,30 +6924,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "ee/hogai/tools/test/test_create_form.py": [
-    "ee/hogai/tools/test/test_create_form.py"
-  ],
-  "ee/hogai/tools/test/test_create_insight.py": [
-    "ee/hogai/tools/test/test_create_insight.py"
-  ],
-  "ee/hogai/tools/test/test_list_data.py": [
-    "ee/hogai/tools/test/test_list_data.py"
-  ],
-  "ee/hogai/tools/test/test_manage_memories.py": [
-    "ee/hogai/tools/test/test_manage_memories.py"
-  ],
-  "ee/hogai/tools/test/test_search.py": [
-    "ee/hogai/tools/test/test_search.py"
-  ],
-  "ee/hogai/tools/test/test_search_traces.py": [
-    "ee/hogai/tools/test/test_search_traces.py"
-  ],
-  "ee/hogai/tools/test/test_task.py": [
-    "ee/hogai/tools/test/test_task.py"
-  ],
-  "ee/hogai/tools/test/test_todo_write.py": [
-    "ee/hogai/tools/test/test_todo_write.py"
-  ],
   "ee/hogai/tools/todo_write.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -7709,9 +7049,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/tools/upsert_dashboard/test/test_tool.py": [
-    "ee/hogai/tools/upsert_dashboard/test/test_tool.py"
   ],
   "ee/hogai/tools/upsert_dashboard/tool.py": [
     "ee/api/test/test_conversation.py",
@@ -7893,9 +7230,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/utils/conversation_summarizer/test/test_nodes.py": [
-    "ee/hogai/utils/conversation_summarizer/test/test_nodes.py"
   ],
   "ee/hogai/utils/embeddings.py": [
     "ee/api/test/test_conversation.py",
@@ -8096,30 +7430,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
-  ],
-  "ee/hogai/utils/test/test_anthropic.py": [
-    "ee/hogai/utils/test/test_anthropic.py"
-  ],
-  "ee/hogai/utils/test/test_assistant_helpers.py": [
-    "ee/hogai/utils/test/test_assistant_helpers.py"
-  ],
-  "ee/hogai/utils/test/test_assistant_node.py": [
-    "ee/hogai/utils/test/test_assistant_node.py"
-  ],
-  "ee/hogai/utils/test/test_assistant_types.py": [
-    "ee/hogai/utils/test/test_assistant_types.py"
-  ],
-  "ee/hogai/utils/test/test_dispatcher.py": [
-    "ee/hogai/utils/test/test_dispatcher.py"
-  ],
-  "ee/hogai/utils/test/test_format_events_prompt.py": [
-    "ee/hogai/utils/test/test_format_events_prompt.py"
-  ],
-  "ee/hogai/utils/test/test_openai.py": [
-    "ee/hogai/utils/test/test_openai.py"
-  ],
-  "ee/hogai/utils/test/test_yaml.py": [
-    "ee/hogai/utils/test/test_yaml.py"
   ],
   "ee/hogai/utils/tests.py": [
     "ee/hogai/core/agent_modes/presets/test/test_product_analytics_preset.py",
@@ -8357,18 +7667,6 @@
     "posthog/test/test_rate_limit.py",
     "products/data_warehouse/backend/api/test/test_external_data_schema.py"
   ],
-  "ee/models/test/test_assistant.py": [
-    "ee/models/test/test_assistant.py"
-  ],
-  "ee/models/test/test_event_definition_model.py": [
-    "ee/models/test/test_event_definition_model.py"
-  ],
-  "ee/models/test/test_property_definition_model.py": [
-    "ee/models/test/test_property_definition_model.py"
-  ],
-  "ee/models/test/test_session_summaries.py": [
-    "ee/models/test/test_session_summaries.py"
-  ],
   "ee/tasks/slack.py": [
     "ee/tasks/test/test_slack.py"
   ],
@@ -8397,24 +7695,6 @@
     "ee/tasks/test/subscriptions/test_slack_subscriptions.py",
     "ee/tasks/test/subscriptions/test_subscriptions_utils.py",
     "posthog/temporal/tests/test_subscriptions_workflows.py"
-  ],
-  "ee/tasks/test/subscriptions/test_email_subscriptions.py": [
-    "ee/tasks/test/subscriptions/test_email_subscriptions.py"
-  ],
-  "ee/tasks/test/subscriptions/test_slack_subscriptions.py": [
-    "ee/tasks/test/subscriptions/test_slack_subscriptions.py"
-  ],
-  "ee/tasks/test/subscriptions/test_subscriptions_utils.py": [
-    "ee/tasks/test/subscriptions/test_subscriptions_utils.py"
-  ],
-  "ee/tasks/test/test_auto_rollback_feature_flag.py": [
-    "ee/tasks/test/test_auto_rollback_feature_flag.py"
-  ],
-  "ee/tasks/test/test_send_license_usage.py": [
-    "ee/tasks/test/test_send_license_usage.py"
-  ],
-  "ee/tasks/test/test_slack.py": [
-    "ee/tasks/test/test_slack.py"
   ],
   "posthog/admin/__init__.py": [
     "posthog/admin/test_admin.py"
@@ -8534,17 +7814,8 @@
   "posthog/admin/admins/user_product_list_admin.py": [
     "posthog/admin/test_admin.py"
   ],
-  "posthog/admin/test_admin.py": [
-    "posthog/admin/test_admin.py"
-  ],
   "posthog/api/__init__.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "posthog/api/advanced_activity_logs/test_field_discovery.py": [
-    "posthog/api/advanced_activity_logs/test_field_discovery.py"
-  ],
-  "posthog/api/advanced_activity_logs/test_filters.py": [
-    "posthog/api/advanced_activity_logs/test_filters.py"
   ],
   "posthog/api/annotation.py": [
     "posthog/api/test/test_routing.py",
@@ -8643,18 +7914,6 @@
   "posthog/api/file_system/persisted_folder.py": [
     "posthog/test/test_decorators.py"
   ],
-  "posthog/api/file_system/test/test_file_system.py": [
-    "posthog/api/file_system/test/test_file_system.py"
-  ],
-  "posthog/api/file_system/test/test_file_system_shortcut.py": [
-    "posthog/api/file_system/test/test_file_system_shortcut.py"
-  ],
-  "posthog/api/file_system/test/test_persisted_folder.py": [
-    "posthog/api/file_system/test/test_persisted_folder.py"
-  ],
-  "posthog/api/file_system/test/test_user_product_list.py": [
-    "posthog/api/file_system/test/test_user_product_list.py"
-  ],
   "posthog/api/flag_value.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -8727,18 +7986,6 @@
     "posthog/api/oauth/test_cimd.py",
     "posthog/api/oauth/test_views.py",
     "posthog/test/test_decorators.py"
-  ],
-  "posthog/api/oauth/test_application.py": [
-    "posthog/api/oauth/test_application.py"
-  ],
-  "posthog/api/oauth/test_cimd.py": [
-    "posthog/api/oauth/test_cimd.py"
-  ],
-  "posthog/api/oauth/test_dcr.py": [
-    "posthog/api/oauth/test_dcr.py"
-  ],
-  "posthog/api/oauth/test_views.py": [
-    "posthog/api/oauth/test_views.py"
   ],
   "posthog/api/oauth/views.py": [
     "posthog/api/oauth/test_views.py",
@@ -8924,33 +8171,6 @@
     "posthog/test/test_rate_limit.py",
     "products/data_warehouse/backend/api/test/test_external_data_schema.py"
   ],
-  "posthog/api/test/batch_exports/test_create.py": [
-    "posthog/api/test/batch_exports/test_create.py"
-  ],
-  "posthog/api/test/batch_exports/test_delete.py": [
-    "posthog/api/test/batch_exports/test_delete.py"
-  ],
-  "posthog/api/test/batch_exports/test_get.py": [
-    "posthog/api/test/batch_exports/test_get.py"
-  ],
-  "posthog/api/test/batch_exports/test_list.py": [
-    "posthog/api/test/batch_exports/test_list.py"
-  ],
-  "posthog/api/test/batch_exports/test_pause.py": [
-    "posthog/api/test/batch_exports/test_pause.py"
-  ],
-  "posthog/api/test/batch_exports/test_runs.py": [
-    "posthog/api/test/batch_exports/test_runs.py"
-  ],
-  "posthog/api/test/batch_exports/test_serializers.py": [
-    "posthog/api/test/batch_exports/test_serializers.py"
-  ],
-  "posthog/api/test/batch_exports/test_test.py": [
-    "posthog/api/test/batch_exports/test_test.py"
-  ],
-  "posthog/api/test/batch_exports/test_update.py": [
-    "posthog/api/test/batch_exports/test_update.py"
-  ],
   "posthog/api/test/dashboards/__init__.py": [
     "ee/api/test/test_insight.py",
     "posthog/api/test/dashboards/test_dashboard.py",
@@ -8963,369 +8183,6 @@
     "posthog/tasks/alerts/test/test_alert_checks.py",
     "posthog/tasks/alerts/test/test_trends_absolute_alerts.py",
     "posthog/tasks/alerts/test/test_trends_relative_alerts.py"
-  ],
-  "posthog/api/test/dashboards/test_dashboard.py": [
-    "posthog/api/test/dashboards/test_dashboard.py"
-  ],
-  "posthog/api/test/dashboards/test_dashboard_button_tiles.py": [
-    "posthog/api/test/dashboards/test_dashboard_button_tiles.py"
-  ],
-  "posthog/api/test/dashboards/test_dashboard_duplication.py": [
-    "posthog/api/test/dashboards/test_dashboard_duplication.py"
-  ],
-  "posthog/api/test/dashboards/test_dashboard_text_tiles.py": [
-    "posthog/api/test/dashboards/test_dashboard_text_tiles.py"
-  ],
-  "posthog/api/test/test_action.py": [
-    "posthog/api/test/test_action.py"
-  ],
-  "posthog/api/test/test_activity_log.py": [
-    "posthog/api/test/test_activity_log.py"
-  ],
-  "posthog/api/test/test_alert.py": [
-    "posthog/api/test/test_alert.py"
-  ],
-  "posthog/api/test/test_annotation.py": [
-    "posthog/api/test/test_annotation.py"
-  ],
-  "posthog/api/test/test_api_docs.py": [
-    "posthog/api/test/test_api_docs.py"
-  ],
-  "posthog/api/test/test_app_metrics.py": [
-    "posthog/api/test/test_app_metrics.py"
-  ],
-  "posthog/api/test/test_async_migrations.py": [
-    "posthog/api/test/test_async_migrations.py"
-  ],
-  "posthog/api/test/test_authentication.py": [
-    "posthog/api/test/test_authentication.py"
-  ],
-  "posthog/api/test/test_batch_imports.py": [
-    "posthog/api/test/test_batch_imports.py"
-  ],
-  "posthog/api/test/test_bulk_deletion_disabled.py": [
-    "posthog/api/test/test_bulk_deletion_disabled.py"
-  ],
-  "posthog/api/test/test_capture_internal.py": [
-    "posthog/api/test/test_capture_internal.py"
-  ],
-  "posthog/api/test/test_circular_dependency_detection.py": [
-    "posthog/api/test/test_circular_dependency_detection.py"
-  ],
-  "posthog/api/test/test_classify_auth_method.py": [
-    "posthog/api/test/test_classify_auth_method.py"
-  ],
-  "posthog/api/test/test_cli_auth.py": [
-    "posthog/api/test/test_cli_auth.py"
-  ],
-  "posthog/api/test/test_cohort.py": [
-    "posthog/api/test/test_cohort.py"
-  ],
-  "posthog/api/test/test_cohort_bytecode.py": [
-    "posthog/api/test/test_cohort_bytecode.py"
-  ],
-  "posthog/api/test/test_cohort_personhog.py": [
-    "posthog/api/test/test_cohort_personhog.py"
-  ],
-  "posthog/api/test/test_column_configuration.py": [
-    "posthog/api/test/test_column_configuration.py"
-  ],
-  "posthog/api/test/test_comments.py": [
-    "posthog/api/test/test_comments.py"
-  ],
-  "posthog/api/test/test_csp.py": [
-    "posthog/api/test/test_csp.py"
-  ],
-  "posthog/api/test/test_dashboard_metadata.py": [
-    "posthog/api/test/test_dashboard_metadata.py"
-  ],
-  "posthog/api/test/test_data_color_theme.py": [
-    "posthog/api/test/test_data_color_theme.py"
-  ],
-  "posthog/api/test/test_debug_ch_queries.py": [
-    "posthog/api/test/test_debug_ch_queries.py"
-  ],
-  "posthog/api/test/test_element.py": [
-    "posthog/api/test/test_element.py"
-  ],
-  "posthog/api/test/test_email_mfa.py": [
-    "posthog/api/test/test_email_mfa.py"
-  ],
-  "posthog/api/test/test_event.py": [
-    "posthog/api/test/test_event.py"
-  ],
-  "posthog/api/test/test_event_definition.py": [
-    "posthog/api/test/test_event_definition.py"
-  ],
-  "posthog/api/test/test_event_definition_base.py": [
-    "posthog/api/test/test_event_definition_base.py"
-  ],
-  "posthog/api/test/test_event_definition_golang.py": [
-    "posthog/api/test/test_event_definition_golang.py"
-  ],
-  "posthog/api/test/test_event_definition_python.py": [
-    "posthog/api/test/test_event_definition_python.py"
-  ],
-  "posthog/api/test/test_event_definition_typescript.py": [
-    "posthog/api/test/test_event_definition_typescript.py"
-  ],
-  "posthog/api/test/test_event_filter_config.py": [
-    "posthog/api/test/test_event_filter_config.py"
-  ],
-  "posthog/api/test/test_exports.py": [
-    "posthog/api/test/test_exports.py"
-  ],
-  "posthog/api/test/test_feature_flag.py": [
-    "posthog/api/test/test_feature_flag.py"
-  ],
-  "posthog/api/test/test_feature_flag_default_evaluation_contexts.py": [
-    "posthog/api/test/test_feature_flag_default_evaluation_contexts.py"
-  ],
-  "posthog/api/test/test_feature_flag_dependency_deletion.py": [
-    "posthog/api/test/test_feature_flag_dependency_deletion.py"
-  ],
-  "posthog/api/test/test_feature_flag_dependency_disabling.py": [
-    "posthog/api/test/test_feature_flag_dependency_disabling.py"
-  ],
-  "posthog/api/test/test_feature_flag_require_evaluation_tags.py": [
-    "posthog/api/test/test_feature_flag_require_evaluation_tags.py"
-  ],
-  "posthog/api/test/test_feature_flag_utils.py": [
-    "posthog/api/test/test_feature_flag_utils.py"
-  ],
-  "posthog/api/test/test_file_system.py": [
-    "posthog/api/test/test_file_system.py"
-  ],
-  "posthog/api/test/test_flag_value.py": [
-    "posthog/api/test/test_flag_value.py"
-  ],
-  "posthog/api/test/test_github.py": [
-    "posthog/api/test/test_github.py"
-  ],
-  "posthog/api/test/test_health_issue.py": [
-    "posthog/api/test/test_health_issue.py"
-  ],
-  "posthog/api/test/test_hog_flow.py": [
-    "posthog/api/test/test_hog_flow.py"
-  ],
-  "posthog/api/test/test_hog_flow_template.py": [
-    "posthog/api/test/test_hog_flow_template.py"
-  ],
-  "posthog/api/test/test_hog_function.py": [
-    "posthog/api/test/test_hog_function.py"
-  ],
-  "posthog/api/test/test_hog_function_templates.py": [
-    "posthog/api/test/test_hog_function_templates.py"
-  ],
-  "posthog/api/test/test_ingestion_warnings.py": [
-    "posthog/api/test/test_ingestion_warnings.py"
-  ],
-  "posthog/api/test/test_insight.py": [
-    "posthog/api/test/test_insight.py"
-  ],
-  "posthog/api/test/test_insight_funnels.py": [
-    "posthog/api/test/test_insight_funnels.py"
-  ],
-  "posthog/api/test/test_insight_metadata.py": [
-    "posthog/api/test/test_insight_metadata.py"
-  ],
-  "posthog/api/test/test_insight_query.py": [
-    "posthog/api/test/test_insight_query.py"
-  ],
-  "posthog/api/test/test_insight_variable.py": [
-    "posthog/api/test/test_insight_variable.py"
-  ],
-  "posthog/api/test/test_instance_settings.py": [
-    "posthog/api/test/test_instance_settings.py"
-  ],
-  "posthog/api/test/test_instance_status.py": [
-    "posthog/api/test/test_instance_status.py"
-  ],
-  "posthog/api/test/test_integration.py": [
-    "posthog/api/test/test_integration.py"
-  ],
-  "posthog/api/test/test_js_snippet.py": [
-    "posthog/api/test/test_js_snippet.py"
-  ],
-  "posthog/api/test/test_llm_prompt.py": [
-    "posthog/api/test/test_llm_prompt.py"
-  ],
-  "posthog/api/test/test_local_evaluation.py": [
-    "posthog/api/test/test_local_evaluation.py"
-  ],
-  "posthog/api/test/test_log_entries.py": [
-    "posthog/api/test/test_log_entries.py"
-  ],
-  "posthog/api/test/test_materialized_column_activity_logging.py": [
-    "posthog/api/test/test_materialized_column_activity_logging.py"
-  ],
-  "posthog/api/test/test_materialized_column_slot.py": [
-    "posthog/api/test/test_materialized_column_slot.py"
-  ],
-  "posthog/api/test/test_mixins.py": [
-    "posthog/api/test/test_mixins.py"
-  ],
-  "posthog/api/test/test_my_notifications.py": [
-    "posthog/api/test/test_my_notifications.py"
-  ],
-  "posthog/api/test/test_organization.py": [
-    "posthog/api/test/test_organization.py"
-  ],
-  "posthog/api/test/test_organization_domain.py": [
-    "posthog/api/test/test_organization_domain.py"
-  ],
-  "posthog/api/test/test_organization_feature_flag.py": [
-    "posthog/api/test/test_organization_feature_flag.py"
-  ],
-  "posthog/api/test/test_organization_integration.py": [
-    "posthog/api/test/test_organization_integration.py"
-  ],
-  "posthog/api/test/test_organization_invites.py": [
-    "posthog/api/test/test_organization_invites.py"
-  ],
-  "posthog/api/test/test_organization_members.py": [
-    "posthog/api/test/test_organization_members.py"
-  ],
-  "posthog/api/test/test_person.py": [
-    "posthog/api/test/test_person.py"
-  ],
-  "posthog/api/test/test_person_personhog.py": [
-    "posthog/api/test/test_person_personhog.py"
-  ],
-  "posthog/api/test/test_personal_api_keys.py": [
-    "posthog/api/test/test_personal_api_keys.py"
-  ],
-  "posthog/api/test/test_persons_trends.py": [
-    "posthog/api/test/test_persons_trends.py"
-  ],
-  "posthog/api/test/test_playwright_setup.py": [
-    "posthog/api/test/test_playwright_setup.py"
-  ],
-  "posthog/api/test/test_plugin.py": [
-    "posthog/api/test/test_plugin.py"
-  ],
-  "posthog/api/test/test_preflight.py": [
-    "posthog/api/test/test_preflight.py"
-  ],
-  "posthog/api/test/test_project.py": [
-    "posthog/api/test/test_project.py"
-  ],
-  "posthog/api/test/test_project_secret_api_keys.py": [
-    "posthog/api/test/test_project_secret_api_keys.py"
-  ],
-  "posthog/api/test/test_properties_timeline.py": [
-    "posthog/api/test/test_properties_timeline.py"
-  ],
-  "posthog/api/test/test_property_definition.py": [
-    "posthog/api/test/test_property_definition.py"
-  ],
-  "posthog/api/test/test_proxy_record.py": [
-    "posthog/api/test/test_proxy_record.py"
-  ],
-  "posthog/api/test/test_query.py": [
-    "posthog/api/test/test_query.py"
-  ],
-  "posthog/api/test/test_query_coalescing.py": [
-    "posthog/api/test/test_query_coalescing.py"
-  ],
-  "posthog/api/test/test_query_kind_endpoint.py": [
-    "posthog/api/test/test_query_kind_endpoint.py"
-  ],
-  "posthog/api/test/test_query_service.py": [
-    "posthog/api/test/test_query_service.py"
-  ],
-  "posthog/api/test/test_quick_filters.py": [
-    "posthog/api/test/test_quick_filters.py"
-  ],
-  "posthog/api/test/test_remote_config.py": [
-    "posthog/api/test/test_remote_config.py"
-  ],
-  "posthog/api/test/test_render_query.py": [
-    "posthog/api/test/test_render_query.py"
-  ],
-  "posthog/api/test/test_report.py": [
-    "posthog/api/test/test_report.py"
-  ],
-  "posthog/api/test/test_resource_transfer.py": [
-    "posthog/api/test/test_resource_transfer.py"
-  ],
-  "posthog/api/test/test_routing.py": [
-    "posthog/api/test/test_routing.py"
-  ],
-  "posthog/api/test/test_scheduled_change.py": [
-    "posthog/api/test/test_scheduled_change.py"
-  ],
-  "posthog/api/test/test_schema_property_group.py": [
-    "posthog/api/test/test_schema_property_group.py"
-  ],
-  "posthog/api/test/test_scoped_related_fields.py": [
-    "posthog/api/test/test_scoped_related_fields.py"
-  ],
-  "posthog/api/test/test_search.py": [
-    "posthog/api/test/test_search.py"
-  ],
-  "posthog/api/test/test_session.py": [
-    "posthog/api/test/test_session.py"
-  ],
-  "posthog/api/test/test_share_password_api.py": [
-    "posthog/api/test/test_share_password_api.py"
-  ],
-  "posthog/api/test/test_sharing.py": [
-    "posthog/api/test/test_sharing.py"
-  ],
-  "posthog/api/test/test_sharing_access_token_security.py": [
-    "posthog/api/test/test_sharing_access_token_security.py"
-  ],
-  "posthog/api/test/test_signup.py": [
-    "posthog/api/test/test_signup.py"
-  ],
-  "posthog/api/test/test_signup_demo.py": [
-    "posthog/api/test/test_signup_demo.py"
-  ],
-  "posthog/api/test/test_site_app.py": [
-    "posthog/api/test/test_site_app.py"
-  ],
-  "posthog/api/test/test_tagged_item.py": [
-    "posthog/api/test/test_tagged_item.py"
-  ],
-  "posthog/api/test/test_team.py": [
-    "posthog/api/test/test_team.py"
-  ],
-  "posthog/api/test/test_team_default_release_conditions.py": [
-    "posthog/api/test/test_team_default_release_conditions.py"
-  ],
-  "posthog/api/test/test_toolbar_oauth_authorize.py": [
-    "posthog/api/test/test_toolbar_oauth_authorize.py"
-  ],
-  "posthog/api/test/test_toolbar_oauth_endpoint_auth.py": [
-    "posthog/api/test/test_toolbar_oauth_endpoint_auth.py"
-  ],
-  "posthog/api/test/test_toolbar_oauth_primitives.py": [
-    "posthog/api/test/test_toolbar_oauth_primitives.py"
-  ],
-  "posthog/api/test/test_two_factor_reset.py": [
-    "posthog/api/test/test_two_factor_reset.py"
-  ],
-  "posthog/api/test/test_uploaded_media.py": [
-    "posthog/api/test/test_uploaded_media.py"
-  ],
-  "posthog/api/test/test_user.py": [
-    "posthog/api/test/test_user.py"
-  ],
-  "posthog/api/test/test_user_home_settings.py": [
-    "posthog/api/test/test_user_home_settings.py"
-  ],
-  "posthog/api/test/test_utils.py": [
-    "posthog/api/test/test_utils.py"
-  ],
-  "posthog/api/test/test_web_experiment.py": [
-    "posthog/api/test/test_web_experiment.py"
-  ],
-  "posthog/api/test/test_web_vitals.py": [
-    "posthog/api/test/test_web_vitals.py"
-  ],
-  "posthog/api/test/test_webauthn.py": [
-    "posthog/api/test/test_webauthn.py"
   ],
   "posthog/api/two_factor_reset.py": [
     "posthog/admin/test_admin.py",
@@ -9358,12 +8215,6 @@
     "posthog/api/wizard/test/test_http.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/api/wizard/test/test_http.py": [
-    "posthog/api/wizard/test/test_http.py"
-  ],
-  "posthog/api/wizard/test/test_utils.py": [
-    "posthog/api/wizard/test/test_utils.py"
-  ],
   "posthog/api/wizard/utils.py": [
     "posthog/api/wizard/test/test_http.py",
     "posthog/api/wizard/test/test_utils.py",
@@ -9379,50 +8230,11 @@
     "posthog/approvals/tests/test_services.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/approvals/tests/test_approvals_api.py": [
-    "posthog/approvals/tests/test_approvals_api.py"
-  ],
-  "posthog/approvals/tests/test_notifications.py": [
-    "posthog/approvals/tests/test_notifications.py"
-  ],
-  "posthog/approvals/tests/test_policy_engine.py": [
-    "posthog/approvals/tests/test_policy_engine.py"
-  ],
-  "posthog/approvals/tests/test_services.py": [
-    "posthog/approvals/tests/test_services.py"
-  ],
-  "posthog/approvals/tests/test_tasks.py": [
-    "posthog/approvals/tests/test_tasks.py"
-  ],
-  "posthog/approvals/tests/test_update_feature_flag_action.py": [
-    "posthog/approvals/tests/test_update_feature_flag_action.py"
-  ],
   "posthog/async_migrations/examples/example.py": [
     "posthog/async_migrations/test/test_definition.py"
   ],
-  "posthog/async_migrations/examples/test_migration.py": [
-    "posthog/async_migrations/examples/test_migration.py"
-  ],
-  "posthog/async_migrations/examples/test_with_rollback_exception.py": [
-    "posthog/async_migrations/examples/test_with_rollback_exception.py"
-  ],
   "posthog/async_migrations/status.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "posthog/async_migrations/test/test_0007_persons_and_groups_on_events_backfill.py": [
-    "posthog/async_migrations/test/test_0007_persons_and_groups_on_events_backfill.py"
-  ],
-  "posthog/async_migrations/test/test_definition.py": [
-    "posthog/async_migrations/test/test_definition.py"
-  ],
-  "posthog/async_migrations/test/test_migrations_not_required.py": [
-    "posthog/async_migrations/test/test_migrations_not_required.py"
-  ],
-  "posthog/async_migrations/test/test_runner.py": [
-    "posthog/async_migrations/test/test_runner.py"
-  ],
-  "posthog/async_migrations/test/test_utils.py": [
-    "posthog/async_migrations/test/test_utils.py"
   ],
   "posthog/async_migrations/test/util.py": [
     "posthog/async_migrations/test/test_0007_persons_and_groups_on_events_backfill.py",
@@ -9434,69 +8246,12 @@
   "posthog/clickhouse/client/migration_tools.py": [
     "posthog/clickhouse/test/test_alter_replicated_validation.py"
   ],
-  "posthog/clickhouse/client/test/test_connection.py": [
-    "posthog/clickhouse/client/test/test_connection.py"
-  ],
-  "posthog/clickhouse/client/test/test_escape.py": [
-    "posthog/clickhouse/client/test/test_escape.py"
-  ],
-  "posthog/clickhouse/client/test/test_execute_async.py": [
-    "posthog/clickhouse/client/test/test_execute_async.py"
-  ],
-  "posthog/clickhouse/client/test/test_limit.py": [
-    "posthog/clickhouse/client/test/test_limit.py"
-  ],
-  "posthog/clickhouse/client/test/test_tracing.py": [
-    "posthog/clickhouse/client/test/test_tracing.py"
-  ],
   "posthog/clickhouse/explain.py": [
     "posthog/clickhouse/test/test_explain.py"
   ],
   "posthog/clickhouse/system_status.py": [
     "ee/clickhouse/test/test_system_status.py",
     "posthog/test/test_decorators.py"
-  ],
-  "posthog/clickhouse/test/test_0064.py": [
-    "posthog/clickhouse/test/test_0064.py"
-  ],
-  "posthog/clickhouse/test/test_alter_replicated_validation.py": [
-    "posthog/clickhouse/test/test_alter_replicated_validation.py"
-  ],
-  "posthog/clickhouse/test/test_cluster.py": [
-    "posthog/clickhouse/test/test_cluster.py"
-  ],
-  "posthog/clickhouse/test/test_custom_metrics.py": [
-    "posthog/clickhouse/test/test_custom_metrics.py"
-  ],
-  "posthog/clickhouse/test/test_enable_analyzer.py": [
-    "posthog/clickhouse/test/test_enable_analyzer.py"
-  ],
-  "posthog/clickhouse/test/test_explain.py": [
-    "posthog/clickhouse/test/test_explain.py"
-  ],
-  "posthog/clickhouse/test/test_kill_switch.py": [
-    "posthog/clickhouse/test/test_kill_switch.py"
-  ],
-  "posthog/clickhouse/test/test_migrations.py": [
-    "posthog/clickhouse/test/test_migrations.py"
-  ],
-  "posthog/clickhouse/test/test_preaggregation_model.py": [
-    "posthog/clickhouse/test/test_preaggregation_model.py"
-  ],
-  "posthog/clickhouse/test/test_query_tagging.py": [
-    "posthog/clickhouse/test/test_query_tagging.py"
-  ],
-  "posthog/clickhouse/test/test_raw_sessions_model.py": [
-    "posthog/clickhouse/test/test_raw_sessions_model.py"
-  ],
-  "posthog/clickhouse/test/test_raw_sessions_v3_model.py": [
-    "posthog/clickhouse/test/test_raw_sessions_v3_model.py"
-  ],
-  "posthog/clickhouse/test/test_schema.py": [
-    "posthog/clickhouse/test/test_schema.py"
-  ],
-  "posthog/clickhouse/test/test_sessions_model.py": [
-    "posthog/clickhouse/test/test_sessions_model.py"
   ],
   "posthog/dags/backfill_materialized_column.py": [
     "posthog/dags/tests/test_backfill_materialized_column.py"
@@ -9722,84 +8477,6 @@
   "posthog/dags/slack_alerts.py": [
     "posthog/dags/tests/test_slack_alerts.py"
   ],
-  "posthog/dags/test_events_backfill_to_duckling.py": [
-    "posthog/dags/test_events_backfill_to_duckling.py"
-  ],
-  "posthog/dags/tests/max_ai/test_run_evaluation.py": [
-    "posthog/dags/tests/max_ai/test_run_evaluation.py"
-  ],
-  "posthog/dags/tests/max_ai/test_snapshot_team_data.py": [
-    "posthog/dags/tests/max_ai/test_snapshot_team_data.py"
-  ],
-  "posthog/dags/tests/max_ai/test_utils.py": [
-    "posthog/dags/tests/max_ai/test_utils.py"
-  ],
-  "posthog/dags/tests/test_backfill_materialized_column.py": [
-    "posthog/dags/tests/test_backfill_materialized_column.py"
-  ],
-  "posthog/dags/tests/test_backups.py": [
-    "posthog/dags/tests/test_backups.py"
-  ],
-  "posthog/dags/tests/test_data_deletion_requests.py": [
-    "posthog/dags/tests/test_data_deletion_requests.py"
-  ],
-  "posthog/dags/tests/test_delete_persons_from_trigger_log.py": [
-    "posthog/dags/tests/test_delete_persons_from_trigger_log.py"
-  ],
-  "posthog/dags/tests/test_deletes.py": [
-    "posthog/dags/tests/test_deletes.py"
-  ],
-  "posthog/dags/tests/test_detach_distinct_id.py": [
-    "posthog/dags/tests/test_detach_distinct_id.py"
-  ],
-  "posthog/dags/tests/test_distinct_id_usage.py": [
-    "posthog/dags/tests/test_distinct_id_usage.py"
-  ],
-  "posthog/dags/tests/test_events_backfill_to_ducklake.py": [
-    "posthog/dags/tests/test_events_backfill_to_ducklake.py"
-  ],
-  "posthog/dags/tests/test_fix_missing_person_overrides.py": [
-    "posthog/dags/tests/test_fix_missing_person_overrides.py"
-  ],
-  "posthog/dags/tests/test_fix_person_id_overrides.py": [
-    "posthog/dags/tests/test_fix_person_id_overrides.py"
-  ],
-  "posthog/dags/tests/test_health_check_framework.py": [
-    "posthog/dags/tests/test_health_check_framework.py"
-  ],
-  "posthog/dags/tests/test_person_overrides.py": [
-    "posthog/dags/tests/test_person_overrides.py"
-  ],
-  "posthog/dags/tests/test_person_property_reconciliation.py": [
-    "posthog/dags/tests/test_person_property_reconciliation.py"
-  ],
-  "posthog/dags/tests/test_person_property_reconciliation_restore.py": [
-    "posthog/dags/tests/test_person_property_reconciliation_restore.py"
-  ],
-  "posthog/dags/tests/test_persondistinctids_without_person_cleanup.py": [
-    "posthog/dags/tests/test_persondistinctids_without_person_cleanup.py"
-  ],
-  "posthog/dags/tests/test_persons_new_backfill.py": [
-    "posthog/dags/tests/test_persons_new_backfill.py"
-  ],
-  "posthog/dags/tests/test_persons_without_distinct_ids_cleanup.py": [
-    "posthog/dags/tests/test_persons_without_distinct_ids_cleanup.py"
-  ],
-  "posthog/dags/tests/test_postgres_to_clickhouse_etl.py": [
-    "posthog/dags/tests/test_postgres_to_clickhouse_etl.py"
-  ],
-  "posthog/dags/tests/test_property_definitions.py": [
-    "posthog/dags/tests/test_property_definitions.py"
-  ],
-  "posthog/dags/tests/test_sessions.py": [
-    "posthog/dags/tests/test_sessions.py"
-  ],
-  "posthog/dags/tests/test_sessions_v1_cleanup.py": [
-    "posthog/dags/tests/test_sessions_v1_cleanup.py"
-  ],
-  "posthog/dags/tests/test_slack_alerts.py": [
-    "posthog/dags/tests/test_slack_alerts.py"
-  ],
   "posthog/dbrouter.py": [
     "posthog/test/test_dbrouter.py"
   ],
@@ -9811,19 +8488,7 @@
     "posthog/ducklake/test_client.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/ducklake/test_client.py": [
-    "posthog/ducklake/test_client.py"
-  ],
-  "posthog/ducklake/test_common.py": [
-    "posthog/ducklake/test_common.py"
-  ],
-  "posthog/ducklake/test_storage.py": [
-    "posthog/ducklake/test_storage.py"
-  ],
   "posthog/feature_flags/sdk_cache_provider.py": [
-    "posthog/feature_flags/test_sdk_cache_provider.py"
-  ],
-  "posthog/feature_flags/test_sdk_cache_provider.py": [
     "posthog/feature_flags/test_sdk_cache_provider.py"
   ],
   "posthog/filters.py": [
@@ -9886,54 +8551,6 @@
     "posthog/tasks/test/test_email.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/helpers/tests/test_batch_iterator.py": [
-    "posthog/helpers/tests/test_batch_iterator.py"
-  ],
-  "posthog/helpers/tests/test_email_utils.py": [
-    "posthog/helpers/tests/test_email_utils.py"
-  ],
-  "posthog/helpers/tests/test_encrypted_fields.py": [
-    "posthog/helpers/tests/test_encrypted_fields.py"
-  ],
-  "posthog/helpers/tests/test_geoip.py": [
-    "posthog/helpers/tests/test_geoip.py"
-  ],
-  "posthog/helpers/tests/test_multi_property_breakdown.py": [
-    "posthog/helpers/tests/test_multi_property_breakdown.py"
-  ],
-  "posthog/helpers/tests/test_two_factor_session.py": [
-    "posthog/helpers/tests/test_two_factor_session.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_actors_property_taxonomy_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_actors_property_taxonomy_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_event_taxonomy_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_event_taxonomy_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_suggested_questions_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_suggested_questions_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_team_taxonomy_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_team_taxonomy_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_trace_neighbors_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_trace_neighbors_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_trace_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_trace_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_traces_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_traces_query_runner.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_utils.py": [
-    "posthog/hogql_queries/ai/test/test_utils.py"
-  ],
-  "posthog/hogql_queries/ai/test/test_vector_search_query_runner.py": [
-    "posthog/hogql_queries/ai/test/test_vector_search_query_runner.py"
-  ],
-  "posthog/hogql_queries/endpoints/test/test_endpoints_usage_query_runners.py": [
-    "posthog/hogql_queries/endpoints/test/test_endpoints_usage_query_runners.py"
-  ],
   "posthog/hogql_queries/experiments/experiment_metric_fingerprint.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -9989,134 +8606,8 @@
     "posthog/hogql_queries/insights/funnels/test/test_funnel_strict.py",
     "posthog/hogql_queries/insights/funnels/test/test_funnel_unordered.py"
   ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_aggregation_operations.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_aggregation_operations.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_breakdowns_by_current_url.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_breakdowns_by_current_url.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_correlation.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_correlation.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_correlation_actors.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_correlation_actors.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_data_warehouse.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_data_warehouse.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_event_query.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_event_query.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_persons.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_persons.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_strict.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_strict.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_strict_persons.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_strict_persons.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_time_to_convert.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_time_to_convert.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_trends.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_trends.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_trends_actors.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_trends_actors.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_unordered.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_unordered.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_funnel_unordered_persons.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_funnel_unordered_persons.py"
-  ],
-  "posthog/hogql_queries/insights/funnels/test/test_utils.py": [
-    "posthog/hogql_queries/insights/funnels/test/test_utils.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_insight_actors_query_runner.py": [
-    "posthog/hogql_queries/insights/test/test_insight_actors_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_lifecycle_data_warehouse.py": [
-    "posthog/hogql_queries/insights/test/test_lifecycle_data_warehouse.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_lifecycle_query_runner.py": [
-    "posthog/hogql_queries/insights/test/test_lifecycle_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_paginators.py": [
-    "posthog/hogql_queries/insights/test/test_paginators.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_paths_query_runner.py": [
-    "posthog/hogql_queries/insights/test/test_paths_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_paths_query_runner_ee.py": [
-    "posthog/hogql_queries/insights/test/test_paths_query_runner_ee.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_retention_query_runner.py": [
-    "posthog/hogql_queries/insights/test/test_retention_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/test/test_stickiness_query_runner.py": [
-    "posthog/hogql_queries/insights/test/test_stickiness_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_aggregation_operations.py": [
-    "posthog/hogql_queries/insights/trends/test/test_aggregation_operations.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_boxplot_trends_query_runner.py": [
-    "posthog/hogql_queries/insights/trends/test/test_boxplot_trends_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_breakdown_limits.py": [
-    "posthog/hogql_queries/insights/trends/test/test_breakdown_limits.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_calendar_heatmap_query_runner.py": [
-    "posthog/hogql_queries/insights/trends/test/test_calendar_heatmap_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_formula.py": [
-    "posthog/hogql_queries/insights/trends/test/test_formula.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_math_property_revenue_currency_timestamp.py": [
-    "posthog/hogql_queries/insights/trends/test/test_math_property_revenue_currency_timestamp.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_session_level_aggregation.py": [
-    "posthog/hogql_queries/insights/trends/test/test_session_level_aggregation.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_actors_query_builder.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_actors_query_builder.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_breakdown_empty_null_properties.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_breakdown_empty_null_properties.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_dashboard_filters.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_dashboard_filters.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_data_warehouse_query.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_data_warehouse_query.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_persons.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_persons.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_query_builder.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_query_builder.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_trends_query_runner.py": [
-    "posthog/hogql_queries/insights/trends/test/test_trends_query_runner.py"
-  ],
-  "posthog/hogql_queries/insights/trends/test/test_utils.py": [
-    "posthog/hogql_queries/insights/trends/test/test_utils.py"
-  ],
   "posthog/hogql_queries/web_analytics/external/summary_query_runner.py": [
     "posthog/hogql_queries/web_analytics/external/test/test_summary_query_runner.py"
-  ],
-  "posthog/hogql_queries/web_analytics/external/test/test_summary_query_runner.py": [
-    "posthog/hogql_queries/web_analytics/external/test/test_summary_query_runner.py"
-  ],
-  "posthog/hogql_queries/web_analytics/test_web_analytics_tables_version.py": [
-    "posthog/hogql_queries/web_analytics/test_web_analytics_tables_version.py"
   ],
   "posthog/llm/gateway_client.py": [
     "ee/api/test/test_conversation.py",
@@ -10166,9 +8657,6 @@
     "products/llm_analytics/backend/summarization/tests/test_providers.py",
     "products/llm_analytics/backend/translation/test/test_llm.py"
   ],
-  "posthog/llm/test_gateway_client.py": [
-    "posthog/llm/test_gateway_client.py"
-  ],
   "posthog/models/activity_logging/batch_import_utils.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -10204,28 +8692,10 @@
   "posthog/models/async_deletion/delete_events.py": [
     "posthog/models/test/test_async_deletion_model.py"
   ],
-  "posthog/models/async_deletion/test_delete_person.py": [
-    "posthog/models/async_deletion/test_delete_person.py"
-  ],
-  "posthog/models/comment/test_utils.py": [
-    "posthog/models/comment/test_utils.py"
-  ],
   "posthog/models/event/query_event_list.py": [
     "posthog/api/test/test_event.py",
     "posthog/models/event/test_query_event_list_personhog.py",
     "posthog/test/test_decorators.py"
-  ],
-  "posthog/models/event/test_query_event_list_personhog.py": [
-    "posthog/models/event/test_query_event_list_personhog.py"
-  ],
-  "posthog/models/filters/mixins/test/test_groups.py": [
-    "posthog/models/filters/mixins/test/test_groups.py"
-  ],
-  "posthog/models/filters/mixins/test/test_interval.py": [
-    "posthog/models/filters/mixins/test/test_interval.py"
-  ],
-  "posthog/models/filters/mixins/test/test_property.py": [
-    "posthog/models/filters/mixins/test/test_property.py"
   ],
   "posthog/models/resource_transfer/inter_project_transferer.py": [
     "posthog/test/test_decorators.py"
@@ -10296,146 +8766,11 @@
   "posthog/models/resource_transfer/visitors/user.py": [
     "posthog/test/test_decorators.py"
   ],
-  "posthog/models/team/test_campaign_field_preferences.py": [
-    "posthog/models/team/test_campaign_field_preferences.py"
-  ],
-  "posthog/models/test/test_activity_logging.py": [
-    "posthog/models/test/test_activity_logging.py"
-  ],
-  "posthog/models/test/test_async_deletion_model.py": [
-    "posthog/models/test/test_async_deletion_model.py"
-  ],
-  "posthog/models/test/test_dashboard_tile_model.py": [
-    "posthog/models/test/test_dashboard_tile_model.py"
-  ],
-  "posthog/models/test/test_delete_persons_query.py": [
-    "posthog/models/test/test_delete_persons_query.py"
-  ],
-  "posthog/models/test/test_entity_model.py": [
-    "posthog/models/test/test_entity_model.py"
-  ],
-  "posthog/models/test/test_event_filter_config.py": [
-    "posthog/models/test/test_event_filter_config.py"
-  ],
-  "posthog/models/test/test_event_ingestion_restriction_config.py": [
-    "posthog/models/test/test_event_ingestion_restriction_config.py"
-  ],
-  "posthog/models/test/test_event_model.py": [
-    "posthog/models/test/test_event_model.py"
-  ],
-  "posthog/models/test/test_exported_asset_model.py": [
-    "posthog/models/test/test_exported_asset_model.py"
-  ],
-  "posthog/models/test/test_group_type_mapping.py": [
-    "posthog/models/test/test_group_type_mapping.py"
-  ],
-  "posthog/models/test/test_group_usage_metric_model.py": [
-    "posthog/models/test/test_group_usage_metric_model.py"
-  ],
-  "posthog/models/test/test_health_issue.py": [
-    "posthog/models/test/test_health_issue.py"
-  ],
-  "posthog/models/test/test_hog_flow.py": [
-    "posthog/models/test/test_hog_flow.py"
-  ],
-  "posthog/models/test/test_hog_flow_batch_job.py": [
-    "posthog/models/test/test_hog_flow_batch_job.py"
-  ],
-  "posthog/models/test/test_hog_function.py": [
-    "posthog/models/test/test_hog_function.py"
-  ],
-  "posthog/models/test/test_hog_function_template.py": [
-    "posthog/models/test/test_hog_function_template.py"
-  ],
-  "posthog/models/test/test_insight_caching_state.py": [
-    "posthog/models/test/test_insight_caching_state.py"
-  ],
-  "posthog/models/test/test_insight_model.py": [
-    "posthog/models/test/test_insight_model.py"
-  ],
-  "posthog/models/test/test_integration_model.py": [
-    "posthog/models/test/test_integration_model.py"
-  ],
-  "posthog/models/test/test_missing_person_model.py": [
-    "posthog/models/test/test_missing_person_model.py"
-  ],
-  "posthog/models/test/test_oauth.py": [
-    "posthog/models/test/test_oauth.py"
-  ],
-  "posthog/models/test/test_organization_invite_model.py": [
-    "posthog/models/test/test_organization_invite_model.py"
-  ],
-  "posthog/models/test/test_organization_membership_signals.py": [
-    "posthog/models/test/test_organization_membership_signals.py"
-  ],
-  "posthog/models/test/test_organization_model.py": [
-    "posthog/models/test/test_organization_model.py"
-  ],
-  "posthog/models/test/test_person_model.py": [
-    "posthog/models/test/test_person_model.py"
-  ],
-  "posthog/models/test/test_person_override_model.py": [
-    "posthog/models/test/test_person_override_model.py"
-  ],
-  "posthog/models/test/test_person_schema.py": [
-    "posthog/models/test/test_person_schema.py"
-  ],
-  "posthog/models/test/test_product_intent.py": [
-    "posthog/models/test/test_product_intent.py"
-  ],
-  "posthog/models/test/test_project.py": [
-    "posthog/models/test/test_project.py"
-  ],
-  "posthog/models/test/test_remote_config.py": [
-    "posthog/models/test/test_remote_config.py"
-  ],
-  "posthog/models/test/test_scheduled_change.py": [
-    "posthog/models/test/test_scheduled_change.py"
-  ],
-  "posthog/models/test/test_share_password.py": [
-    "posthog/models/test/test_share_password.py"
-  ],
-  "posthog/models/test/test_sharing_configuration_model.py": [
-    "posthog/models/test/test_sharing_configuration_model.py"
-  ],
-  "posthog/models/test/test_subscription_model.py": [
-    "posthog/models/test/test_subscription_model.py"
-  ],
-  "posthog/models/test/test_tagged_item_model.py": [
-    "posthog/models/test/test_tagged_item_model.py"
-  ],
-  "posthog/models/test/test_team_model.py": [
-    "posthog/models/test/test_team_model.py"
-  ],
-  "posthog/models/test/test_user_model.py": [
-    "posthog/models/test/test_user_model.py"
-  ],
-  "posthog/models/test/test_user_product_list_invites.py": [
-    "posthog/models/test/test_user_product_list_invites.py"
-  ],
-  "posthog/models/test/test_user_scene_personalisation.py": [
-    "posthog/models/test/test_user_scene_personalisation.py"
-  ],
-  "posthog/models/test/test_user_teams_access_control.py": [
-    "posthog/models/test/test_user_teams_access_control.py"
-  ],
-  "posthog/models/test/test_utils.py": [
-    "posthog/models/test/test_utils.py"
-  ],
   "posthog/models/tophog/queries.py": [
-    "posthog/models/tophog/test/test_tophog_queries.py"
-  ],
-  "posthog/models/tophog/test/test_tophog_queries.py": [
     "posthog/models/tophog/test/test_tophog_queries.py"
   ],
   "posthog/models/web_preaggregated/team_selection_strategies.py": [
     "products/web_analytics/dags/tests/test_web_preaggregated_team_selection.py"
-  ],
-  "posthog/models/web_preaggregated/test_web_pre_aggregated_timezones.py": [
-    "posthog/models/web_preaggregated/test_web_pre_aggregated_timezones.py"
-  ],
-  "posthog/models/web_preaggregated/test_web_preaggregated_sql.py": [
-    "posthog/models/web_preaggregated/test_web_preaggregated_sql.py"
   ],
   "posthog/otel_instrumentation.py": [
     "posthog/test/test_otel_instrumentation.py"
@@ -10453,27 +8788,6 @@
   "posthog/personhog_client/middleware.py": [
     "posthog/personhog_client/test_gate.py"
   ],
-  "posthog/personhog_client/test_channel_state_monitor.py": [
-    "posthog/personhog_client/test_channel_state_monitor.py"
-  ],
-  "posthog/personhog_client/test_converters.py": [
-    "posthog/personhog_client/test_converters.py"
-  ],
-  "posthog/personhog_client/test_fake_client.py": [
-    "posthog/personhog_client/test_fake_client.py"
-  ],
-  "posthog/personhog_client/test_gate.py": [
-    "posthog/personhog_client/test_gate.py"
-  ],
-  "posthog/personhog_client/test_helpers.py": [
-    "posthog/personhog_client/test_helpers.py"
-  ],
-  "posthog/personhog_client/test_interceptor.py": [
-    "posthog/personhog_client/test_interceptor.py"
-  ],
-  "posthog/personhog_client/test_metrics_interceptor.py": [
-    "posthog/personhog_client/test_metrics_interceptor.py"
-  ],
   "posthog/plugins/__init__.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -10487,9 +8801,6 @@
     "posthog/models/test/test_organization_model.py",
     "posthog/plugins/test/test_utils.py",
     "posthog/test/test_plugin.py"
-  ],
-  "posthog/plugins/test/test_utils.py": [
-    "posthog/plugins/test/test_utils.py"
   ],
   "posthog/product_db_router.py": [
     "posthog/test/test_product_db_router.py"
@@ -10510,63 +8821,6 @@
     "posthog/queries/funnels/test/test_funnel_strict.py",
     "posthog/queries/funnels/test/test_funnel_unordered.py"
   ],
-  "posthog/queries/funnels/test/test_breakdowns_by_current_url.py": [
-    "posthog/queries/funnels/test/test_breakdowns_by_current_url.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel.py": [
-    "posthog/queries/funnels/test/test_funnel.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_persons.py": [
-    "posthog/queries/funnels/test/test_funnel_persons.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_strict.py": [
-    "posthog/queries/funnels/test/test_funnel_strict.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_strict_persons.py": [
-    "posthog/queries/funnels/test/test_funnel_strict_persons.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_time_to_convert.py": [
-    "posthog/queries/funnels/test/test_funnel_time_to_convert.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_trends.py": [
-    "posthog/queries/funnels/test/test_funnel_trends.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_trends_persons.py": [
-    "posthog/queries/funnels/test/test_funnel_trends_persons.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_unordered.py": [
-    "posthog/queries/funnels/test/test_funnel_unordered.py"
-  ],
-  "posthog/queries/funnels/test/test_funnel_unordered_persons.py": [
-    "posthog/queries/funnels/test/test_funnel_unordered_persons.py"
-  ],
-  "posthog/queries/funnels/test/test_utils.py": [
-    "posthog/queries/funnels/test/test_utils.py"
-  ],
-  "posthog/queries/test/test_actor_base_query_personhog_routing.py": [
-    "posthog/queries/test/test_actor_base_query_personhog_routing.py"
-  ],
-  "posthog/queries/test/test_actors_base_query.py": [
-    "posthog/queries/test/test_actors_base_query.py"
-  ],
-  "posthog/queries/test/test_base.py": [
-    "posthog/queries/test/test_base.py"
-  ],
-  "posthog/queries/test/test_lifecycle.py": [
-    "posthog/queries/test/test_lifecycle.py"
-  ],
-  "posthog/queries/test/test_person_query.py": [
-    "posthog/queries/test/test_person_query.py"
-  ],
-  "posthog/queries/test/test_query_date_range.py": [
-    "posthog/queries/test/test_query_date_range.py"
-  ],
-  "posthog/queries/test/test_trends.py": [
-    "posthog/queries/test/test_trends.py"
-  ],
-  "posthog/queries/test/test_util.py": [
-    "posthog/queries/test/test_util.py"
-  ],
   "posthog/queries/time_to_see_data/hierarchy.py": [
     "posthog/queries/time_to_see_data/test/test_hierarchy.py",
     "posthog/queries/time_to_see_data/test/test_sessions.py"
@@ -10577,22 +8831,10 @@
   "posthog/queries/time_to_see_data/sessions.py": [
     "posthog/queries/time_to_see_data/test/test_sessions.py"
   ],
-  "posthog/queries/time_to_see_data/test/test_hierarchy.py": [
-    "posthog/queries/time_to_see_data/test/test_hierarchy.py"
-  ],
-  "posthog/queries/time_to_see_data/test/test_sessions.py": [
-    "posthog/queries/time_to_see_data/test/test_sessions.py"
-  ],
   "posthog/sampling.py": [
     "posthog/api/test/test_csp.py",
     "posthog/test/test_decorators.py",
     "posthog/test/test_sampling.py"
-  ],
-  "posthog/security/test/test_outbound_proxy.py": [
-    "posthog/security/test/test_outbound_proxy.py"
-  ],
-  "posthog/security/test/test_url_validation.py": [
-    "posthog/security/test/test_url_validation.py"
   ],
   "posthog/session_recordings/models/system_status_queries.py": [
     "ee/clickhouse/test/test_system_status.py",
@@ -10639,33 +8881,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/session_recordings/playlist_counters/test/test_recordings_that_match_playlist_filters.py": [
-    "posthog/session_recordings/playlist_counters/test/test_recordings_that_match_playlist_filters.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_person_property_hybrid_query.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_person_property_hybrid_query.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_session_recording_list_by_top_level_event_property.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_session_recording_list_by_top_level_event_property.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_session_recording_list_from_query.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_session_recording_list_from_query.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_session_recording_list_operands_queries.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_session_recording_list_operands_queries.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_session_recordings_list_by_cohort.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_session_recordings_list_by_cohort.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_session_recordings_list_by_group_properties.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_session_recordings_list_by_group_properties.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_session_recordings_query_date_range.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_session_recordings_query_date_range.py"
-  ],
-  "posthog/session_recordings/queries/test/listing_recordings/test_utils.py": [
-    "posthog/session_recordings/queries/test/listing_recordings/test_utils.py"
-  ],
   "posthog/session_recordings/queries/test/session_replay_sql.py": [
     "ee/clickhouse/queries/funnels/test/test_funnel_correlations_persons.py",
     "ee/hogai/tools/replay/test/test_filter_session_recordings.py",
@@ -10703,83 +8918,8 @@
     "posthog/tasks/test/test_usage_report.py",
     "posthog/temporal/tests/data_imports/test_import_data.py"
   ],
-  "posthog/session_recordings/queries/test/test_combine_session_ids.py": [
-    "posthog/session_recordings/queries/test/test_combine_session_ids.py"
-  ],
-  "posthog/session_recordings/queries/test/test_session_replay_events.py": [
-    "posthog/session_recordings/queries/test/test_session_replay_events.py"
-  ],
-  "posthog/session_recordings/queries/test/test_session_replay_summaries.py": [
-    "posthog/session_recordings/queries/test/test_session_replay_summaries.py"
-  ],
   "posthog/session_recordings/session_recording_helpers.py": [
     "posthog/session_recordings/test/test_session_recording_helpers.py"
-  ],
-  "posthog/session_recordings/test/recordings/test_recording_api_client.py": [
-    "posthog/session_recordings/test/recordings/test_recording_api_client.py"
-  ],
-  "posthog/session_recordings/test/recordings/test_recording_s3_client.py": [
-    "posthog/session_recordings/test/recordings/test_recording_s3_client.py"
-  ],
-  "posthog/session_recordings/test/test_clean_referer_url.py": [
-    "posthog/session_recordings/test/test_clean_referer_url.py"
-  ],
-  "posthog/session_recordings/test/test_data_retention.py": [
-    "posthog/session_recordings/test/test_data_retention.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_access_control.py": [
-    "posthog/session_recordings/test/test_session_recording_access_control.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_helpers.py": [
-    "posthog/session_recordings/test/test_session_recording_helpers.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_personhog.py": [
-    "posthog/session_recordings/test/test_session_recording_personhog.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_playlist.py": [
-    "posthog/session_recordings/test/test_session_recording_playlist.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_snapshots_api_blob_v2.py": [
-    "posthog/session_recordings/test/test_session_recording_snapshots_api_blob_v2.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_throttle.py": [
-    "posthog/session_recordings/test/test_session_recording_throttle.py"
-  ],
-  "posthog/session_recordings/test/test_session_recording_v2_service.py": [
-    "posthog/session_recordings/test/test_session_recording_v2_service.py"
-  ],
-  "posthog/session_recordings/test/test_session_recordings.py": [
-    "posthog/session_recordings/test/test_session_recordings.py"
-  ],
-  "posthog/session_recordings/test/test_session_recordings_comment_filters.py": [
-    "posthog/session_recordings/test/test_session_recordings_comment_filters.py"
-  ],
-  "posthog/session_recordings/test/test_session_recordings_sharing.py": [
-    "posthog/session_recordings/test/test_session_recordings_sharing.py"
-  ],
-  "posthog/session_recordings/test/test_synthetic_playlists.py": [
-    "posthog/session_recordings/test/test_synthetic_playlists.py"
-  ],
-  "posthog/tasks/alerts/detectors/test/test_detectors.py": [
-    "posthog/tasks/alerts/detectors/test/test_detectors.py"
-  ],
-  "posthog/tasks/alerts/test/test_alert_checks.py": [
-    "posthog/tasks/alerts/test/test_alert_checks.py"
-  ],
-  "posthog/tasks/alerts/test/test_detector_breakdowns.py": [
-    "posthog/tasks/alerts/test/test_detector_breakdowns.py"
-  ],
-  "posthog/tasks/alerts/test/test_schedule_restriction.py": [
-    "posthog/tasks/alerts/test/test_schedule_restriction.py"
-  ],
-  "posthog/tasks/alerts/test/test_trends_absolute_alerts.py": [
-    "posthog/tasks/alerts/test/test_trends_absolute_alerts.py"
-  ],
-  "posthog/tasks/alerts/test/test_trends_relative_alerts.py": [
-    "posthog/tasks/alerts/test/test_trends_relative_alerts.py"
-  ],
-  "posthog/tasks/alerts/test/test_validate_alert_config.py": [
-    "posthog/tasks/alerts/test/test_validate_alert_config.py"
   ],
   "posthog/tasks/heatmap_screenshot.py": [
     "posthog/tasks/test/test_heatmap_screenshot.py"
@@ -10790,87 +8930,6 @@
   ],
   "posthog/tasks/team_access_cache_tasks.py": [
     "posthog/tasks/test/test_team_access_cache_tasks.py"
-  ],
-  "posthog/tasks/test/test_activity_log.py": [
-    "posthog/tasks/test/test_activity_log.py"
-  ],
-  "posthog/tasks/test/test_async_migrations.py": [
-    "posthog/tasks/test/test_async_migrations.py"
-  ],
-  "posthog/tasks/test/test_auth_token_cache_verification.py": [
-    "posthog/tasks/test/test_auth_token_cache_verification.py"
-  ],
-  "posthog/tasks/test/test_calculate_cohort.py": [
-    "posthog/tasks/test/test_calculate_cohort.py"
-  ],
-  "posthog/tasks/test/test_deletion_tasks.py": [
-    "posthog/tasks/test/test_deletion_tasks.py"
-  ],
-  "posthog/tasks/test/test_early_access_feature.py": [
-    "posthog/tasks/test/test_early_access_feature.py"
-  ],
-  "posthog/tasks/test/test_email.py": [
-    "posthog/tasks/test/test_email.py"
-  ],
-  "posthog/tasks/test/test_exporter.py": [
-    "posthog/tasks/test/test_exporter.py"
-  ],
-  "posthog/tasks/test/test_feature_flag_metrics.py": [
-    "posthog/tasks/test/test_feature_flag_metrics.py"
-  ],
-  "posthog/tasks/test/test_feature_flag_sync.py": [
-    "posthog/tasks/test/test_feature_flag_sync.py"
-  ],
-  "posthog/tasks/test/test_flag_definitions_cache_tasks.py": [
-    "posthog/tasks/test/test_flag_definitions_cache_tasks.py"
-  ],
-  "posthog/tasks/test/test_heatmap_screenshot.py": [
-    "posthog/tasks/test/test_heatmap_screenshot.py"
-  ],
-  "posthog/tasks/test/test_hypercache_verification.py": [
-    "posthog/tasks/test/test_hypercache_verification.py"
-  ],
-  "posthog/tasks/test/test_integrations.py": [
-    "posthog/tasks/test/test_integrations.py"
-  ],
-  "posthog/tasks/test/test_llm_analytics_usage_report.py": [
-    "posthog/tasks/test/test_llm_analytics_usage_report.py"
-  ],
-  "posthog/tasks/test/test_poll_query_performance.py": [
-    "posthog/tasks/test/test_poll_query_performance.py"
-  ],
-  "posthog/tasks/test/test_process_scheduled_changes.py": [
-    "posthog/tasks/test/test_process_scheduled_changes.py"
-  ],
-  "posthog/tasks/test/test_pushgateway_task.py": [
-    "posthog/tasks/test/test_pushgateway_task.py"
-  ],
-  "posthog/tasks/test/test_remote_config.py": [
-    "posthog/tasks/test/test_remote_config.py"
-  ],
-  "posthog/tasks/test/test_scheduled.py": [
-    "posthog/tasks/test/test_scheduled.py"
-  ],
-  "posthog/tasks/test/test_stop_surveys_reached_target.py": [
-    "posthog/tasks/test/test_stop_surveys_reached_target.py"
-  ],
-  "posthog/tasks/test/test_task_registration.py": [
-    "posthog/tasks/test/test_task_registration.py"
-  ],
-  "posthog/tasks/test/test_team_access_cache_tasks.py": [
-    "posthog/tasks/test/test_team_access_cache_tasks.py"
-  ],
-  "posthog/tasks/test/test_update_survey_adaptive_sampling.py": [
-    "posthog/tasks/test/test_update_survey_adaptive_sampling.py"
-  ],
-  "posthog/tasks/test/test_update_survey_iteration.py": [
-    "posthog/tasks/test/test_update_survey_iteration.py"
-  ],
-  "posthog/tasks/test/test_usage_report.py": [
-    "posthog/tasks/test/test_usage_report.py"
-  ],
-  "posthog/tasks/test/test_warehouse.py": [
-    "posthog/tasks/test/test_warehouse.py"
   ],
   "posthog/tasks/test/utils.py": [
     "posthog/tasks/test/test_auth_token_cache_verification.py",
@@ -11210,12 +9269,6 @@
     "posthog/temporal/ai/video_segment_clustering/tests/test_workflow.py",
     "posthog/temporal/tests/ai/test_module_integrity.py"
   ],
-  "posthog/temporal/ai/video_segment_clustering/tests/test_signal_weight.py": [
-    "posthog/temporal/ai/video_segment_clustering/tests/test_signal_weight.py"
-  ],
-  "posthog/temporal/ai/video_segment_clustering/tests/test_workflow.py": [
-    "posthog/temporal/ai/video_segment_clustering/tests/test_workflow.py"
-  ],
   "posthog/temporal/backfill_materialized_property/activities.py": [
     "posthog/api/test/test_materialized_column_activity_logging.py",
     "posthog/temporal/tests/backfill_materialized_property/test_activities.py",
@@ -11405,12 +9458,6 @@
     "posthog/temporal/experiments/test_backfill.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/temporal/experiments/test_backfill.py": [
-    "posthog/temporal/experiments/test_backfill.py"
-  ],
-  "posthog/temporal/experiments/test_significance_transition.py": [
-    "posthog/temporal/experiments/test_significance_transition.py"
-  ],
   "posthog/temporal/experiments/utils.py": [
     "posthog/temporal/experiments/test_backfill.py",
     "posthog/temporal/experiments/test_significance_transition.py"
@@ -11461,9 +9508,6 @@
   "posthog/temporal/ingestion_acceptance_test/slack.py": [
     "posthog/temporal/tests/ingestion_acceptance_test/test_activities.py",
     "posthog/temporal/tests/ingestion_acceptance_test/test_slack.py"
-  ],
-  "posthog/temporal/ingestion_acceptance_test/test_cases_discovery.py": [
-    "posthog/temporal/ingestion_acceptance_test/test_cases_discovery.py"
   ],
   "posthog/temporal/llm_analytics/coordinator_metrics.py": [
     "posthog/temporal/llm_analytics/trace_clustering/tests/test_coordinator.py",
@@ -11646,18 +9690,6 @@
     "posthog/temporal/llm_analytics/sentiment/tests/test_model.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/temporal/llm_analytics/sentiment/tests/test_classify.py": [
-    "posthog/temporal/llm_analytics/sentiment/tests/test_classify.py"
-  ],
-  "posthog/temporal/llm_analytics/sentiment/tests/test_extraction.py": [
-    "posthog/temporal/llm_analytics/sentiment/tests/test_extraction.py"
-  ],
-  "posthog/temporal/llm_analytics/sentiment/tests/test_generation_activity.py": [
-    "posthog/temporal/llm_analytics/sentiment/tests/test_generation_activity.py"
-  ],
-  "posthog/temporal/llm_analytics/sentiment/tests/test_model.py": [
-    "posthog/temporal/llm_analytics/sentiment/tests/test_model.py"
-  ],
   "posthog/temporal/llm_analytics/sentiment/utils.py": [
     "posthog/temporal/llm_analytics/sentiment/tests/test_classify.py",
     "posthog/temporal/llm_analytics/sentiment/tests/test_generation_activity.py"
@@ -11670,18 +9702,6 @@
     "posthog/temporal/llm_analytics/test_team_discovery.py",
     "posthog/temporal/llm_analytics/trace_clustering/tests/test_coordinator.py",
     "posthog/temporal/llm_analytics/trace_summarization/tests/test_coordinator.py"
-  ],
-  "posthog/temporal/llm_analytics/test_message_utils.py": [
-    "posthog/temporal/llm_analytics/test_message_utils.py"
-  ],
-  "posthog/temporal/llm_analytics/test_metrics.py": [
-    "posthog/temporal/llm_analytics/test_metrics.py"
-  ],
-  "posthog/temporal/llm_analytics/test_run_evaluation.py": [
-    "posthog/temporal/llm_analytics/test_run_evaluation.py"
-  ],
-  "posthog/temporal/llm_analytics/test_team_discovery.py": [
-    "posthog/temporal/llm_analytics/test_team_discovery.py"
   ],
   "posthog/temporal/llm_analytics/trace_clustering/activities.py": [
     "posthog/temporal/llm_analytics/trace_clustering/tests/test_coordinator.py",
@@ -11760,27 +9780,6 @@
     "posthog/temporal/llm_analytics/trace_clustering/tests/test_workflow.py",
     "posthog/test/test_decorators.py"
   ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_clustering.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_clustering.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_coordinator.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_coordinator.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_data.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_data.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_event_emission.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_event_emission.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_labeling_agent.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_labeling_agent.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_metrics.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_metrics.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_clustering/tests/test_workflow.py": [
-    "posthog/temporal/llm_analytics/trace_clustering/tests/test_workflow.py"
-  ],
   "posthog/temporal/llm_analytics/trace_clustering/workflow.py": [
     "posthog/temporal/llm_analytics/trace_clustering/tests/test_coordinator.py"
   ],
@@ -11838,24 +9837,6 @@
     "posthog/temporal/llm_analytics/trace_summarization/tests/test_summarize_and_save.py",
     "posthog/temporal/llm_analytics/trace_summarization/tests/test_workflow.py"
   ],
-  "posthog/temporal/llm_analytics/trace_summarization/tests/test_coordinator.py": [
-    "posthog/temporal/llm_analytics/trace_summarization/tests/test_coordinator.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_summarization/tests/test_fetch_and_format.py": [
-    "posthog/temporal/llm_analytics/trace_summarization/tests/test_fetch_and_format.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_summarization/tests/test_metrics.py": [
-    "posthog/temporal/llm_analytics/trace_summarization/tests/test_metrics.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_summarization/tests/test_state.py": [
-    "posthog/temporal/llm_analytics/trace_summarization/tests/test_state.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_summarization/tests/test_summarize_and_save.py": [
-    "posthog/temporal/llm_analytics/trace_summarization/tests/test_summarize_and_save.py"
-  ],
-  "posthog/temporal/llm_analytics/trace_summarization/tests/test_workflow.py": [
-    "posthog/temporal/llm_analytics/trace_summarization/tests/test_workflow.py"
-  ],
   "posthog/temporal/llm_analytics/trace_summarization/utils.py": [
     "posthog/temporal/llm_analytics/trace_summarization/tests/test_coordinator.py",
     "posthog/temporal/llm_analytics/trace_summarization/tests/test_fetch_and_format.py",
@@ -11889,24 +9870,6 @@
     "posthog/temporal/messaging/test/test_realtime_cohort_calculation_workflow.py"
   ],
   "posthog/temporal/messaging/realtime_cohort_calculation_workflow_coordinator.py": [
-    "posthog/temporal/messaging/test/test_realtime_cohort_calculation_workflow.py"
-  ],
-  "posthog/temporal/messaging/test/test_backfill_precalculated_person_properties_coordinator_workflow.py": [
-    "posthog/temporal/messaging/test/test_backfill_precalculated_person_properties_coordinator_workflow.py"
-  ],
-  "posthog/temporal/messaging/test/test_backfill_precalculated_person_properties_helpers.py": [
-    "posthog/temporal/messaging/test/test_backfill_precalculated_person_properties_helpers.py"
-  ],
-  "posthog/temporal/messaging/test/test_backfill_precalculated_person_properties_workflow.py": [
-    "posthog/temporal/messaging/test/test_backfill_precalculated_person_properties_workflow.py"
-  ],
-  "posthog/temporal/messaging/test/test_filter_storage.py": [
-    "posthog/temporal/messaging/test/test_filter_storage.py"
-  ],
-  "posthog/temporal/messaging/test/test_parse_person_properties.py": [
-    "posthog/temporal/messaging/test/test_parse_person_properties.py"
-  ],
-  "posthog/temporal/messaging/test/test_realtime_cohort_calculation_workflow.py": [
     "posthog/temporal/messaging/test/test_realtime_cohort_calculation_workflow.py"
   ],
   "posthog/temporal/messaging/types.py": [
@@ -12173,59 +10136,8 @@
   "posthog/temporal/sync_person_distinct_ids/workflow.py": [
     "posthog/temporal/tests/sync_person_distinct_ids/test_workflow.py"
   ],
-  "posthog/temporal/tests/ai/test_chat_agent_activity.py": [
-    "posthog/temporal/tests/ai/test_chat_agent_activity.py"
-  ],
-  "posthog/temporal/tests/ai/test_module_integrity.py": [
-    "posthog/temporal/tests/ai/test_module_integrity.py"
-  ],
-  "posthog/temporal/tests/ai/test_research_agent_activity.py": [
-    "posthog/temporal/tests/ai/test_research_agent_activity.py"
-  ],
-  "posthog/temporal/tests/ai/test_sync_vectors.py": [
-    "posthog/temporal/tests/ai/test_sync_vectors.py"
-  ],
-  "posthog/temporal/tests/ai/test_validate_and_clamp_sentiment.py": [
-    "posthog/temporal/tests/ai/test_validate_and_clamp_sentiment.py"
-  ],
-  "posthog/temporal/tests/backfill_materialized_property/test_activities.py": [
-    "posthog/temporal/tests/backfill_materialized_property/test_activities.py"
-  ],
-  "posthog/temporal/tests/backfill_materialized_property/test_workflow.py": [
-    "posthog/temporal/tests/backfill_materialized_property/test_workflow.py"
-  ],
   "posthog/temporal/tests/cleanup_property_definitions/conftest.py": [
     "posthog/temporal/tests/cleanup_property_definitions/test_activities.py"
-  ],
-  "posthog/temporal/tests/cleanup_property_definitions/test_activities.py": [
-    "posthog/temporal/tests/cleanup_property_definitions/test_activities.py"
-  ],
-  "posthog/temporal/tests/cleanup_property_definitions/test_workflows.py": [
-    "posthog/temporal/tests/cleanup_property_definitions/test_workflows.py"
-  ],
-  "posthog/temporal/tests/common/test_asyncpa.py": [
-    "posthog/temporal/tests/common/test_asyncpa.py"
-  ],
-  "posthog/temporal/tests/common/test_combined_metrics_server.py": [
-    "posthog/temporal/tests/common/test_combined_metrics_server.py"
-  ],
-  "posthog/temporal/tests/common/test_error_tracking.py": [
-    "posthog/temporal/tests/common/test_error_tracking.py"
-  ],
-  "posthog/temporal/tests/common/test_health_server.py": [
-    "posthog/temporal/tests/common/test_health_server.py"
-  ],
-  "posthog/temporal/tests/common/test_interceptor.py": [
-    "posthog/temporal/tests/common/test_interceptor.py"
-  ],
-  "posthog/temporal/tests/common/test_liveness_tracker.py": [
-    "posthog/temporal/tests/common/test_liveness_tracker.py"
-  ],
-  "posthog/temporal/tests/common/test_logger.py": [
-    "posthog/temporal/tests/common/test_logger.py"
-  ],
-  "posthog/temporal/tests/common/test_utils.py": [
-    "posthog/temporal/tests/common/test_utils.py"
   ],
   "posthog/temporal/tests/data_imports/conftest.py": [
     "posthog/temporal/tests/data_imports/stripe/test_stripe_source.py",
@@ -12237,142 +10149,13 @@
   "posthog/temporal/tests/data_imports/stripe/data.py": [
     "posthog/temporal/tests/data_imports/stripe/test_stripe_source.py"
   ],
-  "posthog/temporal/tests/data_imports/stripe/test_stripe_source.py": [
-    "posthog/temporal/tests/data_imports/stripe/test_stripe_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_bigquery_source.py": [
-    "posthog/temporal/tests/data_imports/test_bigquery_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_end_to_end.py": [
-    "posthog/temporal/tests/data_imports/test_end_to_end.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_google_ads_source.py": [
-    "posthog/temporal/tests/data_imports/test_google_ads_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_hubspot_source.py": [
-    "posthog/temporal/tests/data_imports/test_hubspot_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_import_data.py": [
-    "posthog/temporal/tests/data_imports/test_import_data.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_mssql_source.py": [
-    "posthog/temporal/tests/data_imports/test_mssql_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_mysql_source.py": [
-    "posthog/temporal/tests/data_imports/test_mysql_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_postgres_source.py": [
-    "posthog/temporal/tests/data_imports/test_postgres_source.py"
-  ],
-  "posthog/temporal/tests/data_imports/test_snapchat_ads_utils.py": [
-    "posthog/temporal/tests/data_imports/test_snapchat_ads_utils.py"
-  ],
-  "posthog/temporal/tests/dlq_replay/test_activities.py": [
-    "posthog/temporal/tests/dlq_replay/test_activities.py"
-  ],
-  "posthog/temporal/tests/dlq_replay/test_workflow.py": [
-    "posthog/temporal/tests/dlq_replay/test_workflow.py"
-  ],
-  "posthog/temporal/tests/ingestion_acceptance_test/test_activities.py": [
-    "posthog/temporal/tests/ingestion_acceptance_test/test_activities.py"
-  ],
-  "posthog/temporal/tests/ingestion_acceptance_test/test_client.py": [
-    "posthog/temporal/tests/ingestion_acceptance_test/test_client.py"
-  ],
-  "posthog/temporal/tests/ingestion_acceptance_test/test_runner.py": [
-    "posthog/temporal/tests/ingestion_acceptance_test/test_runner.py"
-  ],
-  "posthog/temporal/tests/ingestion_acceptance_test/test_slack.py": [
-    "posthog/temporal/tests/ingestion_acceptance_test/test_slack.py"
-  ],
-  "posthog/temporal/tests/ingestion_acceptance_test/test_test_cases_discovery.py": [
-    "posthog/temporal/tests/ingestion_acceptance_test/test_test_cases_discovery.py"
-  ],
-  "posthog/temporal/tests/salesforce_enrichment/test_usage_workflow.py": [
-    "posthog/temporal/tests/salesforce_enrichment/test_usage_workflow.py"
-  ],
-  "posthog/temporal/tests/session_replay/delete_recordings/test_activities.py": [
-    "posthog/temporal/tests/session_replay/delete_recordings/test_activities.py"
-  ],
-  "posthog/temporal/tests/session_replay/delete_recordings/test_chunk_storage.py": [
-    "posthog/temporal/tests/session_replay/delete_recordings/test_chunk_storage.py"
-  ],
-  "posthog/temporal/tests/session_replay/delete_recordings/test_metrics.py": [
-    "posthog/temporal/tests/session_replay/delete_recordings/test_metrics.py"
-  ],
-  "posthog/temporal/tests/session_replay/delete_recordings/test_workflows.py": [
-    "posthog/temporal/tests/session_replay/delete_recordings/test_workflows.py"
-  ],
-  "posthog/temporal/tests/session_replay/export_recording/test_activities.py": [
-    "posthog/temporal/tests/session_replay/export_recording/test_activities.py"
-  ],
-  "posthog/temporal/tests/session_replay/export_recording/test_types.py": [
-    "posthog/temporal/tests/session_replay/export_recording/test_types.py"
-  ],
-  "posthog/temporal/tests/session_replay/export_recording/test_workflows.py": [
-    "posthog/temporal/tests/session_replay/export_recording/test_workflows.py"
-  ],
-  "posthog/temporal/tests/session_replay/import_recording/test_activities.py": [
-    "posthog/temporal/tests/session_replay/import_recording/test_activities.py"
-  ],
-  "posthog/temporal/tests/session_replay/import_recording/test_types.py": [
-    "posthog/temporal/tests/session_replay/import_recording/test_types.py"
-  ],
-  "posthog/temporal/tests/session_replay/import_recording/test_workflows.py": [
-    "posthog/temporal/tests/session_replay/import_recording/test_workflows.py"
-  ],
-  "posthog/temporal/tests/session_replay/rasterize_recording/test_activities.py": [
-    "posthog/temporal/tests/session_replay/rasterize_recording/test_activities.py"
-  ],
   "posthog/temporal/tests/session_replay/session_summary/conftest.py": [
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
-    "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py"
-  ],
-  "posthog/temporal/tests/session_replay/session_summary/test_calculate_video_segment_specs.py": [
-    "posthog/temporal/tests/session_replay/session_summary/test_calculate_video_segment_specs.py"
-  ],
-  "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py": [
-    "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py"
-  ],
-  "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py": [
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py"
   ],
   "posthog/temporal/tests/sync_person_distinct_ids/conftest.py": [
     "posthog/temporal/tests/sync_person_distinct_ids/test_activities.py",
     "posthog/temporal/tests/sync_person_distinct_ids/test_workflow.py"
-  ],
-  "posthog/temporal/tests/sync_person_distinct_ids/test_activities.py": [
-    "posthog/temporal/tests/sync_person_distinct_ids/test_activities.py"
-  ],
-  "posthog/temporal/tests/sync_person_distinct_ids/test_workflow.py": [
-    "posthog/temporal/tests/sync_person_distinct_ids/test_workflow.py"
-  ],
-  "posthog/temporal/tests/test_clickhouse.py": [
-    "posthog/temporal/tests/test_clickhouse.py"
-  ],
-  "posthog/temporal/tests/test_codec_server.py": [
-    "posthog/temporal/tests/test_codec_server.py"
-  ],
-  "posthog/temporal/tests/test_encryption_codec.py": [
-    "posthog/temporal/tests/test_encryption_codec.py"
-  ],
-  "posthog/temporal/tests/test_export_activities.py": [
-    "posthog/temporal/tests/test_export_activities.py"
-  ],
-  "posthog/temporal/tests/test_export_workflow.py": [
-    "posthog/temporal/tests/test_export_workflow.py"
-  ],
-  "posthog/temporal/tests/test_oauth.py": [
-    "posthog/temporal/tests/test_oauth.py"
-  ],
-  "posthog/temporal/tests/test_shutdown.py": [
-    "posthog/temporal/tests/test_shutdown.py"
-  ],
-  "posthog/temporal/tests/test_slo_interceptor.py": [
-    "posthog/temporal/tests/test_slo_interceptor.py"
-  ],
-  "posthog/temporal/tests/test_subscriptions_workflows.py": [
-    "posthog/temporal/tests/test_subscriptions_workflows.py"
   ],
   "posthog/temporal/tests/utils/datetimes.py": [
     "products/batch_exports/backend/tests/temporal/backfills/test_backfill_schedule.py",
@@ -12438,15 +10221,6 @@
   "posthog/temporal/tests/utils/workflow.py": [
     "posthog/temporal/tests/test_shutdown.py"
   ],
-  "posthog/temporal/tests/weekly_digest/test_activities.py": [
-    "posthog/temporal/tests/weekly_digest/test_activities.py"
-  ],
-  "posthog/temporal/tests/weekly_digest/test_types.py": [
-    "posthog/temporal/tests/weekly_digest/test_types.py"
-  ],
-  "posthog/temporal/tests/weekly_digest/test_workflows.py": [
-    "posthog/temporal/tests/weekly_digest/test_workflows.py"
-  ],
   "posthog/temporal/weekly_digest/activities.py": [
     "posthog/temporal/tests/weekly_digest/test_activities.py",
     "posthog/temporal/tests/weekly_digest/test_workflows.py"
@@ -12479,51 +10253,6 @@
     "posthog/test/activity_logging/test_tag_activity_logging.py",
     "posthog/test/activity_logging/test_user_activity_logging.py"
   ],
-  "posthog/test/activity_logging/test_activity_logging.py": [
-    "posthog/test/activity_logging/test_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_alert_activity_logging.py": [
-    "posthog/test/activity_logging/test_alert_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_annotation_activity_logging.py": [
-    "posthog/test/activity_logging/test_annotation_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_batch_export_activity_logging.py": [
-    "posthog/test/activity_logging/test_batch_export_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_batch_import_activity_logging.py": [
-    "posthog/test/activity_logging/test_batch_import_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_external_data_schema_activity_logging.py": [
-    "posthog/test/activity_logging/test_external_data_schema_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_external_data_source_activity_logging.py": [
-    "posthog/test/activity_logging/test_external_data_source_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_feature_flag_activity_logging.py": [
-    "posthog/test/activity_logging/test_feature_flag_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_insight_activity_logging.py": [
-    "posthog/test/activity_logging/test_insight_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_organization_activity_logging.py": [
-    "posthog/test/activity_logging/test_organization_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_organization_domain_activity_logging.py": [
-    "posthog/test/activity_logging/test_organization_domain_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_person_activity_logging.py": [
-    "posthog/test/activity_logging/test_person_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_personal_api_key_activity_logging.py": [
-    "posthog/test/activity_logging/test_personal_api_key_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_tag_activity_logging.py": [
-    "posthog/test/activity_logging/test_tag_activity_logging.py"
-  ],
-  "posthog/test/activity_logging/test_user_activity_logging.py": [
-    "posthog/test/activity_logging/test_user_activity_logging.py"
-  ],
   "posthog/test/db_context_capturing.py": [
     "ee/api/test/test_insight.py",
     "posthog/api/test/test_feature_flag.py",
@@ -12534,204 +10263,6 @@
     "posthog/tasks/test/test_email.py",
     "posthog/tasks/test/test_usage_report.py",
     "posthog/temporal/tests/data_imports/test_import_data.py"
-  ],
-  "posthog/test/test_backfill_hogflow_billable_action_types.py": [
-    "posthog/test/test_backfill_hogflow_billable_action_types.py"
-  ],
-  "posthog/test/test_base.py": [
-    "posthog/test/test_base.py"
-  ],
-  "posthog/test/test_cache_utils.py": [
-    "posthog/test/test_cache_utils.py"
-  ],
-  "posthog/test/test_celery.py": [
-    "posthog/test/test_celery.py"
-  ],
-  "posthog/test/test_cloud_utils.py": [
-    "posthog/test/test_cloud_utils.py"
-  ],
-  "posthog/test/test_cohort_model.py": [
-    "posthog/test/test_cohort_model.py"
-  ],
-  "posthog/test/test_cohort_validation.py": [
-    "posthog/test/test_cohort_validation.py"
-  ],
-  "posthog/test/test_database_healthcheck.py": [
-    "posthog/test/test_database_healthcheck.py"
-  ],
-  "posthog/test/test_datetime.py": [
-    "posthog/test/test_datetime.py"
-  ],
-  "posthog/test/test_dbrouter.py": [
-    "posthog/test/test_dbrouter.py"
-  ],
-  "posthog/test/test_decorators.py": [
-    "posthog/test/test_decorators.py"
-  ],
-  "posthog/test/test_domain_connect.py": [
-    "posthog/test/test_domain_connect.py"
-  ],
-  "posthog/test/test_element_model.py": [
-    "posthog/test/test_element_model.py"
-  ],
-  "posthog/test/test_email.py": [
-    "posthog/test/test_email.py"
-  ],
-  "posthog/test/test_event_usage.py": [
-    "posthog/test/test_event_usage.py"
-  ],
-  "posthog/test/test_export_renderer_auth.py": [
-    "posthog/test/test_export_renderer_auth.py"
-  ],
-  "posthog/test/test_feature_flag_analytics.py": [
-    "posthog/test/test_feature_flag_analytics.py"
-  ],
-  "posthog/test/test_flags_redis_cache.py": [
-    "posthog/test/test_flags_redis_cache.py"
-  ],
-  "posthog/test/test_get_context_for_template.py": [
-    "posthog/test/test_get_context_for_template.py"
-  ],
-  "posthog/test/test_gzip_middleware.py": [
-    "posthog/test/test_gzip_middleware.py"
-  ],
-  "posthog/test/test_health.py": [
-    "posthog/test/test_health.py"
-  ],
-  "posthog/test/test_instance_setting_model.py": [
-    "posthog/test/test_instance_setting_model.py"
-  ],
-  "posthog/test/test_internal_api_auth.py": [
-    "posthog/test/test_internal_api_auth.py"
-  ],
-  "posthog/test/test_journeys.py": [
-    "posthog/test/test_journeys.py"
-  ],
-  "posthog/test/test_js_snippet_versioning.py": [
-    "posthog/test/test_js_snippet_versioning.py"
-  ],
-  "posthog/test/test_metrics.py": [
-    "posthog/test/test_metrics.py"
-  ],
-  "posthog/test/test_middleware.py": [
-    "posthog/test/test_middleware.py"
-  ],
-  "posthog/test/test_migration_0218.py": [
-    "posthog/test/test_migration_0218.py"
-  ],
-  "posthog/test/test_migration_0219.py": [
-    "posthog/test/test_migration_0219.py"
-  ],
-  "posthog/test/test_migration_0220.py": [
-    "posthog/test/test_migration_0220.py"
-  ],
-  "posthog/test/test_migration_0222.py": [
-    "posthog/test/test_migration_0222.py"
-  ],
-  "posthog/test/test_migration_0227.py": [
-    "posthog/test/test_migration_0227.py"
-  ],
-  "posthog/test/test_migration_0228.py": [
-    "posthog/test/test_migration_0228.py"
-  ],
-  "posthog/test/test_migration_0259.py": [
-    "posthog/test/test_migration_0259.py"
-  ],
-  "posthog/test/test_migration_0273.py": [
-    "posthog/test/test_migration_0273.py"
-  ],
-  "posthog/test/test_migration_0287.py": [
-    "posthog/test/test_migration_0287.py"
-  ],
-  "posthog/test/test_migration_0385.py": [
-    "posthog/test/test_migration_0385.py"
-  ],
-  "posthog/test/test_migration_0421.py": [
-    "posthog/test/test_migration_0421.py"
-  ],
-  "posthog/test/test_migration_0459.py": [
-    "posthog/test/test_migration_0459.py"
-  ],
-  "posthog/test/test_migration_0766.py": [
-    "posthog/test/test_migration_0766.py"
-  ],
-  "posthog/test/test_migration_0838.py": [
-    "posthog/test/test_migration_0838.py"
-  ],
-  "posthog/test/test_migration_0999.py": [
-    "posthog/test/test_migration_0999.py"
-  ],
-  "posthog/test/test_otel_instrumentation.py": [
-    "posthog/test/test_otel_instrumentation.py"
-  ],
-  "posthog/test/test_permissions.py": [
-    "posthog/test/test_permissions.py"
-  ],
-  "posthog/test/test_plugin.py": [
-    "posthog/test/test_plugin.py"
-  ],
-  "posthog/test/test_plugin_log_entry.py": [
-    "posthog/test/test_plugin_log_entry.py"
-  ],
-  "posthog/test/test_product_db_router.py": [
-    "posthog/test/test_product_db_router.py"
-  ],
-  "posthog/test/test_products.py": [
-    "posthog/test/test_products.py"
-  ],
-  "posthog/test/test_rate_limit.py": [
-    "posthog/test/test_rate_limit.py"
-  ],
-  "posthog/test/test_redis.py": [
-    "posthog/test/test_redis.py"
-  ],
-  "posthog/test/test_redis_admin_views.py": [
-    "posthog/test/test_redis_admin_views.py"
-  ],
-  "posthog/test/test_renderers.py": [
-    "posthog/test/test_renderers.py"
-  ],
-  "posthog/test/test_sampling.py": [
-    "posthog/test/test_sampling.py"
-  ],
-  "posthog/test/test_schema_helpers.py": [
-    "posthog/test/test_schema_helpers.py"
-  ],
-  "posthog/test/test_survey_question_ids.py": [
-    "posthog/test/test_survey_question_ids.py"
-  ],
-  "posthog/test/test_team.py": [
-    "posthog/test/test_team.py"
-  ],
-  "posthog/test/test_templatetags.py": [
-    "posthog/test/test_templatetags.py"
-  ],
-  "posthog/test/test_turnstile.py": [
-    "posthog/test/test_turnstile.py"
-  ],
-  "posthog/test/test_two_factor_enforcement.py": [
-    "posthog/test/test_two_factor_enforcement.py"
-  ],
-  "posthog/test/test_urls.py": [
-    "posthog/test/test_urls.py"
-  ],
-  "posthog/test/test_user_permissions.py": [
-    "posthog/test/test_user_permissions.py"
-  ],
-  "posthog/test/test_user_repo_preference.py": [
-    "posthog/test/test_user_repo_preference.py"
-  ],
-  "posthog/test/test_utils.py": [
-    "posthog/test/test_utils.py"
-  ],
-  "posthog/test/test_utils_cors.py": [
-    "posthog/test/test_utils_cors.py"
-  ],
-  "posthog/test/test_version_requirement.py": [
-    "posthog/test/test_version_requirement.py"
-  ],
-  "posthog/test/test_workos_radar.py": [
-    "posthog/test/test_workos_radar.py"
   ],
   "posthog/turnstile.py": [
     "posthog/admin/test_admin.py",
@@ -12792,16 +10323,7 @@
     "posthog/test/test_decorators.py",
     "products/alerts/backend/test_max_tools.py"
   ],
-  "products/alerts/backend/test_max_tools.py": [
-    "products/alerts/backend/test_max_tools.py"
-  ],
   "products/analytics_platform/backend/lazy_computation/lazy_computation_transformer.py": [
-    "products/analytics_platform/backend/lazy_computation/tests/test_lazy_computation_transformer.py"
-  ],
-  "products/analytics_platform/backend/lazy_computation/tests/test_lazy_computation_executor.py": [
-    "products/analytics_platform/backend/lazy_computation/tests/test_lazy_computation_executor.py"
-  ],
-  "products/analytics_platform/backend/lazy_computation/tests/test_lazy_computation_transformer.py": [
     "products/analytics_platform/backend/lazy_computation/tests/test_lazy_computation_transformer.py"
   ],
   "products/batch_exports/backend/api/destination_tests/azure_blob.py": [
@@ -14165,57 +11687,12 @@
     "products/batch_exports/backend/tests/temporal/test_metrics.py",
     "products/data_warehouse/backend/api/test/test_external_data_schema.py"
   ],
-  "products/batch_exports/backend/tests/api/destination_tests/test_azure_blob_destination_tests.py": [
-    "products/batch_exports/backend/tests/api/destination_tests/test_azure_blob_destination_tests.py"
-  ],
-  "products/batch_exports/backend/tests/api/destination_tests/test_bigquery_destination_tests.py": [
-    "products/batch_exports/backend/tests/api/destination_tests/test_bigquery_destination_tests.py"
-  ],
-  "products/batch_exports/backend/tests/api/destination_tests/test_databricks_destination_tests.py": [
-    "products/batch_exports/backend/tests/api/destination_tests/test_databricks_destination_tests.py"
-  ],
-  "products/batch_exports/backend/tests/api/destination_tests/test_s3_destination_tests.py": [
-    "products/batch_exports/backend/tests/api/destination_tests/test_s3_destination_tests.py"
-  ],
-  "products/batch_exports/backend/tests/api/destination_tests/test_snowflake_destination_tests.py": [
-    "products/batch_exports/backend/tests/api/destination_tests/test_snowflake_destination_tests.py"
-  ],
   "products/batch_exports/backend/tests/temporal/backfills/conftest.py": [
     "products/batch_exports/backend/tests/temporal/backfills/test_backfill_schedule.py",
     "products/batch_exports/backend/tests/temporal/backfills/test_backfill_workflow.py"
   ],
-  "products/batch_exports/backend/tests/temporal/backfills/test_align_timestamp_to_interval.py": [
-    "products/batch_exports/backend/tests/temporal/backfills/test_align_timestamp_to_interval.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/backfills/test_backfill_range.py": [
-    "products/batch_exports/backend/tests/temporal/backfills/test_backfill_range.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/backfills/test_backfill_schedule.py": [
-    "products/batch_exports/backend/tests/temporal/backfills/test_backfill_schedule.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/backfills/test_backfill_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/backfills/test_backfill_workflow.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/backfills/test_get_backfill_info.py": [
-    "products/batch_exports/backend/tests/temporal/backfills/test_get_backfill_info.py"
-  ],
   "products/batch_exports/backend/tests/temporal/destinations/azure_blob/conftest.py": [
     "products/batch_exports/backend/tests/api/destination_tests/test_azure_blob_destination_tests.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_activity.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_activity.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_utils.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_utils.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_workflow_error_states.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_workflow_error_states.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_workflow_execution.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_workflow_execution.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_workflow_with_azure_account.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_workflow_with_azure_account.py"
   ],
   "products/batch_exports/backend/tests/temporal/destinations/azure_blob/utils.py": [
     "products/batch_exports/backend/tests/temporal/destinations/azure_blob/test_activity.py",
@@ -14225,18 +11702,6 @@
   "products/batch_exports/backend/tests/temporal/destinations/base_destination_tests.py": [
     "products/batch_exports/backend/tests/temporal/destinations/databricks/test_workflow.py"
   ],
-  "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_activity.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_activity.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_bigquery_utils.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_bigquery_utils.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_client.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_client.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_workflow.py"
-  ],
   "products/batch_exports/backend/tests/temporal/destinations/bigquery/utils.py": [
     "products/batch_exports/backend/tests/api/destination_tests/test_bigquery_destination_tests.py",
     "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_activity.py",
@@ -14244,45 +11709,9 @@
     "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_client.py",
     "products/batch_exports/backend/tests/temporal/destinations/bigquery/test_workflow.py"
   ],
-  "products/batch_exports/backend/tests/temporal/destinations/databricks/test_client.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/databricks/test_client.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/databricks/test_utils.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/databricks/test_utils.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/databricks/test_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/databricks/test_workflow.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/postgres/test_activity.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/postgres/test_activity.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/postgres/test_postgres_client.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/postgres/test_postgres_client.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/postgres/test_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/postgres/test_workflow.py"
-  ],
   "products/batch_exports/backend/tests/temporal/destinations/postgres/utils.py": [
     "products/batch_exports/backend/tests/temporal/destinations/postgres/test_activity.py",
     "products/batch_exports/backend/tests/temporal/destinations/postgres/test_workflow.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/s3/test_activity.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/s3/test_activity.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/s3/test_activity_with_gcs_bucket.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/s3/test_activity_with_gcs_bucket.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_error_handling.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_error_handling.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_gcs_bucket.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_gcs_bucket.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_minio_bucket.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_minio_bucket.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_s3_bucket.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_s3_bucket.py"
   ],
   "products/batch_exports/backend/tests/temporal/destinations/s3/utils.py": [
     "products/batch_exports/backend/tests/api/destination_tests/test_bigquery_destination_tests.py",
@@ -14294,81 +11723,15 @@
     "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_minio_bucket.py",
     "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow_with_s3_bucket.py"
   ],
-  "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_activity_e2e.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_activity_e2e.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_auth.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_auth.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_client.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_client.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow_e2e.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow_e2e.py"
-  ],
   "products/batch_exports/backend/tests/temporal/destinations/snowflake/utils.py": [
     "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_activity_e2e.py",
     "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_client.py",
     "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow.py",
     "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow_e2e.py"
   ],
-  "products/batch_exports/backend/tests/temporal/destinations/test_http_batch_export_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/test_http_batch_export_workflow.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/test_utils.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/test_utils.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/workflows/test_activity.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/workflows/test_activity.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/destinations/workflows/test_workflow.py": [
-    "products/batch_exports/backend/tests/temporal/destinations/workflows/test_workflow.py"
-  ],
   "products/batch_exports/backend/tests/temporal/destinations/workflows/utils.py": [
     "products/batch_exports/backend/tests/temporal/destinations/workflows/test_activity.py",
     "products/batch_exports/backend/tests/temporal/destinations/workflows/test_workflow.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/pipeline/test_entrypoint.py": [
-    "products/batch_exports/backend/tests/temporal/pipeline/test_entrypoint.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/pipeline/test_internal_stage.py": [
-    "products/batch_exports/backend/tests/temporal/pipeline/test_internal_stage.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/pipeline/test_table.py": [
-    "products/batch_exports/backend/tests/temporal/pipeline/test_table.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/pipeline/test_transformer.py": [
-    "products/batch_exports/backend/tests/temporal/pipeline/test_transformer.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_batch_export_utils.py": [
-    "products/batch_exports/backend/tests/temporal/test_batch_export_utils.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_batch_exports.py": [
-    "products/batch_exports/backend/tests/temporal/test_batch_exports.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_heartbeat.py": [
-    "products/batch_exports/backend/tests/temporal/test_heartbeat.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_metrics.py": [
-    "products/batch_exports/backend/tests/temporal/test_metrics.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_monitoring.py": [
-    "products/batch_exports/backend/tests/temporal/test_monitoring.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_record_batch_model.py": [
-    "products/batch_exports/backend/tests/temporal/test_record_batch_model.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_run_updates.py": [
-    "products/batch_exports/backend/tests/temporal/test_run_updates.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_spmc.py": [
-    "products/batch_exports/backend/tests/temporal/test_spmc.py"
-  ],
-  "products/batch_exports/backend/tests/temporal/test_temporary_file.py": [
-    "products/batch_exports/backend/tests/temporal/test_temporary_file.py"
   ],
   "products/batch_exports/backend/tests/temporal/utils/clickhouse.py": [
     "products/batch_exports/backend/tests/temporal/backfills/test_backfill_workflow.py",
@@ -14439,16 +11802,10 @@
     "products/batch_exports/backend/tests/temporal/destinations/snowflake/test_workflow.py",
     "products/batch_exports/backend/tests/temporal/destinations/test_http_batch_export_workflow.py"
   ],
-  "products/batch_exports/backend/tests/test_service.py": [
-    "products/batch_exports/backend/tests/test_service.py"
-  ],
   "products/cdp/backend/max_tools.py": [
     "products/cdp/backend/test_max_tools.py"
   ],
   "products/cdp/backend/prompts.py": [
-    "products/cdp/backend/test_max_tools.py"
-  ],
-  "products/cdp/backend/test_max_tools.py": [
     "products/cdp/backend/test_max_tools.py"
   ],
   "products/conversations/backend/ai/graph.py": [
@@ -14478,54 +11835,6 @@
   "products/conversations/backend/api/serializers.py": [
     "posthog/test/test_decorators.py",
     "products/conversations/backend/api/tests/test_restore.py"
-  ],
-  "products/conversations/backend/api/tests/test_cache.py": [
-    "products/conversations/backend/api/tests/test_cache.py"
-  ],
-  "products/conversations/backend/api/tests/test_email_endpoints.py": [
-    "products/conversations/backend/api/tests/test_email_endpoints.py"
-  ],
-  "products/conversations/backend/api/tests/test_events.py": [
-    "products/conversations/backend/api/tests/test_events.py"
-  ],
-  "products/conversations/backend/api/tests/test_external.py": [
-    "products/conversations/backend/api/tests/test_external.py"
-  ],
-  "products/conversations/backend/api/tests/test_formatting.py": [
-    "products/conversations/backend/api/tests/test_formatting.py"
-  ],
-  "products/conversations/backend/api/tests/test_reaction_backfill.py": [
-    "products/conversations/backend/api/tests/test_reaction_backfill.py"
-  ],
-  "products/conversations/backend/api/tests/test_restore.py": [
-    "products/conversations/backend/api/tests/test_restore.py"
-  ],
-  "products/conversations/backend/api/tests/test_signals.py": [
-    "products/conversations/backend/api/tests/test_signals.py"
-  ],
-  "products/conversations/backend/api/tests/test_slack_endpoints.py": [
-    "products/conversations/backend/api/tests/test_slack_endpoints.py"
-  ],
-  "products/conversations/backend/api/tests/test_slack_image_sync.py": [
-    "products/conversations/backend/api/tests/test_slack_image_sync.py"
-  ],
-  "products/conversations/backend/api/tests/test_slack_message_routing.py": [
-    "products/conversations/backend/api/tests/test_slack_message_routing.py"
-  ],
-  "products/conversations/backend/api/tests/test_slack_team_member_detection.py": [
-    "products/conversations/backend/api/tests/test_slack_team_member_detection.py"
-  ],
-  "products/conversations/backend/api/tests/test_slack_token_storage.py": [
-    "products/conversations/backend/api/tests/test_slack_token_storage.py"
-  ],
-  "products/conversations/backend/api/tests/test_support_slack.py": [
-    "products/conversations/backend/api/tests/test_support_slack.py"
-  ],
-  "products/conversations/backend/api/tests/test_tickets.py": [
-    "products/conversations/backend/api/tests/test_tickets.py"
-  ],
-  "products/conversations/backend/api/tests/test_widget.py": [
-    "products/conversations/backend/api/tests/test_widget.py"
   ],
   "products/conversations/backend/api/tickets.py": [
     "posthog/test/test_decorators.py"
@@ -14595,9 +11904,6 @@
   "products/customer_analytics/backend/api/serializers.py": [
     "posthog/test/test_decorators.py"
   ],
-  "products/customer_analytics/backend/api/test_views.py": [
-    "products/customer_analytics/backend/api/test_views.py"
-  ],
   "products/customer_analytics/backend/api/utils.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -14619,9 +11925,6 @@
   "products/dashboards/backend/api/dashboard_templates.py": [
     "posthog/test/test_decorators.py"
   ],
-  "products/dashboards/backend/api/test/test_dashboard_templates.py": [
-    "products/dashboards/backend/api/test/test_dashboard_templates.py"
-  ],
   "products/data_modeling/backend/api/__init__.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -14634,36 +11937,12 @@
   "products/data_modeling/backend/api/node.py": [
     "posthog/test/test_decorators.py"
   ],
-  "products/data_modeling/backend/api/test/test_dag_api.py": [
-    "products/data_modeling/backend/api/test/test_dag_api.py"
-  ],
-  "products/data_modeling/backend/api/test/test_node_api.py": [
-    "products/data_modeling/backend/api/test/test_node_api.py"
-  ],
   "products/data_modeling/backend/graph.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "products/data_modeling/backend/migrations/test/test_migration_0006.py": [
-    "products/data_modeling/backend/migrations/test/test_migration_0006.py"
   ],
   "products/data_modeling/backend/services/saved_query_dag_sync.py": [
     "posthog/test/test_decorators.py",
     "products/data_modeling/backend/test/test_saved_query_dag_sync.py"
-  ],
-  "products/data_modeling/backend/test/test_cycle_detection.py": [
-    "products/data_modeling/backend/test/test_cycle_detection.py"
-  ],
-  "products/data_modeling/backend/test/test_dag_mismatch.py": [
-    "products/data_modeling/backend/test/test_dag_mismatch.py"
-  ],
-  "products/data_modeling/backend/test/test_node.py": [
-    "products/data_modeling/backend/test/test_node.py"
-  ],
-  "products/data_modeling/backend/test/test_saved_query_dag_sync.py": [
-    "products/data_modeling/backend/test/test_saved_query_dag_sync.py"
-  ],
-  "products/data_modeling/backend/test/test_schedule.py": [
-    "products/data_modeling/backend/test/test_schedule.py"
   ],
   "products/data_warehouse/backend/api/data_modeling_job.py": [
     "posthog/test/test_decorators.py"
@@ -14705,57 +11984,6 @@
     "posthog/test/test_decorators.py",
     "products/data_warehouse/backend/api/test/test_external_data_source.py"
   ],
-  "products/data_warehouse/backend/api/test/test_data_warehouse.py": [
-    "products/data_warehouse/backend/api/test/test_data_warehouse.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_datamodelingjob.py": [
-    "products/data_warehouse/backend/api/test/test_datamodelingjob.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_external_data_schema.py": [
-    "products/data_warehouse/backend/api/test/test_external_data_schema.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_external_data_source.py": [
-    "products/data_warehouse/backend/api/test/test_external_data_source.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_external_data_source_access_control.py": [
-    "products/data_warehouse/backend/api/test/test_external_data_source_access_control.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_external_data_source_end_to_end.py": [
-    "products/data_warehouse/backend/api/test/test_external_data_source_end_to_end.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_fix_hogql.py": [
-    "products/data_warehouse/backend/api/test/test_fix_hogql.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_lineage.py": [
-    "products/data_warehouse/backend/api/test/test_lineage.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_managed_viewset.py": [
-    "products/data_warehouse/backend/api/test/test_managed_viewset.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_modeling.py": [
-    "products/data_warehouse/backend/api/test/test_modeling.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_public_source_configs.py": [
-    "products/data_warehouse/backend/api/test/test_public_source_configs.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_query_tab_state.py": [
-    "products/data_warehouse/backend/api/test/test_query_tab_state.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_saved_query.py": [
-    "products/data_warehouse/backend/api/test/test_saved_query.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_saved_query_draft.py": [
-    "products/data_warehouse/backend/api/test/test_saved_query_draft.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_table.py": [
-    "products/data_warehouse/backend/api/test/test_table.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_view.py": [
-    "products/data_warehouse/backend/api/test/test_view.py"
-  ],
-  "products/data_warehouse/backend/api/test/test_view_link.py": [
-    "products/data_warehouse/backend/api/test/test_view_link.py"
-  ],
   "products/data_warehouse/backend/api/test/utils.py": [
     "products/data_warehouse/backend/api/test/test_external_data_schema.py"
   ],
@@ -14767,9 +11995,6 @@
     "products/data_warehouse/backend/api/test/test_external_data_schema.py",
     "products/data_warehouse/backend/api/test/test_external_data_source.py",
     "products/data_warehouse/backend/api/test/test_table.py"
-  ],
-  "products/data_warehouse/backend/external_data_source/test/test_webhooks.py": [
-    "products/data_warehouse/backend/external_data_source/test/test_webhooks.py"
   ],
   "products/data_warehouse/backend/external_data_source/webhooks.py": [
     "posthog/test/test_decorators.py",
@@ -14785,27 +12010,6 @@
   "products/data_warehouse/backend/models/ssh_tunnel.py": [
     "posthog/temporal/tests/data_imports/test_import_data.py",
     "products/data_warehouse/backend/models/test/test_ssh_tunnel.py"
-  ],
-  "products/data_warehouse/backend/models/test/test_managed_viewset.py": [
-    "products/data_warehouse/backend/models/test/test_managed_viewset.py"
-  ],
-  "products/data_warehouse/backend/models/test/test_modeling.py": [
-    "products/data_warehouse/backend/models/test/test_modeling.py"
-  ],
-  "products/data_warehouse/backend/models/test/test_ssh_tunnel.py": [
-    "products/data_warehouse/backend/models/test/test_ssh_tunnel.py"
-  ],
-  "products/data_warehouse/backend/models/test/test_table.py": [
-    "products/data_warehouse/backend/models/test/test_table.py"
-  ],
-  "products/data_warehouse/backend/test/test_hogql_fixer_ai.py": [
-    "products/data_warehouse/backend/test/test_hogql_fixer_ai.py"
-  ],
-  "products/data_warehouse/backend/test/test_saved_query_dag_sync_integration.py": [
-    "products/data_warehouse/backend/test/test_saved_query_dag_sync_integration.py"
-  ],
-  "products/data_warehouse/backend/test/test_saved_query_schedule.py": [
-    "products/data_warehouse/backend/test/test_saved_query_schedule.py"
   ],
   "products/data_warehouse/backend/test/utils.py": [
     "posthog/hogql_queries/insights/funnels/test/test_funnel.py",
@@ -14838,24 +12042,12 @@
     "posthog/temporal/tests/data_imports/test_end_to_end.py",
     "products/data_warehouse/backend/webhook_consumer/test/test_consumer.py"
   ],
-  "products/data_warehouse/backend/webhook_consumer/test/test_buffer.py": [
-    "products/data_warehouse/backend/webhook_consumer/test/test_buffer.py"
-  ],
-  "products/data_warehouse/backend/webhook_consumer/test/test_consumer.py": [
-    "products/data_warehouse/backend/webhook_consumer/test/test_consumer.py"
-  ],
-  "products/data_warehouse/backend/webhook_consumer/test/test_writer.py": [
-    "products/data_warehouse/backend/webhook_consumer/test/test_writer.py"
-  ],
   "products/data_warehouse/backend/webhook_consumer/writer.py": [
     "posthog/temporal/tests/data_imports/test_end_to_end.py",
     "products/data_warehouse/backend/webhook_consumer/test/test_consumer.py",
     "products/data_warehouse/backend/webhook_consumer/test/test_writer.py"
   ],
   "products/data_warehouse/dags/managed_viewset_sync.py": [
-    "products/data_warehouse/dags/tests/test_managed_viewset_sync.py"
-  ],
-  "products/data_warehouse/dags/tests/test_managed_viewset_sync.py": [
     "products/data_warehouse/dags/tests/test_managed_viewset_sync.py"
   ],
   "products/desktop_recordings/backend/admin.py": [
@@ -14875,12 +12067,6 @@
   ],
   "products/desktop_recordings/backend/services/recall_client.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "products/desktop_recordings/backend/tests/test_api.py": [
-    "products/desktop_recordings/backend/tests/test_api.py"
-  ],
-  "products/desktop_recordings/backend/tests/test_models.py": [
-    "products/desktop_recordings/backend/tests/test_models.py"
   ],
   "products/endpoints/backend/admin.py": [
     "posthog/admin/test_admin.py"
@@ -14924,18 +12110,6 @@
   "products/error_tracking/backend/api/symbol_sets.py": [
     "posthog/test/test_decorators.py"
   ],
-  "products/error_tracking/backend/hogql_queries/test/test_error_tracking_breakdowns_query_runner.py": [
-    "products/error_tracking/backend/hogql_queries/test/test_error_tracking_breakdowns_query_runner.py"
-  ],
-  "products/error_tracking/backend/hogql_queries/test/test_error_tracking_issue_correlation_query_runner.py": [
-    "products/error_tracking/backend/hogql_queries/test/test_error_tracking_issue_correlation_query_runner.py"
-  ],
-  "products/error_tracking/backend/hogql_queries/test/test_error_tracking_query_runner.py": [
-    "products/error_tracking/backend/hogql_queries/test/test_error_tracking_query_runner.py"
-  ],
-  "products/error_tracking/backend/hogql_queries/test/test_error_tracking_query_runner_v2.py": [
-    "products/error_tracking/backend/hogql_queries/test/test_error_tracking_query_runner_v2.py"
-  ],
   "products/error_tracking/backend/tools/search_issues.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -14974,9 +12148,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session.py",
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py",
-    "products/error_tracking/backend/tools/test/test_search_issues.py"
-  ],
-  "products/error_tracking/backend/tools/test/test_search_issues.py": [
     "products/error_tracking/backend/tools/test/test_search_issues.py"
   ],
   "products/experiments/backend/experiment_saved_metric_service.py": [
@@ -15164,47 +12335,8 @@
     "posthog/api/test/test_web_experiment.py",
     "posthog/test/test_decorators.py"
   ],
-  "products/experiments/backend/test/test_api.py": [
-    "products/experiments/backend/test/test_api.py"
-  ],
-  "products/experiments/backend/test/test_contracts.py": [
-    "products/experiments/backend/test/test_contracts.py"
-  ],
-  "products/experiments/backend/test/test_experiment_saved_metric_service.py": [
-    "products/experiments/backend/test/test_experiment_saved_metric_service.py"
-  ],
-  "products/experiments/backend/test/test_experiment_service.py": [
-    "products/experiments/backend/test/test_experiment_service.py"
-  ],
-  "products/experiments/backend/test/test_experiment_summary_tool.py": [
-    "products/experiments/backend/test/test_experiment_summary_tool.py"
-  ],
-  "products/experiments/backend/test/test_max_tools.py": [
-    "products/experiments/backend/test/test_max_tools.py"
-  ],
-  "products/experiments/backend/test/test_metric_utils.py": [
-    "products/experiments/backend/test/test_metric_utils.py"
-  ],
-  "products/experiments/backend/test/test_session_replay_summary_tool.py": [
-    "products/experiments/backend/test/test_session_replay_summary_tool.py"
-  ],
   "products/experiments/stats/shared/cuped.py": [
     "products/experiments/stats/tests/test_cuped.py"
-  ],
-  "products/experiments/stats/tests/test_bayesian.py": [
-    "products/experiments/stats/tests/test_bayesian.py"
-  ],
-  "products/experiments/stats/tests/test_cuped.py": [
-    "products/experiments/stats/tests/test_cuped.py"
-  ],
-  "products/experiments/stats/tests/test_frequentist.py": [
-    "products/experiments/stats/tests/test_frequentist.py"
-  ],
-  "products/experiments/stats/tests/test_statistics.py": [
-    "products/experiments/stats/tests/test_statistics.py"
-  ],
-  "products/experiments/stats/tests/test_utils.py": [
-    "products/experiments/stats/tests/test_utils.py"
   ],
   "products/feature_flags/backend/max_tools.py": [
     "ee/api/test/test_conversation.py",
@@ -15246,17 +12378,11 @@
     "posthog/test/test_decorators.py",
     "products/feature_flags/backend/test/test_max_tools.py"
   ],
-  "products/feature_flags/backend/test/test_max_tools.py": [
-    "products/feature_flags/backend/test/test_max_tools.py"
-  ],
   "products/growth/backend/constants.py": [
     "products/growth/backend/temporal/health_checks/tests/test_sdk_outdated.py",
     "products/growth/dags/tests/test_github_sdk_versions.py"
   ],
   "products/growth/backend/temporal/health_checks/sdk_outdated.py": [
-    "products/growth/backend/temporal/health_checks/tests/test_sdk_outdated.py"
-  ],
-  "products/growth/backend/temporal/health_checks/tests/test_sdk_outdated.py": [
     "products/growth/backend/temporal/health_checks/tests/test_sdk_outdated.py"
   ],
   "products/growth/dags/github_sdk_versions.py": [
@@ -15265,15 +12391,6 @@
   ],
   "products/growth/dags/oauth.py": [
     "products/growth/dags/tests/test_oauth.py"
-  ],
-  "products/growth/dags/tests/test_github_sdk_versions.py": [
-    "products/growth/dags/tests/test_github_sdk_versions.py"
-  ],
-  "products/growth/dags/tests/test_oauth.py": [
-    "products/growth/dags/tests/test_oauth.py"
-  ],
-  "products/growth/dags/tests/test_user_product_list.py": [
-    "products/growth/dags/tests/test_user_product_list.py"
   ],
   "products/growth/dags/user_product_list.py": [
     "products/growth/dags/tests/test_user_product_list.py"
@@ -15296,12 +12413,6 @@
   "products/live_debugger/backend/models.py": [
     "posthog/test/test_decorators.py",
     "products/live_debugger/backend/test_api.py",
-    "products/live_debugger/backend/test_models.py"
-  ],
-  "products/live_debugger/backend/test_api.py": [
-    "products/live_debugger/backend/test_api.py"
-  ],
-  "products/live_debugger/backend/test_models.py": [
     "products/live_debugger/backend/test_models.py"
   ],
   "products/llm_analytics/backend/api/__init__.py": [
@@ -15361,57 +12472,6 @@
   ],
   "products/llm_analytics/backend/api/summarization.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_clustering_config.py": [
-    "products/llm_analytics/backend/api/test/test_clustering_config.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_clustering_job.py": [
-    "products/llm_analytics/backend/api/test/test_clustering_job.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_datasets.py": [
-    "products/llm_analytics/backend/api/test/test_datasets.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_evaluation_config.py": [
-    "products/llm_analytics/backend/api/test/test_evaluation_config.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_evaluation_runs.py": [
-    "products/llm_analytics/backend/api/test/test_evaluation_runs.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_evaluation_summary.py": [
-    "products/llm_analytics/backend/api/test/test_evaluation_summary.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_evaluations.py": [
-    "products/llm_analytics/backend/api/test/test_evaluations.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_llm_analytics_access_control.py": [
-    "products/llm_analytics/backend/api/test/test_llm_analytics_access_control.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_metrics.py": [
-    "products/llm_analytics/backend/api/test/test_metrics.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_provider_keys.py": [
-    "products/llm_analytics/backend/api/test/test_provider_keys.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_proxy.py": [
-    "products/llm_analytics/backend/api/test/test_proxy.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_review_queues.py": [
-    "products/llm_analytics/backend/api/test/test_review_queues.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_score_definitions.py": [
-    "products/llm_analytics/backend/api/test/test_score_definitions.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_summarization.py": [
-    "products/llm_analytics/backend/api/test/test_summarization.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_text_repr.py": [
-    "products/llm_analytics/backend/api/test/test_text_repr.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_trace_reviews.py": [
-    "products/llm_analytics/backend/api/test/test_trace_reviews.py"
-  ],
-  "products/llm_analytics/backend/api/test/test_translate.py": [
-    "products/llm_analytics/backend/api/test/test_translate.py"
   ],
   "products/llm_analytics/backend/api/text_repr.py": [
     "posthog/test/test_decorators.py",
@@ -15902,15 +12962,6 @@
     "products/llm_analytics/backend/llm/test/test_client.py",
     "products/llm_analytics/backend/test_hog_eval_examples.py",
     "products/llm_analytics/backend/tools/test_run_hog_eval_test.py"
-  ],
-  "products/llm_analytics/backend/llm/test/test_client.py": [
-    "products/llm_analytics/backend/llm/test/test_client.py"
-  ],
-  "products/llm_analytics/backend/llm/test/test_config.py": [
-    "products/llm_analytics/backend/llm/test/test_config.py"
-  ],
-  "products/llm_analytics/backend/llm/test/test_errors.py": [
-    "products/llm_analytics/backend/llm/test/test_errors.py"
   ],
   "products/llm_analytics/backend/llm/types.py": [
     "ee/api/test/test_conversation.py",
@@ -16732,25 +13783,10 @@
     "products/llm_analytics/backend/tools/test_run_hog_eval_test.py",
     "products/tasks/backend/services/test_title_generator.py"
   ],
-  "products/llm_analytics/backend/providers/formatters/tools_handler/test/test_formatters.py": [
-    "products/llm_analytics/backend/providers/formatters/tools_handler/test/test_formatters.py"
-  ],
-  "products/llm_analytics/backend/providers/formatters/tools_handler/test/test_handler.py": [
-    "products/llm_analytics/backend/providers/formatters/tools_handler/test/test_handler.py"
-  ],
   "products/llm_analytics/backend/providers/gemini.py": [
     "products/llm_analytics/backend/providers/test/test_gemini.py"
   ],
   "products/llm_analytics/backend/providers/openai.py": [
-    "products/llm_analytics/backend/providers/test/test_openai.py"
-  ],
-  "products/llm_analytics/backend/providers/test/test_anthropic.py": [
-    "products/llm_analytics/backend/providers/test/test_anthropic.py"
-  ],
-  "products/llm_analytics/backend/providers/test/test_gemini.py": [
-    "products/llm_analytics/backend/providers/test/test_gemini.py"
-  ],
-  "products/llm_analytics/backend/providers/test/test_openai.py": [
     "products/llm_analytics/backend/providers/test/test_openai.py"
   ],
   "products/llm_analytics/backend/queries/__init__.py": [
@@ -17010,18 +14046,6 @@
     "products/llm_analytics/backend/summarization/tests/test_call.py",
     "products/llm_analytics/backend/summarization/tests/test_providers.py"
   ],
-  "products/llm_analytics/backend/summarization/tests/test_call.py": [
-    "products/llm_analytics/backend/summarization/tests/test_call.py"
-  ],
-  "products/llm_analytics/backend/summarization/tests/test_providers.py": [
-    "products/llm_analytics/backend/summarization/tests/test_providers.py"
-  ],
-  "products/llm_analytics/backend/summarization/tests/test_schema.py": [
-    "products/llm_analytics/backend/summarization/tests/test_schema.py"
-  ],
-  "products/llm_analytics/backend/summarization/tests/test_utils.py": [
-    "products/llm_analytics/backend/summarization/tests/test_utils.py"
-  ],
   "products/llm_analytics/backend/summarization/utils.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -17068,15 +14092,6 @@
     "products/llm_analytics/backend/summarization/tests/test_call.py",
     "products/llm_analytics/backend/summarization/tests/test_providers.py",
     "products/llm_analytics/backend/summarization/tests/test_utils.py"
-  ],
-  "products/llm_analytics/backend/test/test_error_normalization.py": [
-    "products/llm_analytics/backend/test/test_error_normalization.py"
-  ],
-  "products/llm_analytics/backend/test/test_score_definition_configs.py": [
-    "products/llm_analytics/backend/test/test_score_definition_configs.py"
-  ],
-  "products/llm_analytics/backend/test_hog_eval_examples.py": [
-    "products/llm_analytics/backend/test_hog_eval_examples.py"
   ],
   "products/llm_analytics/backend/text_repr/formatters/__init__.py": [
     "posthog/temporal/llm_analytics/trace_summarization/tests/test_coordinator.py",
@@ -17284,24 +14299,6 @@
     "products/llm_analytics/backend/text_repr/formatters/test/test_line_numbers.py",
     "products/llm_analytics/backend/text_repr/formatters/test/test_trace_formatter.py"
   ],
-  "products/llm_analytics/backend/text_repr/formatters/test/test_event_formatter.py": [
-    "products/llm_analytics/backend/text_repr/formatters/test/test_event_formatter.py"
-  ],
-  "products/llm_analytics/backend/text_repr/formatters/test/test_line_numbers.py": [
-    "products/llm_analytics/backend/text_repr/formatters/test/test_line_numbers.py"
-  ],
-  "products/llm_analytics/backend/text_repr/formatters/test/test_message_formatter.py": [
-    "products/llm_analytics/backend/text_repr/formatters/test/test_message_formatter.py"
-  ],
-  "products/llm_analytics/backend/text_repr/formatters/test/test_tool_formatter.py": [
-    "products/llm_analytics/backend/text_repr/formatters/test/test_tool_formatter.py"
-  ],
-  "products/llm_analytics/backend/text_repr/formatters/test/test_trace_formatter.py": [
-    "products/llm_analytics/backend/text_repr/formatters/test/test_trace_formatter.py"
-  ],
-  "products/llm_analytics/backend/text_repr/formatters/test/test_uniform_sampling.py": [
-    "products/llm_analytics/backend/text_repr/formatters/test/test_uniform_sampling.py"
-  ],
   "products/llm_analytics/backend/text_repr/formatters/tool_formatter.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -17438,9 +14435,6 @@
     "posthog/test/test_decorators.py",
     "products/llm_analytics/backend/tools/test_run_hog_eval_test.py"
   ],
-  "products/llm_analytics/backend/tools/test_run_hog_eval_test.py": [
-    "products/llm_analytics/backend/tools/test_run_hog_eval_test.py"
-  ],
   "products/llm_analytics/backend/translation/constants.py": [
     "posthog/test/test_decorators.py",
     "products/llm_analytics/backend/api/test/test_translate.py",
@@ -17449,12 +14443,6 @@
   "products/llm_analytics/backend/translation/llm.py": [
     "posthog/test/test_decorators.py",
     "products/llm_analytics/backend/translation/test/test_llm.py"
-  ],
-  "products/llm_analytics/backend/translation/test/test_llm.py": [
-    "products/llm_analytics/backend/translation/test/test_llm.py"
-  ],
-  "products/llm_analytics/dags/tests/daily_metrics/test_sql_metrics.py": [
-    "products/llm_analytics/dags/tests/daily_metrics/test_sql_metrics.py"
   ],
   "products/logs/backend/alert_check_query.py": [
     "posthog/test/test_decorators.py"
@@ -17498,45 +14486,6 @@
   "products/marketing_analytics/backend/api.py": [
     "posthog/test/test_decorators.py"
   ],
-  "products/marketing_analytics/backend/hogql_queries/adapters/test_campaign_field_preferences.py": [
-    "products/marketing_analytics/backend/hogql_queries/adapters/test_campaign_field_preferences.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/adapters/test_factory.py": [
-    "products/marketing_analytics/backend/hogql_queries/adapters/test_factory.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_adapters.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_adapters.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_constants.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_constants.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_conversion_goal_processor.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_conversion_goal_processor.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_conversion_goals_aggregator.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_conversion_goals_aggregator.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_custom_source_mappings_integration.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_custom_source_mappings_integration.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_aggregated_query_runner.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_aggregated_query_runner.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_config.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_config.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_table_query_runner.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_table_query_runner.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_table_query_runner_business.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_table_query_runner_business.py"
-  ],
-  "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_table_query_runner_compare.py": [
-    "products/marketing_analytics/backend/hogql_queries/test_marketing_analytics_table_query_runner_compare.py"
-  ],
-  "products/marketing_analytics/backend/services/test_utm_audit.py": [
-    "products/marketing_analytics/backend/services/test_utm_audit.py"
-  ],
   "products/marketing_analytics/backend/services/types.py": [
     "posthog/test/test_decorators.py",
     "products/marketing_analytics/backend/services/test_utm_audit.py"
@@ -17567,21 +14516,6 @@
     "products/mcp_analytics/backend/tests/test_presentation.py"
   ],
   "products/mcp_analytics/backend/tasks/tasks.py": [
-    "products/mcp_analytics/backend/tests/test_tasks.py"
-  ],
-  "products/mcp_analytics/backend/tests/test_api.py": [
-    "products/mcp_analytics/backend/tests/test_api.py"
-  ],
-  "products/mcp_analytics/backend/tests/test_logic.py": [
-    "products/mcp_analytics/backend/tests/test_logic.py"
-  ],
-  "products/mcp_analytics/backend/tests/test_models.py": [
-    "products/mcp_analytics/backend/tests/test_models.py"
-  ],
-  "products/mcp_analytics/backend/tests/test_presentation.py": [
-    "products/mcp_analytics/backend/tests/test_presentation.py"
-  ],
-  "products/mcp_analytics/backend/tests/test_tasks.py": [
     "products/mcp_analytics/backend/tests/test_tasks.py"
   ],
   "products/mcp_store/backend/api.py": [
@@ -17678,15 +14612,6 @@
     "posthog/test/test_decorators.py",
     "products/mcp_store/backend/test/test_api.py"
   ],
-  "products/mcp_store/backend/test/test_api.py": [
-    "products/mcp_store/backend/test/test_api.py"
-  ],
-  "products/mcp_store/backend/test/test_oauth.py": [
-    "products/mcp_store/backend/test/test_oauth.py"
-  ],
-  "products/mcp_store/backend/test/test_proxy.py": [
-    "products/mcp_store/backend/test/test_proxy.py"
-  ],
   "products/messaging/backend/api/message_categories.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -17695,15 +14620,6 @@
   ],
   "products/messaging/backend/api/message_templates.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "products/messaging/backend/api/test/test_message_categories.py": [
-    "products/messaging/backend/api/test/test_message_categories.py"
-  ],
-  "products/messaging/backend/api/test/test_message_preferences.py": [
-    "products/messaging/backend/api/test/test_message_preferences.py"
-  ],
-  "products/messaging/backend/api/test/test_message_templates.py": [
-    "products/messaging/backend/api/test/test_message_templates.py"
   ],
   "products/messaging/backend/models/message_template.py": [
     "posthog/test/test_decorators.py",
@@ -17717,50 +14633,17 @@
     "posthog/test/test_decorators.py",
     "products/messaging/backend/services/test_customerio_import_service.py"
   ],
-  "products/messaging/backend/services/test_customerio_import_service.py": [
-    "products/messaging/backend/services/test_customerio_import_service.py"
-  ],
-  "products/messaging/backend/tests/test_message_preferences.py": [
-    "products/messaging/backend/tests/test_message_preferences.py"
-  ],
-  "products/metrics/backend/tests/test_api.py": [
-    "products/metrics/backend/tests/test_api.py"
-  ],
-  "products/metrics/backend/tests/test_logic.py": [
-    "products/metrics/backend/tests/test_logic.py"
-  ],
-  "products/metrics/backend/tests/test_models.py": [
-    "products/metrics/backend/tests/test_models.py"
-  ],
-  "products/metrics/backend/tests/test_presentation.py": [
-    "products/metrics/backend/tests/test_presentation.py"
-  ],
-  "products/metrics/backend/tests/test_tasks.py": [
-    "products/metrics/backend/tests/test_tasks.py"
-  ],
   "products/notifications/backend/presentation/serializers.py": [
     "posthog/test/test_decorators.py"
   ],
   "products/notifications/backend/presentation/views.py": [
     "posthog/test/test_decorators.py"
   ],
-  "products/notifications/backend/tests/test_api.py": [
-    "products/notifications/backend/tests/test_api.py"
-  ],
-  "products/notifications/backend/tests/test_logic.py": [
-    "products/notifications/backend/tests/test_logic.py"
-  ],
-  "products/platform_features/backend/tests/test_app.py": [
-    "products/platform_features/backend/tests/test_app.py"
-  ],
   "products/posthog_ai/backend/api/__init__.py": [
     "posthog/test/test_decorators.py"
   ],
   "products/posthog_ai/backend/api/mcp_tools.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "products/posthog_ai/backend/api/test_mcp_tools.py": [
-    "products/posthog_ai/backend/api/test_mcp_tools.py"
   ],
   "products/posthog_ai/backend/models.py": [
     "ee/api/test/test_conversation.py",
@@ -17820,12 +14703,6 @@
   "products/product_tours/backend/api/product_tour.py": [
     "posthog/test/test_decorators.py",
     "products/product_tours/backend/api/test/test_product_tour.py"
-  ],
-  "products/product_tours/backend/api/test/test_product_tour.py": [
-    "products/product_tours/backend/api/test/test_product_tour.py"
-  ],
-  "products/product_tours/backend/api/test/test_product_tour_draft.py": [
-    "products/product_tours/backend/api/test/test_product_tour_draft.py"
   ],
   "products/product_tours/backend/constants.py": [
     "posthog/test/test_decorators.py",
@@ -17918,9 +14795,6 @@
     "ee/hogai/eval/ci/max_tools/eval_revenue_analytics_filter_generation.py"
   ],
   "products/revenue_analytics/dags/exchange_rate.py": [
-    "products/revenue_analytics/dags/tests/test_exchange_rate.py"
-  ],
-  "products/revenue_analytics/dags/tests/test_exchange_rate.py": [
     "products/revenue_analytics/dags/tests/test_exchange_rate.py"
   ],
   "products/signals/backend/admin.py": [
@@ -18677,21 +15551,6 @@
     "products/signals/backend/test/test_api.py",
     "products/signals/eval/eval_grouping_e2e.py"
   ],
-  "products/signals/backend/test/test_agentic_report_activity.py": [
-    "products/signals/backend/test/test_agentic_report_activity.py"
-  ],
-  "products/signals/backend/test/test_api.py": [
-    "products/signals/backend/test/test_api.py"
-  ],
-  "products/signals/backend/test/test_resolve_user_id.py": [
-    "products/signals/backend/test/test_resolve_user_id.py"
-  ],
-  "products/signals/backend/test/test_signal_report_api.py": [
-    "products/signals/backend/test/test_signal_report_api.py"
-  ],
-  "products/signals/backend/test/test_signal_source_config_api.py": [
-    "products/signals/backend/test/test_signal_source_config_api.py"
-  ],
   "products/signals/backend/views.py": [
     "posthog/test/test_decorators.py"
   ],
@@ -18702,9 +15561,6 @@
     "products/signals/eval/eval_grouping_e2e.py"
   ],
   "products/signals/eval/data_spec.py": [
-    "products/signals/eval/eval_grouping_e2e.py"
-  ],
-  "products/signals/eval/eval_grouping_e2e.py": [
     "products/signals/eval/eval_grouping_e2e.py"
   ],
   "products/signals/eval/mock.py": [
@@ -18880,12 +15736,6 @@
     "products/tasks/backend/tests/test_sandbox_utils.py",
     "products/tasks/backend/tests/test_webhooks.py"
   ],
-  "products/surveys/backend/api/test/test_external_surveys.py": [
-    "products/surveys/backend/api/test/test_external_surveys.py"
-  ],
-  "products/surveys/backend/api/test/test_survey.py": [
-    "products/surveys/backend/api/test/test_survey.py"
-  ],
   "products/surveys/backend/max_tools.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -18927,18 +15777,6 @@
     "posthog/temporal/tests/session_replay/session_summary/test_summarize_session_group.py",
     "posthog/test/test_decorators.py",
     "products/surveys/backend/test_max_tools.py"
-  ],
-  "products/surveys/backend/summarization/test_fetch.py": [
-    "products/surveys/backend/summarization/test_fetch.py"
-  ],
-  "products/surveys/backend/summarization/test_summarization.py": [
-    "products/surveys/backend/summarization/test_summarization.py"
-  ],
-  "products/surveys/backend/test_max_tools.py": [
-    "products/surveys/backend/test_max_tools.py"
-  ],
-  "products/surveys/backend/test_survey_util.py": [
-    "products/surveys/backend/test_survey_util.py"
   ],
   "products/tasks/backend/admin.py": [
     "posthog/admin/test_admin.py"
@@ -19757,21 +16595,6 @@
     "products/tasks/backend/tests/test_sandbox_utils.py",
     "products/tasks/backend/tests/test_webhooks.py"
   ],
-  "products/tasks/backend/services/test_docker_sandbox.py": [
-    "products/tasks/backend/services/test_docker_sandbox.py"
-  ],
-  "products/tasks/backend/services/test_sandbox.py": [
-    "products/tasks/backend/services/test_sandbox.py"
-  ],
-  "products/tasks/backend/services/test_title_generator.py": [
-    "products/tasks/backend/services/test_title_generator.py"
-  ],
-  "products/tasks/backend/services/tests/test_agent_command.py": [
-    "products/tasks/backend/services/tests/test_agent_command.py"
-  ],
-  "products/tasks/backend/services/tests/test_modal_sandbox.py": [
-    "products/tasks/backend/services/tests/test_modal_sandbox.py"
-  ],
   "products/tasks/backend/services/title_generator.py": [
     "posthog/test/test_decorators.py",
     "products/tasks/backend/services/test_title_generator.py"
@@ -20486,21 +17309,6 @@
     "products/tasks/backend/tests/test_repository_readiness.py",
     "products/tasks/backend/tests/test_sandbox_utils.py",
     "products/tasks/backend/tests/test_webhooks.py"
-  ],
-  "products/tasks/backend/temporal/create_snapshot/activities/tests/test_cleanup_sandbox.py": [
-    "products/tasks/backend/temporal/create_snapshot/activities/tests/test_cleanup_sandbox.py"
-  ],
-  "products/tasks/backend/temporal/create_snapshot/activities/tests/test_clone_repository.py": [
-    "products/tasks/backend/temporal/create_snapshot/activities/tests/test_clone_repository.py"
-  ],
-  "products/tasks/backend/temporal/create_snapshot/activities/tests/test_create_snapshot.py": [
-    "products/tasks/backend/temporal/create_snapshot/activities/tests/test_create_snapshot.py"
-  ],
-  "products/tasks/backend/temporal/create_snapshot/activities/tests/test_setup_repository.py": [
-    "products/tasks/backend/temporal/create_snapshot/activities/tests/test_setup_repository.py"
-  ],
-  "products/tasks/backend/temporal/create_snapshot/tests/test_workflow.py": [
-    "products/tasks/backend/temporal/create_snapshot/tests/test_workflow.py"
   ],
   "products/tasks/backend/temporal/create_snapshot/utils.py": [
     "ee/api/test/test_conversation.py",
@@ -21849,27 +18657,6 @@
     "products/tasks/backend/tests/test_sandbox_utils.py",
     "products/tasks/backend/tests/test_webhooks.py"
   ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_cleanup_sandbox.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_cleanup_sandbox.py"
-  ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_execute_task_in_sandbox.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_execute_task_in_sandbox.py"
-  ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_get_sandbox_for_repository.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_get_sandbox_for_repository.py"
-  ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_get_task_processing_context.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_get_task_processing_context.py"
-  ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_relay_sandbox_events.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_relay_sandbox_events.py"
-  ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_send_followup_to_sandbox.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_send_followup_to_sandbox.py"
-  ],
-  "products/tasks/backend/temporal/process_task/activities/tests/test_update_task_run_status.py": [
-    "products/tasks/backend/temporal/process_task/activities/tests/test_update_task_run_status.py"
-  ],
   "products/tasks/backend/temporal/process_task/activities/track_workflow_event.py": [
     "ee/api/test/test_conversation.py",
     "ee/hogai/api/test/test_serializers.py",
@@ -22027,18 +18814,6 @@
     "products/tasks/backend/tests/test_repository_readiness.py",
     "products/tasks/backend/tests/test_sandbox_utils.py",
     "products/tasks/backend/tests/test_webhooks.py"
-  ],
-  "products/tasks/backend/temporal/process_task/tests/test_followup.py": [
-    "products/tasks/backend/temporal/process_task/tests/test_followup.py"
-  ],
-  "products/tasks/backend/temporal/process_task/tests/test_forward_pending_message.py": [
-    "products/tasks/backend/temporal/process_task/tests/test_forward_pending_message.py"
-  ],
-  "products/tasks/backend/temporal/process_task/tests/test_utils.py": [
-    "products/tasks/backend/temporal/process_task/tests/test_utils.py"
-  ],
-  "products/tasks/backend/temporal/process_task/tests/test_workflow.py": [
-    "products/tasks/backend/temporal/process_task/tests/test_workflow.py"
   ],
   "products/tasks/backend/temporal/process_task/utils.py": [
     "ee/api/test/test_conversation.py",
@@ -22277,39 +19052,6 @@
     "products/tasks/backend/tests/test_sandbox_utils.py",
     "products/tasks/backend/tests/test_webhooks.py"
   ],
-  "products/tasks/backend/temporal/slack_relay/tests/test_activities.py": [
-    "products/tasks/backend/temporal/slack_relay/tests/test_activities.py"
-  ],
-  "products/tasks/backend/tests/test_agentsh.py": [
-    "products/tasks/backend/tests/test_agentsh.py"
-  ],
-  "products/tasks/backend/tests/test_agentsh_docker.py": [
-    "products/tasks/backend/tests/test_agentsh_docker.py"
-  ],
-  "products/tasks/backend/tests/test_api.py": [
-    "products/tasks/backend/tests/test_api.py"
-  ],
-  "products/tasks/backend/tests/test_check_logs.py": [
-    "products/tasks/backend/tests/test_check_logs.py"
-  ],
-  "products/tasks/backend/tests/test_custom_prompt_executor.py": [
-    "products/tasks/backend/tests/test_custom_prompt_executor.py"
-  ],
-  "products/tasks/backend/tests/test_max_tools.py": [
-    "products/tasks/backend/tests/test_max_tools.py"
-  ],
-  "products/tasks/backend/tests/test_models.py": [
-    "products/tasks/backend/tests/test_models.py"
-  ],
-  "products/tasks/backend/tests/test_repository_readiness.py": [
-    "products/tasks/backend/tests/test_repository_readiness.py"
-  ],
-  "products/tasks/backend/tests/test_sandbox_utils.py": [
-    "products/tasks/backend/tests/test_sandbox_utils.py"
-  ],
-  "products/tasks/backend/tests/test_webhooks.py": [
-    "products/tasks/backend/tests/test_webhooks.py"
-  ],
   "products/tasks/backend/webhooks.py": [
     "products/tasks/backend/tests/test_webhooks.py"
   ],
@@ -22318,21 +19060,6 @@
   ],
   "products/tracing/backend/sparkline_query_runner.py": [
     "posthog/test/test_decorators.py"
-  ],
-  "products/tracing/backend/tests/test_api.py": [
-    "products/tracing/backend/tests/test_api.py"
-  ],
-  "products/tracing/backend/tests/test_logic.py": [
-    "products/tracing/backend/tests/test_logic.py"
-  ],
-  "products/tracing/backend/tests/test_models.py": [
-    "products/tracing/backend/tests/test_models.py"
-  ],
-  "products/tracing/backend/tests/test_presentation.py": [
-    "products/tracing/backend/tests/test_presentation.py"
-  ],
-  "products/tracing/backend/tests/test_tasks.py": [
-    "products/tracing/backend/tests/test_tasks.py"
   ],
   "products/user_interviews/backend/api.py": [
     "posthog/test/test_decorators.py"
@@ -22427,62 +19154,17 @@
     "products/visual_review/backend/tests/test_presentation.py",
     "products/visual_review/backend/tests/test_tasks.py"
   ],
-  "products/visual_review/backend/tests/test_api.py": [
-    "products/visual_review/backend/tests/test_api.py"
-  ],
-  "products/visual_review/backend/tests/test_diff.py": [
-    "products/visual_review/backend/tests/test_diff.py"
-  ],
-  "products/visual_review/backend/tests/test_github_integration.py": [
-    "products/visual_review/backend/tests/test_github_integration.py"
-  ],
-  "products/visual_review/backend/tests/test_logic.py": [
-    "products/visual_review/backend/tests/test_logic.py"
-  ],
-  "products/visual_review/backend/tests/test_models.py": [
-    "products/visual_review/backend/tests/test_models.py"
-  ],
-  "products/visual_review/backend/tests/test_presentation.py": [
-    "products/visual_review/backend/tests/test_presentation.py"
-  ],
-  "products/visual_review/backend/tests/test_signing.py": [
-    "products/visual_review/backend/tests/test_signing.py"
-  ],
-  "products/visual_review/backend/tests/test_tasks.py": [
-    "products/visual_review/backend/tests/test_tasks.py"
-  ],
   "products/web_analytics/backend/max_tools.py": [
     "products/web_analytics/backend/test/test_max_tools.py"
   ],
   "products/web_analytics/backend/prompts.py": [
     "products/web_analytics/backend/test/test_max_tools.py"
   ],
-  "products/web_analytics/backend/test/test_max_tools.py": [
-    "products/web_analytics/backend/test/test_max_tools.py"
-  ],
-  "products/web_analytics/backend/test/test_no_pageleave_events.py": [
-    "products/web_analytics/backend/test/test_no_pageleave_events.py"
-  ],
   "products/web_analytics/dags/cache_favicons.py": [
     "products/web_analytics/dags/tests/test_cache_favicons.py"
   ],
   "products/web_analytics/dags/no_pageleave_events.py": [
     "products/web_analytics/backend/test/test_no_pageleave_events.py"
-  ],
-  "products/web_analytics/dags/tests/test_cache_favicons.py": [
-    "products/web_analytics/dags/tests/test_cache_favicons.py"
-  ],
-  "products/web_analytics/dags/tests/test_web_analytics_watchdog.py": [
-    "products/web_analytics/dags/tests/test_web_analytics_watchdog.py"
-  ],
-  "products/web_analytics/dags/tests/test_web_preaggregated_asset_checks.py": [
-    "products/web_analytics/dags/tests/test_web_preaggregated_asset_checks.py"
-  ],
-  "products/web_analytics/dags/tests/test_web_preaggregated_team_selection.py": [
-    "products/web_analytics/dags/tests/test_web_preaggregated_team_selection.py"
-  ],
-  "products/web_analytics/dags/tests/test_web_preaggregated_utils.py": [
-    "products/web_analytics/dags/tests/test_web_preaggregated_utils.py"
   ],
   "products/web_analytics/dags/web_analytics_watchdog.py": [
     "products/web_analytics/dags/tests/test_web_analytics_watchdog.py"
@@ -22510,9 +19192,6 @@
   ],
   "products/workflows/backend/utils/rrule_utils.py": [
     "posthog/test/test_decorators.py",
-    "products/workflows/backend/utils/test_rrule_utils.py"
-  ],
-  "products/workflows/backend/utils/test_rrule_utils.py": [
     "products/workflows/backend/utils/test_rrule_utils.py"
   ]
 }

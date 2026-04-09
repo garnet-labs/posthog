@@ -118,16 +118,13 @@ def build_map(graph: grimp.ImportGraph) -> dict[str, list[str]]:
         if processed % 100 == 0:
             sys.stderr.write(f"  Processed {processed}/{len(test_modules)} test modules...\n")
 
-    # Also map each test file to itself (changes to a test file should run that test)
-    for test_module in test_modules:
-        test_file = module_files[test_module]
-        reverse_map[test_file].add(test_file)
-
     # Exclude high-fan-out entries (core/shared modules that affect too many tests).
     # Changing these files practically requires a full test run anyway, and including
     # them bloats the map file significantly.
     excluded = {k for k, v in reverse_map.items() if len(v) > MAX_FANOUT}
-    filtered_map = {k: v for k, v in reverse_map.items() if k not in excluded}
+    # Also drop entries where a test file only references itself — that's implicit
+    self_only = {k for k, v in reverse_map.items() if v == {k}}
+    filtered_map = {k: v for k, v in reverse_map.items() if k not in excluded and k not in self_only}
 
     sys.stderr.write(
         f"Map covers {len(filtered_map)} source files "
