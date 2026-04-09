@@ -4,6 +4,7 @@ import collections
 from collections.abc import Iterator
 from typing import Any, Optional
 
+import structlog
 import snowflake.connector
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -251,13 +252,18 @@ def get_primary_keys_for_schemas(
                         keys = [row[column_index] for row in cursor]
                         if keys:
                             result[tbl] = keys
-                    except Exception:
+                    except Exception as e:
+                        structlog.get_logger().warning(
+                            "Failed to detect primary keys for Snowflake table",
+                            table=tbl,
+                            exc_info=e,
+                        )
                         continue
 
         if file_name is not None:
             os.unlink(file_name)
-    except Exception:
-        pass
+    except Exception as e:
+        structlog.get_logger().warning("Failed to detect primary keys for Snowflake schemas", exc_info=e)
 
     return result
 

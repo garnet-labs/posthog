@@ -12,6 +12,7 @@ from django.conf import settings
 
 import pyarrow as pa
 import pymysql
+import structlog
 import pymysql.converters
 from dlt.common.normalizers.naming.snake_case import NamingConvention
 from pymysql.constants import FIELD_TYPE
@@ -335,8 +336,8 @@ def get_primary_keys_for_schemas(
                 result[table_name] = pk_cols
 
         connection.close()
-    except Exception:
-        pass
+    except Exception as e:
+        structlog.get_logger().warning("Failed to detect primary keys for MySQL schemas", exc_info=e)
 
     return result
 

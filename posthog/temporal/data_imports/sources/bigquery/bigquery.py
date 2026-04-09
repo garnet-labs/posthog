@@ -6,6 +6,7 @@ import collections.abc
 from datetime import date, datetime
 
 import pyarrow as pa
+import structlog
 from dlt.common.normalizers.naming.snake_case import NamingConvention
 from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery, bigquery_storage
@@ -291,8 +292,8 @@ def get_primary_keys_for_schemas(
                 table_name = row["table_name"]
                 col_name = row["column_name"].removeprefix(f"{table_name}.")
                 constraint_pks[table_name].append(col_name)
-        except Exception:
-            pass
+        except Exception as e:
+            structlog.get_logger().warning("Failed to detect primary keys for BigQuery schemas", exc_info=e)
 
         for table_name, columns in schemas.items():
             existing_fields = {col[0] for col in columns}

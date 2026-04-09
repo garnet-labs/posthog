@@ -8,6 +8,7 @@ from contextlib import _GeneratorContextManager
 from typing import Any
 
 import pyarrow as pa
+import structlog
 from dlt.common.normalizers.naming.snake_case import NamingConvention
 from structlog.types import FilteringBoundLogger
 
@@ -169,8 +170,8 @@ def get_primary_keys_for_schemas(
                 result[table_name] = pk_cols
 
         connection.close()
-    except Exception:
-        pass
+    except Exception as e:
+        structlog.get_logger().warning("Failed to detect primary keys for MSSQL schemas", exc_info=e)
 
     return result
 

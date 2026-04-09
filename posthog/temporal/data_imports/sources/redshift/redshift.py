@@ -8,6 +8,7 @@ from typing import Any, Literal, LiteralString, Optional, cast
 
 import psycopg
 import pyarrow as pa
+import structlog
 from dlt.common.normalizers.naming.snake_case import NamingConvention
 from psycopg import sql
 from psycopg.adapt import Loader
@@ -295,8 +296,8 @@ def get_primary_keys_for_schemas(
                 result[table_name] = pk_cols
 
         connection.close()
-    except Exception:
-        pass
+    except Exception as e:
+        structlog.get_logger().warning("Failed to detect primary keys for Redshift schemas", exc_info=e)
 
     return result
 
