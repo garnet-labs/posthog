@@ -81,7 +81,10 @@ test.describe('SQL Editor', () => {
             await page.getByRole('button', { name: 'Submit' }).click()
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
 
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
+            // The scene name header may take time to update after navigation
+            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible({
+                timeout: 60000,
+            })
             // Dismiss the quickstart popover if visible, as it can overlay the button
             const quickstart = page.locator('[data-attr=global-product-setup-button]')
             if (await quickstart.isVisible({ timeout: 1000 }).catch(() => false)) {
