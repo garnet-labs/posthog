@@ -49,6 +49,7 @@ import { BoxPlotPropertySelector } from './BoxPlotPropertySelector'
 import { HogQLMathEditorDropdown } from './HogQLMathEditor'
 import { MathSelector } from './MathSelector'
 import { PropertyValueMathSelector } from './PropertyValueMathSelector'
+import { SaveAsActionBanner } from './SaveAsActionBanner'
 import type { ActionFilterRowProps } from './types'
 import { MathAvailability } from './types'
 
@@ -701,6 +702,7 @@ export function ActionFilterRow({
                         hogQLGlobals={hogQLGlobals}
                         operatorAllowlist={operatorAllowlist}
                     />
+                    <SaveAsActionBanner filter={filter} />
                 </div>
             )}
         </li>

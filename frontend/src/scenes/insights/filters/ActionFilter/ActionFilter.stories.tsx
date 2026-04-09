@@ -137,3 +137,71 @@ export const SingleFilter: Story = {
         entitiesLimit: 1,
     },
 }
+
+const renderAutocaptureFilter = ({ ...props }: Partial<ActionFilterProps>): JSX.Element => {
+    useMountedLogic(cohortsModel)
+    const { groupsTaxonomicTypes } = useValues(groupsModel)
+
+    const id = useRef(uuid())
+
+    const [filters, setFilters] = useState<FilterType>({
+        insight: InsightType.TRENDS,
+        events: [
+            {
+                id: '$autocapture',
+                name: '$autocapture',
+                order: 0,
+                type: 'events',
+                properties: [
+                    {
+                        key: '$el_text',
+                        value: 'Submit',
+                        operator: 'exact',
+                        type: 'event',
+                    },
+                    {
+                        key: 'selector',
+                        value: '.btn-primary',
+                        operator: 'exact',
+                        type: 'element',
+                    },
+                ],
+            },
+        ],
+    })
+
+    const [dashboardItemId] = useState(() => `ActionFilterStory.${uniqueNode++}`)
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const insight = require('../../../../mocks/fixtures/api/projects/team_id/insights/trendsLineBreakdown.json')
+    const cachedInsight = { ...insight, short_id: dashboardItemId, filters }
+    const insightProps = { dashboardItemId, doNotLoad: true, cachedInsight } as InsightLogicProps
+
+    return (
+        <BindLogic logic={insightLogic} props={insightProps}>
+            <ActionFilter
+                filters={filters}
+                setFilters={(payload: Partial<FilterType>): void => setFilters(payload)}
+                typeKey={`trends_${id.current}`}
+                buttonCopy="Add graph series"
+                showSeriesIndicator
+                mathAvailability={MathAvailability.All}
+                propertiesTaxonomicGroupTypes={[
+                    TaxonomicFilterGroupType.EventProperties,
+                    TaxonomicFilterGroupType.PersonProperties,
+                    TaxonomicFilterGroupType.EventFeatureFlags,
+                    ...groupsTaxonomicTypes,
+                    TaxonomicFilterGroupType.Cohorts,
+                    TaxonomicFilterGroupType.Elements,
+                    TaxonomicFilterGroupType.HogQLExpression,
+                ]}
+                {...props}
+            />
+        </BindLogic>
+    )
+}
+
+export const AutocaptureWithSaveAsAction: Story = {
+    render: renderAutocaptureFilter,
+    args: {},
+}
