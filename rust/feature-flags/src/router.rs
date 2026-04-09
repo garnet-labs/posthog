@@ -33,9 +33,10 @@ use tower_http::{
 
 use crate::{
     api::{
-        endpoint, flag_definitions, surveys,
+        endpoint, flag_definitions,
         flag_definitions_rate_limiter::FlagDefinitionsRateLimiter,
         flags_rate_limiter::{FlagsRateLimiter, IpRateLimiter},
+        surveys,
     },
     cohorts::{cohort_cache_manager::CohortCacheManager, membership::CohortMembershipProvider},
     config::{Config, ServiceMode, TeamIdCollection},
@@ -277,10 +278,7 @@ pub fn router(
             );
     }
 
-    if matches!(
-        config.service_mode,
-        ServiceMode::All | ServiceMode::Surveys
-    ) {
+    if matches!(config.service_mode, ServiceMode::All | ServiceMode::Surveys) {
         flags_router = flags_router
             .route("/surveys", any(surveys::surveys_endpoint))
             .route("/surveys/", any(surveys::surveys_endpoint))

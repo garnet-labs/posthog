@@ -1,7 +1,4 @@
-use crate::{
-    api::errors::FlagError,
-    router::State as AppState,
-};
+use crate::{api::errors::FlagError, router::State as AppState};
 use axum::{
     debug_handler,
     extract::{Query, State},
@@ -50,9 +47,11 @@ pub async fn surveys_endpoint(
                 .into_response());
         }
         Method::OPTIONS => {
-            return Ok(
-                (StatusCode::NO_CONTENT, [("allow", "GET, POST, OPTIONS, HEAD")]).into_response(),
-            );
+            return Ok((
+                StatusCode::NO_CONTENT,
+                [("allow", "GET, POST, OPTIONS, HEAD")],
+            )
+                .into_response());
         }
         _ => {} // GET and POST proceed below
     }
@@ -116,8 +115,7 @@ mod tests {
 
     #[test]
     fn test_query_params_deserialize() {
-        let params: SurveysQueryParams =
-            serde_json::from_str(r#"{"token": "phc_test"}"#).unwrap();
+        let params: SurveysQueryParams = serde_json::from_str(r#"{"token": "phc_test"}"#).unwrap();
         assert_eq!(params.token.as_deref(), Some("phc_test"));
     }
 
@@ -127,7 +125,12 @@ mod tests {
             "surveys": [],
             "survey_config": null
         });
-        assert!(response.get("surveys").unwrap().as_array().unwrap().is_empty());
+        assert!(response
+            .get("surveys")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert!(response.get("survey_config").unwrap().is_null());
     }
 }
