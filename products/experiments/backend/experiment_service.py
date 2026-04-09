@@ -115,11 +115,6 @@ class ExperimentService:
                 raise ValidationError(
                     "Feature flag must have at least 2 variants (control and at least one test variant)"
                 )
-            for i, variant in enumerate(variants):
-                if not isinstance(variant, dict):
-                    raise ValidationError(f"Feature flag variant at index {i} must be an object")
-                if "key" not in variant:
-                    raise ValidationError(f"Feature flag variant at index {i} must have a 'key' field")
             if "control" not in [variant["key"] for variant in variants]:
                 raise ValidationError("Feature flag variants must contain a control variant")
 
