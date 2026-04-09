@@ -317,32 +317,35 @@ class ExperimentService:
                 "Each ActionsNode must reference an existing action belonging to this project."
             )
 
-    def get_warnings_for_unknown_metric_events(self, *metric_lists: list[dict] | None) -> list[str]:
-        """Return warnings for event names not yet seen by this team.
+    def validate_metric_event_names(self, metrics: list[dict] | None) -> None:
+        """Validate that all EventsNode event names have been seen by this team.
 
-        Events are schema-on-write - new names appear automatically on first ingestion,
-        so an "unknown" event may be intentional (e.g. setting up an experiment before
-        deploying the code that emits the event). We warn instead of blocking, which allows
-        us to surface typos while permitting legitimate use.
+        The frontend event picker already prevents selecting unknown events, so an
+        unrecognized name coming through the API is almost certainly a typo.
+        Callers that intentionally reference not-yet-ingested events (e.g. setting up
+        an experiment before deploying the emitting code) can pass
+        ``allow_unknown_events=True`` to bypass this check.
         """
-        all_event_names: set[str] = set()
-        for metrics in metric_lists:
-            event_names, _ = self._extract_entity_nodes(metrics)
-            all_event_names.update(event_names)
-
-        if not all_event_names:
-            return []
+        event_names, _ = self._extract_entity_nodes(metrics)
+        if not event_names:
+            return
 
         from products.event_definitions.backend.models.event_definition import EventDefinition
 
         existing = set(
             EventDefinition.objects.filter(
                 team_id=self.team.id,
-                name__in=all_event_names,
+                name__in=event_names,
             ).values_list("name", flat=True)
         )
-        unknown = all_event_names - existing
-        return [f"Event '{name}' has not been seen yet by this project." for name in sorted(unknown)]
+        unknown = event_names - existing
+        if unknown:
+            unknown_str = ", ".join(f"'{name}'" for name in sorted(unknown))
+            raise ValidationError(
+                f"Event(s) {unknown_str} not found. "
+                "No events with these names have been ingested by this project. "
+                "If this is intentional, set allow_unknown_events=True."
+            )
 
     @transaction.atomic
     def create_experiment(
@@ -375,6 +378,7 @@ class ExperimentService:
         conclusion_comment: str | None = None,
         serializer_context: dict | None = None,
         event_source: EventSource | None = None,
+        allow_unknown_events: bool = False,
     ) -> Experiment:
         """Create experiment with full validation and defaults."""
         self.validate_variant_shapes(parameters)
@@ -382,6 +386,9 @@ class ExperimentService:
         self.validate_experiment_metrics(metrics_secondary)
         self.validate_metric_action_ids(metrics, self.team.id)
         self.validate_metric_action_ids(metrics_secondary, self.team.id)
+        if not allow_unknown_events:
+            self.validate_metric_event_names(metrics)
+            self.validate_metric_event_names(metrics_secondary)
         self.validate_stats_config(stats_config)
         self.validate_saved_metrics_ids(saved_metrics_ids, self.team.id)
         is_draft = start_date is None
@@ -484,9 +491,8 @@ class ExperimentService:
             experiment,
             serializer_context=serializer_context,
             event_source=event_source,
+            allow_unknown_events=allow_unknown_events,
         )
-
-        experiment._warnings = self.get_warnings_for_unknown_metric_events(metrics, metrics_secondary)
 
         return experiment
 
@@ -500,6 +506,7 @@ class ExperimentService:
         *,
         serializer_context: dict | None,
         event_source: EventSource | None,
+        allow_unknown_events: bool = False,
     ) -> None:
         request = serializer_context.get("request") if serializer_context else None
         if request is None and event_source is None:
@@ -508,6 +515,8 @@ class ExperimentService:
         analytics_metadata = experiment.get_analytics_metadata()
         if event_source is not None:
             analytics_metadata["source"] = event_source
+        if allow_unknown_events:
+            analytics_metadata["allow_unknown_events"] = True
 
         report_user_action(
             self.user,
@@ -1225,6 +1234,7 @@ class ExperimentService:
         update_data: dict,
         *,
         serializer_context: dict | None = None,
+        allow_unknown_events: bool = False,
     ) -> Experiment:
         """Update an experiment with full business-logic validation.
 
@@ -1236,8 +1246,12 @@ class ExperimentService:
             self.validate_saved_metrics_ids(update_data["saved_metrics_ids"], self.team.id)
         if "metrics" in update_data:
             self.validate_metric_action_ids(update_data["metrics"], self.team.id)
+            if not allow_unknown_events:
+                self.validate_metric_event_names(update_data["metrics"])
         if "metrics_secondary" in update_data:
             self.validate_metric_action_ids(update_data["metrics_secondary"], self.team.id)
+            if not allow_unknown_events:
+                self.validate_metric_event_names(update_data["metrics_secondary"])
 
         context = serializer_context or self._build_serializer_context()
         feature_flag = experiment.feature_flag
@@ -1367,12 +1381,6 @@ class ExperimentService:
         for attr, value in update_data.items():
             setattr(experiment, attr, value)
         experiment.save()
-
-        # Use final persisted metrics for event existence warnings
-        experiment._warnings = self.get_warnings_for_unknown_metric_events(
-            experiment.metrics,
-            experiment.metrics_secondary,
-        )
 
         return experiment
 
@@ -1509,6 +1517,7 @@ class ExperimentService:
         duplicate_description = source_experiment.description or ""
         duplicate_type = source_experiment.type or "product"
 
+        # For duplicate we set allow_unknown_events since the goal here is to actually duplicate.
         return self.create_experiment(
             name=duplicate_name,
             feature_flag_key=feature_flag_key,
@@ -1527,6 +1536,7 @@ class ExperimentService:
             exposure_preaggregation_enabled=source_experiment.exposure_preaggregation_enabled,
             only_count_matured_users=source_experiment.only_count_matured_users,
             serializer_context=serializer_context,
+            allow_unknown_events=True,
         )
 
     # ------------------------------------------------------------------

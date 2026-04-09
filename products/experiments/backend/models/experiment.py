@@ -14,9 +14,6 @@ if TYPE_CHECKING:
 
 
 class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.Model):
-    # Non-persisted advisory warnings set by ExperimentService (e.g. unknown event names).
-    _warnings: list[str]
-
     class ExperimentType(models.TextChoices):
         WEB = "web", "web"
         PRODUCT = "product", "product"

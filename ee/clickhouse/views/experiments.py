@@ -55,6 +55,7 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
     )
     saved_metrics = ExperimentToSavedMetricSerializer(many=True, source="experimenttosavedmetric_set", read_only=True)
     saved_metrics_ids = serializers.ListField(child=serializers.JSONField(), required=False, allow_null=True)
+    allow_unknown_events = serializers.BooleanField(required=False, default=False, write_only=True)
     _create_in_folder = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
@@ -86,6 +87,7 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
             "metrics_secondary",
             "stats_config",
             "scheduling_config",
+            "allow_unknown_events",
             "_create_in_folder",
             "conclusion",
             "conclusion_comment",
@@ -161,10 +163,6 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
                     only_count_matured_users=instance.only_count_matured_users,
                 )
 
-        warnings = getattr(instance, "_warnings", None)
-        if warnings:
-            data["warnings"] = warnings
-
         return data
 
     def validate_saved_metrics_ids(self, value):
@@ -219,6 +217,7 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
         deleted = validated_data.pop("deleted", False)
         conclusion = validated_data.pop("conclusion", None)
         conclusion_comment = validated_data.pop("conclusion_comment", None)
+        allow_unknown_events = validated_data.pop("allow_unknown_events", False)
 
         if validated_data:
             raise ValidationError(f"Can't create keys: {', '.join(sorted(validated_data))} on Experiment")
@@ -253,12 +252,16 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
             conclusion=conclusion,
             conclusion_comment=conclusion_comment,
             serializer_context=self.context,
+            allow_unknown_events=allow_unknown_events,
         )
 
     def update(self, instance: Experiment, validated_data: dict, *args: Any, **kwargs: Any) -> Experiment:
+        allow_unknown_events = validated_data.pop("allow_unknown_events", False)
         team = Team.objects.get(id=self.context["team_id"])
         service = ExperimentService(team=team, user=self.context["request"].user)
-        return service.update_experiment(instance, validated_data, serializer_context=self.context)
+        return service.update_experiment(
+            instance, validated_data, serializer_context=self.context, allow_unknown_events=allow_unknown_events
+        )
 
 
 class EndExperimentSerializer(serializers.Serializer):
