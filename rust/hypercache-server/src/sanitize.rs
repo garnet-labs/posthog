@@ -251,6 +251,7 @@ mod tests {
     fn test_on_permitted_domain_with_wildcards() {
         let domains = vec!["https://*.example.com".to_string()];
 
+        // Subdomain matches (fast path: suffix check)
         let mut headers = HeaderMap::new();
         headers.insert("Origin", "https://app.example.com".parse().unwrap());
         assert!(on_permitted_domain(&domains, &headers));
@@ -259,10 +260,53 @@ mod tests {
         headers.insert("Origin", "https://test.example.com".parse().unwrap());
         assert!(on_permitted_domain(&domains, &headers));
 
+        // Deep subdomain matches
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://deep.nested.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
         // Bare domain without subdomain should NOT match wildcard
         let mut headers = HeaderMap::new();
         headers.insert("Origin", "https://example.com".parse().unwrap());
         assert!(!on_permitted_domain(&domains, &headers));
+
+        // Wrong domain should NOT match
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://app.evil.com".parse().unwrap());
+        assert!(!on_permitted_domain(&domains, &headers));
+
+        // Suffix injection: `notexample.com` should NOT match `*.example.com`
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://notexample.com".parse().unwrap());
+        assert!(!on_permitted_domain(&domains, &headers));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_non_prefix_wildcard() {
+        // Rare pattern like `app-*.example.com` — falls back to regex
+        let domains = vec!["https://app-*.example.com".to_string()];
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://app-staging.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://app-prod.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
+        // Should NOT match without the prefix
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://other.example.com".parse().unwrap());
+        assert!(!on_permitted_domain(&domains, &headers));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_wildcard_with_www() {
+        let domains = vec!["https://*.example.com".to_string()];
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://www.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
     }
 
     #[test]
