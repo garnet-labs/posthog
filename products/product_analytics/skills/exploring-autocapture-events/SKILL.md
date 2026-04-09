@@ -10,7 +10,7 @@ description: >
 
 # Exploring autocapture events
 
-posthog-js automatically captures clicks, form submissions, and page changes as `$autocapture` events.
+if users opt in then posthog-js automatically captures clicks, form submissions, and page changes as `$autocapture` events.
 Each event records the clicked DOM element and its ancestors in the `elements_chain` column.
 
 `$autocapture` is intentionally excluded from the `posthog:read-data-schema` taxonomy
