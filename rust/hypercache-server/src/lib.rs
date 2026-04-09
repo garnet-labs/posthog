@@ -4,3 +4,6 @@ pub mod config_cache;
 pub mod router;
 pub mod sanitize;
 pub mod server;
+
+#[cfg(test)]
+pub mod test_utils;

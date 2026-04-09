@@ -4431,6 +4431,9 @@ dependencies = [
 name = "hypercache-server"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-s3",
  "axum 0.7.9",
  "common-alloc",
  "common-continuous-profiling",
@@ -4439,9 +4442,12 @@ dependencies = [
  "common-redis",
  "envconfig",
  "health",
+ "http-body-util",
  "metrics",
  "regex",
+ "reqwest 0.12.28",
  "serde",
+ "serde-pickle",
  "serde_json",
  "tokio",
  "tower 0.4.13",

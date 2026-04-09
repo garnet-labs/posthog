@@ -99,13 +99,10 @@ pub async fn surveys_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::helpers::*;
+    use axum::http::StatusCode;
+    use common_redis::MockRedisClient;
     use serde_json::json;
-
-    #[test]
-    fn test_empty_token_is_missing() {
-        let params = SurveysQueryParams { token: None };
-        assert!(params.token.is_none());
-    }
 
     #[test]
     fn test_query_params_deserialize() {
@@ -113,18 +110,51 @@ mod tests {
         assert_eq!(params.token.as_deref(), Some("phc_test"));
     }
 
-    #[test]
-    fn test_empty_surveys_response_shape() {
-        let response = json!({
-            "surveys": [],
-            "survey_config": null
+    #[tokio::test]
+    async fn test_missing_token_returns_401() {
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", MockRedisClient::new()).await;
+        let router = test_router(surveys, config);
+
+        let (status, _body) = get(&router, "/api/surveys").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_cache_miss_returns_empty_surveys() {
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", MockRedisClient::new()).await;
+        let router = test_router(surveys, config);
+
+        let (status, body) = get(&router, "/api/surveys?token=phc_unknown").await;
+        assert_eq!(status, StatusCode::OK);
+
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["surveys"], json!([]));
+        assert_eq!(parsed["survey_config"], json!(null));
+    }
+
+    #[tokio::test]
+    async fn test_cache_hit_returns_survey_data() {
+        let token = "phc_test_surveys";
+        let key = cache_key("surveys", "surveys.json", token);
+
+        let survey_data = json!({
+            "surveys": [{"id": "s1", "name": "NPS", "type": "popover"}],
+            "survey_config": {"appearance": {"theme": "light"}}
         });
-        assert!(response
-            .get("surveys")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .is_empty());
-        assert!(response.get("survey_config").unwrap().is_null());
+
+        let mut mock = MockRedisClient::new();
+        mock = mock.get_raw_bytes_ret(&key, Ok(pickle_json(&survey_data)));
+
+        let surveys = mock_reader("surveys", "surveys.json", mock).await;
+        let config = mock_reader("array", "config.json", MockRedisClient::new()).await;
+        let router = test_router(surveys, config);
+
+        let (status, body) = get(&router, &format!("/api/surveys?token={token}")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed, survey_data);
     }
 }

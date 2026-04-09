@@ -207,6 +207,9 @@ pub async fn config_js_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::helpers::*;
+    use axum::http::StatusCode;
+    use common_redis::MockRedisClient;
     use serde_json::json;
 
     #[test]
@@ -272,5 +275,141 @@ mod tests {
         );
 
         assert!(js.contains("siteApps: [function() { return 1; },function() { return 2; }]"));
+    }
+
+    // --- Endpoint integration tests ---
+
+    #[tokio::test]
+    async fn test_config_invalid_token_returns_400() {
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", MockRedisClient::new()).await;
+        let router = test_router(surveys, config);
+
+        let (status, _) = get(&router, "/array/token.with.dots/config").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_config_missing_returns_404() {
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", MockRedisClient::new()).await;
+        let router = test_router(surveys, config);
+
+        let (status, _) = get(&router, "/array/phc_unknown/config").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_config_hit_returns_json_with_cache_headers() {
+        let token = "phc_config_test";
+        let key = cache_key("array", "config.json", token);
+
+        let config_data = json!({
+            "sessionRecording": {"endpoint": "/s/"},
+            "heatmaps": true,
+            "token": token
+        });
+
+        let mut mock = MockRedisClient::new();
+        mock = mock.get_raw_bytes_ret(&key, Ok(pickle_json(&config_data)));
+
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", mock).await;
+        let router = test_router(surveys, config);
+
+        let (status, body, headers) =
+            get_with_headers(&router, &format!("/array/{token}/config"), vec![]).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get("cache-control").unwrap().to_str().unwrap(),
+            "public, max-age=300"
+        );
+        assert_eq!(
+            headers.get("vary").unwrap().to_str().unwrap(),
+            "Origin, Referer"
+        );
+
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["heatmaps"], json!(true));
+        assert_eq!(parsed["token"], json!(token));
+    }
+
+    #[tokio::test]
+    async fn test_config_sanitizes_site_apps_js() {
+        let token = "phc_sanitize_test";
+        let key = cache_key("array", "config.json", token);
+
+        let config_data = json!({
+            "heatmaps": true,
+            "siteAppsJS": ["function() {}"],
+            "siteApps": [{"id": 1}]
+        });
+
+        let mut mock = MockRedisClient::new();
+        mock = mock.get_raw_bytes_ret(&key, Ok(pickle_json(&config_data)));
+
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", mock).await;
+        let router = test_router(surveys, config);
+
+        let (status, body) = get(&router, &format!("/array/{token}/config")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            parsed.get("siteAppsJS").is_none(),
+            "siteAppsJS should be removed"
+        );
+        assert!(
+            parsed.get("siteApps").is_some(),
+            "siteApps should be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_config_js_returns_javascript() {
+        let token = "phc_js_test";
+        let key = cache_key("array", "config.json", token);
+
+        let config_data = json!({
+            "heatmaps": true,
+            "siteAppsJS": ["function() { return 1; }"],
+            "siteApps": [{"id": 1}]
+        });
+
+        let mut mock = MockRedisClient::new();
+        mock = mock.get_raw_bytes_ret(&key, Ok(pickle_json(&config_data)));
+
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", mock).await;
+        let router = test_router(surveys, config);
+
+        let (status, body, headers) =
+            get_with_headers(&router, &format!("/array/{token}/config.js"), vec![]).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get("content-type").unwrap().to_str().unwrap(),
+            "application/javascript"
+        );
+
+        assert!(body.contains("window._POSTHOG_REMOTE_CONFIG"));
+        assert!(body.contains(token));
+        assert!(body.contains("siteApps: [function() { return 1; }]"));
+        // siteApps metadata should be removed from config JSON
+        assert!(!body.contains("\"siteApps\""));
+        // siteAppsJS should be removed from config JSON
+        assert!(!body.contains("\"siteAppsJS\""));
+    }
+
+    #[tokio::test]
+    async fn test_config_js_missing_returns_404() {
+        let surveys = mock_reader("surveys", "surveys.json", MockRedisClient::new()).await;
+        let config = mock_reader("array", "config.json", MockRedisClient::new()).await;
+        let router = test_router(surveys, config);
+
+        let (status, _) = get(&router, "/array/phc_unknown/config.js").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

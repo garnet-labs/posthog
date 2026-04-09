@@ -107,3 +107,166 @@ fn hostname_in_allowed_url_list(allowed: &[String], hostname: Option<&str>) -> b
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_removes_site_apps_js() {
+        let mut config = json!({
+            "siteApps": [{"id": 1}],
+            "siteAppsJS": ["function() {}"],
+            "heatmaps": true
+        });
+
+        sanitize_config_for_client(&mut config, &HeaderMap::new());
+
+        assert!(config.get("siteAppsJS").is_none());
+        assert!(config.get("siteApps").is_some());
+        assert_eq!(config.get("heatmaps"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn test_strips_session_recording_domains() {
+        let mut config = json!({
+            "sessionRecording": {
+                "endpoint": "/s/",
+                "domains": ["https://example.com"]
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://example.com".parse().unwrap());
+
+        sanitize_config_for_client(&mut config, &headers);
+
+        let sr = config.get("sessionRecording").unwrap();
+        assert!(sr.is_object());
+        assert!(sr.get("domains").is_none());
+        assert_eq!(sr.get("endpoint"), Some(&json!("/s/")));
+    }
+
+    #[test]
+    fn test_disables_recording_for_wrong_domain() {
+        let mut config = json!({
+            "sessionRecording": {
+                "endpoint": "/s/",
+                "domains": ["https://allowed.com"]
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://evil.com".parse().unwrap());
+
+        sanitize_config_for_client(&mut config, &headers);
+
+        assert_eq!(config.get("sessionRecording"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn test_empty_domains_allows_all() {
+        let mut config = json!({
+            "sessionRecording": {
+                "endpoint": "/s/",
+                "domains": []
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://any-site.com".parse().unwrap());
+
+        sanitize_config_for_client(&mut config, &headers);
+
+        let sr = config.get("sessionRecording").unwrap();
+        assert!(sr.is_object());
+    }
+
+    #[test]
+    fn test_no_session_recording_field_is_noop() {
+        let mut config = json!({"heatmaps": true});
+
+        sanitize_config_for_client(&mut config, &HeaderMap::new());
+
+        assert_eq!(config, json!({"heatmaps": true}));
+    }
+
+    #[test]
+    fn test_session_recording_false_passes_through() {
+        let mut config = json!({"sessionRecording": false});
+
+        sanitize_config_for_client(&mut config, &HeaderMap::new());
+
+        assert_eq!(config.get("sessionRecording"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_with_origin() {
+        let domains = vec!["https://app.example.com".to_string()];
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://app.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://wrong.example.com".parse().unwrap());
+        assert!(!on_permitted_domain(&domains, &headers));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_with_referer() {
+        let domains = vec!["https://app.example.com".to_string()];
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Referer",
+            "https://app.example.com/some/path".parse().unwrap(),
+        );
+        assert!(on_permitted_domain(&domains, &headers));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_with_wildcards() {
+        let domains = vec!["https://*.example.com".to_string()];
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://app.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://test.example.com".parse().unwrap());
+        assert!(on_permitted_domain(&domains, &headers));
+
+        // Bare domain without subdomain should NOT match wildcard
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", "https://example.com".parse().unwrap());
+        assert!(!on_permitted_domain(&domains, &headers));
+    }
+
+    #[test]
+    fn test_on_permitted_domain_mobile_user_agent() {
+        let domains = vec!["https://web-only.com".to_string()];
+
+        for ua in [
+            "posthog-android/3.0.0",
+            "posthog-ios/2.0.0",
+            "posthog-react-native/1.0.0",
+            "posthog-flutter/1.0.0",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert("User-Agent", ua.parse().unwrap());
+            assert!(
+                on_permitted_domain(&domains, &headers),
+                "Expected mobile UA '{ua}' to be permitted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_on_permitted_domain_no_headers() {
+        let domains = vec!["https://example.com".to_string()];
+        let headers = HeaderMap::new();
+        assert!(!on_permitted_domain(&domains, &headers));
+    }
+}
