@@ -34,6 +34,9 @@ function getPersistedFeatureFlags(appContext: AppContext | undefined = getAppCon
     return flags
 }
 
+let cachedFlagsSerialized: string | null = null
+let cachedFlagsProxy: FeatureFlagsSet | null = null
+
 function spyOnFeatureFlags(featureFlags: FeatureFlagsSet): FeatureFlagsSet {
     const appContext = getAppContext()
     const persistedFlags = getPersistedFeatureFlags(appContext)
@@ -42,8 +45,14 @@ function spyOnFeatureFlags(featureFlags: FeatureFlagsSet): FeatureFlagsSet {
             ? { ...persistedFlags, ...featureFlags }
             : persistedFlags
 
+    const serialized = JSON.stringify(availableFlags)
+    if (serialized === cachedFlagsSerialized && cachedFlagsProxy) {
+        return cachedFlagsProxy
+    }
+    cachedFlagsSerialized = serialized
+
     if (typeof window.Proxy !== 'undefined') {
-        return new Proxy(
+        cachedFlagsProxy = new Proxy(
             {},
             {
                 get(_, flag) {
@@ -57,8 +66,8 @@ function spyOnFeatureFlags(featureFlags: FeatureFlagsSet): FeatureFlagsSet {
                 },
             }
         )
+        return cachedFlagsProxy
     }
-    // Fallback for IE11. Won't track "false" results. ¯\_(ツ)_/¯
     const flags: FeatureFlagsSet = {}
     for (const flag of Object.keys(availableFlags)) {
         Object.defineProperty(flags, flag, {
@@ -71,6 +80,7 @@ function spyOnFeatureFlags(featureFlags: FeatureFlagsSet): FeatureFlagsSet {
             },
         })
     }
+    cachedFlagsProxy = flags
     return flags
 }
 
