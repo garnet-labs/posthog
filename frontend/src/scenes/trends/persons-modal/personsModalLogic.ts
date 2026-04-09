@@ -33,15 +33,11 @@ import {
     ActorType,
     BreakdownType,
     ChartDisplayType,
-    CohortPropertyFilter,
     CommonActorType,
-    EventPropertyFilter,
     FilterLogicalOperator,
     GroupActorType,
-    GroupPropertyFilter,
     IntervalType,
     PersonActorType,
-    PersonPropertyFilter,
     PropertiesTimelineFilterType,
     SessionActorType,
     PropertyFilterType,
@@ -89,13 +85,13 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
         if (!Number.isFinite(cohortId)) {
             return null
         }
-        const cohortFilter: CohortPropertyFilter = {
+
+        return {
             type: PropertyFilterType.Cohort,
             key: 'id',
             value: cohortId,
             operator: PropertyOperator.In,
         }
-        return cohortFilter
     }
 
     if (!breakdown || Array.isArray(breakdown)) {
@@ -105,36 +101,34 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     const key = String(breakdown)
 
     if (breakdownType === 'person') {
-        const personFilter: PersonPropertyFilter = {
+        return {
             type: PropertyFilterType.Person,
             key,
             value: breakdownValue,
             operator: PropertyOperator.Exact,
         }
-        return personFilter
     }
 
     if (breakdownType === 'group') {
         if (breakdownFilter?.breakdown_group_type_index == null) {
             return null
         }
-        const groupFilter: GroupPropertyFilter = {
+
+        return {
             type: PropertyFilterType.Group,
             key,
             value: breakdownValue,
             operator: PropertyOperator.Exact,
             group_type_index: breakdownFilter.breakdown_group_type_index,
         }
-        return groupFilter
     }
 
-    const eventFilter: EventPropertyFilter = {
+    return {
         type: PropertyFilterType.Event,
         key,
         value: breakdownValue,
         operator: PropertyOperator.Exact,
     }
-    return eventFilter
 }
 
 export interface PersonModalLogicProps {
