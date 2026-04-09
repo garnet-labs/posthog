@@ -243,7 +243,7 @@ export const SyncMethodForm = ({
                                             data first to change it.
                                         </LemonBanner>
                                     )}
-                                    {primaryKeyColumns.length === 0 && !resolvedDetectedPks && (
+                                    {primaryKeyColumns.length === 0 && !resolvedDetectedPks && !primaryKeyLocked && (
                                         <LemonBanner type="info" className="mt-2">
                                             No primary key could be auto-detected from the source. Select one manually
                                             to enable incremental sync, or use full table replication instead.
