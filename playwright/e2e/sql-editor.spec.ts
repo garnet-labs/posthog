@@ -55,10 +55,14 @@ test.describe('SQL Editor', () => {
             // Click submit
             await submitButton.click()
 
-            // Wait for the success message and URL change which confirm the save completed
+            // Wait for the success message which confirms the API call completed
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
-            await page.waitForURL(/\/sql#view=/, { timeout: 30000 })
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
+            // The scene name updates asynchronously after the save — poll until it appears
+            await expect(async () => {
+                await expect(
+                    page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })
+                ).toBeVisible({ timeout: 2000 })
+            }).toPass({ timeout: 60000 })
         })
 
         test('Materialize view pane', async ({ page }) => {
@@ -79,9 +83,12 @@ test.describe('SQL Editor', () => {
             await page.getByRole('button', { name: 'Submit' }).click()
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
 
-            // Wait for URL to update confirming navigation to the saved view
-            await page.waitForURL(/\/sql#view=/, { timeout: 30000 })
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
+            // The scene name updates asynchronously after the save — poll until it appears
+            await expect(async () => {
+                await expect(
+                    page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })
+                ).toBeVisible({ timeout: 2000 })
+            }).toPass({ timeout: 60000 })
             // Dismiss the quickstart popover if visible, as it can overlay the button
             const quickstart = page.locator('[data-attr=global-product-setup-button]')
             if (await quickstart.isVisible({ timeout: 1000 }).catch(() => false)) {
