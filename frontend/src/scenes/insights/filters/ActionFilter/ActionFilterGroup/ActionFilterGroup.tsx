@@ -102,6 +102,7 @@ export function ActionFilterGroup({
         setMathHogQL,
         setHogQLDropdownVisible,
     } = useActions(groupLogic)
+    const defaultMathHogQLExpression = insightType === InsightType.STICKINESS ? 'person_id' : 'count()'
 
     return (
         <li
@@ -170,7 +171,7 @@ export function ActionFilterGroup({
                                         math={filter.math}
                                         mathGroupTypeIndex={filter.math_group_type_index}
                                         index={index}
-                                        onMathSelect={(_, math) => setMath(math)}
+                                        onMathSelect={(_, math) => setMath(math, defaultMathHogQLExpression)}
                                         disabled={disabled || readOnly}
                                         mathAvailability={mathAvailability}
                                         trendsDisplayCategory={trendsDisplayCategory}
@@ -240,7 +241,7 @@ export function ActionFilterGroup({
                                                 // eslint-disable-next-line react/forbid-dom-props
                                                 <div className="w-120" style={{ maxWidth: 'max(60vw, 20rem)' }}>
                                                     <HogQLEditor
-                                                        value={filter.math_hogql || 'count()'}
+                                                        value={filter.math_hogql || defaultMathHogQLExpression}
                                                         onChange={(currentValue) => {
                                                             setMathHogQL(currentValue)
                                                             setHogQLDropdownVisible(false)
@@ -256,7 +257,7 @@ export function ActionFilterGroup({
                                                 data-attr={`math-hogql-select-${index}`}
                                                 onClick={() => setHogQLDropdownVisible(!isHogQLDropdownVisible)}
                                             >
-                                                <code>{filter.math_hogql || 'count()'}</code>
+                                                <code>{filter.math_hogql || defaultMathHogQLExpression}</code>
                                             </LemonButton>
                                         </LemonDropdown>
                                     )}

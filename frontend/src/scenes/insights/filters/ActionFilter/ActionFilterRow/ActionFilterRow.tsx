@@ -38,6 +38,7 @@ import {
     BaseMathType,
     EntityTypes,
     InsightShortId,
+    InsightType,
     PropertyFilterType,
     PropertyFilterValue,
     PropertyOperator,
@@ -167,6 +168,7 @@ export function ActionFilterRow({
         math_hogql: mathHogQL,
         math_group_type_index: mathGroupTypeIndex,
     } = filter
+    const defaultMathHogQLExpression = insightType === InsightType.STICKINESS ? 'person_id' : 'count()'
 
     const onClose = (): void => {
         removeLocalFilter({ ...filter, index })
@@ -186,7 +188,7 @@ export function ActionFilterRow({
                     : undefined
             const math_hogql =
                 mathDefinitions[selectedMath]?.category === MathCategory.HogQLExpression
-                    ? (mathHogQL ?? 'count()')
+                    ? (mathHogQL ?? defaultMathHogQLExpression)
                     : undefined
             mathProperties = {
                 ...mathTypeToApiValues(selectedMath),
