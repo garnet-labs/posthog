@@ -7,8 +7,8 @@ from parameterized import parameterized
 from products.mcp_store.backend.facade.contracts import ActiveInstallationInfo
 from products.tasks.backend.temporal.process_task.utils import (
     McpServerConfig,
-    fetch_user_mcp_server_configs,
     get_sandbox_ph_mcp_configs,
+    get_user_mcp_server_configs,
 )
 
 
@@ -174,7 +174,7 @@ class TestFetchUserMcpServerConfigs(TestCase):
         installation = self._make_installation()
         mock_facade.return_value = [installation]
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID)
+        configs = get_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID)
 
         mock_facade.assert_called_once_with(self.TEAM_ID, self.USER_ID)
         assert configs == [
@@ -192,7 +192,7 @@ class TestFetchUserMcpServerConfigs(TestCase):
         mock_api_url.return_value = self.API_BASE
         mock_facade.return_value = []
 
-        assert fetch_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID) == []
+        assert get_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID) == []
 
     @patch(MOCK_API_URL)
     @patch(MOCK_FACADE)
@@ -200,7 +200,7 @@ class TestFetchUserMcpServerConfigs(TestCase):
         mock_api_url.return_value = "https://us.posthog.com/"
         mock_facade.return_value = [self._make_installation()]
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID)
+        configs = get_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID)
 
         assert configs[0].url.startswith("https://us.posthog.com/api/")
 
@@ -217,7 +217,7 @@ class TestFetchUserMcpServerConfigs(TestCase):
             ),
         ]
 
-        configs = fetch_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID)
+        configs = get_user_mcp_server_configs(self.TOKEN, self.TEAM_ID, self.USER_ID)
 
         assert len(configs) == 2
         assert configs[0].name == "Linear"

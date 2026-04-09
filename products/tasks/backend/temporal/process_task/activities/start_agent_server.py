@@ -14,9 +14,9 @@ from products.tasks.backend.temporal.exceptions import OAuthTokenError, SandboxE
 from products.tasks.backend.temporal.oauth import create_oauth_access_token
 from products.tasks.backend.temporal.observability import emit_agent_log, log_activity_execution
 from products.tasks.backend.temporal.process_task.utils import (
-    fetch_user_mcp_server_configs,
     format_allowed_domains_for_log,
     get_sandbox_ph_mcp_configs,
+    get_user_mcp_server_configs,
 )
 
 from .get_task_processing_context import TaskProcessingContext
@@ -145,7 +145,7 @@ def start_agent_server(input: StartAgentServerInput) -> StartAgentServerOutput:
         )
 
         if task.created_by_id:
-            user_mcp_configs = fetch_user_mcp_server_configs(
+            user_mcp_configs = get_user_mcp_server_configs(
                 token=access_token,
                 team_id=ctx.team_id,
                 user_id=task.created_by_id,

@@ -39,7 +39,7 @@ def get_sandbox_api_url() -> str:
     return settings.SANDBOX_API_URL or settings.SITE_URL
 
 
-def fetch_user_mcp_server_configs(
+def get_user_mcp_server_configs(
     token: str,
     team_id: int,
     user_id: int,
