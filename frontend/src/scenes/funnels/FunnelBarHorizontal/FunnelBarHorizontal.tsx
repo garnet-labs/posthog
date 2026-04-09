@@ -25,9 +25,9 @@ import {
     formatDroppedOffPercentage,
     getBreakdownMaxIndex,
     getReferenceStep,
+    getStepBreakdownSeries,
     getTooltipTitleForConverted,
     getTooltipTitleForDroppedOff,
-    shouldRenderStepAsBreakdown,
 } from '../funnelUtils'
 import { ValueInspectorButton } from '../ValueInspectorButton'
 import { Bar } from './Bar'
@@ -48,8 +48,6 @@ export function FunnelBarHorizontal({
 
     const { canOpenPersonModal } = useValues(funnelPersonsModalLogic(insightProps))
     const { openPersonsModalForStep, openPersonsModalForSeries } = useActions(funnelPersonsModalLogic(insightProps))
-
-    const hasBreakdown = !!breakdownFilter?.breakdown
 
     const steps = visibleStepsWithConversionMetrics
     const stepReference = funnelsFilter?.funnelStepReference || FunnelStepReference.total
@@ -79,7 +77,23 @@ export function FunnelBarHorizontal({
                         step.nested_breakdown?.reduce((sum, item) => sum + item.count, 0)) ||
                     0
 
-                const isBreakdown = shouldRenderStepAsBreakdown(step.nested_breakdown, hasBreakdown)
+                const isBreakdown =
+                    Array.isArray(step.nested_breakdown) &&
+                    step.nested_breakdown?.length !== undefined &&
+                    !(step.nested_breakdown.length === 1)
+
+                // When the funnel has a breakdown filter that resolves to a single visible value
+                // we still render the non-breakdown layout (so the bar fills correctly), but we
+                // route clicks through openPersonsModalForSeries so the persons modal is scoped
+                // to that breakdown value rather than opened unfiltered.
+                const stepBreakdownSeries = !isBreakdown ? getStepBreakdownSeries(step, breakdownFilter) : null
+                const openStep = (converted: boolean): void => {
+                    if (stepBreakdownSeries) {
+                        openPersonsModalForSeries({ step, series: stepBreakdownSeries, converted })
+                    } else {
+                        openPersonsModalForStep({ step, converted })
+                    }
+                }
 
                 return (
                     <section
@@ -172,7 +186,7 @@ export function FunnelBarHorizontal({
                                     <Bar
                                         name={step.name}
                                         percentage={step.conversionRates.fromBasisStep}
-                                        onBarClick={() => openPersonsModalForStep({ step, converted: true })}
+                                        onBarClick={() => openStep(true)}
                                         step={step.nested_breakdown![0]}
                                         stepIndex={stepIndex}
                                         breakdownFilter={breakdownFilter}
@@ -181,11 +195,7 @@ export function FunnelBarHorizontal({
                                     />
                                     <div
                                         className="funnel-bar-empty-space"
-                                        onClick={
-                                            showPersonsModal
-                                                ? () => openPersonsModalForStep({ step, converted: false }) // dropoff value for steps is negative
-                                                : undefined
-                                        }
+                                        onClick={showPersonsModal ? () => openStep(false) : undefined}
                                         // eslint-disable-next-line react/forbid-dom-props
                                         style={{
                                             flex: `${1 - step.conversionRates.fromBasisStep} 1 0`,
@@ -200,13 +210,7 @@ export function FunnelBarHorizontal({
                                 title={getTooltipTitleForConverted(funnelsFilter, aggregationTargetLabel, stepIndex)}
                                 placement="bottom"
                             >
-                                <ValueInspectorButton
-                                    onClick={
-                                        showPersonsModal
-                                            ? () => openPersonsModalForStep({ step, converted: true })
-                                            : undefined
-                                    }
-                                >
+                                <ValueInspectorButton onClick={showPersonsModal ? () => openStep(true) : undefined}>
                                     <IconTrendingFlat
                                         style={{ color: 'var(--success)' }}
                                         className="value-inspector-button-icon"
@@ -226,11 +230,7 @@ export function FunnelBarHorizontal({
                                         placement="bottom"
                                     >
                                         <ValueInspectorButton
-                                            onClick={
-                                                showPersonsModal
-                                                    ? () => openPersonsModalForStep({ step, converted: false })
-                                                    : undefined
-                                            }
+                                            onClick={showPersonsModal ? () => openStep(false) : undefined}
                                         >
                                             <IconTrendingFlatDown
                                                 style={{ color: 'var(--danger)' }}

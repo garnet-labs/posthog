@@ -12,7 +12,7 @@ import { elementsToAction } from 'scenes/activity/explore/createActionFromEvent'
 import { teamLogic } from 'scenes/teamLogic'
 
 import { Noun } from '~/models/groupsModel'
-import { AnyEntityNode, FunnelExclusionSteps, FunnelsFilter } from '~/queries/schema/schema-general'
+import { AnyEntityNode, BreakdownFilter, FunnelExclusionSteps, FunnelsFilter } from '~/queries/schema/schema-general'
 import { integer } from '~/queries/schema/type-utils'
 import {
     AnyPropertyFilter,
@@ -656,24 +656,32 @@ export function getTooltipTitleForDroppedOff(
 }
 
 /**
- * Whether a funnel step should be rendered using the breakdown layout.
+ * When a funnel step is shown without a per-breakdown bar (i.e. a non-breakdown rendering)
+ * but the funnel actually has a breakdown filter set with a single visible value, this returns
+ * the corresponding series so callers can route clicks through `openPersonsModalForSeries` —
+ * which carries the breakdown value — instead of `openPersonsModalForStep`, which would open
+ * the modal unfiltered.
  *
- * The single-entry case is treated as "not a breakdown" only when there's no real breakdown value
- * — otherwise (i.e. the user filtered the funnel down to a single segment) we treat it as a
- * breakdown so clicks scope the persons modal to that breakdown value.
- *
- * Empty arrays are treated as a breakdown (matching the original logic) so the breakdown
- * rendering branch can safely render nothing instead of crashing on `nested_breakdown![0]`.
+ * Returns null when there is no breakdown filter, when nested_breakdown has any number of
+ * items other than one, or when the single entry has no breakdown value (e.g. it's a bare
+ * step placeholder rather than a real breakdown).
  */
-export function shouldRenderStepAsBreakdown(
-    nestedBreakdown: Pick<FunnelStepWithConversionMetrics, 'breakdown_value'>[] | null | undefined,
-    hasBreakdown: boolean
-): boolean {
-    if (!Array.isArray(nestedBreakdown)) {
-        return false
+export function getStepBreakdownSeries(
+    step: Pick<FunnelStepWithConversionMetrics, 'nested_breakdown'>,
+    breakdownFilter: BreakdownFilter | null | undefined
+): FunnelStepWithConversionMetrics | null {
+    if (!breakdownFilter?.breakdown) {
+        return null
     }
-    if (nestedBreakdown.length === 1) {
-        return hasBreakdown && nestedBreakdown[0]?.breakdown_value != null
+
+    if (!Array.isArray(step.nested_breakdown) || step.nested_breakdown.length !== 1) {
+        return null
     }
-    return true
+
+    const single = step.nested_breakdown[0]
+    if (!single || single.breakdown_value == null) {
+        return null
+    }
+
+    return single
 }

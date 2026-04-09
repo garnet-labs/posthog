@@ -20,9 +20,9 @@ import {
     getLastFilledStep,
     getMeanAndStandardDeviation,
     getReferenceStep,
+    getStepBreakdownSeries,
     getVisibilityKey,
     parseDisplayNameForCorrelation,
-    shouldRenderStepAsBreakdown,
     stepsWithConversionMetrics,
 } from './funnelUtils'
 
@@ -703,51 +703,52 @@ describe('getLastFilledStep', () => {
     })
 })
 
-describe('shouldRenderStepAsBreakdown', () => {
+describe('getStepBreakdownSeries', () => {
+    const series = { breakdown_value: 'NL' } as any
     it.each([
         {
-            scenario: 'multiple breakdown values → breakdown',
-            nested: [{ breakdown_value: 'NL' }, { breakdown_value: 'US' }],
-            hasBreakdown: true,
-            expected: true,
+            scenario: 'single breakdown value with breakdown filter set → returns the series',
+            step: { nested_breakdown: [series] },
+            breakdownFilter: { breakdown: '$geoip_country_code', breakdown_type: 'event' },
+            expected: series,
         },
         {
-            scenario: 'single breakdown value with breakdown filter set → breakdown',
-            nested: [{ breakdown_value: 'NL' }],
-            hasBreakdown: true,
-            expected: true,
+            scenario: 'no breakdown filter → null',
+            step: { nested_breakdown: [series] },
+            breakdownFilter: null,
+            expected: null,
         },
         {
-            scenario: 'single entry without breakdown filter → not a breakdown',
-            nested: [{ breakdown_value: 'NL' }],
-            hasBreakdown: false,
-            expected: false,
+            scenario: 'breakdown filter without breakdown property → null',
+            step: { nested_breakdown: [series] },
+            breakdownFilter: {},
+            expected: null,
         },
         {
-            scenario: 'single entry with breakdown filter but null breakdown_value → not a breakdown',
-            nested: [{ breakdown_value: null as any }],
-            hasBreakdown: true,
-            expected: false,
+            scenario: 'multiple breakdown values → null (use existing per-bar handlers)',
+            step: { nested_breakdown: [series, { breakdown_value: 'US' }] },
+            breakdownFilter: { breakdown: '$geoip_country_code', breakdown_type: 'event' },
+            expected: null,
         },
         {
-            scenario: 'empty array → breakdown (matches original behavior so empty branch renders nothing)',
-            nested: [],
-            hasBreakdown: true,
-            expected: true,
+            scenario: 'empty nested_breakdown → null',
+            step: { nested_breakdown: [] },
+            breakdownFilter: { breakdown: '$geoip_country_code', breakdown_type: 'event' },
+            expected: null,
         },
         {
-            scenario: 'undefined nested_breakdown → not a breakdown',
-            nested: undefined,
-            hasBreakdown: true,
-            expected: false,
+            scenario: 'undefined nested_breakdown → null',
+            step: { nested_breakdown: undefined },
+            breakdownFilter: { breakdown: '$geoip_country_code', breakdown_type: 'event' },
+            expected: null,
         },
         {
-            scenario: 'null nested_breakdown → not a breakdown',
-            nested: null,
-            hasBreakdown: true,
-            expected: false,
+            scenario: 'single entry with null breakdown_value → null',
+            step: { nested_breakdown: [{ breakdown_value: null }] },
+            breakdownFilter: { breakdown: '$geoip_country_code', breakdown_type: 'event' },
+            expected: null,
         },
-    ])('$scenario', ({ nested, hasBreakdown, expected }) => {
-        expect(shouldRenderStepAsBreakdown(nested as any, hasBreakdown)).toBe(expected)
+    ])('$scenario', ({ step, breakdownFilter, expected }) => {
+        expect(getStepBreakdownSeries(step as any, breakdownFilter as any)).toBe(expected)
     })
 })
