@@ -103,11 +103,11 @@ services:
                     }
 
                     handle @surveys {
-                        reverse_proxy app:3001
+                        reverse_proxy app:3002
                     }
 
                     handle @remote-config {
-                        reverse_proxy app:3001
+                        reverse_proxy app:3002
                     }
 
                     handle @webhooks {

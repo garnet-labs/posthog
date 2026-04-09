@@ -21,6 +21,7 @@ services:
             - 'capture-ai:host-gateway'
             - 'replay-capture:host-gateway'
             - 'feature-flags:host-gateway'
+            - 'hypercache-server:host-gateway'
         environment:
             CADDYFILE: |
                 http://localhost:8000 {
@@ -92,11 +93,11 @@ services:
                     }
 
                     handle @surveys {
-                        reverse_proxy feature-flags:3001
+                        reverse_proxy hypercache-server:3002
                     }
 
                     handle @remote-config {
-                        reverse_proxy feature-flags:3001
+                        reverse_proxy hypercache-server:3002
                     }
 
                     handle @webhooks {
@@ -474,6 +475,14 @@ services:
             FLAGS_REDIS_URL: 'redis://redis7:6379/1'
             FLAGS_REDIS_ENABLED: 'false' # Warming but not reading yet
             REDIS_COMPRESSION_ENABLED: 'true'
+
+    hypercache-server:
+        extends:
+            file: docker-compose.base.yml
+            service: hypercache-server
+        depends_on:
+            redis7:
+                condition: service_healthy
 
     # Temporal containers
     elasticsearch:

@@ -417,7 +417,6 @@ pub async fn serve<F>(
         flags_with_cohorts_hypercache_reader,
         team_hypercache_reader,
         config_hypercache_reader,
-        surveys_hypercache_reader,
         rayon_dispatcher,
         team_negative_cache,
         auth_token_cache,
