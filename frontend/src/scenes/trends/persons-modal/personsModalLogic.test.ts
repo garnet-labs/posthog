@@ -304,11 +304,84 @@ describe('personsModalLogic', () => {
             )
         })
 
+        it('includes group_type_index for group breakdown filters', () => {
+            logic = personsModalLogic({
+                query: {
+                    kind: NodeKind.FunnelsActorsQuery,
+                    source: {
+                        kind: NodeKind.FunnelsQuery,
+                        series: [{ kind: NodeKind.EventsNode, event: '$pageview' }],
+                        breakdownFilter: {
+                            breakdown: 'company_name',
+                            breakdown_type: 'group',
+                            breakdown_group_type_index: 0,
+                        },
+                    },
+                    funnelStep: 1,
+                    funnelStepBreakdown: 'Acme',
+                    includeRecordings: true,
+                } as any,
+                url: '/api/environments/1/persons?',
+                additionalSelect: { matched_recordings: 'matched_recordings' },
+            })
+            logic.mount()
+
+            logic.actions.loadActorsSuccess({
+                results: [
+                    {
+                        count: 1,
+                        people: [
+                            {
+                                type: 'person',
+                                id: 'person-1',
+                                distinct_ids: ['user-1'],
+                                is_identified: true,
+                                properties: {},
+                                created_at: '2024-01-01',
+                                matched_recordings: [{ session_id: 'session-1', events: [] }],
+                                value_at_data_point: null,
+                            },
+                        ],
+                    },
+                ],
+                missing_persons: 0,
+            })
+
+            expectLogic(logic).toMatchValues({
+                recordingFilters: {
+                    session_ids: ['session-1'],
+                    filter_group: {
+                        type: FilterLogicalOperator.And,
+                        values: [
+                            {
+                                type: FilterLogicalOperator.And,
+                                values: [
+                                    {
+                                        key: 'company_name',
+                                        value: 'Acme',
+                                        operator: PropertyOperator.Exact,
+                                        type: PropertyFilterType.Group,
+                                        group_type_index: 0,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    duration: [],
+                },
+            })
+        })
+
         it.each([
             {
                 scenario: 'cohort breakdown',
                 breakdownFilter: { breakdown: [1, 2], breakdown_type: 'cohort' },
                 funnelStepBreakdown: 1,
+            },
+            {
+                scenario: 'group breakdown without breakdown_group_type_index',
+                breakdownFilter: { breakdown: 'company_name', breakdown_type: 'group' },
+                funnelStepBreakdown: 'Acme',
             },
             {
                 scenario: 'multi-key breakdown property',

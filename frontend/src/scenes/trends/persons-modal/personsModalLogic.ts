@@ -57,8 +57,9 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     if (!source || source.kind !== NodeKind.FunnelsActorsQuery || source.funnelStepBreakdown == null) {
         return null
     }
-    const breakdown = source.source.breakdownFilter?.breakdown
-    const breakdownType = source.source.breakdownFilter?.breakdown_type ?? 'event'
+    const breakdownFilter = source.source.breakdownFilter
+    const breakdown = breakdownFilter?.breakdown
+    const breakdownType = breakdownFilter?.breakdown_type ?? 'event'
     if (
         !breakdown ||
         Array.isArray(breakdown) ||
@@ -67,18 +68,27 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     ) {
         return null
     }
-    const filterType: PropertyFilterType =
-        breakdownType === 'person'
-            ? PropertyFilterType.Person
-            : breakdownType === 'group'
-              ? PropertyFilterType.Group
-              : PropertyFilterType.Event
-    return {
+    const base = {
         key: String(breakdown),
         value: source.funnelStepBreakdown,
         operator: PropertyOperator.Exact,
-        type: filterType,
-    } as UniversalFilterValue
+    }
+    if (breakdownType === 'person') {
+        return { ...base, type: PropertyFilterType.Person } as UniversalFilterValue
+    }
+    if (breakdownType === 'group') {
+        // Group filters must carry the group_type_index so the backend can match the filter
+        // against the correct group type. Bail out if we don't know which group type this is.
+        if (breakdownFilter?.breakdown_group_type_index == null) {
+            return null
+        }
+        return {
+            ...base,
+            type: PropertyFilterType.Group,
+            group_type_index: breakdownFilter.breakdown_group_type_index,
+        } as UniversalFilterValue
+    }
+    return { ...base, type: PropertyFilterType.Event } as UniversalFilterValue
 }
 
 export interface PersonModalLogicProps {
