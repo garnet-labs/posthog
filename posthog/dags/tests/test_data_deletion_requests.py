@@ -264,7 +264,7 @@ def _insert_events_with_properties(events: list[tuple], client: Client) -> None:
 
 def _get_properties(team_id: int, event_name: str, client: Client) -> list[dict]:
     result = client.execute(
-        "SELECT properties FROM writable_events WHERE team_id = %(team_id)s AND event = %(event)s",
+        "SELECT properties FROM events WHERE team_id = %(team_id)s AND event = %(event)s",
         {"team_id": team_id, "event": event_name},
     )
     return [json.loads(row[0]) for row in result]
@@ -338,7 +338,14 @@ def test_full_job_property_removal(cluster: ClickhouseCluster):
     start_time = now - timedelta(days=7)
     end_time = now + timedelta(minutes=1)
 
-    props_to_drop = json.dumps({"$ip": "1.2.3.4", "metrics": "data", "keep": "yes"})
+    props_to_drop_obj = {
+        "$ip": "1.2.3.4",
+        "metrics": "data",
+        "keep": "yes",
+        "sub": {"prop": "value"},
+        "sub2": {"a": "b", "c": "d"},
+    }
+    props_to_drop = json.dumps(props_to_drop_obj)
     no_target_props = json.dumps({"keep": "yes", "other": "value"})
 
     target_events = [(PROP_TEAM_ID, "$pageview", uuid4(), now - timedelta(hours=i), props_to_drop) for i in range(30)]
@@ -359,7 +366,7 @@ def test_full_job_property_removal(cluster: ClickhouseCluster):
         team_id=PROP_TEAM_ID,
         request_type=RequestType.PROPERTY_REMOVAL,
         events=["$pageview"],
-        properties=["$ip", "metrics"],
+        properties=["$ip", "metrics", "sub.prop", "sub2.a"],
         start_time=start_time,
         end_time=end_time,
         status=RequestStatus.APPROVED,
@@ -385,58 +392,61 @@ def test_full_job_property_removal(cluster: ClickhouseCluster):
     for props in pageview_props:
         assert "$ip" not in props, f"$ip should be removed, got {props}"
         assert "metrics" not in props, f"metrics should be removed, got {props}"
+        assert "prop" not in props.get("sub", {}), f"sub.prop should be removed, got {props}"
         assert "keep" in props, f"keep should be preserved, got {props}"
+        sub = props.get("sub2", None)
+        if sub is not None:
+            assert "a" not in sub, f"sub.prop should be removed, got {props}"
+            assert "c" in sub, f"sub.prop should be preserved, got {props}"
 
     # $identify events untouched (different event name, not in request)
     identify_props = cluster.any_host(partial(_get_properties, PROP_TEAM_ID, "$identify")).result()
     for props in identify_props:
-        assert "$ip" in props
-        assert "metrics" in props
+        assert props_to_drop_obj == props, f"Properties should not be modified, got {props}"
 
-    # Status transitioned to COMPLETED
-    request.refresh_from_db()
-    assert request.status == RequestStatus.COMPLETED
+        # Status transitioned to COMPLETED
+        request.refresh_from_db()
+        assert request.status == RequestStatus.COMPLETED
 
+    @pytest.mark.django_db
+    def test_full_job_property_removal_single_property(cluster: ClickhouseCluster):
+        _skip_without_json_drop_keys(cluster)
 
-@pytest.mark.django_db
-def test_full_job_property_removal_single_property(cluster: ClickhouseCluster):
-    _skip_without_json_drop_keys(cluster)
+        now = datetime.now()
+        start_time = now - timedelta(days=7)
+        end_time = now + timedelta(minutes=1)
 
-    now = datetime.now()
-    start_time = now - timedelta(days=7)
-    end_time = now + timedelta(minutes=1)
+        props = json.dumps({"secret": "value", "keep_me": "yes"})
+        events = [(PROP_TEAM_ID, "custom_event", uuid4(), now - timedelta(hours=i), props) for i in range(20)]
 
-    props = json.dumps({"secret": "value", "keep_me": "yes"})
-    events = [(PROP_TEAM_ID, "custom_event", uuid4(), now - timedelta(hours=i), props) for i in range(20)]
+        cluster.any_host(partial(_insert_events_with_properties, events)).result()
 
-    cluster.any_host(partial(_insert_events_with_properties, events)).result()
+        request = DataDeletionRequest.objects.create(
+            team_id=PROP_TEAM_ID,
+            request_type=RequestType.PROPERTY_REMOVAL,
+            events=["custom_event"],
+            properties=["secret"],
+            start_time=start_time,
+            end_time=end_time,
+            status=RequestStatus.APPROVED,
+        )
 
-    request = DataDeletionRequest.objects.create(
-        team_id=PROP_TEAM_ID,
-        request_type=RequestType.PROPERTY_REMOVAL,
-        events=["custom_event"],
-        properties=["secret"],
-        start_time=start_time,
-        end_time=end_time,
-        status=RequestStatus.APPROVED,
-    )
-
-    result = data_deletion_request_property_removal.execute_in_process(
-        run_config={
-            "ops": {
-                "load_property_removal_request": {
-                    "config": {"request_id": str(request.pk)},
+        result = data_deletion_request_property_removal.execute_in_process(
+            run_config={
+                "ops": {
+                    "load_property_removal_request": {
+                        "config": {"request_id": str(request.pk)},
+                    },
                 },
             },
-        },
-        resources={"cluster": cluster},
-    )
-    assert result.success
+            resources={"cluster": cluster},
+        )
+        assert result.success
 
-    all_props = cluster.any_host(partial(_get_properties, PROP_TEAM_ID, "custom_event")).result()
-    for props in all_props:
-        assert "secret" not in props
-        assert "keep_me" in props
+        all_props = cluster.any_host(partial(_get_properties, PROP_TEAM_ID, "custom_event")).result()
+        for props in all_props:
+            assert "secret" not in props
+            assert "keep_me" in props
 
-    request.refresh_from_db()
-    assert request.status == RequestStatus.COMPLETED
+        request.refresh_from_db()
+        assert request.status == RequestStatus.COMPLETED
