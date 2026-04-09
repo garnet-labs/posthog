@@ -61,6 +61,13 @@ services:
                         path /flags/*
                     }
 
+                    @surveys {
+                        path /surveys
+                        path /surveys/
+                        path /api/surveys
+                        path /api/surveys/
+                    }
+
                     @webhooks {
                         path /public/webhooks
                         path /public/webhooks/
@@ -99,6 +106,10 @@ services:
                     }
 
                     handle @flags {
+                        reverse_proxy feature-flags:3001
+                    }
+
+                    handle @surveys {
                         reverse_proxy feature-flags:3001
                     }
 

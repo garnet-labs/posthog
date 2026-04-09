@@ -348,9 +348,9 @@ pub async fn serve<F>(
     // Create HyperCacheReader for surveys (surveys/surveys.json)
     // Reads pre-computed survey definitions from Python's surveys_hypercache
     // Uses token-based lookup (api_token) to match Python's HyperCache key pattern
-    let surveys_redis_client = dedicated_redis_client
-        .clone()
-        .unwrap_or_else(|| redis_client.clone());
+    // Uses the shared Redis client (not dedicated flags Redis) because Django writes
+    // surveys cache to the default Redis database, not the flags-specific one.
+    let surveys_redis_client = redis_client.clone();
 
     let mut surveys_hypercache_config = HyperCacheConfig::new(
         "surveys".to_string(),
