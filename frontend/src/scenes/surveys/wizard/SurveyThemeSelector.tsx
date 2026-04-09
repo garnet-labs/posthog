@@ -117,7 +117,7 @@ export function SurveyThemeSelector({
                 </div>
             ) : null}
 
-            <div className="flex flex-wrap justify-center gap-2 [&>*]:w-[150px]">
+            <div className="grid grid-cols-3 gap-2 md:grid-cols-6 max-w-4xl">
                 {surveyThemes.map((theme) => (
                     <ThemePreviewCard
                         key={theme.id}

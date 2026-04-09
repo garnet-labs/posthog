@@ -45,9 +45,9 @@ export function AppearanceStep(): JSX.Element {
     const [previewBackground, setPreviewBackground] = useState<'light' | 'dark'>(() =>
         isDarkModeOn ? 'dark' : 'light'
     )
-    const [selectedThemeId, setSelectedThemeId] = useState<string | null>(() => {
-        return getMatchingSurveyThemeId(survey.appearance)
-    })
+    const [selectedThemeId, setSelectedThemeId] = useState<string | null>(() =>
+        getMatchingSurveyThemeId(survey.appearance)
+    )
 
     const appearance: SurveyAppearance = { ...defaultSurveyAppearance, ...survey.appearance }
     const hasRatingButtons = survey.questions?.some((q) => q.type === SurveyQuestionType.Rating)

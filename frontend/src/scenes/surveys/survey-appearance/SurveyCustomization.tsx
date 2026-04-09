@@ -50,172 +50,157 @@ export function Customization({
     disabledReason,
 }: CustomizationProps): JSX.Element {
     const { surveysStylingAvailable } = useValues(surveysLogic)
-    const surveyShufflingQuestionsAvailable = true
-    const surveyShufflingQuestionsDisabledReason = surveyShufflingQuestionsAvailable
-        ? ''
-        : 'Please add more than one question to the survey to enable shuffling questions'
     const { guardAvailableFeature } = useValues(upgradeModalLogic)
 
     const surveyAppearance = { ...defaultSurveyAppearance, ...survey.appearance }
     const selectedThemeId = getMatchingSurveyThemeId(survey.appearance)
 
     return (
-        <>
-            <div className="flex flex-col divide-y divide-border [&>*]:py-5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
-                {!surveysStylingAvailable && (
-                    <PayGateMini feature={AvailableFeature.SURVEYS_STYLING}>
-                        <></>
-                    </PayGateMini>
-                )}
+        <div className="flex flex-col divide-y divide-border [&>*]:py-5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
+            {!surveysStylingAvailable && (
+                <PayGateMini feature={AvailableFeature.SURVEYS_STYLING}>
+                    <></>
+                </PayGateMini>
+            )}
 
+            <CustomizationSection
+                title="Theme"
+                description="Start with a preset, then fine-tune individual colors below."
+            >
+                <SurveyThemeSelector
+                    selectedThemeId={selectedThemeId}
+                    onSelectTheme={(theme) => onAppearanceChange(theme.appearance)}
+                    disabled={!surveysStylingAvailable || !!disabledReason}
+                    showHeader={false}
+                />
+            </CustomizationSection>
+
+            <CustomizationSection title="Colors">
+                <SurveyColorsAppearance
+                    appearance={surveyAppearance}
+                    onAppearanceChange={onAppearanceChange}
+                    validationErrors={validationErrors}
+                    customizeRatingButtons={hasRatingButtons}
+                    customizePlaceholderText={hasPlaceholderText}
+                    disabledReason={disabledReason}
+                />
+            </CustomizationSection>
+
+            {survey.type !== SurveyType.ExternalSurvey && (
                 <CustomizationSection
-                    title="Theme"
-                    description="Start with a preset, then fine-tune individual colors below."
+                    title="Layout"
+                    description="Container, placement, and typography. Only applied in web surveys, not native mobile apps."
                 >
-                    <SurveyThemeSelector
-                        selectedThemeId={selectedThemeId}
-                        onSelectTheme={(theme) => onAppearanceChange(theme.appearance)}
-                        disabled={!surveysStylingAvailable || !!disabledReason}
-                        showHeader={false}
-                    />
-                </CustomizationSection>
-
-                <CustomizationSection title="Colors">
-                    <SurveyColorsAppearance
+                    <SurveyContainerAppearance
                         appearance={surveyAppearance}
                         onAppearanceChange={onAppearanceChange}
                         validationErrors={validationErrors}
-                        customizeRatingButtons={hasRatingButtons}
-                        customizePlaceholderText={hasPlaceholderText}
+                        surveyType={survey.type}
+                        disabledReason={disabledReason}
+                    />
+                    <SurveyAppearanceModal
+                        survey={survey}
+                        onAppearanceChange={onAppearanceChange}
+                        hasPlaceholderText={hasPlaceholderText}
+                        hasRatingButtons={hasRatingButtons}
+                        validationErrors={validationErrors}
                         disabledReason={disabledReason}
                     />
                 </CustomizationSection>
+            )}
 
-                {survey.type !== SurveyType.ExternalSurvey && (
-                    <CustomizationSection title="Layout" description="Container, placement, and typography.">
-                        <div className="mb-4">
-                            <SurveyAppearanceModal
-                                survey={survey}
-                                onAppearanceChange={onAppearanceChange}
-                                hasPlaceholderText={hasPlaceholderText}
-                                hasRatingButtons={hasRatingButtons}
-                                validationErrors={validationErrors}
-                                disabledReason={disabledReason}
-                            />
-                        </div>
-                        <SurveyContainerAppearance
-                            appearance={surveyAppearance}
-                            onAppearanceChange={onAppearanceChange}
-                            validationErrors={validationErrors}
-                            surveyType={survey.type}
-                            disabledReason={disabledReason}
-                        />
-                    </CustomizationSection>
-                )}
-
-                <CustomizationSection title="Behavior">
-                    <div className="flex flex-col gap-3">
-                        <LemonCheckbox
-                            label={
-                                <div className="flex items-center">
-                                    <span>Hide PostHog branding</span>
-                                </div>
-                            }
-                            onChange={(checked) => {
-                                if (checked) {
-                                    guardAvailableFeature(AvailableFeature.WHITE_LABELLING, () =>
-                                        onAppearanceChange({ whiteLabel: checked })
-                                    )
-                                } else {
+            <CustomizationSection title="Behavior">
+                <div className="flex flex-col gap-3">
+                    <LemonCheckbox
+                        label="Hide PostHog branding"
+                        onChange={(checked) => {
+                            if (checked) {
+                                guardAvailableFeature(AvailableFeature.WHITE_LABELLING, () =>
                                     onAppearanceChange({ whiteLabel: checked })
-                                }
-                            }}
-                            checked={survey.appearance?.whiteLabel}
-                            disabledReason={disabledReason}
-                        />
-                        <LemonDivider className="my-0" />
-                        <div className="flex flex-col gap-2">
-                            <LemonCheckbox
-                                disabledReason={disabledReason ?? surveyShufflingQuestionsDisabledReason}
-                                label={
-                                    <div className="flex items-center">
-                                        <span>Shuffle questions</span>
-                                    </div>
-                                }
-                                onChange={(checked) => {
-                                    if (checked && hasBranchingLogic) {
-                                        onAppearanceChange({ shuffleQuestions: false })
+                                )
+                            } else {
+                                onAppearanceChange({ whiteLabel: checked })
+                            }
+                        }}
+                        checked={survey.appearance?.whiteLabel}
+                        disabledReason={disabledReason}
+                    />
+                    <LemonDivider className="my-0" />
+                    <LemonCheckbox
+                        disabledReason={disabledReason}
+                        label="Shuffle questions"
+                        onChange={(checked) => {
+                            if (checked && hasBranchingLogic) {
+                                onAppearanceChange({ shuffleQuestions: false })
 
-                                        LemonDialog.open({
-                                            title: 'Your survey has active branching logic',
-                                            description: (
-                                                <p className="py-2">
-                                                    Enabling this option will remove your branching logic. Are you sure
-                                                    you want to continue?
-                                                </p>
-                                            ),
-                                            primaryButton: {
-                                                children: 'Continue',
-                                                status: 'danger',
-                                                onClick: () => {
-                                                    if (deleteBranchingLogic) {
-                                                        deleteBranchingLogic()
-                                                    }
-                                                    onAppearanceChange({ shuffleQuestions: true })
-                                                },
-                                            },
-                                            secondaryButton: {
-                                                children: 'Cancel',
-                                            },
-                                        })
-                                    } else {
-                                        onAppearanceChange({ shuffleQuestions: checked })
-                                    }
-                                }}
-                                checked={survey.appearance?.shuffleQuestions}
-                            />
-                        </div>
-                    </div>
-                    {survey.type !== SurveyType.ExternalSurvey && (
-                        <>
-                            <LemonDivider className="my-3" />
-                            <LemonField.Pure>
-                                <div className="flex flex-row items-center gap-2 font-medium">
-                                    <LemonCheckbox
-                                        checked={!!survey.appearance?.surveyPopupDelaySeconds}
-                                        onChange={(checked) => {
-                                            const surveyPopupDelaySeconds = checked ? 5 : undefined
-                                            onAppearanceChange({ surveyPopupDelaySeconds })
-                                        }}
-                                        disabledReason={disabledReason}
-                                    />
-                                    Delay survey popup by at least{' '}
-                                    <LemonInput
-                                        type="number"
-                                        data-attr="survey-popup-delay-input"
-                                        size="small"
-                                        min={1}
-                                        max={3600}
-                                        value={survey.appearance?.surveyPopupDelaySeconds || NaN}
-                                        onChange={(newValue) => {
-                                            if (newValue && newValue > 0) {
-                                                onAppearanceChange({ surveyPopupDelaySeconds: newValue })
-                                            } else {
-                                                onAppearanceChange({
-                                                    surveyPopupDelaySeconds: undefined,
-                                                })
+                                LemonDialog.open({
+                                    title: 'Your survey has active branching logic',
+                                    description: (
+                                        <p className="py-2">
+                                            Enabling this option will remove your branching logic. Are you sure you want
+                                            to continue?
+                                        </p>
+                                    ),
+                                    primaryButton: {
+                                        children: 'Continue',
+                                        status: 'danger',
+                                        onClick: () => {
+                                            if (deleteBranchingLogic) {
+                                                deleteBranchingLogic()
                                             }
-                                        }}
-                                        className="w-12 ignore-error-border"
-                                        disabledReason={disabledReason}
-                                    />{' '}
-                                    seconds once the display conditions are met.
-                                </div>
-                            </LemonField.Pure>
-                        </>
-                    )}
-                </CustomizationSection>
-            </div>
-        </>
+                                            onAppearanceChange({ shuffleQuestions: true })
+                                        },
+                                    },
+                                    secondaryButton: {
+                                        children: 'Cancel',
+                                    },
+                                })
+                            } else {
+                                onAppearanceChange({ shuffleQuestions: checked })
+                            }
+                        }}
+                        checked={survey.appearance?.shuffleQuestions}
+                    />
+                </div>
+                {survey.type !== SurveyType.ExternalSurvey && (
+                    <>
+                        <LemonDivider className="my-3" />
+                        <LemonField.Pure>
+                            <div className="flex flex-row items-center gap-2 font-medium">
+                                <LemonCheckbox
+                                    checked={!!survey.appearance?.surveyPopupDelaySeconds}
+                                    onChange={(checked) => {
+                                        const surveyPopupDelaySeconds = checked ? 5 : undefined
+                                        onAppearanceChange({ surveyPopupDelaySeconds })
+                                    }}
+                                    disabledReason={disabledReason}
+                                />
+                                Delay survey popup by at least{' '}
+                                <LemonInput
+                                    type="number"
+                                    data-attr="survey-popup-delay-input"
+                                    size="small"
+                                    min={1}
+                                    max={3600}
+                                    value={survey.appearance?.surveyPopupDelaySeconds || NaN}
+                                    onChange={(newValue) => {
+                                        if (newValue && newValue > 0) {
+                                            onAppearanceChange({ surveyPopupDelaySeconds: newValue })
+                                        } else {
+                                            onAppearanceChange({
+                                                surveyPopupDelaySeconds: undefined,
+                                            })
+                                        }
+                                    }}
+                                    className="w-12 ignore-error-border"
+                                    disabledReason={disabledReason}
+                                />{' '}
+                                seconds once the display conditions are met.
+                            </div>
+                        </LemonField.Pure>
+                    </>
+                )}
+            </CustomizationSection>
+        </div>
     )
 }

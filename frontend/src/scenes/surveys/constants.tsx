@@ -816,5 +816,5 @@ export function getMatchingSurveyThemeId(appearance?: Partial<SurveyAppearance> 
             theme.appearance.submitButtonColor === appearance.submitButtonColor
     )
 
-    return matchingTheme?.id || null
+    return matchingTheme?.id ?? null
 }
