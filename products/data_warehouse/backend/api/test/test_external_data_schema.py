@@ -331,18 +331,17 @@ class TestExternalDataSchema(APIBaseTest):
             table=table,
         )
 
-        with mock.patch.object(DataWarehouseTable, "get_max_value_for_column", return_value=1):
-            response = self.client.patch(
-                f"/api/environments/{self.team.pk}/external_data_schemas/{schema.id}",
-                data={
-                    "sync_type": "incremental",
-                    "incremental_field": "created",
-                    "incremental_field_type": "integer",
-                    "primary_key_columns": ["_id"],
-                },
-            )
+        response = self.client.patch(
+            f"/api/environments/{self.team.pk}/external_data_schemas/{schema.id}",
+            data={
+                "sync_type": "incremental",
+                "incremental_field": "created",
+                "incremental_field_type": "integer",
+                "primary_key_columns": ["_id"],
+            },
+        )
 
-            assert response.status_code == 400
+        assert response.status_code == 400
 
     def test_update_schema_primary_key_columns_not_reset_on_full_refresh(self):
         source = ExternalDataSource.objects.create(
