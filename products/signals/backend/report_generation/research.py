@@ -113,7 +113,7 @@ A PR-style title (max 70 chars) scoped to one concrete concern.
 It should read like a pull request title that one engineer could ship in a single PR. Target one feature, one bug, one component, or one tightly-scoped change.
 Follow the Conventional Commits style (sentence-cased).
 If the report already has a title that is PR-specific and still accurate after your research, keep it — don't replace a good PR title with a vaguer one.
-- Good: fix(date-picker): Handle timezone conversion in insights"
+- Good: fix(date-picker): Handle timezone conversion in insights
 - Good: feat(funnel): Add percentile options to Time to Convert
 - Bad: fix(funnel): various funnel improvements and bug fixes
 - Bad: multiple analytics issues
