@@ -86,10 +86,10 @@ class Command(BaseCommand):
             "--team-id",
             type=int,
             required=False,
-            help="Team ID to backfill person properties for. Cannot be used with --teams-ids",
+            help="Team ID to backfill person properties for. Cannot be used with --team-ids",
         )
         parser.add_argument(
-            "--teams-ids",
+            "--team-ids",
             type=int,
             nargs="+",
             required=False,
@@ -99,7 +99,7 @@ class Command(BaseCommand):
             "--cohort-id",
             type=int,
             required=False,
-            help="Optional: Specific cohort ID to backfill. Can only be used with --team-id, not with --teams-ids",
+            help="Optional: Specific cohort ID to backfill. Can only be used with --team-id, not with --team-ids",
         )
         parser.add_argument(
             "--batch-size",
@@ -122,26 +122,33 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         team_id = options.get("team_id")
-        teams_ids = options.get("teams_ids")
+        team_ids_option = options.get("team_ids")
         cohort_id = options.get("cohort_id")
         batch_size = options["batch_size"]
         concurrent_workflows = options["concurrent_workflows"]
         person_id = options.get("person_id")
 
         # Validate that only one team option is provided
-        if team_id and teams_ids:
-            self.stdout.write(self.style.ERROR("Cannot use both --team-id and --teams-ids. Please use only one."))
+        if team_id and team_ids_option:
+            self.stdout.write(self.style.ERROR("Cannot use both --team-id and --team-ids. Please use only one."))
             return
 
         # Validate that at least one team option is provided
-        if not team_id and not teams_ids:
-            self.stdout.write(self.style.ERROR("Must provide either --team-id or --teams-ids"))
+        if not team_id and not team_ids_option:
+            self.stdout.write(self.style.ERROR("Must provide either --team-id or --team-ids"))
             return
 
         # Validate that cohort-id is only used with single team
-        if cohort_id and teams_ids:
+        if cohort_id and team_ids_option:
             self.stdout.write(
-                self.style.ERROR("Cannot use --cohort-id with --teams-ids. Use --cohort-id only with --team-id.")
+                self.style.ERROR("Cannot use --cohort-id with --team-ids. Use --cohort-id only with --team-id.")
+            )
+            return
+
+        # Validate that person-id is only used with single team
+        if person_id and team_ids_option:
+            self.stdout.write(
+                self.style.ERROR("Cannot use --person-id with --team-ids. Use --person-id only with --team-id.")
             )
             return
 
@@ -149,7 +156,8 @@ class Command(BaseCommand):
         if team_id:
             team_ids = [team_id]
         else:
-            team_ids = teams_ids or []
+            # Deduplicate and sort team_ids for deterministic processing
+            team_ids = sorted(set(team_ids_option or []))
 
         self.stdout.write(self.style.SUCCESS(f"Processing {len(team_ids)} team(s): {team_ids}"))
 
@@ -260,14 +268,18 @@ class Command(BaseCommand):
                 )
             )
 
-            workflow_id = self.run_temporal_workflow(
-                team_id=current_team_id,
-                filters=deduplicated_filters,
-                cohort_ids=cohort_ids,
-                batch_size=batch_size,
-                concurrent_workflows=concurrent_workflows,
-                person_id=person_id,
-            )
+            try:
+                workflow_id = self.run_temporal_workflow(
+                    team_id=current_team_id,
+                    filters=deduplicated_filters,
+                    cohort_ids=cohort_ids,
+                    batch_size=batch_size,
+                    concurrent_workflows=concurrent_workflows,
+                    person_id=person_id,
+                )
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"Failed to start workflow for team {current_team_id}: {e}"))
+                continue
 
             self.stdout.write(
                 self.style.SUCCESS(
