@@ -689,7 +689,7 @@ def collect_cohort_query_stats(
 
 
 @shared_task(ignore_result=True, max_retries=3)
-def trigger_cohort_backfill_task(team_id: int, cohort_id: int):
+def trigger_cohort_backfill_task(team_id: int, cohort_id: int) -> None:
     """
     Trigger backfill for a realtime cohort with person properties.
     Uses the existing temporal workflow for consistency.
