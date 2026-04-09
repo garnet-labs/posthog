@@ -38,7 +38,7 @@ from posthog.models.feature_flag.user_blast_radius import (
 )
 from posthog.models.hog_flow.hog_flow import BILLABLE_ACTION_TYPES, HogFlow
 from posthog.models.hog_function_template import HogFunctionTemplate
-from posthog.plugins.plugin_server_api import create_hog_flow_invocation_test
+from posthog.plugins.plugin_server_api import create_hog_flow_invocation_test, create_hog_flow_scheduled_invocation
 
 from products.workflows.backend.models.hog_flow_batch_job import HogFlowBatchJob
 from products.workflows.backend.models.hog_flow_schedule import HogFlowSchedule
@@ -789,23 +789,10 @@ class InternalHogFlowViewSet(TeamAndOrgViewSetMixin, LogEntryMixin, AppMetricsMi
                         )
                         processed.append(str(schedule_id))
                     elif schedule_invocation_params:
-                        create_hog_flow_invocation_test(
+                        create_hog_flow_scheduled_invocation(
                             team_id=schedule_invocation_params["team_id"],
                             hog_flow_id=schedule_invocation_params["hog_flow_id"],
-                            payload={
-                                "globals": {
-                                    "event": {
-                                        "uuid": str(uuid_mod.uuid4()),
-                                        "event": "$workflow_scheduled",
-                                        "distinct_id": f"workflow-{schedule_invocation_params['hog_flow_id']}",
-                                        "timestamp": timezone.now().isoformat(),
-                                        "url": "",
-                                        "properties": {},
-                                        "elements_chain": "",
-                                    },
-                                    "variables": schedule_invocation_params["variables"],
-                                },
-                            },
+                            variables=schedule_invocation_params["variables"],
                         )
                         processed.append(str(schedule_id))
                 except Exception:
