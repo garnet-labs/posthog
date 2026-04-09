@@ -18636,6 +18636,20 @@ export namespace Schemas {
       readonly last_used_at: string | null;
     }
 
+    /**
+     * * `success` - Success
+    * `failed` - Failed
+    * `running` - Running
+     */
+    export type LastRunStatusEnum = typeof LastRunStatusEnum[keyof typeof LastRunStatusEnum];
+
+
+    export const LastRunStatusEnum = {
+      Success: 'success',
+      Failed: 'failed',
+      Running: 'running',
+    } as const;
+
     export type LimitContext = typeof LimitContext[keyof typeof LimitContext];
 
 
@@ -19712,6 +19726,7 @@ export namespace Schemas {
      * * `error_tracking` - Error Tracking
     * `eval_clusters` - Eval Clusters
     * `user_created` - User Created
+    * `automation` - Automation
     * `slack` - Slack
     * `support_queue` - Support Queue
     * `session_summaries` - Session Summaries
@@ -19724,6 +19739,7 @@ export namespace Schemas {
       ErrorTracking: 'error_tracking',
       EvalClusters: 'eval_clusters',
       UserCreated: 'user_created',
+      Automation: 'automation',
       Slack: 'slack',
       SupportQueue: 'support_queue',
       SessionSummaries: 'session_summaries',
@@ -21744,6 +21760,49 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: TaggedItem[];
+    }
+
+    export interface TaskAutomation {
+      readonly id: string;
+      /** @maxLength 255 */
+      name: string;
+      prompt: string;
+      /** @maxLength 255 */
+      repository: string;
+      /**
+       * GitHub integration for this automation
+       * @nullable
+       */
+      github_integration?: number | null;
+      schedule_time?: string;
+      /** @maxLength 128 */
+      timezone?: string;
+      /**
+       * @maxLength 255
+       * @nullable
+       */
+      template_id?: string | null;
+      enabled?: boolean;
+      /** @nullable */
+      readonly last_run_at: string | null;
+      readonly last_run_status: LastRunStatusEnum | NullEnum | null;
+      /** @nullable */
+      readonly last_task_id: string | null;
+      /** @nullable */
+      readonly last_task_run_id: string | null;
+      /** @nullable */
+      readonly last_error: string | null;
+      readonly created_at: string;
+      readonly updated_at: string;
+    }
+
+    export interface PaginatedTaskAutomationList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: TaskAutomation[];
     }
 
     export interface PaginatedTaskList {
@@ -25864,6 +25923,40 @@ export namespace Schemas {
       readonly created_at?: string;
       readonly updated_at?: string;
       readonly created_by?: UserBasic;
+    }
+
+    export interface PatchedTaskAutomation {
+      readonly id?: string;
+      /** @maxLength 255 */
+      name?: string;
+      prompt?: string;
+      /** @maxLength 255 */
+      repository?: string;
+      /**
+       * GitHub integration for this automation
+       * @nullable
+       */
+      github_integration?: number | null;
+      schedule_time?: string;
+      /** @maxLength 128 */
+      timezone?: string;
+      /**
+       * @maxLength 255
+       * @nullable
+       */
+      template_id?: string | null;
+      enabled?: boolean;
+      /** @nullable */
+      readonly last_run_at?: string | null;
+      readonly last_run_status?: LastRunStatusEnum | NullEnum | null;
+      /** @nullable */
+      readonly last_task_id?: string | null;
+      /** @nullable */
+      readonly last_task_run_id?: string | null;
+      /** @nullable */
+      readonly last_error?: string | null;
+      readonly created_at?: string;
+      readonly updated_at?: string;
     }
 
     /**
@@ -35843,6 +35936,17 @@ export namespace Schemas {
     };
 
     export type TagsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number;
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number;
+    };
+
+    export type TaskAutomationsListParams = {
     /**
      * Number of results to return per page.
      */
