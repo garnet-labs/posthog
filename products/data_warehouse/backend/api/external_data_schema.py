@@ -174,7 +174,11 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             if "primary_key_columns" in data:
                 new_pk = data.get("primary_key_columns")
                 old_pk = instance.sync_type_config.get("primary_key_columns")
-                if new_pk != old_pk and instance.table is not None:
+                if (
+                    sync_type == ExternalDataSchema.SyncType.INCREMENTAL
+                    and new_pk != old_pk
+                    and instance.table is not None
+                ):
                     raise ValidationError(
                         "Primary key cannot be changed after data has been synced. "
                         "Delete the synced data first, then change the primary key."
