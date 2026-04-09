@@ -9,7 +9,6 @@ from posthog.schema import (
     CachedStickinessQueryResponse,
     DataWarehouseEventsModifier,
     DataWarehouseNode,
-    DataWarehousePropertyFilter,
     EventsNode,
     HogQLQueryModifiers,
     StickinessComputationMode,
@@ -380,7 +379,6 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
         date_range = self.date_range(series_with_extra)
         series = series_with_extra.series
         filters: list[ast.Expr] = []
-        is_data_warehouse_series = isinstance(series, DataWarehouseNode)
 
         # Dates
         filters.extend(
