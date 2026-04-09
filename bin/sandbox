@@ -1091,7 +1091,11 @@ def cmd_destroy(branch: str, clean: bool = False) -> None:
     # entry is missing, derive profiles from the compose file to ensure nothing
     # is orphaned.
     profiles = resolve_docker_profiles(entry.intents) if entry else sorted(_all_sandbox_profiles())
-    compose(project, port, worktree, "down", "-v", "-t", "0", check=False, capture=True, profiles=profiles)
+    result = compose(project, port, worktree, "down", "-v", "-t", "0", check=False, capture=True, profiles=profiles)
+
+    if result.returncode != 0:
+        error(f"Docker teardown failed for '{project}' (is Docker running?). Registry entry preserved for retry.")
+        return
 
     if clean and entry and entry.worktree:
         _remove_worktree(entry.worktree)
@@ -1278,7 +1282,11 @@ def cmd_nuke() -> None:
     for branch in list(registry.list_all()):
         cmd_destroy(branch)
     # Don't rebuild the cache here — it will be rebuilt on the next `sandbox create`.
-    clear_volume(DB_CACHE_VOLUME)
+    try:
+        clear_volume(DB_CACHE_VOLUME)
+    except subprocess.CalledProcessError:
+        error("Failed to clear DB cache volume (is Docker running?). Containers may still exist.")
+        return
     success("All sandboxes destroyed and cache cleared.")
 
 
