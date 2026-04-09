@@ -8,7 +8,7 @@ TTL Considerations:
 - Individual activities have start_to_close_timeout=12h with maximum_attempts=3
 - Coordinator workflows spawn multiple child workflows with batch delays
 - Total workflow execution time in worst case: 3 retries × 12h + batch delays ≈ 40-48h
-- TTL set to 72h (3 days) provides safety margin for retries and delays
+- TTL set to 168h (7 days) provides generous safety margin for retries and delays
 - If workflows consistently exceed 48h, consider TTL refresh logic in get_filters()
 """
 
@@ -25,8 +25,8 @@ from common.hogvm.python.operation import HOGQL_BYTECODE_IDENTIFIER, Operation
 
 KEY_PREFIX = "backfill_person_properties_filters:"
 # TTL sizing: Worst case workflow duration ~48h (3 × 12h retries + batch delays)
-# 72h provides 50% safety margin. Increase if workflows consistently run longer.
-DEFAULT_TTL = 72 * 60 * 60  # 3 days
+# 168h provides generous safety margin for complex backfill operations that may run longer.
+DEFAULT_TTL = 168 * 60 * 60  # 7 days
 
 logger = structlog.get_logger(__name__)
 
