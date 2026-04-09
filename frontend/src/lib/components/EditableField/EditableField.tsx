@@ -211,6 +211,7 @@ export function EditableField({
             // eslint-disable-next-line react/forbid-dom-props
             style={style}
             ref={containerRef}
+            onClick={handleClick}
             onDoubleClick={handleDoubleClick}
         >
             <div className="EditableField__highlight">
