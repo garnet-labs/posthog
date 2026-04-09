@@ -855,6 +855,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         },
         setQueryInput: async ({ queryInput }, breakpoint) => {
             const tablesAndColumns = await parseQueryTablesAndColumns(queryInput)
+            await breakpoint()
             actions.setSelectedQueryTablesAndColumns(tablesAndColumns)
             cache.updateActiveQueryDecoration?.()
 
