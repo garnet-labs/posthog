@@ -199,6 +199,10 @@ class TestExternalDataSchema(APIBaseTest):
             "append_available": True,
             "full_refresh_available": True,
             "supports_webhooks": False,
+            "available_columns": [
+                {"field": "id", "label": "id", "type": "integer", "nullable": True},
+            ],
+            "detected_primary_keys": ["id"],
         }
 
     def test_update_schema_change_sync_type(self):
