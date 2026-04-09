@@ -55,12 +55,10 @@ test.describe('SQL Editor', () => {
             // Click submit
             await submitButton.click()
 
-            // Wait for the success message which confirms the API call completed
+            // Wait for the success message and URL change which confirm the save completed
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
-            // The scene name header may take time to update after navigation
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible({
-                timeout: 60000,
-            })
+            await page.waitForURL(/\/sql#view=/, { timeout: 30000 })
+            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
         })
 
         test('Materialize view pane', async ({ page }) => {
@@ -81,10 +79,9 @@ test.describe('SQL Editor', () => {
             await page.getByRole('button', { name: 'Submit' }).click()
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
 
-            // The scene name header may take time to update after navigation
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible({
-                timeout: 60000,
-            })
+            // Wait for URL to update confirming navigation to the saved view
+            await page.waitForURL(/\/sql#view=/, { timeout: 30000 })
+            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
             // Dismiss the quickstart popover if visible, as it can overlay the button
             const quickstart = page.locator('[data-attr=global-product-setup-button]')
             if (await quickstart.isVisible({ timeout: 1000 }).catch(() => false)) {
