@@ -317,9 +317,9 @@ pub async fn serve<F>(
     // Create HyperCacheReader for remote config (array/config.json)
     // This reads the pre-computed config blob from Python's RemoteConfig.build_config()
     // Uses token-based lookup (api_token) to match Python's HyperCache key pattern
-    let config_redis_client = dedicated_redis_client
-        .clone()
-        .unwrap_or_else(|| redis_client.clone());
+    // Uses the shared Redis client (not dedicated flags Redis) because Django writes
+    // remote config to the default Redis database, not the flags-specific one.
+    let config_redis_client = redis_client.clone();
 
     let mut config_hypercache_config = HyperCacheConfig::new(
         "array".to_string(),
