@@ -1,3 +1,4 @@
+import os
 import socket
 import ipaddress
 import urllib.parse as urlparse
@@ -88,6 +89,17 @@ def _is_private_ip_literal(host: str) -> bool:
     )
 
 
+def _dev_bypass_enabled() -> bool:
+    """
+    Dev mode short-circuits is_url_allowed unless POSTHOG_FORCE_URL_VALIDATION is set.
+    Developers can set the env var to exercise the production code path locally
+    (e.g. to reproduce or verify SSRF-related fixes) without flipping global DEBUG.
+    """
+    if not is_dev_mode():
+        return False
+    return os.environ.get("POSTHOG_FORCE_URL_VALIDATION", "").lower() not in {"1", "true"}
+
+
 def is_url_allowed(raw_url: str) -> tuple[bool, str | None]:
     """
     Validate a URL for SSRF protection.
@@ -99,7 +111,7 @@ def is_url_allowed(raw_url: str) -> tuple[bool, str | None]:
     - Host must not be localhost, metadata service, or internal domain
     - Resolved IPs must not be private/internal
     """
-    if is_dev_mode():
+    if _dev_bypass_enabled():
         return True, None
 
     def _blocked(reason: str, **log_kwargs) -> tuple[bool, str]:
