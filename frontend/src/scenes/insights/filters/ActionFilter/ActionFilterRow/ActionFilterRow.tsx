@@ -48,6 +48,7 @@ import { ActionFilterRowMenu } from './ActionFilterRowMenu'
 import { getValue, taxonomicFilterGroupTypeToEntityType } from './actionFilterRowUtils'
 import { BoxPlotPropertySelector } from './BoxPlotPropertySelector'
 import { HogQLMathEditorDropdown } from './HogQLMathEditor'
+import { getDefaultMathHogQLExpression } from './mathUtils'
 import { MathSelector } from './MathSelector'
 import { PropertyValueMathSelector } from './PropertyValueMathSelector'
 import type { ActionFilterRowProps } from './types'
@@ -168,7 +169,7 @@ export function ActionFilterRow({
         math_hogql: mathHogQL,
         math_group_type_index: mathGroupTypeIndex,
     } = filter
-    const defaultMathHogQLExpression = insightType === InsightType.STICKINESS ? 'person_id' : 'count()'
+    const defaultMathHogQLExpression = getDefaultMathHogQLExpression(insightType)
 
     const onClose = (): void => {
         removeLocalFilter({ ...filter, index })

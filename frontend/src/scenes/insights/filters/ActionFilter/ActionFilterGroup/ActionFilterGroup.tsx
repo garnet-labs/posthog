@@ -34,6 +34,7 @@ import {
     MathSelector,
     taxonomicFilterGroupTypeToEntityType,
 } from '../ActionFilterRow/ActionFilterRow'
+import { getDefaultMathHogQLExpression } from '../ActionFilterRow/mathUtils'
 import { LocalFilter, entityFilterLogic } from '../entityFilterLogic'
 import { actionFilterGroupLogic } from './actionFilterGroupLogic'
 import { nestedFilterLogic } from './nestedFilterLogic'
@@ -102,7 +103,7 @@ export function ActionFilterGroup({
         setMathHogQL,
         setHogQLDropdownVisible,
     } = useActions(groupLogic)
-    const defaultMathHogQLExpression = insightType === InsightType.STICKINESS ? 'person_id' : 'count()'
+    const defaultMathHogQLExpression = getDefaultMathHogQLExpression(insightType)
 
     return (
         <li
