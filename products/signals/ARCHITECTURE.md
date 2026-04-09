@@ -219,7 +219,11 @@ This workflow is intended for full-team regrouping after changes to matching / p
 5. **Wait for ClickHouse** → `wait_for_signal_in_clickhouse_activity`, ensuring the deleted rows land before the next batch is fetched
 6. **Refresh the pause window if needed** so grouping stays paused throughout long runs
 7. **Repeat** until no non-deleted signals remain
-8. **Restore the prior grouping pause state** → `restore_grouping_pause_activity`
+8. **Delete all team reports + artefacts in Postgres** → `delete_team_reports_activity`
+   - Deletes all `SignalReportArtefact` rows for the team
+   - Deletes all `SignalReport` rows for the team
+   - Runs after all signals have been re-queued, but while grouping is still paused, so the re-emitted signals regroup into a clean ORM state when processing resumes
+9. **Restore the prior grouping pause state** → `restore_grouping_pause_activity`
 
 Important detail: the workflow intentionally does **not** paginate across iterations with offsets. Each batch mutates the underlying non-deleted result set by emitting delete rows, so once those rows land in ClickHouse the result set shrinks. Re-fetching from `OFFSET 0` after each batch avoids skipping signals.
 

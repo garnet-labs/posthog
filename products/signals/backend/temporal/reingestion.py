@@ -17,7 +17,7 @@ from posthog.models import Team
 from posthog.sync import database_sync_to_async
 
 from products.signals.backend.api import emit_signal
-from products.signals.backend.models import SignalReport
+from products.signals.backend.models import SignalReport, SignalReportArtefact
 from products.signals.backend.temporal.clickhouse import execute_hogql_query_with_retry
 from products.signals.backend.temporal.grouping_v2 import TeamSignalGroupingV2Workflow
 from products.signals.backend.temporal.signal_queries import (
@@ -150,6 +150,11 @@ class RestoreGroupingPauseInput:
     paused_until: datetime | None
 
 
+@dataclass
+class DeleteTeamReportsInput:
+    team_id: int
+
+
 @temporalio.activity.defn
 async def fetch_team_signals_batch_activity(input: FetchTeamSignalsBatchInput) -> FetchTeamSignalsBatchOutput:
     team = await Team.objects.aget(pk=input.team_id)
@@ -269,6 +274,26 @@ async def restore_grouping_pause_activity(input: RestoreGroupingPauseInput) -> N
 
     await TeamSignalGroupingV2Workflow.unpause(input.team_id)
     logger.info("Cleared grouping pause", team_id=input.team_id)
+
+
+@temporalio.activity.defn
+async def delete_team_reports_activity(input: DeleteTeamReportsInput) -> None:
+    def do_delete() -> tuple[int, int]:
+        artefact_count = SignalReportArtefact.objects.filter(team_id=input.team_id).count()
+        report_count = SignalReport.objects.filter(team_id=input.team_id).count()
+
+        SignalReportArtefact.objects.filter(team_id=input.team_id).delete()
+        SignalReport.objects.filter(team_id=input.team_id).delete()
+
+        return artefact_count, report_count
+
+    artefact_count, report_count = await database_sync_to_async(do_delete, thread_sensitive=False)()
+    logger.info(
+        "Deleted team signal reports and artefacts",
+        team_id=input.team_id,
+        artefact_count=artefact_count,
+        report_count=report_count,
+    )
 
 
 @temporalio.workflow.defn(name="signal-report-reingestion")
@@ -434,6 +459,12 @@ class TeamSignalReingestionWorkflow:
                     workflow.logger.info(
                         "Team-wide signal reingestion complete",
                         team_id=inputs.team_id,
+                    )
+                    await workflow.execute_activity(
+                        delete_team_reports_activity,
+                        DeleteTeamReportsInput(team_id=inputs.team_id),
+                        start_to_close_timeout=timedelta(minutes=5),
+                        retry_policy=RetryPolicy(maximum_attempts=3),
                     )
                     break
 
