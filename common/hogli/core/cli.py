@@ -11,7 +11,7 @@ import sys
 import time as _time
 import shutil
 import platform
-import functools
+import subprocess
 import configparser
 from collections import defaultdict
 from pathlib import Path
@@ -327,20 +327,76 @@ def _infer_process_manager(command: str | None) -> str | None:
     return None
 
 
-@functools.lru_cache(maxsize=1)
-def _is_posthog_dev() -> bool:
-    """Check if git user.email ends with @posthog.com.
+_POSTHOG_DEV_CACHE_TTL_SECONDS = 30 * 86400  # 30 days
 
-    Reads git config files directly (local then global) to avoid spawning a subprocess.
-    """
+
+def _check_email_domain() -> bool:
+    """Fallback: check if git user.email ends with @posthog.com."""
     parser = configparser.RawConfigParser()
     try:
-        # Local overrides global -- read global first, local second
         parser.read([Path.home() / ".gitconfig", REPO_ROOT / ".git" / "config"])
         email = parser.get("user", "email", fallback="")
         return email.endswith("@posthog.com")
     except Exception:
         return False
+
+
+def _get_github_token() -> str | None:
+    """Resolve a GitHub personal token from env vars or ``gh auth token``."""
+    for var in ("GH_TOKEN", "GITHUB_TOKEN"):
+        token = os.environ.get(var)
+        if token:
+            return token
+    try:
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _check_github_org(token: str) -> bool:
+    """Return True if *token* belongs to a PostHog GitHub org member."""
+    import requests
+
+    resp = requests.get(
+        "https://api.github.com/user/memberships/orgs/PostHog",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        timeout=5,
+    )
+    return resp.status_code == 200
+
+
+def _is_posthog_dev() -> bool:
+    """Check if the user is a PostHog GitHub org member.
+
+    Calls the GitHub ``/user/memberships/orgs/PostHog`` API using a token
+    from ``GH_TOKEN``, ``GITHUB_TOKEN``, or ``gh auth token``.  The boolean
+    result is cached in the telemetry config for 30 days.  Falls back to a
+    git email domain check when no token is available.
+    """
+    from hogli.telemetry import _load_config, _save_config
+
+    config = _load_config()
+    cached = config.get("is_posthog_org_member")
+    checked_at = config.get("org_check_timestamp", 0.0)
+
+    if cached is not None and (_time.time() - checked_at) < _POSTHOG_DEV_CACHE_TTL_SECONDS:
+        return cached
+
+    token = _get_github_token()
+    if token is None:
+        return _check_email_domain()
+
+    try:
+        is_member = _check_github_org(token)
+        config["is_posthog_org_member"] = is_member
+        config["org_check_timestamp"] = _time.time()
+        _save_config(config)
+        return is_member
+    except Exception:
+        return _check_email_domain()
 
 
 def _env_properties(command: str | None = None) -> dict[str, Any]:

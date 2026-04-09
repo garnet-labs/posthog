@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
-from hogli.core.cli import _infer_process_manager, _is_posthog_dev, cli
+from hogli.core.cli import (
+    _POSTHOG_DEV_CACHE_TTL_SECONDS,
+    _check_email_domain,
+    _get_github_token,
+    _infer_process_manager,
+    _is_posthog_dev,
+    cli,
+)
 
 runner = CliRunner()
 
@@ -165,13 +175,7 @@ class TestProcessManagerInference:
         assert _infer_process_manager("start") == "phrocs"
 
 
-class TestIsPosthogDev:
-    @pytest.fixture(autouse=True)
-    def _clear_cache(self):
-        _is_posthog_dev.cache_clear()
-        yield
-        _is_posthog_dev.cache_clear()
-
+class TestCheckEmailDomain:
     @pytest.fixture()
     def _fake_home(self, tmp_path, monkeypatch):
         monkeypatch.setattr("hogli.core.cli.Path.home", staticmethod(lambda: tmp_path))
@@ -180,18 +184,94 @@ class TestIsPosthogDev:
 
     def test_posthog_email(self, _fake_home):
         (_fake_home / ".gitconfig").write_text("[user]\n\temail = dev@posthog.com\n")
-        assert _is_posthog_dev() is True
+        assert _check_email_domain() is True
 
     def test_non_posthog_email(self, _fake_home):
         (_fake_home / ".gitconfig").write_text("[user]\n\temail = user@example.com\n")
-        assert _is_posthog_dev() is False
-
-    def test_local_config_overrides_global(self, _fake_home):
-        (_fake_home / ".gitconfig").write_text("[user]\n\temail = user@example.com\n")
-        git_dir = _fake_home / ".git"
-        git_dir.mkdir()
-        (git_dir / "config").write_text("[user]\n\temail = dev@posthog.com\n")
-        assert _is_posthog_dev() is True
+        assert _check_email_domain() is False
 
     def test_no_config_files(self, _fake_home):
+        assert _check_email_domain() is False
+
+
+class TestGetGithubToken:
+    def test_gh_token_env(self, monkeypatch):
+        monkeypatch.setenv("GH_TOKEN", "tok-from-env")
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        assert _get_github_token() == "tok-from-env"
+
+    def test_github_token_env(self, monkeypatch):
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "tok-github")
+        assert _get_github_token() == "tok-github"
+
+    @patch("hogli.core.cli.subprocess.run")
+    def test_falls_back_to_gh_auth(self, mock_run, monkeypatch):
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        mock_run.return_value = MagicMock(returncode=0, stdout="tok-cli\n")
+        assert _get_github_token() == "tok-cli"
+
+    @patch("hogli.core.cli.subprocess.run", side_effect=FileNotFoundError)
+    def test_no_gh_returns_none(self, _mock_run, monkeypatch):
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        assert _get_github_token() is None
+
+
+class TestIsPosthogDev:
+    @pytest.fixture()
+    def _config_dir(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "hogli_telemetry.json"
+        monkeypatch.setattr("hogli.telemetry.get_config_path", lambda: config_file)
+        return config_file
+
+    def _write_config(self, path, **kwargs):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(kwargs))
+
+    def test_fresh_cache_returns_cached_true(self, _config_dir):
+        self._write_config(_config_dir, is_posthog_org_member=True, org_check_timestamp=time.time())
+        assert _is_posthog_dev() is True
+
+    def test_fresh_cache_returns_cached_false(self, _config_dir):
+        self._write_config(_config_dir, is_posthog_org_member=False, org_check_timestamp=time.time())
         assert _is_posthog_dev() is False
+
+    @patch("hogli.core.cli._check_github_org", return_value=True)
+    @patch("hogli.core.cli._get_github_token", return_value="tok")
+    def test_stale_cache_triggers_api_check(self, _mock_tok, _mock_org, _config_dir):
+        stale_ts = time.time() - _POSTHOG_DEV_CACHE_TTL_SECONDS - 1
+        self._write_config(_config_dir, is_posthog_org_member=False, org_check_timestamp=stale_ts)
+
+        assert _is_posthog_dev() is True
+
+    @patch("hogli.core.cli._check_github_org", return_value=True)
+    @patch("hogli.core.cli._get_github_token", return_value="tok")
+    def test_api_member_caches_true(self, _mock_tok, _mock_org, _config_dir):
+        assert _is_posthog_dev() is True
+
+        config = json.loads(_config_dir.read_text())
+        assert config["is_posthog_org_member"] is True
+        assert config["org_check_timestamp"] > 0
+
+    @patch("hogli.core.cli._check_github_org", return_value=False)
+    @patch("hogli.core.cli._get_github_token", return_value="tok")
+    def test_api_non_member_caches_false(self, _mock_tok, _mock_org, _config_dir):
+        assert _is_posthog_dev() is False
+
+        config = json.loads(_config_dir.read_text())
+        assert config["is_posthog_org_member"] is False
+
+    @patch("hogli.core.cli._check_email_domain", return_value=True)
+    @patch("hogli.core.cli._get_github_token", return_value=None)
+    def test_no_token_falls_back_to_email(self, _mock_tok, mock_email, _config_dir):
+        assert _is_posthog_dev() is True
+        mock_email.assert_called_once()
+
+    @patch("hogli.core.cli._check_email_domain", return_value=False)
+    @patch("hogli.core.cli._check_github_org", side_effect=Exception("network error"))
+    @patch("hogli.core.cli._get_github_token", return_value="tok")
+    def test_api_error_falls_back_to_email(self, _mock_tok, _mock_org, mock_email, _config_dir):
+        assert _is_posthog_dev() is False
+        mock_email.assert_called_once()
