@@ -3,7 +3,7 @@ from zoneinfo import available_timezones
 from django.core.cache import cache
 from django.utils import timezone
 
-from croniter import croniter
+from croniter import croniter  # type: ignore[import-untyped]
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -510,7 +510,8 @@ class TaskAutomationSerializer(serializers.ModelSerializer):
     def get_last_task_id(self, instance: TaskAutomation) -> str | None:
         if instance.task_id:
             return str(instance.task_id)
-        return str(instance.last_task_run.task_id) if instance.last_task_run_id else None
+        task_run = instance.last_task_run
+        return str(task_run.task_id) if task_run is not None else None
 
     def get_last_task_run_id(self, instance: TaskAutomation) -> str | None:
         return str(instance.last_task_run_id) if instance.last_task_run_id else None

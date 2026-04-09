@@ -12,7 +12,7 @@ class TestAutomationService(TestCase):
     def setUp(self):
         self.organization = Organization.objects.create(name="Test Org")
         self.team = Team.objects.create(organization=self.organization, name="Test Team")
-        self.user = User.objects.create_user(email="test@example.com", password="password")
+        self.user = User.objects.create_user(email="test@example.com", first_name="Test", password="password")
 
     def create_automation(self) -> TaskAutomation:
         return TaskAutomation.objects.create(
@@ -31,9 +31,13 @@ class TestAutomationService(TestCase):
         automation = self.create_automation()
 
         with self.captureOnCommitCallbacks(execute=True):
-            first_task, first_run = run_task_automation(automation.id, trigger_workflow_id="automation-workflow-123")
+            first_task, first_run = run_task_automation(
+                str(automation.id), trigger_workflow_id="automation-workflow-123"
+            )
         with self.captureOnCommitCallbacks(execute=True):
-            second_task, second_run = run_task_automation(automation.id, trigger_workflow_id="automation-workflow-123")
+            second_task, second_run = run_task_automation(
+                str(automation.id), trigger_workflow_id="automation-workflow-123"
+            )
 
         self.assertEqual(first_task.id, second_task.id)
         self.assertEqual(first_run.id, second_run.id)
@@ -48,9 +52,9 @@ class TestAutomationService(TestCase):
         automation = self.create_automation()
 
         with self.captureOnCommitCallbacks(execute=True):
-            first_task, first_run = run_task_automation(automation.id)
+            first_task, first_run = run_task_automation(str(automation.id))
         with self.captureOnCommitCallbacks(execute=True):
-            second_task, second_run = run_task_automation(automation.id)
+            second_task, second_run = run_task_automation(str(automation.id))
 
         automation.refresh_from_db()
         self.assertEqual(first_task.id, second_task.id)
