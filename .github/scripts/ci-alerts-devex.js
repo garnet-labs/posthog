@@ -4,7 +4,7 @@
 // watched workflow on master. Only alerts when master has been continuously broken
 // for ALERT_THRESHOLD_MINUTES (default 30), filtering out transient flakes.
 //
-// State structure (persisted via GitHub Actions cache as .master-ci-alert):
+// State structure (persisted via GitHub Actions cache as .alerts-devex):
 // {
 //   failing: { [workflow]: { since: ISO string, sha: string, run_url: string } },
 //   alerted: boolean,
