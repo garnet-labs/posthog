@@ -1320,7 +1320,7 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 } else {
                     lemonToast.error('Could not update insight')
                 }
-                return
+                throw e
             }
             actions.setInsightLoading(false)
 
