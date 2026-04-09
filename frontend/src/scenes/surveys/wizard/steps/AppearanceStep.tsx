@@ -20,7 +20,13 @@ import {
     SurveyQuestionType,
 } from '~/types'
 
-import { NewSurvey, SurveyTheme, WEB_SAFE_FONTS, defaultSurveyAppearance, surveyThemes } from '../../constants'
+import {
+    NewSurvey,
+    SurveyTheme,
+    WEB_SAFE_FONTS,
+    defaultSurveyAppearance,
+    getMatchingSurveyThemeId,
+} from '../../constants'
 import { SurveyAppearancePreview } from '../../SurveyAppearancePreview'
 import { surveyLogic } from '../../surveyLogic'
 import { surveysLogic } from '../../surveysLogic'
@@ -40,16 +46,7 @@ export function AppearanceStep(): JSX.Element {
         isDarkModeOn ? 'dark' : 'light'
     )
     const [selectedThemeId, setSelectedThemeId] = useState<string | null>(() => {
-        const currentAppearance = survey.appearance
-        if (!currentAppearance) {
-            return 'clean'
-        }
-        const matchingTheme = surveyThemes.find(
-            (theme) =>
-                theme.appearance.backgroundColor === currentAppearance.backgroundColor &&
-                theme.appearance.submitButtonColor === currentAppearance.submitButtonColor
-        )
-        return matchingTheme?.id || null
+        return getMatchingSurveyThemeId(survey.appearance)
     })
 
     const appearance: SurveyAppearance = { ...defaultSurveyAppearance, ...survey.appearance }

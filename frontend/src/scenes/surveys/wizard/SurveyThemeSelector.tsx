@@ -8,6 +8,7 @@ interface SurveyThemeSelectorProps {
     selectedThemeId: string | null
     onSelectTheme: (theme: SurveyTheme) => void
     disabled?: boolean
+    showHeader?: boolean
 }
 
 function ThemePreviewCard({
@@ -105,15 +106,18 @@ export function SurveyThemeSelector({
     selectedThemeId,
     onSelectTheme,
     disabled,
+    showHeader = true,
 }: SurveyThemeSelectorProps): JSX.Element {
     return (
         <div className="space-y-2">
-            <div>
-                <h3 className="font-medium m-0">Choose a theme</h3>
-                <p className="text-sm text-muted">Start with a preset and customize colors below</p>
-            </div>
+            {showHeader ? (
+                <div>
+                    <h3 className="m-0 font-medium">Choose a theme</h3>
+                    <p className="text-sm text-muted">Start with a preset and customize colors below</p>
+                </div>
+            ) : null}
 
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            <div className="flex flex-wrap justify-center gap-2 [&>*]:w-[150px]">
                 {surveyThemes.map((theme) => (
                     <ThemePreviewCard
                         key={theme.id}

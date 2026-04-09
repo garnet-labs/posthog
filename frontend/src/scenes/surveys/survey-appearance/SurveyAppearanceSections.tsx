@@ -7,6 +7,7 @@ import { LemonButton, LemonInput, LemonSelect } from '@posthog/lemon-ui'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { WEB_SAFE_FONTS } from 'scenes/surveys/constants'
 import { surveysLogic } from 'scenes/surveys/surveysLogic'
+import { ColorInput } from 'scenes/surveys/wizard/ColorInput'
 
 import { SurveyAppearance, SurveyPosition, SurveyType, SurveyWidgetType } from '~/types'
 
@@ -54,11 +55,11 @@ function SurveyOptionsGroup({
     sectionTitle,
 }: {
     children: React.ReactNode
-    sectionTitle: string
+    sectionTitle?: string
 }): JSX.Element {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
-            <h3 className="col-span-full mb-0">{sectionTitle}</h3>
+            {sectionTitle ? <h3 className="col-span-full mb-0">{sectionTitle}</h3> : null}
             {children}
         </div>
     )
@@ -72,6 +73,7 @@ interface SurveyAppearanceInputProps {
     info?: string
     placeholder?: string
     disabledReason?: string | null
+    inputType?: 'text' | 'color'
 }
 
 function SurveyAppearanceInput({
@@ -82,19 +84,30 @@ function SurveyAppearanceInput({
     info,
     placeholder,
     disabledReason,
+    inputType = 'text',
 }: SurveyAppearanceInputProps): JSX.Element {
     const { surveysStylingAvailable } = useValues(surveysLogic)
+    const disabled = !surveysStylingAvailable || !!disabledReason
 
     return (
         <LemonField.Pure label={label} className="flex-1 gap-1" info={info}>
-            <LemonInput
-                value={value}
-                onChange={onChange}
-                disabled={!surveysStylingAvailable}
-                className={IGNORE_ERROR_BORDER_CLASS}
-                placeholder={placeholder}
-                disabledReason={disabledReason || undefined}
-            />
+            {inputType === 'color' ? (
+                <ColorInput
+                    value={value}
+                    onChange={onChange}
+                    disabled={disabled}
+                    disabledReason={disabledReason || undefined}
+                />
+            ) : (
+                <LemonInput
+                    value={value}
+                    onChange={onChange}
+                    disabled={!surveysStylingAvailable}
+                    className={IGNORE_ERROR_BORDER_CLASS}
+                    placeholder={placeholder}
+                    disabledReason={disabledReason || undefined}
+                />
+            )}
             {error && <LemonField.Error error={error} />}
         </LemonField.Pure>
     )
@@ -110,7 +123,7 @@ export function SurveyContainerAppearance({
     const { surveysStylingAvailable } = useValues(surveysLogic)
 
     return (
-        <SurveyOptionsGroup sectionTitle="Container options">
+        <SurveyOptionsGroup>
             <span className="col-span-full text-secondary">
                 These options are only applied in the web surveys. Not on native mobile apps.
             </span>
@@ -243,7 +256,7 @@ export function SurveyColorsAppearance({
     customizePlaceholderText: boolean
 }): JSX.Element {
     return (
-        <SurveyOptionsGroup sectionTitle="Colors and placeholder customization">
+        <SurveyOptionsGroup>
             <SurveyColorsSubgroup title="Survey background">
                 <SurveyAppearanceInput
                     value={appearance.backgroundColor}
@@ -251,6 +264,7 @@ export function SurveyColorsAppearance({
                     error={validationErrors?.backgroundColor}
                     disabledReason={disabledReason}
                     label="Background color"
+                    inputType="color"
                 />
                 <SurveyAppearanceInput
                     value={appearance.textColor}
@@ -259,6 +273,7 @@ export function SurveyColorsAppearance({
                     disabledReason={disabledReason}
                     label="Text color"
                     placeholder="Leave empty for auto-contrast"
+                    inputType="color"
                 />
                 <SurveyAppearanceInput
                     value={appearance.borderColor}
@@ -266,6 +281,7 @@ export function SurveyColorsAppearance({
                     error={validationErrors?.borderColor}
                     disabledReason={disabledReason}
                     label="Border color"
+                    inputType="color"
                 />
             </SurveyColorsSubgroup>
 
@@ -278,6 +294,7 @@ export function SurveyColorsAppearance({
                     error={validationErrors?.inputBackground || validationErrors?.ratingButtonColor}
                     disabledReason={disabledReason}
                     label="Background color"
+                    inputType="color"
                 />
                 <SurveyAppearanceInput
                     value={appearance.inputTextColor}
@@ -286,6 +303,7 @@ export function SurveyColorsAppearance({
                     disabledReason={disabledReason}
                     label="Text color"
                     placeholder="Leave empty for auto-contrast"
+                    inputType="color"
                 />
                 {customizeRatingButtons && (
                     <SurveyAppearanceInput
@@ -294,6 +312,7 @@ export function SurveyColorsAppearance({
                         error={validationErrors?.ratingButtonActiveColor}
                         disabledReason={disabledReason}
                         label="Active rating background"
+                        inputType="color"
                     />
                 )}
                 {customizePlaceholderText && (
@@ -314,6 +333,7 @@ export function SurveyColorsAppearance({
                     error={validationErrors?.submitButtonColor}
                     disabledReason={disabledReason}
                     label="Background color"
+                    inputType="color"
                 />
                 <SurveyAppearanceInput
                     value={appearance.submitButtonTextColor}
@@ -322,6 +342,7 @@ export function SurveyColorsAppearance({
                     disabledReason={disabledReason}
                     label="Text color"
                     placeholder="Leave empty for auto-contrast"
+                    inputType="color"
                 />
             </SurveyColorsSubgroup>
         </SurveyOptionsGroup>
