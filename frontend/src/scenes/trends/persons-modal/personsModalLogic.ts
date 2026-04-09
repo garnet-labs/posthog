@@ -481,16 +481,46 @@ export const personsModalLogic = kea<personsModalLogicType>([
                 const source = actorsQuery.source
 
                 // If we have session IDs from matched_recordings, use them directly for efficient lookup
-                // No need for additional event/property filters since we already have the exact list of sessions
                 if (sessionIds.length > 0) {
+                    // For funnel breakdowns, add a property filter so recordings are
+                    // scoped to the selected breakdown value (e.g. country = "NL").
+                    const breakdownFilters: UniversalFilterValue[] = []
+                    if (
+                        source.kind === NodeKind.FunnelsActorsQuery &&
+                        (source as FunnelsActorsQuery).funnelStepBreakdown != null
+                    ) {
+                        const funnelSource = source as FunnelsActorsQuery
+                        const funnelsQuery = funnelSource.source
+                        const breakdownProp = funnelsQuery.breakdownFilter?.breakdown
+                        const breakdownType = funnelsQuery.breakdownFilter?.breakdown_type ?? 'event'
+                        if (breakdownProp) {
+                            let filterType: PropertyFilterType
+                            switch (breakdownType) {
+                                case 'person':
+                                    filterType = PropertyFilterType.Person
+                                    break
+                                case 'group':
+                                    filterType = PropertyFilterType.Group
+                                    break
+                                default:
+                                    filterType = PropertyFilterType.Event
+                            }
+                            breakdownFilters.push({
+                                key: String(breakdownProp),
+                                value: funnelSource.funnelStepBreakdown,
+                                operator: PropertyOperator.Exact,
+                                type: filterType,
+                            } as UniversalFilterValue)
+                        }
+                    }
+
                     return {
                         session_ids: sessionIds,
-                        // Use minimal valid structure required by conversion functions
                         filter_group: {
                             type: FilterLogicalOperator.And,
-                            values: [{ type: FilterLogicalOperator.And, values: [] }],
+                            values: [{ type: FilterLogicalOperator.And, values: breakdownFilters }],
                         },
-                        duration: [], // Empty duration means no duration filtering (we have explicit session IDs)
+                        duration: [],
                     }
                 }
 
@@ -524,7 +554,7 @@ export const personsModalLogic = kea<personsModalLogicType>([
                     })
                 }
 
-                // Add breakdown filters if present
+                // Add breakdown filters if present (trends path)
                 if ('breakdown' in source && source.breakdown && propertiesTimelineFilter?.breakdown) {
                     const breakdownFilter = {
                         key: propertiesTimelineFilter.breakdown,
@@ -533,6 +563,36 @@ export const personsModalLogic = kea<personsModalLogicType>([
                         type: PropertyFilterType.Event,
                     }
                     filters.push(breakdownFilter as UniversalFilterValue)
+                }
+
+                // Add breakdown filters for funnels
+                if (
+                    source.kind === NodeKind.FunnelsActorsQuery &&
+                    (source as FunnelsActorsQuery).funnelStepBreakdown != null
+                ) {
+                    const funnelSource = source as FunnelsActorsQuery
+                    const funnelsQuery = funnelSource.source
+                    const breakdownProp = funnelsQuery.breakdownFilter?.breakdown
+                    const breakdownType = funnelsQuery.breakdownFilter?.breakdown_type ?? 'event'
+                    if (breakdownProp) {
+                        let filterType: PropertyFilterType
+                        switch (breakdownType) {
+                            case 'person':
+                                filterType = PropertyFilterType.Person
+                                break
+                            case 'group':
+                                filterType = PropertyFilterType.Group
+                                break
+                            default:
+                                filterType = PropertyFilterType.Event
+                        }
+                        filters.push({
+                            key: String(breakdownProp),
+                            value: funnelSource.funnelStepBreakdown,
+                            operator: PropertyOperator.Exact,
+                            type: filterType,
+                        } as UniversalFilterValue)
+                    }
                 }
 
                 // Add global properties from the insight query
