@@ -135,7 +135,7 @@ export class SnapshotStore {
                 return Math.max(0, i - 1)
             }
         }
-        return this.entries.length - 1
+        return Math.max(0, this.entries.length - 1)
     }
 
     canPlayAt(ts: number): boolean {
