@@ -63,30 +63,36 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     if (!breakdown || Array.isArray(breakdown) || breakdownType === 'cohort') {
         return null
     }
+
     // The backend canonicalizes single-value breakdowns as a one-element array (e.g. ["NL"]).
     // Unwrap that here; bail out only for genuine multi-value arrays which can't be a single
     // Exact filter.
-    let breakdownValue: string | number | boolean = source.funnelStepBreakdown as any
-    if (Array.isArray(source.funnelStepBreakdown)) {
-        if (source.funnelStepBreakdown.length !== 1) {
+    const rawBreakdownValue = source.funnelStepBreakdown
+    let breakdownValue: string | number
+    if (Array.isArray(rawBreakdownValue)) {
+        if (rawBreakdownValue.length !== 1) {
             return null
         }
-        breakdownValue = source.funnelStepBreakdown[0] as string | number
+        breakdownValue = rawBreakdownValue[0]
+    } else {
+        breakdownValue = rawBreakdownValue
     }
+
     const base = {
         key: String(breakdown),
         value: breakdownValue,
         operator: PropertyOperator.Exact,
     }
+
     if (breakdownType === 'person') {
         return { ...base, type: PropertyFilterType.Person } as UniversalFilterValue
     }
+
     if (breakdownType === 'group') {
-        // Group filters must carry the group_type_index so the backend can match the filter
-        // against the correct group type. Bail out if we don't know which group type this is.
         if (breakdownFilter?.breakdown_group_type_index == null) {
             return null
         }
+
         return {
             ...base,
             type: PropertyFilterType.Group,
