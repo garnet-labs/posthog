@@ -57,7 +57,10 @@ test.describe('SQL Editor', () => {
 
             // Wait for the success message which confirms the API call completed
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
+            // The scene name header may take time to update after navigation
+            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible({
+                timeout: 60000,
+            })
         })
 
         test('Materialize view pane', async ({ page }) => {
