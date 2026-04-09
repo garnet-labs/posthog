@@ -257,11 +257,7 @@ mod tests {
     #[test]
     fn test_config_js_template_with_site_apps() {
         let config_json = "{}";
-        let site_apps = vec![
-            "function() { return 1; }".to_string(),
-            "function() { return 2; }".to_string(),
-        ];
-        let site_apps_joined = site_apps.join(",");
+        let site_apps_joined = ["function() { return 1; }", "function() { return 2; }"].join(",");
         let token = "phc_test";
 
         let js = format!(
