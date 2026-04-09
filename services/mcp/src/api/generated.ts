@@ -14690,6 +14690,7 @@ export namespace Schemas {
       metrics_secondary?: unknown | null;
       stats_config?: unknown | null;
       scheduling_config?: unknown | null;
+      allow_unknown_events?: boolean;
       _create_in_folder?: string;
       conclusion?: ExperimentConclusionEnum | BlankEnum | NullEnum | null;
       /** @nullable */
@@ -23577,6 +23578,7 @@ export namespace Schemas {
       metrics_secondary?: unknown | null;
       stats_config?: unknown | null;
       scheduling_config?: unknown | null;
+      allow_unknown_events?: boolean;
       _create_in_folder?: string;
       conclusion?: ExperimentConclusionEnum | BlankEnum | NullEnum | null;
       /** @nullable */
