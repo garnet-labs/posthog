@@ -63,7 +63,7 @@ function sanitizeContentType(contentType: string | undefined, fallback: string):
     }
     const normalized = contentType.toLowerCase().trim().split(';')[0].trim()
     if (SAFE_CONTENT_TYPES.has(normalized)) {
-        return contentType
+        return normalized
     }
     return fallback
 }

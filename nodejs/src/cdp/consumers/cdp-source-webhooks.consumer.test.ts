@@ -392,6 +392,21 @@ describe('SourceWebhooksConsumer', () => {
                 expect(res.headers['content-type']).not.toContain('text/html')
             })
 
+            it('should strip parameters from allowlisted content types', async () => {
+                const fn = await insertHogFunction(hub.postgres, team.id, {
+                    type: 'source_webhook',
+                    hog: `return { 'httpResponse': { 'status': 200, 'body': 'hello', 'contentType': 'text/plain; charset=utf-7' } }`,
+                    bytecode: await compileHog(
+                        `return { 'httpResponse': { 'status': 200, 'body': 'hello', 'contentType': 'text/plain; charset=utf-7' } }`
+                    ),
+                    inputs: {},
+                })
+                const res = await doGetRequest({ webhookId: fn.id })
+                expect(res.status).toEqual(200)
+                expect(res.headers['content-type']).toContain('text/plain')
+                expect(res.headers['content-type']).not.toContain('utf-7')
+            })
+
             it('should default to application/octet-stream when isBase64Encoded is true but no contentType', async () => {
                 const base64Data = 'AQIDBA=='
                 const customBinaryFunction = await insertHogFunction(hub.postgres, team.id, {
