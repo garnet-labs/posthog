@@ -4,16 +4,17 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+doctest = false
+
 [dependencies]
 axum = { workspace = true }
 common-alloc = { path = "../common/alloc" }
-common-continuous-profiling = { path = "../common/continuous_profiling" }
 common-hypercache = { path = "../common/hypercache" }
 common-metrics = { path = "../common/metrics" }
 common-redis = { path = "../common/redis" }
 envconfig = { workspace = true }
 health = { path = "../common/health" }
-metrics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
