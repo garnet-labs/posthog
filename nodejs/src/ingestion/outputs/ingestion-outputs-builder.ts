@@ -117,8 +117,8 @@ export class IngestionOutputsBuilder<O extends string = never, TK extends string
             )
 
             const secondaryTopic = config[def.secondaryTopicKey]
-            const secondaryProducerName = config[def.secondaryProducerKey]
-            if (secondaryTopic && secondaryProducerName) {
+            if (secondaryTopic) {
+                const secondaryProducerName = config[def.secondaryProducerKey]
                 record[name] = new DualWriteIngestionOutput(
                     primary,
                     new SingleIngestionOutput(
