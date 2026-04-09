@@ -6,14 +6,14 @@ from posthog.clickhouse.preaggregation.experiment_metric_events_sql import (
 )
 
 operations = [
-    # Create sharded table on data nodes
+    # Create sharded table on aux cluster
     run_sql_with_exceptions(
         SHARDED_EXPERIMENT_METRIC_EVENTS_TABLE_SQL(),
-        node_roles=[NodeRole.DATA],
+        node_roles=[NodeRole.AUX],
     ),
-    # Create distributed table on data + coordinator nodes
+    # Create distributed table on aux cluster + data nodes (for querying)
     run_sql_with_exceptions(
         DISTRIBUTED_EXPERIMENT_METRIC_EVENTS_TABLE_SQL(),
-        node_roles=[NodeRole.DATA, NodeRole.COORDINATOR],
+        node_roles=[NodeRole.AUX, NodeRole.DATA],
     ),
 ]

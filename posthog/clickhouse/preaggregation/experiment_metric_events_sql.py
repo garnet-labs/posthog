@@ -11,7 +11,9 @@
 # - Ratio: two separate jobs (numerator + denominator), both use `numeric_value`
 # - Retention: two separate jobs (start + completion), uses entity_id + timestamp
 
-from posthog.clickhouse.table_engines import Distributed, ReplacingMergeTree, ReplicationScheme
+from django.conf import settings
+
+from posthog.clickhouse.table_engines import Distributed, ReplacingMergeTree
 
 TABLE_BASE_NAME = "experiment_metric_events_preaggregated"
 
@@ -25,7 +27,7 @@ def SHARDED_EXPERIMENT_METRIC_EVENTS_TABLE():
 
 
 def SHARDED_EXPERIMENT_METRIC_EVENTS_TABLE_ENGINE():
-    return ReplacingMergeTree(TABLE_BASE_NAME, replication_scheme=ReplicationScheme.SHARDED, ver="computed_at")
+    return ReplacingMergeTree(TABLE_BASE_NAME, ver="computed_at")
 
 
 EXPERIMENT_METRIC_EVENTS_TABLE_BASE_SQL = """
@@ -77,6 +79,7 @@ def DISTRIBUTED_EXPERIMENT_METRIC_EVENTS_TABLE_SQL():
         engine=Distributed(
             data_table=SHARDED_EXPERIMENT_METRIC_EVENTS_TABLE(),
             sharding_key="cityHash64(entity_id)",
+            cluster=settings.CLICKHOUSE_AUX_CLUSTER,
         ),
     )
 
