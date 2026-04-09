@@ -3,6 +3,7 @@ import { useActions, useValues } from 'kea'
 import { IconCalendar } from '@posthog/icons'
 
 import { DateFilter } from 'lib/components/DateFilter/DateFilter'
+import { dayjs } from 'lib/dayjs'
 import { dateMapping } from 'lib/utils'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
@@ -13,13 +14,6 @@ import { IntervalType } from '~/types'
 type InsightDateFilterProps = {
     disabled: boolean
 }
-
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-
-const isLeapYear = (year: number): boolean => (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
-
-const daysInMonth = (year: number, month: number): number =>
-    month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1]
 
 // When an insight is grouped by month, the query's WHERE clause uses
 // toStartOfInterval(date_from, month), so the first and last chart buckets cover the
@@ -35,21 +29,14 @@ export function alignResolvedDateRangeToInterval(
     if (interval !== 'month') {
         return resolvedDateRange
     }
-    // ISO input like "2025-04-07T00:00:00+00:00" — just swap the day + time parts and
-    // keep the original timezone suffix so we stay in the same wall-clock tz.
-    const clampToMonth = (iso: string, boundary: 'start' | 'end'): string => {
-        const ymd = iso.slice(0, 7) // "YYYY-MM"
-        const tz = iso.slice(19) // everything after "YYYY-MM-DDTHH:mm:ss"
-        if (boundary === 'start') {
-            return `${ymd}-01T00:00:00${tz}`
-        }
-        const [year, month] = ymd.split('-').map(Number)
-        const lastDay = String(daysInMonth(year, month)).padStart(2, '0')
-        return `${ymd}-${lastDay}T23:59:59${tz}`
-    }
+    // Parse the wall-clock portion only, so manipulation stays in the original tz.
+    const stripTz = (iso: string): string => iso.replace(/([+-]\d{2}:\d{2}|Z)$/, '')
+    const tzSuffix = (iso: string): string => (iso.endsWith('Z') ? '+00:00' : iso.slice(-6))
+    const from = dayjs.utc(stripTz(resolvedDateRange.date_from)).startOf('month')
+    const to = dayjs.utc(stripTz(resolvedDateRange.date_to)).endOf('month')
     return {
-        date_from: clampToMonth(resolvedDateRange.date_from, 'start'),
-        date_to: clampToMonth(resolvedDateRange.date_to, 'end'),
+        date_from: from.format('YYYY-MM-DDTHH:mm:ss') + tzSuffix(resolvedDateRange.date_from),
+        date_to: to.format('YYYY-MM-DDTHH:mm:ss') + tzSuffix(resolvedDateRange.date_to),
     }
 }
 

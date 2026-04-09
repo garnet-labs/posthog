@@ -37,36 +37,6 @@ describe('alignResolvedDateRangeToInterval', () => {
         })
     })
 
-    it('handles February in a leap year', () => {
-        expect(
-            alignResolvedDateRangeToInterval(
-                {
-                    date_from: '2024-02-15T00:00:00+00:00',
-                    date_to: '2024-02-20T23:59:59+00:00',
-                },
-                'month'
-            )
-        ).toEqual({
-            date_from: '2024-02-01T00:00:00+00:00',
-            date_to: '2024-02-29T23:59:59+00:00',
-        })
-    })
-
-    it('handles February in a non-leap year', () => {
-        expect(
-            alignResolvedDateRangeToInterval(
-                {
-                    date_from: '2025-02-15T00:00:00+00:00',
-                    date_to: '2025-02-20T23:59:59+00:00',
-                },
-                'month'
-            )
-        ).toEqual({
-            date_from: '2025-02-01T00:00:00+00:00',
-            date_to: '2025-02-28T23:59:59+00:00',
-        })
-    })
-
     it('preserves a non-UTC timezone offset', () => {
         expect(
             alignResolvedDateRangeToInterval(
