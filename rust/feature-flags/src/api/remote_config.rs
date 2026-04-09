@@ -40,12 +40,16 @@ fn config_cache_headers() -> [(&'static str, &'static str); 2] {
 /// Returns `Ok(config)` on hit, or an HTTP error response on failure:
 /// - 400 for invalid tokens
 /// - 404 for unknown tokens (cache miss / explicit missing marker)
-async fn get_validated_config(state: &AppState, token: &str) -> Result<Value, Response> {
+async fn get_validated_config(
+    state: &AppState,
+    token: &str,
+    endpoint_label: &str,
+) -> Result<Value, Response> {
     if !is_valid_token(token) {
         inc(
             REMOTE_CONFIG_COUNTER,
             &[
-                ("endpoint".to_string(), "config".to_string()),
+                ("endpoint".to_string(), endpoint_label.to_string()),
                 ("result".to_string(), "invalid_token".to_string()),
             ],
             1,
@@ -58,7 +62,7 @@ async fn get_validated_config(state: &AppState, token: &str) -> Result<Value, Re
             inc(
                 REMOTE_CONFIG_COUNTER,
                 &[
-                    ("endpoint".to_string(), "config".to_string()),
+                    ("endpoint".to_string(), endpoint_label.to_string()),
                     ("result".to_string(), "hit".to_string()),
                 ],
                 1,
@@ -69,7 +73,7 @@ async fn get_validated_config(state: &AppState, token: &str) -> Result<Value, Re
             inc(
                 REMOTE_CONFIG_COUNTER,
                 &[
-                    ("endpoint".to_string(), "config".to_string()),
+                    ("endpoint".to_string(), endpoint_label.to_string()),
                     ("result".to_string(), "not_found".to_string()),
                 ],
                 1,
@@ -96,6 +100,13 @@ pub async fn config_endpoint(
     if method == Method::OPTIONS {
         return (StatusCode::NO_CONTENT, [("allow", "GET, OPTIONS, HEAD")]).into_response();
     }
+
+    // Validate token before HEAD so invalid/missing tokens return 400/404, not 200
+    let mut config = match get_validated_config(&state, &token, "config").await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
     if method == Method::HEAD {
         return (
             StatusCode::OK,
@@ -105,11 +116,6 @@ pub async fn config_endpoint(
         )
             .into_response();
     }
-
-    let mut config = match get_validated_config(&state, &token).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
 
     sanitize_config_for_client(&mut config, &headers);
 
@@ -132,6 +138,13 @@ pub async fn config_js_endpoint(
     if method == Method::OPTIONS {
         return (StatusCode::NO_CONTENT, [("allow", "GET, OPTIONS, HEAD")]).into_response();
     }
+
+    // Validate token before HEAD so invalid/missing tokens return 400/404, not 200
+    let mut config = match get_validated_config(&state, &token, "config_js").await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
     if method == Method::HEAD {
         return (
             StatusCode::OK,
@@ -144,11 +157,6 @@ pub async fn config_js_endpoint(
         )
             .into_response();
     }
-
-    let mut config = match get_validated_config(&state, &token).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
 
     // Extract siteAppsJS (raw JS strings) before sanitization removes it
     let site_apps_js = config
@@ -183,15 +191,7 @@ pub async fn config_js_endpoint(
     let config_json = serde_json::to_string(&config).unwrap_or_else(|_| "{}".to_string());
     let site_apps_joined = site_apps_js.join(",");
 
-    let js_content = format!(
-        "(function() {{\n\
-         \x20 window._POSTHOG_REMOTE_CONFIG = window._POSTHOG_REMOTE_CONFIG || {{}};\n\
-         \x20 window._POSTHOG_REMOTE_CONFIG['{token}'] = {{\n\
-         \x20   config: {config_json},\n\
-         \x20   siteApps: [{site_apps_joined}]\n\
-         \x20 }}\n\
-         }})();"
-    );
+    let js_content = build_config_js(&token, &config_json, &site_apps_joined);
 
     (
         StatusCode::OK,
@@ -203,6 +203,19 @@ pub async fn config_js_endpoint(
         js_content,
     )
         .into_response()
+}
+
+/// Build the JS IIFE that sets `window._POSTHOG_REMOTE_CONFIG[token]`.
+fn build_config_js(token: &str, config_json: &str, site_apps_joined: &str) -> String {
+    format!(
+        "(function() {{\n\
+         \x20 window._POSTHOG_REMOTE_CONFIG = window._POSTHOG_REMOTE_CONFIG || {{}};\n\
+         \x20 window._POSTHOG_REMOTE_CONFIG['{token}'] = {{\n\
+         \x20   config: {config_json},\n\
+         \x20   siteApps: [{site_apps_joined}]\n\
+         \x20 }}\n\
+         }})();"
+    )
 }
 
 #[cfg(test)]
@@ -233,18 +246,8 @@ mod tests {
     fn test_config_js_template_format() {
         let config = json!({"sessionRecording": true, "heatmaps": false});
         let config_json = serde_json::to_string(&config).unwrap();
-        let site_apps_joined = "";
-        let token = "phc_test123";
 
-        let js = format!(
-            "(function() {{\n\
-             \x20 window._POSTHOG_REMOTE_CONFIG = window._POSTHOG_REMOTE_CONFIG || {{}};\n\
-             \x20 window._POSTHOG_REMOTE_CONFIG['{token}'] = {{\n\
-             \x20   config: {config_json},\n\
-             \x20   siteApps: [{site_apps_joined}]\n\
-             \x20 }}\n\
-             }})();"
-        );
+        let js = build_config_js("phc_test123", &config_json, "");
 
         assert!(js.contains("window._POSTHOG_REMOTE_CONFIG"));
         assert!(js.contains("phc_test123"));
@@ -254,23 +257,9 @@ mod tests {
 
     #[test]
     fn test_config_js_template_with_site_apps() {
-        let config_json = "{}";
-        let site_apps = vec![
-            "function() { return 1; }".to_string(),
-            "function() { return 2; }".to_string(),
-        ];
-        let site_apps_joined = site_apps.join(",");
-        let token = "phc_test";
+        let site_apps_joined = "function() { return 1; },function() { return 2; }";
 
-        let js = format!(
-            "(function() {{\n\
-             \x20 window._POSTHOG_REMOTE_CONFIG = window._POSTHOG_REMOTE_CONFIG || {{}};\n\
-             \x20 window._POSTHOG_REMOTE_CONFIG['{token}'] = {{\n\
-             \x20   config: {config_json},\n\
-             \x20   siteApps: [{site_apps_joined}]\n\
-             \x20 }}\n\
-             }})();"
-        );
+        let js = build_config_js("phc_test", "{}", site_apps_joined);
 
         assert!(js.contains("siteApps: [function() { return 1; },function() { return 2; }]"));
     }

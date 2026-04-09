@@ -288,12 +288,14 @@ pub fn router(
     }
 
     // Remote config endpoints — reuses config_hypercache_reader (array/config.json)
-    flags_router = flags_router
-        .route("/array/:token/config", any(remote_config::config_endpoint))
-        .route(
-            "/array/:token/config.js",
-            any(remote_config::config_js_endpoint),
-        );
+    if matches!(config.service_mode, ServiceMode::All) {
+        flags_router = flags_router
+            .route("/array/:token/config", any(remote_config::config_endpoint))
+            .route(
+                "/array/:token/config.js",
+                any(remote_config::config_js_endpoint),
+            );
+    }
 
     let flags_router = flags_router
         .layer(ConcurrencyLimitLayer::new(config.max_concurrency))
