@@ -1,1 +1,1 @@
-0224_drop_error_tracking_events_test_table
+0226_add_error_tracking_fingerprint_issue_state

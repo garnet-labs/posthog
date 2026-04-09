@@ -24,8 +24,10 @@ import { Setting, SettingId, SettingLevelId, SettingSection, SettingSectionId, S
 const FUSE_THRESHOLD = 0.2
 
 // Helping kea-typegen navigate the exported default class for Fuse
-export interface SettingsFuse extends FuseClass<Setting> {}
-export interface SectionsFuse extends FuseClass<SettingSection> {}
+export interface SettingsFuse extends FuseClass<Setting & { searchValue: string }> {}
+export interface SectionsFuse extends FuseClass<
+    SettingSection & { searchValue: string; settingsSearchValues: string }
+> {}
 
 export interface SearchIndexEntry {
     settingId: SettingId
@@ -486,7 +488,7 @@ export const settingsLogic = kea<settingsLogicType>([
             (sections, doesMatchFlags, preflight, currentTeam): GlobalSearchFuse => {
                 const entries: SearchIndexEntry[] = []
 
-                for (const section of sections) {
+                for (const section of sections.filter((s) => !s.hideFromNavigation)) {
                     const sectionTitle =
                         typeof section.title === 'string' ? section.title : section.id.replace(/[-]/g, ' ')
 
@@ -519,7 +521,7 @@ export const settingsLogic = kea<settingsLogicType>([
                 }
 
                 // Index sections that are top-level links with no settings (e.g. Billing)
-                for (const section of sections) {
+                for (const section of sections.filter((s) => !s.hideFromNavigation)) {
                     if (section.settings.length === 0) {
                         const sectionTitle =
                             typeof section.title === 'string' ? section.title : section.id.replace(/[-]/g, ' ')
@@ -589,12 +591,14 @@ export const settingsLogic = kea<settingsLogicType>([
         filteredSections: [
             (s) => [s.sections, s.searchResults, s.isSearching],
             (sections, searchResults, isSearching): SettingSection[] => {
+                const visibleSections = sections.filter((section) => !section.hideFromNavigation)
+
                 if (!isSearching) {
-                    return sections
+                    return visibleSections
                 }
 
                 const sectionIds = new Set(searchResults.map((g) => g.sectionId))
-                return sections.filter((section) => sectionIds.has(section.id))
+                return visibleSections.filter((section) => sectionIds.has(section.id))
             },
         ],
     }),
