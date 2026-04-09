@@ -1012,12 +1012,12 @@ def break_part(
                 _ssh_exec(ssh, f"mv {staging_tgt_detached}{dp} {source_detached}{dp}")
 
             # -- Step 11: ATTACH the new parts to source table --
-            # Record the min block number of our parts so we can verify exactly
+            # Record the block number range of our parts so we can verify exactly
             # our rows after ATTACH. Part names: {partition}_{min_block}_{max_block}_{level}.
-            # Our INSERT SELECT parts have block numbers higher than existing parts,
-            # so filtering by min_block_number >= our_min_block isolates our data
-            # even after background merges combine parts.
+            # Filtering by block range isolates our data even after background
+            # merges combine parts (merges preserve min/max block numbers).
             our_min_block = min(int(dp.split("_")[1]) for dp in detached_parts)
+            our_max_block = max(int(dp.split("_")[2]) for dp in detached_parts)
 
             # Use ATTACH PART (not ATTACH PARTITION) to only attach the parts we moved,
             # avoiding accidentally reattaching unrelated pre-existing detached parts.
@@ -1057,24 +1057,26 @@ def break_part(
             # Safety check: verify new parts exist on the source table before dropping.
             # If ATTACHes failed silently or parts were merged away, dropping the old
             # part would lose data.
-            # Verify the new parts by checking row count of parts whose block
-            # numbers fall in our range (min_block_number >= our_min_block).
-            # This isolates exactly the rows we attached, immune to:
-            # - Background merges (merges preserve min/max block numbers)
-            # - Pre-existing partition data (different block range)
-            # - Concurrent ingestion (new inserts get higher block numbers,
-            #   but are included — which only inflates the count, never hides loss)
+            # Verify the new parts by checking row count of parts that overlap
+            # with our block range. We use max_block_number >= our_min_block
+            # (not min_block_number >= our_min_block) because background merges
+            # can combine our parts with pre-existing ones, producing a merged
+            # part whose min_block is lower than ours but whose max_block
+            # extends into our range. We exclude the old part by name since
+            # its block range may technically overlap.
             our_parts = client.execute(
                 "SELECT count(), sum(rows) FROM system.parts "
                 "WHERE database = %(db)s AND table = %(table)s AND active "
                 "AND partition_id = %(partition_id)s "
-                "AND min_block_number >= %(min_block)s "
+                "AND max_block_number >= %(min_block)s "
+                "AND min_block_number <= %(max_block)s "
                 "AND name != %(old_part)s",
                 {
                     "db": database,
                     "table": source_table,
                     "partition_id": partition_id,
                     "min_block": our_min_block,
+                    "max_block": our_max_block,
                     "old_part": part.part_name,
                 },
             )
@@ -1083,18 +1085,18 @@ def break_part(
 
             if our_part_count == 0:
                 raise dagster.Failure(
-                    description=f"No parts found with min_block >= {our_min_block} on "
+                    description=f"No parts found in block range [{our_min_block}, {our_max_block}] on "
                     f"{source_table} partition {partition_id}. Skipping DROP to avoid data loss."
                 )
             if our_row_count < target_count:
                 raise dagster.Failure(
-                    description=f"Parts with min_block >= {our_min_block} have {our_row_count:,} rows, "
-                    f"expected at least {target_count:,}. "
+                    description=f"Parts in block range [{our_min_block}, {our_max_block}] have "
+                    f"{our_row_count:,} rows, expected at least {target_count:,}. "
                     f"Skipping DROP to avoid data loss."
                 )
             context.log.info(
                 f"Pre-DROP safety check passed: {our_row_count:,} rows in {our_part_count} parts "
-                f"with min_block >= {our_min_block} (target: {target_count:,})"
+                f"in block range [{our_min_block}, {our_max_block}] (target: {target_count:,})"
             )
 
             # Re-query the part by its min_block/max_block numbers which are stable
