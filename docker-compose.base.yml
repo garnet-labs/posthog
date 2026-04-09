@@ -68,6 +68,10 @@ services:
                         path /api/surveys/
                     }
 
+                    @remote-config {
+                        path /array/*
+                    }
+
                     @webhooks {
                         path /public/webhooks
                         path /public/webhooks/
@@ -110,6 +114,10 @@ services:
                     }
 
                     handle @surveys {
+                        reverse_proxy feature-flags:3001
+                    }
+
+                    handle @remote-config {
                         reverse_proxy feature-flags:3001
                     }
 

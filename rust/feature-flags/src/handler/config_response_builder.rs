@@ -162,7 +162,7 @@ fn set_cached_quota_limits_without_recordings(response: &mut FlagsResponse) {
 /// - Removes `siteAppsJS` (raw JS only needed for array.js bundle, not JSON API)
 /// - Removes `sessionRecording.domains` (internal field, not needed by SDK)
 /// - Sets `sessionRecording` to `false` if request origin not in permitted domains
-fn sanitize_config_for_client(cached_config: &mut Value, headers: &HeaderMap) {
+pub fn sanitize_config_for_client(cached_config: &mut Value, headers: &HeaderMap) {
     if let Some(obj) = cached_config.as_object_mut() {
         obj.remove("siteAppsJS");
     }

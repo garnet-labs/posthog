@@ -36,7 +36,7 @@ use crate::{
         endpoint, flag_definitions,
         flag_definitions_rate_limiter::FlagDefinitionsRateLimiter,
         flags_rate_limiter::{FlagsRateLimiter, IpRateLimiter},
-        surveys,
+        remote_config, surveys,
     },
     cohorts::{cohort_cache_manager::CohortCacheManager, membership::CohortMembershipProvider},
     config::{Config, ServiceMode, TeamIdCollection},
@@ -286,6 +286,14 @@ pub fn router(
             .route("/api/surveys", any(surveys::surveys_endpoint))
             .route("/api/surveys/", any(surveys::surveys_endpoint));
     }
+
+    // Remote config endpoints — reuses config_hypercache_reader (array/config.json)
+    flags_router = flags_router
+        .route("/array/:token/config", any(remote_config::config_endpoint))
+        .route(
+            "/array/:token/config.js",
+            any(remote_config::config_js_endpoint),
+        );
 
     let flags_router = flags_router
         .layer(ConcurrencyLimitLayer::new(config.max_concurrency))
