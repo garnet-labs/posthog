@@ -13,6 +13,7 @@ from posthog.schema import (
     CohortPropertyFilter,
     CompareFilter,
     DataWarehouseNode,
+    DataWarehousePropertyFilter,
     DateRange,
     ElementPropertyFilter,
     EmptyPropertyFilter,
@@ -150,7 +151,7 @@ class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
 
     def _setup_data_warehouse(self) -> str:
         table, _source, _credential, _df, self.cleanUpDataWarehouse = create_data_warehouse_table_from_csv(
-            csv_path=Path(__file__).parent / "data" / "trends_data.csv",
+            csv_path=Path(__file__).parent.parent / "trends" / "test" / "data" / "trends_data.csv",
             table_name="test_table_stickiness",
             table_columns={
                 "id": {"clickhouse": "String", "hogql": "StringDatabaseField"},
@@ -282,28 +283,54 @@ class TestStickinessQueryRunner(ClickhouseTestMixin, APIBaseTest):
         assert isinstance(response.results, list)
         assert isinstance(response.results[0], dict)
 
-    @freeze_time("2023-01-07")
-    def test_stickiness_data_warehouse_runs(self):
+    def test_stickiness_data_warehouse(self):
         table_name = self._setup_data_warehouse()
 
-        response = self._run_query(
-            series=[
-                DataWarehouseNode(
-                    id=table_name,
-                    table_name=table_name,
-                    id_field="id",
-                    distinct_id_field="customer_email",
-                    timestamp_field="created",
-                )
-            ],
-            date_from="2023-01-01",
-            date_to="2023-01-07",
-        )
+        with freeze_time("2023-01-07"):
+            response = self._run_query(
+                series=[
+                    DataWarehouseNode(
+                        id=table_name,
+                        table_name=table_name,
+                        id_field="id",
+                        distinct_id_field="id",
+                        timestamp_field="created",
+                    )
+                ],
+                date_from="2023-01-01",
+                date_to="2023-01-07",
+            )
 
         assert isinstance(response, StickinessQueryResponse)
         assert response.results[0]["label"] == table_name
-        assert response.results[0]["data"] == [4]
-        assert response.results[0]["days"] == [1]
+        assert response.results[0]["data"] == [4, 0, 0, 0, 0, 0, 0]
+        assert response.results[0]["days"] == [1, 2, 3, 4, 5, 6, 7]
+
+    def test_stickiness_data_warehouse_with_entity_property_filter(self):
+        table_name = self._setup_data_warehouse()
+
+        with freeze_time("2023-01-07"):
+            response = self._run_query(
+                series=[
+                    DataWarehouseNode(
+                        id=table_name,
+                        table_name=table_name,
+                        id_field="id",
+                        distinct_id_field="id",
+                        timestamp_field="created",
+                        properties=[
+                            DataWarehousePropertyFilter(key="prop_1", value="a", operator=PropertyOperator.EXACT)
+                        ],
+                    )
+                ],
+                date_from="2023-01-01",
+                date_to="2023-01-07",
+            )
+
+        assert isinstance(response, StickinessQueryResponse)
+        assert response.results[0]["label"] == table_name
+        assert response.results[0]["data"] == [1, 0, 0, 0, 0, 0, 0]
+        assert response.results[0]["days"] == [1, 2, 3, 4, 5, 6, 7]
 
     def test_days(self):
         self._create_test_events()

@@ -139,10 +139,17 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
         )
 
     def _events_query(self, series_with_extra: SeriesWithExtras) -> ast.SelectQuery:
+        from_table = ast.Field(
+            chain=[
+                series_with_extra.series.table_name
+                if isinstance(series_with_extra.series, DataWarehouseNode)
+                else "events"
+            ]
+        )
+
         # Produce one row per (aggregation_target, start_of_interval) pair.
-        if isinstance(series_with_extra.series, DataWarehouseNode):
-            inner_query = parse_select(
-                """
+        inner_query = parse_select(
+            """
                 SELECT
                     {aggregation} as aggregation_target,
                     {start_of_interval} as start_of_interval,
@@ -151,34 +158,24 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
                 GROUP BY aggregation_target, start_of_interval
                 HAVING {having_clause}
             """,
-                {
-                    "aggregation": self._aggregation_expressions(series_with_extra.series),
-                    "start_of_interval": self.date_to_start_of_interval_hogql(ast.Field(chain=["e", "timestamp"])),
-                    "from_table": ast.Field(chain=[series_with_extra.series.table_name]),
-                    "where_clause": self.where_clause(series_with_extra),
-                    "having_clause": self._having_clause(),
-                },
-            )
-        else:
-            inner_query = parse_select(
-                """
-                SELECT
-                    {aggregation} as aggregation_target,
-                    {start_of_interval} as start_of_interval,
-                FROM events e
-                SAMPLE {sample}
-                WHERE {where_clause}
-                GROUP BY aggregation_target, start_of_interval
-                HAVING {having_clause}
-            """,
-                {
-                    "aggregation": self._aggregation_expressions(series_with_extra.series),
-                    "start_of_interval": self.date_to_start_of_interval_hogql(ast.Field(chain=["e", "timestamp"])),
-                    "sample": self._sample_value(),
-                    "where_clause": self.where_clause(series_with_extra),
-                    "having_clause": self._having_clause(),
-                },
-            )
+            {
+                "aggregation": self._aggregation_expressions(series_with_extra.series),
+                "start_of_interval": self.date_to_start_of_interval_hogql(ast.Field(chain=["e", "timestamp"])),
+                "from_table": from_table,
+                "where_clause": self.where_clause(series_with_extra),
+                "having_clause": self._having_clause(),
+            },
+        )
+        inner_query = cast(ast.SelectQuery, inner_query)
+        inner_query.select_from = ast.JoinExpr(
+            table=from_table,
+            alias="e",
+            sample=(
+                ast.SampleExpr(sample_value=self._sample_value())
+                if not isinstance(series_with_extra.series, DataWarehouseNode)
+                else None
+            ),
+        )
 
         # Count how many distinct intervals each aggregation target appeared in.
         # e.g. person A -> 3, person B -> 1, person C -> 3
