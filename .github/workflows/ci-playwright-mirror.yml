@@ -1,0 +1,50 @@
+name: Mirror Playwright image to GHCR
+
+# Mirrors mcr.microsoft.com/playwright to ghcr.io/posthog/playwright
+# to avoid MCR outages blocking CI (see insight 01KN99AZ6B3M6AZEZTGEYB1JJK).
+#
+# Run manually when bumping the Playwright version, or on-demand if the
+# GHCR copy is missing.
+
+on:
+    workflow_dispatch:
+        inputs:
+            playwright_version:
+                description: 'Playwright image tag to mirror (e.g. v1.45.0)'
+                required: true
+                default: 'v1.45.0'
+
+permissions:
+    packages: write # allow push to ghcr.io
+
+jobs:
+    mirror:
+        name: Mirror Playwright ${{ inputs.playwright_version || 'v1.45.0' }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Log in to GHCR
+              uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Pull from MCR and push to GHCR
+              env:
+                  TAG: ${{ inputs.playwright_version || 'v1.45.0' }}
+              run: |
+                  set -euo pipefail
+                  SOURCE="mcr.microsoft.com/playwright:${TAG}"
+                  TARGET="ghcr.io/posthog/playwright:${TAG}"
+
+                  echo "Pulling ${SOURCE}..."
+                  docker pull "${SOURCE}"
+
+                  echo "Tagging as ${TARGET}..."
+                  docker tag "${SOURCE}" "${TARGET}"
+
+                  echo "Pushing ${TARGET}..."
+                  docker push "${TARGET}"
+
+                  echo "✅ Mirrored ${SOURCE} → ${TARGET}"
