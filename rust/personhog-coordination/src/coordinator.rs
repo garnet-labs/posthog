@@ -425,9 +425,7 @@ impl Coordinator {
                         partition = handoff.partition,
                         "cleaning up orphaned Complete handoff from previous leader"
                     );
-                    self.store
-                        .delete_router_acks(handoff.partition)
-                        .await?;
+                    self.store.delete_router_acks(handoff.partition).await?;
                     self.store.delete_handoff(handoff.partition).await?;
                     counter!("personhog_coordinator_handoffs_total", "outcome" => "completed")
                         .increment(1);
@@ -472,9 +470,13 @@ impl Coordinator {
 
         // Emit pod gauges
         let ready = pods.iter().filter(|p| p.status == PodStatus::Ready).count();
-        let draining = pods.iter().filter(|p| p.status == PodStatus::Draining).count();
+        let draining = pods
+            .iter()
+            .filter(|p| p.status == PodStatus::Draining)
+            .count();
         gauge!("personhog_coordinator_pods_registered", "status" => "ready").set(ready as f64);
-        gauge!("personhog_coordinator_pods_registered", "status" => "draining").set(draining as f64);
+        gauge!("personhog_coordinator_pods_registered", "status" => "draining")
+            .set(draining as f64);
 
         // Emit router gauge
         let routers = store.list_routers().await.unwrap_or_default();
@@ -603,7 +605,8 @@ impl Coordinator {
                 );
                 store.delete_router_acks(handoff.partition).await?;
                 store.delete_handoff(handoff.partition).await?;
-                counter!("personhog_coordinator_handoffs_total", "outcome" => "stale_cleanup").increment(1);
+                counter!("personhog_coordinator_handoffs_total", "outcome" => "stale_cleanup")
+                    .increment(1);
             }
         }
 
@@ -695,7 +698,11 @@ async fn filter_pods_for_k8s(
                 old_gen_pods.push(pod);
                 rollout_controller = Some(controller);
             }
-            (ControllerKind::Deployment, PodStatus::Ready, DepartureReason::Crash | DepartureReason::Unknown | DepartureReason::Downscale) => {
+            (
+                ControllerKind::Deployment,
+                PodStatus::Ready,
+                DepartureReason::Crash | DepartureReason::Unknown | DepartureReason::Downscale,
+            ) => {
                 // New-gen or steady-state pod — stays in active list
                 new_gen_count += 1;
             }
@@ -757,9 +764,18 @@ async fn filter_pods_for_k8s(
 }
 
 fn emit_handoff_gauges(handoffs: &[HandoffState]) {
-    let warming = handoffs.iter().filter(|h| h.phase == HandoffPhase::Warming).count();
-    let ready = handoffs.iter().filter(|h| h.phase == HandoffPhase::Ready).count();
-    let complete = handoffs.iter().filter(|h| h.phase == HandoffPhase::Complete).count();
+    let warming = handoffs
+        .iter()
+        .filter(|h| h.phase == HandoffPhase::Warming)
+        .count();
+    let ready = handoffs
+        .iter()
+        .filter(|h| h.phase == HandoffPhase::Ready)
+        .count();
+    let complete = handoffs
+        .iter()
+        .filter(|h| h.phase == HandoffPhase::Complete)
+        .count();
     gauge!("personhog_coordinator_handoffs_in_flight", "phase" => "warming").set(warming as f64);
     gauge!("personhog_coordinator_handoffs_in_flight", "phase" => "ready").set(ready as f64);
     gauge!("personhog_coordinator_handoffs_in_flight", "phase" => "complete").set(complete as f64);
@@ -773,7 +789,8 @@ fn emit_assignment_gauges(assignments: &[PartitionAssignment]) {
         *per_pod.entry(a.owner.as_str()).or_default() += 1;
     }
     for (pod, count) in per_pod {
-        gauge!("personhog_coordinator_partitions_per_pod", "pod" => pod.to_string()).set(count as f64);
+        gauge!("personhog_coordinator_partitions_per_pod", "pod" => pod.to_string())
+            .set(count as f64);
     }
 }
 

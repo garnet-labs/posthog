@@ -279,7 +279,8 @@ impl PodHandle {
                 .record(warm_start.elapsed().as_secs_f64());
 
             self.owned_partitions.lock().await.insert(handoff.partition);
-            gauge!("personhog_pod_owned_partitions").set(self.owned_partitions.lock().await.len() as f64);
+            gauge!("personhog_pod_owned_partitions")
+                .set(self.owned_partitions.lock().await.len() as f64);
 
             // Signal ready — routers will now begin cutover
             let mut updated = handoff.clone();
@@ -297,7 +298,8 @@ impl PodHandle {
                 .lock()
                 .await
                 .remove(&handoff.partition);
-            gauge!("personhog_pod_owned_partitions").set(self.owned_partitions.lock().await.len() as f64);
+            gauge!("personhog_pod_owned_partitions")
+                .set(self.owned_partitions.lock().await.len() as f64);
             counter!("personhog_pod_partitions_released_total").increment(1);
             self.drain_notify.notify_one();
         }
@@ -372,7 +374,8 @@ impl PodHandle {
             .lock()
             .await
             .insert(assignment.partition);
-        gauge!("personhog_pod_owned_partitions").set(self.owned_partitions.lock().await.len() as f64);
+        gauge!("personhog_pod_owned_partitions")
+            .set(self.owned_partitions.lock().await.len() as f64);
 
         Ok(())
     }

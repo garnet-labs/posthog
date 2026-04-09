@@ -1193,17 +1193,29 @@ async fn enrich_pod_k8s_preserves_lease() {
     // Verify enrichment persisted
     let enriched = store.get_pod("writer-0").await.unwrap().unwrap();
     assert_eq!(enriched.generation, "abc123");
-    assert_eq!(enriched.controller.as_ref().unwrap().name, "personhog-leader");
-    assert_eq!(enriched.controller.as_ref().unwrap().kind, ControllerKind::Deployment);
+    assert_eq!(
+        enriched.controller.as_ref().unwrap().name,
+        "personhog-leader"
+    );
+    assert_eq!(
+        enriched.controller.as_ref().unwrap().kind,
+        ControllerKind::Deployment
+    );
     // Other fields should be unchanged
     assert_eq!(enriched.pod_name, "writer-0");
-    assert_eq!(enriched.status, personhog_coordination::types::PodStatus::Ready);
+    assert_eq!(
+        enriched.status,
+        personhog_coordination::types::PodStatus::Ready
+    );
     assert_eq!(enriched.registered_at, 1000);
 
     // Verify the lease is preserved: revoking it should delete the pod key
     store.revoke_lease(lease_id).await.unwrap();
     let gone = store.get_pod("writer-0").await.unwrap();
-    assert!(gone.is_none(), "pod key should be deleted after lease revocation");
+    assert!(
+        gone.is_none(),
+        "pod key should be deleted after lease revocation"
+    );
 }
 
 /// Verify that `enrich_pod_k8s` returns NotFound for a nonexistent pod.
