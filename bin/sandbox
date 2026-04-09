@@ -649,12 +649,11 @@ def _ensure_cache_volumes() -> None:
 def _init_cache_cleanup(port: int, worktree: str) -> None:
     info("Cleaning up cache init containers...")
     compose("sandbox-cache-init", port, worktree, "down", "-v", "-t", "0", check=False, capture=True)
-    shutil.rmtree(worktree, ignore_errors=True)
-    run(["git", "worktree", "prune"], check=False)
+    _remove_worktree(worktree)
 
 
 def init_cache_from_master() -> None:
-    """Boot a temporary master stack, generate demo data, and snapshot both databases."""
+    """Run migrations, generate demo data, pre-build Rust, and snapshot databases."""
     info("No database cache found. Building from master (one-time setup, ~10 min)...")
 
     init_project = "sandbox-cache-init"
@@ -675,37 +674,78 @@ def init_cache_from_master() -> None:
         fatal("Could not check out cache branch for cache init.")
 
     try:
-        info("Building and starting containers...")
-        compose(init_project, init_port, init_worktree, "up", "-d", "--build", capture=True)
+        # Build the app image and start only infra services (no app container).
+        # We run migrations and demo data directly via `docker compose run`,
+        # skipping the full entrypoint/phrocs boot entirely.
+        info("Building app image...")
+        compose(init_project, init_port, init_worktree, "build", "app", capture=True)
+        info("Starting infra services...")
+        compose(init_project, init_port, init_worktree, "up", "-d",
+                "db", "redis7", "clickhouse", "kafka", "zookeeper", "objectstorage", capture=True)
 
-        info("Waiting for master to boot...")
-        if not wait_for_health(f"http://localhost:{init_port}/_health", f"{init_project}-app-1"):
-            fatal("Cache init failed. See logs above.")
+        # Wait for infra to be healthy
+        info("Waiting for infra services...")
+        for svc in ["db", "clickhouse", "kafka", "redis7"]:
+            container = f"{init_project}-{svc}-1"
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                result = run(
+                    ["docker", "inspect", "--format", "{{.State.Health.Status}}", container],
+                    check=False, capture=True,
+                )
+                status = result.stdout.strip() if result.returncode == 0 else ""
+                if status == "healthy":
+                    info(f"  {svc}: healthy")
+                    break
+                time.sleep(2)
+            else:
+                dump_container_logs(container)
+                fatal(f"{svc} did not become healthy within 120s")
 
-        app = f"{init_project}-app-1"
+        env = _compose_env(init_port, init_worktree)
+        compose_run_base = [
+            "docker", "compose", "--progress=quiet",
+            "-p", init_project,
+            "-f", str(COMPOSE_FILE), "-f", str(PROFILES_FILE),
+            "run", "--rm", "--no-deps", "--entrypoint", "",
+            "-e", "SKIP_SERVICE_VERSION_REQUIREMENTS=1",
+        ]
+        compose_run = compose_run_base + ["app"]
+        # Cargo needs cwd inside the workspace so it picks up .cargo/config.toml
+        # (which sets SQLX_OFFLINE=true). --manifest-path doesn't change the
+        # config search path, only the manifest location.
+        compose_run_rust = compose_run_base + ["-w", "/workspace/rust", "app"]
 
-        # Generate demo data and pre-build Rust in parallel — they're
-        # independent and both take several minutes.
+        # Install Python deps (the entrypoint is skipped, so uv sync hasn't run).
+        info("Installing Python dependencies...")
+        run(compose_run + ["uv", "sync", "--no-editable"], env_extra=env)
+
+        # Migrations and Rust build are independent (Rust uses sqlx offline mode).
+        # Run them in parallel; demo data runs after migrations.
         import concurrent.futures
 
-        def _generate_demo_data():
+        def _migrate_and_demo():
+            info("Running migrations...")
+            run(compose_run + ["python", "manage.py", "sandbox_migrate"], env_extra=env)
             info("Generating demo data (this takes a few minutes)...")
-            run(
-                ["docker", "exec", app, "python", "manage.py", "generate_demo_data",
-                 "--skip-flag-sync"],
-            )
+            run(compose_run + ["python", "manage.py", "generate_demo_data", "--skip-flag-sync"], env_extra=env)
 
         def _build_rust():
             info("Pre-building Rust workspace...")
-            run(
-                ["docker", "exec", "-w", "/workspace/rust", app,
-                 "cargo", "build", "--workspace"],
+            result = run(
+                compose_run_rust + ["cargo", "build", "--workspace"],
+                env_extra={**env, "CARGO_BUILD_JOBS": "0"},
+                check=False,
             )
+            if result.returncode != 0:
+                # Non-fatal: even a partial build warms the cargo cache for
+                # subsequent sandbox boots.
+                info("Rust pre-build failed, continuing (cargo cache still warmed).")
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            futures = [pool.submit(_generate_demo_data), pool.submit(_build_rust)]
+            futures = [pool.submit(_migrate_and_demo), pool.submit(_build_rust)]
             for f in concurrent.futures.as_completed(futures):
-                f.result()  # raises if either failed
+                f.result()
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
@@ -1235,7 +1275,9 @@ def _attach_with_health_poll(container: str, health_url: str) -> None:
     # Wait for tmux then attach (replaces this process).
     # The entrypoint installs deps before starting tmux, so there's a
     # brief window where the container is running but tmux isn't ready.
-    info("Attaching to phrocs... (detach with Ctrl-b d)")
+    # Show entrypoint progress while waiting so the user knows what's happening.
+    info("Waiting for phrocs... (showing entrypoint progress)")
+    seen_steps: set[str] = set()
     deadline = time.monotonic() + 300
     while time.monotonic() < deadline:
         result = run(
@@ -1245,9 +1287,22 @@ def _attach_with_health_poll(container: str, health_url: str) -> None:
         )
         if result.returncode == 0:
             break
+
+        # Show entrypoint progress from the container's progress file.
+        progress = run(
+            ["docker", "exec", container, "cat", "/tmp/sandbox-progress"],
+            check=False, capture=True,
+        )
+        for line in (progress.stdout or "").splitlines():
+            step = line.strip()
+            if step and step not in seen_steps:
+                seen_steps.add(step)
+                print(f"  {step}")
+
         time.sleep(2)
     else:
         fatal("Timed out waiting for phrocs. Run `sandbox logs <branch>` to investigate.")
+    info("Attaching to phrocs... (detach with Ctrl-b d)")
     _attach_tmux(container)
 
 

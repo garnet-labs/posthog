@@ -463,8 +463,7 @@ def user_phase() -> None:
     # migrations (usually a fast no-op).
     def install_python_and_migrate() -> None:
         install_python_deps()
-        info("Running migrations...")
-        run(["bin/migrate", "--scope=postgres", "--scope=clickhouse", "--scope=persons"])
+        run(["python", "manage.py", "sandbox_migrate", "--progress-file", str(PROGRESS_FILE)])
         ensure_demo_data()
 
     with ThreadPoolExecutor() as pool:
