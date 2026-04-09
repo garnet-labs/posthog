@@ -63,7 +63,7 @@ def delete_automation_schedule(automation: TaskAutomation) -> None:
 def run_task_automation(automation_id: str, trigger_workflow_id: str | None = None) -> tuple[Task, TaskRun]:
     automation_id = str(automation_id)
     with transaction.atomic():
-        automation = TaskAutomation.objects.select_for_update().select_related("team", "task").get(id=automation_id)
+        automation = TaskAutomation.objects.select_for_update().select_related("team").get(id=automation_id)
 
         if trigger_workflow_id:
             existing_task_run_query = TaskRun.objects.select_related("task").filter(
