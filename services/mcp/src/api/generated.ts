@@ -14072,6 +14072,16 @@ export namespace Schemas {
       readonly cohort: ErrorTrackingIssueFullCohort;
     }
 
+    export interface ErrorTrackingIssueMergeRequest {
+      /** IDs of the issues to merge into the current issue. */
+      ids: string[];
+    }
+
+    export interface ErrorTrackingIssueMergeResponse {
+      /** Whether the merge completed successfully. */
+      success: boolean;
+    }
+
     export interface ErrorTrackingRelease {
       readonly id: string;
       hash_id: string;
@@ -17795,6 +17805,13 @@ export namespace Schemas {
       Unknown: 'unknown',
     } as const;
 
+    export interface SummaryOutcome {
+      /** @nullable */
+      description?: string | null;
+      /** @nullable */
+      success?: boolean | null;
+    }
+
     export interface SessionRecordingType {
       /** @nullable */
       active_seconds?: number | null;
@@ -17872,6 +17889,7 @@ export namespace Schemas {
       start_url?: string | null;
       /** @nullable */
       summary?: string | null;
+      summary_outcome?: SummaryOutcome | null;
       /** Whether this recording has been viewed by you already. */
       viewed: boolean;
       /** user ids of other users who have viewed this recording */
@@ -19730,6 +19748,20 @@ export namespace Schemas {
       SignalReport: 'signal_report',
     } as const;
 
+    /**
+     * Initial goal and session outcome coming from LLM.
+     */
+    export interface Outcome {
+      /**
+       * @minLength 1
+       * @maxLength 10000
+       * @nullable
+       */
+      description?: string | null;
+      /** @nullable */
+      success?: boolean | null;
+    }
+
     export interface PaginatedActionList {
       count: number;
       /** @nullable */
@@ -21174,6 +21206,7 @@ export namespace Schemas {
       /** @nullable */
       readonly activity_score: number | null;
       readonly has_summary: boolean;
+      readonly summary_outcome: Outcome | null;
       /** Load external references (linked issues) for this recording */
       readonly external_references: readonly SessionRecordingExternalReferencesItem[];
     }
@@ -25027,6 +25060,7 @@ export namespace Schemas {
       /** @nullable */
       readonly activity_score?: number | null;
       readonly has_summary?: boolean;
+      readonly summary_outcome?: Outcome | null;
       /** Load external references (linked issues) for this recording */
       readonly external_references?: readonly PatchedSessionRecordingExternalReferencesItem[];
     }
@@ -31402,6 +31436,13 @@ export namespace Schemas {
     offset?: number;
     };
 
+    export type EnvironmentsEndpointsOpenapiJsonRetrieveParams = {
+    /**
+     * Specific endpoint version to generate the spec for. Defaults to latest.
+     */
+    version?: number;
+    };
+
     export type EnvironmentsEndpointsVersionsListParams = {
     created_by?: number;
     is_active?: boolean;
@@ -34158,6 +34199,13 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
+    };
+
+    export type EndpointsOpenapiJsonRetrieveParams = {
+    /**
+     * Specific endpoint version to generate the spec for. Defaults to latest.
+     */
+    version?: number;
     };
 
     export type EndpointsVersionsListParams = {
