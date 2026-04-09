@@ -42,6 +42,23 @@ function makeTrendsQuery(): TrendsQuery {
     }
 }
 
+function makeDataWarehouseTrendsQuery(): TrendsQuery {
+    return {
+        kind: NodeKind.TrendsQuery,
+        series: [
+            {
+                kind: NodeKind.DataWarehouseNode,
+                id: 'warehouse_orders',
+                table_name: 'warehouse_orders',
+                name: 'Orders',
+                timestamp_field: 'created_at',
+                id_field: 'order_id',
+                distinct_id_field: 'customer_id',
+            },
+        ],
+    }
+}
+
 function makeLifecycleQuery(): LifecycleQuery {
     return {
         kind: NodeKind.LifecycleQuery,
@@ -203,6 +220,15 @@ describe('EditorFilters', () => {
             await userEvent.click(screen.getByRole('button', { name: /Advanced options/ }))
 
             expect(screen.getByText('Use person properties from query time')).toBeInTheDocument()
+        })
+
+        it('disables query-time person properties for data warehouse insights', async () => {
+            setupAndRender(makeDataWarehouseTrendsQuery())
+
+            await userEvent.click(screen.getByRole('button', { name: /Advanced options/ }))
+
+            expect(screen.getByText('Data warehouse insights always use properties from the selected table.')).toBeInTheDocument()
+            expect(screen.getByRole('switch', { name: 'Use person properties from query time' })).toBeDisabled()
         })
     })
 
