@@ -268,6 +268,14 @@ def _render_signal_for_research(signal: SignalData, index: int, total: int) -> s
 _RESEARCH_PREAMBLE = """You are a research agent investigating a signal report for the PostHog codebase.
 Your findings will be passed downstream to a coding agent that will act on this report — thorough, evidence-based research here directly improves the quality of the coding agent's work.
 
+<writing_guide>
+We use American English.
+We use the Oxford comma.
+We always use sentence case rather than title case, including in titles, headings, subheadings, or bold text. However if quoting provided text, we keep the original case.
+When writing numbers in the thousands to the billions, it's acceptable to abbreviate them (like 10M or 100B - capital letter, no space). If you write out the full number, use commas (like 15,000,000).
+We never use the em-dash, only the en-dash (–).
+</writing_guide>
+
 You have two investigation tools:
 1. **The codebase** — the full PostHog repository is available on disk. Use file search, grep, and code reading.
 2. **PostHog MCP** — you can query PostHog analytics data via MCP tools like `execute-sql`, `query-run`, `read-data-schema`, `insights-get-all`, `experiment-get`, `list-errors`, `feature-flag-get-all`, etc."""
