@@ -1,4 +1,4 @@
-use crate::{api::errors::FlagError, router::State as AppState};
+use crate::router::State as AppState;
 use axum::{
     debug_handler,
     extract::{Query, State},
@@ -16,6 +16,14 @@ pub struct SurveysQueryParams {
     pub token: Option<String>,
 }
 
+fn empty_surveys_response() -> Response {
+    Json(serde_json::json!({
+        "surveys": [],
+        "survey_config": null
+    }))
+    .into_response()
+}
+
 /// Surveys endpoint handler
 ///
 /// Serves pre-cached survey definitions from HyperCache. This is a public endpoint
@@ -30,7 +38,7 @@ pub async fn surveys_endpoint(
     State(state): State<AppState>,
     Query(params): Query<SurveysQueryParams>,
     method: Method,
-) -> Result<Response, FlagError> {
+) -> Response {
     info!(
         method = %method,
         token = ?params.token,
@@ -39,28 +47,27 @@ pub async fn surveys_endpoint(
 
     match method {
         Method::HEAD => {
-            return Ok((
+            return (
                 StatusCode::OK,
                 [("content-type", "application/json")],
                 axum::body::Body::empty(),
             )
-                .into_response());
+                .into_response();
         }
         Method::OPTIONS => {
-            return Ok((
+            return (
                 StatusCode::NO_CONTENT,
                 [("allow", "GET, POST, OPTIONS, HEAD")],
             )
-                .into_response());
+                .into_response();
         }
         _ => {} // GET and POST proceed below
     }
 
-    let token = params.token.ok_or(FlagError::NoTokenError)?;
-
-    if token.is_empty() {
-        return Err(FlagError::NoTokenError);
-    }
+    let token = match params.token {
+        Some(t) if !t.is_empty() => t,
+        _ => return (StatusCode::UNAUTHORIZED, "Token not provided").into_response(),
+    };
 
     let key = KeyType::string(&token);
 
@@ -72,34 +79,21 @@ pub async fn surveys_endpoint(
                 error = %e,
                 "Surveys cache miss"
             );
-            // Return empty surveys response on cache miss, matching Django fallback behavior
-            return Ok(Json(serde_json::json!({
-                "surveys": [],
-                "survey_config": null
-            }))
-            .into_response());
+            return empty_surveys_response();
         }
     };
 
     // Handle null / missing marker
     if value.is_null() {
-        return Ok(Json(serde_json::json!({
-            "surveys": [],
-            "survey_config": null
-        }))
-        .into_response());
+        return empty_surveys_response();
     }
     if let Some(s) = value.as_str() {
         if s == HYPER_CACHE_EMPTY_VALUE {
-            return Ok(Json(serde_json::json!({
-                "surveys": [],
-                "survey_config": null
-            }))
-            .into_response());
+            return empty_surveys_response();
         }
     }
 
-    Ok(Json(value).into_response())
+    Json(value).into_response()
 }
 
 #[cfg(test)]

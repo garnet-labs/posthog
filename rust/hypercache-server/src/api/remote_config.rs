@@ -1,6 +1,5 @@
 use crate::{
-    config_cache::get_cached_config, handler::config_response_builder::sanitize_config_for_client,
-    router::State as AppState,
+    config_cache::get_cached_data, router::State as AppState, sanitize::sanitize_config_for_client,
 };
 use axum::{
     debug_handler,
@@ -53,7 +52,7 @@ async fn get_validated_config(state: &AppState, token: &str) -> Result<Value, Re
         return Err((StatusCode::BAD_REQUEST, "Invalid token").into_response());
     }
 
-    match get_cached_config(&state.config_hypercache_reader, token).await {
+    match get_cached_data(&state.config_hypercache_reader, token).await {
         Some(value) => {
             inc(
                 REMOTE_CONFIG_COUNTER,

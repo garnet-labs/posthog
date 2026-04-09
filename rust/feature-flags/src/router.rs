@@ -36,7 +36,6 @@ use crate::{
         endpoint, flag_definitions,
         flag_definitions_rate_limiter::FlagDefinitionsRateLimiter,
         flags_rate_limiter::{FlagsRateLimiter, IpRateLimiter},
-        remote_config, surveys,
     },
     cohorts::{cohort_cache_manager::CohortCacheManager, membership::CohortMembershipProvider},
     config::{Config, ServiceMode, TeamIdCollection},
@@ -85,10 +84,6 @@ pub struct State {
     /// Reads pre-computed config from Python's RemoteConfig.build_config()
     /// Uses token-based lookup (api_token)
     pub config_hypercache_reader: Arc<HyperCacheReader>,
-    /// Pre-initialized HyperCacheReader for surveys (surveys/surveys.json)
-    /// Reads pre-computed survey definitions from Python's surveys_hypercache
-    /// Uses token-based lookup (api_token)
-    pub surveys_hypercache_reader: Arc<HyperCacheReader>,
     /// Bounds concurrent large-batch dispatches to the Rayon pool
     pub rayon_dispatcher: RayonDispatcher,
     /// In-memory negative cache for invalid API tokens, preventing repeated
@@ -117,7 +112,6 @@ pub fn router(
     flags_with_cohorts_hypercache_reader: Arc<HyperCacheReader>,
     team_hypercache_reader: Arc<HyperCacheReader>,
     config_hypercache_reader: Arc<HyperCacheReader>,
-    surveys_hypercache_reader: Arc<HyperCacheReader>,
     rayon_dispatcher: RayonDispatcher,
     team_negative_cache: NegativeCache,
     auth_token_cache: Arc<ReadThroughCacheWithMetrics>,
@@ -204,7 +198,6 @@ pub fn router(
         flags_with_cohorts_hypercache_reader,
         team_hypercache_reader,
         config_hypercache_reader,
-        surveys_hypercache_reader,
         rayon_dispatcher,
         team_negative_cache,
         cohort_membership_provider,
@@ -277,23 +270,6 @@ pub fn router(
                 any(flag_definitions::flags_definitions),
             );
     }
-
-    if matches!(config.service_mode, ServiceMode::All | ServiceMode::Surveys) {
-        flags_router = flags_router
-            .route("/surveys", any(surveys::surveys_endpoint))
-            .route("/surveys/", any(surveys::surveys_endpoint))
-            // Alias for Django's surveys endpoint
-            .route("/api/surveys", any(surveys::surveys_endpoint))
-            .route("/api/surveys/", any(surveys::surveys_endpoint));
-    }
-
-    // Remote config endpoints — reuses config_hypercache_reader (array/config.json)
-    flags_router = flags_router
-        .route("/array/:token/config", any(remote_config::config_endpoint))
-        .route(
-            "/array/:token/config.js",
-            any(remote_config::config_js_endpoint),
-        );
 
     let flags_router = flags_router
         .layer(ConcurrencyLimitLayer::new(config.max_concurrency))
