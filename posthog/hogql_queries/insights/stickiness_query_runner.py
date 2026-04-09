@@ -419,30 +419,11 @@ class StickinessQueryRunner(AnalyticsQueryRunner[StickinessQueryResponse]):
             and len(self.team.test_account_filters) > 0
         ):
             for property in self.team.test_account_filters:
-                if is_data_warehouse_series:
-                    property_clone = property.copy()
-                    if property_clone["type"] in ("event", "person"):
-                        if property_clone["type"] == "event":
-                            property_clone["key"] = f"events.properties.{property_clone['key']}"
-                        elif property_clone["type"] == "person":
-                            property_clone["key"] = f"events.person.properties.{property_clone['key']}"
-                        property_clone["type"] = "data_warehouse"
-                    filters.append(property_to_expr(property_clone, self.team))
-                else:
-                    filters.append(property_to_expr(property, self.team))
+                filters.append(property_to_expr(property, self.team))
 
         # Properties
         if self.query.properties is not None and self.query.properties != []:
-            if is_data_warehouse_series:
-                data_warehouse_properties = [
-                    property_filter
-                    for property_filter in self.query.properties
-                    if isinstance(property_filter, DataWarehousePropertyFilter)
-                ]
-                if data_warehouse_properties:
-                    filters.append(property_to_expr(data_warehouse_properties, self.team))
-            else:
-                filters.append(property_to_expr(self.query.properties, self.team))
+            filters.append(property_to_expr(self.query.properties, self.team))
 
         # Series Filters
         if series.properties is not None and series.properties != []:
