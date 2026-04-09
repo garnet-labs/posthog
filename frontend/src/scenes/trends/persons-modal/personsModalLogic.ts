@@ -51,8 +51,8 @@ import type { personsModalLogicType } from './personsModalLogicType'
 const RESULTS_PER_PAGE = 100
 
 // Build a property filter that scopes session recordings to a funnel's selected breakdown
-// value. Returns null for cohort, multi-key, or array-value breakdowns (not expressible as
-// a single Exact filter).
+// value. Returns null for cohort or multi-key breakdowns (not expressible as a single Exact
+// filter). Single-element breakdown value arrays are unwrapped to their scalar value.
 function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): UniversalFilterValue | null {
     if (!source || source.kind !== NodeKind.FunnelsActorsQuery || source.funnelStepBreakdown == null) {
         return null
@@ -60,17 +60,22 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     const breakdownFilter = source.source.breakdownFilter
     const breakdown = breakdownFilter?.breakdown
     const breakdownType = breakdownFilter?.breakdown_type ?? 'event'
-    if (
-        !breakdown ||
-        Array.isArray(breakdown) ||
-        breakdownType === 'cohort' ||
-        Array.isArray(source.funnelStepBreakdown)
-    ) {
+    if (!breakdown || Array.isArray(breakdown) || breakdownType === 'cohort') {
         return null
+    }
+    // The backend canonicalizes single-value breakdowns as a one-element array (e.g. ["NL"]).
+    // Unwrap that here; bail out only for genuine multi-value arrays which can't be a single
+    // Exact filter.
+    let breakdownValue: string | number | boolean = source.funnelStepBreakdown as any
+    if (Array.isArray(source.funnelStepBreakdown)) {
+        if (source.funnelStepBreakdown.length !== 1) {
+            return null
+        }
+        breakdownValue = source.funnelStepBreakdown[0] as string | number
     }
     const base = {
         key: String(breakdown),
-        value: source.funnelStepBreakdown,
+        value: breakdownValue,
         operator: PropertyOperator.Exact,
     }
     if (breakdownType === 'person') {
