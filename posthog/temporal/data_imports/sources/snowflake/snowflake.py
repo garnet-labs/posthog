@@ -201,10 +201,10 @@ def get_primary_keys_for_schemas(
 ) -> dict[str, list[str] | None]:
     """Detect primary keys for all tables by iterating SHOW PRIMARY KEYS."""
     result: dict[str, list[str] | None] = dict.fromkeys(table_names)
+    file_name: str | None = None
 
     try:
         auth_connect_args: dict[str, str | None] = {}
-        file_name: str | None = None
 
         if config.auth_type.selection == "keypair" and config.auth_type.private_key is not None:
             with tempfile.NamedTemporaryFile(delete=False) as tf:
@@ -260,10 +260,11 @@ def get_primary_keys_for_schemas(
                         )
                         continue
 
-        if file_name is not None:
-            os.unlink(file_name)
     except Exception as e:
         structlog.get_logger().warning("Failed to detect primary keys for Snowflake schemas", exc_info=e)
+    finally:
+        if file_name is not None:
+            os.unlink(file_name)
 
     return result
 
