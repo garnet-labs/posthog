@@ -179,6 +179,14 @@ class WorkflowsConsumer(Consumer):
                             raise _make_exception(ServiceUnavailable, err)
                         case n if n >= 500:
                             raise _make_exception(InternalServerError, err)
+                else:
+                    response_body = await response.json()
+                    if response_body.get("status") == "error":
+                        self.logger.warning(
+                            "Hog function execution failed",
+                            errors=response_body.get("errors", []),
+                        )
+                        self.records_failed_count += 1
 
     async def finalize_file(self):
         """Required by consumer interface."""

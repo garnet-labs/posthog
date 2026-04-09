@@ -44,6 +44,7 @@ class Consumer:
         self.total_records_count = 0
         self.total_record_batch_bytes_count = 0
         self.total_file_bytes_count = 0
+        self.records_failed_count = 0
 
     @property
     def rows_exported_counter(self) -> temporalio.common.MetricCounter:
@@ -60,6 +61,7 @@ class Consumer:
         self.total_records_count = 0
         self.total_record_batch_bytes_count = 0
         self.total_file_bytes_count = 0
+        self.records_failed_count = 0
 
     async def start(
         self,
@@ -115,7 +117,12 @@ class Consumer:
             f"from {self.total_record_batches_count:,} record batches. "
             f"Total file MiB: {self.total_file_bytes_count / 1024**2:.2f}"
         )
-        return BatchExportResult(self.total_records_count, self.total_file_bytes_count)
+        records_completed = self.total_records_count - self.records_failed_count
+        return BatchExportResult(
+            records_completed=records_completed,
+            bytes_exported=self.total_file_bytes_count,
+            records_failed=self.records_failed_count if self.records_failed_count > 0 else None,
+        )
 
     async def generate_record_batches_from_queue(
         self,
