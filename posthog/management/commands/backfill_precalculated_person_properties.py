@@ -99,7 +99,7 @@ class Command(BaseCommand):
             "--cohort-id",
             type=int,
             required=False,
-            help="Optional: Specific cohort ID to backfill. If not provided, backfills all realtime cohorts for the team(s)",
+            help="Optional: Specific cohort ID to backfill. Can only be used with --team-id, not with --teams-ids",
         )
         parser.add_argument(
             "--batch-size",
@@ -136,6 +136,13 @@ class Command(BaseCommand):
         # Validate that at least one team option is provided
         if not team_id and not teams_ids:
             self.stdout.write(self.style.ERROR("Must provide either --team-id or --teams-ids"))
+            return
+
+        # Validate that cohort-id is only used with single team
+        if cohort_id and teams_ids:
+            self.stdout.write(
+                self.style.ERROR("Cannot use --cohort-id with --teams-ids. Use --cohort-id only with --team-id.")
+            )
             return
 
         # Get team IDs to process
