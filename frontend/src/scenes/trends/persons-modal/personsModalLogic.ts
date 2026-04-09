@@ -33,11 +33,15 @@ import {
     ActorType,
     BreakdownType,
     ChartDisplayType,
+    CohortPropertyFilter,
     CommonActorType,
+    EventPropertyFilter,
     FilterLogicalOperator,
     GroupActorType,
+    GroupPropertyFilter,
     IntervalType,
     PersonActorType,
+    PersonPropertyFilter,
     PropertiesTimelineFilterType,
     SessionActorType,
     PropertyFilterType,
@@ -85,40 +89,52 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
         if (!Number.isFinite(cohortId)) {
             return null
         }
-        return {
+        const cohortFilter: CohortPropertyFilter = {
             type: PropertyFilterType.Cohort,
             key: 'id',
             value: cohortId,
             operator: PropertyOperator.In,
-        } as UniversalFilterValue
+        }
+        return cohortFilter
     }
 
     if (!breakdown || Array.isArray(breakdown)) {
         return null
     }
 
-    const base = {
-        key: String(breakdown),
-        value: breakdownValue,
-        operator: PropertyOperator.Exact,
-    }
+    const key = String(breakdown)
 
     if (breakdownType === 'person') {
-        return { ...base, type: PropertyFilterType.Person } as UniversalFilterValue
+        const personFilter: PersonPropertyFilter = {
+            type: PropertyFilterType.Person,
+            key,
+            value: breakdownValue,
+            operator: PropertyOperator.Exact,
+        }
+        return personFilter
     }
 
     if (breakdownType === 'group') {
         if (breakdownFilter?.breakdown_group_type_index == null) {
             return null
         }
-
-        return {
-            ...base,
+        const groupFilter: GroupPropertyFilter = {
             type: PropertyFilterType.Group,
+            key,
+            value: breakdownValue,
+            operator: PropertyOperator.Exact,
             group_type_index: breakdownFilter.breakdown_group_type_index,
-        } as UniversalFilterValue
+        }
+        return groupFilter
     }
-    return { ...base, type: PropertyFilterType.Event } as UniversalFilterValue
+
+    const eventFilter: EventPropertyFilter = {
+        type: PropertyFilterType.Event,
+        key,
+        value: breakdownValue,
+        operator: PropertyOperator.Exact,
+    }
+    return eventFilter
 }
 
 export interface PersonModalLogicProps {
