@@ -674,78 +674,18 @@ def init_cache_from_master() -> None:
         fatal("Could not check out cache branch for cache init.")
 
     try:
-        # Build the app image and start only infra services (no app container).
-        # We run migrations and demo data directly via `docker compose run`,
-        # skipping the full entrypoint/phrocs boot entirely.
-        info("Building app image...")
-        compose(init_project, init_port, init_worktree, "build", "app", capture=True)
-        info("Starting infra services...")
-        compose(init_project, init_port, init_worktree, "up", "-d",
-                "db", "redis7", "clickhouse", "kafka", "zookeeper", "objectstorage", capture=True)
-
-        # Wait for infra to be healthy
-        info("Waiting for infra services...")
-        for svc in ["db", "clickhouse", "kafka", "redis7"]:
-            container = f"{init_project}-{svc}-1"
-            deadline = time.monotonic() + 120
-            while time.monotonic() < deadline:
-                result = run(
-                    ["docker", "inspect", "--format", "{{.State.Health.Status}}", container],
-                    check=False, capture=True,
-                )
-                status = result.stdout.strip() if result.returncode == 0 else ""
-                if status == "healthy":
-                    info(f"  {svc}: healthy")
-                    break
-                time.sleep(2)
-            else:
-                dump_container_logs(container)
-                fatal(f"{svc} did not become healthy within 120s")
-
-        env = _compose_env(init_port, init_worktree)
-        compose_run_base = [
-            "docker", "compose", "--progress=quiet",
-            "-p", init_project,
-            "-f", str(COMPOSE_FILE), "-f", str(PROFILES_FILE),
-            "run", "--rm", "--no-deps", "--entrypoint", "",
-            "-e", "SKIP_SERVICE_VERSION_REQUIREMENTS=1",
-        ]
-        compose_run = compose_run_base + ["app"]
-        # Cargo needs cwd inside the workspace so it picks up .cargo/config.toml
-        # (which sets SQLX_OFFLINE=true). --manifest-path doesn't change the
-        # config search path, only the manifest location.
-        compose_run_rust = compose_run_base + ["-w", "/workspace/rust", "app"]
-
-        # Install Python deps (the entrypoint is skipped, so uv sync hasn't run).
-        info("Installing Python dependencies...")
-        run(compose_run + ["uv", "sync", "--no-editable"], env_extra=env)
-
-        # Migrations and Rust build are independent (Rust uses sqlx offline mode).
-        # Run them in parallel; demo data runs after migrations.
-        import concurrent.futures
-
-        def _migrate_and_demo():
-            info("Running migrations...")
-            run(compose_run + ["python", "manage.py", "sandbox_migrate"], env_extra=env)
-            info("Generating demo data (this takes a few minutes)...")
-            run(compose_run + ["python", "manage.py", "generate_demo_data", "--skip-flag-sync"], env_extra=env)
-
-        def _build_rust():
-            info("Pre-building Rust workspace...")
-            result = run(
-                compose_run_rust + ["cargo", "build", "--workspace"],
-                env_extra={**env, "CARGO_BUILD_JOBS": "0"},
-                check=False,
-            )
-            if result.returncode != 0:
-                # Non-fatal: even a partial build warms the cargo cache for
-                # subsequent sandbox boots.
-                info("Rust pre-build failed, continuing (cargo cache still warmed).")
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            futures = [pool.submit(_migrate_and_demo), pool.submit(_build_rust)]
-            for f in concurrent.futures.as_completed(futures):
-                f.result()
+        # Run the entrypoint in cache-init mode. `compose run` handles building
+        # the image, starting + health-checking dependencies (via `depends_on`),
+        # invoking the entrypoint, and removing the container on exit. The
+        # entrypoint's cache_init_phase warms uv/pnpm/cargo caches, runs
+        # migrations, and generates demo data, then exits.
+        info("Running cache-init entrypoint...")
+        compose(
+            init_project, init_port, init_worktree,
+            "run", "--rm", "--build",
+            "-e", "SANDBOX_MODE=cache-init",
+            "app",
+        )
 
         # Snapshot postgres (stop first for consistency)
         info("Snapshotting databases...")
