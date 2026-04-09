@@ -1944,7 +1944,7 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.Model
         # Reject the removed filters_override parameter with a clear migration message.
         # The field is no longer on EndpointRunRequest, so pydantic would otherwise return a
         # generic "Extra inputs are not permitted" error that doesn't point users to variables.
-        if isinstance(request.data, dict) and request.data.get("filters_override") is not None:
+        if isinstance(request.data, dict) and "filters_override" in request.data:
             raise ValidationError(
                 {
                     "filters_override": "filters_override is no longer supported. Use variables instead: https://posthog.com/docs/api/endpoints"
