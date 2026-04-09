@@ -267,6 +267,42 @@ describe('personsModalLogic', () => {
                     },
                 },
                 {
+                    scenario: 'person breakdown',
+                    breakdownFilter: { breakdown: 'email', breakdown_type: 'person' as const },
+                    funnelStepBreakdown: 'alice@example.com',
+                    expectedFilter: {
+                        key: 'email',
+                        value: 'alice@example.com',
+                        operator: PropertyOperator.Exact,
+                        type: PropertyFilterType.Person,
+                    },
+                },
+                {
+                    scenario: 'event_metadata breakdown',
+                    breakdownFilter: { breakdown: '$session_id', breakdown_type: 'event_metadata' as const },
+                    funnelStepBreakdown: 'session-abc',
+                    expectedFilter: {
+                        key: '$session_id',
+                        value: 'session-abc',
+                        operator: PropertyOperator.Exact,
+                        type: PropertyFilterType.EventMetadata,
+                    },
+                },
+                {
+                    scenario: 'session breakdown',
+                    breakdownFilter: {
+                        breakdown: '$session_entry_referring_domain',
+                        breakdown_type: 'session' as const,
+                    },
+                    funnelStepBreakdown: 'google.com',
+                    expectedFilter: {
+                        key: '$session_entry_referring_domain',
+                        value: 'google.com',
+                        operator: PropertyOperator.Exact,
+                        type: PropertyFilterType.Session,
+                    },
+                },
+                {
                     scenario: 'group breakdown with group_type_index',
                     breakdownFilter: {
                         breakdown: 'company_name',
@@ -310,9 +346,27 @@ describe('personsModalLogic', () => {
                     funnelStepBreakdown: 'all',
                 },
                 {
+                    scenario: 'cohort breakdown with non-numeric string value',
+                    breakdownFilter: { breakdown: [1, 2], breakdown_type: 'cohort' as const },
+                    funnelStepBreakdown: 'not-a-number',
+                },
+                {
                     scenario: 'group breakdown without breakdown_group_type_index',
                     breakdownFilter: { breakdown: 'company_name', breakdown_type: 'group' as const },
                     funnelStepBreakdown: 'Acme',
+                },
+                {
+                    scenario: 'hogql breakdown',
+                    breakdownFilter: { breakdown: 'toString(properties.foo)', breakdown_type: 'hogql' as const },
+                    funnelStepBreakdown: 'bar',
+                },
+                {
+                    scenario: 'data_warehouse breakdown',
+                    breakdownFilter: {
+                        breakdown: 'some_column',
+                        breakdown_type: 'data_warehouse' as const,
+                    },
+                    funnelStepBreakdown: 'value',
                 },
                 {
                     scenario: 'multi-key breakdown property',

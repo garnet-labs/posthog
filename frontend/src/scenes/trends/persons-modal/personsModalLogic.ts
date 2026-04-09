@@ -50,9 +50,10 @@ import type { personsModalLogicType } from './personsModalLogicType'
 
 const RESULTS_PER_PAGE = 100
 
-// Build a property filter that scopes session recordings to a funnel's selected breakdown
-// value. Returns null for multi-key breakdowns (not expressible as a single filter).
-// Single-element breakdown value arrays are unwrapped to their scalar value.
+// Scope session recordings to the funnel's selected breakdown value. Load-bearing:
+// matched_recordings from the backend contains ALL of each actor's session IDs, so we
+// need this filter to actually narrow the list. Returns null for breakdown types that
+// can't be a single property filter (hogql / data_warehouse / multi-key / multi-value).
 function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): UniversalFilterValue | null {
     if (!source || source.kind !== NodeKind.FunnelsActorsQuery || source.funnelStepBreakdown == null) {
         return null
@@ -61,9 +62,8 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
     const breakdown = breakdownFilter?.breakdown
     const breakdownType = breakdownFilter?.breakdown_type ?? 'event'
 
-    // The backend canonicalizes single-value breakdowns as a one-element array (e.g. ["NL"]).
-    // Unwrap that here; bail out only for genuine multi-value arrays which can't be a single
-    // filter.
+    // Backend sends single values as one-element arrays (e.g. ["NL"]). Unwrap them; bail
+    // for genuine multi-value arrays — a click represents one selected value.
     const rawBreakdownValue = source.funnelStepBreakdown
     let breakdownValue: string | number
     if (Array.isArray(rawBreakdownValue)) {
@@ -75,8 +75,7 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
         breakdownValue = rawBreakdownValue
     }
 
-    // Cohort breakdowns resolve to a cohort membership filter rather than a property filter.
-    // Skip the "All users" pseudo-cohort (id 0 / 'all') since it's a no-op.
+    // Cohort → cohort membership filter. Skip the "All users" pseudo-cohort (0 / 'all').
     if (breakdownType === 'cohort') {
         if (breakdownValue === 0 || breakdownValue === 'all') {
             return null
@@ -85,7 +84,6 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
         if (!Number.isFinite(cohortId)) {
             return null
         }
-
         return {
             type: PropertyFilterType.Cohort,
             key: 'id',
@@ -94,40 +92,35 @@ function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): Unive
         }
     }
 
+    // Non-cohort types need a single property key.
     if (!breakdown || Array.isArray(breakdown)) {
         return null
     }
 
     const key = String(breakdown)
+    const base = { key, value: breakdownValue, operator: PropertyOperator.Exact }
 
-    if (breakdownType === 'person') {
-        return {
-            type: PropertyFilterType.Person,
-            key,
-            value: breakdownValue,
-            operator: PropertyOperator.Exact,
-        }
-    }
-
-    if (breakdownType === 'group') {
-        if (breakdownFilter?.breakdown_group_type_index == null) {
+    switch (breakdownType) {
+        case 'event':
+            return { ...base, type: PropertyFilterType.Event }
+        case 'event_metadata':
+            return { ...base, type: PropertyFilterType.EventMetadata }
+        case 'person':
+            return { ...base, type: PropertyFilterType.Person }
+        case 'session':
+            return { ...base, type: PropertyFilterType.Session }
+        case 'group':
+            if (breakdownFilter?.breakdown_group_type_index == null) {
+                return null
+            }
+            return {
+                ...base,
+                type: PropertyFilterType.Group,
+                group_type_index: breakdownFilter.breakdown_group_type_index,
+            }
+        // hogql / data_warehouse / revenue_analytics don't map to a single property filter.
+        default:
             return null
-        }
-
-        return {
-            type: PropertyFilterType.Group,
-            key,
-            value: breakdownValue,
-            operator: PropertyOperator.Exact,
-            group_type_index: breakdownFilter.breakdown_group_type_index,
-        }
-    }
-
-    return {
-        type: PropertyFilterType.Event,
-        key,
-        value: breakdownValue,
-        operator: PropertyOperator.Exact,
     }
 }
 

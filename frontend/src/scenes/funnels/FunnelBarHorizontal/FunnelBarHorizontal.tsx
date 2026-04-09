@@ -82,9 +82,9 @@ export function FunnelBarHorizontal({
                     step.nested_breakdown?.length !== undefined &&
                     !(step.nested_breakdown.length === 1)
 
-                // For single-visible-breakdown steps, use the series' own counts / rates for
-                // display and scope clicks through openPersonsModalForSeries.
-                const stepBreakdownSeries = !isBreakdown ? getStepBreakdownSeries(step, breakdownFilter) : null
+                // For single-visible-breakdown steps, use the series' counts / rates for display
+                // and scope clicks through openPersonsModalForSeries. Null otherwise.
+                const stepBreakdownSeries = getStepBreakdownSeries(step, breakdownFilter)
                 const displayStep = stepBreakdownSeries ?? step
                 const openStep = (converted: boolean): void => {
                     if (stepBreakdownSeries) {
