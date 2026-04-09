@@ -259,7 +259,7 @@ def get_primary_keys_for_schemas(
     result: dict[str, list[str] | None] = dict.fromkeys(table_names)
 
     try:
-        connection = psycopg.connect(
+        with psycopg.connect(
             host=host,
             port=port,
             dbname=database,
@@ -271,32 +271,29 @@ def get_primary_keys_for_schemas(
             sslcert="/tmp/no.txt",
             sslkey="/tmp/no.txt",
             options="-c client_encoding=UTF8",
-        )
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("""
+                        SELECT tc.table_name, kcu.column_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name
+                        AND tc.table_schema = kcu.table_schema
+                        AND tc.table_name = kcu.table_name
+                        WHERE tc.table_schema = {schema}
+                        AND tc.table_name = ANY({names})
+                        AND tc.constraint_type = 'PRIMARY KEY'
+                    """).format(schema=sql.Literal(schema), names=sql.Literal(table_names))
+                )
+                rows = cursor.fetchall()
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                sql.SQL("""
-                    SELECT tc.table_name, kcu.column_name
-                    FROM information_schema.table_constraints tc
-                    JOIN information_schema.key_column_usage kcu
-                    ON tc.constraint_name = kcu.constraint_name
-                    AND tc.table_schema = kcu.table_schema
-                    AND tc.table_name = kcu.table_name
-                    WHERE tc.table_schema = {schema}
-                    AND tc.table_name = ANY({names})
-                    AND tc.constraint_type = 'PRIMARY KEY'
-                """).format(schema=sql.Literal(schema), names=sql.Literal(table_names))
-            )
-            rows = cursor.fetchall()
+                pks: dict[str, list[str]] = collections.defaultdict(list)
+                for table_name, column_name in rows:
+                    pks[table_name].append(column_name)
 
-            pks: dict[str, list[str]] = collections.defaultdict(list)
-            for table_name, column_name in rows:
-                pks[table_name].append(column_name)
-
-            for table_name, pk_cols in pks.items():
-                result[table_name] = pk_cols
-
-        connection.close()
+                for table_name, pk_cols in pks.items():
+                    result[table_name] = pk_cols
     except Exception as e:
         structlog.get_logger().warning("Failed to detect primary keys for Redshift schemas", exc_info=e)
 

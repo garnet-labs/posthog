@@ -698,6 +698,7 @@ const SyncMethodModal = ({ schema }: { schema: ExternalDataSourceSchema }): JSX.
                         supports_webhooks: schemaIncrementalFields?.supports_webhooks ?? false,
                         primary_key_columns: currentSyncMethodModalSchema.primary_key_columns ?? null,
                         available_columns: [],
+                        detected_primary_keys: null,
                     }}
                     availableColumns={schemaIncrementalFields.available_columns ?? []}
                     detectedPrimaryKeys={schemaIncrementalFields.detected_primary_keys ?? null}

@@ -302,7 +302,7 @@ def get_primary_keys_for_schemas(
         if using_ssl:
             ssl_ca = "/etc/ssl/cert.pem" if settings.DEBUG else "/etc/ssl/certs/ca-certificates.crt"
 
-        connection = pymysql.connect(
+        with pymysql.connect(
             host=host,
             port=port,
             database=database,
@@ -310,33 +310,30 @@ def get_primary_keys_for_schemas(
             password=password,
             connect_timeout=10,
             ssl_ca=ssl_ca,
-        )
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT tc.TABLE_NAME, kcu.COLUMN_NAME
+                    FROM information_schema.TABLE_CONSTRAINTS tc
+                    JOIN information_schema.KEY_COLUMN_USAGE kcu
+                    ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                    AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                    AND tc.TABLE_NAME = kcu.TABLE_NAME
+                    WHERE tc.TABLE_SCHEMA = %(schema)s
+                    AND tc.TABLE_NAME IN %(names)s
+                    AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                    """,
+                    {"schema": schema, "names": tuple(table_names)},
+                )
+                rows = cursor.fetchall()
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT tc.TABLE_NAME, kcu.COLUMN_NAME
-                FROM information_schema.TABLE_CONSTRAINTS tc
-                JOIN information_schema.KEY_COLUMN_USAGE kcu
-                ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-                AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
-                AND tc.TABLE_NAME = kcu.TABLE_NAME
-                WHERE tc.TABLE_SCHEMA = %(schema)s
-                AND tc.TABLE_NAME IN %(names)s
-                AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-                """,
-                {"schema": schema, "names": tuple(table_names)},
-            )
-            rows = cursor.fetchall()
+                pks: dict[str, list[str]] = collections.defaultdict(list)
+                for table_name, column_name in rows:
+                    pks[table_name].append(column_name)
 
-            pks: dict[str, list[str]] = collections.defaultdict(list)
-            for table_name, column_name in rows:
-                pks[table_name].append(column_name)
-
-            for table_name, pk_cols in pks.items():
-                result[table_name] = pk_cols
-
-        connection.close()
+                for table_name, pk_cols in pks.items():
+                    result[table_name] = pk_cols
     except Exception as e:
         structlog.get_logger().warning("Failed to detect primary keys for MySQL schemas", exc_info=e)
 
