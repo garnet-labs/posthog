@@ -3,7 +3,7 @@ import { QueryResult } from 'pg'
 
 import { Properties } from '~/plugin-scaffold'
 
-import { PERSON_DISTINCT_IDS_OUTPUT } from '../../../../ingestion/analytics/outputs/names'
+import { PERSON_DISTINCT_IDS_OUTPUT } from '../../../../ingestion/analytics/outputs'
 import {
     InternalPerson,
     PersonDistinctId,

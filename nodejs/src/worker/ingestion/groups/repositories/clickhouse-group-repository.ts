@@ -2,7 +2,7 @@ import { DateTime } from 'luxon'
 
 import { Properties } from '~/plugin-scaffold'
 
-import { GROUPS_OUTPUT, GroupsOutput } from '../../../../ingestion/common/outputs/names'
+import { GROUPS_OUTPUT, GroupsOutput } from '../../../../ingestion/common/outputs'
 import { IngestionOutputs } from '../../../../ingestion/outputs/ingestion-outputs'
 import { GroupTypeIndex, TeamId, TimestampFormat } from '../../../../types'
 import { castTimestampOrNow } from '../../../../utils/utils'

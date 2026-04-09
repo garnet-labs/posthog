@@ -9,8 +9,8 @@ import {
     produceMessageToDLQ,
     redirectMessageToOutput,
 } from '../../worker/ingestion/pipeline-helpers'
-import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../common/outputs/names'
-import { OverflowOutput } from '../common/outputs/names'
+import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../common/outputs'
+import { OverflowOutput } from '../common/outputs'
 import { createContext } from './helpers'
 import { PipelineConfig, ResultHandlingPipeline } from './result-handling-pipeline'
 import { dlq, drop, ok, redirect } from './results'

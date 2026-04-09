@@ -7,7 +7,7 @@ import {
     produceMessageToDLQ,
     redirectMessageToOutput,
 } from '../../worker/ingestion/pipeline-helpers'
-import { DlqOutput, IngestionWarningsOutput } from '../common/outputs/names'
+import { DlqOutput, IngestionWarningsOutput } from '../common/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { BatchPipeline, BatchPipelineResultWithContext, OkResultWithContext } from './batch-pipeline.interface'
 import {

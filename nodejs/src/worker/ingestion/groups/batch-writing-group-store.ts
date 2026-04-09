@@ -4,7 +4,7 @@ import pLimit from 'p-limit'
 import { Properties } from '~/plugin-scaffold'
 
 import { emitIngestionWarning } from '../../../ingestion/common/ingestion-warnings'
-import { GroupsOutput, IngestionWarningsOutput } from '../../../ingestion/common/outputs/names'
+import { GroupsOutput, IngestionWarningsOutput } from '../../../ingestion/common/outputs'
 import { IngestionOutputs } from '../../../ingestion/outputs/ingestion-outputs'
 import { GroupTypeIndex, TeamId } from '../../../types'
 import { MessageSizeTooLarge } from '../../../utils/db/error'

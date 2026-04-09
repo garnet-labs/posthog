@@ -1,4 +1,4 @@
-import { PersonDistinctIdsOutput, PersonsOutput } from '../../../ingestion/analytics/outputs/names'
+import { PersonDistinctIdsOutput, PersonsOutput } from '../../../ingestion/analytics/outputs'
 
 export type PersonMessage = {
     output: PersonsOutput | PersonDistinctIdsOutput

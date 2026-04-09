@@ -1,4 +1,13 @@
 import {
+    AI_EVENTS_OUTPUT,
+    ASYNC_OUTPUT,
+    EVENTS_OUTPUT,
+    HEATMAPS_OUTPUT,
+    PERSONS_OUTPUT,
+    PERSON_DISTINCT_IDS_OUTPUT,
+} from '.'
+
+import {
     APP_METRICS_OUTPUT,
     DLQ_OUTPUT,
     GROUPS_OUTPUT,
@@ -6,16 +15,8 @@ import {
     LOG_ENTRIES_OUTPUT,
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
-} from '../../common/outputs/names'
+} from '../../common/outputs'
 import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder'
-import {
-    AI_EVENTS_OUTPUT,
-    ASYNC_OUTPUT,
-    EVENTS_OUTPUT,
-    HEATMAPS_OUTPUT,
-    PERSONS_OUTPUT,
-    PERSON_DISTINCT_IDS_OUTPUT,
-} from './names'
 
 /** Register all analytics ingestion outputs on the builder. Call `.build(registry, config)` to resolve. */
 export function createOutputsRegistry() {

@@ -23,12 +23,7 @@ import { createMockIngestionOutputs } from '../../../../tests/helpers/mock-inges
 import { createTestTeam } from '../../../../tests/helpers/team'
 import { Team } from '../../../types'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
-import {
-    DLQ_OUTPUT,
-    INGESTION_WARNINGS_OUTPUT,
-    IngestionWarningsOutput,
-    OVERFLOW_OUTPUT,
-} from '../../common/outputs/names'
+import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput, OVERFLOW_OUTPUT } from '../../common/outputs'
 import { newBatchPipelineBuilder } from '../builders'
 import { createOkContext } from '../helpers'
 import { PipelineWarning } from '../pipeline.interface'

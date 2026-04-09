@@ -9,7 +9,7 @@ import { HealthCheckResult, HealthCheckResultError, PluginServerService, Plugins
 import { logger } from '../utils/logger'
 import { PromiseScheduler } from '../utils/promise-scheduler'
 import { TeamManager } from '../utils/team-manager'
-import { EVENTS_OUTPUT, HEATMAPS_OUTPUT } from './analytics/outputs/names'
+import { EVENTS_OUTPUT, HEATMAPS_OUTPUT } from './analytics/outputs'
 import {
     TestingJoinedIngestionPipelineConfig,
     TestingJoinedIngestionPipelineContext,
@@ -17,7 +17,7 @@ import {
     TestingJoinedIngestionPipelineInput,
     createTestingJoinedIngestionPipeline,
 } from './analytics/testing-joined-ingestion-pipeline'
-import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT } from './common/outputs/names'
+import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT } from './common/outputs'
 import { latestOffsetTimestampGauge } from './ingestion-consumer'
 import { IngestionOutputs } from './outputs/ingestion-outputs'
 import { SingleIngestionOutput } from './outputs/single-ingestion-output'

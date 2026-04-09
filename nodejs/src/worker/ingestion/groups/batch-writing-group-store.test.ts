@@ -15,7 +15,7 @@ jest.mock('../../../ingestion/common/ingestion-warnings', () => ({
     emitIngestionWarning: jest.fn().mockResolvedValue(undefined),
 }))
 
-import { GroupsOutput, IngestionWarningsOutput } from '../../../ingestion/common/outputs/names'
+import { GroupsOutput, IngestionWarningsOutput } from '../../../ingestion/common/outputs'
 import { emitIngestionWarning } from '../../../ingestion/common/ingestion-warnings'
 import { IngestionOutputs } from '../../../ingestion/outputs/ingestion-outputs'
 

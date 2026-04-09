@@ -4,7 +4,7 @@ import { PluginEvent } from '~/plugin-scaffold'
 
 import { EventHeaders, Team } from '../../types'
 import { createProcessAiEventStep } from '../ai/pipelines/steps/process-ai-event-step'
-import { IngestionWarningsOutput } from '../common/outputs/names'
+import { IngestionWarningsOutput } from '../common/outputs'
 import { createCreateEventStep } from '../event-processing/create-event-step'
 import { createDisablePersonProcessingWithFakePersonStep } from '../event-processing/disable-person-processing-with-fake-person-step'
 import { createEmitEventStep } from '../event-processing/emit-event-step'
@@ -12,7 +12,7 @@ import { createNormalizeEventStep } from '../event-processing/normalize-event-st
 import { createPrepareEventStep } from '../event-processing/prepare-event-step'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
-import { EVENTS_OUTPUT, EventOutput } from './outputs/names'
+import { EVENTS_OUTPUT, EventOutput } from './outputs'
 
 export interface TestingAiEventSubpipelineInput {
     message: Message

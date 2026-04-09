@@ -11,7 +11,7 @@ import {
     OVERFLOW_OUTPUT,
     OverflowOutput,
     TOPHOG_OUTPUT,
-} from '../ingestion/common/outputs/names'
+} from '../ingestion/common/outputs'
 import { IngestionConsumerConfig } from '../ingestion/config'
 import { IngestionOutputs } from '../ingestion/outputs/ingestion-outputs'
 import { SingleIngestionOutput } from '../ingestion/outputs/single-ingestion-output'

@@ -6,7 +6,7 @@ import { ProcessingStep } from '../../pipelines/steps'
 import { EventFilterManager, evaluateFilterTree } from '../event-filters'
 import { EventFiltersBatchAppMetrics } from '../event-filters/batch-app-metrics'
 import { eventFiltersEventsEvaluated } from '../event-filters/metrics'
-import { AppMetricsOutput } from '../outputs/names'
+import { AppMetricsOutput } from '../outputs'
 
 export interface EventFiltersBatchContext {
     eventFiltersBatchAppMetrics: EventFiltersBatchAppMetrics

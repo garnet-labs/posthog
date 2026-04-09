@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon'
 
-import { INGESTION_WARNINGS_OUTPUT } from '~/ingestion/common/outputs/names'
+import { INGESTION_WARNINGS_OUTPUT } from '~/ingestion/common/outputs'
 import { IngestionOutputs } from '~/ingestion/outputs/ingestion-outputs'
 import { createMockIngestionOutputs } from '~/tests/helpers/mock-ingestion-outputs'
 import { InternalPerson, TeamId } from '~/types'

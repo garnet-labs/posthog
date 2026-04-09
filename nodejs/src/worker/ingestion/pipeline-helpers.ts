@@ -1,7 +1,7 @@
 import { Message } from 'node-rdkafka'
 
 import { emitIngestionWarning } from '../../ingestion/common/ingestion-warnings'
-import { DLQ_OUTPUT, DlqOutput, IngestionWarningsOutput } from '../../ingestion/common/outputs/names'
+import { DLQ_OUTPUT, DlqOutput, IngestionWarningsOutput } from '../../ingestion/common/outputs'
 import { IngestionOutputs } from '../../ingestion/outputs/ingestion-outputs'
 import { logger } from '../../utils/logger'
 import { captureException } from '../../utils/posthog'

@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger'
-import { TOPHOG_OUTPUT, TophogOutput } from '../common/outputs/names'
+import { TOPHOG_OUTPUT, TophogOutput } from '../common/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { AverageMetricTracker, MaxMetricTracker, SummingMetricTracker, Tracker } from './metric-tracker'
 

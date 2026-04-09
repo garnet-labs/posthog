@@ -8,7 +8,7 @@ import {
     KAFKA_INGESTION_WARNINGS,
     KAFKA_LOG_ENTRIES,
 } from '../../config/kafka-topics'
-import { DEFAULT_PRODUCER, type ProducerName } from '../common/outputs/names'
+import { DEFAULT_PRODUCER, type ProducerName } from '../common/outputs'
 import { IngestionLane } from '../config'
 
 export type ErrorTrackingConsumerConfig = {

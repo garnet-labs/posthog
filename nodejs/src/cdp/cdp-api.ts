@@ -3,7 +3,7 @@ import express from 'ultimate-express'
 
 import { ModifiedRequest } from '~/api/router'
 import { KAFKA_CDP_BATCH_HOGFLOW_REQUESTS } from '~/config/kafka-topics'
-import { APP_METRICS_OUTPUT, LOG_ENTRIES_OUTPUT } from '~/ingestion/common/outputs/names'
+import { APP_METRICS_OUTPUT, LOG_ENTRIES_OUTPUT } from '~/ingestion/common/outputs'
 import { IngestionOutputs } from '~/ingestion/outputs/ingestion-outputs'
 import { SingleIngestionOutput } from '~/ingestion/outputs/single-ingestion-output'
 import { KafkaProducerWrapper } from '~/kafka/producer'

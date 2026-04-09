@@ -1,5 +1,5 @@
 import { createTestPipelineEvent } from '../../../tests/helpers/pipeline-event'
-import { OVERFLOW_OUTPUT } from '../common/outputs/names'
+import { OVERFLOW_OUTPUT } from '../common/outputs'
 import { PipelineResultType } from '../pipelines/results'
 import { OverflowRedirectService } from '../utils/overflow-redirect/overflow-redirect-service'
 import { RateLimitToOverflowStepInput, createRateLimitToOverflowStep } from './rate-limit-to-overflow-step'

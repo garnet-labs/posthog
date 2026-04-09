@@ -8,7 +8,7 @@ import { BatchWritingGroupStore } from '../../worker/ingestion/groups/batch-writ
 import { PersonsStore } from '../../worker/ingestion/persons/persons-store'
 import { AI_EVENT_TYPES } from '../ai'
 import { AiEventSubpipelineInput, createAiEventSubpipeline } from '../ai/pipelines/ai-event-subpipeline'
-import { IngestionWarningsOutput } from '../common/outputs/names'
+import { IngestionWarningsOutput } from '../common/outputs'
 import { EventPipelineRunnerOptions } from '../event-processing/event-pipeline-options'
 import { SplitAiEventsStepConfig } from '../event-processing/split-ai-events-step'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
@@ -27,7 +27,7 @@ import {
     HeatmapsOutput,
     PersonDistinctIdsOutput,
     PersonsOutput,
-} from './outputs/names'
+} from './outputs'
 
 export type PerDistinctIdPipelineInput = EventSubpipelineInput &
     HeatmapSubpipelineInput &

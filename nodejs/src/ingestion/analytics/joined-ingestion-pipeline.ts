@@ -10,13 +10,7 @@ import { GroupTypeManager } from '../../worker/ingestion/group-type-manager'
 import { BatchWritingGroupStore } from '../../worker/ingestion/groups/batch-writing-group-store'
 import { PersonsStore } from '../../worker/ingestion/persons/persons-store'
 import { EventFilterManager } from '../common/event-filters'
-import {
-    AppMetricsOutput,
-    DlqOutput,
-    GroupsOutput,
-    IngestionWarningsOutput,
-    OverflowOutput,
-} from '../common/outputs/names'
+import { AppMetricsOutput, DlqOutput, GroupsOutput, IngestionWarningsOutput, OverflowOutput } from '../common/outputs'
 import {
     EventFiltersBatchContext,
     createEventFiltersBatchAppMetricsBeforeBatchStep,
@@ -39,7 +33,7 @@ import {
     HeatmapsOutput,
     PersonDistinctIdsOutput,
     PersonsOutput,
-} from './outputs/names'
+} from './outputs'
 import {
     PerDistinctIdPipelineConfig,
     PerDistinctIdPipelineInput,

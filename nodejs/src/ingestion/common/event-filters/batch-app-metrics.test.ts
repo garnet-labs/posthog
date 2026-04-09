@@ -1,6 +1,6 @@
 import { parseJSON } from '../../../utils/json-parse'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
-import { AppMetricsOutput } from '../outputs/names'
+import { AppMetricsOutput } from '../outputs'
 import { EventFiltersBatchAppMetrics } from './batch-app-metrics'
 
 describe('EventFiltersBatchAppMetrics', () => {

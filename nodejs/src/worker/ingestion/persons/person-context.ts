@@ -2,8 +2,8 @@ import { DateTime } from 'luxon'
 
 import { PluginEvent, Properties } from '~/plugin-scaffold'
 
-import { PersonDistinctIdsOutput, PersonsOutput } from '../../../ingestion/analytics/outputs/names'
-import { IngestionWarningsOutput } from '../../../ingestion/common/outputs/names'
+import { PersonDistinctIdsOutput, PersonsOutput } from '../../../ingestion/analytics/outputs'
+import { IngestionWarningsOutput } from '../../../ingestion/common/outputs'
 import { IngestionOutputs } from '../../../ingestion/outputs/ingestion-outputs'
 import { Team } from '../../../types'
 import { MergeMode } from './person-merge-types'

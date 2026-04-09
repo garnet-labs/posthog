@@ -9,7 +9,7 @@ import {
     IngestionWarningsOutput,
     OVERFLOW_OUTPUT,
     OverflowOutput,
-} from '../common/outputs/names'
+} from '../common/outputs'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { BatchProcessingStep } from './base-batch-pipeline'
 import { newBatchPipelineBuilder } from './builders'
