@@ -16,13 +16,21 @@ pub struct SurveysQueryParams {
     pub token: Option<String>,
 }
 
+fn empty_surveys_response() -> Response {
+    Json(serde_json::json!({
+        "surveys": [],
+        "survey_config": null
+    }))
+    .into_response()
+}
+
 /// Surveys endpoint handler
 ///
 /// Serves pre-cached survey definitions from HyperCache. This is a public endpoint
 /// that only requires a project API token (no secret key or personal API key).
 ///
 /// Mirrors Django's `POST /api/surveys` behavior:
-/// - Token passed as query param or form body
+/// - Token passed as query param
 /// - No authentication beyond token validation
 /// - Returns cached `{"surveys": [...], "survey_config": {...}}`
 #[debug_handler]
@@ -73,29 +81,17 @@ pub async fn surveys_endpoint(
                 "Surveys cache miss"
             );
             // Return empty surveys response on cache miss, matching Django fallback behavior
-            return Ok(Json(serde_json::json!({
-                "surveys": [],
-                "survey_config": null
-            }))
-            .into_response());
+            return Ok(empty_surveys_response());
         }
     };
 
     // Handle null / missing marker
     if value.is_null() {
-        return Ok(Json(serde_json::json!({
-            "surveys": [],
-            "survey_config": null
-        }))
-        .into_response());
+        return Ok(empty_surveys_response());
     }
     if let Some(s) = value.as_str() {
         if s == HYPER_CACHE_EMPTY_VALUE {
-            return Ok(Json(serde_json::json!({
-                "surveys": [],
-                "survey_config": null
-            }))
-            .into_response());
+            return Ok(empty_surveys_response());
         }
     }
 
