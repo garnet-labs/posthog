@@ -25,6 +25,13 @@ use crate::{
     },
 };
 
+// NOTE: We considered sharded warming where each pod only warms symbol sets
+// for teams routed to it via sticky routing. This doesn't work with Deployments
+// because pod IPs change on every restart, shifting the routing assignments.
+// The only viable path to sharded warming is StatefulSets (stable ordinals).
+// For now, every pod warms the same top-N entries globally, which provides
+// broad cache coverage regardless of routing assignment.
+
 struct WarmingParsers {
     smp: SourcemapProvider,
     hmp: HermesMapProvider,
@@ -35,146 +42,15 @@ struct WarmingParsers {
 /// Leave 15% headroom in the cache for incoming traffic after the consumer starts.
 const WARMING_FILL_FRACTION: f64 = 0.85;
 
-/// Jump consistent hash — maps a key to one of `num_buckets` slots with minimal
-/// reassignment when the bucket count changes. Uses a 31-bit linear congruential
-/// generator, matching the TypeScript implementation in the Node ingestion pipeline's
-/// CymbalClient. Both must produce identical results for sticky routing to work.
-fn jump_consistent_hash(key: u32, num_buckets: u32) -> u32 {
-    let mut b: i64 = -1;
-    let mut j: i64 = 0;
-    let mut seed = key;
-    while j < num_buckets as i64 {
-        b = j;
-        seed = seed.wrapping_mul(1103515245).wrapping_add(12345) & 0x7FFF_FFFF;
-        j = (((b + 1) as f64 * 2_147_483_648.0) / (seed as f64 + 1.0)).floor() as i64;
-    }
-    b as u32
-}
-
-/// Resolves the headless service hostname and finds this pod's index in the
-/// sorted peer list. Returns `(my_index, num_peers)` or None if peer-aware
-/// warming isn't configured or DNS resolution fails.
-async fn resolve_peer_index(config: &Config) -> Option<(u32, u32)> {
-    let hostname = config.cache_warming_peer_hostname.clone();
-    resolve_peer_index_with(config, move || async move {
-        let addrs = tokio::net::lookup_host(format!("{hostname}:0")).await?;
-        Ok(addrs.map(|a| a.ip().to_string()).collect())
-    })
-    .await
-}
-
-/// Resolves peer index using an injectable DNS resolver. The resolver returns
-/// a list of IP strings for the configured peer hostname — injectable for testing.
-async fn resolve_peer_index_with<F, Fut>(config: &Config, dns_resolve: F) -> Option<(u32, u32)>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = std::io::Result<Vec<String>>>,
-{
-    if config.cache_warming_peer_hostname.is_empty() || config.pod_ip.is_empty() {
-        return None;
-    }
-
-    let ips = match dns_resolve().await {
-        Ok(ips) => ips,
-        Err(e) => {
-            warn!(
-                hostname = %config.cache_warming_peer_hostname,
-                error = %e,
-                "Failed to resolve peer hostname, warming all candidates"
-            );
-            return None;
-        }
-    };
-
-    let mut ips = ips;
-    // Include our own IP so we can find our index even if DNS hasn't
-    // registered us yet (e.g. during a rolling deploy when the pod
-    // isn't ready and the headless service excludes not-ready pods).
-    ips.push(config.pod_ip.clone());
-    ips.sort();
-    ips.dedup();
-
-    if ips.len() <= 1 {
-        info!("Single peer detected, warming all candidates");
-        return None;
-    }
-
-    // Safe to unwrap: we just ensured our IP is in the list above.
-    let index = ips.iter().position(|ip| ip == &config.pod_ip).unwrap();
-    info!(
-        my_index = index,
-        num_peers = ips.len(),
-        pod_ip = %config.pod_ip,
-        "Resolved peer position for routing-aware warming"
-    );
-    Some((index as u32, ips.len() as u32))
-}
-
-/// Queries for distinct team_ids with recent symbol sets, then filters to only those
-/// assigned to this pod via jump consistent hash. Returns None if peer-aware warming
-/// is disabled, meaning the caller should fetch all records without a team filter.
-async fn resolve_team_filter(
-    pool: &PgPool,
-    config: &Config,
-    lookback_hours: i64,
-) -> Result<Option<Vec<i32>>, UnhandledError> {
-    let (my_index, num_peers) = match resolve_peer_index(config).await {
-        Some(peer_info) => peer_info,
-        None => return Ok(None),
-    };
-
-    let all_team_ids: Vec<(i32,)> = sqlx::query_as(
-        r#"SELECT DISTINCT team_id
-        FROM posthog_errortrackingsymbolset
-        WHERE content_hash IS NOT NULL
-          AND storage_ptr IS NOT NULL
-          AND last_used > NOW() - make_interval(hours => $1::integer)"#,
-    )
-    .bind(lookback_hours)
-    .fetch_all(pool)
-    .await?;
-
-    let filtered: Vec<i32> = all_team_ids
-        .into_iter()
-        .map(|(tid,)| tid)
-        .filter(|&tid| jump_consistent_hash(tid as u32, num_peers) == my_index)
-        .collect();
-
-    info!(
-        my_index,
-        num_peers,
-        total_teams = filtered.len(),
-        "Resolved team filter for routing-aware warming"
-    );
-
-    Ok(Some(filtered))
-}
-
-/// Pre-populates the symbol set cache from DB + S3 on startup. Resolves peer
-/// awareness via DNS, then delegates to `warm_cache_with_filter`.
+/// Pre-populates the symbol set cache from DB + S3 on startup. Fetches the most
+/// recently used symbol sets across all teams and parses them into the cache.
+/// Stops early once the cache reaches 85% of its byte capacity.
 pub async fn warm_cache(
     pool: &PgPool,
     s3_client: &Arc<dyn BlobClient>,
     bucket: &str,
     ss_cache: &Arc<Mutex<SymbolSetCache>>,
     config: &Config,
-) -> Result<(), UnhandledError> {
-    let lookback_hours = config.cache_warming_lookback_hours as i64;
-    let team_filter = resolve_team_filter(pool, config, lookback_hours).await?;
-    warm_cache_with_filter(pool, s3_client, bucket, ss_cache, config, team_filter).await
-}
-
-/// Core warming logic. Queries for recently-used symbol sets (optionally filtered
-/// to specific team_ids), fetches their raw data from S3, parses them, and inserts
-/// the results into the shared cache. Stops early once the cache reaches 85% of
-/// its byte capacity.
-async fn warm_cache_with_filter(
-    pool: &PgPool,
-    s3_client: &Arc<dyn BlobClient>,
-    bucket: &str,
-    ss_cache: &Arc<Mutex<SymbolSetCache>>,
-    config: &Config,
-    team_filter: Option<Vec<i32>>,
 ) -> Result<(), UnhandledError> {
     let start = Instant::now();
 
@@ -186,13 +62,11 @@ async fn warm_cache_with_filter(
         WHERE content_hash IS NOT NULL
           AND storage_ptr IS NOT NULL
           AND last_used > NOW() - make_interval(hours => $1::integer)
-          AND ($3::int[] IS NULL OR team_id = ANY($3))
         ORDER BY last_used DESC
         LIMIT $2"#,
     )
     .bind(lookback_hours)
     .bind(config.cache_warming_max_entries as i64)
-    .bind(team_filter.as_deref())
     .fetch_all(pool)
     .await?;
 
@@ -448,151 +322,6 @@ mod test {
         }
     }
 
-    #[test]
-    fn jump_consistent_hash_deterministic() {
-        // Same key always maps to the same bucket
-        assert_eq!(jump_consistent_hash(42, 3), jump_consistent_hash(42, 3));
-        assert_eq!(jump_consistent_hash(1, 10), jump_consistent_hash(1, 10));
-    }
-
-    #[test]
-    fn jump_consistent_hash_in_range() {
-        for key in 0..1000 {
-            for buckets in 1..20 {
-                let result = jump_consistent_hash(key, buckets);
-                assert!(
-                    result < buckets,
-                    "key={key}, buckets={buckets}, result={result}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn jump_consistent_hash_single_bucket() {
-        // With one bucket, everything maps to bucket 0
-        for key in 0..100 {
-            assert_eq!(jump_consistent_hash(key, 1), 0);
-        }
-    }
-
-    #[test]
-    fn jump_consistent_hash_matches_typescript() {
-        // These expected values were computed by running the TypeScript
-        // jumpConsistentHash implementation from the Node ingestion pipeline.
-        // If these fail, the Rust and TypeScript implementations have diverged
-        // and sticky routing will misroute traffic.
-        assert_eq!(jump_consistent_hash(1, 3), 1);
-        assert_eq!(jump_consistent_hash(2, 3), 0);
-        assert_eq!(jump_consistent_hash(3, 3), 1);
-        assert_eq!(jump_consistent_hash(10, 3), 0);
-        assert_eq!(jump_consistent_hash(100, 3), 2);
-        assert_eq!(jump_consistent_hash(1000, 3), 1);
-        assert_eq!(jump_consistent_hash(1, 5), 1);
-        assert_eq!(jump_consistent_hash(2, 5), 0);
-        assert_eq!(jump_consistent_hash(42, 10), 8);
-        assert_eq!(jump_consistent_hash(12345, 30), 10);
-    }
-
-    #[test]
-    fn jump_consistent_hash_distributes_evenly() {
-        // With 1000 keys across 3 buckets, each should get roughly 1/3
-        let mut counts = [0u32; 3];
-        for key in 1..=1000 {
-            counts[jump_consistent_hash(key, 3) as usize] += 1;
-        }
-        for (i, &count) in counts.iter().enumerate() {
-            assert!(
-                (280..=390).contains(&count),
-                "Bucket {i} has {count} entries, expected ~333"
-            );
-        }
-    }
-
-    fn peer_config(pod_ip: &str, hostname: &str) -> Config {
-        let mut config = Config::init_with_defaults().unwrap();
-        config.pod_ip = pod_ip.to_string();
-        config.cache_warming_peer_hostname = hostname.to_string();
-        config
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_returns_none_when_not_configured() {
-        let config = Config::init_with_defaults().unwrap();
-        let result = resolve_peer_index_with(&config, || async { unreachable!() }).await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_returns_none_when_pod_ip_empty() {
-        let config = peer_config("", "some-hostname");
-        let result = resolve_peer_index_with(&config, || async { unreachable!() }).await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_returns_none_on_dns_failure() {
-        let config = peer_config("10.0.0.1", "bad-hostname");
-        let result = resolve_peer_index_with(&config, || async {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "DNS failed",
-            ))
-        })
-        .await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_returns_none_for_single_peer() {
-        let config = peer_config("10.0.0.1", "cymbal-headless");
-        let result =
-            resolve_peer_index_with(&config, || async { Ok(vec!["10.0.0.1".to_string()]) }).await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_adds_own_ip_when_not_in_dns() {
-        let config = peer_config("10.0.0.99", "cymbal-headless");
-        let result = resolve_peer_index_with(&config, || async {
-            Ok(vec!["10.0.0.1".to_string(), "10.0.0.2".to_string()])
-        })
-        .await;
-        // Pod IP 10.0.0.99 added to list, sorted: [10.0.0.1, 10.0.0.2, 10.0.0.99] → index 2 of 3
-        assert_eq!(result, Some((2, 3)));
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_finds_correct_index() {
-        let config = peer_config("10.0.0.2", "cymbal-headless");
-        let result = resolve_peer_index_with(&config, || async {
-            Ok(vec![
-                "10.0.0.3".to_string(),
-                "10.0.0.1".to_string(),
-                "10.0.0.2".to_string(),
-            ])
-        })
-        .await;
-        // Sorted: [10.0.0.1, 10.0.0.2, 10.0.0.3] → pod 10.0.0.2 is index 1
-        assert_eq!(result, Some((1, 3)));
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_index_deduplicates_ips() {
-        let config = peer_config("10.0.0.1", "cymbal-headless");
-        let result = resolve_peer_index_with(&config, || async {
-            Ok(vec![
-                "10.0.0.2".to_string(),
-                "10.0.0.1".to_string(),
-                "10.0.0.2".to_string(),
-                "10.0.0.1".to_string(),
-            ])
-        })
-        .await;
-        // Deduped + sorted: [10.0.0.1, 10.0.0.2] → index 0 of 2
-        assert_eq!(result, Some((0, 2)));
-    }
-
     #[tokio::test]
     async fn skips_entry_when_over_byte_budget() {
         let parsers = make_parsers();
@@ -784,45 +513,7 @@ mod test {
     }
 
     #[sqlx::test(migrations = "./tests/test_migrations")]
-    async fn warm_cache_with_team_filter_only_warms_matching_teams(db: PgPool) {
-        // Insert records for 3 different teams
-        insert_symbol_set(&db, 1, "team1-a").await;
-        insert_symbol_set(&db, 1, "team1-b").await;
-        insert_symbol_set(&db, 2, "team2-a").await;
-        insert_symbol_set(&db, 3, "team3-a").await;
-
-        // Track which S3 keys are fetched
-        let fetched_keys = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let fetched_keys_clone = fetched_keys.clone();
-        let data = test_symbol_data();
-        let mut s3_client = MockS3Client::new();
-        s3_client.expect_get().returning(move |_, key| {
-            fetched_keys_clone.lock().unwrap().push(key.to_string());
-            Ok(Some(data.clone()))
-        });
-
-        let s3_client: Arc<dyn BlobClient> = Arc::new(s3_client);
-        let cache = Arc::new(Mutex::new(SymbolSetCache::new(100_000_000)));
-
-        let mut config = Config::init_with_defaults().unwrap();
-        config.cache_warming_lookback_hours = 1;
-        config.cache_warming_max_entries = 100;
-        config.cache_warming_concurrency = 1;
-        config.cache_warming_timeout_seconds = 30;
-        config.symbol_store_cache_max_bytes = 100_000_000;
-
-        // Only warm team_id 1 — team 2 and 3 should be excluded
-        warm_cache_with_filter(&db, &s3_client, "bucket", &cache, &config, Some(vec![1]))
-            .await
-            .unwrap();
-
-        let keys = fetched_keys.lock().unwrap();
-        assert_eq!(keys.len(), 2, "Should fetch exactly 2 records for team 1");
-        assert!(keys.iter().all(|k| k.starts_with("symbolsets/team1-")));
-    }
-
-    #[sqlx::test(migrations = "./tests/test_migrations")]
-    async fn warm_cache_without_filter_warms_all_teams(db: PgPool) {
+    async fn warm_cache_warms_all_teams(db: PgPool) {
         insert_symbol_set(&db, 1, "team1-a").await;
         insert_symbol_set(&db, 2, "team2-a").await;
         insert_symbol_set(&db, 3, "team3-a").await;
@@ -843,55 +534,18 @@ mod test {
         config.cache_warming_timeout_seconds = 30;
         config.symbol_store_cache_max_bytes = 100_000_000;
 
-        // No team filter — should warm all 3 records
-        warm_cache_with_filter(&db, &s3_client, "bucket", &cache, &config, None)
+        warm_cache(&db, &s3_client, "bucket", &cache, &config)
             .await
             .unwrap();
 
-        // 3 records means 3 cache entries
-        let cache = cache.lock().await;
-        assert!(cache.held_bytes() > 0);
+        assert!(cache.lock().await.held_bytes() > 0);
     }
 
     #[sqlx::test(migrations = "./tests/test_migrations")]
-    async fn warm_cache_with_empty_filter_warms_nothing(db: PgPool) {
-        insert_symbol_set(&db, 1, "team1-a").await;
-        insert_symbol_set(&db, 2, "team2-a").await;
-
-        // No S3 expectations — empty filter means no records to fetch
-        let s3_client: Arc<dyn BlobClient> = Arc::new(MockS3Client::new());
-        let cache = Arc::new(Mutex::new(SymbolSetCache::new(100_000_000)));
-
-        let mut config = Config::init_with_defaults().unwrap();
-        config.cache_warming_lookback_hours = 1;
-        config.cache_warming_max_entries = 100;
-        config.cache_warming_concurrency = 1;
-        config.cache_warming_timeout_seconds = 30;
-        config.symbol_store_cache_max_bytes = 100_000_000;
-
-        // Empty team filter — no teams assigned to this pod
-        warm_cache_with_filter(&db, &s3_client, "bucket", &cache, &config, Some(vec![]))
-            .await
-            .unwrap();
-
-        assert_eq!(cache.lock().await.held_bytes(), 0);
-    }
-
-    #[sqlx::test(migrations = "./tests/test_migrations")]
-    async fn warm_cache_with_filter_respects_limit(db: PgPool) {
-        // Insert 5 records for team 1
+    async fn warm_cache_respects_max_entries_limit(db: PgPool) {
         for i in 0..5 {
             insert_symbol_set(&db, 1, &format!("team1-{i}")).await;
         }
-
-        let cache = Arc::new(Mutex::new(SymbolSetCache::new(100_000_000)));
-
-        let mut config = Config::init_with_defaults().unwrap();
-        config.cache_warming_lookback_hours = 1;
-        config.cache_warming_max_entries = 3; // Limit to 3
-        config.cache_warming_concurrency = 1;
-        config.cache_warming_timeout_seconds = 30;
-        config.symbol_store_cache_max_bytes = 100_000_000;
 
         let fetched_keys = Arc::new(std::sync::Mutex::new(Vec::new()));
         let fetched_keys_clone = fetched_keys.clone();
@@ -902,16 +556,20 @@ mod test {
             Ok(Some(data.clone()))
         });
         let s3_client: Arc<dyn BlobClient> = Arc::new(s3_client);
+        let cache = Arc::new(Mutex::new(SymbolSetCache::new(100_000_000)));
 
-        warm_cache_with_filter(&db, &s3_client, "bucket", &cache, &config, Some(vec![1]))
+        let mut config = Config::init_with_defaults().unwrap();
+        config.cache_warming_lookback_hours = 1;
+        config.cache_warming_max_entries = 3;
+        config.cache_warming_concurrency = 1;
+        config.cache_warming_timeout_seconds = 30;
+        config.symbol_store_cache_max_bytes = 100_000_000;
+
+        warm_cache(&db, &s3_client, "bucket", &cache, &config)
             .await
             .unwrap();
 
         let keys = fetched_keys.lock().unwrap();
-        assert_eq!(
-            keys.len(),
-            3,
-            "Should respect max_entries limit even with team filter"
-        );
+        assert_eq!(keys.len(), 3, "Should respect max_entries limit");
     }
 }
