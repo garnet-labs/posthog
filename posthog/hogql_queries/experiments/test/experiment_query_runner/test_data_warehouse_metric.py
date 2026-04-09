@@ -1195,7 +1195,13 @@ class TestExperimentQueryRunner(ExperimentQueryRunnerBaseTest):
         )
 
         # Enable precomputation
-        experiment.exposure_preaggregation_enabled = True
+        from posthog.models.team.extensions import get_or_create_team_extension
+
+        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+        config.experiment_precomputation_enabled = True
+        config.save()
         experiment.save()
 
         feature_flag_property = f"$feature/{feature_flag.key}"

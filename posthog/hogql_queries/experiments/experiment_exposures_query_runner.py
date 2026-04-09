@@ -141,7 +141,13 @@ class ExperimentExposuresQueryRunner(QueryRunner):
             entity_key=get_entity_key(self.group_type_index),
         )
 
-        if self.experiment.exposure_preaggregation_enabled:
+        # TODO: Add query-level precomputation_mode override for ExperimentExposureQuery
+        from posthog.models.team.extensions import get_or_create_team_extension
+
+        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+        if config.experiment_precomputation_enabled:
             try:
                 result = self._ensure_exposures_precomputed(builder)
                 if result.ready:

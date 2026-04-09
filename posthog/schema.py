@@ -1696,6 +1696,11 @@ class ExperimentMetricType(StrEnum):
     RETENTION = "retention"
 
 
+class PrecomputationMode(StrEnum):
+    PRECOMPUTED = "precomputed"
+    DIRECT = "direct"
+
+
 class StartHandling(StrEnum):
     FIRST_SEEN = "first_seen"
     LAST_SEEN = "last_seen"
@@ -20235,6 +20240,7 @@ class ExperimentQuery(BaseModel):
     metric: ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric
     modifiers: HogQLQueryModifiers | None = Field(default=None, description="Modifiers used when performing the query")
     name: str | None = None
+    precomputation_mode: PrecomputationMode | None = None
     response: ExperimentQueryResponse | None = None
     tags: QueryLogTags | None = None
     version: float | None = Field(default=None, description="version of the node, used for schema migrations")

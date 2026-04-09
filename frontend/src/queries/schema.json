@@ -16423,6 +16423,10 @@
                 "name": {
                     "type": "string"
                 },
+                "precomputation_mode": {
+                    "enum": ["precomputed", "direct"],
+                    "type": "string"
+                },
                 "response": {
                     "$ref": "#/definitions/ExperimentQueryResponse"
                 },

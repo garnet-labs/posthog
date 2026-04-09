@@ -17,6 +17,7 @@ from posthog.hogql_queries.experiments.test.experiment_query_runner.base import 
 from posthog.hogql_queries.experiments.test.experiment_query_runner.utils import create_standard_group_test_events
 from posthog.models.action.action import Action
 from posthog.models.feature_flag import FeatureFlag
+from posthog.models.team.extensions import get_or_create_team_extension
 from posthog.test.test_journeys import journeys_for
 
 
@@ -449,7 +450,11 @@ class TestExperimentExposuresQueryRunner(ExperimentQueryRunnerBaseTest):
 
         self.experiment.exposure_criteria = {"filterTestAccounts": True}
         if use_precomputation:
-            self.experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         self.experiment.save()
 
         self.team.test_account_filters = [
@@ -487,7 +492,11 @@ class TestExperimentExposuresQueryRunner(ExperimentQueryRunnerBaseTest):
         self.experiment.exposure_criteria = {"filterTestAccounts": False}
         if use_precomputation:
             self._clean_preaggregation_data()
-            self.experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         self.experiment.save()
 
         query = ExperimentExposureQuery(
@@ -617,7 +626,11 @@ class TestExperimentExposuresQueryRunner(ExperimentQueryRunnerBaseTest):
             "exposure_config": exposure_config.model_dump(mode="json"),
         }
         if use_precomputation:
-            self.experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         self.experiment.save()
 
         query = ExperimentExposureQuery(
@@ -880,7 +893,11 @@ class TestExperimentExposuresQueryRunner(ExperimentQueryRunnerBaseTest):
         self.experiment.start_date = datetime(2024, 1, 1).replace(tzinfo=ZoneInfo("UTC"))
         self.experiment.end_date = datetime(2024, 1, 28).replace(tzinfo=ZoneInfo("UTC"))
         if use_precomputation:
-            self.experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         self.experiment.save()
 
         group_type_index = 0
@@ -920,7 +937,11 @@ class TestExperimentExposuresQueryRunner(ExperimentQueryRunnerBaseTest):
         # Set the experiment to use first_seen handling for multiple variants
         self.experiment.exposure_criteria = {"multiple_variant_handling": "first_seen"}
         if use_precomputation:
-            self.experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         self.experiment.save()
 
         journeys_for(
@@ -1097,7 +1118,11 @@ class TestExperimentExposuresQueryRunner(ExperimentQueryRunnerBaseTest):
         # Set exposure criteria to use the action
         self.experiment.exposure_criteria = {"exposure_config": ActionsNode(id=action.id).model_dump(mode="json")}
         if use_precomputation:
-            self.experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         self.experiment.save()
 
         query = ExperimentExposureQuery(

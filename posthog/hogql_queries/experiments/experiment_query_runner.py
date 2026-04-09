@@ -82,14 +82,12 @@ class ExperimentQueryRunner(QueryRunner):
         override_end_date: Optional[datetime] = None,
         user_facing: bool = True,
         max_execution_time: Optional[int] = None,
-        force_precomputation: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.override_end_date = override_end_date
         self.user_facing = user_facing
         self.max_execution_time = max_execution_time if max_execution_time is not None else MAX_EXECUTION_TIME
-        self.force_precomputation = force_precomputation
 
         if not self.query.experiment_id:
             raise ValidationError("experiment_id is required")
@@ -189,6 +187,20 @@ class ExperimentQueryRunner(QueryRunner):
             placeholders=placeholders,
         )
 
+    def _should_precompute(self) -> bool:
+        """Resolve whether to use precomputation: query-level override > team-level default."""
+        from posthog.models.team.extensions import get_or_create_team_extension
+
+        from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+        if self.query.precomputation_mode == "precomputed":
+            return True
+        if self.query.precomputation_mode == "direct":
+            return False
+
+        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+        return config.experiment_precomputation_enabled
+
     def _get_experiment_query(self) -> ast.SelectQuery:
         """
         Returns the main experiment query.
@@ -216,13 +228,14 @@ class ExperimentQueryRunner(QueryRunner):
             entity_key=self.entity_key,
             metric=self.metric,
             breakdowns=self._get_breakdowns_for_builder(),
-            force_precomputation=self.force_precomputation,
             only_count_matured_users=self.experiment.only_count_matured_users,
         )
 
+        should_precompute = self._should_precompute()
+
         # Skip precomputation for data warehouse metrics because the precomputed table
         # doesn't include the join keys needed to link exposures to data warehouse tables
-        if self.experiment.exposure_preaggregation_enabled and not self.is_data_warehouse_query:
+        if should_precompute and not self.is_data_warehouse_query:
             try:
                 result = self._ensure_exposures_precomputed(builder)
                 if result.ready:

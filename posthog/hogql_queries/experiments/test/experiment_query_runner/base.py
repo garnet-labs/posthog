@@ -9,6 +9,7 @@ from django.utils import timezone
 from posthog.clickhouse.client.execute import sync_execute
 from posthog.clickhouse.preaggregation.experiment_exposures_sql import TRUNCATE_EXPERIMENT_EXPOSURES_TABLE_SQL
 from posthog.models.feature_flag.feature_flag import FeatureFlag
+from posthog.models.team.extensions import get_or_create_team_extension
 
 from products.analytics_platform.backend.models.preaggregation_job import PreaggregationJob
 from products.data_warehouse.backend.models.join import DataWarehouseJoin
@@ -44,7 +45,11 @@ class ExperimentQueryRunnerBaseTest(ClickhouseTestMixin, APIBaseTest):
     def _save_experiment_with_precomputation(self, experiment, use_precomputation: bool):
         """Save experiment with precomputation enabled if needed"""
         if use_precomputation:
-            experiment.exposure_preaggregation_enabled = True
+            from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
+
+            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+            config.experiment_precomputation_enabled = True
+            config.save()
         experiment.save()
 
     def create_feature_flag(self, key="test-experiment"):
