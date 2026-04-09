@@ -34,7 +34,7 @@ export function createQueryWrapper<T extends ZodObjectAny>(config: QueryWrapperC
                         values: [{ type: 'AND', values: query.filterGroup }],
                     }
                 } else {
-                    query.filterGroup = { type: 'AND', values: [] }
+                    delete query.filterGroup
                 }
             }
             const result = await context.api.request<{
