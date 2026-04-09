@@ -227,7 +227,7 @@ describe('EditorFilters', () => {
 
             await userEvent.click(screen.getByRole('button', { name: /Advanced options/ }))
 
-            expect(screen.getByText('Data warehouse insights always use properties from the selected table.')).toBeInTheDocument()
+            expect(screen.getByText('Data warehouse insights always use the latest table properties.')).toBeInTheDocument()
             expect(screen.getByRole('switch', { name: 'Use person properties from query time' })).toBeDisabled()
         })
     })
