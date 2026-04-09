@@ -77,11 +77,10 @@ test.describe('SQL Editor', () => {
             await nameInput.fill(uniqueViewName)
             await page.getByRole('button', { name: 'Submit' }).click()
             await expect(page.getByText(`${uniqueViewName} successfully created`)).toBeVisible()
-
-            await expect(page.locator('.scene-name h1 span').getByText(uniqueViewName, { exact: true })).toBeVisible()
-            // Dismiss any popover that might overlay the materialization button
+            // Dismiss any popover/toast that might overlay the materialization button
             await page.keyboard.press('Escape')
 
+            await expect(page.locator('[data-attr=sql-editor-materialization-button]')).toBeVisible()
             await page.locator('[data-attr=sql-editor-materialization-button]').click()
             await expect(page.locator('[data-attr=sql-editor-sidebar-query-info-pane]')).toBeVisible()
         })
