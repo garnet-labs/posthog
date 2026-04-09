@@ -288,6 +288,60 @@ class TestProperty(BaseTest):
             self._parse_expr("properties.unknown_prop = 'true'"),
         )
 
+    def test_property_to_expr_date_operators(self):
+        # is_date_before wraps RHS in toDateTime()
+        self.assertEqual(
+            self._property_to_expr(
+                {"type": "event", "key": "a", "value": "2026-03-19T14:00:00Z", "operator": "is_date_before"}
+            ),
+            ast.CompareOperation(
+                op=ast.CompareOperationOp.Lt,
+                left=ast.Field(chain=["properties", "a"]),
+                right=ast.Call(name="toDateTime", args=[ast.Constant(value="2026-03-19T14:00:00Z")]),
+            ),
+        )
+        # is_date_after wraps RHS in toDateTime()
+        self.assertEqual(
+            self._property_to_expr(
+                {"type": "event", "key": "a", "value": "2026-03-19T14:00:00Z", "operator": "is_date_after"}
+            ),
+            ast.CompareOperation(
+                op=ast.CompareOperationOp.Gt,
+                left=ast.Field(chain=["properties", "a"]),
+                right=ast.Call(name="toDateTime", args=[ast.Constant(value="2026-03-19T14:00:00Z")]),
+            ),
+        )
+        # is_date_exact wraps RHS in toDateTime()
+        self.assertEqual(
+            self._property_to_expr({"type": "event", "key": "a", "value": "2026-03-19", "operator": "is_date_exact"}),
+            ast.CompareOperation(
+                op=ast.CompareOperationOp.Eq,
+                left=ast.Field(chain=["properties", "a"]),
+                right=ast.Call(name="toDateTime", args=[ast.Constant(value="2026-03-19")]),
+            ),
+        )
+        # generic lt does NOT wrap RHS in toDateTime()
+        self.assertEqual(
+            self._property_to_expr({"type": "event", "key": "a", "value": "3", "operator": "lt"}),
+            self._parse_expr("properties.a < '3'"),
+        )
+        # generic gt does NOT wrap RHS in toDateTime()
+        self.assertEqual(
+            self._property_to_expr({"type": "event", "key": "a", "value": "3", "operator": "gt"}),
+            self._parse_expr("properties.a > '3'"),
+        )
+        # person property with is_date_before wraps RHS in toDateTime()
+        self.assertEqual(
+            self._property_to_expr(
+                {"type": "person", "key": "inserted_at", "value": "2026-03-19T14:00:00Z", "operator": "is_date_before"}
+            ),
+            ast.CompareOperation(
+                op=ast.CompareOperationOp.Lt,
+                left=ast.Field(chain=["person", "properties", "inserted_at"]),
+                right=ast.Call(name="toDateTime", args=[ast.Constant(value="2026-03-19T14:00:00Z")]),
+            ),
+        )
+
     def test_property_to_expr_event_list(self):
         # positive
         self.assertEqual(

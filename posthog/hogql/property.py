@@ -429,11 +429,17 @@ def _expr_to_compare_op(
                 ast.Constant(value=1),
             ],
         )
-    elif operator == PropertyOperator.EXACT or operator == PropertyOperator.IS_DATE_EXACT:
+    elif operator == PropertyOperator.EXACT:
         return ast.CompareOperation(
             op=ast.CompareOperationOp.Eq,
             left=expr,
             right=ast.Constant(value=_handle_bool_values(value, expr, property, team)),
+        )
+    elif operator == PropertyOperator.IS_DATE_EXACT:
+        return ast.CompareOperation(
+            op=ast.CompareOperationOp.Eq,
+            left=expr,
+            right=ast.Call(name="toDateTime", args=[ast.Constant(value=value)]),
         )
     elif operator == PropertyOperator.IS_NOT:
         return ast.CompareOperation(
@@ -441,10 +447,22 @@ def _expr_to_compare_op(
             left=expr,
             right=ast.Constant(value=_handle_bool_values(value, expr, property, team)),
         )
-    elif operator == PropertyOperator.LT or operator == PropertyOperator.IS_DATE_BEFORE:
+    elif operator == PropertyOperator.LT:
         return ast.CompareOperation(op=ast.CompareOperationOp.Lt, left=expr, right=ast.Constant(value=value))
-    elif operator == PropertyOperator.GT or operator == PropertyOperator.IS_DATE_AFTER:
+    elif operator == PropertyOperator.IS_DATE_BEFORE:
+        return ast.CompareOperation(
+            op=ast.CompareOperationOp.Lt,
+            left=expr,
+            right=ast.Call(name="toDateTime", args=[ast.Constant(value=value)]),
+        )
+    elif operator == PropertyOperator.GT:
         return ast.CompareOperation(op=ast.CompareOperationOp.Gt, left=expr, right=ast.Constant(value=value))
+    elif operator == PropertyOperator.IS_DATE_AFTER:
+        return ast.CompareOperation(
+            op=ast.CompareOperationOp.Gt,
+            left=expr,
+            right=ast.Call(name="toDateTime", args=[ast.Constant(value=value)]),
+        )
     elif operator == PropertyOperator.LTE or operator == PropertyOperator.MAX:
         return ast.CompareOperation(op=ast.CompareOperationOp.LtEq, left=expr, right=ast.Constant(value=value))
     elif operator == PropertyOperator.GTE or operator == PropertyOperator.MIN:
