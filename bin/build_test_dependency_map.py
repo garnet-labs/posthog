@@ -43,6 +43,12 @@ os.chdir(REPO_ROOT)
 LOCAL_PACKAGES = ("posthog", "ee", "products", "common")
 DEFAULT_OUTPUT = REPO_ROOT / ".test_dependency_map.json"
 
+# Source files affecting more tests than this are excluded from the map.
+# Changing them effectively requires a full run anyway, and including them
+# bloats the file from ~2MB to ~55MB. find_affected_tests.py treats
+# excluded files as "force full run" via the safety fallback.
+MAX_FANOUT = 100
+
 # Patterns that identify test files
 TEST_FILE_RE = re.compile(r"(^|/)test_[^/]*\.py$")
 TEST_DIR_RE = re.compile(r"(^|/)tests?/")
@@ -117,10 +123,19 @@ def build_map(graph: grimp.ImportGraph) -> dict[str, list[str]]:
         test_file = module_files[test_module]
         reverse_map[test_file].add(test_file)
 
-    sys.stderr.write(f"Map covers {len(reverse_map)} source files\n")
+    # Exclude high-fan-out entries (core/shared modules that affect too many tests).
+    # Changing these files practically requires a full test run anyway, and including
+    # them bloats the map file significantly.
+    excluded = {k for k, v in reverse_map.items() if len(v) > MAX_FANOUT}
+    filtered_map = {k: v for k, v in reverse_map.items() if k not in excluded}
+
+    sys.stderr.write(
+        f"Map covers {len(filtered_map)} source files "
+        f"(excluded {len(excluded)} high-fan-out files with >{MAX_FANOUT} tests)\n"
+    )
 
     # Convert sets to sorted lists for JSON serialization
-    return {k: sorted(v) for k, v in sorted(reverse_map.items())}
+    return {k: sorted(v) for k, v in sorted(filtered_map.items())}
 
 
 def main():
