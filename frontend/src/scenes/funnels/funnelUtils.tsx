@@ -655,17 +655,9 @@ export function getTooltipTitleForDroppedOff(
     )
 }
 
-/**
- * When a funnel step is shown without a per-breakdown bar (i.e. a non-breakdown rendering)
- * but the funnel actually has a breakdown filter set with a single visible value, this returns
- * the corresponding series so callers can route clicks through `openPersonsModalForSeries` —
- * which carries the breakdown value — instead of `openPersonsModalForStep`, which would open
- * the modal unfiltered.
- *
- * Returns null when there is no breakdown filter, when nested_breakdown has any number of
- * items other than one, or when the single entry has no breakdown value (e.g. it's a bare
- * step placeholder rather than a real breakdown).
- */
+// Returns the single visible breakdown series on a funnel step, when the step is rendered
+// with the non-breakdown layout but a breakdown filter is set. Lets callers route clicks
+// through `openPersonsModalForSeries` so the persons modal is scoped to that value.
 export function getStepBreakdownSeries(
     step: Pick<FunnelStepWithConversionMetrics, 'nested_breakdown'>,
     breakdownFilter: BreakdownFilter | null | undefined

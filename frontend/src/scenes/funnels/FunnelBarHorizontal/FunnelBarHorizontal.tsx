@@ -82,11 +82,12 @@ export function FunnelBarHorizontal({
                     step.nested_breakdown?.length !== undefined &&
                     !(step.nested_breakdown.length === 1)
 
-                // When the funnel has a breakdown filter that resolves to a single visible value
-                // we still render the non-breakdown layout (so the bar fills correctly), but we
-                // route clicks through openPersonsModalForSeries so the persons modal is scoped
-                // to that breakdown value rather than opened unfiltered.
+                // When a breakdown filter resolves to a single visible value, use that series'
+                // counts and rates for display so the bar/labels match the tooltip instead of
+                // showing aggregate (cross-breakdown) values. Clicks also route through
+                // openPersonsModalForSeries so the persons modal is scoped to that value.
                 const stepBreakdownSeries = !isBreakdown ? getStepBreakdownSeries(step, breakdownFilter) : null
+                const displayStep = stepBreakdownSeries ?? step
                 const openStep = (converted: boolean): void => {
                     if (stepBreakdownSeries) {
                         openPersonsModalForSeries({ step, series: stepBreakdownSeries, converted })
@@ -184,8 +185,8 @@ export function FunnelBarHorizontal({
                             ) : (
                                 <>
                                     <Bar
-                                        name={step.name}
-                                        percentage={step.conversionRates.fromBasisStep}
+                                        name={displayStep.name}
+                                        percentage={displayStep.conversionRates.fromBasisStep}
                                         onBarClick={() => openStep(true)}
                                         step={step.nested_breakdown![0]}
                                         stepIndex={stepIndex}
@@ -198,7 +199,7 @@ export function FunnelBarHorizontal({
                                         onClick={showPersonsModal ? () => openStep(false) : undefined}
                                         // eslint-disable-next-line react/forbid-dom-props
                                         style={{
-                                            flex: `${1 - step.conversionRates.fromBasisStep} 1 0`,
+                                            flex: `${1 - displayStep.conversionRates.fromBasisStep} 1 0`,
                                             cursor: `${showPersonsModal && !inCardView ? 'pointer' : ''}`,
                                         }}
                                     />
@@ -215,11 +216,11 @@ export function FunnelBarHorizontal({
                                         style={{ color: 'var(--success)' }}
                                         className="value-inspector-button-icon"
                                     />
-                                    <b>{formatConvertedCount(step, aggregationTargetLabel)}</b>
+                                    <b>{formatConvertedCount(displayStep, aggregationTargetLabel)}</b>
                                 </ValueInspectorButton>{' '}
                                 {!isFirstStep && (
                                     <span className="text-secondary grow">
-                                        {`(${formatConvertedPercentage(step)}) completed step`}
+                                        {`(${formatConvertedPercentage(displayStep)}) completed step`}
                                     </span>
                                 )}
                             </Tooltip>
@@ -236,10 +237,10 @@ export function FunnelBarHorizontal({
                                                 style={{ color: 'var(--danger)' }}
                                                 className="value-inspector-button-icon"
                                             />
-                                            <b>{formatDroppedOffCount(step, aggregationTargetLabel)}</b>
+                                            <b>{formatDroppedOffCount(displayStep, aggregationTargetLabel)}</b>
                                         </ValueInspectorButton>{' '}
                                         <span className="text-secondary">
-                                            {`(${formatDroppedOffPercentage(step)}) dropped off`}
+                                            {`(${formatDroppedOffPercentage(displayStep)}) dropped off`}
                                         </span>
                                     </Tooltip>
                                 </div>

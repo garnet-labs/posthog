@@ -50,18 +50,10 @@ import type { personsModalLogicType } from './personsModalLogicType'
 
 const RESULTS_PER_PAGE = 100
 
-/**
- * For a funnel actors query with `funnelStepBreakdown` set (i.e. the user clicked a specific
- * breakdown segment), build a property filter that scopes session recordings to that breakdown
- * value. Returns null when the source isn't a funnel, or when the breakdown can't be expressed
- * as a single Exact property filter:
- *  - cohort breakdowns (`breakdown_type === 'cohort'`, breakdown is an array of cohort IDs)
- *  - multi-key breakdowns (`breakdown` is an array of property names)
- *  - array breakdown values (`funnelStepBreakdown` is an array)
- */
-function buildFunnelBreakdownFilter(
-    source: NonNullable<ActorsQuery['source']> | null | undefined
-): UniversalFilterValue | null {
+// Build a property filter that scopes session recordings to a funnel's selected breakdown
+// value. Returns null for cohort, multi-key, or array-value breakdowns (not expressible as
+// a single Exact filter).
+function buildFunnelBreakdownFilter(source: ActorsQuery['source'] | null): UniversalFilterValue | null {
     if (!source || source.kind !== NodeKind.FunnelsActorsQuery || source.funnelStepBreakdown == null) {
         return null
     }
@@ -519,10 +511,7 @@ export const personsModalLogic = kea<personsModalLogicType>([
 
                 const source = actorsQuery.source
 
-                // For funnel breakdowns, build a property filter so recordings are scoped to
-                // the selected breakdown value (e.g. country = "NL"). Bails out for cases that
-                // can't be represented as a single Exact property filter (cohort lists,
-                // multi-key breakdowns, array breakdown values).
+                // Scope recordings to the selected funnel breakdown value (e.g. country = "NL").
                 const funnelBreakdownFilter = buildFunnelBreakdownFilter(source)
 
                 // If we have session IDs from matched_recordings, use them directly for efficient lookup
