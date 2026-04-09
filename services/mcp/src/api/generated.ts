@@ -22190,6 +22190,8 @@ export namespace Schemas {
       events_column_config?: unknown;
       readonly is_2fa_enabled: boolean;
       readonly has_social_auth: boolean;
+      /** @nullable */
+      readonly github_login: string | null;
       readonly has_sso_enforcement: boolean;
       has_seen_product_intro_for?: unknown | null;
       readonly scene_personalisation: readonly ScenePersonalisationBasic[];
@@ -26294,6 +26296,8 @@ export namespace Schemas {
       events_column_config?: unknown;
       readonly is_2fa_enabled?: boolean;
       readonly has_social_auth?: boolean;
+      /** @nullable */
+      readonly github_login?: string | null;
       readonly has_sso_enforcement?: boolean;
       has_seen_product_intro_for?: unknown | null;
       readonly scene_personalisation?: readonly ScenePersonalisationBasic[];
