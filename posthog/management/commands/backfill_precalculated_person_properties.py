@@ -85,14 +85,21 @@ class Command(BaseCommand):
         parser.add_argument(
             "--team-id",
             type=int,
-            required=True,
-            help="Team ID to backfill person properties for",
+            required=False,
+            help="Team ID to backfill person properties for. Cannot be used with --teams-ids",
+        )
+        parser.add_argument(
+            "--teams-ids",
+            type=int,
+            nargs="+",
+            required=False,
+            help="List of team IDs to backfill person properties for. Cannot be used with --team-id",
         )
         parser.add_argument(
             "--cohort-id",
             type=int,
             required=False,
-            help="Optional: Specific cohort ID to backfill. If not provided, backfills all realtime cohorts for the team",
+            help="Optional: Specific cohort ID to backfill. If not provided, backfills all realtime cohorts for the team(s)",
         )
         parser.add_argument(
             "--batch-size",
@@ -114,129 +121,160 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        team_id = options["team_id"]
+        team_id = options.get("team_id")
+        teams_ids = options.get("teams_ids")
         cohort_id = options.get("cohort_id")
         batch_size = options["batch_size"]
         concurrent_workflows = options["concurrent_workflows"]
         person_id = options.get("person_id")
 
-        # Get cohorts to process
-        if cohort_id:
-            # Single cohort mode
-            try:
-                cohorts = [Cohort.objects.get(id=cohort_id, team_id=team_id)]
-            except Cohort.DoesNotExist:
-                self.stdout.write(self.style.ERROR(f"Cohort {cohort_id} not found for team {team_id}"))
-                return
-        else:
-            # All realtime cohorts for team
-            cohorts = list(
-                Cohort.objects.filter(
-                    team_id=team_id,
-                    cohort_type=CohortType.REALTIME,
-                    deleted=False,
-                ).order_by("id")
-            )
-            if not cohorts:
-                self.stdout.write(self.style.WARNING(f"No realtime cohorts found for team {team_id}"))
-                return
-
-        self.stdout.write(self.style.SUCCESS(f"Found {len(cohorts)} realtime cohort(s) to process for team {team_id}"))
-
-        # Collect and deduplicate filters across all cohorts
-        condition_map: dict[str, tuple[list[Any], str | None, set[int]]] = {}
-        cohort_ids = []
-        total_original_filters = 0
-        for cohort in cohorts:
-            if cohort.cohort_type != CohortType.REALTIME:
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"Skipping cohort {cohort.id}: not a realtime cohort (type: {cohort.cohort_type})"
-                    )
-                )
-                continue
-
-            # Extract person property filters
-            filters = extract_person_property_filters(cohort)
-            if not filters:
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"Skipping cohort {cohort.id}: no person property filters with conditionHash and bytecode"
-                    )
-                )
-                continue
-
-            cohort_ids.append(cohort.id)
-            total_original_filters += len(filters)
-            self.stdout.write(self.style.SUCCESS(f"Cohort {cohort.id}: found {len(filters)} person property filters"))
-
-            # Deduplicate by condition_hash
-            for f in filters:
-                if f.condition_hash not in condition_map:
-                    condition_map[f.condition_hash] = (f.bytecode, f.property_key, {cohort.id})
-                    self.stdout.write(f"  + New condition: {f.condition_hash}")
-                else:
-                    # Condition already exists, just add this cohort ID
-                    condition_map[f.condition_hash][2].add(cohort.id)
-                    self.stdout.write(f"  = Duplicate condition: {f.condition_hash}")
-
-        if not condition_map:
-            self.stdout.write(self.style.WARNING("No person property filters found across any cohorts"))
+        # Validate that only one team option is provided
+        if team_id and teams_ids:
+            self.stdout.write(self.style.ERROR("Cannot use both --team-id and --teams-ids. Please use only one."))
             return
 
-        # Convert to list of PersonPropertyFilter objects with deterministic ordering
-        deduplicated_filters = [
-            PersonPropertyFilter(
-                condition_hash=condition_hash,
-                bytecode=bytecode,
-                property_key=property_key,
-                cohort_ids=sorted(cohort_set),  # Sort cohort IDs for deterministic order
+        # Validate that at least one team option is provided
+        if not team_id and not teams_ids:
+            self.stdout.write(self.style.ERROR("Must provide either --team-id or --teams-ids"))
+            return
+
+        # Get team IDs to process
+        if team_id:
+            team_ids = [team_id]
+        else:
+            team_ids = teams_ids or []
+
+        self.stdout.write(self.style.SUCCESS(f"Processing {len(team_ids)} team(s): {team_ids}"))
+
+        # Process each team separately (each team needs its own workflow)
+        for current_team_id in team_ids:
+            self.stdout.write(self.style.SUCCESS(f"\n=== Processing Team {current_team_id} ==="))
+
+            # Get cohorts to process for this team
+            if cohort_id:
+                # Single cohort mode
+                try:
+                    cohorts = [Cohort.objects.get(id=cohort_id, team_id=current_team_id)]
+                except Cohort.DoesNotExist:
+                    self.stdout.write(self.style.ERROR(f"Cohort {cohort_id} not found for team {current_team_id}"))
+                    continue
+            else:
+                # All realtime cohorts for team
+                cohorts = list(
+                    Cohort.objects.filter(
+                        team_id=current_team_id,
+                        cohort_type=CohortType.REALTIME,
+                        deleted=False,
+                    ).order_by("id")
+                )
+                if not cohorts:
+                    self.stdout.write(self.style.WARNING(f"No realtime cohorts found for team {current_team_id}"))
+                    continue
+
+            self.stdout.write(
+                self.style.SUCCESS(f"Found {len(cohorts)} realtime cohort(s) to process for team {current_team_id}")
             )
-            for condition_hash, (bytecode, property_key, cohort_set) in sorted(
-                condition_map.items()
-            )  # Sort by condition_hash for deterministic order
-        ]
 
-        # Sort cohort_ids for deterministic workflow ordering
-        cohort_ids = sorted(cohort_ids)
+            # Collect and deduplicate filters across all cohorts for this team
+            condition_map: dict[str, tuple[list[Any], str | None, set[int]]] = {}
+            cohort_ids = []
+            total_original_filters = 0
+            for cohort in cohorts:
+                if cohort.cohort_type != CohortType.REALTIME:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"Skipping cohort {cohort.id}: not a realtime cohort (type: {cohort.cohort_type})"
+                        )
+                    )
+                    continue
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"\nDeduplicated {len(deduplicated_filters)} unique conditions across {len(cohort_ids)} cohorts"
+                # Extract person property filters
+                filters = extract_person_property_filters(cohort)
+                if not filters:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"Skipping cohort {cohort.id}: no person property filters with conditionHash and bytecode"
+                        )
+                    )
+                    continue
+
+                cohort_ids.append(cohort.id)
+                total_original_filters += len(filters)
+                self.stdout.write(
+                    self.style.SUCCESS(f"Cohort {cohort.id}: found {len(filters)} person property filters")
+                )
+
+                # Deduplicate by condition_hash
+                for f in filters:
+                    if f.condition_hash not in condition_map:
+                        condition_map[f.condition_hash] = (f.bytecode, f.property_key, {cohort.id})
+                        self.stdout.write(f"  + New condition: {f.condition_hash}")
+                    else:
+                        # Condition already exists, just add this cohort ID
+                        condition_map[f.condition_hash][2].add(cohort.id)
+                        self.stdout.write(f"  = Duplicate condition: {f.condition_hash}")
+
+            if not condition_map:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"No person property filters found across any cohorts for team {current_team_id}"
+                    )
+                )
+                continue
+
+            # Convert to list of PersonPropertyFilter objects with deterministic ordering
+            deduplicated_filters = [
+                PersonPropertyFilter(
+                    condition_hash=condition_hash,
+                    bytecode=bytecode,
+                    property_key=property_key,
+                    cohort_ids=sorted(cohort_set),  # Sort cohort IDs for deterministic order
+                )
+                for condition_hash, (bytecode, property_key, cohort_set) in sorted(
+                    condition_map.items()
+                )  # Sort by condition_hash for deterministic order
+            ]
+
+            # Sort cohort_ids for deterministic workflow ordering
+            cohort_ids = sorted(cohort_ids)
+
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"\nDeduplicated {len(deduplicated_filters)} unique conditions across {len(cohort_ids)} cohorts"
+                )
             )
-        )
-        for filter_obj in deduplicated_filters:
-            self.stdout.write(f"  - {filter_obj.condition_hash} (used by cohorts: {filter_obj.cohort_ids})")
+            for filter_obj in deduplicated_filters:
+                self.stdout.write(f"  - {filter_obj.condition_hash} (used by cohorts: {filter_obj.cohort_ids})")
 
-        # Run coordinator workflow with cursor-based sequential processing
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"\nProcessing {len(cohort_ids)} cohorts: reduced {total_original_filters} filters to {len(deduplicated_filters)} unique conditions"
+            # Run coordinator workflow with cursor-based sequential processing
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"\nProcessing {len(cohort_ids)} cohorts: reduced {total_original_filters} filters to {len(deduplicated_filters)} unique conditions"
+                )
             )
-        )
 
-        workflow_id = self.run_temporal_workflow(
-            team_id=team_id,
-            filters=deduplicated_filters,
-            cohort_ids=cohort_ids,
-            batch_size=batch_size,
-            concurrent_workflows=concurrent_workflows,
-            person_id=person_id,
-        )
-
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"\nSuccessfully started coordinator workflow for team {team_id}\n"
-                f"  Workflow ID: {workflow_id}\n"
-                f"  Cohorts: {cohort_ids}\n"
-                f"  Unique conditions: {len(deduplicated_filters)}\n"
-                f"  Batch size: {batch_size} persons per batch\n"
-                f"  Concurrent workflows: {concurrent_workflows}"
+            workflow_id = self.run_temporal_workflow(
+                team_id=current_team_id,
+                filters=deduplicated_filters,
+                cohort_ids=cohort_ids,
+                batch_size=batch_size,
+                concurrent_workflows=concurrent_workflows,
+                person_id=person_id,
             )
-        )
-        self.stdout.write(
-            f"\nWorkflow is running with {concurrent_workflows} concurrent child workflows using ID-range based batching. Check Temporal UI for progress and results."
-        )
+
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"\nSuccessfully started coordinator workflow for team {current_team_id}\n"
+                    f"  Workflow ID: {workflow_id}\n"
+                    f"  Cohorts: {cohort_ids}\n"
+                    f"  Unique conditions: {len(deduplicated_filters)}\n"
+                    f"  Batch size: {batch_size} persons per batch\n"
+                    f"  Concurrent workflows: {concurrent_workflows}"
+                )
+            )
+            self.stdout.write(
+                f"\nWorkflow is running with {concurrent_workflows} concurrent child workflows using ID-range based batching. Check Temporal UI for progress and results."
+            )
 
     def run_temporal_workflow(
         self,
