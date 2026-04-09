@@ -14,8 +14,10 @@ from rest_framework.test import APIRequestFactory
 
 from posthog.api.feature_flag import FeatureFlagSerializer
 from posthog.models import FeatureFlag, Team
+from posthog.models.action.action import Action
 from posthog.models.evaluation_context import EvaluationContext, FeatureFlagEvaluationContext
 
+from products.event_definitions.backend.models.event_definition import EventDefinition
 from products.experiments.backend.experiment_service import ExperimentService
 from products.experiments.backend.models.experiment import (
     Experiment,
@@ -2805,3 +2807,316 @@ class TestExperimentService(APIBaseTest):
         )
         assert experiment.stats_config is not None
         assert experiment.stats_config["method"] == method
+
+    # ------------------------------------------------------------------
+    # Action ID validation (hard error)
+    # ------------------------------------------------------------------
+
+    def test_metric_with_nonexistent_action_id_raises(self):
+        service = self._service()
+        with self.assertRaises(ValidationError) as ctx:
+            service.create_experiment(
+                name="Bad Action",
+                feature_flag_key="bad-action-flag",
+                metrics=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "ActionsNode", "id": 999999},
+                    },
+                ],
+            )
+        assert "999999" in str(ctx.exception.detail)
+
+    def test_metric_with_action_belonging_to_other_team_raises(self):
+        other_team = Team.objects.create(organization=self.organization, name="Other Team")
+        action = Action.objects.create(team=other_team, name="other team action")
+        service = self._service()
+        with self.assertRaises(ValidationError):
+            service.create_experiment(
+                name="Wrong Team Action",
+                feature_flag_key="wrong-team-action-flag",
+                metrics=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "ActionsNode", "id": action.id},
+                    },
+                ],
+            )
+
+    def test_metric_with_deleted_action_raises(self):
+        action = Action.objects.create(team=self.team, name="deleted action", deleted=True)
+        service = self._service()
+        with self.assertRaises(ValidationError):
+            service.create_experiment(
+                name="Deleted Action",
+                feature_flag_key="deleted-action-flag",
+                metrics=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "ActionsNode", "id": action.id},
+                    },
+                ],
+            )
+
+    def test_metric_with_valid_action_id_passes(self):
+        action = Action.objects.create(team=self.team, name="valid action")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Valid Action",
+            feature_flag_key="valid-action-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "ActionsNode", "id": action.id},
+                },
+            ],
+        )
+        assert len(experiment.metrics) == 1
+
+    def test_funnel_metric_with_nonexistent_action_in_series_raises(self):
+        action = Action.objects.create(team=self.team, name="real action")
+        service = self._service()
+        with self.assertRaises(ValidationError):
+            service.create_experiment(
+                name="Bad Funnel Action",
+                feature_flag_key="bad-funnel-action-flag",
+                metrics=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "funnel",
+                        "series": [
+                            {"kind": "ActionsNode", "id": action.id},
+                            {"kind": "ActionsNode", "id": 999999},
+                        ],
+                    },
+                ],
+            )
+
+    def test_ratio_metric_with_nonexistent_action_raises(self):
+        service = self._service()
+        with self.assertRaises(ValidationError):
+            service.create_experiment(
+                name="Bad Ratio Action",
+                feature_flag_key="bad-ratio-action-flag",
+                metrics=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "ratio",
+                        "numerator": {"kind": "EventsNode", "event": "$pageview"},
+                        "denominator": {"kind": "ActionsNode", "id": 999999},
+                    },
+                ],
+            )
+
+    def test_retention_metric_with_nonexistent_action_raises(self):
+        service = self._service()
+        with self.assertRaises(ValidationError):
+            service.create_experiment(
+                name="Bad Retention Action",
+                feature_flag_key="bad-retention-action-flag",
+                metrics=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "retention",
+                        "start_event": {"kind": "EventsNode", "event": "$pageview"},
+                        "completion_event": {"kind": "ActionsNode", "id": 999999},
+                        "retention_window_start": 0,
+                        "retention_window_end": 7,
+                        "retention_window_unit": "day",
+                        "start_handling": "strict",
+                    },
+                ],
+            )
+
+    def test_action_validation_in_secondary_metrics(self):
+        service = self._service()
+        with self.assertRaises(ValidationError):
+            service.create_experiment(
+                name="Bad Secondary Action",
+                feature_flag_key="bad-secondary-action-flag",
+                metrics_secondary=[
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "ActionsNode", "id": 999999},
+                    },
+                ],
+            )
+
+    # ------------------------------------------------------------------
+    # Event name warnings (soft, non-blocking)
+    # ------------------------------------------------------------------
+
+    def test_metric_with_unknown_event_sets_warning(self):
+        EventDefinition.objects.create(team=self.team, name="$pageview")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Unknown Event",
+            feature_flag_key="unknown-event-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "EventsNode", "event": "$pagevew"},
+                },
+            ],
+        )
+        assert hasattr(experiment, "_warnings")
+        assert any("$pagevew" in w for w in experiment._warnings)
+
+    def test_metric_with_known_event_has_no_warning(self):
+        EventDefinition.objects.create(team=self.team, name="$pageview")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Known Event",
+            feature_flag_key="known-event-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "EventsNode", "event": "$pageview"},
+                },
+            ],
+        )
+        assert experiment._warnings == []
+
+    def test_no_warnings_when_no_metrics(self):
+        service = self._service()
+        experiment = service.create_experiment(
+            name="No Metrics",
+            feature_flag_key="no-metrics-flag",
+        )
+        assert experiment._warnings == []
+
+    def test_warnings_across_multiple_metric_types(self):
+        EventDefinition.objects.create(team=self.team, name="$pageview")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Multi Warnings",
+            feature_flag_key="multi-warnings-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "EventsNode", "event": "$pageview"},
+                },
+            ],
+            metrics_secondary=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "EventsNode", "event": "totally_fake"},
+                },
+            ],
+        )
+        assert any("totally_fake" in w for w in experiment._warnings)
+        assert not any("$pageview" in w for w in experiment._warnings)
+
+    def test_funnel_series_events_checked_for_warnings(self):
+        EventDefinition.objects.create(team=self.team, name="step_one")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Funnel Warnings",
+            feature_flag_key="funnel-warnings-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "funnel",
+                    "series": [
+                        {"kind": "EventsNode", "event": "step_one"},
+                        {"kind": "EventsNode", "event": "step_two_typo"},
+                    ],
+                },
+            ],
+        )
+        assert any("step_two_typo" in w for w in experiment._warnings)
+        assert not any("step_one" in w for w in experiment._warnings)
+
+    def test_null_event_name_not_warned(self):
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Null Event",
+            feature_flag_key="null-event-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "EventsNode", "event": None},
+                },
+            ],
+        )
+        assert experiment._warnings == []
+
+    def test_action_nodes_not_checked_for_event_warnings(self):
+        action = Action.objects.create(team=self.team, name="valid action for warning test")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Action No Warning",
+            feature_flag_key="action-no-warning-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "ActionsNode", "id": action.id},
+                },
+            ],
+        )
+        assert experiment._warnings == []
+
+    # ------------------------------------------------------------------
+    # Warnings on update_experiment
+    # ------------------------------------------------------------------
+
+    def test_update_experiment_with_unknown_event_sets_warning(self):
+        EventDefinition.objects.create(team=self.team, name="$pageview")
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Update Warning",
+            feature_flag_key="update-warning-flag",
+            metrics=[
+                {
+                    "kind": "ExperimentMetric",
+                    "metric_type": "mean",
+                    "source": {"kind": "EventsNode", "event": "$pageview"},
+                },
+            ],
+        )
+        assert experiment._warnings == []
+
+        updated = service.update_experiment(
+            experiment,
+            {
+                "metrics": [
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "EventsNode", "event": "nonexistent_event"},
+                    },
+                ],
+            },
+        )
+        assert any("nonexistent_event" in w for w in updated._warnings)
+
+    def test_update_experiment_with_nonexistent_action_raises(self):
+        service = self._service()
+        experiment = service.create_experiment(
+            name="Update Action Error",
+            feature_flag_key="update-action-error-flag",
+        )
+        with self.assertRaises(ValidationError):
+            service.update_experiment(
+                experiment,
+                {
+                    "metrics": [
+                        {
+                            "kind": "ExperimentMetric",
+                            "metric_type": "mean",
+                            "source": {"kind": "ActionsNode", "id": 999999},
+                        },
+                    ],
+                },
+            )

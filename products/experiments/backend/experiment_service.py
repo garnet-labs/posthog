@@ -23,6 +23,7 @@ from posthog.api.cohort import CohortSerializer
 from posthog.api.feature_flag import FeatureFlagSerializer
 from posthog.event_usage import EventSource, report_user_action
 from posthog.hogql_queries.experiments.experiment_metric_fingerprint import compute_metric_fingerprint
+from posthog.models.action.action import Action
 from posthog.models.cohort import Cohort
 from posthog.models.evaluation_context import FeatureFlagEvaluationContext
 from posthog.models.feature_flag.feature_flag import FeatureFlag
@@ -247,6 +248,102 @@ class ExperimentService:
         if saved_metrics.count() != len(saved_metrics_ids):
             raise ValidationError("Saved metric does not exist or does not belong to this project")
 
+    @staticmethod
+    def _extract_entity_nodes(metrics: list[dict] | None) -> tuple[set[str], set[int]]:
+        """Extract event names and action IDs from all EventsNode/ActionsNode refs in metrics."""
+        event_names: set[str] = set()
+        action_ids: set[int] = set()
+        if not metrics:
+            return event_names, action_ids
+
+        for metric in metrics:
+            if not isinstance(metric, dict):
+                continue
+            nodes: list[dict] = []
+            metric_type = metric.get("metric_type")
+            if metric_type == "mean":
+                if source := metric.get("source"):
+                    nodes.append(source)
+            elif metric_type == "funnel":
+                nodes.extend(metric.get("series", []))
+            elif metric_type == "ratio":
+                if num := metric.get("numerator"):
+                    nodes.append(num)
+                if den := metric.get("denominator"):
+                    nodes.append(den)
+            elif metric_type == "retention":
+                if se := metric.get("start_event"):
+                    nodes.append(se)
+                if ce := metric.get("completion_event"):
+                    nodes.append(ce)
+
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                kind = node.get("kind")
+                if kind == "EventsNode":
+                    event = node.get("event")
+                    if event is not None:
+                        event_names.add(event)
+                elif kind == "ActionsNode":
+                    if (action_id := node.get("id")) is not None:
+                        action_ids.add(int(action_id))
+
+        return event_names, action_ids
+
+    @classmethod
+    def validate_metric_action_ids(cls, metrics: list[dict] | None, team_id: int) -> None:
+        """Validate that all ActionsNode IDs reference existing, non-deleted actions for the team.
+
+        Actions are explicitly created entities with stable IDs, so a reference to a
+        nonexistent action is almost certainly a mistake, so we raise a hard validation error.
+        """
+        _, action_ids = cls._extract_entity_nodes(metrics)
+        if not action_ids:
+            return
+
+        existing_ids = set(
+            Action.objects.filter(
+                id__in=action_ids,
+                team_id=team_id,
+                deleted=False,
+            ).values_list("id", flat=True)
+        )
+        missing = action_ids - existing_ids
+        if missing:
+            missing_str = ", ".join(str(aid) for aid in sorted(missing))
+            raise ValidationError(
+                f"Action(s) with ID {missing_str} not found or deleted. "
+                "Each ActionsNode must reference an existing action belonging to this project."
+            )
+
+    def get_warnings_for_unknown_metric_events(self, *metric_lists: list[dict] | None) -> list[str]:
+        """Return warnings for event names not yet seen by this team.
+
+        Events are schema-on-write - new names appear automatically on first ingestion,
+        so an "unknown" event may be intentional (e.g. setting up an experiment before
+        deploying the code that emits the event). We warn instead of blocking, which allows
+        us to surface typos while permitting legitimate use.
+        """
+        all_event_names: set[str] = set()
+        for metrics in metric_lists:
+            event_names, _ = self._extract_entity_nodes(metrics)
+            all_event_names.update(event_names)
+
+        if not all_event_names:
+            return []
+
+        from products.event_definitions.backend.models.event_definition import EventDefinition
+
+        existing = set(
+            EventDefinition.objects.filter(
+                team_id=self.team.id,
+                name__in=all_event_names,
+            ).values_list("name", flat=True)
+        )
+        unknown = all_event_names - existing
+        return [f"Event '{name}' has not been seen yet by this project." for name in sorted(unknown)]
+
     @transaction.atomic
     def create_experiment(
         self,
@@ -283,6 +380,8 @@ class ExperimentService:
         self.validate_variant_shapes(parameters)
         self.validate_experiment_metrics(metrics)
         self.validate_experiment_metrics(metrics_secondary)
+        self.validate_metric_action_ids(metrics, self.team.id)
+        self.validate_metric_action_ids(metrics_secondary, self.team.id)
         self.validate_stats_config(stats_config)
         self.validate_saved_metrics_ids(saved_metrics_ids, self.team.id)
         is_draft = start_date is None
@@ -386,6 +485,8 @@ class ExperimentService:
             serializer_context=serializer_context,
             event_source=event_source,
         )
+
+        experiment._warnings = self.get_warnings_for_unknown_metric_events(metrics, metrics_secondary)
 
         return experiment
 
@@ -1133,6 +1234,10 @@ class ExperimentService:
         """
         if "saved_metrics_ids" in update_data:
             self.validate_saved_metrics_ids(update_data["saved_metrics_ids"], self.team.id)
+        if "metrics" in update_data:
+            self.validate_metric_action_ids(update_data["metrics"], self.team.id)
+        if "metrics_secondary" in update_data:
+            self.validate_metric_action_ids(update_data["metrics_secondary"], self.team.id)
 
         context = serializer_context or self._build_serializer_context()
         feature_flag = experiment.feature_flag
@@ -1262,6 +1367,12 @@ class ExperimentService:
         for attr, value in update_data.items():
             setattr(experiment, attr, value)
         experiment.save()
+
+        # Use final persisted metrics for event existence warnings
+        experiment._warnings = self.get_warnings_for_unknown_metric_events(
+            experiment.metrics,
+            experiment.metrics_secondary,
+        )
 
         return experiment
 

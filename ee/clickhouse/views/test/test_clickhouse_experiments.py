@@ -3911,6 +3911,124 @@ class TestExperimentCRUD(APILicensedTest):
         )
         self.assertEqual(ship_response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    # ------------------------------------------------------------------
+    # Action ID validation & event name warnings in API responses
+    # ------------------------------------------------------------------
+
+    def test_create_with_nonexistent_action_returns_400(self):
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/experiments/",
+            {
+                "name": "Bad Action Experiment",
+                "feature_flag_key": "bad-action-api-flag",
+                "metrics": [
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "ActionsNode", "id": 999999},
+                    },
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("999999", response.json()["detail"])
+
+    def test_create_with_unknown_event_returns_warnings(self):
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/experiments/",
+            {
+                "name": "Unknown Event Experiment",
+                "feature_flag_key": "unknown-event-api-flag",
+                "metrics": [
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "EventsNode", "event": "$pagevew"},
+                    },
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertIn("warnings", data)
+        self.assertTrue(any("$pagevew" in w for w in data["warnings"]))
+
+    def test_create_with_known_event_has_no_warnings_key(self):
+        from products.event_definitions.backend.models.event_definition import EventDefinition
+
+        EventDefinition.objects.create(team=self.team, name="$pageview")
+        response = self.client.post(
+            f"/api/projects/{self.team.id}/experiments/",
+            {
+                "name": "Known Event Experiment",
+                "feature_flag_key": "known-event-api-flag",
+                "metrics": [
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "EventsNode", "event": "$pageview"},
+                    },
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertNotIn("warnings", response.json())
+
+    def test_retrieve_experiment_has_no_warnings_key(self):
+        create_response = self.client.post(
+            f"/api/projects/{self.team.id}/experiments/",
+            {
+                "name": "Retrieve No Warnings",
+                "feature_flag_key": "retrieve-no-warnings-flag",
+                "metrics": [
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "EventsNode", "event": "nonexistent_event"},
+                    },
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        experiment_id = create_response.json()["id"]
+
+        retrieve_response = self.client.get(f"/api/projects/{self.team.id}/experiments/{experiment_id}/")
+        self.assertEqual(retrieve_response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("warnings", retrieve_response.json())
+
+    def test_update_with_unknown_event_returns_warnings(self):
+        create_response = self.client.post(
+            f"/api/projects/{self.team.id}/experiments/",
+            {
+                "name": "Update Warning Experiment",
+                "feature_flag_key": "update-warning-api-flag",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        experiment_id = create_response.json()["id"]
+
+        update_response = self.client.patch(
+            f"/api/projects/{self.team.id}/experiments/{experiment_id}/",
+            {
+                "metrics": [
+                    {
+                        "kind": "ExperimentMetric",
+                        "metric_type": "mean",
+                        "source": {"kind": "EventsNode", "event": "totally_fake_event"},
+                    },
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertIn("warnings", update_response.json())
+        self.assertTrue(any("totally_fake_event" in w for w in update_response.json()["warnings"]))
+
 
 class TestExperimentAuxiliaryEndpoints(ClickhouseTestMixin, APILicensedTest):
     def _generate_experiment(self, start_date="2024-01-01T10:23", extra_parameters=None):

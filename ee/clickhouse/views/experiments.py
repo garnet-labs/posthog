@@ -161,6 +161,10 @@ class ExperimentSerializer(UserAccessControlSerializerMixin, serializers.ModelSe
                     only_count_matured_users=instance.only_count_matured_users,
                 )
 
+        warnings = getattr(instance, "_warnings", None)
+        if warnings:
+            data["warnings"] = warnings
+
         return data
 
     def validate_saved_metrics_ids(self, value):
