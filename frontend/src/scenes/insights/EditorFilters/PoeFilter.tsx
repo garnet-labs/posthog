@@ -16,7 +16,7 @@ export function PoeFilter({ insightProps }: PoeFilterProps): JSX.Element {
     const { hasDataWarehouseSeries } = useValues(insightVizDataLogic(insightProps))
     const { setPoeMode } = useActions(poeFilterLogic(insightProps))
     const disabledReason = hasDataWarehouseSeries
-        ? 'Data warehouse insights always use properties from the selected table.'
+        ? 'Data warehouse insights always use the latest table properties.'
         : null
 
     return (
