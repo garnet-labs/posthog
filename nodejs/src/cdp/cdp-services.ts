@@ -2,7 +2,7 @@ import { RedisV2, createRedisV2PoolFromConfig } from '~/common/redis/redis-v2'
 
 import type { CommonConfig } from '../common/config'
 import { InternalCaptureService } from '../common/services/internal-capture'
-import { APP_METRICS_OUTPUT, LOG_ENTRIES_OUTPUT } from '../ingestion/common/outputs'
+import { APP_METRICS_OUTPUT, LOG_ENTRIES_OUTPUT } from '../ingestion/common/outputs/names'
 import { IngestionOutputs } from '../ingestion/outputs/ingestion-outputs'
 import { SingleIngestionOutput } from '../ingestion/outputs/single-ingestion-output'
 import { KafkaProducerWrapper } from '../kafka/producer'

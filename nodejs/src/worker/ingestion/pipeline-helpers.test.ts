@@ -2,7 +2,7 @@ import { Message } from 'node-rdkafka'
 
 import { createMockIngestionOutputs } from '../../../tests/helpers/mock-ingestion-outputs'
 import { emitIngestionWarning } from '../../ingestion/common/ingestion-warnings'
-import { DLQ_OUTPUT } from '../../ingestion/common/outputs'
+import { DLQ_OUTPUT } from '../../ingestion/common/outputs/names'
 import { IngestionOutputs } from '../../ingestion/outputs/ingestion-outputs'
 import { logger } from '../../utils/logger'
 import { captureException } from '../../utils/posthog'

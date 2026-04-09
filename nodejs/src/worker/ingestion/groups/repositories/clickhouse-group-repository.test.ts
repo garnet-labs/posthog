@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon'
 
-import { GROUPS_OUTPUT, GroupsOutput } from '~/ingestion/common/outputs'
+import { GROUPS_OUTPUT, GroupsOutput } from '~/ingestion/common/outputs/names'
 import { IngestionOutputs } from '~/ingestion/outputs/ingestion-outputs'
 
 import { GroupTypeIndex, TeamId } from '../../../../types'

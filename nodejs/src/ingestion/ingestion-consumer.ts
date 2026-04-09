@@ -40,7 +40,7 @@ import {
     HeatmapsOutput,
     PersonDistinctIdsOutput,
     PersonsOutput,
-} from './analytics/outputs'
+} from './analytics/outputs/names'
 import { EventFilterManager } from './common/event-filters'
 import {
     AppMetricsOutput,
@@ -49,7 +49,7 @@ import {
     IngestionWarningsOutput,
     OverflowOutput,
     TophogOutput,
-} from './common/outputs'
+} from './common/outputs/names'
 import { IngestionConsumerConfig } from './config'
 import { CookielessManager } from './cookieless/cookieless-manager'
 import { parseSplitAiEventsConfig } from './event-processing/split-ai-events-step'

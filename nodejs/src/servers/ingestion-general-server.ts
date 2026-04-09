@@ -16,26 +16,29 @@ import {
     KAFKA_EVENTS_PLUGIN_INGESTION_OVERFLOW,
 } from '../config/kafka-topics'
 import { createCookielessRedisConnectionConfig, createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { createOutputsRegistry } from '../ingestion/analytics/config/outputs'
-import { ProducerName, createProducerRegistry } from '../ingestion/common/outputs'
+import { createOutputsRegistry } from '../ingestion/analytics/outputs/registry'
+import {
+    KafkaProducerEnvConfig,
+    KafkaWarpstreamProducerEnvConfig,
+    getDefaultKafkaProducerEnvConfig,
+    getDefaultKafkaWarpstreamProducerEnvConfig,
+} from '../ingestion/common/config'
+import { ProducerName } from '../ingestion/common/outputs/names'
+import { createProducerRegistry } from '../ingestion/common/outputs/registry'
 import {
     DatabaseConnectionConfig,
     IngestionConsumerConfig,
     IngestionOutputsConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
-    KafkaProducerEnvConfig,
-    KafkaWarpstreamProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
     getDefaultIngestionOutputsConfig,
-    getDefaultKafkaProducerEnvConfig,
-    getDefaultKafkaWarpstreamProducerEnvConfig,
 } from '../ingestion/config'
 import { CookielessManager } from '../ingestion/cookieless/cookieless-manager'
 import { IngestionConsumer, IngestionConsumerDeps } from '../ingestion/ingestion-consumer'
 import { IngestionTestingConsumer } from '../ingestion/ingestion-testing-consumer'
-import { KafkaProducerRegistry } from '../ingestion/outputs'
+import { KafkaProducerRegistry } from '../ingestion/outputs/kafka-producer-registry'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { KafkaProducerWrapper } from '../kafka/producer'
 import { PluginServerService, RedisPool } from '../types'

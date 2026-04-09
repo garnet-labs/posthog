@@ -12,7 +12,7 @@ import { UUIDT } from '~/utils/utils'
 import { GroupTypeManager } from '~/worker/ingestion/group-type-manager'
 import { PersonRepository } from '~/worker/ingestion/persons/repositories/person-repository'
 
-import { TophogOutput } from '../common/outputs'
+import { TophogOutput } from '../common/outputs/names'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { SingleIngestionOutput } from '../outputs/single-ingestion-output'
 import { TopHogRegistry } from '../pipelines/extensions/tophog'

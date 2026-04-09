@@ -3,7 +3,12 @@ import { Counter, Gauge, Histogram } from 'prom-client'
 import { InternalCaptureEvent, InternalCaptureService } from '~/common/services/internal-capture'
 import { instrumentFn } from '~/common/tracing/tracing-utils'
 import { KAFKA_WAREHOUSE_SOURCE_WEBHOOKS } from '~/config/kafka-topics'
-import { APP_METRICS_OUTPUT, AppMetricsOutput, LOG_ENTRIES_OUTPUT, LogEntriesOutput } from '~/ingestion/common/outputs'
+import {
+    APP_METRICS_OUTPUT,
+    AppMetricsOutput,
+    LOG_ENTRIES_OUTPUT,
+    LogEntriesOutput,
+} from '~/ingestion/common/outputs/names'
 import { IngestionOutputs } from '~/ingestion/outputs/ingestion-outputs'
 import { KafkaProducerWrapper } from '~/kafka/producer'
 

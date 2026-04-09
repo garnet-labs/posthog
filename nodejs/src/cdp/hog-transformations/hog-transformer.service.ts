@@ -8,7 +8,7 @@ import { CyclotronJobInvocationResult, HogFunctionInvocationGlobals, HogFunction
 import { isLegacyPluginHogFunction } from '../../cdp/utils'
 import type { CommonConfig } from '../../common/config'
 import { InternalCaptureService } from '../../common/services/internal-capture'
-import { AppMetricsOutput, LogEntriesOutput } from '../../ingestion/common/outputs'
+import { AppMetricsOutput, LogEntriesOutput } from '../../ingestion/common/outputs/names'
 import { IngestionOutputs } from '../../ingestion/outputs/ingestion-outputs'
 import { PostgresRouter } from '../../utils/db/postgres'
 import { GeoIPService, GeoIp } from '../../utils/geoip'

@@ -6,7 +6,7 @@ import {
     LOG_ENTRIES_OUTPUT,
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
-} from '../../common/outputs'
+} from '../../common/outputs/names'
 import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder'
 import {
     AI_EVENTS_OUTPUT,
@@ -15,7 +15,7 @@ import {
     HEATMAPS_OUTPUT,
     PERSONS_OUTPUT,
     PERSON_DISTINCT_IDS_OUTPUT,
-} from '../outputs'
+} from './names'
 
 /** Register all analytics ingestion outputs on the builder. Call `.build(registry, config)` to resolve. */
 export function createOutputsRegistry() {

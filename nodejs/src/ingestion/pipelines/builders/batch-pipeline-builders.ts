@@ -1,7 +1,7 @@
 import { Message } from 'node-rdkafka'
 
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
-import { IngestionWarningsOutput } from '../../common/outputs'
+import { IngestionWarningsOutput } from '../../common/outputs/names'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
 import { BaseBatchPipeline, BatchProcessingStep } from '../base-batch-pipeline'
 import { BatchPipeline } from '../batch-pipeline.interface'

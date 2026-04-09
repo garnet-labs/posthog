@@ -9,8 +9,13 @@ import { createTestPluginEvent } from '../../../../tests/helpers/plugin-event'
 import { createTestTeam } from '../../../../tests/helpers/team'
 import { InternalPerson, PropertyUpdateOperation } from '../../../types'
 import { parseJSON } from '../../../utils/json-parse'
-import { AI_EVENTS_OUTPUT, EVENTS_OUTPUT, PERSONS_OUTPUT, PERSON_DISTINCT_IDS_OUTPUT } from '../../analytics/outputs'
-import { INGESTION_WARNINGS_OUTPUT } from '../../common/outputs'
+import {
+    AI_EVENTS_OUTPUT,
+    EVENTS_OUTPUT,
+    PERSONS_OUTPUT,
+    PERSON_DISTINCT_IDS_OUTPUT,
+} from '../../analytics/outputs/names'
+import { INGESTION_WARNINGS_OUTPUT } from '../../common/outputs/names'
 import { IngestionOutputs } from '../../outputs/ingestion-outputs'
 import { newPipelineBuilder } from '../../pipelines/builders'
 import { createOkContext } from '../../pipelines/helpers'

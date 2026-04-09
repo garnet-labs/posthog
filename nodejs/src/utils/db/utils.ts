@@ -3,7 +3,7 @@ import { Counter } from 'prom-client'
 import { Properties } from '~/plugin-scaffold'
 
 import { defaultConfig } from '../../config/config'
-import { PERSONS_OUTPUT } from '../../ingestion/analytics/outputs'
+import { PERSONS_OUTPUT } from '../../ingestion/analytics/outputs/names'
 import { BasePerson, InternalPerson, RawPerson, TimestampFormat } from '../../types'
 import { logger } from '../../utils/logger'
 import { castTimestampOrNow } from '../../utils/utils'

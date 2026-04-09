@@ -6,7 +6,7 @@ import {
     LOG_ENTRIES_OUTPUT,
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
-} from '../../common/outputs'
+} from '../../common/outputs/names'
 import { IngestionOutputsBuilder } from '../../outputs/ingestion-outputs-builder'
 
 /** Register all error tracking outputs on the builder. Call `.build(registry, config)` to resolve. */

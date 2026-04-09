@@ -1,5 +1,5 @@
 import { parseJSON } from '../../utils/json-parse'
-import { TOPHOG_OUTPUT, TophogOutput } from '../common/outputs'
+import { TOPHOG_OUTPUT, TophogOutput } from '../common/outputs/names'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { TopHog, TopHogOptionalConfig, TopHogRequiredConfig } from './tophog'
 

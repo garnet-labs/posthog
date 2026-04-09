@@ -47,7 +47,7 @@ import { createMockIngestionOutputs } from '../../../../tests/helpers/mock-inges
 import { createTestTeam } from '../../../../tests/helpers/team'
 import { Team } from '../../../types'
 import { PromiseScheduler } from '../../../utils/promise-scheduler'
-import { IngestionWarningsOutput } from '../../common/outputs'
+import { IngestionWarningsOutput } from '../../common/outputs/names'
 import { newBatchPipelineBuilder } from '../builders'
 import { createOkContext } from '../helpers'
 import { PipelineWarning } from '../pipeline.interface'

@@ -9,7 +9,7 @@ import { PersonMergeService } from '../../worker/ingestion/persons/person-merge-
 import { determineMergeMode } from '../../worker/ingestion/persons/person-merge-types'
 import { PersonPropertyService } from '../../worker/ingestion/persons/person-property-service'
 import { PersonsStore } from '../../worker/ingestion/persons/persons-store'
-import { AsyncOutput } from '../analytics/outputs'
+import { AsyncOutput } from '../analytics/outputs/names'
 import { PipelineResult, isOkResult, ok } from '../pipelines/results'
 import { ProcessingStep } from '../pipelines/steps'
 import { EventPipelineRunnerOptions } from './event-pipeline-options'

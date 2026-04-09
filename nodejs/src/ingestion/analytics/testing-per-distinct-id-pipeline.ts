@@ -2,14 +2,14 @@ import { Message } from 'node-rdkafka'
 
 import { Team } from '../../types'
 import { AI_EVENT_TYPES } from '../ai'
-import { IngestionWarningsOutput } from '../common/outputs'
+import { IngestionWarningsOutput } from '../common/outputs/names'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
 import {
     ClientIngestionWarningSubpipelineInput,
     createClientIngestionWarningSubpipeline,
 } from './client-ingestion-warning-subpipeline'
-import { EventOutput, HeatmapsOutput } from './outputs'
+import { EventOutput, HeatmapsOutput } from './outputs/names'
 import { TestingAiEventSubpipelineInput, createTestingAiEventSubpipeline } from './testing-ai-event-subpipeline'
 import { TestingEventSubpipelineInput, createTestingEventSubpipeline } from './testing-event-subpipeline'
 import { TestingHeatmapSubpipelineInput, createTestingHeatmapSubpipeline } from './testing-heatmap-subpipeline'

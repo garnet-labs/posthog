@@ -11,26 +11,29 @@ import { EncryptedFields } from '../cdp/utils/encryption-utils'
 import { CommonConfig } from '../common/config'
 import { defaultConfig, overrideConfigWithEnv } from '../config/config'
 import { createIngestionRedisConnectionConfig } from '../config/redis-pools'
-import { ProducerName, createProducerRegistry } from '../ingestion/common/outputs'
+import {
+    KafkaProducerEnvConfig,
+    KafkaWarpstreamProducerEnvConfig,
+    getDefaultKafkaProducerEnvConfig,
+    getDefaultKafkaWarpstreamProducerEnvConfig,
+} from '../ingestion/common/config'
+import { ProducerName } from '../ingestion/common/outputs/names'
+import { createProducerRegistry } from '../ingestion/common/outputs/registry'
 import {
     DatabaseConnectionConfig,
     KafkaBrokerConfig,
     KafkaConsumerBaseConfig,
-    KafkaProducerEnvConfig,
-    KafkaWarpstreamProducerEnvConfig,
     PersonHogConfig,
     RedisConnectionsConfig,
-    getDefaultKafkaProducerEnvConfig,
-    getDefaultKafkaWarpstreamProducerEnvConfig,
 } from '../ingestion/config'
 import {
     ErrorTrackingConsumerConfig,
     ErrorTrackingOutputsConfig,
     getDefaultErrorTrackingOutputsConfig,
 } from '../ingestion/error-tracking/config'
-import { createOutputsRegistry } from '../ingestion/error-tracking/config/outputs'
 import { ErrorTrackingConsumer } from '../ingestion/error-tracking/error-tracking-consumer'
-import { KafkaProducerRegistry } from '../ingestion/outputs'
+import { createOutputsRegistry } from '../ingestion/error-tracking/outputs/registry'
+import { KafkaProducerRegistry } from '../ingestion/outputs/kafka-producer-registry'
 import { buildGroupRepository, buildPersonRepository, createPersonHogClient } from '../ingestion/personhog'
 import { PluginServerService, RedisPool } from '../types'
 import { ServerCommands } from '../utils/commands'

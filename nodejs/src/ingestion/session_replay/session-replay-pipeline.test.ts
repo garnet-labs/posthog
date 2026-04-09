@@ -9,7 +9,7 @@ import { TeamService } from '../../session-replay/shared/teams/team-service'
 import { EventIngestionRestrictionManager } from '../../utils/event-ingestion-restrictions'
 import { parseJSON } from '../../utils/json-parse'
 import { PromiseScheduler } from '../../utils/promise-scheduler'
-import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../common/outputs'
+import { DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, OVERFLOW_OUTPUT } from '../common/outputs/names'
 import { createApplyEventRestrictionsStep, createParseHeadersStep } from '../event-preprocessing'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { TopHogRegistry } from '../pipelines/extensions/tophog'
@@ -612,7 +612,7 @@ describe('session-replay-pipeline', () => {
                 INGESTION_WARNINGS_OUTPUT,
                 expect.arrayContaining([
                     expect.objectContaining({
-                        value: expect.any(String),
+                        value: expect.any(Buffer),
                     }),
                 ])
             )
@@ -691,7 +691,7 @@ describe('session-replay-pipeline', () => {
                 INGESTION_WARNINGS_OUTPUT,
                 expect.arrayContaining([
                     expect.objectContaining({
-                        value: expect.any(String),
+                        value: expect.any(Buffer),
                     }),
                 ])
             )

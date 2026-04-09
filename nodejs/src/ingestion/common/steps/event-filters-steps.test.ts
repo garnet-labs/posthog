@@ -7,7 +7,7 @@ import { EventFilterManager } from '../event-filters'
 import { EventFiltersBatchAppMetrics } from '../event-filters/batch-app-metrics'
 import { FilterNode } from '../event-filters/schema'
 import { and, cond, not, or } from '../event-filters/test-helpers'
-import { AppMetricsOutput } from '../outputs'
+import { AppMetricsOutput } from '../outputs/names'
 import {
     createApplyEventFiltersStep,
     createEventFiltersBatchAppMetricsBeforeBatchStep,

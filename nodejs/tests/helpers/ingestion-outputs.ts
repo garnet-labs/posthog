@@ -20,7 +20,7 @@ import {
     HEATMAPS_OUTPUT,
     PERSONS_OUTPUT,
     PERSON_DISTINCT_IDS_OUTPUT,
-} from '../../src/ingestion/analytics/outputs'
+} from '../../src/ingestion/analytics/outputs/names'
 import {
     APP_METRICS_OUTPUT,
     DLQ_OUTPUT,
@@ -29,7 +29,7 @@ import {
     LOG_ENTRIES_OUTPUT,
     OVERFLOW_OUTPUT,
     TOPHOG_OUTPUT,
-} from '../../src/ingestion/common/outputs'
+} from '../../src/ingestion/common/outputs/names'
 import { IngestionOutputs } from '../../src/ingestion/outputs/ingestion-outputs'
 import { SingleIngestionOutput } from '../../src/ingestion/outputs/single-ingestion-output'
 import { KafkaProducerWrapper } from '../../src/kafka/producer'

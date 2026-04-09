@@ -7,7 +7,7 @@ import { logger } from '../../utils/logger'
 import { IngestionWarningLimiter } from '../../utils/token-bucket'
 import { castTimestampOrNow } from '../../utils/utils'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
-import { INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput } from './outputs'
+import { INGESTION_WARNINGS_OUTPUT, IngestionWarningsOutput } from './outputs/names'
 
 export const ingestionWarningCounter = new Counter({
     name: 'ingestion_warnings_total',

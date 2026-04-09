@@ -13,7 +13,7 @@ import {
     IngestionWarningsOutput,
     OverflowOutput,
     TophogOutput,
-} from '../common/outputs'
+} from '../common/outputs/names'
 import {
     createApplyEventRestrictionsStep,
     createOverflowLaneTTLRefreshStep,

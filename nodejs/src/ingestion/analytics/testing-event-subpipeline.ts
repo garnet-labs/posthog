@@ -3,7 +3,7 @@ import { Message } from 'node-rdkafka'
 import { PluginEvent } from '~/plugin-scaffold'
 
 import { EventHeaders, Team } from '../../types'
-import { IngestionWarningsOutput } from '../common/outputs'
+import { IngestionWarningsOutput } from '../common/outputs/names'
 import { createCreateEventStep } from '../event-processing/create-event-step'
 import { createDisablePersonProcessingWithFakePersonStep } from '../event-processing/disable-person-processing-with-fake-person-step'
 import { createEmitEventStep } from '../event-processing/emit-event-step'
@@ -12,7 +12,7 @@ import { createNormalizeEventStep } from '../event-processing/normalize-event-st
 import { createPrepareEventStep } from '../event-processing/prepare-event-step'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
-import { EVENTS_OUTPUT, EventOutput, HeatmapsOutput } from './outputs'
+import { EVENTS_OUTPUT, EventOutput, HeatmapsOutput } from './outputs/names'
 
 export interface TestingEventSubpipelineInput {
     message: Message

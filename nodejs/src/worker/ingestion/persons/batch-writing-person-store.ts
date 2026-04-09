@@ -5,7 +5,7 @@ import { Properties } from '~/plugin-scaffold'
 import { NoRowsUpdatedError } from '~/utils/utils'
 
 import { emitIngestionWarning } from '../../../ingestion/common/ingestion-warnings'
-import { IngestionWarningsOutput } from '../../../ingestion/common/outputs'
+import { IngestionWarningsOutput } from '../../../ingestion/common/outputs/names'
 import { IngestionOutputs } from '../../../ingestion/outputs/ingestion-outputs'
 import {
     InternalPerson,

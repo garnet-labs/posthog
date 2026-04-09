@@ -14,7 +14,7 @@ import { createProcessGroupsStep } from '../event-processing/process-groups-step
 import { createSkipEmitEventStep } from '../event-processing/skip-emit-event-step'
 import { IngestionOutputs } from '../outputs/ingestion-outputs'
 import { PipelineBuilder, StartPipelineBuilder } from '../pipelines/builders/pipeline-builders'
-import { HeatmapsOutput } from './outputs'
+import { HeatmapsOutput } from './outputs/names'
 
 export interface HeatmapSubpipelineInput {
     event: PluginEvent
