@@ -27,6 +27,7 @@ import {
     getReferenceStep,
     getTooltipTitleForConverted,
     getTooltipTitleForDroppedOff,
+    shouldRenderStepAsBreakdown,
 } from '../funnelUtils'
 import { ValueInspectorButton } from '../ValueInspectorButton'
 import { Bar } from './Bar'
@@ -47,6 +48,8 @@ export function FunnelBarHorizontal({
 
     const { canOpenPersonModal } = useValues(funnelPersonsModalLogic(insightProps))
     const { openPersonsModalForStep, openPersonsModalForSeries } = useActions(funnelPersonsModalLogic(insightProps))
+
+    const hasBreakdown = !!breakdownFilter?.breakdown
 
     const steps = visibleStepsWithConversionMetrics
     const stepReference = funnelsFilter?.funnelStepReference || FunnelStepReference.total
@@ -76,10 +79,7 @@ export function FunnelBarHorizontal({
                         step.nested_breakdown?.reduce((sum, item) => sum + item.count, 0)) ||
                     0
 
-                const isBreakdown =
-                    Array.isArray(step.nested_breakdown) &&
-                    step.nested_breakdown?.length !== undefined &&
-                    !(step.nested_breakdown.length === 1)
+                const isBreakdown = shouldRenderStepAsBreakdown(step.nested_breakdown, hasBreakdown)
 
                 return (
                     <section

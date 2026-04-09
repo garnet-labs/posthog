@@ -22,6 +22,7 @@ import {
     getReferenceStep,
     getVisibilityKey,
     parseDisplayNameForCorrelation,
+    shouldRenderStepAsBreakdown,
     stepsWithConversionMetrics,
 } from './funnelUtils'
 
@@ -699,5 +700,54 @@ describe('getLastFilledStep', () => {
         },
     ])('$scenario', ({ steps, index, expectedOrder }) => {
         expect(getLastFilledStep(steps, index).order).toBe(expectedOrder)
+    })
+})
+
+describe('shouldRenderStepAsBreakdown', () => {
+    it.each([
+        {
+            scenario: 'multiple breakdown values → breakdown',
+            nested: [{ breakdown_value: 'NL' }, { breakdown_value: 'US' }],
+            hasBreakdown: true,
+            expected: true,
+        },
+        {
+            scenario: 'single breakdown value with breakdown filter set → breakdown',
+            nested: [{ breakdown_value: 'NL' }],
+            hasBreakdown: true,
+            expected: true,
+        },
+        {
+            scenario: 'single entry without breakdown filter → not a breakdown',
+            nested: [{ breakdown_value: 'NL' }],
+            hasBreakdown: false,
+            expected: false,
+        },
+        {
+            scenario: 'single entry with breakdown filter but null breakdown_value → not a breakdown',
+            nested: [{ breakdown_value: null as any }],
+            hasBreakdown: true,
+            expected: false,
+        },
+        {
+            scenario: 'empty array → breakdown (matches original behavior so empty branch renders nothing)',
+            nested: [],
+            hasBreakdown: true,
+            expected: true,
+        },
+        {
+            scenario: 'undefined nested_breakdown → not a breakdown',
+            nested: undefined,
+            hasBreakdown: true,
+            expected: false,
+        },
+        {
+            scenario: 'null nested_breakdown → not a breakdown',
+            nested: null,
+            hasBreakdown: true,
+            expected: false,
+        },
+    ])('$scenario', ({ nested, hasBreakdown, expected }) => {
+        expect(shouldRenderStepAsBreakdown(nested as any, hasBreakdown)).toBe(expected)
     })
 })

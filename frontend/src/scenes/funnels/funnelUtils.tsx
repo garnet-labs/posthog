@@ -654,3 +654,26 @@ export function getTooltipTitleForDroppedOff(
         </>
     )
 }
+
+/**
+ * Whether a funnel step should be rendered using the breakdown layout.
+ *
+ * The single-entry case is treated as "not a breakdown" only when there's no real breakdown value
+ * — otherwise (i.e. the user filtered the funnel down to a single segment) we treat it as a
+ * breakdown so clicks scope the persons modal to that breakdown value.
+ *
+ * Empty arrays are treated as a breakdown (matching the original logic) so the breakdown
+ * rendering branch can safely render nothing instead of crashing on `nested_breakdown![0]`.
+ */
+export function shouldRenderStepAsBreakdown(
+    nestedBreakdown: Pick<FunnelStepWithConversionMetrics, 'breakdown_value'>[] | null | undefined,
+    hasBreakdown: boolean
+): boolean {
+    if (!Array.isArray(nestedBreakdown)) {
+        return false
+    }
+    if (nestedBreakdown.length === 1) {
+        return hasBreakdown && nestedBreakdown[0]?.breakdown_value != null
+    }
+    return true
+}
