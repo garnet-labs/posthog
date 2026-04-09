@@ -43,12 +43,20 @@ class ExperimentQueryRunnerBaseTest(ClickhouseTestMixin, APIBaseTest):
         if use_precomputation:
             self._clean_preaggregation_data()
 
+    def _enable_precomputation(self):
+        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+        config.experiment_precomputation_enabled = True
+        config.save()
+
+    def _disable_precomputation(self):
+        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
+        config.experiment_precomputation_enabled = False
+        config.save()
+
     def _save_experiment_with_precomputation(self, experiment, use_precomputation: bool):
         """Save experiment with precomputation enabled if needed"""
         if use_precomputation:
-            config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-            config.experiment_precomputation_enabled = True
-            config.save()
+            self._enable_precomputation()
         experiment.save()
 
     def create_feature_flag(self, key="test-experiment"):

@@ -20,10 +20,7 @@ from posthog.hogql_queries.experiments.test.experiment_query_runner.base import 
 from posthog.hogql_queries.legacy_compatibility.clean_properties import clean_entity_properties
 from posthog.models.cohort.cohort import Cohort
 from posthog.models.group.util import create_group
-from posthog.models.team.extensions import get_or_create_team_extension
 from posthog.test.test_utils import create_group_type_mapping_without_created_at
-
-from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
 
 
 @override_settings(IN_UNIT_TESTING=True)
@@ -1198,9 +1195,7 @@ class TestExperimentQueryRunner(ExperimentQueryRunnerBaseTest):
         )
 
         # Enable precomputation
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
         experiment.save()
 
         feature_flag_property = f"$feature/{feature_flag.key}"

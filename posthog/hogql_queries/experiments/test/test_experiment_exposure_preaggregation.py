@@ -26,14 +26,12 @@ from posthog.hogql_queries.experiments.experiment_query_runner import Experiment
 from posthog.hogql_queries.experiments.exposure_query_logic import get_entity_key
 from posthog.hogql_queries.experiments.test.experiment_query_runner.base import ExperimentQueryRunnerBaseTest
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
-from posthog.models.team.extensions import get_or_create_team_extension
 
 from products.analytics_platform.backend.lazy_computation.lazy_computation_executor import (
     LazyComputationTable,
     _get_insert_settings,
     ensure_precomputed,
 )
-from products.experiments.backend.models.team_experiments_config import TeamExperimentsConfig
 
 
 @override_settings(IN_UNIT_TESTING=True)
@@ -80,9 +78,7 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
     ) -> tuple[ExperimentQueryResponse, ExperimentQueryResponse]:
         """Run the same experiment through both paths and assert identical results."""
         # Path A: direct events scan
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = False
-        config.save()
+        self._disable_precomputation()
         experiment.save()
         direct_result = self._run_experiment(experiment, metric)
 
@@ -99,9 +95,7 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
         )
 
         # Path B: lazy-computed
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
         experiment.save()
         lazy_result = self._run_experiment(experiment, metric)
 
@@ -252,16 +246,12 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
         )
 
         # Run through runner with lazy computation enabled
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
         experiment.save()
         lazy_result = self._run_experiment(experiment, metric)
 
         # Run through runner without lazy computation
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = False
-        config.save()
+        self._disable_precomputation()
         experiment.save()
         direct_result = self._run_experiment(experiment, metric)
 
@@ -290,9 +280,7 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             start_date=datetime(2024, 1, 1),
             end_date=datetime(2024, 1, 5),
         )
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
 
         metric = ExperimentMeanMetric(
             source=EventsNode(event="purchase", math=ExperimentMetricMathType.TOTAL),
@@ -375,9 +363,7 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             start_date=datetime(2024, 1, 1),
             end_date=datetime(2024, 1, 5),
         )
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
         experiment.exposure_criteria = {"multiple_variant_handling": "first_seen"}
 
         metric = ExperimentMeanMetric(
@@ -535,9 +521,7 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             placeholders=placeholders,
         )
 
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
         experiment.metrics = [metric.model_dump(mode="json")]
         experiment.save()
 
@@ -703,9 +687,7 @@ class TestExperimentExposurePreaggregation(ExperimentQueryRunnerBaseTest):
             start_date=datetime(2024, 1, 1),
             end_date=datetime(2024, 1, 5),
         )
-        config = get_or_create_team_extension(self.team, TeamExperimentsConfig)
-        config.experiment_precomputation_enabled = True
-        config.save()
+        self._enable_precomputation()
 
         metric = ExperimentMeanMetric(
             source=EventsNode(event="purchase", math=ExperimentMetricMathType.TOTAL),
