@@ -59,7 +59,7 @@
         "fuse.js": "catalog:",
         "husky": "catalog:",
         "lint-staged": "catalog:",
-        "uuid": "^10.0.0"
+        "uuid": "^14.0.0"
     },
     "devDependencies": {
         "@parcel/packager-ts": "catalog:",
