@@ -68,7 +68,7 @@
         "@maxmind/geoip2-node": "^3.4.0",
         "@mongodb-js/zstd": "^1.2.0",
         "@opentelemetry/api": "^1.9.0",
-        "@opentelemetry/auto-instrumentations-node": "^0.62.1",
+        "@opentelemetry/auto-instrumentations-node": "^0.75.0",
         "@opentelemetry/exporter-trace-otlp-grpc": "^0.203.0",
         "@opentelemetry/exporter-trace-otlp-http": "^0.203.0",
         "@opentelemetry/instrumentation-pg": "^0.56.0",
