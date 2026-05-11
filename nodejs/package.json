@@ -73,7 +73,7 @@
         "@opentelemetry/exporter-trace-otlp-http": "^0.203.0",
         "@opentelemetry/instrumentation-pg": "^0.56.0",
         "@opentelemetry/resources": "^2.0.1",
-        "@opentelemetry/sdk-node": "^0.203.0",
+        "@opentelemetry/sdk-node": "^0.217.0",
         "@opentelemetry/sdk-trace-node": "^2.0.1",
         "@opentelemetry/semantic-conventions": "^1.36.0",
         "@posthog/cyclotron": "workspace:*",
