@@ -43,9 +43,10 @@ jobs:
       - name: Detect latest release tag
         id: detect
         shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          INPUT_TAG="${{ inputs.release_tag }}"
           if [ -n "$INPUT_TAG" ]; then
             TAG="$INPUT_TAG"
           else
@@ -88,7 +89,7 @@ jobs:
           echo "GARNET_PROFILE_WORKFLOW=garnet-posthog-monitor/python@${{ needs.prepare.outputs.safe_tag }}" >> "$GITHUB_ENV"
 
       - name: Garnet Runtime Visibility
-        uses: garnet-org/action@v2
+        uses: garnet-org/action@2b7fc9d79b54f551b43358c27424a36064b3e078 # v2
         with:
           api_token: ${{ secrets.GARNET_API_TOKEN }}
           jibril_version: v2.12.0
@@ -134,7 +135,7 @@ jobs:
           echo "GARNET_PROFILE_WORKFLOW=garnet-posthog-monitor/frontend@${{ needs.prepare.outputs.safe_tag }}" >> "$GITHUB_ENV"
 
       - name: Garnet Runtime Visibility
-        uses: garnet-org/action@v2
+        uses: garnet-org/action@2b7fc9d79b54f551b43358c27424a36064b3e078 # v2
         with:
           api_token: ${{ secrets.GARNET_API_TOKEN }}
           jibril_version: v2.12.0
@@ -143,7 +144,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
 
       - name: Install frontend dependencies
         continue-on-error: true
