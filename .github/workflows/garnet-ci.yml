@@ -1,0 +1,158 @@
+name: Garnet PostHog Release Monitor
+
+# Profiles the PostHog platform (Python backend + Node.js frontend) on each
+# upstream release.  Runs daily at 10:17 UTC and on manual dispatch.
+#
+# Two jobs — python-deps and frontend-deps — each get their own Garnet profile
+# via GARNET_PROFILE_JOB / GARNET_PROFILE_WORKFLOW env vars set BEFORE
+# garnet-org/action so the Garnet UI shows distinct rows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Upstream tag to profile (blank = latest posthog-live-*)"
+        required: false
+        default: ""
+  schedule:
+    - cron: '17 10 * * *'   # 10:17 UTC daily
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # ── 1. Detect the latest upstream release tag ──────────────────────────
+  prepare:
+    name: Detect latest release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      tag:      ${{ steps.detect.outputs.tag }}
+      safe_tag: ${{ steps.detect.outputs.safe_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream tags
+        run: |
+          git remote add upstream https://github.com/PostHog/posthog.git 2>/dev/null || true
+          git fetch upstream --tags --force
+
+      - name: Detect latest release tag
+        id: detect
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            # PostHog uses posthog-live-YYYYMMDD-HHMMSS tags for releases
+            TAG=$(git tag -l 'posthog-live-*' --sort=-creatordate \
+                  | grep -v 'latest' | head -1)
+            # Fallback to release-* tags
+            if [ -z "$TAG" ]; then
+              TAG=$(git tag -l 'release-*' --sort=-v:refname | head -1)
+            fi
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::No release tag found"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # safe_tag: printf (not echo) to avoid phantom trailing underscore
+          SAFE_TAG=$(printf '%s' "$TAG" \
+            | tr -c 'A-Za-z0-9._-' '_' \
+            | sed -E 's/^_+|_+$//g' \
+            | cut -c1-80)
+          echo "safe_tag=$SAFE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest release: $TAG (safe: $SAFE_TAG)"
+
+  # ── 2. Profile Python backend dependencies ─────────────────────────────
+  profile-python:
+    name: "Profile Python deps (${{ needs.prepare.outputs.tag }})"
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set per-job Garnet profile identity
+        shell: bash
+        run: |
+          echo "GARNET_PROFILE_JOB=posthog-python-${{ needs.prepare.outputs.safe_tag }}" >> "$GITHUB_ENV"
+          echo "GARNET_PROFILE_WORKFLOW=garnet-posthog-monitor/python@${{ needs.prepare.outputs.safe_tag }}" >> "$GITHUB_ENV"
+
+      - name: Garnet Runtime Visibility
+        uses: garnet-org/action@2b7fc9d79b54f551b43358c27424a36064b3e078 # v2
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+          jibril_version: v2.12.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          pip install uv 2>/dev/null || true
+          # PostHog uses requirements.txt files
+          for f in requirements.txt requirements-dev.txt requirements/*.txt; do
+            [ -f "$f" ] && echo "── pip install -r $f ──" && pip install -r "$f" || true
+          done
+          # Also try pyproject.toml
+          if [ -f pyproject.toml ]; then
+            echo "── pip install -e . ──"
+            pip install -e ".[dev]" || pip install -e . || true
+          fi
+          echo "── pip list ──"
+          pip list | wc -l
+          exit 0
+
+  # ── 3. Profile Node.js frontend dependencies ──────────────────────────
+  profile-frontend:
+    name: "Profile Frontend deps (${{ needs.prepare.outputs.tag }})"
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set per-job Garnet profile identity
+        shell: bash
+        run: |
+          echo "GARNET_PROFILE_JOB=posthog-frontend-${{ needs.prepare.outputs.safe_tag }}" >> "$GITHUB_ENV"
+          echo "GARNET_PROFILE_WORKFLOW=garnet-posthog-monitor/frontend@${{ needs.prepare.outputs.safe_tag }}" >> "$GITHUB_ENV"
+
+      - name: Garnet Runtime Visibility
+        uses: garnet-org/action@2b7fc9d79b54f551b43358c27424a36064b3e078 # v2
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+          jibril_version: v2.12.0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install frontend dependencies
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          echo "── pnpm install ──"
+          pnpm install --no-frozen-lockfile || true
+          echo "── pnpm build frontend ──"
+          pnpm --filter=@posthog/frontend build 2>/dev/null || true
+          exit 0
