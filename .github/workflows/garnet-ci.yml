@@ -26,6 +26,7 @@ jobs:
   prepare:
     name: Detect latest release
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     outputs:
       tag:      ${{ steps.detect.outputs.tag }}
       safe_tag: ${{ steps.detect.outputs.safe_tag }}
