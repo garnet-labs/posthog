@@ -32,12 +32,12 @@ jobs:
         timeout-minutes: 20
 
         steps:
-            # Always run the approval script from master — hardcoded so a PR
-            # can't supply a tampered script.
-            - name: Checkout master (blobless, full history)
+            # Always run the approval script from the PR's base branch — the
+            # author can't push there, so a PR can't supply a tampered script.
+            - name: Checkout base branch (blobless, full history)
               uses: actions/checkout@v4
               with:
-                  ref: master
+                  ref: ${{ github.event.pull_request.base.ref }}
                   filter: blob:none
                   fetch-depth: 0
 
