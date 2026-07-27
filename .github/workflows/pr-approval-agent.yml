@@ -20,10 +20,10 @@ concurrency:
 
 jobs:
     review:
+        # Fork demo: upstream also excludes bot authors; relaxed here so the
+        # canary PRs (opened by an automation account) can exercise the gate.
         if: >-
             !github.event.pull_request.draft
-            && github.event.pull_request.user.type != 'Bot'
-            && !contains(github.event.pull_request.user.login, '[bot]')
             && (
               github.event.label.name == 'stamphog'
               || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'stamphog'))
