@@ -65,6 +65,13 @@ from github import (
 )
 from manifest_risk import manifest_script_changes
 from migration_risk import migration_check_pending, safe_migration_files
+from runtime_evidence import (
+    RuntimeEvidence,
+    bypassable_deny,
+    fetch_runtime_evidence,
+    load_config as load_runtime_evidence_config,
+    prompt_block as runtime_evidence_prompt_block,
+)
 from policy import EffectivePolicy, ScopeBudget, _sanitize_untrusted, repo_root, resolve
 from reviewer import Reviewer
 from version import STAMPHOG_VERSION
@@ -391,6 +398,14 @@ class Pipeline:
         cc = parse_conventional_commit(pr.title)
         safe_migrations = safe_migration_files(pr.check_runs, file_paths)
         deny = detect_deny_categories(file_paths, ignored_files=safe_migrations)
+        # Garnet runtime evidence (vendored local extension — see README):
+        # kernel-recorded CI egress bound to the head commit. Clean evidence
+        # may clear a deps_toolchain-only deny (to LLM review, never
+        # auto-approve); unexpected egress is surfaced to the reviewer as a
+        # showstopper. Config absent → everything below is a no-op.
+        runtime_evidence_config = load_runtime_evidence_config(REPO_ROOT / ".stamphog")
+        runtime_evidence: RuntimeEvidence | None = None
+        runtime_evidence_bypassed: list[str] = []
         dep_manifests = dependency_manifests_without_lockfile(file_paths)
         # Deterministic first line for the manifest scripts risk: an edit to
         # scripts/lifecycle/build keys hard-denies rather than resting solely
@@ -400,6 +415,13 @@ class Pipeline:
         )
         if risky_manifests and "deps_toolchain" not in deny:
             deny = sorted([*deny, "deps_toolchain"])
+        if runtime_evidence_config is not None:
+            runtime_evidence = fetch_runtime_evidence(
+                self.repo, self.pr_number, pr.head_sha, runtime_evidence_config
+            )
+            runtime_evidence_bypassed = bypassable_deny(deny, runtime_evidence, runtime_evidence_config)
+            if runtime_evidence_bypassed:
+                deny = [c for c in deny if c not in runtime_evidence_bypassed]
         title_flags = [
             c
             for c in detect_title_scrutiny_flags(pr.title)
@@ -449,6 +471,9 @@ class Pipeline:
             "deny_categories": deny,
             "title_scrutiny_flags": title_flags,
             "safe_migration_files": sorted(safe_migrations),
+            "runtime_evidence_status": runtime_evidence.status if runtime_evidence else None,
+            "runtime_evidence_block": runtime_evidence_prompt_block(runtime_evidence) if runtime_evidence else None,
+            "runtime_evidence_bypassed": runtime_evidence_bypassed,
             "allow_listed_only": allow_only,
             "is_test_only": is_test,
             "has_dep_changes": has_dependency_changes(file_paths),
@@ -916,6 +941,8 @@ class Pipeline:
                 "deny_categories": self.classification.get("deny_categories", []),
                 "title_scrutiny_flags": self.classification.get("title_scrutiny_flags", []),
                 "safe_migration_files": self.classification.get("safe_migration_files", []),
+                "runtime_evidence_status": self.classification.get("runtime_evidence_status"),
+                "runtime_evidence_bypassed": self.classification.get("runtime_evidence_bypassed", []),
                 "ownership": self.classification.get("ownership", {}),
                 "familiarity": familiarity_evidence(self.familiarity),
             },

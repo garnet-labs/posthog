@@ -503,6 +503,14 @@ class Reviewer:
         ownership = self._format_ownership(cl)
         assurance_block = self._format_assurance(cl)
         familiarity_block = self._format_familiarity(cl)
+        runtime_evidence_block = ""
+        if cl.get("runtime_evidence_block"):
+            runtime_evidence_block = "\n" + cl["runtime_evidence_block"]
+            if cl.get("runtime_evidence_bypassed"):
+                runtime_evidence_block += (
+                    "\n  Deny bypass: " + ", ".join(cl["runtime_evidence_bypassed"]) + " was cleared by "
+                    "passing runtime evidence \u2014 the diff still deserves full dependency/toolchain scrutiny."
+                )
 
         gate_lines = []
         for g in gate_context["gates"]:
@@ -559,7 +567,7 @@ class Reviewer:
             Reviews: {len(pr.reviews)} top-level, {len(pr.review_comments)} inline, {len(pr.pr_reactions)} PR reactions
 
             {ownership}
-            {assurance_block}
+            {assurance_block}{runtime_evidence_block}
 
             Gate results:
             {chr(10).join(gate_lines)}
