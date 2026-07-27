@@ -121,6 +121,18 @@ def test_prompt_block_names_unexpected():
     assert "Evidence permalink: https://app.garnet.ai/public/runs/1" in block
 
 
+def test_explainer_sample_tree_ignored():
+    explainer = (
+        "<details><summary><sub>💡 Reading this review</sub></summary>\n<pre>\n"
+        "<em>Runner.Worker</em>\n└─ <strong>bash</strong>\n   └─ <strong>curl</strong>\n"
+        "      └─ → evil-example.com\n</pre>\n</details>\n"
+    )
+    body = COMMENT.replace("**See what ran**", explainer + "**See what ran**")
+    ev = parse_comment(body, HEAD, _config(ALLOW_ALL))
+    assert "evil-example.com" not in {d["dest"] for d in ev.destinations}
+    assert ev.status == "pass"
+
+
 def test_prompt_block_missing():
     assert "none recorded" in prompt_block(RuntimeEvidence(status="missing"))
 

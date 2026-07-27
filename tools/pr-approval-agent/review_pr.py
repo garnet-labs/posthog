@@ -419,7 +419,13 @@ class Pipeline:
             runtime_evidence = fetch_runtime_evidence(
                 self.repo, self.pr_number, pr.head_sha, runtime_evidence_config
             )
-            runtime_evidence_bypassed = bypassable_deny(deny, runtime_evidence, runtime_evidence_config)
+            # Manifest script/lifecycle changes keep their deny even with
+            # clean evidence: scripts can behave differently outside CI
+            # (conditional or time-delayed egress), and _check_deny_list
+            # denies on manifest_script_changes independently — bypassing
+            # here would record a bypass that had no effect.
+            if not risky_manifests:
+                runtime_evidence_bypassed = bypassable_deny(deny, runtime_evidence, runtime_evidence_config)
             if runtime_evidence_bypassed:
                 deny = [c for c in deny if c not in runtime_evidence_bypassed]
         title_flags = [

@@ -156,6 +156,11 @@ def _extract_destinations(body: str) -> list[dict]:
     results: list[dict] = []
     seen: set[tuple[str, str]] = set()
     for pre in re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL):
+        # Real job trees are rooted at "<name> · job"; the comment's
+        # "Reading this review" explainer renders a sample tree without
+        # that root and must not contribute destinations.
+        if "· job" not in pre:
+            continue
         stack: list[tuple[int, str]] = []  # (depth, process name)
         for line in pre.splitlines():
             depth = _tree_depth(line)
@@ -245,5 +250,6 @@ def _issue_comments(repo: str, pr_number: int) -> list[dict]:
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     return json.loads(result.stdout)

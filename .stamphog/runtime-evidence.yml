@@ -14,7 +14,9 @@ expected_destinations:
     - '^(localhost|127\.0\.0\.1|::1)$'
     - '\.githubusercontent\.com$'
     - '^github\.com$'
-    - '^api\.github\.com$'
+    - '^(api|codeload|objects|uploads)\.github\.com$'
+    - '^nodejs\.org$'
+    - '^ip6-all(routers|nodes|hosts)$'
     - '\.githubapp$'
     - '\.githubapp\.com$'
     - '^168\.63\.129\.16$'          # Azure runner platform plumbing
