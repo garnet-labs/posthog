@@ -244,6 +244,59 @@ def prompt_block(evidence: RuntimeEvidence) -> str:
     return "\n".join(lines)
 
 
+def citation_block(evidence: RuntimeEvidence) -> str | None:
+    """Verifiable Markdown citation for the posted verdict comment.
+
+    Whenever runtime evidence existed for the reviewed head, the verdict
+    comment carries the exact commit binding, every destination outside the
+    expected-egress policy (with its process lineage), and the Garnet public
+    run permalinks — so anyone can independently verify the kernel-recorded
+    egress the verdict relied on, without re-running anything.
+    """
+    if evidence.status == "missing":
+        return None
+    lines = [
+        "<details>",
+        f"<summary>Runtime evidence (Garnet) — kernel-recorded CI egress for head <code>{evidence.commit_sha[:7]}</code></summary>",
+        "",
+        f"Status: **{evidence.status}** ({len(evidence.destinations)} recorded destination(s)).",
+    ]
+    unexpected = evidence.unexpected
+    if unexpected:
+        lines.append("")
+        lines.append("Destinations outside the expected-egress policy (`.stamphog/runtime-evidence.yml`):")
+        for d in unexpected:
+            note = f" ({d['note']})" if d["note"] else ""
+            lineage = f" — process lineage: `{d['lineage']}`" if d["lineage"] else ""
+            lines.append(f"- `{d['dest']}`{note}{lineage}")
+    elif not evidence.destinations:
+        lines.append("No outbound destinations were recorded while this PR's code ran.")
+    else:
+        lines.append("Every recorded destination matches the expected-egress policy.")
+    lines.append("")
+    lines.append("Verify independently:")
+    for link in evidence.permalinks[:3]:
+        lines.append(f"- [Garnet run profile]({link})")
+    lines.append(
+        "- The `Garnet Runtime Review` comment on this PR "
+        f"(its embedded commit marker must equal `{evidence.commit_sha[:7]}`)."
+    )
+    lines += ["", "</details>"]
+    return "\n".join(lines)
+
+
+def evidence_dict(evidence: RuntimeEvidence | None) -> dict | None:
+    """Full evidence for the machine-readable review bundle."""
+    if evidence is None:
+        return None
+    return {
+        "status": evidence.status,
+        "commit_sha": evidence.commit_sha,
+        "destinations": evidence.destinations,
+        "permalinks": evidence.permalinks,
+    }
+
+
 def _issue_comments(repo: str, pr_number: int) -> list[dict]:
     result = subprocess.run(
         ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments", "--paginate"],

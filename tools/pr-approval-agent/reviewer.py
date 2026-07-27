@@ -506,6 +506,12 @@ class Reviewer:
         runtime_evidence_block = ""
         if cl.get("runtime_evidence_block"):
             runtime_evidence_block = "\n" + cl["runtime_evidence_block"]
+            runtime_evidence_block += (
+                "\n  Citation requirement: when runtime evidence factors into your verdict "
+                "(either direction), cite it explicitly in your reasoning — name the exact "
+                "destination(s) and process lineage and reference the Garnet run profile "
+                "permalink — so the verdict is independently verifiable from the evidence."
+            )
             if cl.get("runtime_evidence_bypassed"):
                 runtime_evidence_block += (
                     "\n  Deny bypass: " + ", ".join(cl["runtime_evidence_bypassed"]) + " was cleared by "

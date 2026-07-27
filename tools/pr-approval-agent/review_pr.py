@@ -68,6 +68,8 @@ from migration_risk import migration_check_pending, safe_migration_files
 from runtime_evidence import (
     RuntimeEvidence,
     bypassable_deny,
+    citation_block as runtime_evidence_citation_block,
+    evidence_dict as runtime_evidence_dict,
     fetch_runtime_evidence,
     load_config as load_runtime_evidence_config,
     prompt_block as runtime_evidence_prompt_block,
@@ -479,6 +481,8 @@ class Pipeline:
             "safe_migration_files": sorted(safe_migrations),
             "runtime_evidence_status": runtime_evidence.status if runtime_evidence else None,
             "runtime_evidence_block": runtime_evidence_prompt_block(runtime_evidence) if runtime_evidence else None,
+            "runtime_evidence_citation": runtime_evidence_citation_block(runtime_evidence) if runtime_evidence else None,
+            "runtime_evidence": runtime_evidence_dict(runtime_evidence),
             "runtime_evidence_bypassed": runtime_evidence_bypassed,
             "allow_listed_only": allow_only,
             "is_test_only": is_test,
@@ -924,6 +928,9 @@ class Pipeline:
 
         parts = [part for part in (reasoning, "\n".join(f"- {b}" for b in bullets) if bullets else "") if part]
         parts.append(details)
+        citation = self.classification.get("runtime_evidence_citation")
+        if citation:
+            parts.append(citation)
         return "\n\n".join(parts)
 
     def to_dict(self) -> dict:
@@ -948,6 +955,7 @@ class Pipeline:
                 "title_scrutiny_flags": self.classification.get("title_scrutiny_flags", []),
                 "safe_migration_files": self.classification.get("safe_migration_files", []),
                 "runtime_evidence_status": self.classification.get("runtime_evidence_status"),
+                "runtime_evidence": self.classification.get("runtime_evidence"),
                 "runtime_evidence_bypassed": self.classification.get("runtime_evidence_bypassed", []),
                 "ownership": self.classification.get("ownership", {}),
                 "familiarity": familiarity_evidence(self.familiarity),

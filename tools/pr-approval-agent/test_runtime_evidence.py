@@ -9,6 +9,8 @@ from runtime_evidence import (
     RuntimeEvidenceConfig,
     RuntimeEvidenceError,
     bypassable_deny,
+    citation_block,
+    evidence_dict,
     load_config,
     parse_comment,
     prompt_block,
@@ -131,6 +133,35 @@ def test_explainer_sample_tree_ignored():
     ev = parse_comment(body, HEAD, _config(ALLOW_ALL))
     assert "evil-example.com" not in {d["dest"] for d in ev.destinations}
     assert ev.status == "pass"
+
+
+def test_citation_block_cites_verifiable_evidence():
+    ev = parse_comment(COMMENT, HEAD, _config([r"^localhost$"]))
+    block = citation_block(ev)
+    assert f"<code>{HEAD[:7]}</code>" in block
+    assert "**unexpected**" in block
+    assert "`registry.npmjs.org`" in block
+    assert "process lineage" in block
+    assert "https://app.garnet.ai/public/runs/1" in block
+    assert f"must equal `{HEAD[:7]}`" in block
+
+
+def test_citation_block_pass_and_missing():
+    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+    block = citation_block(ev)
+    assert "**pass**" in block
+    assert "matches the expected-egress policy" in block
+    assert citation_block(RuntimeEvidence(status="missing")) is None
+
+
+def test_evidence_dict_round_trip():
+    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+    d = evidence_dict(ev)
+    assert d["status"] == "pass"
+    assert d["commit_sha"] == HEAD
+    assert d["destinations"] == ev.destinations
+    assert d["permalinks"] == ev.permalinks
+    assert evidence_dict(None) is None
 
 
 def test_prompt_block_missing():
