@@ -31,9 +31,9 @@ earlier push is ignored), and the expected-destination patterns live in
 stamphog_policy deny which covers `.stamphog/**`).
 """
 
+import re
 import html
 import json
-import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +46,7 @@ _COMMIT_MARKER_RE = re.compile(r"<!--\s*garnet:commit\s+([0-9a-f]{40})\s*-->")
 _DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
+_EXPLAINER_RE = re.compile(r"<details><summary>(?:<sub>)?💡 How to read this.*?</details>", re.DOTALL)
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
 
@@ -164,19 +165,18 @@ def _extract_destinations(body: str) -> list[dict]:
     Lineage is reconstructed from tree indentation depth. Hostnames are
     defanged in the comment and refanged here so policy patterns match.
 
-    Explainer exclusion: older contracts root real trees at `<name> · job`
-    (sample trees lack that root); the current contract marks the sample
-    tree with `←` annotation arrows instead.
+    Explainer exclusion: the current contract wraps its sample tree in the
+    “How to read this” details fold, which is removed wholesale before
+    parsing; older contracts root real trees at `<name> · job` (sample
+    trees lack that root).
     """
+    body = _EXPLAINER_RE.sub("", body)
     results: list[dict] = []
     seen: set[tuple[str, str]] = set()
     pres = re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL)
     legacy_contract = any("· job" in pre for pre in pres)
     for pre in pres:
-        if legacy_contract:
-            if "· job" not in pre:
-                continue
-        elif "←" in pre:
+        if legacy_contract and "· job" not in pre:
             continue
         _walk_tree(pre.splitlines(), results, seen)
     for fence in re.findall(r"```diff\n(.*?)```", body, flags=re.DOTALL):

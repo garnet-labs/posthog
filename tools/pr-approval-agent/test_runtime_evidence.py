@@ -181,7 +181,7 @@ V66_COMMENT = f"""<!-- garnet-runtime-review -->
 
 
 def test_v66_snapshot_trees_parsed_and_refanged():
-    ev = parse_comment(V66_COMMENT, HEAD, _config(ALLOW_ALL + [r"^github\.com$", r"^httpbin\.org$"]))
+    ev = parse_comment(V66_COMMENT, HEAD, _config([*ALLOW_ALL, r"^github\.com$", r"^httpbin\.org$"]))
     dests = {d["dest"] for d in ev.destinations}
     assert "registry.npmjs.org" in dests
     assert "localhost" in dests
@@ -190,7 +190,7 @@ def test_v66_snapshot_trees_parsed_and_refanged():
 
 
 def test_v66_diff_fence_new_and_unchanged_counted_removed_excluded():
-    ev = parse_comment(V66_COMMENT, HEAD, _config(ALLOW_ALL + [r"^github\.com$"]))
+    ev = parse_comment(V66_COMMENT, HEAD, _config([*ALLOW_ALL, r"^github\.com$"]))
     dests = {d["dest"] for d in ev.destinations}
     assert "github.com" in dests
     assert "httpbin.org" in dests
@@ -199,6 +199,15 @@ def test_v66_diff_fence_new_and_unchanged_counted_removed_excluded():
     assert [d["dest"] for d in ev.unexpected] == ["httpbin.org"]
     new = next(d for d in ev.destinations if d["dest"] == "httpbin.org")
     assert new["lineage"].endswith("Runner.Worker > node")
+
+
+def test_v66_real_tree_containing_arrow_still_contributes_evidence():
+    body = V66_COMMENT.replace("<strong>npm install</strong>", "<strong>npm install ← run</strong>")
+    ev = parse_comment(body, HEAD, _config([r"^localhost$", r"^github\.com$"]))
+    dests = {d["dest"] for d in ev.destinations}
+    assert "registry.npmjs.org" in dests
+    assert "evil-example.com" not in dests
+    assert ev.status == "unexpected"
 
 
 def test_legacy_comment_still_parses():
