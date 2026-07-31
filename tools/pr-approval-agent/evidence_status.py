@@ -26,9 +26,19 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from runtime_evidence import fetch_runtime_evidence, load_config
+from runtime_evidence import RuntimeEvidence, fetch_runtime_evidence, load_config
 
 _CONTEXT = "garnet/runtime-evidence"
+
+
+def status_payload(evidence: RuntimeEvidence) -> tuple[str, str]:
+    """Map parsed evidence to a commit-status (state, description)."""
+    if evidence.status == "pass":
+        return "success", f"pass: {len(evidence.destinations)} recorded destination(s), all expected"
+    if evidence.status == "unexpected":
+        named = ", ".join(d["dest"] for d in evidence.unexpected[:3])
+        return "failure", f"{len(evidence.unexpected)} unexpected destination(s): {named}"
+    return "pending", "no usable runtime evidence for this head yet (fail-closed)"
 
 
 def _gh_json(args: list[str]) -> dict:
@@ -51,18 +61,7 @@ def main() -> int:
     head_sha = pr["head"]["sha"]
     evidence = fetch_runtime_evidence(args.repo, args.pr_number, head_sha, config)
 
-    if evidence.status == "pass":
-        state = "success"
-        description = f"pass — {len(evidence.destinations)} recorded destination(s), all expected"
-    elif evidence.status == "unexpected":
-        state = "failure"
-        description = f"{len(evidence.unexpected)} unexpected destination(s): " + ", ".join(
-            d["dest"] for d in evidence.unexpected[:3]
-        )
-    else:
-        state = "pending"
-        description = "no usable runtime evidence for this head yet (fail-closed)"
-
+    state, description = status_payload(evidence)
     target_url = evidence.permalinks[0] if evidence.permalinks else pr["html_url"]
     _gh_json(
         [
@@ -77,7 +76,7 @@ def main() -> int:
             f"target_url={target_url}",
         ]
     )
-    print(f"{_CONTEXT} @ {head_sha[:9]}: {state} — {description}")
+    print(f"{_CONTEXT} @ {head_sha[:9]}: {state} ({description})")
     return 0
 
 
