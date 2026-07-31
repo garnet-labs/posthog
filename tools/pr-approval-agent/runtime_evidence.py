@@ -13,8 +13,11 @@ bound to the head commit, interpreted conservatively, feeding a scoped
 deny-list bypass plus a TRUSTED prompt block for the LLM reviewer.
 
 Semantics (all fail toward "no bypass"):
-    missing    → no Garnet comment for the current head; deny-list applies
-                 normally and the reviewer is told no runtime evidence exists.
+    missing    → no Garnet comment for the current head, or a comment from
+                 which no recorded destinations could be parsed (waiting
+                 state, or a renderer format this parser doesn't understand);
+                 deny-list applies normally and the reviewer is told no
+                 usable runtime evidence exists.
     pass       → evidence exists for the head commit and every recorded
                  destination matches the expected-egress policy. Scoped
                  bypass: a deps_toolchain-only deny may proceed to LLM
@@ -31,9 +34,9 @@ earlier push is ignored), and the expected-destination patterns live in
 stamphog_policy deny which covers `.stamphog/**`).
 """
 
+import re
 import html
 import json
-import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +49,8 @@ _COMMIT_MARKER_RE = re.compile(r"<!--\s*garnet:commit\s+([0-9a-f]{40})\s*-->")
 _DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
+_EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary><sub>💡.*?</details>", flags=re.DOTALL)
+_DEFANG_RE = re.compile(r"\[([.:])\]")
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
 
@@ -131,12 +136,14 @@ def parse_comment(body: str, head_sha: str, config: RuntimeEvidenceConfig) -> Ru
 
     destinations = _extract_destinations(body)
     permalinks = _PERMALINK_RE.findall(body)
+    if not destinations:
+        # Zero parsed destinations means the evidence is unusable — the run is
+        # still recording, or the renderer format drifted past this parser.
+        # Either way there is no bypass.
+        return RuntimeEvidence(status="missing")
     for d in destinations:
         d["expected"] = any(p.search(d["dest"]) for p in config.expected_destinations)
     status = "pass" if all(d["expected"] for d in destinations) else "unexpected"
-    if not destinations:
-        # A recorded run with zero destinations is still evidence (nothing egressed).
-        status = "pass"
     return RuntimeEvidence(
         status=status,
         commit_sha=marker.group(1),
@@ -150,17 +157,16 @@ def _extract_destinations(body: str) -> list[dict]:
 
     The comment renders each job as a <pre> tree: process nodes wrapped in
     <em>/<strong>, destination leaves as `→ name` (optionally with a
-    parenthesised note such as `(dns resolver)`). Lineage is reconstructed
-    from tree indentation depth, keeping the nearest process ancestors.
+    parenthesised note such as `(dns resolver)`). Destination names may be
+    defanged (`registry.npmjs[.]org`) and are normalized before policy
+    matching. Lineage is reconstructed from tree indentation depth, keeping
+    the nearest process ancestors. The "how to read this" explainer fold
+    (💡 summary) renders a sample tree and must not contribute destinations.
     """
     results: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    body = _EXPLAINER_RE.sub("", body)
     for pre in re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL):
-        # Real job trees are rooted at "<name> · job"; the comment's
-        # "Reading this review" explainer renders a sample tree without
-        # that root and must not contribute destinations.
-        if "· job" not in pre:
-            continue
         stack: list[tuple[int, str]] = []  # (depth, process name)
         for line in pre.splitlines():
             depth = _tree_depth(line)
@@ -170,7 +176,7 @@ def _extract_destinations(body: str) -> list[dict]:
                 continue
             dest_match = _DESTINATION_RE.search(text)
             if text.startswith("→") and dest_match:
-                dest = html.unescape(dest_match.group(1)).strip()
+                dest = _DEFANG_RE.sub(r"\1", html.unescape(dest_match.group(1))).strip()
                 note = (dest_match.group(2) or "").strip()
                 lineage = " > ".join(name for d, name in stack if d < depth)
                 key = (dest, lineage)
