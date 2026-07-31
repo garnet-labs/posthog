@@ -1,0 +1,63 @@
+name: Garnet Evidence Status
+
+# Mirrors the Garnet Runtime Review verdict for the PR head as a
+# `garnet/runtime-evidence` commit status, so the fail-closed evidence gate
+# is visible in the PR checks UI (and usable in branch protection) instead
+# of only inside the stamphog sticky comment.
+#
+# Triggers on the same PR events as the approval agent, plus on the Garnet
+# bot's comment arriving/updating (the record usually lands after the first
+# review pass).
+on:
+    pull_request:
+        types: [labeled, ready_for_review, synchronize]
+    issue_comment:
+        types: [created, edited]
+
+permissions:
+    contents: read
+    statuses: write
+    pull-requests: read
+
+concurrency:
+    group: garnet-evidence-status-${{ github.event.pull_request.number || github.event.issue.number }}
+    cancel-in-progress: true
+
+jobs:
+    status:
+        if: >-
+            github.event_name == 'pull_request'
+            || (
+              github.event.issue.pull_request
+              && contains(github.event.comment.body, 'garnet-runtime-review')
+            )
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+
+        steps:
+            # Trusted source only: script from the base branch (PR events) or
+            # the default branch (comment events) — never from the PR head.
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.event.repository.default_branch }}
+                  sparse-checkout: |
+                      tools/pr-approval-agent
+                      .stamphog
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  enable-cache: false
+
+            - name: Post evidence status
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  # Unrebased bases predating this tool: skip gracefully.
+                  if [ ! -f tools/pr-approval-agent/evidence_status.py ]; then
+                    echo "evidence_status.py absent on trusted ref; skipping"
+                    exit 0
+                  fi
+                  uv run tools/pr-approval-agent/evidence_status.py \
+                    ${{ github.event.pull_request.number || github.event.issue.number }} \
+                    --repo ${{ github.repository }}
