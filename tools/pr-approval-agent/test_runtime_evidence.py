@@ -91,11 +91,65 @@ def test_no_commit_marker_is_missing():
     assert parse_comment(body, HEAD, _config(ALLOW_ALL)).status == "missing"
 
 
-def test_zero_destinations_is_pass():
+def test_zero_destinations_is_missing():
+    # Waiting-state comment, or a renderer format this parser can't read:
+    # unusable evidence must never clear a deny.
     body = f"<!-- garnet-runtime-review -->\n<!-- garnet:commit {HEAD} -->\nno record"
     ev = parse_comment(body, HEAD, _config([]))
-    assert ev.status == "pass"
+    assert ev.status == "missing"
     assert ev.destinations == []
+    assert bypassable_deny(["deps_toolchain"], ev, _config([])) == []
+
+
+# Trimmed from the contract v6.6 goldens: no "· job" tree roots, defanged
+# destination names, "How to read this" explainer fold with a sample tree.
+COMMENT_V66 = f"""<!-- garnet-runtime-review -->
+<!-- garnet-run-profile -->
+<!-- garnet:commit {HEAD} -->
+**Execution Profiles recorded for 1 job, triggered by [`{HEAD[:7]}`](https://github.com/o/r/commit/{HEAD})**
+
+> *5&nbsp;execution chains · 2&nbsp;destinations · recorded at the kernel by Garnet*
+
+<details><summary><code>ci</code> / <a href="https://github.com/o/r/actions/runs/2"><code>install</code>&nbsp;↗</a></summary>
+
+<pre>
+<em>Runner.Worker</em>
+└─ <strong>bash</strong>
+   └─ <strong>node</strong>
+      ├─ → registry.npmjs[.]org
+      └─ → localhost (dns resolver)
+</pre>
+
+<p align="right"><sub><a href="https://app.garnet.ai/public/runs/2?profile=def&amp;utm_source=github&amp;utm_medium=pr_comment">View this job's Execution Profile in Garnet →</a></sub></p>
+
+</details>
+
+---
+
+<details open><summary><sub>💡 How to read this</sub></summary>
+
+<pre>
+<em>Runner.Worker</em>                ← runner (italic)
+└─ <strong>npm install</strong>               ← your workflow step (bold)
+   └─ → sample-domain[.]example  ← outbound connection, defanged
+</pre>
+
+</details>
+"""
+
+
+def test_v66_comment_parses_with_defang_normalized():
+    ev = parse_comment(COMMENT_V66, HEAD, _config(ALLOW_ALL))
+    dests = {d["dest"] for d in ev.destinations}
+    assert dests == {"registry.npmjs.org", "localhost"}
+    assert ev.status == "pass"
+    npm = next(d for d in ev.destinations if d["dest"] == "registry.npmjs.org")
+    assert npm["lineage"].endswith("bash > node")
+
+
+def test_v66_explainer_sample_tree_ignored():
+    ev = parse_comment(COMMENT_V66, HEAD, _config(ALLOW_ALL))
+    assert "sample-domain.example" not in {d["dest"] for d in ev.destinations}
 
 
 def test_bypass_only_configured_categories():

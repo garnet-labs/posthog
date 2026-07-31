@@ -13,8 +13,11 @@ bound to the head commit, interpreted conservatively, feeding a scoped
 deny-list bypass plus a TRUSTED prompt block for the LLM reviewer.
 
 Semantics (all fail toward "no bypass"):
-    missing    → no Garnet comment for the current head; deny-list applies
-                 normally and the reviewer is told no runtime evidence exists.
+    missing    → no Garnet comment for the current head, or a comment from
+                 which no recorded destinations could be parsed (waiting
+                 state, or a renderer format this parser doesn't understand);
+                 deny-list applies normally and the reviewer is told no
+                 usable runtime evidence exists.
     pass       → evidence exists for the head commit and every recorded
                  destination matches the expected-egress policy. Scoped
                  bypass: a deps_toolchain-only deny may proceed to LLM
@@ -46,7 +49,8 @@ _COMMIT_MARKER_RE = re.compile(r"<!--\s*garnet:commit\s+([0-9a-f]{40})\s*-->")
 _DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
-_EXPLAINER_RE = re.compile(r"<details><summary>(?:<sub>)?💡 How to read this.*?</details>", re.DOTALL)
+_EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary>(?:<sub>)?💡.*?</details>", flags=re.DOTALL)
+_DEFANG_RE = re.compile(r"\[([.:])\]")
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
 
@@ -132,12 +136,14 @@ def parse_comment(body: str, head_sha: str, config: RuntimeEvidenceConfig) -> Ru
 
     destinations = _extract_destinations(body)
     permalinks = _PERMALINK_RE.findall(body)
+    if not destinations:
+        # Zero parsed destinations means the evidence is unusable — the run is
+        # still recording, or the renderer format drifted past this parser.
+        # Either way there is no bypass.
+        return RuntimeEvidence(status="missing")
     for d in destinations:
         d["expected"] = any(p.search(d["dest"]) for p in config.expected_destinations)
     status = "pass" if all(d["expected"] for d in destinations) else "unexpected"
-    if not destinations:
-        # A recorded run with zero destinations is still evidence (nothing egressed).
-        status = "pass"
     return RuntimeEvidence(
         status=status,
         commit_sha=marker.group(1),
@@ -148,7 +154,7 @@ def parse_comment(body: str, head_sha: str, config: RuntimeEvidenceConfig) -> Ru
 
 def _refang(dest: str) -> str:
     """Undo the comment's hostname defanging (`github[.]com` → `github.com`)."""
-    return dest.replace("[.]", ".")
+    return _DEFANG_RE.sub(r"\1", dest)
 
 
 def _extract_destinations(body: str) -> list[dict]:
