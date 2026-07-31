@@ -49,7 +49,7 @@ _COMMIT_MARKER_RE = re.compile(r"<!--\s*garnet:commit\s+([0-9a-f]{40})\s*-->")
 _DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
-_EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary><sub>💡.*?</details>", flags=re.DOTALL)
+_EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary>(?:<sub>)?💡.*?</details>", flags=re.DOTALL)
 _DEFANG_RE = re.compile(r"\[([.:])\]")
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
@@ -152,43 +152,71 @@ def parse_comment(body: str, head_sha: str, config: RuntimeEvidenceConfig) -> Ru
     )
 
 
+def _refang(dest: str) -> str:
+    """Undo the comment's hostname defanging (`github[.]com` → `github.com`)."""
+    return _DEFANG_RE.sub(r"\1", dest)
+
+
 def _extract_destinations(body: str) -> list[dict]:
     """Extract `→ destination` leaves plus the process lineage above each.
 
-    The comment renders each job as a <pre> tree: process nodes wrapped in
-    <em>/<strong>, destination leaves as `→ name` (optionally with a
-    parenthesised note such as `(dns resolver)`). Destination names may be
-    defanged (`registry.npmjs[.]org`) and are normalized before policy
-    matching. Lineage is reconstructed from tree indentation depth, keeping
-    the nearest process ancestors. The "how to read this" explainer fold
-    (💡 summary) renders a sample tree and must not contribute destinations.
+    Two evidence containers exist:
+    - <pre> trees (snapshot jobs and substrate folds): process nodes wrapped
+      in <em>/<strong>, destination leaves as `→ name` (optionally with a
+      parenthesised note such as `(dns resolver)`).
+    - ```diff fences (changed jobs in comparison comments): the same tree
+      with a leading diff column — `+` (new), space (unchanged), `-` (no
+      longer recorded; not current evidence).
+
+    Lineage is reconstructed from tree indentation depth. Hostnames are
+    defanged in the comment and refanged here so policy patterns match.
+
+    Explainer exclusion: the current contract wraps its sample tree in the
+    “How to read this” details fold, which is removed wholesale before
+    parsing; older contracts root real trees at `<name> · job` (sample
+    trees lack that root).
     """
+    body = _EXPLAINER_RE.sub("", body)
     results: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    body = _EXPLAINER_RE.sub("", body)
-    for pre in re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL):
-        stack: list[tuple[int, str]] = []  # (depth, process name)
-        for line in pre.splitlines():
-            depth = _tree_depth(line)
-            text = _TAG_RE.sub("", line)
-            text = re.sub(r"^[\s│├└─]+", "", text).strip()
-            if not text:
+    pres = re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL)
+    legacy_contract = any("· job" in pre for pre in pres)
+    for pre in pres:
+        if legacy_contract and "· job" not in pre:
+            continue
+        _walk_tree(pre.splitlines(), results, seen)
+    for fence in re.findall(r"```diff\n(.*?)```", body, flags=re.DOTALL):
+        lines = []
+        for raw in fence.splitlines():
+            if raw.startswith("@@") or raw.startswith("-"):
                 continue
-            dest_match = _DESTINATION_RE.search(text)
-            if text.startswith("→") and dest_match:
-                dest = _DEFANG_RE.sub(r"\1", html.unescape(dest_match.group(1))).strip()
-                note = (dest_match.group(2) or "").strip()
-                lineage = " > ".join(name for d, name in stack if d < depth)
-                key = (dest, lineage)
-                if key not in seen:
-                    seen.add(key)
-                    results.append({"dest": dest, "note": note, "lineage": lineage, "expected": False})
-            else:
-                name = html.unescape(re.sub(r"\s*·\s*job$", "", text)).strip()
-                while stack and stack[-1][0] >= depth:
-                    stack.pop()
-                stack.append((depth, name))
+            lines.append(raw[1:] if raw[:1] in "+ " else raw)
+        _walk_tree(lines, results, seen)
     return results
+
+
+def _walk_tree(lines: list[str], results: list[dict], seen: set[tuple[str, str]]) -> None:
+    stack: list[tuple[int, str]] = []  # (depth, process name)
+    for line in lines:
+        depth = _tree_depth(line)
+        text = _TAG_RE.sub("", line)
+        text = re.sub(r"^[\s│├└─]+", "", text).strip()
+        if not text:
+            continue
+        dest_match = _DESTINATION_RE.search(text)
+        if text.startswith("→") and dest_match:
+            dest = _refang(html.unescape(dest_match.group(1)).strip())
+            note = (dest_match.group(2) or "").strip()
+            lineage = " > ".join(name for d, name in stack if d < depth)
+            key = (dest, lineage)
+            if key not in seen:
+                seen.add(key)
+                results.append({"dest": dest, "note": note, "lineage": lineage, "expected": False})
+        else:
+            name = html.unescape(re.sub(r"\s*·\s*job$", "", text)).strip()
+            while stack and stack[-1][0] >= depth:
+                stack.pop()
+            stack.append((depth, name))
 
 
 def _tree_depth(line: str) -> int:

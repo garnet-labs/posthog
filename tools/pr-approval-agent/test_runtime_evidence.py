@@ -189,6 +189,87 @@ def test_explainer_sample_tree_ignored():
     assert ev.status == "pass"
 
 
+V66_COMMENT = f"""<!-- garnet-runtime-review -->
+<!-- garnet-run-profile -->
+<!-- garnet:commit {HEAD} -->
+**Execution Profiles recorded for 2 jobs, triggered by [`6e5d0d4`](https://github.com/o/r/commit/{HEAD})**
+
+> *7&nbsp;execution chains · 4&nbsp;destinations · changed since [`d84f4dc`](https://github.com/o/r/commit/d84f4dc) · recorded at the kernel by Garnet*
+
+<details><summary><code>ci</code> / <a href="https://github.com/o/r/actions/runs/1"><code>install</code>&nbsp;↗</a></summary>
+
+<pre>
+<em>Runner.Worker</em>
+└─ <strong>npm install</strong>
+   ├─ → registry.npmjs[.]org
+   └─ → localhost (dns resolver)
+</pre>
+
+<p align="right"><sub><a href="https://app.garnet.ai/public/runs/1?profile=abc&amp;utm_source=github&amp;utm_medium=pr_comment">View this job's Execution Profile in Garnet →</a></sub></p>
+
+</details>
+
+<details open><summary><b>+1&nbsp;−0</b> · <code>ci</code> / <a href="https://github.com/o/r/actions/runs/2"><code>test</code>&nbsp;↗</a></summary>
+
+```diff
+@@ 6e5d0d4 vs d84f4dc @@
+  Runner.Worker
+  └─ node
+     ├─ → github[.]com
++    ├─ → httpbin[.]org
+-    └─ → nodejs[.]org
+```
+
+</details>
+
+<details><summary><sub>💡 How to read this</sub></summary>
+
+<pre>
+<em>Runner.Worker</em>                ← runner (italic)
+└─ <strong>npm install</strong>               ← your workflow step (bold)
+   └─ → evil-example[.]com  ← outbound connection, defanged
+</pre>
+
+</details>
+"""
+
+
+def test_v66_snapshot_trees_parsed_and_refanged():
+    ev = parse_comment(V66_COMMENT, HEAD, _config([*ALLOW_ALL, r"^github\.com$", r"^httpbin\.org$"]))
+    dests = {d["dest"] for d in ev.destinations}
+    assert "registry.npmjs.org" in dests
+    assert "localhost" in dests
+    assert "evil-example.com" not in dests
+    assert ev.status == "pass"
+
+
+def test_v66_diff_fence_new_and_unchanged_counted_removed_excluded():
+    ev = parse_comment(V66_COMMENT, HEAD, _config([*ALLOW_ALL, r"^github\.com$"]))
+    dests = {d["dest"] for d in ev.destinations}
+    assert "github.com" in dests
+    assert "httpbin.org" in dests
+    assert "nodejs.org" not in dests
+    assert ev.status == "unexpected"
+    assert [d["dest"] for d in ev.unexpected] == ["httpbin.org"]
+    new = next(d for d in ev.destinations if d["dest"] == "httpbin.org")
+    assert new["lineage"].endswith("Runner.Worker > node")
+
+
+def test_v66_real_tree_containing_arrow_still_contributes_evidence():
+    body = V66_COMMENT.replace("<strong>npm install</strong>", "<strong>npm install ← run</strong>")
+    ev = parse_comment(body, HEAD, _config([r"^localhost$", r"^github\.com$"]))
+    dests = {d["dest"] for d in ev.destinations}
+    assert "registry.npmjs.org" in dests
+    assert "evil-example.com" not in dests
+    assert ev.status == "unexpected"
+
+
+def test_legacy_comment_still_parses():
+    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+    assert {d["dest"] for d in ev.destinations} == {"registry.npmjs.org", "localhost"}
+    assert ev.status == "pass"
+
+
 def test_citation_block_cites_verifiable_evidence():
     ev = parse_comment(COMMENT, HEAD, _config([r"^localhost$"]))
     block = citation_block(ev)
