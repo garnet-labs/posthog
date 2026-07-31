@@ -89,10 +89,25 @@ def test_main_without_config_posts_nothing(monkeypatch, tmp_path, capsys):
     assert "not posting" in capsys.readouterr().out
 
 
-def test_description_fits_github_status_limit():
-    # GitHub truncates status descriptions at 140 chars; the script slices
-    # before posting. Worst realistic case: three long unexpected hostnames.
+def test_posted_description_fits_github_status_limit(monkeypatch):
+    # GitHub rejects status descriptions over 140 chars; main() must slice
+    # before posting. Worst realistic case: several long unexpected hostnames.
+    posted = {}
+
+    def fake_gh_json(args):
+        if args[0].endswith("/pulls/65"):
+            return {"head": {"sha": HEAD}, "html_url": "https://github.com/o/r/pull/65"}
+        posted["args"] = args
+        return {}
+
     long = [{"dest": "a" * 60 + f"{i}.evil.example", "note": "", "lineage": [], "expected": False} for i in range(5)]
     evidence = RuntimeEvidence(status="unexpected", commit_sha=HEAD, destinations=long)
-    _state, description = status_payload(evidence)
-    assert len(description[:140]) <= 140
+    assert len(status_payload(evidence)[1]) > 140
+
+    monkeypatch.setattr(evidence_status, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(evidence_status, "fetch_runtime_evidence", lambda *a: evidence)
+    monkeypatch.setattr("sys.argv", ["evidence_status.py", "65", "--repo", "o/r"])
+
+    assert evidence_status.main() == 0
+    (description,) = [v for v in posted["args"][2::2] if v.startswith("description=")]
+    assert len(description.removeprefix("description=")) <= 140
